@@ -86,16 +86,18 @@ fn sidebar_draws_repository_icon_overrides(cx: &mut TestAppContext) {
     wait_for(&shell, &mut visual, |s, _| s.connected);
 
     // The header: the project shows its first repository's icon, and each
-    // repository chip its own.
+    // repository in the switcher's menu its own.
     assert!(shown(
         &mut visual,
         "sidebar-project-identity:emoji:🚀".into()
     ));
+    click(&mut visual, "sidebar-project-switcher");
     assert!(shown(&mut visual, "sidebar-repo-identity:emoji:🚀".into()));
     assert!(shown(
         &mut visual,
         format!("sidebar-repo-identity:monogram:{letters}:violet")
     ));
+    click(&mut visual, "sidebar-project-switcher");
 
     // The scope picker's items, and its trigger once scoped. Scoping keeps
     // each repository's folder near the top of the long fixture list.

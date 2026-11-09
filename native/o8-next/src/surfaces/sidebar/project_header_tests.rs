@@ -75,11 +75,8 @@ fn sidebar_project_header_switches_repos_and_projects(cx: &mut TestAppContext) {
         visual.debug_bounds("sidebar-project-switcher").is_some(),
         "project name and switcher must be painted above Recents"
     );
-    assert!(
-        visual.debug_bounds("sidebar-repo-overflow").is_some(),
-        "four repos must expose a +N overflow"
-    );
-    click(&mut visual, "sidebar-repo-overflow");
+    // The project's four repositories head the switcher's menu.
+    click(&mut visual, "sidebar-project-switcher");
     draw(&mut visual);
     click(&mut visual, "sidebar-repo-3");
     wait_for(&shell, &mut visual, |s, _| {

@@ -196,12 +196,13 @@ fn sidebar_header_matches_desktop_identity_count_and_add_at_1440(cx: &mut TestAp
     let mark = visual
         .debug_bounds("sidebar-project-identity:FW:#7fa68f")
         .expect("project identity must match the desktop monogram and server color");
+    // The name lives in the switcher's tooltip now; its mark carries the selector.
     let name = visual
         .debug_bounds("sidebar-project-name:Field Work")
-        .expect("project name must be rendered from the desktop ledger");
-    let count = visual
-        .debug_bounds("sidebar-project-count:4")
-        .expect("repository count must follow the project name");
+        .expect("project switcher must be keyed by the desktop ledger name");
+    let search = visual
+        .debug_bounds("sidebar-search-field")
+        .expect("Search must open the one-row head");
     let chevron = visual
         .debug_bounds("sidebar-project-chevron")
         .expect("project chevron");
@@ -209,21 +210,38 @@ fn sidebar_header_matches_desktop_identity_count_and_add_at_1440(cx: &mut TestAp
         .debug_bounds("sidebar-project-add")
         .expect("Add repository control must follow the switcher");
     let host = visual.debug_bounds("sidebar-project-header").unwrap();
-    assert_eq!(mark.size, size(px(17.), px(17.)));
-    assert_eq!(mark.origin.x - host.origin.x, px(8.));
-    assert_eq!(name.origin.x - host.origin.x, px(37.));
+    assert_eq!(mark.size, size(px(16.), px(16.)));
+    assert!(name.contains(&mark.origin));
     assert!(
-        mark.right() <= name.left()
-            && name.right() <= count.left()
-            && count.right() <= chevron.left()
-            && chevron.right() <= add.left(),
-        "header content must keep the desktop order"
+        visual.debug_bounds("sidebar-project-count:4").is_none(),
+        "the repository count moved into the switcher's tooltip"
     );
+    assert!(
+        search.left() >= host.left()
+            && search.right() <= mark.left()
+            && mark.right() <= chevron.left()
+            && chevron.right() <= add.left(),
+        "Search, the switcher and Add must share one row in that order"
+    );
+    for control in [search, mark, chevron, add] {
+        assert!(
+            control.top() >= host.top() && control.bottom() <= host.bottom(),
+            "every head control must sit in the one row"
+        );
+    }
     assert_eq!(add.size, size(px(28.), px(28.)));
-    assert_eq!(host.right() - add.right(), px(5.));
-    let chip = visual.debug_bounds("sidebar-repo-0").unwrap();
-    assert_eq!(chip.origin.x - host.origin.x, px(37.));
-    assert!(chip.top() >= add.bottom());
+    assert!(
+        visual.debug_bounds("sidebar-repo-0").is_none(),
+        "repositories no longer draw as chips under the head"
+    );
+    // The project's repositories head the switcher's menu instead.
+    click(&mut visual, "sidebar-project-switcher");
+    draw(&mut visual);
+    let menu = visual.debug_bounds("sidebar-header-menu").unwrap();
+    let chip = visual
+        .debug_bounds("sidebar-repo-0")
+        .expect("the switcher menu must list the project's repositories");
+    assert!(menu.contains(&chip.origin));
     let repos: Value = fixture.client.get("/api/panel/repos", &[]).unwrap();
     let selected = shell.read_with(&visual, |s, _| s.state.selected.clone().unwrap());
     let repo = repos["repos"]
@@ -244,10 +262,9 @@ fn sidebar_header_matches_desktop_identity_count_and_add_at_1440(cx: &mut TestAp
         .debug_bounds(Box::leak(
             format!("sidebar-repo-identity:{monogram}").into_boxed_str(),
         ))
-        .expect("repository chips must show their desktop identities");
-    assert_eq!(chip_mark.size, size(px(14.), px(14.)));
+        .expect("menu repositories must show their desktop identities");
+    assert_eq!(chip_mark.size, size(px(16.), px(16.)));
     assert!(chip.contains(&chip_mark.origin));
-    click(&mut visual, "sidebar-project-switcher");
     choose(&mut visual, &brand);
     wait_for(&shell, &mut visual, |s, cx| {
         s.surfaces

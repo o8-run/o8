@@ -9,9 +9,9 @@ pub(super) use data::HeaderSnapshot;
 mod identity;
 #[path = "scope.rs"]
 mod scope;
-pub(super) use scope::{Menu as ScopeMenu, RowMenu};
 use identity::glyph;
 pub(super) use identity::identity;
+pub(super) use scope::{Menu as ScopeMenu, RowMenu};
 
 /// A repository's icon override when it has one, else its monogram.
 pub(crate) fn repo_identity(
@@ -220,7 +220,11 @@ impl ThreadList {
         // then the project switcher as its mark and Add project. The active
         // project's repositories moved into the switcher's menu.
         let search: AnyElement = if self.editing || !self.query.is_empty() {
-            div().flex_1().min_w_0().child(self.editor.clone()).into_any_element()
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(self.editor.clone())
+                .into_any_element()
         } else {
             self.search_field(cx)
                 .flex_1()
@@ -379,9 +383,18 @@ impl ThreadList {
                                     16.,
                                     "sidebar-repo-identity",
                                 ))
-                                .child(div().flex_1().min_w_0().text_ellipsis().child(crate::text::sanitize(&repo.name)))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_ellipsis()
+                                        .child(crate::text::sanitize(&repo.name)),
+                                )
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.header_select(Action::Open(project.clone(), id.clone()), cx)
+                                    this.header_select(
+                                        Action::Open(project.clone(), id.clone()),
+                                        cx,
+                                    )
                                 })),
                         );
                     }
@@ -497,38 +510,6 @@ impl ThreadList {
                                 this.header_menu = None;
                                 this.open_project_in_editor(path.clone(), cx);
                                 cx.notify();
-                            })),
-                    );
-                }
-            } else {
-                for (index, repo) in repos.iter().enumerate() {
-                    let id = repo.id.clone();
-                    let project = project_id.clone();
-                    menu = menu.child(
-                        div()
-                            .id(gpui::ElementId::Name(
-                                format!("sidebar-overflow-{id}").into(),
-                            ))
-                            .debug_selector(move || format!("sidebar-repo-{index}"))
-                            .h(px(34.))
-                            .px(px(8.))
-                            .flex()
-                            .items_center()
-                            .gap(px(5.))
-                            .text_size(px(12.))
-                            .text_ellipsis()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(theme().hover))
-                            .child(repo_identity(
-                                &repo.name,
-                                None,
-                                repo.icon.as_ref(),
-                                14.,
-                                "sidebar-overflow-identity",
-                            ))
-                            .child(crate::text::sanitize(&repo.name))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.header_select(Action::Open(project.clone(), id.clone()), cx)
                             })),
                     );
                 }
