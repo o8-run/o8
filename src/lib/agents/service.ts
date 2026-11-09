@@ -470,6 +470,9 @@ export function readAgentInbox(
 ) {
   requireBusPrincipal(principal);
   const lane = workerLane(principal);
+  if (principal.role === 'worker' && !lane) {
+    throw new AgentBusError('The worker packet has no active lane.', 'agent_bus_lane_not_found', 404);
+  }
   const agent = lane
     ? findAgentPresence({ agentId: lane.id }, sqlite)
       ?? upsertAgentPresence(lanePresence(lane, new Date().toISOString()), sqlite)
