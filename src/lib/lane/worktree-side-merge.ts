@@ -54,7 +54,7 @@ import {
   mergeRefForLane,
   pushExactBase, pushWorkerBranchBestEffort,
   pushWorkerBranchLeaseBestEffort,
-  readHeadSha,
+  readLaneBranchSha,
   refExists,
   refPointsTo,
   refreshOriginBaseBestEffort,
@@ -586,13 +586,15 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         try {
           await commitDirtyWorktree(
             worktreePath,
+            lane.repoPath,
+            lane.branch,
             resolveAttributedCommitMessage(command.commitMessage),
           );
         } catch (error) {
           console.warn(`[lane-merge] commitDirtyWorktree non-fatal: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      reviewedSnapshotSha = await readHeadSha(worktreePath);
+      reviewedSnapshotSha = await readLaneBranchSha(worktreePath, lane.repoPath, lane.branch);
     }
 
     const integration = await createDetachedIntegrationWorktree({

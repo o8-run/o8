@@ -1,5 +1,7 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
-import { assertLaneHeadOnBranch, laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
+import {
+  assertLaneHeadOnBranch, laneGit, LaneGitMetadataError, withLaneCommitDirectory, type LaneCommitDirectory,
+} from '@/lib/lane/lane-git';
 import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
@@ -151,25 +153,44 @@ export async function autoCommitCompletionWorktree(
   }
   // Commit only onto the lane's branch, wherever the worker pointed HEAD.
   await assertLaneHeadOnBranch(cwd, repoPath, laneBranch);
+  return commitLaneWork(cwd, repoPath, laneBranch, normalizeAutoCommitMessage(commitMessage));
+}
 
-  // `git status --porcelain` does not include ignored directories by default.
-  // Passing explicit negative pathspecs for ignored dirs makes Git error when
-  // those dirs exist, which is exactly what automation worktrees contain — so we
-  // stage everything and then UNSTAGE o8-injected artifacts with `git reset`:
-  // the safety-hook `.claude/settings.json` (otherwise blows the diff-budget merge
-  // gate) and the `node_modules` symlink (otherwise pollutes the target repo's main).
-  await laneGit(cwd, repoPath, ['add', '-A', '--', '.'], { maxBuffer: COMMAND_MAX_BUFFER });
-  await laneGit(cwd, repoPath, ['reset', '-q', '--', '.claude', 'node_modules'], { maxBuffer: COMMAND_MAX_BUFFER });
-  // If only o8-injected artifacts were dirty, nothing real remains to commit.
-  try {
-    await laneGit(cwd, repoPath, ['diff', '--cached', '--quiet'], { maxBuffer: COMMAND_MAX_BUFFER });
-    return false; // exit 0 => no staged changes left after unstaging injected files
-  } catch (error) {
-    if (error instanceof LaneGitMetadataError) throw error;
-    // non-zero exit => staged changes exist, proceed to commit
-  }
-  await laneGit(cwd, repoPath, ['commit', '--no-verify', '-m', normalizeAutoCommitMessage(commitMessage)], { maxBuffer: COMMAND_MAX_BUFFER });
-  return true;
+/**
+ * Commits a lane checkout's work, without o8's injected artifacts, onto the
+ * lane's branch from a host-owned Git directory. A lane without a recorded
+ * branch commits in its checkout's own Git state.
+ */
+export async function commitLaneWork(
+  cwd: string,
+  repoPath: string,
+  laneBranch: string | null | undefined,
+  message: string,
+): Promise<boolean> {
+  const commit = async (directory?: LaneCommitDirectory): Promise<boolean> => {
+    const options = { ...directory?.options, maxBuffer: COMMAND_MAX_BUFFER };
+    // `git status --porcelain` does not include ignored directories by default.
+    // Passing explicit negative pathspecs for ignored dirs makes Git error when
+    // those dirs exist, which is exactly what automation worktrees contain — so we
+    // stage everything and then UNSTAGE o8-injected artifacts with `git reset`:
+    // the safety-hook `.claude/settings.json` (otherwise blows the diff-budget merge
+    // gate) and the `node_modules` symlink (otherwise pollutes the target repo's main).
+    await laneGit(cwd, repoPath, ['add', '-A', '--', '.'], options);
+    await laneGit(cwd, repoPath, ['reset', '-q', '--', '.claude', 'node_modules'], options);
+    // If only o8-injected artifacts were dirty, nothing real remains to commit.
+    try {
+      await laneGit(cwd, repoPath, ['diff', '--cached', '--quiet'], options);
+      return false; // exit 0 => no staged changes left after unstaging injected files
+    } catch (error) {
+      if (error instanceof LaneGitMetadataError) throw error;
+      // non-zero exit => staged changes exist, proceed to commit
+    }
+    await laneGit(cwd, repoPath, ['commit', '--no-verify', '-m', message], options);
+    directory?.syncIndex();
+    return true;
+  };
+  const branch = laneBranch?.trim();
+  return branch ? withLaneCommitDirectory(cwd, repoPath, branch, commit) : commit();
 }
 
 export async function hasReviewableCompletionDiff(cwd: string, baseRef: string, repoPath: string): Promise<boolean> {

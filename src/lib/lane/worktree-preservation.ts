@@ -68,7 +68,7 @@ async function resolveRefSha(repoPath: string, refName: string): Promise<string 
 }
 
 export async function preserveLaneWorktreeHead(
-  lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'baseBranch'>,
+  lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'baseBranch'> & Partial<Pick<Lane, 'branch'>>,
 ): Promise<LaneWorktreePreservation> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {

@@ -1,7 +1,11 @@
+import { getDataDir } from '@/lib/data-dir-migration';
 import { resolveGitBinary } from '@/lib/git/binary';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { execFile, execFileSync, type ExecFileSyncOptions } from '@/lib/providers/child-process';
-import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync,
+  renameSync, writeFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { devNull } from 'node:os';
 import path from 'node:path';
 
@@ -39,6 +43,8 @@ export interface LaneGitOptions {
   maxBuffer?: number;
   /** Host-created temporary index, never inherited from the lane. */
   indexFile?: string;
+  /** Host-created administration directory used in place of the checkout's own. */
+  adminDir?: string;
   identity?: { name: string; email: string };
 }
 
@@ -268,7 +274,7 @@ function* laneGitInvocationPlan(worktreePath: string, repoPath: string, args: re
   const env = laneGitEnvironment(ignoreGlobalConfig);
   const directories = yield* resolveGitDirectories(worktreePath, repoPath, env);
   assertCheckoutStateIsGits(directories);
-  Object.assign(env, { GIT_DIR: directories.admin, GIT_COMMON_DIR: directories.common,
+  Object.assign(env, { GIT_DIR: options.adminDir ?? directories.admin, GIT_COMMON_DIR: directories.common,
     GIT_WORK_TREE: directories.worktree });
   if (options.indexFile) env.GIT_INDEX_FILE = options.indexFile;
   if (options.identity) Object.assign(env, {
@@ -306,8 +312,13 @@ function* laneGitInvocationPlan(worktreePath: string, repoPath: string, args: re
   // precedence even when a later -c remote.* override would be ignored.
   const program = ['fetch', 'ls-remote'].includes(args[0]) ? ['--upload-pack=git-upload-pack']
     : args[0] === 'push' ? ['--receive-pack=git-receive-pack'] : [];
-  return { args: [...filters, ...transport, ...laneGitArguments(program.length ? [args[0], ...program, ...args.slice(1)] : args)],
-    env, cwd: directories.worktree };
+  // A split index would keep its shared part in the host directory.
+  const commitDirectory = options.adminDir ? ['-c', 'core.splitIndex=false'] : [];
+  // The caller's path, not its resolved form, so a workspace being materialized
+  // there is checked at exec time like any other Git command run in it.
+  return { args: [...filters, ...transport, ...commitDirectory,
+    ...laneGitArguments(program.length ? [args[0], ...program, ...args.slice(1)] : args)],
+  env, cwd: path.resolve(worktreePath) };
 }
 
 export function laneGitInvocation(worktreePath: string, repoPath: string, args: readonly string[], ignoreGlobalConfig = false, options: LaneGitOptions = {}) {
@@ -347,4 +358,85 @@ export async function assertLaneHeadOnBranch(worktreePath: string, repoPath: str
     // Exit 1: HEAD is detached.
   }
   if (String(ref).trim() !== `refs/heads/${branch.trim()}`) throw new LaneGitMetadataError();
+}
+
+export interface LaneCommitDirectory {
+  /** Pass to every `laneGit` call that stages or commits. */
+  options: { adminDir: string; indexFile: string };
+  /** Replaces the checkout's index with the staged one, by rename. */
+  syncIndex(): void;
+}
+
+/**
+ * Runs `run` with a host-owned administration directory for committing onto
+ * `refs/heads/<branch>`. A worker can change its checkout's HEAD, index, commit
+ * message and HEAD log at any moment, including while o8 commits. Git given
+ * this directory reads and writes none of them: its HEAD names the branch, and
+ * its index starts as a copy of the checkout's.
+ */
+export async function withLaneCommitDirectory<T>(worktreePath: string, repoPath: string, branch: string,
+  run: (directory: LaneCommitDirectory) => Promise<T>): Promise<T> {
+  const { admin, common } = await runGitPlan(resolveGitDirectories(worktreePath, repoPath, laneGitEnvironment()));
+  // The worker sandbox denies the data dir, unlike the system temp dir.
+  const root = path.join(getDataDir(), 'lane-git');
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await removeAbandonedCommitDirectories(root);
+  const adminDir = await mkdtemp(path.join(root, COMMIT_DIRECTORY_PREFIX));
+  try {
+    const indexFile = path.join(adminDir, 'index');
+    await writeFile(path.join(adminDir, 'HEAD'), `ref: refs/heads/${branch}\n`);
+    // Git's ref store reads this file, not GIT_COMMON_DIR.
+    await writeFile(path.join(adminDir, 'commondir'), `${common}\n`);
+    const options = { adminDir, indexFile };
+    if (!copyCheckoutIndex(path.join(admin, 'index'), indexFile)) {
+      await laneGit(worktreePath, repoPath, ['read-tree', `refs/heads/${branch}`], options);
+    }
+    return await run({ options, syncIndex: () => replaceCheckoutIndex(indexFile, admin) });
+  } finally {
+    await rm(adminDir, { recursive: true, force: true });
+  }
+}
+
+const COMMIT_DIRECTORY_PREFIX = 'commit-';
+/** Far longer than any commit's Git timeouts. */
+const ABANDONED_COMMIT_DIRECTORY_MS = 60 * 60 * 1000;
+
+/** A commit directory outlives its commit only when o8 exits mid-commit. */
+async function removeAbandonedCommitDirectories(root: string): Promise<void> {
+  const now = Date.now();
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith(COMMIT_DIRECTORY_PREFIX)) continue;
+    const directory = path.join(root, entry.name);
+    try {
+      if (now - (await stat(directory)).mtimeMs > ABANDONED_COMMIT_DIRECTORY_MS) {
+        await rm(directory, { recursive: true, force: true });
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+function copyCheckoutIndex(source: string, target: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(source, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw new LaneGitMetadataError();
+  }
+  try {
+    if (!fstatSync(fd).isFile()) throw new LaneGitMetadataError();
+    writeFileSync(target, readFileSync(fd), { flag: 'wx', mode: 0o600 });
+  } finally {
+    closeSync(fd);
+  }
+  return true;
+}
+
+function replaceCheckoutIndex(source: string, admin: string): void {
+  // A new name never follows an existing link, and rename replaces the entry.
+  const staged = path.join(admin, `index.o8-${randomUUID()}`);
+  writeFileSync(staged, readFileSync(source), { flag: 'wx' });
+  renameSync(staged, path.join(admin, 'index'));
 }

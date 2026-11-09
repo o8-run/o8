@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
+import { laneGit, LaneGitMetadataError, withLaneCommitDirectory, type LaneGitOptions } from '@/lib/lane/lane-git';
 
 import {
   getLaneSpokenDiffFacts,
@@ -179,7 +179,9 @@ export async function resolveSpokenReviewSnapshotSha(input: {
 }) {
   const cwd = input.lane.worktreePath || input.lane.repoPath;
   if (!input.expectedFingerprint) {
-    const { stdout } = await laneGit(cwd, input.lane.repoPath, ['rev-parse', 'HEAD']);
+    const branch = input.lane.branch?.trim();
+    const { stdout } = await laneGit(cwd, input.lane.repoPath,
+      ['rev-parse', '--verify', '--end-of-options', branch ? `refs/heads/${branch}^{commit}` : 'HEAD']);
     return stdout.trim();
   }
   const current = await verifiedSpokenReviewSnapshot(input.lane, input.expectedFingerprint);
@@ -196,7 +198,8 @@ export async function resolveSpokenReviewSnapshotSha(input: {
  * An isolated temporary index stages the candidate tree without reading or
  * mutating the shared worktree index. The post-stage check proves the live
  * worktree still matches the reviewed fingerprint, and update-ref advances the
- * branch only while its reviewed HEAD remains unchanged.
+ * branch only while its reviewed HEAD remains unchanged. A lane with a recorded
+ * branch commits onto it from a host-owned Git directory.
  */
 export async function commitSpokenReviewSnapshot(input: {
   lane: Lane;
@@ -205,57 +208,71 @@ export async function commitSpokenReviewSnapshot(input: {
 }): Promise<string> {
   const cwd = input.lane.worktreePath || input.lane.repoPath;
   const reviewed = await verifiedSpokenReviewSnapshot(input.lane, input.expectedFingerprint);
+  const branch = input.lane.branch?.trim();
+  if (branch) {
+    return withLaneCommitDirectory(cwd, input.lane.repoPath, branch,
+      ({ options }) => commitReviewedSnapshot(input, reviewed, options, `refs/heads/${branch}`));
+  }
   const tempDir = await mkdtemp(join(tmpdir(), 'o8-spoken-review-commit-'));
-  const options = { indexFile: join(tempDir, 'index') };
   try {
-    await laneGit(cwd, input.lane.repoPath, ['read-tree', reviewed.headSha], options);
-    await laneGit(cwd, input.lane.repoPath, ['add', '-A', '--', '.'], options);
-    const { stdout: stagedTreeOutput } = await laneGit(cwd, input.lane.repoPath, ['write-tree'], options);
-    const stagedTree = stagedTreeOutput.trim();
-    const current = await verifiedSpokenReviewSnapshot(input.lane, input.expectedFingerprint);
-    const stagedFingerprint = spokenReviewSnapshotFingerprint(
-      reviewed.headSha,
-      reviewed.against,
-      stagedTree,
-    );
-    if (
-      current.headSha !== reviewed.headSha
-      || current.against !== reviewed.against
-      || current.snapshotTreeHash !== stagedTree
-      || (input.expectedFingerprint && stagedFingerprint !== input.expectedFingerprint)
-    ) {
-      throw new SpokenReviewSnapshotChangedError();
-    }
-
-    const { stdout: headTreeOutput } = await laneGit(cwd, input.lane.repoPath, ['rev-parse', `${reviewed.headSha}^{tree}`]);
-    if (headTreeOutput.trim() === stagedTree) return reviewed.headSha;
-
-    const { stdout: commitOutput } = await laneGit(cwd, input.lane.repoPath, [
-      'commit-tree',
-      stagedTree,
-      '-p',
-      reviewed.headSha,
-      '-m',
-      input.commitMessage,
-    ]);
-    const commitSha = commitOutput.trim();
-    const { stdout: branchRefOutput } = await laneGit(cwd, input.lane.repoPath, ['symbolic-ref', '-q', 'HEAD']);
-    const branchRef = branchRefOutput.trim();
-    try {
-      await laneGit(cwd, input.lane.repoPath, ['update-ref', branchRef, commitSha, reviewed.headSha]);
-    } catch (error) {
-      if (error instanceof LaneGitMetadataError) throw error;
-      throw new SpokenReviewSnapshotChangedError();
-    }
-    try {
-      await laneGit(cwd, input.lane.repoPath, ['read-tree', commitSha]);
-    } catch (error) {
-      console.warn(`[spoken-review] Exact commit landed but the shared index could not be refreshed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return commitSha;
+    return await commitReviewedSnapshot(input, reviewed, { indexFile: join(tempDir, 'index') });
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+}
+
+async function commitReviewedSnapshot(
+  input: { lane: Lane; commitMessage: string; expectedFingerprint?: string },
+  reviewed: Awaited<ReturnType<typeof verifiedSpokenReviewSnapshot>>,
+  options: LaneGitOptions,
+  laneBranchRef?: string,
+): Promise<string> {
+  const cwd = input.lane.worktreePath || input.lane.repoPath;
+  await laneGit(cwd, input.lane.repoPath, ['read-tree', reviewed.headSha], options);
+  await laneGit(cwd, input.lane.repoPath, ['add', '-A', '--', '.'], options);
+  const { stdout: stagedTreeOutput } = await laneGit(cwd, input.lane.repoPath, ['write-tree'], options);
+  const stagedTree = stagedTreeOutput.trim();
+  const current = await verifiedSpokenReviewSnapshot(input.lane, input.expectedFingerprint);
+  const stagedFingerprint = spokenReviewSnapshotFingerprint(
+    reviewed.headSha,
+    reviewed.against,
+    stagedTree,
+  );
+  if (
+    current.headSha !== reviewed.headSha
+    || current.against !== reviewed.against
+    || current.snapshotTreeHash !== stagedTree
+    || (input.expectedFingerprint && stagedFingerprint !== input.expectedFingerprint)
+  ) {
+    throw new SpokenReviewSnapshotChangedError();
+  }
+
+  const { stdout: headTreeOutput } = await laneGit(cwd, input.lane.repoPath, ['rev-parse', `${reviewed.headSha}^{tree}`]);
+  if (headTreeOutput.trim() === stagedTree) return reviewed.headSha;
+
+  const { stdout: commitOutput } = await laneGit(cwd, input.lane.repoPath, [
+    'commit-tree',
+    stagedTree,
+    '-p',
+    reviewed.headSha,
+    '-m',
+    input.commitMessage,
+  ], options);
+  const commitSha = commitOutput.trim();
+  const branchRef = laneBranchRef
+    ?? (await laneGit(cwd, input.lane.repoPath, ['symbolic-ref', '-q', 'HEAD'])).stdout.trim();
+  try {
+    await laneGit(cwd, input.lane.repoPath, ['update-ref', branchRef, commitSha, reviewed.headSha], options);
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
+    throw new SpokenReviewSnapshotChangedError();
+  }
+  try {
+    await laneGit(cwd, input.lane.repoPath, ['read-tree', commitSha]);
+  } catch (error) {
+    console.warn(`[spoken-review] Exact commit landed but the shared index could not be refreshed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return commitSha;
 }
 
 export async function commitSpokenReviewSnapshotWithDriftRecovery(input: {
