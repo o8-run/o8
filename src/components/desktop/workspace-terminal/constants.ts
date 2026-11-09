@@ -50,6 +50,7 @@ export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
   // and Settings but never here (#1808). `model-picker-coverage.test.ts` pins
   // the three lists together until they are generated from the registry.
   { id: MODEL_IDS.raw.anthropicClaudeOpus55, label: 'Opus 5.5', color: '#8b5cf6' },
+  { id: MODEL_IDS.raw.anthropicClaudeFable52, label: 'Fable 5.2', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeFable51, label: 'Fable 5.1', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeOpus5, label: 'Opus 5', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8 (1M)', color: '#8b5cf6' },

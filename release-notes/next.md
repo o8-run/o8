@@ -9,6 +9,7 @@
 - A stopped turn says Stopped, even before any output, and archiving a thread or shift-clicking New opens the new thread.
 - Menus, tooltips and dialogs draw over inline visualizations, and info toasts start below split pane headers.
 - The PR panel shows GitLab merge requests.
+- Fable 5.2 is the composer's Fable and the default Fable lead, and usage history prices it and its fast mode. Fable 5.1 stays selectable in Settings.
 - Usage history prices Fable 5, Opus 4.5 and 1-hour cache writes, and counts Claude usage that has no price yet.
 - On Linux, voice provider keys can be stored in the Secret Service.
 - Files up to 128 MiB open in the editor.

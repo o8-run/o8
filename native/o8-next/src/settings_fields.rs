@@ -691,6 +691,7 @@ pub const FIELDS: &[Field] = &[
         "Used only when a request does not select a model. Composer choices take precedence.",
         Kind::Choice(&[
             ("claude-opus-5-5", "Opus 5.5"),
+            ("claude-fable-5-2", "Fable 5.2"),
             ("claude-fable-5-1", "Fable 5.1"),
             ("claude-fable-5", "Fable 5"),
             ("claude-opus-5", "Opus 5"),

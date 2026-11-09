@@ -860,6 +860,7 @@ fn model_names_read_like_the_desktop() {
         ("claude-opus-5-5", "Opus 5.5"),
         ("claude-sonnet-5-5", "Sonnet 5.5"),
         ("claude-haiku-5-5", "Haiku 5.5"),
+        ("claude-fable-5-2", "Fable 5.2"),
         ("claude-fable-5[1m]", "Fable 5 (1M)"),
         ("claude-sonnet-4-20250514", "Sonnet 4"),
         ("gemini-3-flash-preview", "Gemini 3 Flash"),

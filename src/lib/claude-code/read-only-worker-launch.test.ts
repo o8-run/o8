@@ -132,7 +132,7 @@ async function spawnedCall(carrier: 'native' | 'codex-subscription') {
 }
 
 describe('owned Claude Code read-only argv', () => {
-  it.each(['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5'])('passes %s unchanged to the owned CLI launch', async (model) => {
+  it.each(['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-1', 'claude-sonnet-5'])('passes %s unchanged to the owned CLI launch', async (model) => {
     const result = await launchOwnedClaudeCodeSession({ cwd: repoPath, prompt: 'inspect the repository', model });
     expect(result, result.note).toMatchObject({ ok: true });
     const args = spawnMock.mock.calls.at(-1)?.[1] as string[];

@@ -2,6 +2,7 @@
 
 pub const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
 pub const CLAUDE_OPUS_5_5: &str = "claude-opus-5-5";
+pub const CLAUDE_FABLE_5_2: &str = "claude-fable-5-2";
 pub const CLAUDE_FABLE_5_1: &str = "claude-fable-5-1";
 pub const CLAUDE_OPUS_5: &str = "claude-opus-5";
 pub const CLAUDE_SONNET_5: &str = "claude-sonnet-5";

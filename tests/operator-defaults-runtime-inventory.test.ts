@@ -197,7 +197,7 @@ describe('operator-defaults dispatchable runtime inventory', () => {
     expect(restore.status).toBe(200);
   });
 
-  it.each(['claude-opus-5-5', 'claude-fable-5-1'])('persists %s with Sonnet workers through the settings route', async (model) => {
+  it.each(['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-1'])('persists %s with Sonnet workers through the settings route', async (model) => {
     const response = await operatorDefaultsRoute.POST(new Request('http://127.0.0.1/api/panel/operator-defaults', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orchestratorBackend: 'claude', orchestratorModel: model,
