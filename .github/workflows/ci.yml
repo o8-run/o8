@@ -128,6 +128,12 @@ jobs:
       - name: Release channel policy
         if: needs.reuse.outputs.reuse != 'true'
         run: npx vitest run tests/release-channel-real-path.test.ts
+      # The CLI bundle follows the server's dynamic imports, so a server change can break it with
+      # every typecheck green (#5736 did, through the native route registry). The tests that build it
+      # are resource-owning and run only when touched; build it on every PR here.
+      - name: CLI bundle
+        if: needs.reuse.outputs.reuse != 'true'
+        run: npm run build:cli
       - uses: actions/cache/save@v4
         if: needs.reuse.outputs.reuse != 'true' && github.ref == 'refs/heads/main' && steps.typecheck-cache.outputs.cache-hit != 'true'
         with:
