@@ -17,6 +17,8 @@ interface StrongGrepDeps {
     repoPath: string | undefined,
     topK?: number,
   ) => Promise<TypedRow[]>;
+  /** Reads a hit; the server passes one that refuses links and paths outside repoPath. */
+  readFile?: (repoPath: string, relPath: string) => Promise<string>;
 }
 
 const DEFAULT_FILE_BUDGET = 8;
@@ -161,7 +163,9 @@ export async function buildStrongGrepTopRowsImpl(
       if (remaining <= 0) break;
       let content: string;
       try {
-        content = await fs.readFile(path.join(repoPath, relPath), 'utf-8');
+        content = opts.readFile
+          ? await opts.readFile(repoPath, relPath)
+          : await fs.readFile(path.join(repoPath, relPath), 'utf-8');
       } catch {
         continue;
       }

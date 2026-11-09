@@ -44,6 +44,11 @@ interface AskAnswerBody {
   packetId?: unknown;
 }
 
+function realPathOrNull(path: string | null | undefined): string | null {
+  if (!path) return null;
+  try { return realpathSync(path); } catch { return null; }
+}
+
 function recordBrainConsulted(
   packetId: string,
   laneId: string,
@@ -120,6 +125,16 @@ export async function POST(request: NextRequest) {
     ? null : workerPacketRefusal(principal, packetId);
   if (ownershipRefusal) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
+  if (principal.role === 'worker' && !principal.brainRepoPath && repoPath) {
+    // A packet worker asks only about its own lane's repository or worktree.
+    const lane = packetId ? findLatestLaneByPacket(packetId) : null;
+    const target = realPathOrNull(repoPath);
+    if (!target || ![lane?.worktreePath, lane?.repoPath].some((dir) => realPathOrNull(dir) === target)) {
+      return NextResponse.json({ ok: false, error: { code: 'worker_packet_mismatch',
+        message: "A packet worker can ask only about its own lane's repository." } }, { status: 403 });
+    }
+    repoPath = target;
   }
 
   // Worker path: the CLI runs inside a packet worktree whose directory name
