@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { requirePanelAuth } from '@/lib/panel/auth';
+import { requirePanelOrWorkerAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { getLane } from '@/lib/lane/registry';
 import { recordLaneHeartbeat } from '@/lib/lane/reaper';
@@ -13,7 +13,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const denied = requirePanelAuth(req);
+  const denied = requirePanelOrWorkerAuth(req);
   if (denied) return denied;
 
   const { id } = await params;

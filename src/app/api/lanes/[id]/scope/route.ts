@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { requirePanelAuth } from '@/lib/panel/auth';
+import { requirePanelOrWorkerAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { getPacketScope, projectPacketScope } from '@/lib/lanes/scope';
 import { requestPacketScopeExpansion } from '@/lib/orchestrator/packet-scope-expansion';
@@ -11,7 +11,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const denied = requirePanelAuth(req);
+  const denied = requirePanelOrWorkerAuth(req);
   if (denied) return denied;
 
   const { id } = await params;
@@ -37,7 +37,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const denied = requirePanelAuth(req);
+  const denied = requirePanelOrWorkerAuth(req);
   if (denied) return denied;
 
   const { id } = await params;

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
-import { requirePanelAuth } from '@/lib/panel/auth';
+import { requirePanelAuth, requirePanelOrWorkerAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { findLaneByPacket, getLane, getLaneEvents, listLanes, listActiveLanes } from '@/lib/lane/registry';
 import { summarizeLaneArchive, wasArchivedByOperator } from '@/lib/lane/archive-summary';
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   }
-  const denied = requirePanelAuth(req);
+  const denied = requirePanelOrWorkerAuth(req);
   if (denied) return denied;
   const principal = resolveRequestPrincipalContext(req);
   if (principal.role !== 'operator' && principal.role !== 'worker') {
