@@ -5507,6 +5507,14 @@
       ]
     },
     {
+      "path": "tests/o8d-symon-mcp-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-symon-watches-native-real-path.test.ts",
       "reasons": [
         "real-path"

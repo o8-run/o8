@@ -1,21 +1,10 @@
+import { NextResponse } from 'next/server';
+import * as handlers from '@/lib/mcp/symon-mcp-tools-route';
+import { ownedByNativeTransport } from '@/lib/ws-server/native-owner';
+
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-import { NextResponse } from 'next/server';
-import { getSymonMcpCatalog } from '@/lib/mcp/symon-tools';
-import { authorizeSymonMcpRoute } from '../route-auth';
-
-export async function GET(request: Request) {
-  const denied = authorizeSymonMcpRoute(request);
-  if (denied) return denied;
-
-  try {
-    const catalog = await getSymonMcpCatalog({ refresh: true });
-    return NextResponse.json({ ok: true, ...catalog });
-  } catch (error) {
-    return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : 'Failed to load connected MCP tools.' },
-      { status: 500 },
-    );
-  }
-}
+// Connected MCP sessions are per process; one process owns them (#5422).
+export const GET = ownedByNativeTransport(handlers.GET,
+  () => NextResponse.json({ ok: false, error: 'Connected MCP tools are unavailable.' }, { status: 503 }));
