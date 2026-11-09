@@ -3,10 +3,10 @@ name: o8 next Linux shell
 on:
   pull_request:
     branches: [main]
-    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'tests/o8-next-o8d-boot-real-path.test.ts', 'src/lib/ws-server/native-http-registry.ts', 'package.json', 'package-lock.json']
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'tests/o8-next-o8d-boot-real-path.test.ts', 'src/lib/ws-server/native-http-registry.ts', 'src/lib/ws-server/native-http-routes.ts', 'src/lib/ws-server/native-http-handlers.ts', 'tests/fixtures/ws-parity-server.ts', 'package.json', 'package-lock.json']
   push:
     branches: [main]
-    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'tests/o8-next-o8d-boot-real-path.test.ts', 'src/lib/ws-server/native-http-registry.ts', 'package.json', 'package-lock.json']
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'tests/o8-next-o8d-boot-real-path.test.ts', 'src/lib/ws-server/native-http-registry.ts', 'src/lib/ws-server/native-http-routes.ts', 'src/lib/ws-server/native-http-handlers.ts', 'tests/fixtures/ws-parity-server.ts', 'package.json', 'package-lock.json']
 
 permissions:
   contents: read
@@ -37,6 +37,7 @@ jobs:
       # the real WS process with the native transport on and Next stopped. Every route the window
       # reads must be answered natively, so a boot route missing from the native registry fails.
       - name: Boot against the WS process with Next stopped
+        timeout-minutes: 6
         run: |
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           test -n "$VK_ICD_FILENAMES"

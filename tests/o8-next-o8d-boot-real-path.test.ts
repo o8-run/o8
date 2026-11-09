@@ -38,34 +38,46 @@ it.skipIf(!runnable)('boots o8 next against the WS process with Next stopped', a
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-o8d-boot-')));
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-o8d-boot-shell-')));
   const requests: string[] = [];
+  // Every request from the moment it starts, so a read that never answers is still seen.
+  const inflight = new Map<number, { line: string; started: number }>();
+  let sequence = 0;
+  const path = (url: string | undefined) => new URL(url ?? '/', 'http://relay.invalid').pathname;
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   let app: ChildProcess | undefined;
   let target = 0;
+  // The window runs in its tunnel mode (O8_NEXT_TUNNEL_HOST, O8_NEXT_WS_PORT), as a machine window
+  // does: it names the listener's own host on each request and opens its live socket on this
+  // relay's port, so the relay forwards both unchanged and records each status.
   const relay = createServer((request, response) => {
-    const upstream = forward({ host: '127.0.0.1', port: target, path: request.url, method: request.method,
-      // The panel gate compares Host with the listener's own port, as o8d's relay preserves it.
-      headers: { ...request.headers, host: `127.0.0.1:${target}` } }, reply => {
-      requests.push(`${request.method} ${new URL(request.url ?? '/', 'http://relay.invalid').pathname} ${reply.statusCode}`);
+    const id = sequence++;
+    const line = `${request.method} ${path(request.url)}`;
+    inflight.set(id, { line, started: Date.now() });
+    response.on('close', () => inflight.delete(id));
+    const upstream = forward({ host: '127.0.0.1', port: target, path: request.url, method: request.method, headers: request.headers }, reply => {
+      requests.push(`${line} ${reply.statusCode}`);
       response.writeHead(reply.statusCode ?? 502, reply.headers);
       reply.pipe(response);
     });
-    upstream.on('error', () => { requests.push(`${request.method} ${request.url} relay-error`); response.destroy(); });
+    upstream.on('error', () => { requests.push(`${line} relay-error`); response.destroy(); });
     request.pipe(upstream);
   });
   relay.on('upgrade', (request, socket, head) => {
-    requests.push(`UPGRADE ${new URL(request.url ?? '/', 'http://relay.invalid').pathname}`);
+    const line = `UPGRADE ${path(request.url)}`;
     const upstream = connect(target, '127.0.0.1', () => {
       const lines = [`${request.method} ${request.url} HTTP/1.1`];
-      for (let index = 0; index < request.rawHeaders.length; index += 2) {
-        const name = request.rawHeaders[index];
-        lines.push(`${name}: ${name.toLowerCase() === 'host' ? `127.0.0.1:${target}` : request.rawHeaders[index + 1]}`);
-      }
+      for (let index = 0; index < request.rawHeaders.length; index += 2) lines.push(`${request.rawHeaders[index]}: ${request.rawHeaders[index + 1]}`);
       upstream.write(`${lines.join('\r\n')}\r\n\r\n`);
       if (head.length) upstream.write(head);
-      upstream.pipe(socket).pipe(upstream);
+      // The listener's status line decides the handshake; record it before relaying the bytes.
+      upstream.once('data', first => {
+        requests.push(`${line} ${/^HTTP\/1\.1 (\d{3})/.exec(first.toString('latin1'))?.[1] ?? 'unparsed'}`);
+        socket.write(first);
+        upstream.pipe(socket);
+      });
+      socket.pipe(upstream);
     });
     const close = () => { socket.destroy(); upstream.destroy(); };
-    upstream.on('error', close);
+    upstream.on('error', () => { requests.push(`${line} relay-error`); close(); });
     socket.on('error', close);
   });
   try {
@@ -79,7 +91,8 @@ it.skipIf(!runnable)('boots o8 next against the WS process with Next stopped', a
     const origin = `http://127.0.0.1:${address.port}`;
 
     // The shell's window environment only: no inherited credentials or data paths.
-    const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', O8_NEXT_API_TOKEN: server.token, XDG_CACHE_HOME: join(scratch, 'cache') };
+    const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', O8_NEXT_API_TOKEN: server.token, XDG_CACHE_HOME: join(scratch, 'cache'),
+      O8_NEXT_TUNNEL_HOST: `127.0.0.1:${target}`, O8_NEXT_WS_PORT: String(address.port) };
     for (const key of ['PATH', 'TMPDIR', 'LD_LIBRARY_PATH', 'DISPLAY', 'XAUTHORITY', 'VK_DRIVER_FILES', 'VK_ICD_FILENAMES',
       'LIBGL_ALWAYS_SOFTWARE', 'FONTCONFIG_FILE', 'FONTCONFIG_PATH']) if (process.env[key]) env[key] = process.env[key];
     const image = join(scratch, 'display.png');
@@ -96,7 +109,8 @@ it.skipIf(!runnable)('boots o8 next against the WS process with Next stopped', a
     const firstFrameMs = Math.round(performance.now() - started);
     // The window's first data read: the orchestrator thread list, answered by the WS process.
     await until(() => requests.some(line => line.startsWith('GET /api/mobile/orchestrator/threads 2')), app, 'thread list read');
-    // Let the startup reads and subscriptions settle, then require the window to still be up.
+    // The live socket must be open, then let the startup reads settle with the window still up.
+    await until(() => requests.some(line => line.startsWith('UPGRADE /ws ')), app, 'live socket handshake');
     await new Promise(resolve => setTimeout(resolve, 3_000));
     expect(app.exitCode).toBeNull();
     expect(painted(image, env)).toBe(true);
@@ -109,10 +123,13 @@ it.skipIf(!runnable)('boots o8 next against the WS process with Next stopped', a
     // One designed refusal: with no voice host heartbeat the realtime broker answers 503
     // VOICE_HOST_UNAVAILABLE, as it does behind Next. Its body says `available: false`; the
     // route's own relay failure gives the same code without it, so read the body to tell them apart.
-    const voice = await fetch(`${origin}/api/next/voice-host`, { headers: { authorization: `Bearer ${server.token}` } });
+    const voice = await fetch(`http://127.0.0.1:${target}/api/next/voice-host`, { headers: { authorization: `Bearer ${server.token}` } });
     expect([voice.status, await voice.json()]).toEqual([503, { ok: false, available: false, code: 'VOICE_HOST_UNAVAILABLE' }]);
     const designed = new Set(['GET /api/next/voice-host 503']);
-    expect(routes.filter(line => / (4\d\d|5\d\d|relay-error)$/.test(line) && !designed.has(line))).toEqual([]);
+    // A read still open after 5 s is a stuck route, even if the window keeps working around it.
+    expect([...inflight.values()].filter(entry => Date.now() - entry.started > 5_000).map(entry => entry.line)).toEqual([]);
+    expect(routes).toContain('UPGRADE /ws 101');
+    expect(routes.filter(line => / (4\d\d|5\d\d|relay-error|unparsed)$/.test(line) && !designed.has(line))).toEqual([]);
     // The window's boot reads, each answered natively.
     for (const read of ['GET /api/mobile/orchestrator/threads 200', 'GET /api/panel/ws-info 200', 'GET /api/panel/operator-defaults 200']) {
       expect(routes).toContain(read);
