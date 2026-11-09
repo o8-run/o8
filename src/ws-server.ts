@@ -73,7 +73,6 @@ import { waitForTerminalResyncBarrier, type TerminalResyncCapture } from '@/lib/
 import { formatTmuxResyncSnapshot, parseTmuxSnapshotCursor } from '@/lib/ws-server/terminal-resync-snapshot';
 import { TerminalWorkloadStats } from '@/lib/ws-server/terminal-workload-stats';
 import { O8dBridge } from '@/lib/ws-server/o8d-bridge';
-import { nativeSessionReadsEnabled } from '@/lib/ws-server/native-session-reads';
 
 migrateDataDirOnce();
 
@@ -7755,9 +7754,9 @@ function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
 // ── Server startup ──
 
 const httpServer = createServer(async (req, res) => {
-  // Rust classifies HTTP before opening a streaming TS tunnel. End each
-  // flagged response so the next request is classified on a fresh socket.
-  if (o8dBridge && process.env.O8_NEXT_O8D === '1' && nativeSessionReadsEnabled()) res.setHeader('Connection', 'close');
+  // Rust classifies and stamps only the first request on a connection. End each
+  // relayed response so the next request is classified and stamped on a fresh socket.
+  if (o8dBridge && process.env.O8_NEXT_O8D === '1') res.setHeader('Connection', 'close');
   // Transport health is independent of Next and recovery. Stateful requests
   // retain the original recovery-before-use ordering.
   if (req.url !== '/health') await wsStartupReady;
@@ -7768,7 +7767,8 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
-  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.peer(req)))) return;
+  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
+    o8dBridge ? o8dBridge.clientAddress(req) : req.socket.localPort === WS_PORT ? req.socket.remoteAddress ?? null : null)) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([

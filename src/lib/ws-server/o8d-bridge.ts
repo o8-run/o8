@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { isIP } from 'node:net';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -37,15 +38,35 @@ export class O8dBridge {
     return { transport: this.transport, pid: this.child?.pid ?? null, generation: this.generation };
   }
 
+  /** True when o8d sent this request: only Rust holds the per-process key. */
+  bridged(req: IncomingMessage): boolean {
+    const supplied = req.headers['x-o8d-bridge'];
+    if (typeof supplied !== 'string' || Buffer.byteLength(supplied) !== Buffer.byteLength(this.key)) return false;
+    return timingSafeEqual(Buffer.from(supplied), Buffer.from(this.key));
+  }
+
   /** Headers from the public client are replaced by Rust, never trusted verbatim. */
   peer(req: IncomingMessage): string | null {
-    const supplied = req.headers['x-o8d-bridge'];
-    if (typeof supplied !== 'string' || Buffer.byteLength(supplied) !== Buffer.byteLength(this.key)) return null;
-    if (!timingSafeEqual(Buffer.from(supplied), Buffer.from(this.key))) return null;
-    return typeof req.headers['x-o8d-peer'] === 'string' ? req.headers['x-o8d-peer'] : null;
+    if (!this.bridged(req)) return null;
+    const peer = req.headers['x-o8d-peer'];
+    return typeof peer === 'string' && isIP(peer) ? peer : null;
+  }
+
+  /**
+   * The caller's address: o8d's attested peer on the private upstream, the
+   * socket itself on the fallback listener, and nothing on any other socket.
+   */
+  clientAddress(req: IncomingMessage): string | null {
+    const upstream = this.server.address();
+    const fallback = this.fallback.address();
+    if (upstream && typeof upstream !== 'string' && req.socket.localPort === upstream.port) return this.peer(req);
+    if (fallback && typeof fallback !== 'string' && req.socket.localPort === fallback.port) return req.socket.remoteAddress ?? null;
+    return null;
   }
 
   allowsUpgrade(req: IncomingMessage): boolean {
+    // An HTTP stamp never authorizes a WS session that o8d did not mediate.
+    if (req.headers['x-o8d-relay'] !== undefined) return false;
     const address = this.server.address();
     return !address || typeof address === 'string' || req.socket.localPort !== address.port || this.peer(req) !== null;
   }

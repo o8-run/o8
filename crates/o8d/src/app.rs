@@ -4,7 +4,7 @@ use futures_util::{Sink, SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     time::{timeout, timeout_at, Instant},
 };
@@ -127,6 +127,15 @@ async fn connection(
             return Ok(());
         }
         let mut backend = TcpStream::connect(&upstream).await.map_err(|_| ())?;
+        // Attest the socket peer on the first request. TS closes each relayed
+        // response, so every request arrives on a freshly stamped connection.
+        if let Some(stamped) = stamp_http_header(header, &key, &peer) {
+            socket.read_exact(&mut vec![0; end]).await.map_err(|_| ())?;
+            backend
+                .write_all(stamped.as_bytes())
+                .await
+                .map_err(|_| ())?;
+        }
         tokio::io::copy_bidirectional(&mut socket, &mut backend)
             .await
             .map_err(|_| ())?;
@@ -298,6 +307,40 @@ async fn connection(
     }
 }
 
+/// Rewrites a strictly framed request head with the bridge key and the socket
+/// peer, after any client-supplied bridge or address headers. A head that is not
+/// strictly CRLF-framed gets no stamp; TS treats it as an unverified caller and
+/// Node's parser rejects it.
+fn stamp_http_header(header: &str, key: &str, peer: &str) -> Option<String> {
+    let lines = header.strip_suffix("\r\n\r\n")?.split("\r\n");
+    let mut stamped = String::with_capacity(header.len() + 128);
+    for (index, line) in lines.enumerate() {
+        if line.contains(['\r', '\n']) {
+            return None;
+        }
+        if index == 0 {
+            let parts: Vec<&str> = line.split(' ').collect();
+            if parts.len() != 3 || parts.iter().any(|part| part.is_empty()) {
+                return None;
+            }
+        } else {
+            if line.starts_with([' ', '\t']) {
+                return None;
+            }
+            let name = line.split_once(':')?.0.trim().to_ascii_lowercase();
+            if name.starts_with("x-o8d-") || name == "x-o8-client-addr" {
+                continue;
+            }
+        }
+        stamped.push_str(line);
+        stamped.push_str("\r\n");
+    }
+    stamped.push_str(&format!(
+        "x-o8d-bridge: {key}\r\nx-o8d-peer: {peer}\r\nx-o8d-relay: http\r\n\r\n"
+    ));
+    Some(stamped)
+}
+
 async fn send<S: Sink<Message> + Unpin>(socket: &mut S, message: Message) -> Result<(), ()> {
     timeout(Duration::from_millis(50), socket.send(message))
         .await
@@ -323,4 +366,46 @@ fn batch(stream: &str, events: Vec<Value>, epoch: &str) -> Message {
         "epoch":epoch,"events":events}})
         .to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stamp_http_header;
+
+    #[test]
+    fn stamps_the_peer_after_dropping_client_bridge_and_address_headers() {
+        let head = "POST /api/lanes HTTP/1.1\r\nHost: 127.0.0.1:3101\r\nX-O8D-Peer: 127.0.0.1\r\nx-o8d-bridge: guess\r\nx-o8d-session-read: authorize\r\nX-O8-Client-Addr : 127.0.0.1\r\nContent-Length: 2\r\n\r\n";
+        assert_eq!(
+            stamp_http_header(head, "key", "203.0.113.5").as_deref(),
+            Some("POST /api/lanes HTTP/1.1\r\nHost: 127.0.0.1:3101\r\nContent-Length: 2\r\nx-o8d-bridge: key\r\nx-o8d-peer: 203.0.113.5\r\nx-o8d-relay: http\r\n\r\n")
+        );
+    }
+
+    #[test]
+    fn never_stamps_a_head_that_is_not_strictly_framed() {
+        for head in [
+            "GET / HTTP/1.1\r\nHost: a\nX-Smuggled: b\r\n\r\n",
+            "GET / HTTP/1.1\r\nHost: a\rX: b\r\n\r\n",
+            "GET / HTTP/1.1\r\nHost: a\r\n folded\r\n\r\n",
+            "GET / HTTP/1.1\r\nHost: a\r\n\tfolded\r\n\r\n",
+            "GET  / HTTP/1.1\r\nHost: a\r\n\r\n",
+            "GET /\r\nHost: a\r\n\r\n",
+            "GET / HTTP/1.1\r\nno-colon\r\n\r\n",
+            "GET / HTTP/1.1\r\nHost: a\r\n",
+        ] {
+            assert_eq!(
+                stamp_http_header(head, "key", "127.0.0.1"),
+                None,
+                "{head:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn stamps_http_1_0_without_host() {
+        assert_eq!(
+            stamp_http_header("GET /api/panel/file-asset HTTP/1.0\r\n\r\n", "k", "127.0.0.1").as_deref(),
+            Some("GET /api/panel/file-asset HTTP/1.0\r\nx-o8d-bridge: k\r\nx-o8d-peer: 127.0.0.1\r\nx-o8d-relay: http\r\n\r\n")
+        );
+    }
 }
