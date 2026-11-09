@@ -206,7 +206,7 @@ describe('owned Claude Code read-only argv', () => {
         expect(denyIdx).toBeGreaterThan(allowIdx);
         expect(profile.slice(denyIdx)).toContain(`(subpath "${realpathSync(repoPath)}")`);
       } finally {
-        delete process.env.O8_WORKER_SANDBOX;
+        process.env.O8_WORKER_SANDBOX = 'off';
       }
     },
   );

@@ -1,8 +1,8 @@
 # Worker sandbox compatibility profile
 
-o8 does not sandbox dispatched workers by default, and that is a stated posture rather than an omission — see [SECURITY.md](../../SECURITY.md), "How dispatched workers run". `O8_WORKER_SANDBOX` opts in, and an enabled sandbox is fail-closed.
+On macOS, o8 runs dispatched workers in this sandbox by default, and `O8_WORKER_SANDBOX=off` turns it off. On Linux it is off by default, and `O8_WORKER_SANDBOX=on` turns it on. An enabled sandbox is fail-closed; see [SECURITY.md](../../SECURITY.md), "How dispatched workers run".
 
-This document is the map for anyone who wants to make that sandbox good enough to be a default: what a real worker actually touches, and why a naive profile breaks it. Contributions welcome — see [issue #1657](https://github.com/o8-run/o8/issues/1657).
+This document is the map for anyone who wants to make that sandbox good enough to be the default everywhere: what a real worker actually touches, and why a naive profile breaks it. Contributions welcome — see [issue #1657](https://github.com/o8-run/o8/issues/1657).
 
 ## Headline findings
 
