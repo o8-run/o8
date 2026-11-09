@@ -362,7 +362,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/setup/detect', 'GET', () => import('@/app/api/setup/detect/route')),
   ],
   projects: [
-    route('/api/panel/projects', 'GET', () => import('@/app/api/panel/projects/route')),
+    // POST is the MCP server's project create (o8_create_project). No device or worker grant in
+    // panelGateMiddleware, so over native only the operator bearer passes; the handler has no auth of its
+    // own and never reads x-o8-client-addr or loopback. It writes the SQLite project and the projects ledger,
+    // then publishes the repo-inventory change to /internal/realtime, like the repos POST (#5243).
+    route('/api/panel/projects', 'GET POST', () => import('@/app/api/panel/projects/route')),
     route('/api/panel/projects/active', 'POST', () => import('@/app/api/panel/projects/active/route')),
     route('/api/panel/projects/[id]', 'PATCH DELETE', () => import('@/app/api/panel/projects/[id]/route')),
     route('/api/panel/repos', 'GET POST DELETE', () => import('@/app/api/panel/repos/route')),

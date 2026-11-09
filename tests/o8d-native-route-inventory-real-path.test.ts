@@ -78,7 +78,7 @@ const NEXT_ONLY_MCP_PATHS = new Set([
 // Registered paths the MCP server calls with a method the native registration lacks, so that
 // request still falls back to Next. Remove an entry when its method is registered.
 const NEXT_ONLY_MCP_METHODS = new Set([
-  'POST /api/panel/projects', 'POST /api/setup/mcp-servers', 'POST /api/visualizations',
+  'POST /api/setup/mcp-servers', 'POST /api/visualizations',
   // Also matched the GET-only /api/visualizations/[id] path, so a path-only check counted it as served.
   'POST /api/visualizations/preview',
 ]);
