@@ -63,6 +63,10 @@ pub struct Composer {
     pub(crate) controls: controls::State,
     /// Paints `*` for every byte (offsets stay valid) and refuses copy/cut.
     pub(crate) masked: bool,
+    /// A chat composer keeps its unsent text beside its thread's mode, so a
+    /// relaunch or update brings the draft back (#5203).
+    pub(crate) persist_draft: bool,
+    draft_save: Option<gpui::Task<()>>,
 }
 impl Composer {
     /// Read-only input viewport for floating previews; layout and input stay here.
@@ -96,6 +100,8 @@ impl Composer {
             send_intents: false,
             controls: controls::State::default(),
             masked: false,
+            persist_draft: false,
+            draft_save: None,
         }
     }
     pub(crate) fn select_all(&mut self, cx: &mut Context<Self>) {
@@ -164,6 +170,29 @@ impl Composer {
         self.composition = None;
         self.changed(cx);
     }
+    /// Writes the draft once typing pauses. An emptied draft is written at
+    /// once, so a sent message never comes back after a quick quit.
+    fn save_draft(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.controls.prompt.store.clone().filter(|_| self.persist_draft) else {
+            return;
+        };
+        let draft = mode_store::Draft {
+            text: self.text.clone(),
+            files: self.controls.files.clone(),
+        };
+        let wait = !draft.text.trim().is_empty();
+        self.draft_save = Some(cx.spawn(async move |_, cx| {
+            if wait {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(400))
+                    .await;
+            }
+            let _ = cx
+                .background_executor()
+                .spawn(async move { mode_store::save_draft(Some(&path), &draft) })
+                .await;
+        }));
+    }
     fn changed(&mut self, cx: &mut Context<Self>) {
         if self.controls.slash.enabled {
             if self.controls.slash.last != self.text {
@@ -182,6 +211,7 @@ impl Composer {
             self.sync_mention(cx);
         }
         self.revision += 1;
+        self.save_draft(cx);
         self.reveal_cursor = true;
         cx.notify();
     }

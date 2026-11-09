@@ -366,8 +366,16 @@ impl Surface {
                         editor.controls.images = draft.images;
                     }
                     Err(error) => editor.controls.error = error,
-                    Ok(None) => {}
+                    Ok(None) => {
+                        if let Some(draft) =
+                            crate::composer::mode_store::load_draft(editor.controls.prompt.store.as_deref())
+                        {
+                            editor.controls.files = draft.files;
+                            editor.set_text(&draft.text, cx);
+                        }
+                    }
                 }
+                editor.persist_draft = true;
                 if let Some(mode) = mode {
                     editor.controls.overrides["mode"] =
                         json!(if mode == "solo" { "single" } else { "fleet" });

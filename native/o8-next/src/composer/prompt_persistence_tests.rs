@@ -171,3 +171,39 @@ fn native_composer_mode_survives_reopen_through_the_picker(app: &mut TestAppCont
     });
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[gpui::test]
+fn native_composer_draft_survives_reopen_and_clears_on_send(app: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let root = crate::shell::test_support::scratch_path("o8-draft-store");
+    app.update(|cx| cx.set_global(crate::composer::mode_store::TestRoot(root.clone())));
+    let (surface, visual) = open(app, &fixture);
+    focus(&surface, visual);
+    visual.simulate_input("Half-written thought");
+    // The draft is written once typing pauses.
+    visual.executor().advance_clock(std::time::Duration::from_millis(500));
+    visual.run_until_parked();
+    let path = surface.read_with(visual, |s, cx| {
+        s.composer.read(cx).controls.prompt.store.clone().unwrap()
+    });
+    visual.update(|window, _| window.remove_window());
+    drop(surface);
+    let (reopened, visual) = open(app, &fixture);
+    reopened.read_with(visual, |s, cx| {
+        assert_eq!(s.composer.read(cx).text, "Half-written thought")
+    });
+    // A confirmed send clears the stored draft at once, with no pause.
+    focus(&reopened, visual);
+    visual.simulate_keystrokes("cmd-enter");
+    visual.run_until_parked();
+    reopened.read_with(visual, |s, cx| assert!(s.composer.read(cx).text.is_empty()));
+    assert_eq!(
+        std::fs::read_to_string(path.with_extension("draft.json")).unwrap(),
+        "\"\""
+    );
+    visual.update(|window, _| window.remove_window());
+    drop(reopened);
+    let (again, visual) = open(app, &fixture);
+    again.read_with(visual, |s, cx| assert!(s.composer.read(cx).text.is_empty()));
+    let _ = std::fs::remove_dir_all(root);
+}

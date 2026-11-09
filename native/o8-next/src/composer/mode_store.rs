@@ -43,6 +43,35 @@ pub(crate) fn save_prelude(path: Option<&Path>, text: &str) -> Result<(), String
         .map_err(|_| "Queued context could not be saved for the next launch.".into())
 }
 
+/// A thread's unsent composer text and attached file paths (#5203). Pasted
+/// images stay in memory: they can be megabytes, and a relaunch drops them.
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+pub(crate) struct Draft {
+    pub text: String,
+    #[serde(default)]
+    pub files: Vec<PathBuf>,
+}
+/// Drafts are this size or smaller; a larger one is not kept across launches.
+const DRAFT_LIMIT: usize = 1024 * 1024;
+pub(crate) fn save_draft(path: Option<&Path>, draft: &Draft) -> Result<(), String> {
+    let path = path.map(|p| p.with_extension("draft.json"));
+    // An empty draft is written as nothing, which loads as no draft.
+    let text = if draft.text.trim().is_empty() && draft.files.is_empty() {
+        String::new()
+    } else {
+        serde_json::to_string(draft).map_err(|e| e.to_string())?
+    };
+    if serde_json::to_vec(&text).map_err(|e| e.to_string())?.len() > DRAFT_LIMIT {
+        return Err("The draft is too large to keep across launches.".into());
+    }
+    save(path.as_deref(), &text).map_err(|_| "The draft could not be saved.".into())
+}
+pub(crate) fn load_draft(path: Option<&Path>) -> Option<Draft> {
+    let path = path.map(|p| p.with_extension("draft.json"));
+    let text = load_text(path.as_deref(), DRAFT_LIMIT as u64).filter(|t| !t.is_empty())?;
+    serde_json::from_str(&text).ok()
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct PromptDraft {
     pub text: String,
