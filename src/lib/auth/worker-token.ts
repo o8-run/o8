@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -74,6 +74,21 @@ export function registerPacketWorkerTokenHash(tokenHash: string): void {
   }
   mkdirSync(DATA_DIR, { recursive: true });
   appendFileSync(PACKET_WORKER_TOKEN_HASHES_PATH, `${tokenHash}\n`, { mode: 0o600 });
+}
+
+/**
+ * Replace the gate's packet-token hash set with the active hashes the database
+ * holds (see writeActivePacketWorkerTokenHashes). A rename keeps readers from
+ * seeing a partial file.
+ */
+export function writePacketWorkerTokenHashes(tokenHashes: string[]): void {
+  for (const tokenHash of tokenHashes) {
+    if (!/^[a-f0-9]{64}$/.test(tokenHash)) throw new Error('Packet worker token hash must be a SHA-256 hex digest.');
+  }
+  mkdirSync(DATA_DIR, { recursive: true });
+  const temporary = `${PACKET_WORKER_TOKEN_HASHES_PATH}.${process.pid}.tmp`;
+  writeFileSync(temporary, tokenHashes.map((tokenHash) => `${tokenHash}\n`).join(''), { mode: 0o600 });
+  renameSync(temporary, PACKET_WORKER_TOKEN_HASHES_PATH);
 }
 
 /** DB-free packet-worker recognition for middleware. */

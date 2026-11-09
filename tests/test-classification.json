@@ -7368,6 +7368,13 @@
       ]
     },
     {
+      "path": "tests/revoked-packet-worker-gate-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/rule-check-no-credentials-real-path.test.ts",
       "reasons": [
         "child-process",

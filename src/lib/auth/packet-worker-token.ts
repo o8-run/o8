@@ -2,7 +2,7 @@ import 'server-only';
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
-import { registerPacketWorkerTokenHash } from './worker-token';
+import { writePacketWorkerTokenHashes } from './worker-token';
 
 const PACKET_ID_PATTERN = /^[A-Za-z0-9_-]{1,160}$/;
 const PACKET_WORKER_SCOPE = 'local-packet';
@@ -33,6 +33,26 @@ function normalizedPacketId(packetId: string): string {
   return normalized;
 }
 
+/**
+ * Rewrite the gate's DB-free packet-token file from the unrevoked rows. Callers
+ * run it inside the immediate transaction that changes worker_tokens, so the
+ * database lock orders every process's rewrite and a stale one can never put a
+ * revoked hash back.
+ */
+export function writeActivePacketWorkerTokenHashes(): void {
+  const rows = getSqlite().prepare(`
+    SELECT token_hash FROM worker_tokens
+    WHERE scope = ? AND revoked_at IS NULL
+    ORDER BY created_at, id
+  `).all(PACKET_WORKER_SCOPE) as Array<{ token_hash: string }>;
+  writePacketWorkerTokenHashes(rows.map((row) => row.token_hash));
+}
+
+/** Rebuild the gate's file from the database, dropping any revoked hash it still lists. */
+export function syncPacketWorkerTokenHashes(): void {
+  getSqlite().transaction(writeActivePacketWorkerTokenHashes).immediate();
+}
+
 /** Mint a one-way, packet-bound credential for one local worker process. */
 export function mintPacketWorkerToken(
   packetId: string,
@@ -48,27 +68,24 @@ export function mintPacketWorkerToken(
   const tokenHash = createHash('sha256').update(plaintextToken).digest('hex');
   const now = new Date().toISOString();
 
-  getSqlite().prepare(`
-    INSERT INTO worker_tokens
-      (id, token_hash, packet_id, label, scope, max_workers, created_at, revoked_at,
-       lease_process_marker, lease_process_pid, lease_process_group_id)
-    VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, NULL, NULL)
-  `).run(
-    id,
-    tokenHash,
-    boundPacketId,
-    `Local packet ${boundPacketId}`,
-    PACKET_WORKER_SCOPE,
-    now,
-    processMarker,
-  );
-
-  try {
-    registerPacketWorkerTokenHash(tokenHash);
-  } catch (error) {
-    getSqlite().prepare('UPDATE worker_tokens SET revoked_at = ? WHERE id = ?').run(now, id);
-    throw error;
-  }
+  // A failed file write rolls the row back, so no credential exists that the gate cannot see.
+  getSqlite().transaction(() => {
+    getSqlite().prepare(`
+      INSERT INTO worker_tokens
+        (id, token_hash, packet_id, label, scope, max_workers, created_at, revoked_at,
+         lease_process_marker, lease_process_pid, lease_process_group_id)
+      VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, NULL, NULL)
+    `).run(
+      id,
+      tokenHash,
+      boundPacketId,
+      `Local packet ${boundPacketId}`,
+      PACKET_WORKER_SCOPE,
+      now,
+      processMarker,
+    );
+    writeActivePacketWorkerTokenHashes();
+  }).immediate();
   return plaintextToken;
 }
 
