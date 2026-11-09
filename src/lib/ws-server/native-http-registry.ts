@@ -329,6 +329,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/update/apply', 'GET POST', () => import('@/lib/app-update/routes/apply')),
     route('/api/panel/app/update-state', 'GET POST', () => import('@/lib/app-update/routes/update-state')),
     route('/api/panel/app/relaunch', 'POST', () => import('@/lib/app-update/routes/relaunch')),
+    // The shell's restart drain (restart_job_drain.rs). No device/worker/spectator grant, so only the operator
+    // bearer passes over native, and the handler reads no client address. Drain state is SQLite keyed by the
+    // app's O8_BOOT_ID, which the shell gives both processes; the native module refuses (503) without it,
+    // because a drain under a per-process boot id is deleted by Next's next cloud claim (#5243).
+    route('/api/panel/cloud-jobs/drain', 'GET POST', () => import('@/lib/cloud/drain-native-route')),
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
     route('/api/worktrees/retention-usage', 'GET', () => import('@/app/api/worktrees/retention-usage/route')),
