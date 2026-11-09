@@ -24,24 +24,37 @@ const ESM_BANNER = [
   'const __dirname = __o8_dirname(__filename);',
 ].join(' ');
 
-function stageSharedCompiler(root, outDir, metafile) {
-  if (!Object.values(metafile.outputs).some(output =>
-    output.imports.some(item => item.external && item.path === 'typescript'))) return;
-  // The desktop export already traces this runtime for its AST consumers.
-  // Reuse it instead of embedding a second compiler in a lazy server chunk.
-  // Native-only packages receive the same runtime without checkout resolution.
-  const source = join(root, 'node_modules', 'typescript');
-  const destination = join(outDir, 'node_modules', 'typescript');
-  const manifest = join(destination, 'package.json');
-  if (existsSync(manifest) && JSON.parse(readFileSync(manifest, 'utf8')).version
-    !== JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')).version) {
-    throw new Error('Shared compiler runtime does not match the build');
-  }
-  for (const file of ['package.json', 'LICENSE.txt', 'ThirdPartyNoticeText.txt', 'lib/typescript.js']) {
-    const target = join(destination, file);
-    if (existsSync(target)) continue;
-    mkdirSync(dirname(target), { recursive: true });
-    cpSync(join(source, file), target);
+// Lazy runtimes the desktop export already traces for Next. The server bundles
+// load them from node_modules beside the entries instead of embedding them;
+// native-only packages receive the same runtime without checkout resolution.
+// null ships the whole package (its own lazy requires resolve inside it).
+const SHARED_RUNTIMES = {
+  typescript: ['package.json', 'LICENSE.txt', 'ThirdPartyNoticeText.txt', 'lib/typescript.js'],
+  // The browser engine imports it only when an agent drives a browser.
+  'playwright-core': null,
+};
+
+function stageSharedRuntimes(root, outDir, metafile) {
+  for (const [name, files] of Object.entries(SHARED_RUNTIMES)) {
+    if (!Object.values(metafile.outputs).some(output =>
+      output.imports.some(item => item.external && item.path === name))) continue;
+    const source = join(root, 'node_modules', name);
+    const destination = join(outDir, 'node_modules', name);
+    const manifest = join(destination, 'package.json');
+    if (existsSync(manifest) && JSON.parse(readFileSync(manifest, 'utf8')).version
+      !== JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')).version) {
+      throw new Error(`Shared ${name} runtime does not match the build`);
+    }
+    if (!files) {
+      if (!existsSync(manifest)) cpSync(source, destination, { recursive: true });
+      continue;
+    }
+    for (const file of files) {
+      const target = join(destination, file);
+      if (existsSync(target)) continue;
+      mkdirSync(dirname(target), { recursive: true });
+      cpSync(join(source, file), target);
+    }
   }
 }
 
@@ -109,7 +122,7 @@ export function bundleServers({ root, outDir }) {
     ...options,
     entryPoints: entryPoints.filter(entry => !PURE_NODE_ENTRIES.has(entry.out.replace(/-impl$/, ''))),
     splitting: true,
-    external: ['node-pty', 'better-sqlite3', 'bindings', 'typescript'],
+    external: ['node-pty', 'better-sqlite3', 'bindings', ...Object.keys(SHARED_RUNTIMES)],
   });
   // Sharing can hoist an otherwise-unused native import into a common chunk.
   // Keep the dependency-light proxy standalone: it does not run the native-addon
@@ -123,7 +136,7 @@ export function bundleServers({ root, outDir }) {
   }
 
   pruneOrphanOutputs(root, outDir, metafile);
-  stageSharedCompiler(root, outDir, metafile);
+  stageSharedRuntimes(root, outDir, metafile);
   // Keep upstream permission/copyright notices with distributed sidecars.
   for (const file of ['NOTICE.md', 'licenses/t3code-MIT.txt']) {
     const source = join(root, file);

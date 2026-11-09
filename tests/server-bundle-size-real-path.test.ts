@@ -149,6 +149,28 @@ describe('server size check CLI', () => {
     expect(existsSync(join(outDir, 'node_modules/typescript/lib/typescript.js'))).toBe(true);
   });
 
+  it('ships the lazy browser runtime beside the bundle instead of embedding it', () => {
+    const { root } = fixture();
+    symlinkSync(join(process.cwd(), 'node_modules'), join(root, 'node_modules'), 'junction');
+    // Same shape as the browser engine: the runtime loads only when a browser is driven.
+    writeFileSync(join(root, entries[0]), `
+      if (process.argv[2] === 'browser') {
+        const { chromium } = await import('playwright-core');
+        console.log(JSON.stringify({ launch: typeof chromium.launch }));
+      } else console.log(JSON.stringify({ idle: true }));
+    `);
+    const outDir = join(root, 'built');
+    const report = bundleServers({ root, outDir });
+    rmSync(join(root, 'node_modules'), { recursive: true, force: true });
+    writeFileSync(join(outDir, 'native-addon-runtime.cjs'), 'exports.prepareNativeAddons = () => {};');
+    const executed = spawnSync(process.execPath, [join(outDir, 'ws-server.mjs'), 'browser'], { encoding: 'utf8', timeout: 10_000 });
+    expect(executed.status, executed.stderr).toBe(0);
+    expect(JSON.parse(executed.stdout)).toEqual({ launch: 'function' });
+    expect(Object.keys(report.metafile.inputs).some(input => /node_modules\/playwright-core\//.test(input))).toBe(false);
+    expect(JSON.parse(readFileSync(join(outDir, 'node_modules/playwright-core/package.json'), 'utf8')).version)
+      .toBe(JSON.parse(readFileSync('node_modules/playwright-core/package.json', 'utf8')).version);
+  });
+
   it('excludes orphan lazy chunks and executes retained lazy imports', () => {
     const { root, budget } = fixture();
     writeFileSync(join(root, 'optional.ts'), `
