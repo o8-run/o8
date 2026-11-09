@@ -3,8 +3,8 @@ import { resolveGitBinary } from '@/lib/git/binary';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { execFile, execFileSync, type ExecFileSyncOptions } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync,
-  renameSync, writeFileSync } from 'node:fs';
+import { closeSync, constants as fsConstants, copyFileSync, fstatSync, lstatSync, openSync, readFileSync, readSync,
+  readdirSync, realpathSync, renameSync, writeSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { devNull } from 'node:os';
 import path from 'node:path';
@@ -363,6 +363,13 @@ export async function assertLaneHeadOnBranch(worktreePath: string, repoPath: str
 export interface LaneCommitDirectory {
   /** Pass to every `laneGit` call that stages or commits. */
   options: { adminDir: string; indexFile: string };
+  /** The lane branch's commit. The directory's HEAD starts here, detached. */
+  tip: string;
+  /**
+   * Moves `refs/heads/<branch>` itself, never a ref it names, from `from`
+   * (the tip by default) to `commit`.
+   */
+  advance(commit: string, message: string, from?: string): Promise<void>;
   /** Replaces the checkout's index with the staged one, by rename. */
   syncIndex(): void;
 }
@@ -370,13 +377,16 @@ export interface LaneCommitDirectory {
 /**
  * Runs `run` with a host-owned administration directory for committing onto
  * `refs/heads/<branch>`. A worker can change its checkout's HEAD, index, commit
- * message and HEAD log at any moment, including while o8 commits. Git given
- * this directory reads and writes none of them: its HEAD names the branch, and
- * its index starts as a copy of the checkout's.
+ * message and HEAD log at any moment, including while o8 commits, and can
+ * rewrite its branch's ref. Git given this directory reads and writes none of
+ * the checkout's own state: its HEAD is the branch's commit, detached, and its
+ * index starts as a copy of the checkout's. `advance` then updates the branch
+ * ref without following it.
  */
 export async function withLaneCommitDirectory<T>(worktreePath: string, repoPath: string, branch: string,
   run: (directory: LaneCommitDirectory) => Promise<T>): Promise<T> {
   const { admin, common } = await runGitPlan(resolveGitDirectories(worktreePath, repoPath, laneGitEnvironment()));
+  const ref = `refs/heads/${branch}`;
   // The worker sandbox denies the data dir, unlike the system temp dir.
   const root = path.join(getDataDir(), 'lane-git');
   await mkdir(root, { recursive: true, mode: 0o700 });
@@ -384,22 +394,55 @@ export async function withLaneCommitDirectory<T>(worktreePath: string, repoPath:
   const adminDir = await mkdtemp(path.join(root, COMMIT_DIRECTORY_PREFIX));
   try {
     const indexFile = path.join(adminDir, 'index');
-    await writeFile(path.join(adminDir, 'HEAD'), `ref: refs/heads/${branch}\n`);
+    const options = { adminDir, indexFile };
     // Git's ref store reads this file, not GIT_COMMON_DIR.
     await writeFile(path.join(adminDir, 'commondir'), `${common}\n`);
-    const options = { adminDir, indexFile };
-    if (!copyCheckoutIndex(path.join(admin, 'index'), indexFile)) {
-      await laneGit(worktreePath, repoPath, ['read-tree', `refs/heads/${branch}`], options);
+    await writeFile(path.join(adminDir, 'HEAD'), `${'0'.repeat(40)}\n`);
+    await assertLaneRefIsPlain(worktreePath, repoPath, common, ref, options);
+    const { stdout } = await laneGit(worktreePath, repoPath,
+      ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], options);
+    const tip = stdout.trim();
+    await writeFile(path.join(adminDir, 'HEAD'), `${tip}\n`);
+    if (!copyCheckoutIndex(admin, indexFile)) {
+      await laneGit(worktreePath, repoPath, ['read-tree', tip], options);
     }
-    return await run({ options, syncIndex: () => replaceCheckoutIndex(indexFile, admin) });
+    return await run({
+      options,
+      tip,
+      advance: async (commit, message, from = tip) => {
+        await assertLaneRefIsPlain(worktreePath, repoPath, common, ref, options);
+        await laneGit(worktreePath, repoPath, ['update-ref', '--no-deref', '-m', message, ref, commit, from], options);
+      },
+      syncIndex: () => replaceCheckoutIndex(indexFile, admin),
+    });
   } finally {
     await rm(adminDir, { recursive: true, force: true });
   }
 }
 
+/** The lane's branch ref and its reflog: no link along either, and not a symbolic ref. */
+async function assertLaneRefIsPlain(worktreePath: string, repoPath: string, common: string, ref: string,
+  options: LaneGitOptions): Promise<void> {
+  try {
+    assertNoLinkAlong(common, ref);
+    assertNoLinkAlong(common, `logs/${ref}`);
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
+    throw new LaneGitMetadataError();
+  }
+  try {
+    await laneGit(worktreePath, repoPath, ['symbolic-ref', '-q', ref], options);
+  } catch (error) {
+    // Exit 1: not a symbolic ref.
+    if ((error as { code?: unknown }).code === 1) return;
+    throw error instanceof LaneGitMetadataError ? error : new LaneGitMetadataError();
+  }
+  throw new LaneGitMetadataError();
+}
+
 const COMMIT_DIRECTORY_PREFIX = 'commit-';
-/** Far longer than any commit's Git timeouts. */
-const ABANDONED_COMMIT_DIRECTORY_MS = 60 * 60 * 1000;
+/** Far longer than any commit's Git timeouts, or a host sleeping through one. */
+const ABANDONED_COMMIT_DIRECTORY_MS = 24 * 60 * 60 * 1000;
 
 /** A commit directory outlives its commit only when o8 exits mid-commit. */
 async function removeAbandonedCommitDirectories(root: string): Promise<void> {
@@ -417,19 +460,29 @@ async function removeAbandonedCommitDirectories(root: string): Promise<void> {
   }
 }
 
-function copyCheckoutIndex(source: string, target: string): boolean {
-  let fd: number;
+/** False when the commit should start from the branch's tree instead. */
+function copyCheckoutIndex(admin: string, target: string): boolean {
+  // A split index keeps its shared part beside the checkout's own index.
+  if (readdirSync(admin).some((name) => name.startsWith('sharedindex.'))) return false;
+  let source: number;
   try {
-    fd = openSync(source, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    // Non-blocking, so a named pipe in its place cannot hold the open.
+    source = openSync(path.join(admin, 'index'), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw new LaneGitMetadataError();
   }
   try {
-    if (!fstatSync(fd).isFile()) throw new LaneGitMetadataError();
-    writeFileSync(target, readFileSync(fd), { flag: 'wx', mode: 0o600 });
+    if (!fstatSync(source).isFile()) throw new LaneGitMetadataError();
+    const copy = openSync(target, 'wx', 0o600);
+    try {
+      const chunk = Buffer.allocUnsafe(1024 * 1024);
+      for (let read = readSync(source, chunk); read > 0; read = readSync(source, chunk)) writeSync(copy, chunk, 0, read);
+    } finally {
+      closeSync(copy);
+    }
   } finally {
-    closeSync(fd);
+    closeSync(source);
   }
   return true;
 }
@@ -437,6 +490,6 @@ function copyCheckoutIndex(source: string, target: string): boolean {
 function replaceCheckoutIndex(source: string, admin: string): void {
   // A new name never follows an existing link, and rename replaces the entry.
   const staged = path.join(admin, `index.o8-${randomUUID()}`);
-  writeFileSync(staged, readFileSync(source), { flag: 'wx' });
+  copyFileSync(source, staged, fsConstants.COPYFILE_EXCL);
   renameSync(staged, path.join(admin, 'index'));
 }

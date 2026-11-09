@@ -186,7 +186,11 @@ export async function commitLaneWork(
       // non-zero exit => staged changes exist, proceed to commit
     }
     await laneGit(cwd, repoPath, ['commit', '--no-verify', '-m', message], options);
-    directory?.syncIndex();
+    if (directory) {
+      const { stdout: commit } = await laneGit(cwd, repoPath, ['rev-parse', 'HEAD'], options);
+      await directory.advance(commit.trim(), `commit: ${message}`);
+      directory.syncIndex();
+    }
     return true;
   };
   const branch = laneBranch?.trim();

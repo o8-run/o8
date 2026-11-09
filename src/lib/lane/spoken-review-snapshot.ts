@@ -1,7 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { laneGit, LaneGitMetadataError, withLaneCommitDirectory, type LaneGitOptions } from '@/lib/lane/lane-git';
+import {
+  laneGit, LaneGitMetadataError, withLaneCommitDirectory, type LaneCommitDirectory, type LaneGitOptions,
+} from '@/lib/lane/lane-git';
 
 import {
   getLaneSpokenDiffFacts,
@@ -211,7 +213,7 @@ export async function commitSpokenReviewSnapshot(input: {
   const branch = input.lane.branch?.trim();
   if (branch) {
     return withLaneCommitDirectory(cwd, input.lane.repoPath, branch,
-      ({ options }) => commitReviewedSnapshot(input, reviewed, options, `refs/heads/${branch}`));
+      ({ options, advance }) => commitReviewedSnapshot(input, reviewed, options, advance));
   }
   const tempDir = await mkdtemp(join(tmpdir(), 'o8-spoken-review-commit-'));
   try {
@@ -225,7 +227,7 @@ async function commitReviewedSnapshot(
   input: { lane: Lane; commitMessage: string; expectedFingerprint?: string },
   reviewed: Awaited<ReturnType<typeof verifiedSpokenReviewSnapshot>>,
   options: LaneGitOptions,
-  laneBranchRef?: string,
+  advance?: LaneCommitDirectory['advance'],
 ): Promise<string> {
   const cwd = input.lane.worktreePath || input.lane.repoPath;
   await laneGit(cwd, input.lane.repoPath, ['read-tree', reviewed.headSha], options);
@@ -259,10 +261,12 @@ async function commitReviewedSnapshot(
     input.commitMessage,
   ], options);
   const commitSha = commitOutput.trim();
-  const branchRef = laneBranchRef
-    ?? (await laneGit(cwd, input.lane.repoPath, ['symbolic-ref', '-q', 'HEAD'])).stdout.trim();
+  // A lane without a recorded branch updates the branch its checkout names.
+  const checkoutRef = advance ? '' : (await laneGit(cwd, input.lane.repoPath, ['symbolic-ref', '-q', 'HEAD'])).stdout.trim();
   try {
-    await laneGit(cwd, input.lane.repoPath, ['update-ref', branchRef, commitSha, reviewed.headSha], options);
+    await (advance
+      ? advance(commitSha, `commit: ${input.commitMessage.split('\n')[0]}`, reviewed.headSha)
+      : laneGit(cwd, input.lane.repoPath, ['update-ref', '--no-deref', checkoutRef, commitSha, reviewed.headSha], options));
   } catch (error) {
     if (error instanceof LaneGitMetadataError) throw error;
     throw new SpokenReviewSnapshotChangedError();

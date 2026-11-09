@@ -68,6 +68,62 @@ describe('host commits in a lane checkout', () => {
     await expect(readLaneBranchSha(f.lane, f.repo, f.branch)).resolves.toBe(git(f.repo, 'rev-parse', f.branch));
   });
 
+  it('refuses when the lane branch ref names another branch', async () => {
+    const f = fixture('ref-names-main');
+    writeFileSync(join(f.common, 'refs', 'heads', 'inline', 'ref-names-main'), 'ref: refs/heads/main\n');
+    await expect(commitDirtyWorktree(f.lane, f.repo, f.branch, 'merge snapshot')).rejects.toBeInstanceOf(LaneGitMetadataError);
+    await expect(commitLaneWork(f.lane, f.repo, f.branch, 'worker change')).rejects.toBeInstanceOf(LaneGitMetadataError);
+    expect(git(f.repo, 'rev-parse', 'refs/heads/main')).toBe(f.main);
+  });
+
+  it("refuses when the lane branch's reflog is a link, whatever the checkout's HEAD names", async () => {
+    const f = fixture('detached-reflog-link');
+    const config = readFileSync(join(f.common, 'config'), 'utf8');
+    writeFileSync(join(f.admin, 'HEAD'), `${f.main}\n`);
+    const reflog = join(f.common, 'logs', 'refs', 'heads', 'inline', 'detached-reflog-link');
+    rmSync(reflog);
+    symlinkSync(join(f.common, 'config'), reflog);
+    await expect(commitDirtyWorktree(f.lane, f.repo, f.branch, 'merge snapshot')).rejects.toBeInstanceOf(LaneGitMetadataError);
+    expect(readFileSync(join(f.common, 'config'), 'utf8')).toBe(config);
+  });
+
+  it("refuses a checkout index that is not a regular file without waiting on it", async () => {
+    const f = fixture('index-fifo');
+    rmSync(join(f.admin, 'index'), { force: true });
+    execFileSync('mkfifo', [join(f.admin, 'index')]);
+    await expect(commitDirtyWorktree(f.lane, f.repo, f.branch, 'merge snapshot')).rejects.toBeInstanceOf(LaneGitMetadataError);
+    expect(git(f.repo, 'rev-parse', f.branch)).toBe(f.main);
+  }, 10_000);
+
+  it('commits a checkout that uses a split index', async () => {
+    const f = fixture('split-index');
+    git(f.lane, 'update-index', '--split-index');
+    await expect(commitLaneWork(f.lane, f.repo, f.branch, 'worker change')).resolves.toBe(true);
+    expect(git(f.repo, 'show', `${f.branch}:work.txt`)).toBe('worker');
+    expect(git(f.lane, 'status', '--porcelain')).toBe('');
+  });
+
+  it('never moves another branch while the worker keeps rewriting its branch ref', async () => {
+    const f = fixture('ref-race');
+    const ref = join(f.common, 'refs', 'heads', 'inline', 'ref-race');
+    const flipper = spawn(process.execPath, ['-e', `
+      const fs = require('fs');
+      const [ref, ...values] = process.argv.slice(1);
+      for (let i = 0; ; i++) {
+        fs.writeFileSync(ref + '.next', values[i % 2] + '\\n');
+        fs.renameSync(ref + '.next', ref);
+      }`, ref, 'ref: refs/heads/main', f.main], { stdio: 'ignore' });
+    try {
+      for (let round = 0; round < 30; round++) {
+        writeFileSync(join(f.lane, 'work.txt'), `round ${round}\n`);
+        await commitLaneWork(f.lane, f.repo, f.branch, `round ${round}`).catch(() => false);
+      }
+    } finally {
+      flipper.kill('SIGKILL');
+    }
+    expect(git(f.repo, 'rev-parse', 'refs/heads/main')).toBe(f.main);
+  }, 60_000);
+
   it('leaves no commit directory behind, and removes ones an exit abandoned', async () => {
     const commitDirectories = join(root, 'data', 'lane-git');
     const f = fixture('no-accumulation');
@@ -84,8 +140,8 @@ describe('host commits in a lane checkout', () => {
     const live = join(commitDirectories, 'commit-live');
     mkdirSync(abandoned);
     mkdirSync(live);
-    const hoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    utimesSync(abandoned, hoursAgo, hoursAgo);
+    const daysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    utimesSync(abandoned, daysAgo, daysAgo);
     await expect(commitLaneWork(f.lane, f.repo, f.branch, 'worker change')).resolves.toBe(true);
     expect(readdirSync(commitDirectories)).toEqual(['commit-live']);
   });

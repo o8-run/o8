@@ -136,7 +136,11 @@ export async function commitDirtyWorktree(
     const { stdout: porcelain } = await laneGit(worktreePath, repoPath, ['status', '--porcelain'], options);
     if (porcelain.trim()) {
       await laneGit(worktreePath, repoPath, ['commit', '-m', commitMessage], options);
-      directory?.syncIndex();
+      if (directory) {
+        const { stdout: commit } = await laneGit(worktreePath, repoPath, ['rev-parse', 'HEAD'], options);
+        await directory.advance(commit.trim(), `commit: ${commitMessage.split('\n')[0]}`);
+        directory.syncIndex();
+      }
     }
   };
   const laneBranch = branch?.trim();
