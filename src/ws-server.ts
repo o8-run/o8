@@ -9674,6 +9674,12 @@ async function bootstrapWsServer() {
   if (process.env.O8_NEXT_O8D === '1') void import('./lib/tts/ensure-edge-tts')
     .then(({ ensureEdgeTtsInstalled }) => ensureEdgeTtsInstalled())
     .catch(() => { console.warn('[startup] Optional voice preparation failed.'); });
+  // The shell gives the o8 next binary only to the process that owns the window (#5709). When
+  // that is this process, as once it serves the API port with Next stopped, it opens the window
+  // at startup the way Next's startup does; the window's settings switch then finds this child.
+  if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_BIN) void import('./lib/next/app-window')
+    .then(({ restoreNextWindow }) => restoreNextWindow())
+    .catch(() => {});
   if (shuttingDown) return;
   await terminalHostReady;
   if (shuttingDown) return;

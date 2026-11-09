@@ -5643,6 +5643,14 @@
       ]
     },
     {
+      "path": "tests/o8d-window-owner-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/onboarding-runtime-picker-real-path.test.ts",
       "reasons": [
         "real-path"
