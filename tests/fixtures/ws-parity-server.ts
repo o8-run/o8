@@ -24,6 +24,8 @@ async function freePort(): Promise<number> {
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
   logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean | 'default'; nativeRepositoryReads?: boolean; ttsPython?: string;
+  /** WS_TOKEN for the WS process when it should differ from the stored ws-token. */
+  envToken?: string;
   inbox?: () => typeof fixtureInbox;
   sync?: (body: Record<string, unknown>) => unknown | Promise<unknown>;
 } = {}) {
@@ -80,7 +82,7 @@ export async function startParityReference(options: {
       HOME: directory, USERPROFILE: directory,
       O8_DATA_DIR: undefined, CORTEX_IDE_DATA_DIR: directory,
       CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
-      CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: token,
+      CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: options.envToken ?? token,
       // Never reach pip from a fixture, even from a shell that sets a real one.
       O8_TTS_PYTHON: options.ttsPython ?? join(directory, 'no-python'),
       O8_API_PORT: String(address.port), O8_WS_PORT: String(port),

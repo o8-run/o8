@@ -35,6 +35,7 @@ import {
   isTauriShellOrigin,
 } from '@/lib/auth/loopback-request';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
+import { storedWsToken, wsTokenFor } from '@/lib/ws-auth';
 // DB-free reader of the registry's derived active-token-hash file (#5). Importing
 // this does NOT pull better-sqlite3 into the middleware bundle — it is pure fs.
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
@@ -55,26 +56,29 @@ export const config = {
 
 // ── Token loader (cached, refreshed on mtime change) ──
 
-let _cachedToken: { value: string; mtimeMs: number; size: number } | null = null;
+let _cachedToken: { path: string; value: string | null; mtimeMs: number; size: number } | null = null;
 
+/** The operator token by the rule handlers and the WS upgrade share (wsTokenFor). */
 function loadPanelToken(): string | null {
+  return wsTokenFor(loadStoredPanelToken());
+}
+
+function loadStoredPanelToken(): string | null {
   try {
-    const dataDir = getDataDir();
-    const tokenPath = join(dataDir, 'ws-token');
+    const tokenPath = join(getDataDir(), 'ws-token');
     if (!existsSync(tokenPath)) return null;
 
     // Cheap stat check to avoid re-reading every request. mtime alone has
     // ~1s resolution on some filesystems — include size so a same-tick token
     // rewrite can't keep validating against the stale value.
     const stat = statSync(tokenPath);
-    if (_cachedToken && _cachedToken.mtimeMs === stat.mtimeMs && _cachedToken.size === stat.size) {
+    if (_cachedToken && _cachedToken.path === tokenPath && _cachedToken.mtimeMs === stat.mtimeMs && _cachedToken.size === stat.size) {
       return _cachedToken.value;
     }
 
-    const raw = readFileSync(tokenPath, 'utf-8').trim();
-    if (!raw) return null;
-    _cachedToken = { value: raw, mtimeMs: stat.mtimeMs, size: stat.size };
-    return raw;
+    const value = storedWsToken(readFileSync(tokenPath, 'utf-8'));
+    _cachedToken = { path: tokenPath, value, mtimeMs: stat.mtimeMs, size: stat.size };
+    return value;
   } catch {
     return null;
   }

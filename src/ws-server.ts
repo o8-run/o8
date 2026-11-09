@@ -8921,7 +8921,7 @@ const WS_LISTEN_HOST = resolveListenHost();
 const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
 
 const WS_TOKEN = getOrCreateWsToken();
-console.log(`[ws-auth] WS token loaded (source: ${process.env.WS_TOKEN ? 'env' : WS_TOKEN_PATH})`);
+console.log(`[ws-auth] WS token loaded (source: ${WS_TOKEN_PATH})`);
 
 const wss = new WebSocketServer({
   server: httpServer,

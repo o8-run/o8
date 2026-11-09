@@ -8,22 +8,44 @@ export const WS_TOKEN_PATH = path.join(DATA_DIR, 'ws-token');
 const TOKEN_LENGTH = 32; // 256-bit token
 const MIN_TOKEN_LENGTH = 16;
 
+/** A stored token shorter than the minimum is a truncated file, never a credential. */
+export function storedWsToken(raw: string): string | null {
+  const token = raw.trim();
+  return token.length >= MIN_TOKEN_LENGTH ? token : null;
+}
+
+/**
+ * The one rule every verifier shares (the middleware gate, request handlers and the WS
+ * upgrade): a valid stored token wins, and WS_TOKEN stands in only when none is stored.
+ * Every client (the desktop shell, o8d, the MCP servers) reads the stored file, so letting
+ * the environment override it would split the operator's credential in two.
+ */
+export function wsTokenFor(stored: string | null): string | null {
+  return stored ?? (process.env.WS_TOKEN?.trim() || null);
+}
+
 function readStoredWsToken(): string | null {
   try {
     if (!existsSync(WS_TOKEN_PATH)) return null;
-    const existing = readFileSync(WS_TOKEN_PATH, 'utf8').trim();
-    return existing.length >= MIN_TOKEN_LENGTH ? existing : null;
+    return storedWsToken(readFileSync(WS_TOKEN_PATH, 'utf8'));
   } catch {
     return null;
   }
 }
 
-export function getOrCreateWsToken(): string {
-  const envToken = process.env.WS_TOKEN?.trim();
-  if (envToken) return envToken;
+let warnedEnvIgnored = false;
 
+export function getOrCreateWsToken(): string {
   const existing = readStoredWsToken();
-  if (existing) return existing;
+  const envToken = process.env.WS_TOKEN?.trim();
+  if (existing) {
+    if (envToken && envToken !== existing && !warnedEnvIgnored) {
+      warnedEnvIgnored = true;
+      console.warn(`[ws-auth] WS_TOKEN differs from ${WS_TOKEN_PATH}; using the stored token so clients and verifiers agree`);
+    }
+    return existing;
+  }
+  if (envToken) return envToken;
 
   const token = randomBytes(TOKEN_LENGTH).toString('hex');
   mkdirSync(DATA_DIR, { recursive: true });
