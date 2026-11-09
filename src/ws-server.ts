@@ -99,6 +99,7 @@ import {
   type AgentSessionStatus,
   type SymonScopeGrant,
 } from '@/lib/mobile/symon-agent-registry';
+import { endSymonMachineSession as endMachineSessionInWebview } from '@/lib/mobile/symon-machine-session';
 import {
   SymonAsyncActionTracker,
   SymonConfirmationTracker,
@@ -3925,13 +3926,9 @@ const symonConfirmationTracker = new SymonConfirmationTracker();
 const symonAsyncActionTracker = new SymonAsyncActionTracker();
 
 function endSymonMachineSession(sessionId: string): void {
-  void fetchNextJson<{ ok?: boolean; removed?: boolean }>('/api/symon/machine/session', {
-    method: 'POST',
-    body: { sessionId },
-  }).catch((error) => {
-    console.warn(
-      `[symon-machine] failed to end ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  // The webview bridge is reachable from this process, so the cleanup no longer goes through Next.
+  void endMachineSessionInWebview(sessionId).then(({ body }) => {
+    if (!body.ok) console.warn(`[symon-machine] failed to end ${sessionId}: ${body.error}: ${body.detail}`);
   });
 }
 
