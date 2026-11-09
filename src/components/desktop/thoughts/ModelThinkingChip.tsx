@@ -414,9 +414,11 @@ export function ModelThinkingChip({
   // (Q ruling 2026-07-11 — "you might need to know what model you're on").
   // Resolve it from the picked (backend, modelId); fall back to the provider
   // label only when nothing matches (e.g. a fresh 'auto' session before a pick).
+  // The Fable backend runs its default model whatever id was saved, so a saved
+  // Fable 5.1 pick names the Fable it actually runs.
   const activeModelOption = composerModelGroups
     .flatMap((g) => g.options)
-    .find((o) => activeBackend === o.backend && (!o.model || effectiveModelId === o.model));
+    .find((o) => activeBackend === o.backend && (!o.model || o.backend === 'fable' || effectiveModelId === o.model));
   // A searchable house has no static options, so activeModelOption never
   // matches and the chip would fall back to the PROVIDER name — the exact
   // thing the Q ruling below says it must not do. Derive the model's own short

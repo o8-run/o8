@@ -30,6 +30,22 @@ describe('ModelThinkingChip Claude Code carrier truth', () => {
     expect(request).not.toHaveBeenCalled(); expect(container.querySelector('button')?.disabled).toBe(true);
   });
 
+  it('names the Fable the Fable backend runs for a saved Fable 5.1 pick', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) } as Response)));
+    await act(async () => {
+      root.render(createElement(ModelThinkingChip, {
+        modelLabel: 'Fable 5.1',
+        modelId: 'claude-fable-5-1',
+        activeBackend: 'fable',
+        effort: 'high',
+        adaptiveEnabled: true,
+        onEffortChange: () => {},
+      }));
+    });
+    expect(container.textContent).toContain('Fable 5.2');
+    expect(container.textContent).not.toContain('Fable 5.1');
+  });
+
   it('shows the effective Codex model instead of the stale native Claude selection', async () => {
     const fetchProfile = vi.fn(async () => ({
       ok: true,
