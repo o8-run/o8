@@ -38,8 +38,8 @@ impl ShellFeature for RailMore {
     }
 }
 
-/// Below this sidebar width the dock drops Settings (the profile menu has it)
-/// and the update button (the Tools drawer has it), Q 2026-11-09.
+/// Below this sidebar width the dock drops the update button; the Tools
+/// drawer has it (Q 2026-11-09).
 pub(crate) const COMPACT_BELOW: f32 = 240.;
 
 /// The dock's width this frame, set by the dock before its items render.

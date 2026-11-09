@@ -32,7 +32,6 @@ pub(super) enum Icon {
     Clock,
     PullRequest,
     Puzzle,
-    Settings,
 }
 
 impl Icon {
@@ -47,9 +46,6 @@ impl Icon {
             Self::Clock => "M12 6v6l4 2 M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20Z",
             Self::Puzzle => {
                 "M8 3H5a2 2 0 0 0-2 2v3a3 3 0 1 1 0 6v3a2 2 0 0 0 2 2h3a3 3 0 1 1 6 0h3a2 2 0 0 0 2-2v-3a3 3 0 1 0 0-6V5a2 2 0 0 0-2-2h-3a3 3 0 1 0-6 0Z"
-            }
-            Self::Settings => {
-                "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z"
             }
             Self::PullRequest => {
                 "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12"
@@ -624,7 +620,6 @@ impl Shell {
             window.request_animation_frame();
         }
         let voice = self.voice_live();
-        let settings_open = self.surfaces.settings.view.is_some();
         // The dock spans the sidebar and folds away with it.
         let (open, moving) = super::sidebar::travel(self);
         if self.surfaces.sidebar.hidden && !moving {
@@ -633,7 +628,6 @@ impl Shell {
         let width = super::sidebar::width(self) * open;
         // Items read the dock's width to fold into the Tools drawer when narrow.
         self.features.get::<features::rail_more_dock::Dock>().width = super::sidebar::width(self);
-        let compact = features::rail_more_dock::compact(self);
         div()
             .id("shell-rail")
             .debug_selector(|| "shell-dock".into())
@@ -652,8 +646,8 @@ impl Shell {
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
-            // Q 2026-11-09: profile, Settings, PRs, usage on the left; updates
-            // and Tools on the right.
+            // Q 2026-11-09: profile, PRs and usage on the left; updates and
+            // Tools on the right.
             .child(features::profile(self, window, cx))
             // Symon's toggle is off the dock for now (Q 2026-11-09). Caps Lock and
             // voice-toggle still drive it; flip SHOW_SYMON to bring the orb back.
@@ -665,22 +659,7 @@ impl Shell {
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_voice(cx))),
                 )
             })
-            // A narrow dock leaves Settings to the profile menu.
-            .when(!compact, |dock| dock.child(
-                button("dock-settings", Icon::Settings, "Settings", settings_open).on_click(
-                    cx.listener(|this, _, window, cx| {
-                        let open = this.surfaces.settings.view.is_some();
-                        this.close_rail_overlays(window, cx);
-                        if open {
-                            this.restore_focus(window, cx);
-                            cx.notify();
-                        } else {
-                            this.capture(window, cx);
-                            this.execute(Command::Settings, window, cx);
-                        }
-                    }),
-                ),
-            ))
+            // Settings lives in the profile menu and Tools (Q 2026-11-09).
             .children(top)
             .child(gauge(self, cx))
             .child(div().flex_1().min_w_0())

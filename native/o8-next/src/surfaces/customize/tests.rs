@@ -322,26 +322,27 @@ fn rail_plugins_opens_customize_on_its_tab(cx: &mut TestAppContext) {
     custom_click(cx, "rail-more");
     custom_click(cx, "rail-more-plugins");
     assert!(shell.read_with(cx, |s, cx| s.customize_tab_open("plugins", cx)));
-    // The dock (Q 2026-11-09): profile, Settings, PRs and usage left to right,
-    // Tools last; Symon's orb is off the dock.
+    // The dock (Q 2026-11-09): profile, PRs and usage left to right, Tools
+    // last; Settings lives in the profile menu and Symon's orb is off the dock.
     let x = |cx: &mut VisualTestContext, id: &'static str| {
         f32::from(cx.debug_bounds(id).expect(id).origin.x)
     };
-    let (profile, settings, usage, tools) = (
+    let (profile, prs, usage, tools) = (
         x(cx, "shell-profile"),
-        x(cx, "dock-settings"),
+        x(cx, "rail-pull-requests"),
         x(cx, "rail-usage"),
         x(cx, "rail-more"),
     );
     assert!(
-        profile < settings && settings < usage && usage < tools,
-        "{profile} {settings} {usage} {tools}"
+        profile < prs && prs < usage && usage < tools,
+        "{profile} {prs} {usage} {tools}"
     );
     assert!(cx.debug_bounds("rail-symon").is_none());
+    assert!(cx.debug_bounds("dock-settings").is_none());
 }
 
 #[gpui::test]
-fn narrow_dock_folds_settings_and_updates_into_tools(cx: &mut TestAppContext) {
+fn narrow_dock_folds_updates_into_tools(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--customize");
     let (_shell, mut visual) = open(
         fixture.client.clone(),
@@ -355,9 +356,8 @@ fn narrow_dock_folds_settings_and_updates_into_tools(cx: &mut TestAppContext) {
     let cx = &mut visual;
     cx.run_until_parked();
     draw(cx);
-    // Under 240 px the profile menu carries Settings and Tools carries Updates.
+    // Under 240 px Tools carries Updates.
     assert!(cx.debug_bounds("shell-profile").is_some());
-    assert!(cx.debug_bounds("dock-settings").is_none());
     assert!(cx.debug_bounds("rail-update").is_none());
     custom_click(cx, "rail-more");
     assert!(cx.debug_bounds("rail-more-updates").is_some());
