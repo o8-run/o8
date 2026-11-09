@@ -207,6 +207,15 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/lane-events', 'GET', () => import('@/app/api/orchestrator/lane-events/route')),
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),
+    // Agent bus (the o8 MCP message tools). The gate grants a worker POST message and GET inbox
+    // and presence; presence join and the exchange history need the operator bearer. The service
+    // resolves the principal from the bearer, refuses a worker credential without a packet, and
+    // keeps a packet worker to its own lane's repository and inbox. Messages and presence are
+    // SQLite; live delivery uses the codex CLI queue, a terminal input or an owned-session resume,
+    // none of which the Next process holds. (#5576)
+    route('/api/agents/message', 'GET POST', () => import('@/app/api/agents/message/route')),
+    route('/api/agents/inbox', 'GET', () => import('@/app/api/agents/inbox/route')),
+    route('/api/agents/presence', 'GET POST', () => import('@/app/api/agents/presence/route')),
     // Shared agent controls (the desktop agent bridge's start/stop/approve/… actions on a
     // runtime, session or surface). POST only, operator-only twice over: the path is in no
     // middleware allowlist, so the panelGateMiddleware floor already admits only the operator

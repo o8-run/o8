@@ -5346,6 +5346,13 @@
       ]
     },
     {
+      "path": "tests/o8d-agent-bus-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-agent-control-native-real-path.test.ts",
       "reasons": [
         "real-path"
