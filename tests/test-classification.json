@@ -1659,6 +1659,12 @@
       ]
     },
     {
+      "path": "tests/agent-inbox-active-lane-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/agent-inbox-wake-reservation-real-path.test.ts",
       "reasons": [
         "child-process",
