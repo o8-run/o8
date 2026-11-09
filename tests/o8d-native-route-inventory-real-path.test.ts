@@ -66,7 +66,6 @@ const NEXT_ONLY_MCP_PATHS = new Set([
 const NEXT_ONLY_WS_PATHS = new Set([
   '/api/mobile/symon', '/api/mobile/symon/confirm', '/api/mobile/symon/text-turn', '/api/mobile/symon/tool',
   '/api/symon/machine/session', '/api/worktrees/conflicts',
-  '/api/broadcast/commentary', // Symon's commentary reader
   '/api/v2/proxy/llm', // o8 lane model calls: provider keys and spend, held for security
 ]);
 

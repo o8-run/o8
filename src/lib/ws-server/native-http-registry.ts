@@ -259,6 +259,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // and write SQLite only, and calendar ingest reads operator defaults from disk on every call. (#5422)
     route('/api/panel/cli-usage', 'GET', () => import('@/app/api/panel/cli-usage/route')),
     route('/api/broadcast/why', 'GET', () => import('@/app/api/broadcast/why/route')),
+    // Symon's commentary reader (lib/broadcast/speaker.ts) and broadcast spectators. GET only. The
+    // middleware admits the operator ws-token and an active spectator token (SPECTATOR_CAPABILITIES,
+    // GET/HEAD), and requireBroadcastReader re-checks the principal from the bearer, never the client
+    // address. Spectators read the whole commentary feed by design (repo grants scope only truth); actor
+    // and text go through the broadcast projection's read-time redaction, the same as on Next.
+    route('/api/broadcast/commentary', 'GET', () => import('@/app/api/broadcast/commentary/route')),
     route('/api/broadcast/calendar', 'POST', () => import('@/app/api/broadcast/calendar/route')),
     // Operator-principal writes (resolveRequestPrincipal / handleBroadcastSay refuse any other role), never
     // x-o8-client-addr or loopback. Both store in SQLite; pull-request-context reads conversations from disk
