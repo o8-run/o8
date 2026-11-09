@@ -757,8 +757,9 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   finalImmutableWrite.push(...ownerInstructions);
   finalAllowRead.push(...ownerInstructions);
   const finalAllowExec = await resolveAll(input.finalAllowExecPaths ?? []);
+  // Once Git paths are granted, the guard must resolve too.
   const gitMetadataGuard = input.gitBranch && !input.enforceReadOnly
-    ? await resolveGitMetadataGuard(worktreeReal, input.gitBranch)
+    ? await resolveGitMetadataGuard(worktreeReal, input.gitBranch, { required: gitPaths.length > 0 })
     : undefined;
   const finalCredentialPolicy = input.finalCredentialPolicy ? {
     lockPath: await safeRealpath(input.finalCredentialPolicy.lockPath),

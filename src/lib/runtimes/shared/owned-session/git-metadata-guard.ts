@@ -49,9 +49,18 @@ async function canonical(p: string): Promise<string> {
  * Resolve the guard for a worker's checkout. A worker in a linked worktree is
  * always guarded, to its lane's branch, else its session's, else no branch. A
  * worker in the repository's main checkout is guarded only when it belongs to
- * a lane. Fails closed: a lane whose metadata cannot be resolved does not launch.
+ * a lane. Fails closed: a lane, or a checkout whose Git paths the sandbox
+ * already granted (`required`), whose metadata cannot be resolved does not launch.
  */
-export async function resolveGitMetadataGuard(cwd: string, branches: WorkerGitBranch): Promise<GitMetadataGuard | undefined> {
+export async function resolveGitMetadataGuard(
+  cwd: string,
+  branches: WorkerGitBranch,
+  options: { required?: boolean } = {},
+): Promise<GitMetadataGuard | undefined> {
+  const unresolved = () => {
+    if (!branches.lane && !options.required) return undefined;
+    throw new SandboxUnavailableError(`Git metadata for ${cwd} could not be resolved.`);
+  };
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(
@@ -60,14 +69,10 @@ export async function resolveGitMetadataGuard(cwd: string, branches: WorkerGitBr
       { windowsHide: true, cwd, encoding: 'utf8', timeout: 5_000 },
     ));
   } catch {
-    if (!branches.lane) return undefined;
-    throw new SandboxUnavailableError(`Git metadata for ${cwd} could not be resolved.`);
+    return unresolved();
   }
   const [gitDir, commonDir, checkoutRoot] = String(stdout).split(/\r?\n/).map((entry) => entry.trim());
-  if (!gitDir || !commonDir || !checkoutRoot) {
-    if (!branches.lane) return undefined;
-    throw new SandboxUnavailableError(`Git metadata for ${cwd} could not be resolved.`);
-  }
+  if (!gitDir || !commonDir || !checkoutRoot) return unresolved();
   const guard = {
     commonDir: await canonical(commonDir),
     gitDir: await canonical(gitDir),
