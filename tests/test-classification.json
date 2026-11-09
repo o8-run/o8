@@ -8678,6 +8678,14 @@
       ]
     },
     {
+      "path": "tests/worker-git-guard-launch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-git-metadata-guard-real-path.test.ts",
       "reasons": [
         "child-process",
