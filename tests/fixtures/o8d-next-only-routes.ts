@@ -110,10 +110,7 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
   '/api/tasks/[id]/[id]': security('worker grant: task report and block'),
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
-  // Next lost this handler too (deleted as uncalled in a cleanup), so `o8 doctor --reap` gets 405 on both.
-  'POST /api/lanes/reap': { ...seek('doctor reaps stale lanes'), noNextHandler: true },
   'POST /api/setup/cli-updates': seek('install or update a runtime CLI'),
-  'POST /api/tasks': seek('create a task'),
 };
 
 /**
