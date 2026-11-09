@@ -81,3 +81,84 @@ it('never acts on a lane another process unregistered during the heartbeat', asy
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// The same stop, landing inside the supervisor's own long awaits: the relaunch, the stuck
+// interrupt, the completion callback and the failure transcript read. Each callback stops its lane
+// from Next before it returns. After each await the heartbeat must find the watch gone and do
+// nothing more, and a retry the relaunch already started is ended rather than watched.
+it('never acts on a lane another process unregistered during an await', async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-supervisor-stop-await-')));
+  const repo = join(directory, 'repo');
+  mkdirSync(repo);
+  Object.assign(process.env, { HOME: directory, CORTEX_IDE_DATA_DIR: directory, CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db') });
+  delete process.env.O8_DATA_DIR;
+  let ws: typeof import('@/lib/supervisor/agent-supervisor') | undefined;
+  try {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.resetModules();
+    ws = await import('@/lib/supervisor/agent-supervisor');
+    vi.resetModules();
+    const next = await import('@/lib/supervisor/agent-supervisor');
+    const { getSqlite } = await import('@/lib/db');
+    const rows = () => (getSqlite().prepare('SELECT surface_id FROM watched_agents ORDER BY surface_id').all() as Array<{ surface_id: string }>)
+      .map(row => row.surface_id);
+
+    const fleet: Record<string, AgentStatusEntry['status']> = {
+      'surface-retry': 'failed', 'surface-interrupt': 'running', 'surface-exhausted': 'failed', 'surface-finished': 'idle',
+    };
+    for (const surfaceId of Object.keys(fleet)) ws.registerWatchedAgent(surfaceId, repo, surfaceId, 'Work.');
+    const watch = (surfaceId: string) => ws!.getWatchedAgents().find(agent => agent.surfaceId === surfaceId)!;
+    watch('surface-interrupt').steerCount = 2;
+    watch('surface-exhausted').retryCount = 1;
+    watch('surface-finished').tentativeFinishedSince = Date.now();
+    vi.setSystemTime(Date.now() + 7 * 60 * 1000);
+
+    const acted: string[] = [];
+    const stop = (surfaceId: string) => next.unregisterWatchedAgent(surfaceId);
+    const callbacks: SupervisorCallbacks = {
+      fetchFleetStatus: async () => Object.entries(fleet).map(([sessionKey, status]) => ({ sessionKey, status }) as AgentStatusEntry),
+      fetchTranscript: async surfaceId => {
+        // The exhausted failure reads the transcript before it escalates.
+        if (surfaceId === 'surface-exhausted') stop(surfaceId);
+        return [];
+      },
+      steerAgent: async surfaceId => { acted.push(`steer ${surfaceId}`); },
+      interruptAgent: async surfaceId => {
+        acted.push(`interrupt ${surfaceId}`);
+        if (surfaceId === 'surface-interrupt') stop(surfaceId);
+      },
+      relaunchAgent: async (_prompt, _repo, _name, retryOf) => {
+        acted.push(`relaunch ${retryOf}`);
+        stop(retryOf!);
+        return { status: 'launched', surfaceId: 'surface-retry-2' };
+      },
+      broadcastAgentUpdate: update => { acted.push(`broadcast ${update.surfaceId} ${update.status}`); },
+      queueOrchestratorEscalation: (_repo, message) => { acted.push(`escalate ${/\((surface-[a-z0-9-]+)\)/.exec(message)?.[1]}`); },
+      onAgentCompletion: async (surfaceId, outcome) => {
+        acted.push(`complete ${surfaceId} ${outcome}`);
+        if (surfaceId === 'surface-finished') {
+          stop(surfaceId);
+          return { resume: true };
+        }
+        return undefined;
+      },
+      onAgentRetry: (from, to) => { acted.push(`retry ${from} ${to}`); },
+    };
+    ws.startSupervisorLoop(callbacks);
+    await ws.runSupervisorTickForTesting();
+
+    // Each lane reached its await, which is where the stop landed.
+    expect(acted).toEqual(expect.arrayContaining(['relaunch surface-retry', 'interrupt surface-interrupt',
+      'complete surface-finished completed', 'complete surface-exhausted failed']));
+    // Nothing after the await: no retry broadcast or watch, no escalation, no resumed or completed report.
+    expect(acted.filter(action => /^(escalate|retry) /.test(action)
+      || /^broadcast .* (retrying|completed|running)$/.test(action)
+      || action.startsWith('broadcast surface-interrupt') && acted.indexOf(action) > acted.indexOf('interrupt surface-interrupt'))).toEqual([]);
+    // The retry the relaunch started is ended, not watched.
+    expect(acted).toContain('interrupt surface-retry-2');
+    expect([rows(), ws.getWatchedAgents().map(agent => agent.surfaceId)]).toEqual([[], []]);
+  } finally {
+    ws?.stopSupervisorLoop();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

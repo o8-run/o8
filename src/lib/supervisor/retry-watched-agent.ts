@@ -7,6 +7,8 @@ export async function retryWatchedAgent(
   state: {
     /** False when another process unregistered the watch; the lane must not be relaunched. */
     persist(agent: WatchedAgent): boolean;
+    /** False when another process unregistered the watch during an await. */
+    held(agent: WatchedAgent): boolean;
     replace(surfaceId: string): void;
     scheduleCleanup(): void;
   },
@@ -26,6 +28,12 @@ export async function retryWatchedAgent(
     result = { status: 'held', reason: 'Automatic retry held: launch acceptance could not be confirmed. Check the lane before retrying.' };
   }
   watched.lastEventAt = Date.now();
+  // The operator stopped the lane while the relaunch was in flight. A stop means stop: end the
+  // session the relaunch just started instead of watching it or reporting a retry.
+  if (!state.held(watched)) {
+    if (result.status === 'launched') await callbacks.interruptAgent(result.surfaceId).catch(() => {});
+    return;
+  }
   if (result.status === 'held') {
     watched.lastStatus = 'failed';
     state.persist(watched);

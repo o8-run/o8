@@ -129,6 +129,22 @@ function persistWatchedAgent(agent: WatchedAgent): boolean {
   }
 }
 
+/**
+ * After an await: true while this process still holds the watch and its row exists. A stop from
+ * another process during the await ends supervision here, like a write that finds the row gone.
+ */
+function stillHeld(agent: WatchedAgent): boolean {
+  if (watchedAgents.get(agent.surfaceId) !== agent) return false;
+  if (!storedWatches.has(agent)) return true;
+  try {
+    if (getSqlite().prepare('SELECT 1 FROM watched_agents WHERE surface_id = ?').get(agent.surfaceId)) return true;
+  } catch {
+    return true; // DB may not be ready; keep the watch.
+  }
+  forgetUnwatched(agent);
+  return false;
+}
+
 /** Drops every stored watch whose row another process deleted. Returns how many were dropped. */
 export function reconcileWatchedAgents(): number {
   if (watchedAgents.size === 0) return 0;
@@ -654,7 +670,7 @@ async function handleStatusChange(
     watched.completionReported = true;
     if (!persistWatchedAgent(watched)) return;
     const completionDecision = await callbacks.onAgentCompletion?.(watched.surfaceId, 'completed');
-    if (watchedAgents.get(watched.surfaceId) !== watched) return;
+    if (!stillHeld(watched)) return;
     if (completionDecision?.superseded || completionDecision?.resume) {
       resumeWatchedAgentAfterCompletionCheck(watched, now);
       if (completionDecision.superseded) return;
@@ -703,6 +719,7 @@ async function handleStatusChange(
     if (watched.launchContext?.checkoutMode !== 'shared' && watched.retryCount < MAX_RETRIES) {
       await retryWatchedAgent(watched, callbacks, {
         persist: persistWatchedAgent,
+        held: stillHeld,
         scheduleCleanup: () => setTimeout(() => unregisterWatchedAgent(watched.surfaceId, watched), COMPLETION_CLEANUP_MS),
         replace(newSurfaceId) {
           watchedAgents.delete(watched.surfaceId);
@@ -740,6 +757,7 @@ async function handleStatusChange(
       } catch {
         // Best effort.
       }
+      if (!stillHeld(watched)) return;
 
       if (watched.launchContext?.checkoutMode !== 'shared') callbacks.queueOrchestratorEscalation(
         watched.repoPath,
@@ -839,6 +857,7 @@ async function checkStuck(
     } catch {
       // Best effort.
     }
+    if (!stillHeld(watched)) return;
 
     // #8 — Transition the lane so it doesn't stay 'running' forever.
     // Without this, the lane was never updated — the escalation message went
