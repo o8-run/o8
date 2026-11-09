@@ -134,6 +134,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // and no ws-token, but its sandbox can still read files on disk, so the digest stays operator-only;
     // the repoPath must be registered.
     route('/api/orchestrator/digest', 'POST', () => import('@/app/api/orchestrator/digest/route')),
+    // The operator MCP `o8_targets` tool and the Targets panel. GET with no handler-level auth, in no
+    // middleware allowlist, so over native only the operator ws-token passes; the triage spends the
+    // cheap model (rationale prompts carry paths and counts only) and caches scores. A ?mode=start
+    // scan lives in this process's job map, so the listener that started it answers its jobId polls.
+    route('/api/panel/targets', 'GET', () => import('@/app/api/panel/targets/route')),
   ],
   pull_requests: [
     route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
