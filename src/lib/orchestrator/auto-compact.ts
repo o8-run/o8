@@ -152,11 +152,16 @@ async function summarizeWithCodex(repoPath: string, prompt: string, limits: Code
       repoPath,
       ...(promptOnStdin ? [] : [prompt]),
     ]);
+    // A limited run gets its own process group on POSIX: codex is a launcher whose native
+    // binary shares its stdout, so stopping only the launcher would leave the real run going.
+    const limited = limits.signal !== undefined || limits.timeoutMs !== undefined;
+    const group = limited && process.platform !== 'win32';
     const child = spawn(
       launch.command,
       launch.args,
       {
         windowsHide: true,
+        detached: group,
         cwd: repoPath,
         stdio: [promptOnStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         env: childEnvironment({ runtimeId: 'codex', env: { FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' } }),
@@ -166,23 +171,36 @@ async function summarizeWithCodex(repoPath: string, prompt: string, limits: Code
       child.stdin?.write(prompt, 'utf-8');
       child.stdin?.end();
     }
-    let stopped: Error | null = null;
-    let forceKill: ReturnType<typeof setTimeout> | undefined;
-    const stop = (reason: Error) => {
-      if (stopped) return;
-      stopped = reason;
-      child.kill('SIGTERM');
-      forceKill = setTimeout(() => child.kill('SIGKILL'), 2_000);
+    let settled = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      limits.signal?.removeEventListener('abort', cancelled);
+      settle();
     };
-    const deadline = limits.timeoutMs === undefined ? undefined
-      : setTimeout(() => stop(new Error(`Codex summary timed out after ${limits.timeoutMs}ms`)), limits.timeoutMs);
+    const signalRun = (signal: NodeJS.Signals) => {
+      try {
+        if (group && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch {
+        // The run already exited.
+      }
+    };
+    // Settles at once rather than on 'close': a descendant may hold stdout open after the launcher dies.
+    const stop = (reason: Error) => {
+      if (settled) return;
+      signalRun('SIGTERM');
+      setTimeout(() => signalRun('SIGKILL'), 2_000).unref();
+      finish(() => reject(reason));
+    };
     const cancelled = () => stop(new Error('Codex summary cancelled: the caller disconnected'));
     limits.signal?.addEventListener('abort', cancelled, { once: true });
-    const settle = () => {
-      clearTimeout(deadline);
-      clearTimeout(forceKill);
-      limits.signal?.removeEventListener('abort', cancelled);
-    };
+    if (limits.signal?.aborted) cancelled();
+    if (limits.timeoutMs !== undefined) {
+      deadline = setTimeout(() => stop(new Error(`Codex summary timed out after ${limits.timeoutMs}ms`)), limits.timeoutMs);
+    }
     let buffer = '';
     let stderr = '';
     let result = '';
@@ -221,10 +239,8 @@ async function summarizeWithCodex(repoPath: string, prompt: string, limits: Code
       }
     });
     child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-    child.once('error', (error) => { settle(); reject(error); });
-    child.once('close', (code) => {
-      settle();
-      if (stopped) return reject(stopped);
+    child.once('error', (error) => finish(() => reject(error)));
+    child.once('close', (code) => finish(() => {
       const text = result.trim();
       if (code === 0 && text) resolve({
         text,
@@ -233,7 +249,7 @@ async function summarizeWithCodex(repoPath: string, prompt: string, limits: Code
         estimated: inputTokens === null || outputTokens === null,
       });
       else reject(new Error(stderr.trim() || `Codex compaction failed (${code ?? 'unknown'})`));
-    });
+    }));
   });
 }
 
