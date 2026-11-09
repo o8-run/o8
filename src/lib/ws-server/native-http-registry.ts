@@ -410,6 +410,10 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
 const producers = [
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
+  // Worker-dispatch readiness: dispatch-readiness.ts probes it on the API base with the operator
+  // ws-token before every worker launch, so with Next stopped every dispatch was held. No device,
+  // worker or spectator grant; the handler reads nothing and answers a fixed body. (#5243)
+  route('/api/setup/status', 'GET', () => import('@/app/api/setup/status/route')),
   route('/api/mobile/sync', 'POST', () => import('@/app/api/mobile/sync/route')),
   route('/api/mobile/inbox', 'GET', () => import('@/app/api/mobile/inbox/route')),
   route('/api/command-center/snapshot', 'GET', () => import('@/app/api/command-center/snapshot/route')),
