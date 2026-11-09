@@ -407,6 +407,27 @@ describe('worktree-side merge with real git repos', () => {
     ])).toThrow();
   }, 30_000);
 
+  it('refuses to merge a lane whose checkout HEAD the worker pointed at another branch', async () => {
+    const { repo } = makeRepo('o8-merge-head-moved');
+    const worktree = await makeWorktree(repo, 'pkt-head-moved', 'inline/head-moved');
+    writeFileSync(join(worktree.path, 'worker.txt'), 'worker\n');
+    commitAll(worktree.path, 'worker change');
+    const lane = createLane({
+      repoPath: repo, worktreePath: worktree.path, branch: 'inline/head-moved', baseBranch: 'main',
+      runtime: 'codex', packetId: 'pkt-head-moved',
+    });
+    const mainBefore = git(repo, ['rev-parse', 'refs/heads/main']);
+    const admin = git(worktree.path, ['rev-parse', '--path-format=absolute', '--git-dir']);
+    writeFileSync(join(admin, 'HEAD'), 'ref: refs/heads/main\n');
+    writeFileSync(join(worktree.path, 'unreviewed.txt'), 'unreviewed\n');
+
+    const { result } = await mergeLane(lane);
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('worktree_branch_mismatch');
+    expect(git(repo, ['rev-parse', 'refs/heads/main'])).toBe(mainBefore);
+  }, 30_000);
+
   it('fast-forwards the operator checkout from the worker worktree without checkout/stash detours', async () => {
     const { repo } = makeRepo('o8-merge-ff');
     const worktree = await makeWorktree(repo, 'pkt-ff', 'inline/ff');

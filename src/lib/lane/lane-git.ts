@@ -203,12 +203,71 @@ function* resolveGitDirectories(worktreePath: string, repoPath: string, env: Nod
   }
 }
 
+// Entries at the top of a repository's own Git dir that its operator may link
+// elsewhere. Lane Git neither writes them through a link nor runs hooks.
+const OPERATOR_GIT_ENTRIES = new Set(['config', 'description', 'hooks', 'info', 'objects', 'refs', 'packed-refs',
+  'worktrees', 'modules', 'lfs', 'branches', 'remotes']);
+
+function assertNoLinkInside(directory: string): void {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) throw new LaneGitMetadataError();
+    if (entry.isDirectory()) assertNoLinkInside(path.join(directory, entry.name));
+  }
+}
+
+/** No component of `relative` below `root` may be a symbolic link. */
+function assertNoLinkAlong(root: string, relative: string): void {
+  const parts = relative.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..')) throw new LaneGitMetadataError();
+  let current = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink()) throw new LaneGitMetadataError();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+  }
+}
+
+/**
+ * A lane's worker can write its checkout's Git state, even in the worker
+ * sandbox. Git follows a symbolic link when it appends a reflog, writes a
+ * commit message or reads a ref, and never creates one there itself. So no
+ * link may sit in the checkout's state, at the ref HEAD names, or at that
+ * ref's reflog.
+ */
+function assertCheckoutStateIsGits({ admin, common }: { admin: string; common: string }): void {
+  try {
+    if (admin !== common) {
+      assertNoLinkInside(admin);
+    } else {
+      for (const entry of readdirSync(admin, { withFileTypes: true })) {
+        if (OPERATOR_GIT_ENTRIES.has(entry.name)) continue;
+        if (entry.isSymbolicLink()) throw new LaneGitMetadataError();
+        if (entry.isDirectory()) assertNoLinkInside(path.join(admin, entry.name));
+      }
+    }
+    const head = readFileSync(path.join(admin, 'HEAD'), 'utf8').trim();
+    if (head.startsWith('ref:')) {
+      const ref = head.slice('ref:'.length).trim();
+      assertNoLinkAlong(common, ref);
+      assertNoLinkAlong(common, `logs/${ref}`);
+    }
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
+    throw new LaneGitMetadataError();
+  }
+}
+
 interface LaneGitInvocation { args: string[]; env: NodeJS.ProcessEnv; cwd: string }
 
 function* laneGitInvocationPlan(worktreePath: string, repoPath: string, args: readonly string[], ignoreGlobalConfig: boolean,
   options: LaneGitOptions): GitPlan<LaneGitInvocation> {
   const env = laneGitEnvironment(ignoreGlobalConfig);
   const directories = yield* resolveGitDirectories(worktreePath, repoPath, env);
+  assertCheckoutStateIsGits(directories);
   Object.assign(env, { GIT_DIR: directories.admin, GIT_COMMON_DIR: directories.common,
     GIT_WORK_TREE: directories.worktree });
   if (options.indexFile) env.GIT_INDEX_FILE = options.indexFile;
@@ -271,4 +330,21 @@ export async function laneGit(worktreePath: string, repoPath: string, args: read
   const invocation = await laneGitInvocationAsync(worktreePath, repoPath, args, false, options);
   return materializationAwareExecFile('git', invocation.args, { windowsHide: true, timeout: 15_000,
     maxBuffer: 10 * 1024 * 1024, ...options, cwd: invocation.cwd, env: invocation.env });
+}
+
+/**
+ * Before o8 commits or merges in a lane checkout on the lane's behalf: HEAD
+ * must name the lane's branch, since the worker can point it anywhere. A lane
+ * without a recorded branch is not checked.
+ */
+export async function assertLaneHeadOnBranch(worktreePath: string, repoPath: string, branch: string | null | undefined): Promise<void> {
+  if (!branch?.trim()) return;
+  let ref = '';
+  try {
+    ({ stdout: ref } = await laneGit(worktreePath, repoPath, ['symbolic-ref', '-q', 'HEAD'], { timeout: 5000 }));
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
+    // Exit 1: HEAD is detached.
+  }
+  if (String(ref).trim() !== `refs/heads/${branch.trim()}`) throw new LaneGitMetadataError();
 }

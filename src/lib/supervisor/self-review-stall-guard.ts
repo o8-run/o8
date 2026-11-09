@@ -274,7 +274,7 @@ export async function preserveSelfReviewStallWork(
 
   let committed = false;
   try {
-    committed = await completion.autoCommitCompletionWorktree(cwd, lane.repoPath, lane.label);
+    committed = await completion.autoCommitCompletionWorktree(cwd, lane.repoPath, lane.label, lane.branch);
   } catch (error) {
     return {
       committed: false,

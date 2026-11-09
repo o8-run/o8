@@ -1,5 +1,5 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
-import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
+import { assertLaneHeadOnBranch, laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
@@ -139,11 +139,18 @@ function normalizeAutoCommitMessage(message?: string | null): string {
   return subject.includes('[via-o8]') ? subject : `${subject} [via-o8]`;
 }
 
-export async function autoCommitCompletionWorktree(cwd: string, repoPath: string, commitMessage?: string | null): Promise<boolean> {
+export async function autoCommitCompletionWorktree(
+  cwd: string,
+  repoPath: string,
+  commitMessage: string | null | undefined,
+  laneBranch: string | null | undefined,
+): Promise<boolean> {
   const { stdout: porcelain } = await laneGit(cwd, repoPath, ['status', '--porcelain'], { maxBuffer: COMMAND_MAX_BUFFER });
   if (!porcelain.trim()) {
     return false;
   }
+  // Commit only onto the lane's branch, wherever the worker pointed HEAD.
+  await assertLaneHeadOnBranch(cwd, repoPath, laneBranch);
 
   // `git status --porcelain` does not include ignored directories by default.
   // Passing explicit negative pathspecs for ignored dirs makes Git error when

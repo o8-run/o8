@@ -3907,6 +3907,14 @@
       ]
     },
     {
+      "path": "tests/lane-checkout-host-git-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-completion-presentation-real-path.test.ts",
       "reasons": [
         "real-path"

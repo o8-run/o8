@@ -40,7 +40,7 @@ import { decideSurfaceMerge } from '@/lib/lane/surface-merge-decision';
 import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
-import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
+import { assertLaneHeadOnBranch, laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
@@ -470,6 +470,8 @@ async function dispatchUnlocked(
         });
         if (porcelain.trim().length > 0) {
           console.log(`[lane] request_review: dirty worktree detected in ${reviewCwd}, auto-committing`);
+          // Commit only onto the lane's branch, wherever the worker pointed HEAD.
+          await assertLaneHeadOnBranch(reviewCwd, lane.repoPath, lane.branch);
           await laneGit(reviewCwd, lane.repoPath, ['add', '-A', '--', '.'], {
             maxBuffer: 10 * 1024 * 1024,
           });

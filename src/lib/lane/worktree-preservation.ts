@@ -80,7 +80,7 @@ export async function preserveLaneWorktreeHead(
   // committed correctly — the worktree-amend false-landing trap.
   const capture = await captureWorktreeState(worktreePath, lane.id, lane.repoPath);
 
-  const autoCommitted = await autoCommitCompletionWorktree(worktreePath, lane.repoPath);
+  const autoCommitted = await autoCommitCompletionWorktree(worktreePath, lane.repoPath, undefined, lane.branch);
   const baseBranch = lane.baseBranch?.trim() || 'main';
   const hasUnmergedWork = await headHasUnmergedWork(worktreePath, lane.repoPath, baseBranch);
   if (!autoCommitted && !hasUnmergedWork) {
