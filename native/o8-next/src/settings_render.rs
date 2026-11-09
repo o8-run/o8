@@ -341,8 +341,8 @@ impl Render for Settings {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    // Clears the traffic lights, which sit above the rail's edge.
-                    .pl(px(28.))
+                    // Clears the traffic lights (their 52 px corner, then the old 28).
+                    .pl(px(28. + 52.))
                     .pr(px(10.))
                     .text_size(px(12.))
                     .window_control_area(gpui::WindowControlArea::Drag)

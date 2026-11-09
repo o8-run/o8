@@ -197,7 +197,7 @@ const SEARCH_W: f32 = 30.;
 /// search and 4px gap, less the strip's 16px padding in flight, so Back lands
 /// where the folded header puts it.
 /// Past the traffic lights, so the toggle never crowds them.
-const TOGGLE_INSET: f32 = 26.;
+const TOGGLE_INSET: f32 = 26. + super::super::rail::LIGHTS;
 const FOLDED: f32 = TOGGLE_INSET + TOGGLE_W + 4. + SEARCH_W + 4. - 16.;
 
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {

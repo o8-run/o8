@@ -1230,7 +1230,7 @@ fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui:
             div()
                 .id("rail-update")
                 .debug_selector(|| "rail-update".into())
-                .size(px(44.))
+                .size(px(super::super::rail::TARGET))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -1870,8 +1870,9 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
 
     div()
         .absolute()
-        .left(px(44. + 12.))
-        .bottom(px(0.))
+        // Above the dock, left-aligned to the button.
+        .left(px(0.))
+        .top(px(-8.))
         .child(
             gpui::deferred(
                 gpui::anchored()

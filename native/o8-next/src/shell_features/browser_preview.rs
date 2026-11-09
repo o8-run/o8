@@ -144,7 +144,7 @@ fn trigger(s: &mut Shell, _: &mut Window, cx: &mut Context<Shell>) -> Option<Any
         div()
             .id("browser-pip-trigger")
             .debug_selector(|| "browser-pip-trigger".into())
-            .size(px(44.))
+            .size(px(super::super::rail::TARGET))
             .flex()
             .items_center()
             .justify_center()

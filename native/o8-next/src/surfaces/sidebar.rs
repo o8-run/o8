@@ -222,13 +222,20 @@ pub(super) const REGISTRATION: Registration = Registration {
             .min_w_0()
             .map(|row| {
                 if !moving {
-                    return row.child(list);
+                    // The dock covers the column's foot.
+                    return row.child(
+                        div()
+                            .h_full()
+                            .flex_shrink_0()
+                            .pb(px(crate::shell::rail::DOCK))
+                            .child(list),
+                    );
                 }
                 // In flight the workspace makes room while a card carries the
-                // full-width rows out of the rail's o8 mark: it starts as the
-                // mark's tile, lifts with a fill and shadow, and lands flush.
+                // full-width rows in from the window's edge: it lifts with a
+                // fill and shadow, and lands flush.
                 let mix = |from: f32, to: f32| from + (to - from) * open;
-                let mark_left = -(crate::shell::rail::WIDTH + crate::shell::rail::TARGET) / 2.;
+                let mark_left = 0.;
                 let lift = (open / 0.12).min(1.) * ((1. - open) / 0.25).min(1.);
                 let tint = |color: gpui::Rgba| gpui::Rgba { a: color.a * lift, ..color };
                 let card = div()
@@ -261,15 +268,6 @@ pub(super) const REGISTRATION: Registration = Registration {
                                 rows.opacity(((open - 0.5) / 0.5).clamp(0., 1.))
                             })
                             .child(list),
-                    )
-                    // The mark itself, fading as the card leaves it.
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px((crate::shell::rail::TARGET - 24.) / 2. - 1.))
-                            .top(px((crate::shell::rail::TARGET - 24.) / 2. - 1.))
-                            .opacity((1. - open / 0.3).max(0.))
-                            .child(crate::shell::rail::brand()),
                     );
                 row.child(div().w(px(width * open)).h_full().flex_shrink_0())
                     .child(gpui::deferred(card).with_priority(1))

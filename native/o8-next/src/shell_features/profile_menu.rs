@@ -20,12 +20,7 @@ impl ShellFeature for ProfileMenu {
             },
         }]
     }
-    fn rail(&self) -> &'static [RailItem] {
-        &[RailItem {
-            order: 20,
-            render: |s, window, cx| Some(button(s, window, cx)),
-        }]
-    }
+    // The dock places the profile itself, first on the left (Q 2026-11-09).
 }
 
 const DOCS_URL: &str = "https://o8.run";
@@ -86,7 +81,7 @@ fn close(s: &mut Shell, cx: &mut Context<Shell>) {
     cx.notify();
 }
 
-fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::AnyElement {
+pub(crate) fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::AnyElement {
     if s.connected && !s.features.get::<Menu>().photo_asked {
         load_photo(s, cx);
     }
@@ -100,7 +95,7 @@ fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::
             div()
                 .id("shell-profile")
                 .debug_selector(|| "shell-profile".into())
-                .size(px(44.))
+                .size(px(super::super::rail::TARGET))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -118,7 +113,7 @@ fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::
                 // Classic's rail: the account photo, or the account icon without one.
                 .child(match photo {
                     Some(photo) => gpui::img(photo)
-                        .size(px(27.))
+                        .size(px(22.))
                         .rounded_full()
                         .object_fit(gpui::ObjectFit::Cover)
                         .into_any_element(),
