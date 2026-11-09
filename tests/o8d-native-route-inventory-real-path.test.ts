@@ -12,7 +12,6 @@ const NEXT_ONLY_NATIVE_PATHS = new Set([
   '/api/runtime/acp-connection',
   '/api/runtime/acp-registry/prepare',
   '/api/orchestrator/comparison-diff', // GET has a write path; held for review.
-  '/api/orchestrator/pull-request-context',
   '/api/panel/account/avatar', // no caller yet; wired with the native rail account avatar
   '/api/panel/devices',
   '/api/tasks/[id]/preview',
@@ -58,11 +57,11 @@ const NEXT_ONLY_SHELL_PATHS = new Set([
   '/api/v1/audio/transcriptions', '/api/v1/chat/completions',
 ]);
 const NEXT_ONLY_MCP_PATHS = new Set([
-  '/api/agents/inbox', '/api/agents/message', '/api/agents/presence', '/api/broadcast/post', '/api/broadcast/say',
+  '/api/agents/inbox', '/api/agents/message', '/api/agents/presence', '/api/broadcast/post',
   '/api/broadcast/tokens', '/api/browser/proxy', '/api/canvas/intent', '/api/cortex/ask/answer', '/api/cortex/sources',
   '/api/devices/agent', '/api/harness', '/api/leases',
   '/api/orchestrator/create-mission', '/api/orchestrator/digest', '/api/orchestrator/dispatch',
-  '/api/orchestrator/merge', '/api/orchestrator/propose-spec', '/api/orchestrator/pull-request-context',
+  '/api/orchestrator/merge', '/api/orchestrator/propose-spec',
   '/api/orchestrator/reload', '/api/orchestrator/truth',
   '/api/panel/repos/init', '/api/panel/repos/scaffold', '/api/panel/targets',
   '/api/task-artifacts',

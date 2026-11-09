@@ -5438,6 +5438,12 @@
       ]
     },
     {
+      "path": "tests/o8d-pr-context-say-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-r2b-read-only-gets-real-path.test.ts",
       "reasons": [
         "child-process",
