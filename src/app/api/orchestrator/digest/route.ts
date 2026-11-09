@@ -36,7 +36,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await digest(text, resolved.repoRoot);
+    // A client that disconnects (an MCP timeout before its retry) ends the Codex run with it.
+    const result = await digest(text, resolved.repoRoot, { signal: request.signal });
     return NextResponse.json({ ok: true, ...result }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });

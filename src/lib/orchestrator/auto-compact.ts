@@ -119,7 +119,11 @@ type CodexSummaryResult = {
   estimated: boolean;
 };
 
-async function summarizeWithCodex(repoPath: string, prompt: string): Promise<CodexSummaryResult> {
+/** Ends a summary run early: the caller went away, or the run overstayed its deadline. */
+type CodexSummaryLimits = { signal?: AbortSignal; timeoutMs?: number };
+
+async function summarizeWithCodex(repoPath: string, prompt: string, limits: CodexSummaryLimits = {}): Promise<CodexSummaryResult> {
+  limits.signal?.throwIfAborted();
   const { resolveCli } = await import('@/lib/runtimes/shared/cli-resolver');
   const codexBin = (await resolveCli({
     runtimeId: 'codex',
@@ -148,11 +152,16 @@ async function summarizeWithCodex(repoPath: string, prompt: string): Promise<Cod
       repoPath,
       ...(promptOnStdin ? [] : [prompt]),
     ]);
+    // A limited run gets its own process group on POSIX: codex is a launcher whose native
+    // binary shares its stdout, so stopping only the launcher would leave the real run going.
+    const limited = limits.signal !== undefined || limits.timeoutMs !== undefined;
+    const group = limited && process.platform !== 'win32';
     const child = spawn(
       launch.command,
       launch.args,
       {
         windowsHide: true,
+        detached: group,
         cwd: repoPath,
         stdio: [promptOnStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         env: childEnvironment({ runtimeId: 'codex', env: { FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' } }),
@@ -161,6 +170,36 @@ async function summarizeWithCodex(repoPath: string, prompt: string): Promise<Cod
     if (promptOnStdin) {
       child.stdin?.write(prompt, 'utf-8');
       child.stdin?.end();
+    }
+    let settled = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      limits.signal?.removeEventListener('abort', cancelled);
+      settle();
+    };
+    const signalRun = (signal: NodeJS.Signals) => {
+      try {
+        if (group && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch {
+        // The run already exited.
+      }
+    };
+    // Settles at once rather than on 'close': a descendant may hold stdout open after the launcher dies.
+    const stop = (reason: Error) => {
+      if (settled) return;
+      signalRun('SIGTERM');
+      setTimeout(() => signalRun('SIGKILL'), 2_000).unref();
+      finish(() => reject(reason));
+    };
+    const cancelled = () => stop(new Error('Codex summary cancelled: the caller disconnected'));
+    limits.signal?.addEventListener('abort', cancelled, { once: true });
+    if (limits.signal?.aborted) cancelled();
+    if (limits.timeoutMs !== undefined) {
+      deadline = setTimeout(() => stop(new Error(`Codex summary timed out after ${limits.timeoutMs}ms`)), limits.timeoutMs);
     }
     let buffer = '';
     let stderr = '';
@@ -200,8 +239,8 @@ async function summarizeWithCodex(repoPath: string, prompt: string): Promise<Cod
       }
     });
     child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-    child.once('error', reject);
-    child.once('close', (code) => {
+    child.once('error', (error) => finish(() => reject(error)));
+    child.once('close', (code) => finish(() => {
       const text = result.trim();
       if (code === 0 && text) resolve({
         text,
@@ -210,7 +249,7 @@ async function summarizeWithCodex(repoPath: string, prompt: string): Promise<Cod
         estimated: inputTokens === null || outputTokens === null,
       });
       else reject(new Error(stderr.trim() || `Codex compaction failed (${code ?? 'unknown'})`));
-    });
+    }));
   });
 }
 
@@ -253,6 +292,11 @@ export interface DigestResult {
 
 /** Argv-safety cap — the prompt rides as a single codex argv element. */
 const DIGEST_INPUT_CHAR_CAP = 180_000;
+/**
+ * Ends a digest run before the operator MCP client's 120 s request timeout, so a
+ * client retry never overlaps a run that is still going.
+ */
+export const DIGEST_TIMEOUT_MS = 110_000;
 
 /**
  * Pre-digest arbitrary bulk (logs, test output, a diff, docs, a transcript)
@@ -264,7 +308,7 @@ const DIGEST_INPUT_CHAR_CAP = 180_000;
  * codex exec — the digest never comes from the proposing worker's session, so
  * no summarizer grades its own work.
  */
-export async function digest(text: string, repoPath: string): Promise<DigestResult> {
+export async function digest(text: string, repoPath: string, limits: CodexSummaryLimits = {}): Promise<DigestResult> {
   const trimmed = text.trim();
   if (!trimmed) throw new Error('digest: text is required');
   const truncatedInput = trimmed.length > DIGEST_INPUT_CHAR_CAP;
@@ -280,7 +324,7 @@ export async function digest(text: string, repoPath: string): Promise<DigestResu
     'Use file paths, symbols, and numbers verbatim. If a section is empty, write "- None." Do not editorialize or add recommendations beyond the material.',
     '',
     capped,
-  ].join('\n'));
+  ].join('\n'), { signal: limits.signal, timeoutMs: limits.timeoutMs ?? DIGEST_TIMEOUT_MS });
   const summary = summaryResult.text;
   return {
     digest: summary,
