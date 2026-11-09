@@ -38,9 +38,19 @@ import { backingProjectConfigPaths } from './project-config';
 import { ownerInstructionPaths } from './owner-instructions';
 import { SandboxUnavailableError } from './sandbox-error';
 import { homeToolchainPolicy } from './sandbox-toolchain';
+import {
+  gitFixedDirectories,
+  gitRedirectPaths,
+  isLinkedCheckout,
+  laneBranchFiles,
+  resolveGitMetadataGuard,
+  type GitMetadataGuard,
+  type WorkerGitBranch,
+} from './git-metadata-guard';
 import { assertBwrapExpressible, prepareBwrapSandbox, requireBwrap } from './sandbox-linux';
 
 export { SandboxUnavailableError };
+export type { GitMetadataGuard, WorkerGitBranch };
 
 const execFileAsync = promisify(execFile);
 
@@ -183,6 +193,37 @@ export async function resolveGitSandboxPaths(cwd: string): Promise<string[]> {
   }
 }
 
+const GIT_GUARD_WRITE_OPS = 'file-write* file-write-mode file-write-owner file-write-acl file-write-flags file-link file-clone';
+
+/** SBPL for {@link GitMetadataGuard}: deny the shared Git dir, re-open the worker's parts, then deny redirects. */
+function gitMetadataGuardRules(guard: GitMetadataGuard): string[] {
+  const common = guard.commonDir;
+  // A main checkout's own state sits at the top of the common dir.
+  const ownState = isLinkedCheckout(guard)
+    ? [`  ${subpath(guard.gitDir)}`]
+    : [
+      `  (regex #"^${regexFragment(common)}/[^/]+$")`,
+      ...['rebase-merge', 'rebase-apply', 'sequencer'].map((dir) => `  ${subpath(path.join(common, dir))}`),
+      `  (literal ${sbplString(path.join(common, 'logs', 'HEAD'))})`,
+    ];
+  return [
+    ';; --- shared Git metadata: the lane branch, own checkout state and new objects only ---',
+    `(deny ${GIT_GUARD_WRITE_OPS}`,
+    `  ${subpath(common)}`,
+    ')',
+    `(allow ${GIT_GUARD_WRITE_OPS}`,
+    `  ${subpath(path.join(common, 'objects'))}`,
+    ...ownState,
+    ...laneBranchFiles(guard).map((file) => `  (literal ${sbplString(file)})`),
+    ')',
+    // Literals: a protected entry, or a directory holding one, cannot be renamed,
+    // replaced or removed; what lies under it stays as the rules above decide.
+    `(deny ${GIT_GUARD_WRITE_OPS}`,
+    ...[...gitRedirectPaths(guard), ...gitFixedDirectories(guard)].map((entry) => `  (literal ${sbplString(entry)})`),
+    ')',
+  ];
+}
+
 /** Package root for an npm-installed binary target, including scoped packages. */
 function nodePackageRoot(binaryPath: string): string | null {
   const parsed = path.parse(binaryPath);
@@ -246,6 +287,8 @@ export interface SeatbeltProfileInput {
    */
   readOnlyDenyWritePaths?: string[];
   finalCredentialPolicy?: FinalCredentialPolicy;
+  /** A lane worker's share of the repository's Git metadata; see {@link GitMetadataGuard}. */
+  gitMetadataGuard?: GitMetadataGuard;
 }
 
 /**
@@ -488,6 +531,9 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
       ...finalImmutableAncestors.map(p => `  (literal ${sbplString(p)})`),
       ')',
     ] : []),
+    // After every other allow, so nothing re-opens the shared Git metadata;
+    // before the read-only block, which stays authoritative.
+    ...(input.gitMetadataGuard ? gitMetadataGuardRules(input.gitMetadataGuard) : []),
     ...(readOnlyDenyWritePaths.length ? [
       // DEAD LAST, deliberately. SBPL is last-match-wins, so emitting the
       // read-only denial after EVERY allow — including the narrow re-opens
@@ -569,6 +615,14 @@ export interface PrepareWorkerSandboxInput {
    */
   enforceReadOnly?: boolean;
   finalCredentialPolicy?: FinalCredentialPolicy;
+  /**
+   * The worker's branch, from its lane record or else as its session recorded
+   * it. When set (and the run is not read-only, which already denies every
+   * repository write), a worker in a linked worktree, or in a main checkout
+   * with a lane, may write only that branch, its own checkout state and new
+   * objects in the shared Git metadata.
+   */
+  gitBranch?: WorkerGitBranch;
 }
 
 /**
@@ -703,6 +757,10 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   finalImmutableWrite.push(...ownerInstructions);
   finalAllowRead.push(...ownerInstructions);
   const finalAllowExec = await resolveAll(input.finalAllowExecPaths ?? []);
+  // Once Git paths are granted, the guard must resolve too.
+  const gitMetadataGuard = input.gitBranch && !input.enforceReadOnly
+    ? await resolveGitMetadataGuard(worktreeReal, input.gitBranch, { required: gitPaths.length > 0 })
+    : undefined;
   const finalCredentialPolicy = input.finalCredentialPolicy ? {
     lockPath: await safeRealpath(input.finalCredentialPolicy.lockPath),
     readFiles: await resolveAll(input.finalCredentialPolicy.readFiles),
@@ -749,6 +807,7 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     finalAllowExecPaths: finalAllowExec,
     readOnlyDenyWritePaths: readOnlyDenyWrite,
     finalCredentialPolicy,
+    ...(gitMetadataGuard ? { gitMetadataGuard } : {}),
   };
   if (bwrapPath) {
     return prepareBwrapSandbox({

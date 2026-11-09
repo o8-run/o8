@@ -32,6 +32,7 @@ import {
   mintPacketWorkerToken,
 } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
+import { getLane } from '@/lib/lane/registry';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { resolvePortInfo } from '@/lib/panel/api-port';
@@ -504,6 +505,11 @@ export function createOwnedRunController({
           // paths come from the SAME git probe prepareWorkerSandbox uses to
           // grant access, and it throws if that probe resolves nothing.
           enforceReadOnly: readOnlySandbox.enforced,
+          // A worker may move only its own branch in the shared Git metadata.
+          gitBranch: {
+            lane: (session.laneId ? getLane(session.laneId)?.branch : undefined) || undefined,
+            session: session.branch || undefined,
+          },
           finalAllowReadWritePaths: runtimeState.writablePaths,
           finalImmutableWritePaths: [...(runtimeState.immutablePaths ?? []), ...(preparedLaunch.workerO8?.immutablePaths ?? [])],
           finalImmutableAncestorPaths: preparedLaunch.workerO8?.immutableAncestorPaths,

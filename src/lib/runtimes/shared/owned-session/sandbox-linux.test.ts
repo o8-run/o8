@@ -3,8 +3,9 @@ import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  assertBwrapExpressible, buildBwrapArgs, bwrapPolicyPaths, ensureToolchainWriteDirs, type PathKind,
+  assertBwrapExpressible, buildBwrapArgs, bwrapPolicyPaths, ensureToolchainWriteDirs, prepareBwrapSandbox, type PathKind,
 } from './sandbox-linux';
+import { gitGuardBinds } from './git-metadata-guard';
 import { SandboxUnavailableError } from './sandbox-error';
 import type { SeatbeltProfileInput } from './sandbox';
 
@@ -63,6 +64,39 @@ describe('buildBwrapArgs — Linux worker sandbox policy', () => {
     expect(mountIndex(args, '--ro-bind', `${HOME}/.config`)).toBeGreaterThan(-1);
     // Missing cache dirs are skipped rather than created.
     expect(mountIndex(args, '--bind', `${HOME}/.npm`)).toBe(-1);
+  });
+
+  it("leaves a lane worker only its branch directory, own worktree state and objects in the shared .git", () => {
+    const common = '/srv/repo/.git';
+    const gitDir = `${common}/worktrees/app`;
+    const guard = { commonDir: common, gitDir, checkoutRoot: WORKTREE, pointerFile: `${WORKTREE}/.git`, branchRef: 'refs/heads/inline/pkt-a' };
+    const dirs = [...baseDirs, common, gitDir, `${common}/objects`, `${common}/objects/info`,
+      `${common}/refs/heads/inline`, `${common}/logs/refs/heads/inline`];
+    const files = [`${common}/config`, `${gitDir}/commondir`, `${gitDir}/gitdir`, `${WORKTREE}/.git`];
+    const args = buildBwrapArgs(policy({ extraReadWritePaths: [common], gitMetadataGuard: guard }), { kinds: kinds(dirs, files) });
+    const sealed = mountIndex(args, '--ro-bind', common);
+    expect(sealed).toBeGreaterThan(mountIndex(args, '--bind', common));
+    for (const rw of [`${common}/objects`, gitDir, `${common}/refs/heads/inline`, `${common}/logs/refs/heads/inline`]) {
+      expect(mountIndex(args, '--bind', rw)).toBeGreaterThan(sealed);
+    }
+    for (const ro of [`${common}/objects/info`, `${gitDir}/commondir`, `${gitDir}/gitdir`, `${WORKTREE}/.git`]) {
+      expect(mountIndex(args, '--ro-bind', ro)).toBeGreaterThan(mountIndex(args, '--bind', gitDir));
+    }
+    // Config, hooks and the base branch stay under the read-only Git dir.
+    expect(mountIndex(args, '--bind', `${common}/refs/heads`)).toBe(-1);
+    expect(mountIndex(args, '--bind', `${common}/config`)).toBe(-1);
+    expect(bwrapPolicyPaths(policy({ gitMetadataGuard: guard }))).toEqual(expect.arrayContaining([common, gitDir, `${common}/refs/heads/inline`]));
+  });
+
+  it('refuses a worker branch at the top of refs/heads, whose directory holds the base branch', async () => {
+    const common = '/srv/repo/.git';
+    const guard = { commonDir: common, gitDir: `${common}/worktrees/app`, checkoutRoot: WORKTREE, branchRef: 'refs/heads/pkt-top' };
+    await expect(prepareBwrapSandbox({
+      bwrapPath: '/usr/bin/bwrap', policy: policy({ gitMetadataGuard: guard }), profilePath: '/nonexistent/profile',
+      cwd: WORKTREE, binary: '/bin/true', args: [],
+    })).rejects.toThrow(SandboxUnavailableError);
+    const { branchRef: _branchRef, ...noBranch } = guard;
+    expect(gitGuardBinds(noBranch).writable).toEqual([`${common}/objects`, `${common}/worktrees/app`]);
   });
 
   it('hides secrets that would otherwise be visible, and only those', () => {
