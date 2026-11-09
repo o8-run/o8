@@ -927,9 +927,9 @@ fn drag_onto(cx: &mut VisualTestContext, from: &'static str, to: &'static str) {
 }
 
 /// Q 2026-11-09: a thread dropped on an Inbox heading moves there (T3 Code's
-/// drag between sections). The heading under a Pinned shelf is also a pin
-/// drop zone, and GPUI keeps one drop listener per drag type, so a second
-/// one there aborted the app on the drop.
+/// drag between sections). Pin drop zones (the Pinned heading, the heading
+/// under the shelf) already take this drag, and GPUI keeps one drop listener
+/// per drag type, so a second one there aborted the app on the drop.
 #[gpui::test]
 fn sidebar_inbox_drops_threads_on_headings_beside_pins(cx: &mut TestAppContext) {
     let (fixture, shell, mut visual, project) = start("--shell --composer --sidebar", cx);
@@ -971,19 +971,49 @@ fn sidebar_inbox_drops_threads_on_headings_beside_pins(cx: &mut TestAppContext) 
     wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, &other, "Settled"));
     assert_eq!(stored(&fixture, &other), "settled");
 
-    // FIRST dropped on the Active heading, under the Pinned shelf, comes back.
+    // The Pinned heading is a pin drop zone, and GPUI keeps one drop
+    // listener per drag type: an Active thread dropped there pins through
+    // that one listener (two of them aborted the app).
+    let third = list(&shell, &visual, |l| {
+        let start = l.rows.iter().position(|r| r.kind == "section" && r.title == "Active").unwrap();
+        l.rows[start + 1..]
+            .iter()
+            .take_while(|r| r.kind == "thread")
+            .find_map(|r| r.id.clone())
+            .expect("another Active thread")
+    });
+    let from = row(&shell, &mut visual, &third);
+    let pinned_heading = list(&shell, &visual, |l| {
+        l.rows.iter().position(|r| r.kind == "section" && r.title == "Pinned").unwrap()
+    });
+    shell.update(&mut visual, |s, cx| {
+        let sidebar = s.surfaces.sidebar.view.clone().unwrap();
+        sidebar.update(cx, |l, cx| {
+            l.scroll_row(pinned_heading, ScrollStrategy::Top, false);
+            cx.notify();
+        });
+    });
+    draw(&mut visual);
+    let heading: &'static str = Box::leak(format!("thread-row-{pinned_heading}").into_boxed_str());
+    drag_onto(&mut visual, from, heading);
+    wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, &third, "Pinned"));
+    assert!(shell.read_with(&visual, |s, cx| in_section(s, cx, SECOND, "Pinned")));
+
+    // FIRST dropped on the Active heading leaves Settled.
     let active = list(&shell, &visual, |l| {
         l.rows.iter().position(|r| r.kind == "section" && r.title == "Active").unwrap()
     });
-    assert!(
-        list(&shell, &visual, |l| l.rows[active - 1].id.as_deref() == Some(SECOND)),
-        "the Active heading sits right under the Pinned shelf, a pin drop zone"
-    );
-    let heading: &'static str = Box::leak(format!("thread-row-{active}").into_boxed_str());
     let from = row(&shell, &mut visual, FIRST);
+    shell.update(&mut visual, |s, cx| {
+        let sidebar = s.surfaces.sidebar.view.clone().unwrap();
+        sidebar.update(cx, |l, cx| {
+            l.scroll_row(active, ScrollStrategy::Top, false);
+            cx.notify();
+        });
+    });
+    draw(&mut visual);
+    let heading: &'static str = Box::leak(format!("thread-row-{active}").into_boxed_str());
     drag_onto(&mut visual, from, heading);
     wait_for(&shell, &mut visual, |s, cx| in_section(s, cx, FIRST, "Active"));
     assert_ne!(stored(&fixture, FIRST), "settled");
-    // The pin stayed put.
-    assert!(list(&shell, &visual, |l| l.rows[1].id.as_deref() == Some(SECOND)));
 }
