@@ -120,6 +120,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   bots: [
     route('/api/bots', 'GET', () => import('@/app/api/bots/route')),
     route('/api/bots/[id]/thread', 'GET', () => import('@/app/api/bots/[id]/thread/route')),
+    // Operator MCP host (the bots surface's mcp_url points here, surfaces/bots/client.rs). POST runs
+    // the operator MCP tools over JSON-RPC; DELETE terminates a session (204); GET is 405. No
+    // handler-level auth — gated by panelGateMiddleware, and /api/mcp is in no allowlist, so over
+    // native (x-o8-client-addr=unverified-proxy) it is operator-ws-token-only. The device-context
+    // elevation (x-o8-device-worker/conversation/pid) is honored ONLY when the principal is already
+    // operator (route.ts: resolveRequestPrincipalContext(request).role === 'operator'), so a device
+    // or worker bearer cannot forge it. Responses are operator-visible MCP tool results. (#5243)
+    route('/api/mcp', 'POST DELETE', () => import('@/app/api/mcp/route')),
   ],
   grid: [],
   shortcuts: [], // Local shortcut reference has no HTTP transport.

@@ -8,7 +8,6 @@ import { viewerHttpRoutes } from '@/lib/viewers/http-routes';
 // Native paths that still need Next (#5243). Remove a path when it is registered.
 const NEXT_ONLY_NATIVE_PATHS = new Set([
   // Existing native inventory drift, outside the A1 and A2 slices. No methods added.
-  '/api/mcp',
   '/api/panel/ssh-machines',
   '/api/runtime/acp-connection',
   '/api/runtime/acp-registry/prepare',
@@ -61,7 +60,7 @@ const NEXT_ONLY_SHELL_PATHS = new Set([
 const NEXT_ONLY_MCP_PATHS = new Set([
   '/api/agents/inbox', '/api/agents/message', '/api/agents/presence', '/api/broadcast/post', '/api/broadcast/say',
   '/api/broadcast/tokens', '/api/browser/proxy', '/api/canvas/intent', '/api/cortex/ask/answer', '/api/cortex/sources',
-  '/api/devices/agent', '/api/harness', '/api/leases', '/api/mcp', '/api/operator/status',
+  '/api/devices/agent', '/api/harness', '/api/leases', '/api/operator/status',
   '/api/orchestrator/create-mission', '/api/orchestrator/digest', '/api/orchestrator/dispatch',
   '/api/orchestrator/merge', '/api/orchestrator/propose-spec', '/api/orchestrator/pull-request-context',
   '/api/orchestrator/reload', '/api/orchestrator/truth',
@@ -105,7 +104,7 @@ it('counts the desktop shell, the MCP server and the WS process toward the Next-
   checkCaller(['src/ws-server.ts', ...sourceFiles('src/lib/ws-server', '.ts')],
     /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^>(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, NEXT_ONLY_WS_PATHS);
   const remaining = new Set([...NEXT_ONLY_NATIVE_PATHS, ...NEXT_ONLY_SHELL_PATHS, ...NEXT_ONLY_MCP_PATHS, ...NEXT_ONLY_WS_PATHS]);
-  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(48);
+  expect(remaining.size, 'distinct API-port paths that still need Next').toBe(47);
 });
 
 it('rejects an unknown route discovered in a shell or MCP source file', () => {
