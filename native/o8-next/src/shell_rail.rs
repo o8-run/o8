@@ -1,6 +1,7 @@
-//! Left navigation rail, the native counterpart of CompactNavigationRail.tsx.
-//! Surfaces keep their own entries through `Registration::nav`; the rail only
-//! lays them out and adds the shell-level destinations.
+//! The sidebar's bottom dock, which replaced the left navigation rail (Q 2026-11-09:
+//! "cleaner and thinner for the left side"). Surfaces keep their own entries
+//! through `Registration::nav`; the dock lays out the everyday ones in a row
+//! and the Tools drawer (`rail_more`) holds every other destination.
 use super::*;
 use crate::icon::Tip;
 use crate::theme::current as theme;
@@ -8,13 +9,20 @@ use gpui::{AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, SharedString, S
 use serde_json::Value;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 
-// The 44px rail target in shell-geometry.ts; the rail itself is narrower
-// than classic's 60 (Q 2026-10-31).
-pub(super) const WIDTH: f32 = 52.;
-pub(super) const TARGET: f32 = 44.;
-/// The rail's padding above its first target, the o8 mark.
-pub(super) const PAD: f32 = 8.;
-const ICON: f32 = 19.;
+/// No column left of the sidebar any more; kept so the panels that measured
+/// past the old rail still compute their offsets.
+pub(super) const WIDTH: f32 = 0.;
+/// The traffic lights' corner, which the old rail's column used to clear.
+pub(crate) const LIGHTS: f32 = 52.;
+/// One dock target.
+pub(super) const TARGET: f32 = 34.;
+/// The dock's height: one target and its padding.
+pub(crate) const DOCK: f32 = TARGET + 10.;
+/// Where the sidebar card starts when it grows open.
+pub(super) const PAD: f32 = 0.;
+const ICON: f32 = 17.;
+/// Whether the dock shows Symon's orb.
+const SHOW_SYMON: bool = false;
 
 #[derive(Clone, Copy)]
 pub(super) enum Icon {
@@ -28,7 +36,7 @@ pub(super) enum Icon {
 
 impl Icon {
     // Lucide paths used by the desktop rail, embedded for native use.
-    fn path(self) -> &'static str {
+    pub(super) fn path(self) -> &'static str {
         match self {
             Self::Play => {
                 "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"
@@ -190,7 +198,7 @@ fn gauge(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
     let meter = |ratio: Option<f32>, color: Rgba, bottom: f32| {
         div()
             .absolute()
-            .left(px(16.))
+            .left(px((TARGET - 12.) / 2.))
             .bottom(px(bottom))
             .w(px(12.))
             .h(px(2.))
@@ -230,7 +238,7 @@ fn gauge(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
                         theme().text_muted
                     },
                 ))
-                .child(meter(usage.codex, theme().accent, 6.))
+                .child(meter(usage.codex, theme().accent, 5.))
                 .child(meter(usage.claude, crate::theme::brand_orange(), 2.)),
         )
         .when(open, |anchor| anchor.child(usage_card(cx)))
@@ -470,11 +478,11 @@ fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
         .when(snapshot.is_none(), |body| {
             body.child(muted("Reading connected runtimes…".into(), 10.5))
         });
-    // Fixed beside the gauge, bottom-aligned with it, as the desktop places it.
+    // Above the gauge, left-aligned with it.
     div()
         .absolute()
-        .left(px(TARGET + 16.))
-        .bottom(px(0.))
+        .left(px(0.))
+        .top(px(-8.))
         .child(
             gpui::deferred(
                 gpui::anchored()
@@ -607,127 +615,58 @@ impl Shell {
             .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
             .collect::<Vec<_>>();
         watch_usage(&self.client);
-        // The sidebar grows out of the home mark below; keep its frames coming
-        // when the mark, not the header, started it.
+        // The dock grows with the sidebar; keep its frames coming in flight.
         if super::sidebar::travel(self).1 {
             window.request_animation_frame();
         }
-        let active = self.active();
-        let tab = |id: &'static str,
-                   icon: Icon,
-                   label: &'static str,
-                   tab: Tab,
-                   command: fn() -> Command| {
-            button(id, icon, label, active.as_ref() == Some(&tab)).on_click(cx.listener(
-                move |this, _, window, cx| {
-                    // A destination opens in front, not behind Customize or Settings.
-                    this.close_rail_overlays(window, cx);
-                    this.capture(window, cx);
-                    this.execute(command(), window, cx);
-                },
-            ))
-        };
-        let projects_open = self.surfaces.projects.open;
         let voice = self.voice_live();
-        let plugins_open = self.customize_tab_open("plugins", cx);
+        // The dock spans the sidebar and folds away with it.
+        let (open, moving) = super::sidebar::travel(self);
+        if self.surfaces.sidebar.hidden && !moving {
+            return div().into_any_element();
+        }
+        let width = super::sidebar::width(self) * open;
+        // Items read the dock's width to fold into the Tools drawer when narrow.
+        self.features.get::<features::rail_more_dock::Dock>().width = super::sidebar::width(self);
         div()
             .id("shell-rail")
+            .debug_selector(|| "shell-dock".into())
             .absolute()
-            .top(px(crate::theme::GEOMETRY.header))
             .bottom_0()
             .left_0()
-            .w(px(WIDTH))
-            .flex_shrink_0()
+            .w(px(width))
+            .h(px(DOCK))
+            .overflow_hidden()
             .flex()
-            .flex_col()
+            .flex_row()
             .items_center()
-            .py(px(PAD))
+            .gap(px(2.))
+            .px(px(8.))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
-            .child(
-                // Home returns to the workspace from Projects, Settings, Customize
-                // or Setup; on the workspace it opens or folds the sidebar, which
-                // grows out of this mark (Q 2026-10-31).
-                target(if projects_open {
-                    "shell-workspace"
-                } else {
-                    "shell-home"
-                })
-                .tooltip(|_, cx| cx.new(|_| Tip("o8 — Home".into())).into())
-                .child(brand())
-                .on_click(cx.listener(|this, _, window, cx| {
-                    let overlay = this.surfaces.projects.open
-                        || this.surfaces.settings.view.is_some()
-                        || this.surfaces.customize.open
-                        || this.surfaces.setup.view.is_some();
-                    if overlay {
-                        this.close_rail_overlays(window, cx);
-                        this.restore_focus(window, cx);
-                        cx.notify();
-                    } else {
-                        features::toggle_sidebar(this, window, cx);
-                    }
-                })),
-            )
-            // Classic's toggle: the same one Caps Lock and voice-toggle drive.
-            .child(
-                target("rail-symon")
-                    .tooltip(|_, cx| cx.new(|_| Tip("Symon".into())).into())
-                    .child(symon_mark(voice))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_voice(cx))),
-            )
-            // A click starts a chat on the lead; a drag drops one onto the workspace.
-            .child(
-                button("rail-orchestrator", Icon::Play, "Run orchestrator", false)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_rail_overlays(window, cx);
-                        this.capture(window, cx);
-                        features::start_chat(this, window, cx);
-                    }))
-                    .on_drag(features::RailPane::Chat, |drag, _, _, cx| {
-                        cx.new(|_| drag.clone())
-                    }),
-            )
-            // A click opens a terminal; a drag drops one onto the workspace.
-            .child(
-                tab(
-                    "rail-terminal",
-                    Icon::Terminal,
-                    "Run terminal",
-                    Tab::Terminal,
-                    || Command::Terminal,
+            // Q 2026-11-09: profile, PRs and usage on the left; updates and
+            // Tools on the right.
+            .child(features::profile(self, window, cx))
+            // Symon's toggle is off the dock for now (Q 2026-11-09). Caps Lock and
+            // voice-toggle still drive it; flip SHOW_SYMON to bring the orb back.
+            .when(SHOW_SYMON, |dock| {
+                dock.child(
+                    target("rail-symon")
+                        .tooltip(|_, cx| cx.new(|_| Tip("Symon".into())).into())
+                        .child(symon_mark(voice))
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_voice(cx))),
                 )
-                .on_drag(features::RailPane::Terminal, |drag, _, _, cx| {
-                    cx.new(|_| drag.clone())
-                }),
-            )
-            // Grid stays in code but off the rail until it earns a place (Q, 10-30).
-            .child(divider())
-            // AutomationsPage, as the desktop rail's Scheduled entry.
-            .child(tab(
-                "rail-scheduled",
-                Icon::Clock,
-                "Scheduled",
-                Tab::Scheduled,
-                || Command::Scheduled,
-            ))
-            .child(
-                button("rail-plugins", Icon::Puzzle, "Plugins", plugins_open).on_click(
-                    cx.listener(|this, _, window, cx| {
-                        this.show_customize_tab("plugins", window, cx);
-                    }),
-                ),
-            )
-            // RailMoreMenu, then PRs last, as CompactNavigationRail orders them.
-            .child(features::rail_more(self, cx))
+            })
+            // Settings lives in the profile menu and Tools (Q 2026-11-09).
             .children(top)
-            .child(divider())
-            .child(div().flex_1().min_h_0())
             .child(gauge(self, cx))
+            .child(div().flex_1().min_w_0())
             .children(features::rail(self, window, cx))
             .children(bottom)
+            // Every other destination opens from the Tools drawer.
+            .child(features::rail_more(self, cx))
             .into_any_element()
     }
 }

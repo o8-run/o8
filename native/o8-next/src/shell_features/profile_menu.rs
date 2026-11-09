@@ -20,12 +20,7 @@ impl ShellFeature for ProfileMenu {
             },
         }]
     }
-    fn rail(&self) -> &'static [RailItem] {
-        &[RailItem {
-            order: 20,
-            render: |s, window, cx| Some(button(s, window, cx)),
-        }]
-    }
+    // The dock places the profile itself, first on the left (Q 2026-11-09).
 }
 
 const DOCS_URL: &str = "https://o8.run";
@@ -40,6 +35,43 @@ struct Menu {
     /// how a sign-in or sign-out reaches the rail.
     photo_asked: bool,
     photo: Option<Arc<gpui::Image>>,
+    /// Opened by a click, so leaving the pointer does not close it.
+    pinned: bool,
+    /// Bumped on every hover in and out, so a stale close timer does nothing.
+    leave: u64,
+}
+
+/// Hovering the avatar opens the menu (Q 2026-11-09).
+fn hover_open(s: &mut Shell, cx: &mut Context<Shell>) {
+    let menu = s.features.get::<Menu>();
+    menu.leave += 1;
+    if !menu.open {
+        menu.open = true;
+        load_photo(s, cx);
+        cx.notify();
+    }
+}
+
+/// Leaving the avatar and the menu closes a hover-opened menu after 200 ms.
+fn hover_leave(s: &mut Shell, cx: &mut Context<Shell>) {
+    let menu = s.features.get::<Menu>();
+    menu.leave += 1;
+    if menu.pinned {
+        return;
+    }
+    let generation = menu.leave;
+    cx.spawn(async move |this, cx| {
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(200))
+            .await;
+        let _ = this.update(cx, |this, cx| {
+            let menu = this.features.get::<Menu>();
+            if menu.open && !menu.pinned && menu.leave == generation {
+                close(this, cx);
+            }
+        });
+    })
+    .detach();
 }
 
 /// The account photo, or None for anything that isn't a usable image.
@@ -81,12 +113,13 @@ fn load_photo(s: &mut Shell, cx: &mut Context<Shell>) {
 fn close(s: &mut Shell, cx: &mut Context<Shell>) {
     let menu = s.features.get::<Menu>();
     menu.open = false;
+    menu.pinned = false;
     menu.appearance = false;
     menu.help = false;
     cx.notify();
 }
 
-fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::AnyElement {
+pub(crate) fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::AnyElement {
     if s.connected && !s.features.get::<Menu>().photo_asked {
         load_photo(s, cx);
     }
@@ -100,7 +133,7 @@ fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::
             div()
                 .id("shell-profile")
                 .debug_selector(|| "shell-profile".into())
-                .size(px(44.))
+                .size(px(super::super::rail::TARGET))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -118,7 +151,7 @@ fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::
                 // Classic's rail: the account photo, or the account icon without one.
                 .child(match photo {
                     Some(photo) => gpui::img(photo)
-                        .size(px(27.))
+                        .size(px(22.))
                         .rounded_full()
                         .object_fit(gpui::ObjectFit::Cover)
                         .into_any_element(),
@@ -134,12 +167,21 @@ fn button(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::
                     )
                     .into_any_element(),
                 })
+                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                    if *hovered {
+                        hover_open(this, cx);
+                    } else {
+                        hover_leave(this, cx);
+                    }
+                }))
+                // A click pins the menu open, or closes a pinned one.
                 .on_click(cx.listener(|this, _, window, cx| {
                     let menu = this.features.get::<Menu>();
-                    if menu.open {
+                    if menu.open && menu.pinned {
                         close(this, cx);
                     } else {
                         menu.open = true;
+                        menu.pinned = true;
                         load_photo(this, cx);
                         this.capture(window, cx);
                         cx.notify();
@@ -392,6 +434,13 @@ fn menu(s: &mut Shell, viewport_width: f32, cx: &mut Context<Shell>) -> gpui::An
                             .id("profile-menu")
                             .debug_selector(|| "profile-menu".into())
                             .occlude()
+                            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                if *hovered {
+                                    this.features.get::<Menu>().leave += 1;
+                                } else {
+                                    hover_leave(this, cx);
+                                }
+                            }))
                             .w(px(width))
                             .max_h(px(340.))
                             .overflow_y_scroll()

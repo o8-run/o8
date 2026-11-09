@@ -40,19 +40,18 @@ impl Render for Shell {
         let slots = features::render_content(self, &frame, chrome.into_any_element(), window, cx);
         let rail = self.render_rail(window, cx);
         self.root(cx)
-            .pl(px(rail::WIDTH))
             .children(slots)
-            // The traffic-light corner above the rail moves the window too.
+            // The traffic-light corner moves the window too.
             .child(
                 div()
                     .absolute()
                     .top_0()
                     .left_0()
-                    .w(px(rail::WIDTH))
+                    .w(px(rail::LIGHTS))
                     .h(px(crate::theme::GEOMETRY.header))
                     .window_control_area(gpui::WindowControlArea::Drag),
             )
-            // Painted after the veil so the rail sits on the same glass as the content.
+            // Painted after the veil so the dock sits on the same glass as the sidebar.
             .child(rail)
     }
 }

@@ -54,7 +54,9 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
     draw(cx);
     assert!(shell.read_with(cx, |s, _| s.surfaces.customize.open
         && !s.surfaces.projects.open));
-    custom_click(cx, "shell-home");
+    // Picking the open Customize again from Tools closes it.
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-customize");
     let start = Instant::now();
     custom_click(cx, "rail-more");
     custom_click(cx, "rail-more-customize");
@@ -171,7 +173,9 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
     let retained_view = shell.read_with(cx, |s, _| {
         s.surfaces.customize.view.as_ref().unwrap().entity_id()
     });
-    custom_click(cx, "shell-home");
+    // Picking the open Customize again from Tools closes it.
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-customize");
     custom_click(cx, "rail-more");
     custom_click(cx, "rail-more-customize");
     assert_eq!(
@@ -206,7 +210,9 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
         .get("/api/prompt-library", &[("repoPath", &repo)])
         .unwrap();
     assert_eq!(empty["prompts"], json!([]));
-    custom_click(cx, "shell-home");
+    // Picking the open Customize again from Tools closes it.
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-customize");
     println!(
         "O8_NEXT_CUSTOMIZE_EVIDENCE {}",
         json!({"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":open_ms,"interactionToFrameMs":interaction})
@@ -294,7 +300,8 @@ fn customize_closes_by_button_key_and_destination(cx: &mut TestAppContext) {
     draw(cx);
     assert!(!shell.read_with(cx, |s, _| s.surfaces.customize.open));
     open_page(cx);
-    custom_click(cx, "rail-scheduled");
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-scheduled");
     assert!(
         !shell.read_with(cx, |s, _| s.surfaces.customize.open),
         "the page opens in front"
@@ -312,16 +319,46 @@ fn rail_plugins_opens_customize_on_its_tab(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     cx.run_until_parked();
-    custom_click(cx, "rail-plugins");
+    custom_click(cx, "rail-more");
+    custom_click(cx, "rail-more-plugins");
     assert!(shell.read_with(cx, |s, cx| s.customize_tab_open("plugins", cx)));
-    // Symon sits between home and the orchestrator, as in classic's rail.
-    let y = |cx: &mut VisualTestContext, id: &'static str| {
-        f32::from(cx.debug_bounds(id).expect(id).origin.y)
+    // The dock (Q 2026-11-09): profile, PRs and usage left to right, Tools
+    // last; Settings lives in the profile menu and Symon's orb is off the dock.
+    let x = |cx: &mut VisualTestContext, id: &'static str| {
+        f32::from(cx.debug_bounds(id).expect(id).origin.x)
     };
-    let (home, symon, run) = (
-        y(cx, "shell-home"),
-        y(cx, "rail-symon"),
-        y(cx, "rail-orchestrator"),
+    let (profile, prs, usage, tools) = (
+        x(cx, "shell-profile"),
+        x(cx, "rail-pull-requests"),
+        x(cx, "rail-usage"),
+        x(cx, "rail-more"),
     );
-    assert!(home < symon && symon < run, "{home} {symon} {run}");
+    assert!(
+        profile < prs && prs < usage && usage < tools,
+        "{profile} {prs} {usage} {tools}"
+    );
+    assert!(cx.debug_bounds("rail-symon").is_none());
+    assert!(cx.debug_bounds("dock-settings").is_none());
+}
+
+#[gpui::test]
+fn narrow_dock_folds_updates_into_tools(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--customize");
+    let (_shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("customize-narrow-dock.json"),
+        State {
+            sidebar_width: Some(200.),
+            ..State::default()
+        },
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    draw(cx);
+    // Under 240 px Tools carries Updates.
+    assert!(cx.debug_bounds("shell-profile").is_some());
+    assert!(cx.debug_bounds("rail-update").is_none());
+    custom_click(cx, "rail-more");
+    assert!(cx.debug_bounds("rail-more-updates").is_some());
 }

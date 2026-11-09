@@ -1189,7 +1189,21 @@ fn arc(fraction: f32) -> String {
     format!("M12 1.5A10.5 10.5 0 {large} 1 {x:.2} {y:.2}")
 }
 
+/// Whether an installer update is ready (the Tools drawer marks it in a narrow dock).
+pub(super) fn ready(s: &Shell) -> bool {
+    s.features.read::<State>().is_some_and(|state| state.pending.is_some())
+}
+
+/// Opens the update panel as a click on the button does; the Tools drawer's
+/// Updates row uses it when a narrow dock has no room for the button.
+pub(super) fn open(s: &mut Shell, cx: &mut Context<Shell>) {
+    show(s, false, cx);
+    s.features.get::<State>().pinned = true;
+    check_now(s, cx);
+}
+
 fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::AnyElement {
+    let compact = super::rail_more::compact(s);
     let state = s.features.get::<State>();
     // Frames are requested while rendering: ticks run outside any view, where
     // GPUI has no current view to schedule them for.
@@ -1223,6 +1237,15 @@ fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui:
     }
     let viewport = f32::from(window.viewport_size().height);
     let panel = open.then(|| panel(s, viewport, cx));
+    // A narrow dock keeps only the panel's anchor; Tools opens it.
+    if compact {
+        return div()
+            .relative()
+            .flex_shrink_0()
+            .size_0()
+            .children(panel)
+            .into_any_element();
+    }
     div()
         .relative()
         .flex_shrink_0()
@@ -1230,7 +1253,7 @@ fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui:
             div()
                 .id("rail-update")
                 .debug_selector(|| "rail-update".into())
-                .size(px(44.))
+                .size(px(super::super::rail::TARGET))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -1870,8 +1893,9 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
 
     div()
         .absolute()
-        .left(px(44. + 12.))
-        .bottom(px(0.))
+        // Above the dock, left-aligned to the button.
+        .left(px(0.))
+        .top(px(-8.))
         .child(
             gpui::deferred(
                 gpui::anchored()
