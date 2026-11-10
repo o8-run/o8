@@ -325,12 +325,17 @@ it.each(['delivered', 'busy', 'stopped'] as const)('hands a persisted rejection 
   rmSync(dirtyPath);
   if (outcome === 'busy') readiness.mockRejectedValueOnce(new Error('This worker still has an active run.'));
   let release!: () => void;
+  let entered!: () => void;
+  const atReadiness = new Promise<void>(resolve => { entered = resolve; });
   if (outcome === 'stopped') readiness.mockImplementationOnce(async () => {
-    await new Promise<void>(resolve => { release = resolve; }); return { ready: true };
+    const held = new Promise<void>(resolve => { release = resolve; });
+    entered(); await held; return { ready: true };
   });
   const pending = handlers.handleCorrectWorkers(args);
   if (outcome === 'stopped') {
-    await vi.waitFor(() => expect(release).toBeTypeOf('function'), { timeout: 15000 });
+    await Promise.race([atReadiness, pending.then(result => {
+      throw new Error(`Correction returned before the readiness barrier: ${JSON.stringify(result)}`);
+    })]);
     holdWorkerCorrections({ repoPath: repo, threadId: parent }); release();
   }
   const result = await pending;
