@@ -578,7 +578,7 @@ mod tests {
         );
         ready(&s, &mut v);
         assert!(
-            s.read_with(&v, |s, _| commands(s)).is_empty(),
+            s.read_with(&v, |s, _| listed(s, false)).is_empty(),
             "only a dev window lists the preview"
         );
         let ids = |s: &Shell| -> Vec<&'static str> {
