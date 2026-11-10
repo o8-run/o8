@@ -7,8 +7,7 @@
 - A file pill's peek shows the file's length and its last change.
 - Settings › Voice › Polish edits your words, snippets and instructions. Voice Settings opens at its own size, and the dictation waveform follows your voice more closely.
 - Update can't be clicked into a stuck state, and a second click no longer interrupts a running install.
-- The PR panel blocks a merge only on required checks, and Merge joins the merge queue.
-- Long chats page in faster.
+- The PR panel blocks a merge only on required checks, and on a branch with a merge queue, Merge joins it.
 - A hidden terminal keeps colored prompts after it resyncs.
 - Workers stay inside their own lane's branch, notes, questions and inbox, and a merge lands the exact commit that was reviewed.
 - More of o8's server runs natively, so more of the app keeps working without the Next server.
