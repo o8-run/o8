@@ -13,6 +13,7 @@ vi.stubEnv('CORTEX_IDE_DATA_DIR', join(root, 'data'));
 vi.stubEnv('O8_SKIP_PRELAUNCH_TYPECHECK', '1');
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { performWorktreeSideMerge } = await import('@/lib/lane/worktree-side-merge');
+const mergeGit = await import('@/lib/lane/worktree-merge-git');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { bindOwnedPacketSession } = await import('./helpers/managed-packet-worktree');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
@@ -46,7 +47,7 @@ async function makeLane(name: string) {
 }
 
 it('excludes a merge during native drain and holds admitted publication through settlement', async () => {
-  const { repo, origin, lane, manager } = await makeLane('merge');
+  const { origin, lane, manager } = await makeLane('merge');
   const merge = () => performWorktreeSideMerge({ lane, command: { verb: 'merge', laneId: lane.id, actor: 'system',
     orchestratorReviewed: true }, actor: 'system', gateResult: { passed: true, violations: [] },
     createLaneActionApproval: async (_lane, _actor, input) => ({ ok: false, laneId: lane.id, note: input.note }) });
@@ -63,9 +64,13 @@ it('excludes a merge during native drain and holds admitted publication through 
     expect(git(origin, 'show', 'main:file.txt')).toBe('base');
   } finally { rmSync(directory, { recursive: true }); }
   const started = join(root, 'publishing'); const released = join(root, 'release-publication');
-  const hook = join(repo, '.git/hooks/pre-push');
-  writeFileSync(hook, `#!/bin/sh\nwhile read local_ref local_sha remote_ref remote_sha; do\nif [ "$remote_ref" = refs/heads/main ]; then\ntouch '${started}'\nwhile [ ! -f '${released}' ]; do sleep 0.02; done\nfi\ndone\n`);
-  chmodSync(hook, 0o700);
+  // Hold o8's push of main until the admitted publication has been checked.
+  const publishBase = mergeGit.pushExactBase;
+  const push = vi.spyOn(mergeGit, 'pushExactBase').mockImplementation(async (...args) => {
+    writeFileSync(started, '');
+    while (!existsSync(released)) await new Promise((resolve) => setTimeout(resolve, 20));
+    return publishBase(...args);
+  });
   const pending = merge();
   try {
     await vi.waitFor(() => expect(existsSync(started)).toBe(true), { timeout: 10_000 });
@@ -78,6 +83,7 @@ it('excludes a merge during native drain and holds admitted publication through 
   expect(readdirSync(join(root, 'data/work-launches'))).toEqual([]);
   expect(getLane(lane.id)?.status).toBe('completed');
   cleanup.mockRestore();
+  push.mockRestore();
 }, 90_000);
 
 
