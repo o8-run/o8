@@ -35,7 +35,8 @@ const { claimApprovalResolution } = await import('@/lib/approvals/resolution');
 const { currentSpokenReviewGovernanceFingerprint } = await import('@/lib/approvals/spoken-review-guard');
 const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
 const { getLaneSpokenDiffFacts } = await import('@/lib/lane/lane-diff-facts');
-const { createDetachedIntegrationWorktree, resolveCurrentBranch } = await import('@/lib/lane/worktree-merge-git');
+const mergeGit = await import('@/lib/lane/worktree-merge-git');
+const { createDetachedIntegrationWorktree, resolveCurrentBranch } = mergeGit;
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { getSqlite } = await import('@/lib/db');
 const {
@@ -66,6 +67,17 @@ function git(cwd: string, args: string[]): string {
 function commitAll(cwd: string, message: string) {
   git(cwd, ['add', '-A']);
   git(cwd, ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-m', message]);
+}
+
+/** Another client advances origin's main by one commit that writes `file`. */
+function advanceOrigin(origin: string, file: string, content: string) {
+  const clone = mkdtempSync(join(os.tmpdir(), 'o8-merge-upstream-'));
+  tempDirs.push(clone);
+  git(clone, ['clone', '-q', '--branch', 'main', origin, '.']);
+  mkdirSync(join(clone, file, '..'), { recursive: true });
+  writeFileSync(join(clone, file), content);
+  commitAll(clone, 'upstream moved');
+  git(clone, ['push', '-q', 'origin', 'main']);
 }
 
 async function waitFor(
@@ -229,6 +241,7 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   try {
     await updateOperatorDefaults({ productTelemetryEnabled: false });
     writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
@@ -705,18 +718,6 @@ describe('worktree-side merge with real git repos', () => {
       runtime: 'codex',
       packetId: 'pkt-lease-second',
     });
-    const hookPath = join(repo, '.git', 'hooks', 'pre-push');
-    writeFileSync(hookPath, [
-      '#!/bin/sh',
-      'marker="$(git rev-parse --git-common-dir)/o8-test-slow-push"',
-      'if [ ! -f "$marker" ]; then',
-      '  : > "$marker"',
-      '  sleep 7',
-      'fi',
-      '',
-    ].join('\n'));
-    chmodSync(hookPath, 0o755);
-
     const resultPath = join(repo, '.git', 'o8-test-first-merge-result.json');
     const child = spawn(process.execPath, [
       './node_modules/vitest/vitest.mjs', 'run',
@@ -731,6 +732,7 @@ describe('worktree-side merge with real git repos', () => {
         O8_SKIP_PRELAUNCH_TYPECHECK: '1',
         O8_TEST_MERGE_LANE_ID: firstLane.id,
         O8_TEST_MERGE_RESULT_PATH: resultPath,
+        O8_TEST_SLOW_FIRST_PUSH_MS: '7000',
       },
       stdio: 'pipe',
     });
@@ -804,33 +806,18 @@ describe('worktree-side merge with real git repos', () => {
   }, 20_000);
 
   it('auto-rebases once when origin/main moves between rebase and final fast-forward', async () => {
-    const { repo, origin, root } = makeRepo('o8-merge-base-moved');
+    const { repo, origin } = makeRepo('o8-merge-base-moved');
     const worktree = await makeWorktree(repo, 'pkt-base-moved', 'inline/base-moved');
     writeFileSync(join(worktree.path, 'worker.txt'), 'worker\n');
     commitAll(worktree.path, 'worker change');
 
-    const hookFlag = join(root, 'base-moved-once');
-    const hook = join(repo, '.git', 'hooks', 'pre-push');
-    writeFileSync(hook, [
-      '#!/bin/sh',
-      'unset $(git rev-parse --local-env-vars)',
-      `if [ ! -f "${hookFlag}" ]; then`,
-      `  touch "${hookFlag}"`,
-      '  tmp="$(mktemp -d)"',
-      `  git clone "${origin}" "$tmp/repo" >/dev/null 2>&1`,
-      '  cd "$tmp/repo" || exit 1',
-      '  git checkout main >/dev/null 2>&1',
-      '  git config user.name o8-test',
-      '  git config user.email o8@example.test',
-      '  printf "upstream\\n" > upstream.txt',
-      '  git add upstream.txt',
-      '  git commit -m "upstream moved" >/dev/null 2>&1',
-      '  git push origin main >/dev/null 2>&1',
-      'fi',
-      'exit 0',
-      '',
-    ].join('\n'));
-    chmodSync(hook, 0o755);
+    // Another client advances origin while o8 publishes the worker's branch,
+    // after the rebase and before the final fast-forward.
+    const publishWorkerBranch = mergeGit.pushWorkerBranchBestEffort;
+    vi.spyOn(mergeGit, 'pushWorkerBranchBestEffort').mockImplementationOnce(async (...args) => {
+      advanceOrigin(origin, 'upstream.txt', 'upstream\n');
+      return publishWorkerBranch(...args);
+    });
 
     const lane = createLane({
       repoPath: repo,
@@ -851,7 +838,7 @@ describe('worktree-side merge with real git repos', () => {
   }, 20_000);
 
   async function escalateBaseMovedMerge(name: string, workerPath: string) {
-    const { repo, origin, root } = makeRepo(name);
+    const { repo, origin } = makeRepo(name);
     const worktree = await makeWorktree(repo, `pkt-${name}`, `inline/${name}`);
     mkdirSync(join(worktree.path, workerPath, '..'), { recursive: true });
     writeFileSync(join(worktree.path, workerPath), 'worker\n');
@@ -860,32 +847,13 @@ describe('worktree-side merge with real git repos', () => {
     // Each time a rebased candidate lands on the operator checkout's merge ref,
     // origin/main moves again, so the auto-rebase retries run out and the
     // merge escalates as a base-moved fast-forward failure.
-    const moveOrigin = [
-      'unset $(git rev-parse --local-env-vars)',
-      'tmp="$(mktemp -d)"',
-      `git clone "${origin}" "$tmp/repo" >/dev/null 2>&1`,
-      'cd "$tmp/repo" || exit 0',
-      'git checkout main >/dev/null 2>&1',
-      'git config user.name o8-test',
-      'git config user.email o8@example.test',
-      'mkdir -p docs',
-      'n="$(ls docs | wc -l | tr -d " ")"',
-      'printf "upstream\\n" > "docs/upstream-$n.md"',
-      'git add docs',
-      'git commit -m "upstream moved" >/dev/null 2>&1',
-      'git push origin main >/dev/null 2>&1',
-      `touch "${join(root, 'base-moved')}"`,
-    ];
-    const hooks = join(repo, '.git', 'hooks');
-    writeFileSync(join(hooks, 'reference-transaction'), [
-      '#!/bin/sh',
-      '[ "$1" = committed ] || exit 0',
-      'grep -v "^[0-9a-f]* 0\\{40\\} " | grep -q " refs/o8/merge/" || exit 0',
-      ...moveOrigin,
-      'exit 0',
-      '',
-    ].join('\n'));
-    chmodSync(join(hooks, 'reference-transaction'), 0o755);
+    let moves = 0;
+    const landCandidate = mergeGit.fetchWorkerHeadIntoMainRepo;
+    vi.spyOn(mergeGit, 'fetchWorkerHeadIntoMainRepo').mockImplementation(async (...args) => {
+      const landed = await landCandidate(...args);
+      advanceOrigin(origin, `docs/upstream-${moves++}.md`, 'upstream\n');
+      return landed;
+    });
 
     const lane = createLane({
       repoPath: repo,
@@ -903,7 +871,7 @@ describe('worktree-side merge with real git repos', () => {
       gateResult: { passed: true, violations: [] },
       createLaneActionApproval,
     });
-    expect(existsSync(join(root, 'base-moved'))).toBe(true);
+    expect(moves).toBeGreaterThan(0);
     expect(result.ok).toBe(false);
     const approval = getApproval(result.approvalId!);
     expect(approval?.policyRuleId).toBe('fast_forward_failure_escalation');
@@ -932,19 +900,12 @@ describe('worktree-side merge with real git repos', () => {
     const worktree = await makeWorktree(repo, 'pkt-base-deleted', 'inline/base-deleted');
     writeFileSync(join(worktree.path, 'worker.txt'), 'worker\n');
     commitAll(worktree.path, 'worker change');
-    const hook = join(repo, '.git', 'hooks', 'pre-push');
-    writeFileSync(hook, [
-      '#!/bin/sh',
-      'unset $(git rev-parse --local-env-vars)',
-      'while read local_ref local_sha remote_ref remote_sha; do',
-      '  if [ "$remote_ref" = "refs/heads/main" ]; then',
-      `    git --git-dir="${origin}" update-ref -d refs/heads/main`,
-      '  fi',
-      'done',
-      'exit 0',
-      '',
-    ].join('\n'));
-    chmodSync(hook, 0o755);
+    // Another client deletes origin's main as o8 publishes the merge.
+    const publishBase = mergeGit.pushExactBase;
+    vi.spyOn(mergeGit, 'pushExactBase').mockImplementation(async (...args) => {
+      git(origin, ['update-ref', '-d', 'refs/heads/main']);
+      return publishBase(...args);
+    });
     const lane = createLane({
       repoPath: repo,
       worktreePath: worktree.path,
@@ -962,7 +923,7 @@ describe('worktree-side merge with real git repos', () => {
   }, 20_000);
 
   it('keeps the reviewed packet worktree recoverable when a spoken retry conflicts', async () => {
-    const { repo, origin, root } = makeRepo('o8-spoken-retry-conflict');
+    const { repo, origin } = makeRepo('o8-spoken-retry-conflict');
     const worktree = await makeWorktree(repo, 'pkt-spoken-retry-conflict', 'inline/spoken-retry-conflict');
     writeFileSync(join(worktree.path, 'file.txt'), 'worker\n');
     commitAll(worktree.path, 'worker conflict change');
@@ -1000,28 +961,13 @@ describe('worktree-side merge with real git repos', () => {
     const reviewedLaneStatus = getLane(lane.id)!.status;
     const claim = claimApprovalResolution(approval.id, 'approve', 'desktop', undefined, approval.updatedAt);
 
-    const hookFlag = join(root, 'spoken-base-moved-once');
-    const hook = join(repo, '.git', 'hooks', 'pre-push');
-    writeFileSync(hook, [
-      '#!/bin/sh',
-      'unset $(git rev-parse --local-env-vars)',
-      `if [ ! -f "${hookFlag}" ]; then`,
-      `  touch "${hookFlag}"`,
-      '  tmp="$(mktemp -d)"',
-      `  git clone "${origin}" "$tmp/repo" >/dev/null 2>&1`,
-      '  cd "$tmp/repo" || exit 1',
-      '  git checkout main >/dev/null 2>&1',
-      '  git config user.name o8-test',
-      '  git config user.email o8@example.test',
-      '  printf "upstream\\n" > file.txt',
-      '  git add file.txt',
-      '  git commit -m "upstream conflict" >/dev/null 2>&1',
-      '  git push origin main >/dev/null 2>&1',
-      'fi',
-      'exit 0',
-      '',
-    ].join('\n'));
-    chmodSync(hook, 0o755);
+    // Another client pushes a conflicting change while o8 publishes the
+    // worker's branch, so the retry's rebase conflicts.
+    const publishWorkerBranch = mergeGit.pushWorkerBranchBestEffort;
+    vi.spyOn(mergeGit, 'pushWorkerBranchBestEffort').mockImplementationOnce(async (...args) => {
+      advanceOrigin(origin, 'file.txt', 'upstream\n');
+      return publishWorkerBranch(...args);
+    });
 
     const result = await performWorktreeSideMerge({
       lane,
@@ -1127,17 +1073,19 @@ describe('typecheck escalation counters through real merge attempts', () => {
       packets: [packetFixture(packetId, repo, retries)],
     });
 
-    const worktree = await makeWorktree(repo, packetId, `inline/${packetId}`);
-    const binDir = join(worktree.path, 'node_modules', '.bin');
-    mkdirSync(binDir, { recursive: true });
-    const tscPath = join(binDir, 'tsc');
-    writeFileSync(tscPath, [
-      '#!/bin/sh',
-      "echo \"src/broken.ts(1,14): error TS2322: Type 'number' is not assignable to type 'string'.\"",
-      'exit 2',
+    // The merge typecheck runs the repository install's compiler.
+    const compiler = join(repo, 'node_modules', 'typescript', 'bin', 'tsc');
+    mkdirSync(join(compiler, '..'), { recursive: true });
+    writeFileSync(compiler, [
+      "console.log(\"src/broken.ts(1,14): error TS2322: Type 'number' is not assignable to type 'string'.\");",
+      'process.exit(2);',
       '',
     ].join('\n'));
-    chmodSync(tscPath, 0o755);
+
+    const worktree = await makeWorktree(repo, packetId, `inline/${packetId}`);
+    // The lane's dependencies are installed, so the merge runs its typecheck.
+    mkdirSync(join(worktree.path, 'node_modules', 'typescript'), { recursive: true });
+    writeFileSync(join(worktree.path, 'node_modules', 'typescript', 'package.json'), '{}\n');
     writeFileSync(join(worktree.path, 'src', 'broken.ts'), 'export const broken: string = 123;\n');
     commitAll(worktree.path, 'break typecheck');
 
