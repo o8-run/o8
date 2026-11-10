@@ -1,11 +1,11 @@
-import { mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { pushLfsObjects } from '@/lib/git/lfs-push';
 import { NO_REPOSITORY_HOOKS } from '@/lib/git/no-repository-hooks';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { listReposFresh } from '@/lib/repos/registry';
-import { laneGit, withLaneCommitDirectory, type LaneCommitDirectory } from '@/lib/lane/lane-git';
+import { laneGit, removeAbandonedDirectories, withLaneCommitDirectory, type LaneCommitDirectory } from '@/lib/lane/lane-git';
 
 const execFileAsync = materializationAwareExecFile;
 
@@ -237,6 +237,8 @@ async function copyTransportConfig(
   }
 }
 
+const INTEGRATION_DIRECTORY_PREFIX = 'integration-';
+
 async function removeIntegrationParentBestEffort(parent: string): Promise<void> {
   try {
     await rm(parent, { recursive: true, force: true });
@@ -258,7 +260,11 @@ export async function createDetachedIntegrationWorktree(input: {
   sourceWorktreePath: string;
   sourceSha: string;
 }): Promise<DetachedIntegrationWorktree> {
-  const parent = await mkdtemp(join(tmpdir(), 'o8-reviewed-integration-'));
+  // The worker sandbox denies the data dir, unlike the system temp dir.
+  const root = resolve(getDataDir(), 'lane-merge');
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await removeAbandonedDirectories(root, INTEGRATION_DIRECTORY_PREFIX);
+  const parent = await mkdtemp(join(root, INTEGRATION_DIRECTORY_PREFIX));
   const integrationPath = join(parent, 'worktree');
   try {
     await git(input.repoPath, [
