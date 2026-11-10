@@ -1,20 +1,13 @@
-- Setup has its own pages again. A first launch walks through choosing a project or cloning one from GitHub, picking your lead and worker tools, and meeting Symon with the microphone and screen permissions it needs, and it resumes where you stopped.
-- Fn dictation no longer cancels itself when your saved microphone moves to a different USB port. It falls back to the default input, pastes, and is saved to dictation history again.
-- Voice settings keep your dictionary, replacements and polish preferences in their own file, separate from your API keys.
-- Terminal View turns copy into the chat, and a thread offers Reopen when its chat is newer than the CLI session. Each thread keeps its Terminal View choice across relaunches.
-- On first launch, import your existing Codex and Claude threads.
-- Home is the one place for work without a project, and a finished shell card stays with its thread across a relaunch.
-- Mark up an attached image before sending it.
-- Worktree, script and terminal pills jump to what they name, and a sent message keeps its pills after a restart.
-- A stopped turn says Stopped, even before any output, and archiving a thread or shift-clicking New opens the new thread.
-- Menus, tooltips and dialogs draw over inline visualizations, and info toasts start below split pane headers.
-- The PR panel shows GitLab merge requests.
 - Fable 5.2 is the composer's Fable and the default Fable lead, and usage history prices it and its fast mode. Fable 5.1 stays selectable in Settings.
-- Usage history prices Fable 5, Opus 4.5 and 1-hour cache writes, and counts Claude usage that has no price yet.
-- On Linux, voice provider keys can be stored in the Secret Service.
-- Files up to 128 MiB open in the editor.
-- Cmd-K opens the palette after you close the last right panel tab, the sidebar project menu closes on a click outside it, the model picker keeps its size from the first frame, and a refused send shows the queue's own reason.
-- Teams sharing one checkout settle cleanly when a member is lost, and a failed launch keeps its error.
-- The o8 command picks a supported Node version, and says which versions it supports when none qualifies.
-- Clone errors no longer include credentials from a clone URL.
-- o8 next builds and starts on Windows x64 in CI.
+- The sidebar has an Inbox, a one-row head, and the navigation in a dock at its foot.
+- The right panel's empty tab is one compact tool list with a letter key for each tool. Opening the Browser keeps the panel's other tabs.
+- The files-changed pill floats over the transcript instead of cutting it off, and an empty chat shows its heading.
+- Stop holds a delegated worker, and Stop all also stops a worker whose packet was archived mid-turn.
+- A chat's unsent draft survives a relaunch or an update.
+- A file pill's peek shows the file's length and its last change.
+- Settings › Voice › Polish edits your words, snippets and instructions. Voice Settings opens at its own size, and the dictation waveform follows your voice more closely.
+- Update can't be clicked into a stuck state, and a second click no longer interrupts a running install.
+- The PR panel blocks a merge only on required checks, and on a branch with a merge queue, Merge joins it.
+- A hidden terminal keeps colored prompts after it resyncs.
+- Workers stay inside their own lane's branch, notes, questions and inbox, and a merge lands the exact commit that was reviewed.
+- More of o8's server runs natively, so more of the app keeps working without the Next server.
