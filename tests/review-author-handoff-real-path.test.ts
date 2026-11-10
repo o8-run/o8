@@ -13,6 +13,8 @@ vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => true) }));
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn(), triggerScanIfStale: vi.fn(), startChangePolling: vi.fn(), stopChangePolling: vi.fn() }));
 vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] }, reasoningEfforts: { 'gpt-5.6-terra': ['low'] } }) }));
+const sourceCheckout = process.cwd();
+const sourceHead = execFileSync('git', ['-C', sourceCheckout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-review-author-')));
 const data = join(root, 'data'); const repo = join(data, 'repo'); const bin = join(root, 'codex');
 mkdirSync(join(data, 'chat-history'), { recursive: true }); mkdirSync(repo);
@@ -23,17 +25,22 @@ for (const [key, value] of Object.entries({ O8_DATA_DIR: data, CORTEX_IDE_DATA_D
   O8_CODEX_BIN: bin, O8_CRASH_SURVIVABLE_WORKERS: '0', O8_WORKER_SANDBOX: '0' })) vi.stubEnv(key, value);
 writeFileSync(bin, `#!/usr/bin/env node
 if (process.argv.includes('--version')) { console.log('codex-cli 1.0.0'); process.exit(0); }
+if (!process.argv.includes('exec')) process.exit(0);
+const fs = require('node:fs');
+const cwd = fs.realpathSync(process.cwd());
+if (cwd !== ${JSON.stringify(repo)} && !cwd.startsWith(${JSON.stringify(join(data, 'worktrees') + '/')})) {
+ console.error('Fixture worker refused an unowned checkout'); process.exit(1);
+}
 const emit = value => console.log(JSON.stringify({...value, timestamp: new Date().toISOString()}));
 emit({type:'thread.started', thread_id:'fixture-worker'});
 const finish = () => {
-if (process.cwd() !== ${JSON.stringify(repo)}) {
+if (cwd !== ${JSON.stringify(repo)}) {
  const {execFileSync} = require('node:child_process');
  require('node:fs').writeFileSync('answer.txt', 'fixture result');
  execFileSync('git', ['add', '--', 'answer.txt']);
  execFileSync('git', ['-c', 'user.name=o8 test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture author']);
 }
 emit({type:'item.completed', item:{id:'answer', type:'agent_message', text:'Corrected result'}}); emit({type:'turn.completed',usage:{input_tokens:0,output_tokens:0}}); };
-const fs = require('node:fs');
 const timer = setInterval(() => { if (fs.existsSync(${JSON.stringify(join(root, 'release-worker'))})) { clearInterval(timer); finish(); } }, 25);
 `); chmodSync(bin, 0o755);
 const parent = 'thoughts-correction-parent';
@@ -81,6 +88,7 @@ afterAll(async () => {
   const timer = (globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>)[Symbol.for('o8.ownedSession.refreshTimer.codex')];
   if (timer) clearInterval(timer);
   closeDb(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(root, { recursive: true, force: true });
+  expect(execFileSync('git', ['-C', sourceCheckout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(sourceHead);
 });
 
 const { POST: submitReview } = await import('@/app/api/orchestrator/review/route');
