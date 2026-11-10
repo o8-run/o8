@@ -4,9 +4,10 @@ import { addSessionRule } from '@/lib/db/session-rules-store';
 import { relatedWorkerMembership } from '@/lib/mcp/worker-observation';
 import { readOwnedRecoveryState } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
 import { holdPendingOwnedCorrections, withOwnedActionAdmission } from '@/lib/runtimes/shared/owned-session/action-admission';
+import { steerPacket } from './operator-mission-service/steer';
 import { performRuntimeAction } from '@/lib/runtime/actions';
 import { findLaneByPacket } from '@/lib/lane/registry';
-import { packetSteerHoldReason } from '@/lib/lane/packet-stop-hold';
+import { packetOperatorCorrectionHoldReason } from '@/lib/lane/packet-stop-hold';
 import { assertSharedCheckoutOwner, readActiveSharedCheckoutTeam } from './shared-checkout-team';
 import { validateComposerQueueTarget } from './composer-queue';
 import { withSessionRuleMutation } from './session-merge-restriction';
@@ -32,7 +33,7 @@ export function listWorkerCorrections(target: ComposerQueueTarget): WorkerCorrec
     .all(target.repoPath, target.threadId) as CorrectionRow[]).map(receipt);
 }
 
-function assertCurrentMember(target: ComposerQueueTarget, surfaceId: string): void {
+function assertCurrentMember(target: ComposerQueueTarget, surfaceId: string) {
   const member = relatedWorkerMembership({ repoPath: target.repoPath, parentThreadId: target.threadId }).find(item => item.surfaceId === surfaceId);
   if (!member || member.membership !== 'active') throw new Error('Worker is no longer active in this conversation.');
   if (member.checkoutMode === 'shared') {
@@ -41,8 +42,9 @@ function assertCurrentMember(target: ComposerQueueTarget, surfaceId: string): vo
     if (!team?.members.some(item => item.surfaceId === surfaceId && item.state === 'running')) throw new Error('Worker ownership changed.');
   } else {
     const lane = member.packetId ? findLaneByPacket(member.packetId) : null;
-    if (!lane || lane.sessionKey !== surfaceId || packetSteerHoldReason(member.packetId!)) throw new Error('Packet is held, closed, or bound to another worker.');
+    if (!lane || lane.sessionKey !== surfaceId || packetOperatorCorrectionHoldReason(member.packetId!)) throw new Error('Packet is held, closed, or bound to another worker.');
   }
+  return member;
 }
 
 export async function listCorrectableWorkers(target: ComposerQueueTarget): Promise<CorrectableWorker[]> {
@@ -52,7 +54,7 @@ export async function listCorrectableWorkers(target: ComposerQueueTarget): Promi
     // These stores enforce exact-run admission under their owned surface lock.
     if (!['codex', 'claude-code'].includes(member.runtime)) continue;
     const run = await readOwnedRecoveryState(member.surfaceId);
-    if (!run.owned || !run.runId || !run.automaticRecoveryAllowed || run.interrupted) continue;
+    if (!run.owned || !run.runId || !run.operatorCorrectionAllowed || run.interrupted) continue;
     const team = member.checkoutMode === 'shared' ? readActiveSharedCheckoutTeam(target.repoPath) : null;
     workers.push({ surfaceId: member.surfaceId, runId: run.runId, runtime: member.runtime,
       taskName: team?.members.find(item => item.surfaceId === member.surfaceId)?.taskName ?? member.packetId ?? member.surfaceId,
@@ -104,7 +106,7 @@ export async function correctWorkers(input: ComposerQueueTarget & { id: string; 
   for (const selected of correction.targets) {
     assertCurrentMember(target, selected.surfaceId);
     const run = await readOwnedRecoveryState(selected.surfaceId);
-    if (!run.owned || !run.automaticRecoveryAllowed || run.runId !== selected.runId || run.interrupted
+    if (!run.owned || !run.operatorCorrectionAllowed || run.runId !== selected.runId || run.interrupted
       || !/^(codex-owned:|claude-code-owned:)/.test(selected.surfaceId)) throw new Error('A selected worker changed, stopped, or cannot accept a correction. Refresh its state.');
   }
   const created = await withSessionRuleMutation(target.threadId, () => {
@@ -149,10 +151,20 @@ export async function correctWorkers(input: ComposerQueueTarget & { id: string; 
         });
         update(input.id, selected.surfaceId, run.outcome === 'running' ? 'stopped' : 'held', run.outcome === 'running' ? 'Worker stopped. No continuation was sent.' : 'Pending corrections canceled. Worker was last observed idle; no live interruption was claimed.'); continue;
       }
-      const result = await withOwnedActionAdmission({ correctionId: input.id, ...selected, allowInterrupted: interruptedByCorrection, check }, () => performRuntimeAction({
-        action: 'steer', surfaceId: selected.surfaceId, message: withSessionRules(correction.message, target.threadId),
-        clientMutationId: `${input.id}-${selected.surfaceId}`, steerSource: 'operator',
-      }));
+      const result = await withOwnedActionAdmission({ correctionId: input.id, ...selected, allowInterrupted: interruptedByCorrection, check }, async () => {
+        const member = assertCurrentMember(target, selected.surfaceId);
+        const message = withSessionRules(correction.message, target.threadId);
+        const clientMutationId = `${input.id}-${selected.surfaceId}`;
+        if (member.checkoutMode === 'isolated' && member.packetId) {
+          // Reuse the governed steer lifecycle and managed-run grant. A correction
+          // is one immediate attempt; a busy refusal must never enqueue a later send.
+          const delivered = await steerPacket({ packetId: member.packetId, message, clientMutationId,
+            source: 'operator', immediate: true });
+          return { ok: delivered.deliveryState === 'delivered', note: delivered.note };
+        }
+        return performRuntimeAction({ action: 'steer', surfaceId: selected.surfaceId, message,
+          clientMutationId, steerSource: 'operator' });
+      });
       update(input.id, selected.surfaceId, result.ok ? 'delivered' : 'unavailable', result.ok
         ? 'Runtime accepted a new turn on the same worker. Application of the correction is not yet acknowledged.' : result.note);
     } catch (error) { update(input.id, selected.surfaceId, 'unknown', error instanceof Error ? error.message : 'Delivery outcome unknown. Inspect this worker before retrying.'); }

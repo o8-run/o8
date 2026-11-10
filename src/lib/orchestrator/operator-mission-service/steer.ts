@@ -38,6 +38,8 @@ export interface SteerPacketInput {
   message: string;
   source?: string;
   clientMutationId?: string;
+  /** Exact-run corrections must not become deferred sends. */
+  immediate?: boolean;
 }
 
 export interface SteerPacketResult {
@@ -174,6 +176,7 @@ export async function steerPacket({
   message,
   source,
   clientMutationId,
+  immediate,
 }: SteerPacketInput): Promise<SteerPacketResult> {
   const lane = findSteerablePacketLane(packetId);
   if (!lane) {
@@ -197,7 +200,7 @@ export async function steerPacket({
   try {
     const steerEvent = recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', {
       packetId, source: steerSource, message, clientMutationId,
-      sessionKey: lane.sessionKey, deliveryState: 'queued',
+      sessionKey: lane.sessionKey, deliveryState: immediate ? 'immediate' : 'queued',
       stopVersion: correctionStopVersion(`worker:${lane.sessionKey}`),
     });
     return await deliverQueuedPacketSteer(steerEvent);

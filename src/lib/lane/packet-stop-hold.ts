@@ -99,6 +99,17 @@ export function packetAutomaticRecoveryHoldReason(packetId: string): string | nu
   return admission.allowed ? null : admission.reason;
 }
 
+/** An operator correction may resume reviewable work, never an automatic retry. */
+export function packetOperatorCorrectionHoldReason(packetId: string): string | null {
+  const packet = readManagedRunPacket(packetId);
+  if (!packet) return 'packet_not_found';
+  const stopped = recoveryStopReason(packet) || packetSteerHoldReason(packetId);
+  if (stopped) return stopped;
+  const admission = managedRunAdmissionForPacket(packet);
+  return admission.allowed || (admission.reason === 'packet_terminal' && packet.status === 'awaiting_review'
+    && packet.releaseState !== 'released') ? null : admission.reason;
+}
+
 /** Observe a finished current turn without granting automatic resume authority. */
 export function packetCompletionHoldReason(packetId: string): string | null {
   const packet = readManagedRunPacket(packetId);

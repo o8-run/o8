@@ -48,23 +48,30 @@ export async function deliverSteerEvent(
 ): Promise<SteerPacketResult> {
   const queued: SteerPacketResult = { packetId: String(event.payload.packetId), laneId: event.laneId,
     note: QUEUED_STEER_NOTE, deliveryState: 'queued' };
+  const immediate = event.payload.deliveryState === 'immediate';
+  const notAdmitted = () => {
+    if (!immediate) return queued;
+    const note = 'The correction could not be delivered immediately. Nothing was queued; inspect the worker before sending again.';
+    recordState(event, 'failed', note);
+    throw new Error(note);
+  };
   const owner = probeMetadataLockProcessIdentitySync(process.pid);
-  if (owner.state !== 'live') return queued;
+  if (owner.state !== 'live') return notAdmitted();
   // Claim before crossing the runtime seam. A crashed sending claim is never
   // replayed: its provider-side outcome is unknown and requires inspection.
   const claimed = getSqlite().transaction(() => {
     const first = openSteers().find(row => row.lane_id === event.laneId);
-    if (first?.id !== event.id || first.state !== 'queued') return null;
+    if (immediate ? Boolean(first) : first?.id !== event.id || first.state !== 'queued') return null;
     return recordState(event, 'sending', 'Delivery in progress. If interrupted, inspect the worker before sending again.',
       { ownerPid: process.pid, ownerIdentity: owner.identity }).id;
   }).immediate();
-  if (!claimed) return queued;
+  if (!claimed) return notAdmitted();
   try {
     const result = await deliver(claimed);
     recordState(event, 'delivered', 'Delivered to the worker.');
     return { ...result, deliveryState: 'delivered' };
   } catch (error) {
-    if (error instanceof SteerDeferredError) {
+    if (error instanceof SteerDeferredError && !immediate) {
       recordState(event, 'queued', QUEUED_STEER_NOTE);
       return queued;
     }
