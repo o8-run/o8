@@ -1,7 +1,14 @@
 use super::*;
 
-/// The project bar over an empty chat's composer: which project the new chat
-/// works in, and a list to start it in another one instead.
+/// An empty chat's context row under the composer: which project the new
+/// chat works in (with a list to start it in another one), the checkout, the
+/// branch and access.
+///
+/// The empty chat's heading and row follow T3 Code
+/// (https://github.com/pingdotgg/t3code, MIT),
+/// apps/web/src/components/chat/DraftHeroHeadline.tsx and
+/// DraftHeroProjectHeading.tsx at commit
+/// f58fad04162165653bf06f0c987bbfb0074a8a4b. Copyright (c) 2026 T3 Tools Inc.
 #[derive(Default)]
 pub(crate) struct ProjectBar {
     /// (path, name) for every project this machine lists, read once.
@@ -42,7 +49,7 @@ fn repos(body: &Value) -> Vec<(String, String)> {
 impl Surface {
     /// The selected chat's project while it has nothing in it yet: a chat New
     /// chat made, with no messages, no turn running and no send on its way.
-    fn empty_chat_project(&self) -> Option<String> {
+    pub(crate) fn empty_chat_project(&self) -> Option<String> {
         let id = self.selected.as_ref()?;
         if !id.starts_with("thoughts-next-")
             || !self.rows.is_empty()
@@ -198,13 +205,7 @@ impl Surface {
             )
             .with_priority(1)
         });
-        Some(
-            div()
-                .w_full()
-                .flex()
-                .pb(px(6.))
-                .child(
-                    div().relative().children(menu).child(
+        let chip = div().relative().children(menu).child(
                         div()
                             .id("composer-project-chip")
                             .debug_selector(|| "composer-project-chip".into())
@@ -236,8 +237,142 @@ impl Surface {
                                 }
                                 cx.notify();
                             })),
-                    ),
+                    );
+        let routing = self.composer_routing(cx).unwrap_or(Value::Null);
+        let worktrees = routing["pickedMode"] == "multitask";
+        let plan = routing["permissionMode"] == "plan";
+        // A new chat has no branch of its own yet; workers share the
+        // checkout, so its project's latest thread names the branch.
+        let branch = self
+            .sessions
+            .iter()
+            .filter(|s| s.repo_path.as_deref() == Some(current.as_str()))
+            .find_map(|s| s.branch.clone().filter(|b| !b.is_empty()));
+        let quiet = |id: &'static str, glyph: &'static str, label: String| {
+            div()
+                .id(id)
+                .debug_selector(move || id.into())
+                .h(px(26.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .rounded(px(8.))
+                .min_w_0()
+                .text_size(px(12.))
+                .text_color(theme().text_muted)
+                .child(crate::icon::stroke(glyph, theme().text_faint, 13., 1.7))
+                .child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .child(label),
                 )
+        };
+        let picker = |id: &'static str, glyph: &'static str, label: &'static str, open: &'static str, cx: &mut Context<Self>| {
+            quiet(id, glyph, label.to_owned())
+                .flex_shrink_0()
+                .cursor_pointer()
+                .hover(|chip| chip.bg(theme().hover).text_color(theme().text))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_composer_picker(open, window, cx)
+                }))
+        };
+        // Q 2026-11-09, after T3 Code's new thread: where the chat works, on
+        // one quiet row under the composer. Project and checkout on the left;
+        // the branch and access on the right.
+        Some(
+            div()
+                .debug_selector(|| "composer-context-row".into())
+                .w_full()
+                .pt(px(8.))
+                .px(px(4.))
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .child(chip)
+                .child(picker(
+                    "composer-context-checkout",
+                    CHECKOUT,
+                    if worktrees { "Worktrees" } else { "Current checkout" },
+                    "mode",
+                    cx,
+                ))
+                .child(div().flex_1())
+                .children(branch.map(|branch| {
+                    quiet("composer-context-branch", BRANCH, branch).flex_shrink()
+                }))
+                .child(picker(
+                    "composer-context-access",
+                    SHIELD,
+                    if plan { "Plan only" } else { "Full access" },
+                    "access",
+                    cx,
+                ))
+                .into_any_element(),
+        )
+    }
+
+    /// An empty chat's heading over the composer: the question in the
+    /// project's name and, right under it, a way to start without one.
+    pub(super) fn empty_chat_hero(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let current = self.empty_chat_project()?;
+        let home = crate::shell::session::is_home(&current);
+        let name = self
+            .project_bar
+            .repos
+            .iter()
+            .flatten()
+            .find(|(path, _)| *path == current)
+            .map_or_else(|| folder(&current).to_owned(), |(_, name)| name.clone());
+        let title = if home {
+            "What should we do?".to_owned()
+        } else {
+            format!("What should we build in {}?", crate::text::sanitize(&name))
+        };
+        let away = crate::shell::session::home_workspace().filter(|_| !home);
+        Some(
+            div()
+                .debug_selector(|| "composer-empty-hero".into())
+                .w_full()
+                .pb(px(22.))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(6.))
+                .child({
+                    // Regular weight with tight tracking, as large display
+                    // type wants; ExtraLight at 28px read thin and uneven.
+                    let mut heading = div();
+                    heading
+                        .text_style()
+                        .get_or_insert_with(Default::default)
+                        .letter_spacing = Some(px(-0.6));
+                    heading
+                        .text_size(px(26.))
+                        .font_weight(gpui::FontWeight::NORMAL)
+                        .text_color(theme().text)
+                        .text_center()
+                        .child(title)
+                })
+                .children(away.map(|home| {
+                    div()
+                        .id("composer-start-without-project")
+                        .debug_selector(|| "composer-start-without-project".into())
+                        .px(px(8.))
+                        .py(px(3.))
+                        .rounded(px(7.))
+                        .text_size(px(13.))
+                        .text_color(theme().text_muted)
+                        .cursor_pointer()
+                        .hover(|link| link.bg(theme().hover).text_color(theme().text))
+                        .child("or start without a project")
+                        .on_click(cx.listener(move |_, _, window, cx| {
+                            crate::ui::open_link(&format!("o8-new-thread:{home}"), window, cx);
+                        }))
+                }))
                 .into_any_element(),
         )
     }
@@ -246,6 +381,10 @@ impl Surface {
 const FOLDER: &str = "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z";
 const CHEVRON: &str = "M6 9l6 6 6-6";
 const CHECK: &str = "M5 12.5 10 17.5 19 7";
+/// Lucide layers, git-branch and shield.
+const CHECKOUT: &str = "M12 2 2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5";
+const BRANCH: &str = "M6 3v12 M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 9a9 9 0 0 1-9 9";
+const SHIELD: &str = "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z";
 
 #[cfg(test)]
 mod tests {

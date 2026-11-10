@@ -145,7 +145,10 @@ impl Surface {
             .bg(crate::theme::menu_fill())
             .shadow_lg();
         // Mode and permission sit on the left of the footer; model and effort on the right.
-        menu = if matches!(open, "mode" | "access" | "attach") {
+        // An empty chat opens Access from its chip at the row's right end.
+        let left = matches!(open, "mode" | "attach")
+            || open == "access" && self.empty_chat_project().is_none();
+        menu = if left {
             menu.left(px(8.))
         } else {
             menu.right(px(8.))

@@ -3,7 +3,7 @@ use super::*;
 mod drawer;
 #[path = "launcher.rs"]
 mod launch;
-pub(super) use launch::launcher;
+pub(super) use launch::{launcher, open as open_tool};
 
 pub(super) fn button(
     s: &Shell,
@@ -301,22 +301,26 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
         .flex()
         .items_center()
         .gap(px(4.));
-    if selected == Tool::Browser {
-        // The Browser's own pages replace the utility strip while it is in front.
-        if let Some(view) = p.browsers.get(&key(s, Tool::Browser)).cloned() {
+    // Q 2026-11-09: the Browser no longer hides the other tabs. Its pages
+    // follow the panel's tabs after a hairline while it is in front.
+    let browser_pages = (selected == Tool::Browser)
+        .then(|| p.browsers.get(&key(s, Tool::Browser)).cloned())
+        .flatten()
+        .map(|view| {
             let pages = view.update(cx, |browser, cx| browser.page_strip(cx));
-            rail = rail.child(
-                div()
-                    .id("panel-browser-pages")
-                    .debug_selector(|| "panel-browser-pages".into())
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .child(pages),
-            );
-        }
-    } else if selected != Tool::Prs && selected != Tool::Compare {
+            div()
+                .id("panel-browser-pages")
+                .debug_selector(|| "panel-browser-pages".into())
+                .flex_shrink()
+                .min_w_0()
+                .max_w(gpui::relative(0.5))
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .child(div().w(px(1.)).h(px(14.)).flex_shrink_0().bg(theme().border))
+                .child(pages)
+        });
+    if selected != Tool::Prs && selected != Tool::Compare {
         let strip = div()
             .id("panel-tabs")
             .debug_selector(|| "panel-tabs".into())
@@ -347,14 +351,21 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
                     .child("New tab"),
                 )
             });
-        rail = rail.child(super::super::tab_scroll::wrap(
+        let tabs = super::super::tab_scroll::wrap(
             strip,
             p.scroll.clone(),
             Some(selected.slug()),
             "panel-tabs",
             fade,
             cx,
-        ));
+        );
+        rail = match browser_pages {
+            // The tabs take the room; the pages fit beside them, up to half.
+            Some(pages) => rail
+                .child(div().flex_1().min_w_0().child(tabs))
+                .child(pages),
+            None => rail.child(tabs),
+        };
     } else {
         rail = rail.child(contextual::tabs(s, cx));
     }
@@ -368,7 +379,9 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
         .opacity(p.motion.value().0)
         .child(rail)
         .child(icon(s, "panel-new-tab", PLUS, "New tab", cx, |s, w, cx| {
-            show(s, Tool::Launcher, w, cx)
+            show(s, Tool::Launcher, w, cx);
+            // The empty tab takes focus, so its letters open a tool.
+            super::layout::focus(s, "panel-launcher", w);
         }))
         .child(
             div()

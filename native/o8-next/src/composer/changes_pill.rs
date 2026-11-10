@@ -39,6 +39,24 @@ fn changed_files(body: &Value) -> Vec<(String, u64, u64)> {
 }
 
 /// The pill's label and its total additions and deletions.
+/// The floating controls' glass: the popover fill, mostly opaque, so text
+/// that runs under the pill and the jump arrow stays out of the way.
+fn floating_glass() -> gpui::Rgba {
+    gpui::Rgba {
+        a: 0.86,
+        ..crate::theme::popover_background()
+    }
+}
+
+fn floating_shadow() -> Vec<gpui::BoxShadow> {
+    vec![gpui::BoxShadow {
+        color: gpui::hsla(0., 0., 0., 0.18),
+        offset: gpui::point(px(0.), px(4.)),
+        blur_radius: px(14.),
+        spread_radius: px(0.),
+    }]
+}
+
 fn summary(files: &[(String, u64, u64)]) -> (String, u64, u64) {
     let count = files.len();
     let noun = if count == 1 { "file" } else { "files" };
@@ -113,10 +131,50 @@ impl Surface {
         .detach();
     }
 
+    /// Whether the floating changes pill is showing; it then carries the
+    /// jump arrow beside it.
+    pub(crate) fn changes_pill_shown(&self) -> bool {
+        !self.changes_pill.files.is_empty() && self.empty_chat_project().is_none()
+    }
+    /// The jump-to-latest arrow: a glass circle the pill's height, so the two
+    /// read as one row of floating controls.
+    pub(crate) fn jump_arrow(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        div()
+            .id("transcript-jump-to-end")
+            .debug_selector(|| "transcript-jump-to-end".into())
+            .occlude()
+            .size(px(PILL_HEIGHT - 2.))
+            .flex_shrink_0()
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .border_1()
+            .border_color(theme().border)
+            .bg(floating_glass())
+            .shadow(floating_shadow())
+            .hover(|d| d.bg(theme().hover))
+            .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Jump to latest".into())).into())
+            .on_click(cx.listener(|this, _, _, cx| {
+                let last = this.list.item_count().saturating_sub(1);
+                this.list.scroll_to_reveal_item(last);
+                this.pinned = true;
+                this.away_from_end = false;
+                cx.notify();
+            }))
+            .child(crate::icon::stroke(
+                "M12 5v14M5 12l7 7 7-7",
+                theme().text_secondary,
+                12.,
+                2.2,
+            ))
+    }
     pub(super) fn changes_pill(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         self.sync_changes_pill(cx);
         let pill = &self.changes_pill;
-        if pill.files.is_empty() {
+        // A new chat has no changes of its own yet (Q 2026-11-09).
+        if pill.files.is_empty() || self.empty_chat_project().is_some() {
             return None;
         }
         let (label, add, del) = summary(&pill.files);
@@ -136,7 +194,8 @@ impl Surface {
                     .absolute()
                     .left_0()
                     .right_0()
-                    .bottom(px(PILL_HEIGHT))
+                    // Above the floating pill and its 8px of air.
+                    .bottom(px(PILL_HEIGHT + 8.))
                     .flex()
                     .justify_center()
                     .child(
@@ -206,34 +265,50 @@ impl Surface {
             )
             .with_priority(1)
         });
+        // Q 2026-11-09: the pill floats over the transcript's last lines as
+        // glass, instead of a strip of its own that cut the text off above it.
+        let glass = floating_glass();
         Some(
             div()
                 .relative()
                 .w_full()
-                .flex()
-                .justify_center()
-                .pb(px(8.))
+                .h(px(0.))
                 .child(
                     div()
-                        .id("composer-changes-pill")
-                        .debug_selector(|| "composer-changes-pill".into())
-                        .h(px(PILL_HEIGHT - 4.))
-                        .px(px(10.))
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom(px(8.))
                         .flex()
+                        .justify_center()
                         .items_center()
                         .gap(px(6.))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(theme().border)
-                        .bg(theme().surface_raised)
-                        .text_size(px(12.))
-                        .cursor_default()
-                        .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                            this.changes_pill.over_pill = *hovered;
-                            cx.notify();
-                        }))
-                        .child(div().text_color(theme().text_secondary).child(label))
-                        .child(counts(add, del)),
+                        .child(
+                            div()
+                                .id("composer-changes-pill")
+                                .debug_selector(|| "composer-changes-pill".into())
+                                .occlude()
+                                .h(px(PILL_HEIGHT - 2.))
+                                .px(px(11.))
+                                .flex()
+                                .items_center()
+                                .gap(px(6.))
+                                .rounded_full()
+                                .border_1()
+                                .border_color(theme().border)
+                                .bg(glass)
+                                .shadow(floating_shadow())
+                                .text_size(px(12.))
+                                .cursor_default()
+                                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                    this.changes_pill.over_pill = *hovered;
+                                    cx.notify();
+                                }))
+                                .child(div().text_color(theme().text_secondary).child(label))
+                                .child(counts(add, del)),
+                        )
+                        // Scrolled up, the jump arrow sits on the pill's line.
+                        .when(self.away_from_end, |row| row.child(self.jump_arrow(cx))),
                 )
                 .children(list)
                 .into_any_element(),
