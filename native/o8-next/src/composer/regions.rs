@@ -72,11 +72,17 @@ impl Surface {
         // Waiting messages ride as the list's last item, so they scroll with
         // the turns as in classic.
         let queued = Rc::new(self.queued_items());
-        let tail = usize::from(!queued.is_empty());
+        // The floating changes pill covers the transcript's foot, so the tail
+        // also carries room for it: the last line and its actions clear it.
+        let inset = self.changes_pill_shown();
+        let tail = usize::from(!queued.is_empty() || inset);
         let count = self.list.item_count();
-        if count != rows.len() + tail && (count == rows.len() || count == rows.len() + 1) {
+        if (count != rows.len() + tail || inset != self.pill_inset)
+            && (count == rows.len() || count == rows.len() + 1)
+        {
             self.list.splice(rows.len()..count, tail);
         }
+        self.pill_inset = inset;
         // After the tail is in the list, so a just-sent message is revealed.
         self.follow_frame();
         let queue_enabled = self.queue_ready && !self.saving;
@@ -132,12 +138,22 @@ impl Surface {
                     let view = view.clone();
                     move |index, window, _| {
                         if index >= rows.len() {
-                            return super::conversation::queue_tail(
-                                &queued,
-                                queue_enabled,
-                                &steerable,
-                                view.clone(),
-                            );
+                            let queue = (!queued.is_empty()).then(|| {
+                                super::conversation::queue_tail(
+                                    &queued,
+                                    queue_enabled,
+                                    &steerable,
+                                    view.clone(),
+                                )
+                            });
+                            return div()
+                                .debug_selector(|| "transcript-tail".into())
+                                .w_full()
+                                .children(queue)
+                                .when(inset, |tail| {
+                                    tail.child(div().h(px(super::conversation::PILL_INSET)))
+                                })
+                                .into_any_element();
                         }
                         if rows[index].borrow().file_root != file_root {
                             rows[index].borrow_mut().file_root = file_root.clone();

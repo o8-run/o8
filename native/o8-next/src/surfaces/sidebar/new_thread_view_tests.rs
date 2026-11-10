@@ -224,6 +224,16 @@ fn new_thread_view(cx: &mut TestAppContext, archive: bool, shift: bool) {
     assert_eq!(probe["text"], "", "the new thread has an empty composer");
     draw(&mut visual);
     assert!(visual.debug_bounds("composer-space").is_some());
+    // The new thread reads as a draft: its heading, the project row under the
+    // composer, the way out of the project, and no changes pill.
+    for part in [
+        "composer-empty-hero",
+        "composer-context-row",
+        "composer-start-without-project",
+    ] {
+        assert!(visual.debug_bounds(part).is_some(), "{part}");
+    }
+    assert!(visual.debug_bounds("composer-changes-pill").is_none());
     let saved: Value = fixture
         .client
         .get("/api/v2/chat-history", &[("tabId", &created)])

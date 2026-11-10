@@ -202,6 +202,10 @@ pub(super) fn toggle(s: &Shell, open: bool, cx: &mut Context<Shell>) -> gpui::St
 pub(super) fn tool_tab(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyElement {
     let p = s.features.read::<Panel>().unwrap();
     let active = p.selected == tool;
+    // With the Browser in front its pages share the strip, so the panel's
+    // tabs fold to their icons (the name stays in the tooltip) rather than
+    // scrolling into slivers.
+    let compact = p.selected == Tool::Browser;
     let scroll = p.scroll.clone();
     let index = p.tabs.iter().position(|t| *t == tool).unwrap();
     let slug = tool.slug();
@@ -235,9 +239,8 @@ pub(super) fn tool_tab(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyEle
             )
             .tab_stop(active)
             .h(px(28.))
-            .pl(px(8.))
-            .pr(px(5.))
-            .gap(px(6.))
+            .when(compact, |b| b.w(px(28.)))
+            .when(!compact, |b| b.pl(px(8.)).pr(px(5.)).gap(px(6.)))
             .when(active, |b| b.text_color(theme().text))
             .child(crate::icon::stroke(
                 tool.icon(),
@@ -249,38 +252,40 @@ pub(super) fn tool_tab(s: &Shell, tool: Tool, cx: &mut Context<Shell>) -> AnyEle
                 13.,
                 1.6,
             ))
-            .child(tool.label()),
+            .when(!compact, |b| b.child(tool.label())),
         )
-        .child(
-            bare(
-                s,
-                format!("panel-tab-close-{}", tool.slug()),
-                format!("Close {} tab", tool.label()),
-                cx,
-                move |s, w, cx| {
-                    close_tab(s, index, w, cx);
-                    let selected = s.features.get::<Panel>().current();
-                    let id = if selected == Tool::Launcher {
-                        "panel-new-tab".into()
-                    } else {
-                        format!("panel-tab-select-{}", selected.slug())
-                    };
-                    layout::focus(s, &id, w)
-                },
+        .when(!compact, |tab| {
+            tab.child(
+                bare(
+                    s,
+                    format!("panel-tab-close-{}", tool.slug()),
+                    format!("Close {} tab", tool.label()),
+                    cx,
+                    move |s, w, cx| {
+                        close_tab(s, index, w, cx);
+                        let selected = s.features.get::<Panel>().current();
+                        let id = if selected == Tool::Launcher {
+                            "panel-new-tab".into()
+                        } else {
+                            format!("panel-tab-select-{}", selected.slug())
+                        };
+                        layout::focus(s, &id, w)
+                    },
+                )
+                // ContextualPanel's tab close: a faint 16px X inset from the
+                // tab's edge, with no hover box (a bare control).
+                .w(px(16.))
+                .h(px(16.))
+                .mr(px(5.))
+                .rounded(px(4.))
+                .child(crate::icon::stroke(
+                    "M18 6 6 18M6 6l12 12",
+                    theme().text_faint,
+                    10.,
+                    2.5,
+                )),
             )
-            // ContextualPanel's tab close: a faint 16px X inset from the
-            // tab's edge, with no hover box (a bare control).
-            .w(px(16.))
-            .h(px(16.))
-            .mr(px(5.))
-            .rounded(px(4.))
-            .child(crate::icon::stroke(
-                "M18 6 6 18M6 6l12 12",
-                theme().text_faint,
-                10.,
-                2.5,
-            )),
-        )
+        })
         .into_any_element()
 }
 
@@ -317,7 +322,13 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
                 .flex()
                 .items_center()
                 .gap(px(4.))
-                .child(div().w(px(1.)).h(px(14.)).flex_shrink_0().bg(theme().border))
+                .child(
+                    div()
+                        .w(px(1.))
+                        .h(px(14.))
+                        .flex_shrink_0()
+                        .bg(theme().border),
+                )
                 .child(pages)
         });
     if selected != Tool::Prs && selected != Tool::Compare {
@@ -468,7 +479,12 @@ pub(super) fn divider(s: &Shell, lower: Tool, cx: &mut Context<Shell>) -> AnyEle
             .h(px(7.))
             .rounded_none()
             .cursor(gpui::CursorStyle::ResizeUpDown)
-            .child(crate::theme::split_line("panel-split-resize", false, -1., false))
+            .child(crate::theme::split_line(
+                "panel-split-resize",
+                false,
+                -1.,
+                false,
+            ))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|s, e: &gpui::MouseDownEvent, w, cx| {
@@ -556,7 +572,11 @@ fn lower_tab(s: &Shell, tool: Tool, shown: Tool, cx: &mut Context<Shell>) -> Any
             .when(active, |b| b.text_color(theme().text))
             .child(crate::icon::stroke(
                 tool.icon(),
-                if active { theme().text } else { theme().text_muted },
+                if active {
+                    theme().text
+                } else {
+                    theme().text_muted
+                },
                 13.,
                 1.6,
             ))

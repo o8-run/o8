@@ -34,6 +34,7 @@ mod card_tests;
 mod network_tests;
 #[path = "composer/changes_pill.rs"]
 mod changes_pill;
+pub(crate) use changes_pill::PILL_INSET;
 pub(crate) use changes_pill::ChangesPill;
 #[path = "composer/project_bar.rs"]
 mod project_bar;

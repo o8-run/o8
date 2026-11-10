@@ -63,6 +63,7 @@ pub(in super::super) fn launcher(s: &Shell, cx: &mut Context<Shell>) -> AnyEleme
         .gap(px(2.))
         .child(
             div()
+                .debug_selector(|| "panel-launcher-heading".into())
                 .pb(px(10.))
                 .text_center()
                 .text_size(px(13.5))
@@ -90,11 +91,18 @@ pub(in super::super) fn launcher(s: &Shell, cx: &mut Context<Shell>) -> AnyEleme
         .size_full()
         .overflow_y_scroll()
         .track_scroll(&p.launcher_scroll)
-        .flex()
-        .flex_col()
-        .justify_center()
-        .p(px(14.))
-        .child(list)
+        // Centred by an inner column at least the panel's height: centring
+        // the scroll root itself pushes the head of a tall list above the
+        // top, where no scroll reaches it.
+        .child(
+            div()
+                .min_h_full()
+                .flex()
+                .flex_col()
+                .justify_center()
+                .p(px(14.))
+                .child(list),
+        )
         .into_any_element()
 }
 

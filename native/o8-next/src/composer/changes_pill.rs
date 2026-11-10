@@ -3,6 +3,9 @@ use super::*;
 /// Height of the pill row; the file list opens flush above it so the pointer
 /// can move from the pill into the list without closing it.
 const PILL_HEIGHT: f32 = 26.;
+/// The room the transcript keeps under its last row while the pill floats:
+/// the pill, its 8 px lift and the same again above it.
+pub(crate) const PILL_INSET: f32 = PILL_HEIGHT + 16.;
 
 /// The workspace's uncommitted changes above the composer: one pill with the
 /// totals, a hover list with each file's counts, and a click that opens that

@@ -20,6 +20,9 @@ pub(crate) struct ProjectBar {
     /// The press that just closed the list from outside, so the same press on
     /// the chip closes it rather than opening it again.
     dismissed: Option<gpui::Point<gpui::Pixels>>,
+    /// (repo, its checked-out branch), read once per project; a new chat in
+    /// the shared checkout works on that branch unless one is picked.
+    checkout: Option<(String, Option<String>)>,
 }
 
 /// A project's folder name: the last non-empty path segment.
@@ -86,6 +89,47 @@ impl Surface {
                     Err(_) => this.project_bar.failed = true,
                 }
                 cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Reads the project's checked-out branch, once per project.
+    fn load_checkout_branch(&mut self, repo: &str, cx: &mut Context<Self>) {
+        if self
+            .project_bar
+            .checkout
+            .as_ref()
+            .is_some_and(|(r, _)| r == repo)
+        {
+            return;
+        }
+        self.project_bar.checkout = Some((repo.to_owned(), None));
+        let client = self.client.clone();
+        let path = repo.to_owned();
+        let task = cx.background_executor().spawn(async move {
+            client.get::<Value>("/api/panel/branches", &[("path", path.as_str())])
+        });
+        let repo = repo.to_owned();
+        cx.spawn(async move |this, cx| {
+            let branch = task.await.ok().and_then(|body| {
+                body["branches"]
+                    .as_array()?
+                    .iter()
+                    .find(|b| b["current"] == true)?["name"]
+                    .as_str()
+                    .map(str::to_owned)
+            });
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .project_bar
+                    .checkout
+                    .as_ref()
+                    .is_some_and(|(r, _)| *r == repo)
+                {
+                    this.project_bar.checkout = Some((repo, branch));
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -206,48 +250,52 @@ impl Surface {
             .with_priority(1)
         });
         let chip = div().relative().children(menu).child(
-                        div()
-                            .id("composer-project-chip")
-                            .debug_selector(|| "composer-project-chip".into())
-                            .h(px(26.))
-                            .px(px(9.))
-                            .flex()
-                            .items_center()
-                            .gap(px(6.))
-                            .rounded(px(8.))
-                            .cursor_pointer()
-                            .text_size(px(12.))
-                            .text_color(theme().text_secondary)
-                            .hover(|chip| chip.bg(theme().hover).text_color(theme().text))
-                            .when(self.project_bar.open, |chip| chip.bg(theme().hover))
-                            .child(crate::icon::stroke(FOLDER, theme().text_muted, 13., 1.7))
-                            .child(crate::text::sanitize(&name))
-                            .child(crate::icon::stroke(CHEVRON, theme().text_muted, 10., 1.8))
-                            .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
-                                let press = match event {
-                                    gpui::ClickEvent::Mouse(click) => Some(click.down.position),
-                                    gpui::ClickEvent::Keyboard(_) => None,
-                                };
-                                if press.is_some() && this.project_bar.dismissed.take() == press {
-                                    return;
-                                }
-                                this.project_bar.open = !this.project_bar.open;
-                                if this.project_bar.open {
-                                    this.load_project_bar(cx);
-                                }
-                                cx.notify();
-                            })),
-                    );
+            div()
+                .id("composer-project-chip")
+                .debug_selector(|| "composer-project-chip".into())
+                .h(px(26.))
+                .px(px(9.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .rounded(px(8.))
+                .cursor_pointer()
+                .text_size(px(12.))
+                .text_color(theme().text_secondary)
+                .hover(|chip| chip.bg(theme().hover).text_color(theme().text))
+                .when(self.project_bar.open, |chip| chip.bg(theme().hover))
+                .child(crate::icon::stroke(FOLDER, theme().text_muted, 13., 1.7))
+                .child(crate::text::sanitize(&name))
+                .child(crate::icon::stroke(CHEVRON, theme().text_muted, 10., 1.8))
+                .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
+                    let press = match event {
+                        gpui::ClickEvent::Mouse(click) => Some(click.down.position),
+                        gpui::ClickEvent::Keyboard(_) => None,
+                    };
+                    if press.is_some() && this.project_bar.dismissed.take() == press {
+                        return;
+                    }
+                    this.project_bar.open = !this.project_bar.open;
+                    if this.project_bar.open {
+                        this.load_project_bar(cx);
+                    }
+                    cx.notify();
+                })),
+        );
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let worktrees = routing["pickedMode"] == "multitask";
         let plan = routing["permissionMode"] == "plan";
-        // A new chat has no branch of its own yet; workers share the
-        // checkout, so its project's latest thread names the branch.
-        let branch = self
-            .sessions
-            .iter()
-            .filter(|s| s.repo_path.as_deref() == Some(current.as_str()))
-            .find_map(|s| s.branch.clone().filter(|b| !b.is_empty()));
+        // The branch the chat will use: one picked in the composer, else the
+        // branch the shared checkout has out (unknown until read, so hidden).
+        self.load_checkout_branch(&current, cx);
+        let picked = self.composer.read(cx).controls.prompt.branch.clone();
+        let branch = (!picked.is_empty()).then_some(picked).or_else(|| {
+            self.project_bar
+                .checkout
+                .as_ref()
+                .filter(|(r, _)| *r == current)
+                .and_then(|(_, b)| b.clone())
+        });
         let quiet = |id: &'static str, glyph: &'static str, label: String| {
             div()
                 .id(id)
@@ -271,7 +319,11 @@ impl Surface {
                         .child(label),
                 )
         };
-        let picker = |id: &'static str, glyph: &'static str, label: &'static str, open: &'static str, cx: &mut Context<Self>| {
+        let picker = |id: &'static str,
+                      glyph: &'static str,
+                      label: &'static str,
+                      open: &'static str,
+                      cx: &mut Context<Self>| {
             quiet(id, glyph, label.to_owned())
                 .flex_shrink_0()
                 .cursor_pointer()
@@ -296,14 +348,20 @@ impl Surface {
                 .child(picker(
                     "composer-context-checkout",
                     CHECKOUT,
-                    if worktrees { "Worktrees" } else { "Current checkout" },
+                    if worktrees {
+                        "Worktrees"
+                    } else {
+                        "Current checkout"
+                    },
                     "mode",
                     cx,
                 ))
                 .child(div().flex_1())
-                .children(branch.map(|branch| {
-                    quiet("composer-context-branch", BRANCH, branch).flex_shrink()
-                }))
+                .children(
+                    branch.map(|branch| {
+                        quiet("composer-context-branch", BRANCH, branch).flex_shrink()
+                    }),
+                )
                 .child(picker(
                     "composer-context-access",
                     SHIELD,
