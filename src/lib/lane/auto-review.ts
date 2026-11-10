@@ -10,6 +10,8 @@
  */
 
 import { manualReviewRequested } from './review-mode';
+import { runMechanicalChecks } from './auto-review-mechanical';
+import { CorrectionReviewBlocked, correctionReviewPrompt, prepareCorrectionReview } from '@/lib/orchestrator/correction-review';
 import { randomUUID } from 'node:crypto';
 import { laneGitSync } from '@/lib/lane/lane-git';
 import { isSafeGitRef } from '@/lib/git/refs';
@@ -18,7 +20,7 @@ import { readPacketDeviations, type PacketDeviations } from '@/lib/orchestrator/
 import type { PacketSelfReview, PacketTaskContract } from '@/lib/orchestrator/types';
 import { buildAutoReviewPromptV1 } from '@/lib/prompts/v1';
 import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
-import { extractAddedLines, getLaneDiffFacts, parseDiffStat, type AddedDiffLine } from './lane-diff-facts';
+import { getLaneDiffFacts, type AddedDiffLine } from './lane-diff-facts';
 import { buildAdversarialReviewProtocol, classifyReviewRisk } from './review-risk';
 import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReference } from './review-screenshot';
 import {
@@ -35,7 +37,7 @@ import {
 import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondPassVerdict } from './blind-second-pass-review';
 import { appendCodexAutoReviewVerdictInstructions, recordCodexAutoReviewVerdict } from './codex-auto-review-verdict';
 import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
-import { enqueueLaneReview } from './review-queue';
+import { enqueueLaneReview, recoverCorrectionReviewEnqueues } from './review-queue';
 import {
   laneReviewHeadSha,
   normalizeAttemptHeadSha,
@@ -52,6 +54,7 @@ import {
   markReviewDeferred,
   markReviewFailed,
   markReviewSkipped,
+  MAX_REVIEW_ATTEMPTS,
 } from './review-queue-settlement';
 import {
   cancelAutoReviewForLane,
@@ -185,7 +188,7 @@ async function processClaimedReview(slot: number, review: QueuedReview): Promise
       claimOwner: review.claim_owner,
       laneId: review.lane_id,
       error: errorMsg,
-      attempts: review.attempts + 1,
+      attempts: err instanceof CorrectionReviewBlocked ? MAX_REVIEW_ATTEMPTS : review.attempts + 1,
     });
     console.error(`[auto-review] Review ${review.id} failed (attempt ${review.attempts + 1}): ${errorMsg}`);
     return 'pause';
@@ -224,6 +227,7 @@ async function drainAvailableReviewSlot(): Promise<void> {
 
 export async function drainReviewQueue(): Promise<void> {
   if (manualReviewRequested()) return;
+  recoverCorrectionReviewEnqueues();
   // Recovery stays ahead of capacity checks so an abandoned turn cannot pin a
   // slot or disable the path that reclaims and replaces it.
   await runReviewRecoveryPass();
@@ -346,116 +350,6 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth, comparisonRef?: string):
   }
 }
 
-// ── Mechanical Checks (#482) ──
-// Automated diff stats + security pattern scan that runs before LLM review.
-// Findings are prepended to the review prompt so the orchestrator sees them.
-
-interface MechanicalFinding {
-  severity: 'high' | 'warning';
-  label: string;
-  detail: string;
-}
-
-const SECURITY_PATTERNS: Array<{ pattern: RegExp; label: string; severity: 'high' | 'warning' }> = [
-  { pattern: /execSync\s*\(.*\$\{/, label: 'execSync with template literal', severity: 'high' },
-  { pattern: /execSync\s*\(.*\+\s*/, label: 'execSync with string concatenation', severity: 'high' },
-  { pattern: /\bexec\s*\(.*\$\{/, label: 'exec with template literal', severity: 'high' },
-  { pattern: /child_process.*\bsh\s+-c\b/, label: 'sh -c shell execution', severity: 'high' },
-  { pattern: /\beval\s*\(/, label: 'eval() usage', severity: 'high' },
-  { pattern: /new\s+Function\s*\(/, label: 'new Function() constructor', severity: 'high' },
-  { pattern: /dangerouslySetInnerHTML/, label: 'dangerouslySetInnerHTML', severity: 'warning' },
-  { pattern: /path\.join\s*\([^)]*(?:req\.|params\.|query\.|body\.)/, label: 'path.join on user input without bounds check', severity: 'high' },
-  { pattern: /\.innerHTML\s*=/, label: 'direct innerHTML assignment', severity: 'warning' },
-];
-
-function runMechanicalChecks(lane: Lane, comparisonRef?: string): { findings: MechanicalFinding[]; summary: string } {
-  const cwd = lane.worktreePath || lane.repoPath;
-  const safeBase = comparisonRef && isSafeGitRef(comparisonRef)
-    ? comparisonRef
-    : isSafeGitRef(lane.baseBranch) ? lane.baseBranch : null;
-  const findings: MechanicalFinding[] = [];
-
-  // ── Diff stats check ──
-  let stat = '';
-  try {
-    stat = laneGitSync(cwd, lane.repoPath, ['diff', '--stat', safeBase ? `${safeBase}...HEAD` : 'HEAD~1'], { timeout: 10_000 }).trim();
-  } catch {
-    try {
-      stat = laneGitSync(cwd, lane.repoPath, ['diff', '--stat', 'HEAD~1'], { timeout: 10_000 }).trim();
-    } catch { /* no commits */ }
-  }
-
-  if (stat) {
-    const fileStats = parseDiffStat(stat);
-    for (const fs of fileStats) {
-      const total = fs.insertions + fs.deletions;
-      if (total === 0) continue;
-      const deleteRatio = fs.deletions / total;
-      if (fs.deletions > 50 && deleteRatio > 0.5) {
-        findings.push({
-          severity: 'high',
-          label: 'Possible file rewrite',
-          detail: `${fs.file}: ${fs.deletions} deletions (${Math.round(deleteRatio * 100)}% of changes). Agent may have rewritten instead of surgically editing.`,
-        });
-      } else if (fs.deletions > 20 && deleteRatio > 0.3) {
-        findings.push({
-          severity: 'warning',
-          label: 'High deletion ratio',
-          detail: `${fs.file}: ${fs.deletions} deletions (${Math.round(deleteRatio * 100)}% of changes). Verify deletions were intentional.`,
-        });
-      }
-    }
-  }
-
-  // ── Security pattern scan ──
-  let rawDiff = '';
-  try {
-    rawDiff = laneGitSync(cwd, lane.repoPath, ['diff', safeBase ? `${safeBase}...HEAD` : 'HEAD~1', '--no-color'], { timeout: 10_000, maxBuffer: 10 * 1024 * 1024 });
-  } catch {
-    try {
-      rawDiff = laneGitSync(cwd, lane.repoPath, ['diff', 'HEAD~1', '--no-color'], { timeout: 10_000, maxBuffer: 10 * 1024 * 1024 });
-    } catch { /* no commits */ }
-  }
-
-  if (rawDiff) {
-    // Only scan added lines (lines starting with +, excluding +++ headers)
-    const addedLines = extractAddedLines(rawDiff);
-
-    for (const { pattern, label, severity } of SECURITY_PATTERNS) {
-      for (const line of addedLines) {
-        if (pattern.test(line)) {
-          findings.push({
-            severity,
-            label,
-            detail: `New code matches security pattern: ${line.slice(1).trim().slice(0, 120)}`,
-          });
-          break; // One finding per pattern is enough
-        }
-      }
-    }
-  }
-
-  if (findings.length === 0) {
-    return { findings, summary: '' };
-  }
-
-  const highCount = findings.filter((f) => f.severity === 'high').length;
-  const warnCount = findings.filter((f) => f.severity === 'warning').length;
-  const lines = [
-    '## Mechanical checks (automated)',
-    '',
-    `Found ${findings.length} issue${findings.length === 1 ? '' : 's'}: ${highCount} high, ${warnCount} warning.`,
-    '',
-    ...findings.map((f) => `- **[${f.severity.toUpperCase()}]** ${f.label}: ${f.detail}`),
-    '',
-    'These checks are automated and may have false positives. Evaluate each finding independently.',
-  ];
-
-  console.log(`[auto-review] Mechanical checks for lane ${lane.id}: ${highCount} high, ${warnCount} warning`);
-
-  return { findings, summary: lines.join('\n') };
-}
-
 function buildReviewPrompt(
   lane: Lane,
   diffSummary: string,
@@ -507,7 +401,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
     console.log(`[auto-review] Lane ${lane.id} is no longer reviewing (${lane.status}) — skipping`);
     return skipped(`Lane is no longer reviewing (${lane.status}).`);
   }
-  if (isReviewAttemptCancelled(review.id, review.claim_owner)) {
+  if (!isReviewClaimCurrent(review) || isReviewAttemptCancelled(review.id, review.claim_owner)) {
     console.log(`[auto-review] Review ${review.id} was cancelled before it started — skipping`);
     return skipped('This review attempt was cancelled before it started.');
   }
@@ -568,7 +462,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
       console.warn(`[auto-review] Failed to prepare review screenshot for lane ${lane.id}:`, error);
     }
   }
-  const reviewPrompt = buildReviewPrompt(
+  let reviewPrompt = buildReviewPrompt(
     lane,
     diffSummary.summary,
     diffSummary.changedFiles,
@@ -584,13 +478,17 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
     enforceCoverage,
   );
 
-  if (isReviewAttemptCancelled(review.id, review.claim_owner)) {
+  if (!isReviewClaimCurrent(review) || isReviewAttemptCancelled(review.id, review.claim_owner)) {
     console.log(`[auto-review] Review ${review.id} was cancelled while preparing — skipping`);
     return skipped('This review attempt was cancelled while its prompt was being prepared.');
   }
   if (requeueIfReviewHeadMoved(review, lane)) {
     return skipped('HEAD moved while this review prompt was being prepared; a successor review was queued.');
   }
+
+  const correction = prepareCorrectionReview(lane, review.head_sha ?? undefined);
+  if (correction && correction.review_id !== review.id) return skipped('A correction must use its associated independent review attempt.');
+  reviewPrompt += correctionReviewPrompt(correction);
 
   // Dual-path routing (epic #1044): the `inAppOrchestratorEnabled` toggle is
   // now a runtime selector, not an on/off gate.
@@ -626,13 +524,14 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
       }
     },
   });
-  if (isReviewAttemptCancelled(review.id, review.claim_owner)) {
+  if (!isReviewClaimCurrent(review) || isReviewAttemptCancelled(review.id, review.claim_owner)) {
     console.log(`[auto-review] Review ${review.id} was cancelled during the turn — discarding the result`);
     return skipped('This review attempt was cancelled while the reviewer turn was running.');
   }
   if (requeueIfReviewHeadMoved(review, lane)) {
     return skipped('HEAD moved while this review turn was running; its verdict was discarded.');
   }
+  prepareCorrectionReview(lane, review.head_sha ?? undefined);
   if (reviewTurn.unavailableReason === 'session_busy') {
     return deferred('Reviewer session busy');
   }
@@ -647,6 +546,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
       requiresSecondPass: reviewRisk.tier === 'high',
       reviewTurnId: reviewTurn.reviewTurnId,
       expectedHeadSha: review.head_sha,
+      correctionClaimOwner: review.claim_owner,
       // Retry prose once; two parse failures leave the packet unjudged.
       retry: {
         reviewPrompt,
@@ -754,7 +654,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
     // event lands before the dispatch, so a merge that never happens leaves a
     // reason behind instead of parking the lane in a live-looking state.
     markSecondPassAgreed(pendingSecondPass.approval.id);
-    await dispatchSecondPassMerge({
+    if (!correction) await dispatchSecondPassMerge({
       lane,
       approvalId: pendingSecondPass.approval.id,
       reviewedHeadSha: pendingSecondPass.reviewedHeadSha,

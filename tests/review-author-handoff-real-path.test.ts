@@ -7,6 +7,26 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 
 const { readiness } = vi.hoisted(() => ({ readiness: vi.fn(async () => ({ ready: true })) }));
+const reviewer = vi.hoisted(() => ({ prompts: [] as string[], sessions: [] as string[],
+  beforeVerdict: null as (() => void) | null, approve: true }));
+vi.mock('@/lib/lane/orchestrator-backends/registry', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/lane/orchestrator-backends/registry')>();
+  const backend = {
+    id: 'codex' as const, label: 'Fixture independent reviewer',
+    peekSession: () => ({ sessionName: 'correction-reviewer', status: 'ready' as const }),
+    ensureSession: () => ({ sessionName: 'correction-reviewer', status: 'ready' as const }),
+    async sendTurn(_repo: string, prompt: string, onEvent: (event: { type: 'text'; text: string }) => void,
+      options?: { threadId?: string | null }) {
+      reviewer.prompts.push(prompt); reviewer.sessions.push(options?.threadId ?? '');
+      reviewer.beforeVerdict?.();
+      onEvent({ type: 'text', text: reviewer.approve ? 'CODEX_AUTO_REVIEW: {"approved":true,"findings":[]}'
+        : 'CODEX_AUTO_REVIEW: {"approved":false,"findings":[{"file":"answer.txt","severity":"note","description":"The saved finding is still unresolved.","status":"deferred"}]}' });
+    },
+  };
+  return { ...actual, getActiveReviewerBackend: () => backend, getOrchestratorBackend: () => backend };
+});
+vi.mock('@/lib/lane/packet-explainer-queue', () => ({ drainPacketExplainerQueue: vi.fn(async () => {}),
+  enqueuePacketExplainer: vi.fn(async () => {}), notifyCorrectnessReviewQueued: vi.fn(), startPacketExplainerQueueDrain: vi.fn(() => () => {}) }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: readiness }));
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
@@ -278,7 +298,8 @@ it('checks the reviewed code outside SQLite write transactions at admission and 
   } finally { spy.mockRestore(); }
 }, 60000);
 
-it.each(['delivered', 'busy', 'stopped'] as const)('hands a persisted rejection to a real isolated packet-bound author: %s', async outcome => {
+it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-moved', 'reclaimed', 'stopped-after', 'interrupted', 'rejected', 'delivered'] as const)('hands a persisted rejection to a real isolated packet-bound author: %s', async outcome => {
+  const deliveryExpected = outcome !== 'busy' && outcome !== 'stopped';
   rmSync(join(root, 'release-worker'), { force: true });
   const response = await delegate(new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST',
     body: JSON.stringify({ prompt: 'Inspect the original request', repoPath: repo, taskName: `packet-bound-author-${outcome}`,
@@ -332,6 +353,7 @@ it.each(['delivered', 'busy', 'stopped'] as const)('hands a persisted rejection 
   expect(record(target.surfaceId).recentRuns).toHaveLength(1);
   rmSync(dirtyPath);
   if (outcome === 'busy') readiness.mockRejectedValueOnce(new Error('This worker still has an active run.'));
+  if (outcome === 'interrupted') rmSync(join(root, 'release-worker'));
   let release!: () => void;
   let entered!: () => void;
   const atReadiness = new Promise<void>(resolve => { entered = resolve; });
@@ -349,15 +371,99 @@ it.each(['delivered', 'busy', 'stopped'] as const)('hands a persisted rejection 
   const result = await pending;
   expect(result.isError, JSON.stringify(result)).not.toBe(true);
   const value = JSON.parse(result.content[0].text);
-  expect(value.receipt.deliveries[0].status).toBe(outcome === 'delivered' ? 'delivered' : outcome === 'stopped' ? 'held' : 'unknown');
+  expect(value.receipt.deliveries[0].status).toBe(deliveryExpected ? 'delivered' : outcome === 'stopped' ? 'held' : 'unknown');
+  if (outcome === 'interrupted') await owned.interruptOwnedCodexSession(target.surfaceId);
   await settled(target.surfaceId);
   const { drainQueuedPacketSteers } = await import('@/lib/orchestrator/operator-mission-service/steer-queue');
   await drainQueuedPacketSteers();
   const replay = JSON.parse((await handlers.handleCorrectWorkers(args)).content[0].text);
   expect(replay.receipt.id).toBe(value.receipt.id);
-  expect(record(target.surfaceId).recentRuns).toHaveLength(outcome === 'delivered' ? 2 : 1);
-  if (outcome === 'delivered') expect(record(target.surfaceId).recentRuns[0].prompt).toContain(review.auditApprovalId);
+  expect(record(target.surfaceId).recentRuns).toHaveLength(deliveryExpected ? 2 : 1);
+  if (deliveryExpected) expect(record(target.surfaceId).recentRuns[0].prompt).toContain(review.auditApprovalId);
   expect(control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)?.review).toMatchObject({ approved: false,
     findings: [expect.objectContaining({ resolution: 'deferred' })] });
   expect((await readOwnedRecoveryState(target.surfaceId)).automaticRecoveryAllowed).toBe(false);
+  if (deliveryExpected) {
+    // Use the same production entry as the supervisor's completion callback.
+    // Retire earlier fixture reviews so this drain only consumes this packet.
+    getSqlite().prepare("UPDATE review_queue SET status = 'completed' WHERE lane_id != ?").run(launched.laneId);
+    const autoReview = await import('@/app/api/review/auto-review/route');
+    const enqueue = () => autoReview.POST(new NextRequest('http://localhost/api/review/auto-review', {
+      method: 'POST', headers: { host: 'localhost', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'enqueue', laneId: launched.laneId }),
+    }));
+    const correctedHead = execFileSync('git', ['-C', launched.worktreePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    if (outcome !== 'interrupted') expect(correctedHead).not.toBe(packetHead);
+    const { transitionPostCompletionLaneToReviewing } = await import('@/lib/supervisor/post-completion-packet');
+    transitionPostCompletionLaneToReviewing(launched.laneId, packetId);
+    if (outcome !== 'interrupted') {
+      const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+      await capturePacketCompletionContext(packetId, target.surfaceId);
+    }
+    const moveHead = () => execFileSync('git', ['-C', launched.worktreePath, '-c', 'user.name=o8 test',
+      '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'unreviewed successor']);
+    if (outcome === 'moved-before-queue') moveHead();
+    if (outcome === 'dirty') writeFileSync(join(launched.worktreePath, 'unreviewed.txt'), 'unreviewed edit');
+    if (outcome === 'moved') {
+      // Bind the completed correction, then move its code before reviewer entry.
+      expect((await enqueue()).status).toBe(200); moveHead();
+    }
+    if (outcome === 'stopped-after') {
+      const { POST: stop } = await import('@/app/api/orchestrator/stop-packet/route');
+      const stopped = await stop(new NextRequest('http://localhost/api/orchestrator/stop-packet', { method: 'POST',
+        headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId }) }));
+      expect(stopped.status).toBe(200);
+    }
+    // Lose the completion HTTP acknowledgement, then restart. The persisted
+    // correction source must still cause one independent review on the drain.
+    if (outcome === 'delivered') closeDb();
+    reviewer.prompts.length = 0; reviewer.sessions.length = 0;
+    reviewer.beforeVerdict = outcome === 'review-moved' ? moveHead : outcome === 'reclaimed' ? () => {
+      getSqlite().prepare("UPDATE review_queue SET claim_owner = 'replacement-owner' WHERE lane_id = ? AND status = 'in_progress'").run(launched.laneId);
+    } : null;
+    reviewer.approve = outcome !== 'rejected';
+    const { drainReviewQueue } = await import('@/lib/lane/auto-review');
+    await drainReviewQueue();
+    reviewer.beforeVerdict = null;
+    const { getApproval, listApprovalsForContext } = await import('@/lib/approvals/store');
+    if (['moved-before-queue', 'dirty', 'moved', 'stopped-after', 'interrupted', 'review-moved', 'reclaimed'].includes(outcome)) {
+      expect(reviewer.prompts).toHaveLength(['review-moved', 'reclaimed'].includes(outcome) ? 1 : 0);
+      expect(listApprovalsForContext({ packetId }).filter(row => row.status === 'approved' && row.toolName === 'orchestrator_review')).toHaveLength(0);
+      expect(getApproval(review.auditApprovalId!)?.status).toBe('rejected');
+      return;
+    }
+    expect(reviewer.prompts).toHaveLength(1);
+    expect(reviewer.prompts[0]).toContain(`Saved rejection: ${review.auditApprovalId}`);
+    expect(reviewer.prompts[0]).toContain('Preserve the original request.');
+    expect(reviewer.prompts[0]).toContain(`Corrected HEAD: ${correctedHead}`);
+    expect(reviewer.sessions[0]).toMatch(/^thoughts-auto-review-primary-/);
+    expect(reviewer.sessions[0]).not.toBe(record(target.surfaceId).threadId);
+    expect((await enqueue()).status).toBe(200);
+    if (outcome === 'delivered') closeDb();
+    expect((await enqueue()).status).toBe(200);
+    await drainReviewQueue();
+    expect(reviewer.prompts).toHaveLength(1);
+    expect(getApproval(review.auditApprovalId!)?.status).toBe('rejected');
+    if (outcome === 'rejected') {
+      const rejected = listApprovalsForContext({ packetId }).filter(row => row.status === 'rejected' && row.args?.reviewedHeadSha === correctedHead);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].args?.findings).toEqual([expect.objectContaining({ resolution: 'deferred' })]);
+      const next = await handlers.handleCorrectWorkers({ targets: [{ surfaceId: target.surfaceId,
+        runId: record(target.surfaceId).recentRuns[0].id }], reviewSource: { packetId,
+        approvalId: rejected[0].id, reviewedHeadSha: correctedHead } });
+      // Initial packet admission and this correction have spent the existing
+      // budget. Re-review must not reset it or send another author turn.
+      expect(next.isError).toBe(true);
+      expect(next.content[0].text).toContain('budget');
+      expect(record(target.surfaceId).recentRuns).toHaveLength(2);
+      return;
+    }
+    const approved = listApprovalsForContext({ packetId }).filter(row => row.status === 'approved' && row.toolName === 'orchestrator_review');
+    expect(approved).toHaveLength(1);
+    expect(approved[0].args?.reviewedHeadSha).toBe(correctedHead);
+    const { isPacketMergeHeld } = await import('@/lib/lane/merge-hold');
+    expect(isPacketMergeHeld(packetId)).toBe(true);
+    expect(execFileSync('git', ['-C', repo, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(head);
+  }
 }, 60000);

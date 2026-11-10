@@ -88,7 +88,7 @@ export function holdWorkerCorrections(target: ComposerQueueTarget): void {
   })();
 }
 
-interface AdmissionChecks { state: () => void; code: () => void }
+interface AdmissionChecks { state: () => void; code: () => void; persist?: () => void }
 
 /** No automatic retry: an interrupted request can already have affected a worker. */
 export async function correctWorkers(input: ComposerQueueTarget & { id: string; payload: unknown }, admissionChecks?: AdmissionChecks): Promise<WorkerCorrectionReceipt> {
@@ -121,6 +121,7 @@ export async function correctWorkers(input: ComposerQueueTarget & { id: string; 
         .run(input.id, target.repoPath, target.threadId, serialized, rule?.id ?? null, Date.now());
       for (const selected of correction.targets) getSqlite().prepare('INSERT INTO worker_correction_deliveries VALUES (?, ?, ?, ?, ?, ?)')
         .run(input.id, selected.surfaceId, selected.runId, 'pending', 'Awaiting delivery.', Date.now());
+      admissionChecks?.persist?.();
       return true;
     })();
   });

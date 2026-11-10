@@ -5,6 +5,7 @@ import { readCoverageEvidence, type ReviewCoverageEvidence } from '@/lib/orchest
 import type { OrchestratorBackend, OrchestratorBackendId } from './orchestrator-backends/types';
 import type { Lane } from './types';
 import { headShaMatches, normalizeHeadSha } from './head-sha-lock';
+import { prepareCorrectionReview } from '@/lib/orchestrator/correction-review';
 
 const CODEX_AUTO_REVIEW_MARKER = 'CODEX_AUTO_REVIEW:';
 const RAW_TEXT_LIMIT = 2000;
@@ -333,6 +334,7 @@ export async function recordCodexAutoReviewVerdict(input: {
   reviewTurnId: string | null;
   /** Commit described by the original review prompt, shared by its format retry. */
   expectedHeadSha?: string | null;
+  correctionClaimOwner?: string;
   retry?: CodexAutoReviewRetryInput;
 }): Promise<RecordedCodexAutoReviewVerdict | null> {
   if (!input.lane.packetId) {
@@ -401,6 +403,16 @@ export async function recordCodexAutoReviewVerdict(input: {
   }
 
   const { recordOrchestratorReview } = await import('@/lib/approvals/store');
+  const correction = prepareCorrectionReview(input.lane, reviewedHeadSha);
+  if (correction) {
+    if (!reviewTurnId || !input.correctionClaimOwner) throw new Error('Correction re-review has no current independent review claim.');
+    const { submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service/review');
+    const recorded = await submitPacketReview({ packetId: input.lane.packetId, approved: verdict.approved,
+      findings: verdict.findings, reviewedHeadSha, contractCoverageEvidence: verdict.contractCoverageEvidence },
+    { completedCorrectionTurnId: reviewTurnId, claimOwner: input.correctionClaimOwner });
+    if (!recorded.recorded) throw new Error('The correction review verdict was not recorded for its pinned HEAD.');
+    return { event: null, verdict, reviewedHeadSha, reviewUnavailable: false };
+  }
   const event = recordOrchestratorReview(input.lane.packetId, {
     findings: verdict.findings,
     reviewer: 'codex',
