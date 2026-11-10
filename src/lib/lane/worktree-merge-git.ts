@@ -1,6 +1,8 @@
 import { mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
+import { pushLfsObjects } from '@/lib/git/lfs-push';
+import { NO_REPOSITORY_HOOKS } from '@/lib/git/no-repository-hooks';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { listReposFresh } from '@/lib/repos/registry';
 import { laneGit, withLaneCommitDirectory, type LaneCommitDirectory } from '@/lib/lane/lane-git';
@@ -12,7 +14,7 @@ export async function git(
   args: string[],
   opts: { timeout?: number; maxBuffer?: number } = {},
 ) {
-  return execFileAsync('git', args, {
+  return execFileAsync('git', [...NO_REPOSITORY_HOOKS, ...args], {
     windowsHide: true,
     cwd,
     timeout: opts.timeout ?? 60_000,
@@ -352,11 +354,14 @@ export async function deleteRefBestEffort(repoPath: string, ref: string): Promis
 
 export async function pushWorkerBranchBestEffort(
   worktreePath: string,
+  repoPath: string,
   actualBranch: string,
   sourceSha: string,
+  lfsBase: string | null,
 ): Promise<void> {
   try {
-    await git(worktreePath, [
+    await pushLfsObjects((args, options) => laneGit(worktreePath, repoPath, args, options), 'origin', sourceSha, lfsBase);
+    await laneGit(worktreePath, repoPath, [
       'push',
       'origin',
       `${sourceSha}:refs/heads/${actualBranch}`,
@@ -371,13 +376,16 @@ export async function pushWorkerBranchBestEffort(
 
 export async function pushWorkerBranchLeaseBestEffort(
   worktreePath: string,
+  repoPath: string,
   actualBranch: string,
   sourceSha: string,
   expectedRemoteSha: string,
+  lfsBase: string | null,
 ): Promise<void> {
   const destination = `refs/heads/${actualBranch}`;
   try {
-    await git(worktreePath, [
+    await pushLfsObjects((args, options) => laneGit(worktreePath, repoPath, args, options), 'origin', sourceSha, lfsBase);
+    await laneGit(worktreePath, repoPath, [
       'push',
       `--force-with-lease=${destination}:${expectedRemoteSha}`,
       'origin',
@@ -395,9 +403,11 @@ export async function pushExactBase(
   repoPath: string,
   baseBranch: string,
   sourceSha: string,
+  lfsBase: string | null,
   expectedRemoteSha?: string,
 ): Promise<void> {
   const destination = `refs/heads/${baseBranch}`;
+  await pushLfsObjects((args, options) => git(repoPath, args, options), 'origin', sourceSha, lfsBase);
   await git(repoPath, [
     'push',
     ...(expectedRemoteSha

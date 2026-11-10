@@ -9,7 +9,12 @@
 import path from 'node:path';
 import { NextResponse, type NextRequest } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { pushLfsObjects } from '@/lib/git/lfs-push';
+import { NO_REPOSITORY_HOOKS } from '@/lib/git/no-repository-hooks';
+import { assertLaneHeadOnBranch, laneGit } from '@/lib/lane/lane-git';
+import { readLaneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { listLanes } from '@/lib/lane/registry';
+import { commitDirtyWorktree } from '@/lib/lane/worktree-merge-git';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { requestRealtimeRefresh } from '@/lib/realtime/publisher';
@@ -159,11 +164,13 @@ export async function handlePost(
       switch (body.action) {
         case 'pr': {
           const prResult = await (dependencies.createPR ?? createPR)(worktree.path, worktree.branch, worktree.dirtyFiles, {
+            repoPath,
             title: body.prTitle,
             body: body.prBody,
             targetBranch: body.targetBranch ?? 'main',
             agentType: worktree.agentType,
             createdAt: worktree.createdAt,
+            lfsBase: readLaneCreationBaseCommit(lane.id),
           });
           // Cleanup worktree but keep branch (PR needs it)
           if (prResult.ok) {
@@ -188,6 +195,7 @@ export async function handlePost(
         case 'merge': {
           const mergeResult = await (dependencies.mergeToTarget ?? mergeToTarget)(body.repo, worktree.path, worktree.branch, body.targetBranch ?? 'main', {
             importBranchFromWorkspace: worktree.isolationKind === 'apfs-cow-clone',
+            lfsBase: readLaneCreationBaseCommit(lane.id),
           });
           if (mergeResult.ok) {
             await dependencies.beforeWorkspaceCleanup?.('merge');
@@ -282,31 +290,18 @@ export function createWorktreeMergePostForTesting(dependencies: WorktreeMergeRou
 async function commitWorkspaceChanges(
   action: 'pr' | 'merge',
   worktreePath: string,
+  repoPath: string,
+  branch: string,
   message: string,
 ): Promise<MergeResult | null> {
+  const status = async () => (await laneGit(worktreePath, repoPath,
+    ['status', '--porcelain=v1', '--untracked-files=all'], { timeout: 5_000 })).stdout.trim();
   try {
-    const before = await execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
-      windowsHide: true,
-      cwd: worktreePath,
-      timeout: 5_000,
-    });
-    if (!before.stdout.trim()) return null;
-    await execFileAsync('git', ['add', '-A'], {
-      windowsHide: true,
-      cwd: worktreePath,
-      timeout: 10_000,
-    });
-    await execFileAsync('git', ['commit', '-m', message], {
-      windowsHide: true,
-      cwd: worktreePath,
-      timeout: 10_000,
-    });
-    const after = await execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
-      windowsHide: true,
-      cwd: worktreePath,
-      timeout: 5_000,
-    });
-    if (after.stdout.trim()) {
+    const dirty = await status();
+    await assertLaneHeadOnBranch(worktreePath, repoPath, branch);
+    if (!dirty) return null;
+    await commitDirtyWorktree(worktreePath, repoPath, branch, message);
+    if (await status()) {
       return {
         action,
         ok: false,
@@ -332,22 +327,21 @@ async function createPR(
   worktreePath: string,
   branch: string,
   dirtyFiles: string[],
-  opts: { title?: string; body?: string; targetBranch: string; agentType: string; createdAt?: number },
+  opts: { repoPath: string; title?: string; body?: string; targetBranch: string; agentType: string; createdAt?: number; lfsBase?: string | null },
 ): Promise<MergeResult> {
   const commitFailure = await commitWorkspaceChanges(
     'pr',
     worktreePath,
+    opts.repoPath,
+    branch,
     `chore: worktree changes from ${opts.agentType}`,
   );
   if (commitFailure) return commitFailure;
 
   // Push branch
   try {
-    await execFileAsync('git', ['push', '-u', 'origin', branch], {
-      windowsHide: true,
-      cwd: worktreePath,
-      timeout: 30_000,
-    });
+    await pushLfsObjects((args, options) => laneGit(worktreePath, opts.repoPath, args, options), 'origin', branch, opts.lfsBase ?? null);
+    await laneGit(worktreePath, opts.repoPath, ['push', '-u', 'origin', branch], { timeout: 30_000 });
   } catch (err) {
     return {
       action: 'pr',
@@ -418,18 +412,20 @@ async function mergeToTarget(
   worktreePath: string,
   branch: string,
   targetBranch: string,
-  opts?: { importBranchFromWorkspace?: boolean },
+  opts?: { importBranchFromWorkspace?: boolean; lfsBase?: string | null },
 ): Promise<MergeResult> {
   const commitFailure = await commitWorkspaceChanges(
     'merge',
     worktreePath,
+    repoRoot,
+    branch,
     'chore: worktree changes',
   );
   if (commitFailure) return commitFailure;
 
   if (opts?.importBranchFromWorkspace) {
     try {
-      await execFileAsync('git', ['fetch', worktreePath, `${branch}:refs/heads/${branch}`], {
+      await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'fetch', worktreePath, `${branch}:refs/heads/${branch}`], {
         windowsHide: true,
         cwd: repoRoot,
         timeout: 30_000,
@@ -496,13 +492,13 @@ async function mergeToTarget(
 
   // Perform the merge
   try {
-    await execFileAsync('git', ['checkout', targetBranch], {
+    await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'checkout', targetBranch], {
       windowsHide: true,
       cwd: repoRoot,
       timeout: 10_000,
     });
 
-    await execFileAsync('git', ['merge', '--no-ff', branch, '-m', `Merge worktree: ${branch}`], {
+    await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'merge', '--no-ff', branch, '-m', `Merge worktree: ${branch}`], {
       windowsHide: true,
       cwd: repoRoot,
       timeout: 15_000,
@@ -513,7 +509,12 @@ async function mergeToTarget(
     let pushedToOrigin = false;
     let pushError: string | undefined;
     try {
-      await execFileAsync('git', ['push', 'origin', targetBranch], {
+      await pushLfsObjects((args, options) => execFileAsync('git', [...NO_REPOSITORY_HOOKS, ...args], {
+        windowsHide: true,
+        cwd: repoRoot,
+        ...options,
+      }), 'origin', targetBranch, opts?.lfsBase ?? null);
+      await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'push', 'origin', targetBranch], {
         windowsHide: true,
         cwd: repoRoot,
         timeout: 60_000,
@@ -526,7 +527,7 @@ async function mergeToTarget(
 
     // Restore original branch if it was different from target
     if (originalBranch && originalBranch !== targetBranch) {
-      await execFileAsync('git', ['checkout', originalBranch], {
+      await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'checkout', originalBranch], {
         windowsHide: true,
         cwd: repoRoot,
         timeout: 10_000,
@@ -544,10 +545,10 @@ async function mergeToTarget(
     };
   } catch (err) {
     // Abort any partial merge
-    await execFileAsync('git', ['merge', '--abort'], { windowsHide: true, cwd: repoRoot, timeout: 5000 }).catch(() => {});
+    await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'merge', '--abort'], { windowsHide: true, cwd: repoRoot, timeout: 5000 }).catch(() => {});
     // Restore original branch
     if (originalBranch) {
-      await execFileAsync('git', ['checkout', originalBranch], {
+      await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'checkout', originalBranch], {
         windowsHide: true,
         cwd: repoRoot,
         timeout: 10_000,

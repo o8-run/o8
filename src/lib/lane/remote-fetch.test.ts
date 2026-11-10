@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import os from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { NO_REPOSITORY_HOOKS } from '@/lib/git/no-repository-hooks';
 import { fetchWorkerBranch } from './remote-fetch';
 
 const tempDirs: string[] = [];
@@ -36,7 +37,7 @@ describe('fetchWorkerBranch option termination', () => {
 
     expect(result.ok).toBe(true);
     const invocations = readFileSync(argvLog, 'utf8').trim().split('\n');
-    expect(invocations).toContain(`fetch --end-of-options origin ${branch}`);
+    expect(invocations).toContain(`${NO_REPOSITORY_HOOKS.join(' ')} fetch --end-of-options origin ${branch}`);
     expect(invocations.some((line) => line === `fetch origin ${branch}`)).toBe(false);
   });
 });

@@ -592,9 +592,9 @@ async function healInboxItem(item: SupervisorInboxItem): Promise<void> {
   }
 
   const { runCompletionTypecheck } = await import('@/lib/supervisor/completion-verification');
-  const typecheck = await runCompletionTypecheck(cwd);
+  const typecheck = await runCompletionTypecheck(cwd, item.repo_path);
   if (!typecheck.ok) {
-    await markHumanRequired(item, payload, 'heal-bot commit did not pass `npx tsc --noEmit`', {
+    await markHumanRequired(item, payload, 'heal-bot commit did not pass `tsc --noEmit`', {
       outcome: 'failed',
       stdoutSnippet,
       stderrSnippet,

@@ -2,21 +2,19 @@ import { access } from 'node:fs/promises';
 import path from 'node:path';
 
 /**
- * Guards the dispatch typecheck gates against worktrees where `npx tsc` can't
- * actually run — repos with `installOnCreateWorkspace: false` produce a worktree
- * with no `node_modules`, so `npx tsc` falls through to the npm "tsc" SQUATTER
- * package, which prints the marker below and exits non-zero. The gate read that
- * as a type error and bounced the packet into the layer-1 auto-retry forever
+ * Guards the dispatch typecheck gates against worktrees where the compiler
+ * can't actually run: repos with `installOnCreateWorkspace: false` produce a
+ * worktree with no `node_modules`. The gate read the resulting failure as a
+ * type error and bounced the packet into the layer-1 auto-retry forever
  * (#1255). This module lets both gates SKIP-with-warning instead of looping.
  */
 
-// The squatter "tsc" package prints exactly this when the real TypeScript
-// compiler isn't installed locally. It is never a type error — treat it as
-// "no compiler here".
-const MISSING_TSC_MARKER = 'This is not the tsc command you are looking for';
+/** Recorded when the repository's install has no TypeScript compiler; no other compiler is used. */
+export const NO_REPOSITORY_TYPESCRIPT = 'no TypeScript install in the repository';
 
-export function isMissingTscOutput(output: string): boolean {
-  return output.includes(MISSING_TSC_MARKER);
+/** The compiler a lane's typecheck runs: the repository's own install, never the lane's checkout. */
+export function repositoryTypeScriptCompiler(installRoot: string): string {
+  return path.join(installRoot, 'node_modules', 'typescript', 'bin', 'tsc');
 }
 
 async function exists(p: string): Promise<boolean> {
@@ -46,7 +44,7 @@ export async function detectTypecheckAvailability(cwd: string): Promise<Typechec
 }
 
 /**
- * Decide whether `npx tsc --noEmit` should run in this worktree at all. Skips
+ * Decide whether `tsc --noEmit` should run in this worktree at all. Skips
  * when there's no TS project (no tsconfig) or no local compiler to run it
  * (deps not installed). Returns `skip: false` for a normal TS worktree so the
  * typecheck runs exactly as before.
