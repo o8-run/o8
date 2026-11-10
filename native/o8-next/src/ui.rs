@@ -229,6 +229,8 @@ pub(crate) struct Surface {
     away_from_end: bool,
     /// Rows that end a finished turn and carry Play and Copy.
     action_rows: BTreeSet<usize>,
+    /// The transcript ends with room for the floating changes pill.
+    pub(crate) pill_inset: bool,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
     prompt_actions: prompt_actions::State,
     subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
@@ -314,6 +316,7 @@ impl Surface {
             voice_hold: (0, false),
             away_from_end: false,
             action_rows: BTreeSet::new(),
+            pill_inset: false,
             action_feedback: Default::default(),
             prompt_actions: Default::default(),
             subagents: None,

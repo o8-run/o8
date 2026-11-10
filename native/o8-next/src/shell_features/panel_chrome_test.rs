@@ -40,19 +40,22 @@ fn saved(f: &Fixture) -> Value {
     serde_json::from_slice(&fs::read(f.root.join("panel-chrome.json")).unwrap()).unwrap()
 }
 #[gpui::test]
-fn panel_chrome_launcher_disclosure_and_distinct_drawer(cx: &mut TestAppContext) {
+fn panel_chrome_launcher_lists_every_tool_with_keys_and_distinct_drawer(cx: &mut TestAppContext) {
     let (_f, _s, mut v) = setup(cx);
-    assert!(
-        v.debug_bounds("panel-tool-activity").is_none(),
-        "only seven everyday tools initially"
-    );
-    click(&mut v, "panel-launcher-more");
+    // One list, everyday tools then the rest, with no disclosure (Q 2026-11-09).
+    bounds(&mut v, "panel-tool-files");
     bounds(&mut v, "panel-tool-activity");
-    click(&mut v, "panel-launcher-more");
-    assert!(v.debug_bounds("panel-tool-activity").is_none());
+    bounds(&mut v, "panel-tool-targeting");
+    assert!(v.debug_bounds("panel-launcher-more").is_none());
     click(&mut v, "panel-tool-devices");
     click(&mut v, "panel-new-tab");
-    bounds(&mut v, "panel-launcher-more");
+    bounds(&mut v, "panel-launcher");
+    // New tab gives the empty tab focus, so its letter opens a tool.
+    v.simulate_keystrokes("r");
+    settle(&mut v);
+    bounds(&mut v, "panel-tab-close-resources");
+    click(&mut v, "panel-new-tab");
+    bounds(&mut v, "panel-launcher");
     assert!(v.debug_bounds("panel-add-menu").is_none());
     click(&mut v, "panel-more-views");
     assert_eq!(bounds(&mut v, "panel-add-menu").size.width, px(340.));
@@ -64,9 +67,63 @@ fn panel_chrome_launcher_disclosure_and_distinct_drawer(cx: &mut TestAppContext)
     bounds(&mut v, "panel-tab-close-targeting");
 }
 #[gpui::test]
+fn panel_chrome_launcher_starts_at_its_head_when_the_panel_is_short(cx: &mut TestAppContext) {
+    let (_f, _s, mut v) = setup(cx);
+    v.simulate_resize(size(px(1600.), px(360.)));
+    settle(&mut v);
+    let panel = bounds(&mut v, "panel-launcher");
+    let head = bounds(&mut v, "panel-launcher-heading");
+    assert!(
+        head.top() >= panel.top(),
+        "the heading starts inside the panel, not above its scroll"
+    );
+    let files = bounds(&mut v, "panel-tool-files");
+    assert!(files.top() >= panel.top() && files.bottom() <= panel.bottom());
+}
+#[gpui::test]
+fn panel_chrome_launcher_letters_wait_for_its_focus(cx: &mut TestAppContext) {
+    let (_f, _s, mut v) = setup(cx);
+    click(&mut v, "panel-tool-devices");
+    click(&mut v, "panel-new-tab");
+    bounds(&mut v, "panel-launcher");
+    // Typing in the composer is typing, even with the empty tab in front.
+    click(&mut v, "composer-input");
+    v.simulate_keystrokes("r");
+    settle(&mut v);
+    assert!(v.debug_bounds("panel-tab-close-resources").is_none());
+    bounds(&mut v, "panel-launcher");
+}
+#[gpui::test]
+fn panel_chrome_browser_keeps_the_other_tabs_as_icons(cx: &mut TestAppContext) {
+    let (_f, _s, mut v) = setup(cx);
+    click(&mut v, "panel-tool-files");
+    click(&mut v, "panel-new-tab");
+    click(&mut v, "panel-tool-activity");
+    click(&mut v, "panel-new-tab");
+    click(&mut v, "panel-tool-browser");
+    let pages = bounds(&mut v, "panel-browser-pages");
+    let strip = bounds(&mut v, "panel-tabs");
+    for tool in ["files", "activity"] {
+        let tab = bounds(&mut v, &format!("panel-tab-select-{tool}"));
+        assert_eq!(tab.size.width, px(28.), "{tool} folds to its icon");
+        assert!(
+            tab.left() >= strip.left() && tab.right() <= pages.left(),
+            "{tool} stays in view beside the pages"
+        );
+        assert!(
+            v.debug_bounds(Box::leak(
+                format!("panel-tab-close-{tool}").into_boxed_str()
+            ))
+            .is_none()
+        );
+    }
+    // Back on a tool, the tabs carry their names again.
+    click(&mut v, "panel-tab-select-files");
+    assert!(bounds(&mut v, "panel-tab-select-files").size.width > px(28.));
+}
+#[gpui::test]
 fn panel_chrome_tabs_geometry_keyboard_close_and_saved_restore(cx: &mut TestAppContext) {
     let (f, _s, mut v) = setup(cx);
-    click(&mut v, "panel-launcher-more");
     click(&mut v, "panel-tool-activity");
     click(&mut v, "panel-more-views");
     click(&mut v, "panel-add-resources");
@@ -130,7 +187,6 @@ fn panel_chrome_threads_stays_out_of_the_launcher_and_saved_layouts(cx: &mut Tes
     let fresh = crate::shell_state::State::default().right_panel;
     assert!(fresh.primary != "threads" && fresh.secondary != "threads");
     let (f, _s, mut v) = setup(cx);
-    click(&mut v, "panel-launcher-more");
     bounds(&mut v, "panel-tool-targeting");
     assert!(v.debug_bounds("panel-tool-threads").is_none());
     click(&mut v, "panel-tool-resources");
@@ -600,7 +656,7 @@ fn panel_chrome_cmd_k_opens_the_palette_after_closing_the_last_tab(cx: &mut Test
     let (_f, s, mut v) = setup(cx);
     click(&mut v, "panel-tool-devices");
     click(&mut v, "panel-tab-close-devices");
-    bounds(&mut v, "panel-launcher-more");
+    bounds(&mut v, "panel-launcher");
     assert!(!s.read_with(&v, |s, _| s.palette));
     v.simulate_keystrokes("cmd-k");
     settle(&mut v);

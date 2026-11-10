@@ -36,9 +36,9 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         "panel-split",
         "panel-split-resize",
         "header-right-panel",
-        "panel-launcher-more",
         "panel-add-browser-page",
         "panel-tab",
+        "panel-launcher",
     ];
     for id in ids.into_iter().map(String::from).chain(
         Tool::GROUPS
@@ -380,6 +380,20 @@ pub(super) fn key(
     let key = event.keystroke.key.as_str();
     let overlays = s.palette;
     let p = s.features.get::<Panel>();
+    // The empty tab's letters, while focus is in the panel and no menu is open.
+    if p.selected == Tool::Launcher
+        && p.menu.is_none()
+        && !overlays
+        && !event.keystroke.modifiers.modified()
+        && p.focus.values().any(|f| f.is_focused(window))
+        && let Some(tool) = Tool::GROUPS
+            .iter()
+            .flat_map(|(_, tools)| tools.iter().copied())
+            .find(|tool| tool.key().is_some_and(|k| key == k.to_string()))
+    {
+        super::chrome::open_tool(s, tool, window, cx);
+        return true;
+    }
     if p.menu.is_some() {
         if matches!(key, "escape" | "tab") {
             let lower = p.menu_lower;

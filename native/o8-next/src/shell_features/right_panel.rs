@@ -277,6 +277,25 @@ impl Tool {
             Tool::Compare => COLUMNS,
         }
     }
+    /// The empty tab's one-letter key, as T3 Code's "Open a surface" list;
+    /// T3's letters where the tool is shared (B, T, F, D for its diff, M, S).
+    fn key(self) -> Option<char> {
+        Some(match self {
+            Tool::Files => 'f',
+            Tool::Browser => 'b',
+            Tool::Devices => 'm',
+            Tool::Terminal => 't',
+            Tool::Review => 'd',
+            Tool::Subagents => 'g',
+            Tool::Inbox => 'i',
+            Tool::Spec => 'o',
+            Tool::Activity => 'a',
+            Tool::SideChat => 's',
+            Tool::Resources => 'r',
+            Tool::Targeting => 'x',
+            _ => return None,
+        })
+    }
     fn slug(self) -> String {
         self.label().to_lowercase().replace([' ', '.'], "-")
     }
@@ -300,11 +319,9 @@ struct Panel {
     /// The next selection opens in the bottom half.
     into_lower: bool,
     maximized: bool,
-    more: bool,
     menu_lower: bool,
     menu_index: usize,
     focus: std::collections::HashMap<String, gpui::FocusHandle>,
-    launcher_height: std::rc::Rc<std::cell::Cell<f32>>,
     launcher_scroll: gpui::ScrollHandle,
     split_drag: bool,
     split_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
@@ -341,11 +358,9 @@ impl Default for Panel {
             lower_tabs: vec![],
             into_lower: false,
             maximized: false,
-            more: false,
             menu_lower: false,
             menu_index: 0,
             focus: Default::default(),
-            launcher_height: Default::default(),
             launcher_scroll: Default::default(),
             split_drag: false,
             split_bounds: Default::default(),

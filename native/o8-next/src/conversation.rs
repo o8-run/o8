@@ -34,6 +34,7 @@ mod card_tests;
 mod network_tests;
 #[path = "composer/changes_pill.rs"]
 mod changes_pill;
+pub(crate) use changes_pill::PILL_INSET;
 pub(crate) use changes_pill::ChangesPill;
 #[path = "composer/project_bar.rs"]
 mod project_bar;
@@ -765,11 +766,13 @@ impl Surface {
             // Reserve the full card height so the transcript above yields space.
             .flex()
             .flex_col()
+            .children(self.empty_chat_hero(cx))
             .children(self.shell_run_card(cx))
             .children(self.lineage_strip(cx))
             .children(self.changes_pill(cx))
-            .children(self.project_bar(cx))
             .child(self.composer_card(window, cx))
+            // An empty chat's project, checkout, branch and access sit under it.
+            .children(self.project_bar(cx))
             .into_any_element()
     }
     /// Messages still waiting in this chat's queue, oldest first.

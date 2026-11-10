@@ -64,7 +64,6 @@ fn activity_live_batches_ignore_transcripts_and_replace_retained_rows(cx: &mut T
         cx,
     );
     ready(&shell, &mut visual);
-    activity_click(&mut visual, "panel-launcher-more");
     activity_click(&mut visual, "panel-tool-activity");
     let view = shell.read_with(&visual, |s, _| {
         match s.content.get(&s.panel_front_key().unwrap()).unwrap() {
@@ -350,7 +349,6 @@ fn activity_panel_opens_before_the_workspace_has_saved_view_state(cx: &mut TestA
             .workspaces
             .remove(s.state.selected.as_ref().unwrap());
     });
-    activity_click(&mut visual, "panel-launcher-more");
     activity_click(&mut visual, "panel-tool-activity");
     assert!(
         visual.debug_bounds("activity-pane").is_some(),

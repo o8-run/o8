@@ -72,11 +72,17 @@ impl Surface {
         // Waiting messages ride as the list's last item, so they scroll with
         // the turns as in classic.
         let queued = Rc::new(self.queued_items());
-        let tail = usize::from(!queued.is_empty());
+        // The floating changes pill covers the transcript's foot, so the tail
+        // also carries room for it: the last line and its actions clear it.
+        let inset = self.changes_pill_shown();
+        let tail = usize::from(!queued.is_empty() || inset);
         let count = self.list.item_count();
-        if count != rows.len() + tail && (count == rows.len() || count == rows.len() + 1) {
+        if (count != rows.len() + tail || inset != self.pill_inset)
+            && (count == rows.len() || count == rows.len() + 1)
+        {
             self.list.splice(rows.len()..count, tail);
         }
+        self.pill_inset = inset;
         // After the tail is in the list, so a just-sent message is revealed.
         self.follow_frame();
         let queue_enabled = self.queue_ready && !self.saving;
@@ -132,12 +138,22 @@ impl Surface {
                     let view = view.clone();
                     move |index, window, _| {
                         if index >= rows.len() {
-                            return super::conversation::queue_tail(
-                                &queued,
-                                queue_enabled,
-                                &steerable,
-                                view.clone(),
-                            );
+                            let queue = (!queued.is_empty()).then(|| {
+                                super::conversation::queue_tail(
+                                    &queued,
+                                    queue_enabled,
+                                    &steerable,
+                                    view.clone(),
+                                )
+                            });
+                            return div()
+                                .debug_selector(|| "transcript-tail".into())
+                                .w_full()
+                                .children(queue)
+                                .when(inset, |tail| {
+                                    tail.child(div().h(px(super::conversation::PILL_INSET)))
+                                })
+                                .into_any_element();
                         }
                         if rows[index].borrow().file_root != file_root {
                             rows[index].borrow_mut().file_root = file_root.clone();
@@ -197,7 +213,9 @@ impl Surface {
                 .min_h_0(),
             )
             .child(self.history_control(cx))
-            .when(self.away_from_end, |d| d.child(self.jump_to_end(cx)))
+            .when(self.away_from_end && !self.changes_pill_shown(), |d| {
+                d.child(self.jump_to_end(cx))
+            })
             .into_any_element()
     }
     /// "Show N more" on a turn's files card; the row grows, so it is measured again.
@@ -206,46 +224,17 @@ impl Surface {
         self.remeasure_action_row(index);
         cx.notify();
     }
-    /// Classic's round jump-to-latest button, centred over the transcript's
-    /// bottom edge while the reader is scrolled up.
+    /// The jump-to-latest arrow, centred on the floating pill's line while
+    /// the reader is scrolled up; with the changes pill it sits beside it.
     fn jump_to_end(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .absolute()
-            .bottom(px(12.))
+            .bottom(px(8.))
             .left_0()
             .right_0()
             .flex()
             .justify_center()
-            .child(
-                div()
-                    .id("transcript-jump-to-end")
-                    .debug_selector(|| "transcript-jump-to-end".into())
-                    .size(px(40.))
-                    .rounded_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .bg(theme().surface_raised)
-                    .border_1()
-                    .border_color(theme().border)
-                    .shadow_md()
-                    .hover(|d| d.bg(theme().hover))
-                    .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Jump to latest".into())).into())
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let last = this.list.item_count().saturating_sub(1);
-                        this.list.scroll_to_reveal_item(last);
-                        this.pinned = true;
-                        this.away_from_end = false;
-                        cx.notify();
-                    }))
-                    .child(crate::icon::stroke(
-                        "M12 5v14M5 12l7 7 7-7",
-                        theme().text,
-                        18.,
-                        2.,
-                    )),
-            )
+            .child(self.jump_arrow(cx))
     }
 }
 
