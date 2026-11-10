@@ -392,7 +392,7 @@ export async function withLaneCommitDirectory<T>(worktreePath: string, repoPath:
   // The worker sandbox denies the data dir, unlike the system temp dir.
   const root = path.join(getDataDir(), 'lane-git');
   await mkdir(root, { recursive: true, mode: 0o700 });
-  await removeAbandonedCommitDirectories(root);
+  await removeAbandonedDirectories(root, COMMIT_DIRECTORY_PREFIX);
   const adminDir = await mkdtemp(path.join(root, COMMIT_DIRECTORY_PREFIX));
   try {
     const indexFile = path.join(adminDir, 'index');
@@ -443,21 +443,27 @@ async function assertLaneRefIsPlain(worktreePath: string, repoPath: string, comm
 }
 
 const COMMIT_DIRECTORY_PREFIX = 'commit-';
-/** Far longer than any commit's Git timeouts, or a host sleeping through one. */
-const ABANDONED_COMMIT_DIRECTORY_MS = 24 * 60 * 60 * 1000;
+/** Far longer than any commit or merge, or a host sleeping through one. */
+const ABANDONED_DIRECTORY_MS = 24 * 60 * 60 * 1000;
 
-/** A commit directory outlives its commit only when o8 exits mid-commit. */
-async function removeAbandonedCommitDirectories(root: string): Promise<void> {
+/**
+ * A host-owned directory under the data dir outlives its commit or merge only
+ * when o8 exits during it. Removal is best effort: a leftover o8 cannot remove
+ * is logged and kept, and never stops a later commit or merge.
+ */
+export async function removeAbandonedDirectories(root: string, prefix: string): Promise<void> {
   const now = Date.now();
   for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !entry.name.startsWith(COMMIT_DIRECTORY_PREFIX)) continue;
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
     const directory = path.join(root, entry.name);
     try {
-      if (now - (await stat(directory)).mtimeMs > ABANDONED_COMMIT_DIRECTORY_MS) {
+      if (now - (await stat(directory)).mtimeMs > ABANDONED_DIRECTORY_MS) {
         await rm(directory, { recursive: true, force: true });
       }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn(`[lane-git] Could not remove abandoned ${directory}: ${(error as Error).message}`);
+      }
     }
   }
 }

@@ -4000,6 +4000,15 @@
       ]
     },
     {
+      "path": "tests/lane-integration-clone-sandbox-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "integration",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-lifecycle-1810-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -993,7 +993,7 @@ describe('worktree-side merge with real git repos', () => {
       .find((candidate) => candidate.policyRuleId === 'rebase_conflict_escalation');
     expect(conflictApproval?.description).toContain(worktree.path);
     expect(conflictApproval?.description).toContain('isolated integration checkout was discarded');
-    expect(conflictApproval?.description).not.toContain('o8-reviewed-integration-');
+    expect(conflictApproval?.description).not.toContain(join('lane-merge', 'integration-'));
     expect(existsSync(worktree.path)).toBe(true);
     expect(git(worktree.path, ['rev-parse', 'HEAD'])).toBe(reviewedHeadSha);
     expect(git(worktree.path, ['status', '--porcelain'])).toBe('');
