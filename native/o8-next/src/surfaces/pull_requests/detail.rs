@@ -658,7 +658,7 @@ impl PullRequests {
         let d = &self.detail;
         let checks = array(d, "statusCheckRollup");
         let (tone, failing, label) = check_summary(&checks);
-        let reviews = array(d, "reviewComments").len() + array(d, "issueComments").len();
+        let reviews = array(d, "reviewComments").len() + array(d, "issueComments").len() + array(d, "submittedReviews").len();
         let files = d["changedFiles"].as_u64().unwrap_or(array(d, "files").len() as u64) as usize;
         let tabs = [
             ("summary", "Summary", 0),
@@ -1028,3 +1028,5 @@ impl PullRequests {
 
 #[path = "detail_tabs.rs"]
 mod tabs;
+#[path = "reviews.rs"]
+mod reviews;

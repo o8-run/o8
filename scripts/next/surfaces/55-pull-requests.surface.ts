@@ -80,6 +80,7 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
       return Response.json(path.includes('/issues/') ? comments : []);
     }
     if (path.endsWith('/reviews')) {
+      if (scenario === 'reviews-unavailable') return Response.json({ message: 'Fixture reviews unavailable' }, { status: 503 });
       if (method === 'POST') reviews.push({ id: reviews.length + 1, state: body.event === 'REQUEST_CHANGES' ? 'CHANGES_REQUESTED' : body.event === 'APPROVE' ? 'APPROVED' : 'COMMENTED', body: body.body, user: { login: 'fixture-author' } });
       return Response.json(method === 'GET' ? reviews : { id: reviews.length }, {
         headers: scenario === 'reviews-incomplete' ? { link: '<https://api.github.com/fixture?page=2>; rel="next"' } : {},
@@ -108,6 +109,14 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
     createLane({ repoPath: repo, worktreePath: repo, branch: 'fixture-missing', baseBranch: 'main', runtime: 'codex', packetId: 'next-pr-drift' });
     const gates = await (await import('../pull-request-gates-fixture')).pullRequestGatesFixture(repo, name => {
       scenario = name;
+      if (name === 'submitted-reviews') {
+        reviews.splice(0, reviews.length, ...[
+          { id: 501, commit_id: 'c'.repeat(40), submitted_at: '2026-11-10T01:02:19Z', body: 'Close/reset may rebind a stopped packet.' },
+          { id: 502, commit_id: 'a'.repeat(40), submitted_at: '2026-11-10T01:09:36Z', body: 'Re-review: APPROVE. The correction covers reassigned lanes.' },
+        ].map(review => ({ ...review, state: 'COMMENTED', user: { login: 'fixture-reviewer' },
+          html_url: `https://github.com/example/repo/pull/7#pullrequestreview-${review.id}` })));
+      }
+      if (name === 'head-advanced') (pulls.get(7)!.head as { sha: string }).sha = 'd'.repeat(40);
       if (name === 'review-changes' || name === 'review-approved') reviews.push({ id: 99,
         state: name === 'review-changes' ? 'CHANGES_REQUESTED' : 'APPROVED', user: { login: 'fixture-reviewer' } });
       if (name === 'review-cleared') for (const review of reviews) if (review.state === 'REQUEST_CHANGES' || review.state === 'CHANGES_REQUESTED') review.state = 'DISMISSED';

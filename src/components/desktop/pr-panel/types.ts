@@ -61,6 +61,16 @@ export interface PrIssueComment {
   created_at: string;
 }
 
+export interface PrSubmittedReview {
+  id: number;
+  author: string;
+  body: string;
+  state: string;
+  submittedAt: string;
+  reviewedHeadSha: string | null;
+  url: string | null;
+}
+
 export interface PrDetail {
   mergeGate?: import('@/lib/github-broker/pr-merge-gate').PrMergeGate;
   stack?: import('@/lib/github-client/pr-stack').PullRequestStackObservation;
@@ -96,6 +106,7 @@ export interface PrDetail {
   watch?: { changes: Array<'head' | 'checks' | 'state' | 'comments' | 'reviews'>; commentUpdatesPaused: boolean };
   resolvedRepo?: string;
   reviewComments: PrReviewComment[];
+  submittedReviews?: PrSubmittedReview[];
   issueComments: PrIssueComment[];
   diffStat?: string;
 }

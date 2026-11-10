@@ -155,7 +155,7 @@ const PrPanelContent = memo(function PrPanelContent({ prNumber, repoSlug, repoPa
         onChange={(activeTab) => update({ activeTab })}
         changesCount={detail.changedFiles}
         checks={detail.statusCheckRollup}
-        reviewsCount={detail.reviewComments.length + detail.issueComments.length}
+        reviewsCount={detail.reviewComments.length + detail.issueComments.length + (detail.submittedReviews?.length ?? 0)}
         idBase={panelId}
       />
       <PrReviewGuide key={selectionKey} selection={selectionKey} detail={detail} onNavigate={(activeTab, file) => { if (file) openFile(file); else update({ activeTab }); }} onAsk={prompt => { if (repoPath) openComposerBrain({ repoPath, prompt, context: prBrainContext(detail, repoSlug) }); }} />

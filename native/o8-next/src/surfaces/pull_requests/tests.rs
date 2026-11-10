@@ -8,6 +8,8 @@ use std::{
 
 #[path = "merge_tests.rs"]
 mod merge;
+#[path = "review_tests.rs"]
+mod reviews;
 
 struct Fixture {
     server: Child,
