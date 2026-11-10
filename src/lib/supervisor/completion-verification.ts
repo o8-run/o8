@@ -1,17 +1,15 @@
-import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { access } from 'node:fs/promises';
+
 import {
   assertLaneHeadOnBranch, laneGit, LaneGitMetadataError, withLaneCommitDirectory, type LaneCommitDirectory,
 } from '@/lib/lane/lane-git';
-import { execFile } from '@/lib/providers/child-process';
-import { promisify } from 'node:util';
 
-import { detectTypecheckSkip, isMissingTscOutput } from '@/lib/lane/typecheck-availability';
+import { detectTypecheckSkip, NO_REPOSITORY_TYPESCRIPT, repositoryTypeScriptCompiler } from '@/lib/lane/typecheck-availability';
 import { resolvePacketDiffBase } from '@/lib/diff/base-resolution';
+import { runConfinedProcess } from '@/lib/sandbox/run-confined';
 
 import { buildRuleCheckFailureMessage, runRuleCheck } from './rule-check';
-import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
-const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 const TYPECHECK_TIMEOUT_MS = 120_000;
 const TYPECHECK_OUTPUT_LIMIT = 12_000;
@@ -29,20 +27,26 @@ export interface CompletionVerificationResult {
   output: string;
 }
 
-export async function runCompletionTypecheck(cwd: string): Promise<CompletionTypecheckResult> {
+/**
+ * Typechecks `cwd` with the TypeScript compiler installed in `installRoot`,
+ * never one from the lane's checkout, under the confinement lane commands get
+ * (#3412).
+ */
+export async function runCompletionTypecheck(cwd: string, installRoot: string): Promise<CompletionTypecheckResult> {
+  const compiler = repositoryTypeScriptCompiler(installRoot);
   const skip = await detectTypecheckSkip(cwd);
-  if (skip.skip) {
-    console.warn(`[completion-verification] Skipping typecheck: ${skip.reason} (#1255).`);
+  const skipped = skip.skip
+    ? skip.reason
+    : await access(compiler).then(() => undefined, () => NO_REPOSITORY_TYPESCRIPT);
+  if (skipped) {
+    console.warn(`[completion-verification] Skipping typecheck: ${skipped} (#1255).`);
     return { ok: true, output: '' };
   }
   try {
-    const typecheck = cliInvocation('npx', ['tsc', '--noEmit']);
-    const { stdout, stderr } = await execFileAsync(typecheck.command, typecheck.args, {
-      windowsHide: true,
+    const { stdout, stderr } = await runConfinedProcess(cwd, process.execPath, [compiler, '--noEmit'], {
       cwd,
       timeout: TYPECHECK_TIMEOUT_MS,
       maxBuffer: COMMAND_MAX_BUFFER,
-      env: { ...childEnvironment(), FORCE_COLOR: '0', NO_COLOR: '1' },
     });
 
     return {
@@ -55,24 +59,20 @@ export async function runCompletionTypecheck(cwd: string): Promise<CompletionTyp
       stderr?: string | Buffer;
       message?: string;
       status?: number | null;
+      code?: number | string;
       signal?: NodeJS.Signals | null;
     };
     const commandOutput = formatCommandOutput(
       bufferToString(execError.stdout),
       bufferToString(execError.stderr),
     );
-
-    // node_modules existed but `npx tsc` hit the squatter package — skip rather
-    // than report a phantom type error that would loop the retry (#1255).
-    if (isMissingTscOutput(commandOutput)) {
-      console.warn('[completion-verification] No local TypeScript compiler; skipping typecheck (#1255).');
-      return { ok: true, output: '' };
-    }
+    const exitCode = typeof execError.status === 'number' ? execError.status
+      : typeof execError.code === 'number' ? execError.code : undefined;
 
     const failureSummary = execError.signal
       ? `Process terminated by ${execError.signal}.`
-      : typeof execError.status === 'number'
-        ? `Exit code ${execError.status}.`
+      : exitCode !== undefined
+        ? `Exit code ${exitCode}.`
         : execError.message?.trim() || 'Command failed.';
 
     return {
@@ -89,7 +89,7 @@ export async function runCompletionVerification(
   baseRef: string,
   repoPath: string,
 ): Promise<CompletionVerificationResult> {
-  const typecheck = await runCompletionTypecheck(cwd);
+  const typecheck = await runCompletionTypecheck(cwd, repoPath);
   if (!typecheck.ok) {
     return {
       ok: false,

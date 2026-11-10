@@ -1,4 +1,5 @@
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
+import { pushLfsObjects } from '@/lib/git/lfs-push';
 import { withWorkAdmission } from '@/lib/app-update/work-launch-admission';
 /**
  * Lane Command Bus
@@ -66,7 +67,7 @@ import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { enqueueLaneReview } from '@/lib/lane/review-queue';
 import { assertPacketCreationBaseAuthority, resolvePacketCreationBase, PacketCreationBaseError, type PacketCreationBaseAuthority } from '@/lib/lane/packet-creation-base';
-import { readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
+import { readLaneCreationBaseCommit, readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { describeStopRefusal, persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
@@ -702,6 +703,9 @@ async function dispatchUnlocked(
         if (publicationGovernanceDrift) return publicationGovernanceDrift;
 
         // Push the immutable reviewed commit, never the mutable local branch.
+        const laneWorktreePath = lockedLane.worktreePath;
+        await pushLfsObjects((args, options) => laneGit(laneWorktreePath, lockedLane.repoPath, args, options),
+          'origin', reviewedSnapshotSha, readLaneCreationBaseCommit(lockedLane.id));
         await laneGit(lockedLane.worktreePath, lockedLane.repoPath, [
           'push',
           'origin',

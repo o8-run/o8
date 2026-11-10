@@ -5,6 +5,7 @@ import type {
   MergeStrategy,
 } from '@/lib/approvals/types';
 import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
+import { readLaneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { resolveGovernedMergeHistoryPlan } from '@/lib/lane/governed-merge-history';
 import { checkExpectedHeadSha, formatHeadShaMismatchNote, resolveHeadSha } from '@/lib/lane/head-sha-lock';
 import { assertLaneHeadOnBranch, LaneGitMetadataError } from '@/lib/lane/lane-git';
@@ -427,6 +428,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
   // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
   if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
   const worktreePath = lane.worktreePath;
+  const lfsBase = readLaneCreationBaseCommit(lane.id);
   if (!worktreePath) {
     return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
   }
@@ -674,7 +676,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     try {
       await fetchWorkerHeadIntoMainRepo(lane.repoPath, mergeWorktreePath, rebasedSha, integrationRef);
       if (originPushAvailable) {
-        await pushWorkerBranchBestEffort(worktreePath, actualBranch, rebasedSha);
+        await pushWorkerBranchBestEffort(worktreePath, lane.repoPath, actualBranch, rebasedSha, lfsBase);
       }
       const originBaseRef = originPushAvailable
         ? await refreshOriginBaseBestEffort(lane.repoPath, lane.baseBranch)
@@ -694,7 +696,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       const integrationSha = (await git(lane.repoPath, ['rev-parse', integrationRef], { timeout: 5000 })).stdout.trim();
       mergeCandidateSha = integrationSha;
       if (originPushAvailable && integrationSha !== rebasedSha) {
-        await pushWorkerBranchLeaseBestEffort(worktreePath, actualBranch, integrationSha, rebasedSha);
+        await pushWorkerBranchLeaseBestEffort(worktreePath, lane.repoPath, actualBranch, integrationSha, rebasedSha, lfsBase);
       }
       let pushLease = await exactPushLeaseForCandidate(lane.repoPath, originBaseRef, integrationRef);
       if (!pushLease.safe) return createFastForwardFailureApproval(input, new Error(`${originBaseRef} is no longer an ancestor of the exact reviewed candidate.`));
@@ -720,9 +722,11 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       if (originPushAvailable && governedCandidate.squashed) {
         await pushWorkerBranchLeaseBestEffort(
           lane.repoPath,
+          lane.repoPath,
           actualBranch,
           mergeCandidateSha,
           integrationSha,
+          lfsBase,
         );
         pushLease = await exactPushLeaseForCandidate(lane.repoPath, originBaseRef, integrationRef);
         if (!pushLease.safe) return createFastForwardFailureApproval(input, new Error(`${originBaseRef} is no longer an ancestor of the governed squash candidate.`));
@@ -772,7 +776,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     let pushedToOrigin = false, pushError: string | undefined;
     if (originPushAvailable) {
       try {
-        await withSessionMergePublication(lane.packetId, () => pushExactBase(lane.repoPath, lane.baseBranch, mergeSha, expectedRemoteBaseSha));
+        await withSessionMergePublication(lane.packetId, () => pushExactBase(lane.repoPath, lane.baseBranch, mergeSha, lfsBase, expectedRemoteBaseSha));
         pushedToOrigin = true;
         console.log(`[lane-merge] Pushed ${lane.baseBranch} to origin after fast-forwarding ${actualBranch}`);
       } catch (error) {

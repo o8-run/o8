@@ -100,7 +100,7 @@ async function listenSocket(dir: string): Promise<{ server: Server; path: string
   return { server, path, connections: () => count };
 }
 
-const verify = (cwd: string) => runLaneRebaseVerify({ cwd, baseRef: 'main', actualBranch: 'packet/confined', logPrefix: 'test' });
+const verify = (cwd: string) => runLaneRebaseVerify({ cwd, installRoot: cwd, baseRef: 'main', actualBranch: 'packet/confined', logPrefix: 'test' });
 
 beforeAll(() => { if (confinable) buildPiWriteHelper(); }, 600_000);
 

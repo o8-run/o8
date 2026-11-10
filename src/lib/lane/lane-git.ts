@@ -305,7 +305,9 @@ function* laneGitInvocationPlan(worktreePath: string, repoPath: string, args: re
   // but a concurrently introduced filter driver remains an enumeration race.
   const repeated = yield* resolveGitDirectories(worktreePath, repoPath, laneGitEnvironment(ignoreGlobalConfig));
   if (JSON.stringify(repeated) !== JSON.stringify(directories)) throw new LaneGitMetadataError();
-  const isTransport = ['fetch', 'push', 'ls-remote', 'credential'].includes(args[0]);
+  // git-lfs's upload asks Git for credentials, so it gets a push's transport config.
+  const isTransport = ['fetch', 'push', 'ls-remote', 'credential'].includes(args[0])
+    || (args[0] === 'lfs' && args[1] === 'push');
   const transport = isTransport ? yield* transportArguments(directories.worktree, env) : [];
   if (isTransport) env.GIT_PROXY_COMMAND = '';
   // Remote upload/receive-pack config is first-value wins. Command flags take

@@ -1,9 +1,7 @@
+import { access } from 'node:fs/promises';
 
-import { detectTypecheckSkip, isMissingTscOutput } from './typecheck-availability';
-import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
-
-const execFileAsync = materializationAwareExecFile;
+import { detectTypecheckSkip, NO_REPOSITORY_TYPESCRIPT, repositoryTypeScriptCompiler } from './typecheck-availability';
+import { runConfinedProcess } from '@/lib/sandbox/run-confined';
 
 const TYPECHECK_TIMEOUT_MS = 120_000;
 const TYPECHECK_MAX_BUFFER_BYTES = 4 * 1024 * 1024;
@@ -21,24 +19,33 @@ export type LaneRebaseTypecheckResult =
   | { ok: true; skipped?: string }
   | { ok: false; output: string };
 
+/**
+ * Typechecks `cwd` with the TypeScript compiler installed in `installRoot`,
+ * never one from the lane's checkout, under the confinement lane commands get
+ * (#3412).
+ */
 export async function runLaneRebaseTypecheck(input: {
   cwd: string;
+  /** The repository whose TypeScript install compiles the merge; never the lane's checkout. */
+  installRoot: string;
   actualBranch: string;
   logPrefix: string;
 }): Promise<LaneRebaseTypecheckResult> {
+  const compiler = repositoryTypeScriptCompiler(input.installRoot);
   const skip = await detectTypecheckSkip(input.cwd);
-  if (skip.skip) {
+  const skipped = skip.skip
+    ? skip.reason
+    : await access(compiler).then(() => undefined, () => NO_REPOSITORY_TYPESCRIPT);
+  if (skipped) {
     console.warn(
-      `[${input.logPrefix}] Skipping typecheck for ${input.actualBranch}: ${skip.reason}. ` +
+      `[${input.logPrefix}] Skipping typecheck for ${input.actualBranch}: ${skipped}. ` +
         'Treating as pass so the merge does not loop the layer-1 auto-retry (#1255).',
     );
-    return { ok: true, skipped: skip.reason };
+    return { ok: true, skipped };
   }
   const startedAt = Date.now();
   try {
-    const typecheck = cliInvocation('npx', ['tsc', '--noEmit']);
-    await execFileAsync(typecheck.command, typecheck.args, {
-      windowsHide: true,
+    await runConfinedProcess(input.cwd, process.execPath, [compiler, '--noEmit'], {
       cwd: input.cwd,
       timeout: TYPECHECK_TIMEOUT_MS,
       maxBuffer: TYPECHECK_MAX_BUFFER_BYTES,
@@ -47,16 +54,6 @@ export async function runLaneRebaseTypecheck(input: {
     return { ok: true };
   } catch (error) {
     const output = extractTypecheckOutput(error);
-
-    // Safety net: if node_modules existed but `npx tsc` still resolved to the
-    // squatter package, the pre-check missed it — never treat that as a type
-    // error (it would loop the auto-retry).
-    if (isMissingTscOutput(output)) {
-      console.warn(
-        `[${input.logPrefix}] No local TypeScript compiler in ${input.actualBranch} worktree; skipping typecheck (#1255).`,
-      );
-      return { ok: true, skipped: 'no local TypeScript compiler was found' };
-    }
 
     // A compiler that exited non-zero without writing a single byte never got
     // far enough to look for a type error. A timeout kill and a worktree whose
