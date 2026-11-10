@@ -13,6 +13,8 @@ vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => true) }));
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn(), triggerScanIfStale: vi.fn(), startChangePolling: vi.fn(), stopChangePolling: vi.fn() }));
 vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] }, reasoningEfforts: { 'gpt-5.6-terra': ['low'] } }) }));
+const sourceCheckout = process.cwd();
+const sourceHead = execFileSync('git', ['-C', sourceCheckout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-review-author-')));
 const data = join(root, 'data'); const repo = join(data, 'repo'); const bin = join(root, 'codex');
 mkdirSync(join(data, 'chat-history'), { recursive: true }); mkdirSync(repo);
@@ -23,10 +25,22 @@ for (const [key, value] of Object.entries({ O8_DATA_DIR: data, CORTEX_IDE_DATA_D
   O8_CODEX_BIN: bin, O8_CRASH_SURVIVABLE_WORKERS: '0', O8_WORKER_SANDBOX: '0' })) vi.stubEnv(key, value);
 writeFileSync(bin, `#!/usr/bin/env node
 if (process.argv.includes('--version')) { console.log('codex-cli 1.0.0'); process.exit(0); }
+if (!process.argv.includes('exec')) process.exit(0);
+const fs = require('node:fs');
+const cwd = fs.realpathSync(process.cwd());
+if (cwd !== ${JSON.stringify(repo)} && !cwd.startsWith(${JSON.stringify(join(data, 'worktrees') + '/')})) {
+ console.error('Fixture worker refused an unowned checkout'); process.exit(1);
+}
 const emit = value => console.log(JSON.stringify({...value, timestamp: new Date().toISOString()}));
 emit({type:'thread.started', thread_id:'fixture-worker'});
-const finish = () => { emit({type:'item.completed', item:{id:'answer', type:'agent_message', text:'Corrected result'}}); emit({type:'turn.completed',usage:{input_tokens:0,output_tokens:0}}); };
-const fs = require('node:fs');
+const finish = () => {
+if (cwd !== ${JSON.stringify(repo)}) {
+ const {execFileSync} = require('node:child_process');
+ require('node:fs').writeFileSync('answer.txt', 'fixture result');
+ execFileSync('git', ['add', '--', 'answer.txt']);
+ execFileSync('git', ['-c', 'user.name=o8 test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture author']);
+}
+emit({type:'item.completed', item:{id:'answer', type:'agent_message', text:'Corrected result'}}); emit({type:'turn.completed',usage:{input_tokens:0,output_tokens:0}}); };
 const timer = setInterval(() => { if (fs.existsSync(${JSON.stringify(join(root, 'release-worker'))})) { clearInterval(timer); finish(); } }, 25);
 `); chmodSync(bin, 0o755);
 const parent = 'thoughts-correction-parent';
@@ -74,6 +88,7 @@ afterAll(async () => {
   const timer = (globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>)[Symbol.for('o8.ownedSession.refreshTimer.codex')];
   if (timer) clearInterval(timer);
   closeDb(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(root, { recursive: true, force: true });
+  expect(execFileSync('git', ['-C', sourceCheckout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(sourceHead);
 });
 
 const { POST: submitReview } = await import('@/app/api/orchestrator/review/route');
@@ -261,4 +276,88 @@ it('checks the reviewed code outside SQLite write transactions at admission and 
     expect(checked.filter(command => command === 'rev-parse').length).toBeGreaterThanOrEqual(2);
     expect(checked.filter(command => command === 'status').length).toBeGreaterThanOrEqual(2);
   } finally { spy.mockRestore(); }
+}, 60000);
+
+it.each(['delivered', 'busy', 'stopped'] as const)('hands a persisted rejection to a real isolated packet-bound author: %s', async outcome => {
+  rmSync(join(root, 'release-worker'), { force: true });
+  const response = await delegate(new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST',
+    body: JSON.stringify({ prompt: 'Inspect the original request', repoPath: repo, taskName: `packet-bound-author-${outcome}`,
+      runtime: 'codex', model: 'gpt-5.6-terra', requestedEffort: 'low', checkoutMode: 'isolated',
+      parentThreadId: parent, clientMutationId: `isolated-review-author-5832-${outcome}` }) }));
+  const launched = await response.json();
+  expect(response.status, JSON.stringify(launched)).toBe(200);
+  surfaces.push(launched.surfaceId);
+  writeFileSync(join(root, 'release-worker'), 'release');
+  await vi.waitFor(async () => {
+    await owned.getOwnedCodexFleetAdditions({ fresh: true });
+    expect(record(launched.surfaceId).activeRun).toBeUndefined();
+  }, { timeout: 15000, interval: 80 });
+  expect(record(launched.surfaceId).packetId).toBe(launched.packetId);
+  const { dispatch } = await import('@/lib/lane/commands');
+  const requested = await dispatch({ verb: 'request_review', laneId: launched.laneId, actor: 'system' });
+  expect(requested.ok, JSON.stringify(requested)).toBe(true);
+  packetId = launched.packetId;
+  const packetHead = execFileSync('git', ['-C', launched.worktreePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const saved = await submitReview(new NextRequest('http://localhost/api/orchestrator/review', { method: 'POST',
+    headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ packetId, approved: false, reviewedHeadSha: packetHead, clientMutationId: `packet-bound-rejection-${outcome}`,
+      findings: [{ file: 'answer.txt', severity: 'note', description: 'Preserve the original request.', status: 'deferred' }] }) }));
+  expect(saved.status, JSON.stringify(await saved.clone().json())).toBe(200);
+  expect(control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)?.status).toBe('awaiting_review');
+  const review = control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)!.review!;
+  const target = { surfaceId: launched.surfaceId, runId: record(launched.surfaceId).recentRuns[0].id };
+  const { readOwnedRecoveryState } = await import('@/lib/runtimes/shared/owned-session/automatic-recovery');
+  expect(await readOwnedRecoveryState(target.surfaceId)).toMatchObject({
+    automaticRecoveryAllowed: false, operatorCorrectionAllowed: true,
+  });
+  const { createCortexDelegationHandlers } = await import('@/lib/mcp/cortex-delegation-handlers');
+  const { apiError } = await import('@/lib/mcp/api-error');
+  const handlers = createCortexDelegationHandlers({ repoPath: repo, parentThreadId: parent, apiBase: 'http://localhost',
+    wsToken: getOrCreateWsToken(), fastCapability: '', apiFetch: async (path, options) => {
+      const result = options?.method === 'POST'
+        ? await corrections.POST(request(JSON.parse(String(options.body))))
+        : await corrections.GET(new NextRequest(`http://localhost${path}`, { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } }));
+      const value = await result.json();
+      if (!result.ok) throw apiError(path, result.status, JSON.stringify(value));
+      return value;
+    } });
+  const snapshot = JSON.parse((await handlers.handleCorrectWorkers({})).content[0].text);
+  expect(snapshot.workers).toEqual(expect.arrayContaining([expect.objectContaining(target)]));
+  const args = { targets: [target], reviewSource: { packetId, approvalId: review.auditApprovalId, reviewedHeadSha: packetHead } };
+  const dirtyPath = join(launched.worktreePath, 'unreviewed.txt');
+  writeFileSync(dirtyPath, 'unreviewed');
+  const dirty = await handlers.handleCorrectWorkers(args);
+  expect(dirty.isError).toBe(true);
+  expect(dirty.content[0].text).toContain('uncommitted');
+  expect(record(target.surfaceId).recentRuns).toHaveLength(1);
+  rmSync(dirtyPath);
+  if (outcome === 'busy') readiness.mockRejectedValueOnce(new Error('This worker still has an active run.'));
+  let release!: () => void;
+  let entered!: () => void;
+  const atReadiness = new Promise<void>(resolve => { entered = resolve; });
+  if (outcome === 'stopped') readiness.mockImplementationOnce(async () => {
+    const held = new Promise<void>(resolve => { release = resolve; });
+    entered(); await held; return { ready: true };
+  });
+  const pending = handlers.handleCorrectWorkers(args);
+  if (outcome === 'stopped') {
+    await Promise.race([atReadiness, pending.then(result => {
+      throw new Error(`Correction returned before the readiness barrier: ${JSON.stringify(result)}`);
+    })]);
+    holdWorkerCorrections({ repoPath: repo, threadId: parent }); release();
+  }
+  const result = await pending;
+  expect(result.isError, JSON.stringify(result)).not.toBe(true);
+  const value = JSON.parse(result.content[0].text);
+  expect(value.receipt.deliveries[0].status).toBe(outcome === 'delivered' ? 'delivered' : outcome === 'stopped' ? 'held' : 'unknown');
+  await settled(target.surfaceId);
+  const { drainQueuedPacketSteers } = await import('@/lib/orchestrator/operator-mission-service/steer-queue');
+  await drainQueuedPacketSteers();
+  const replay = JSON.parse((await handlers.handleCorrectWorkers(args)).content[0].text);
+  expect(replay.receipt.id).toBe(value.receipt.id);
+  expect(record(target.surfaceId).recentRuns).toHaveLength(outcome === 'delivered' ? 2 : 1);
+  if (outcome === 'delivered') expect(record(target.surfaceId).recentRuns[0].prompt).toContain(review.auditApprovalId);
+  expect(control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)?.review).toMatchObject({ approved: false,
+    findings: [expect.objectContaining({ resolution: 'deferred' })] });
+  expect((await readOwnedRecoveryState(target.surfaceId)).automaticRecoveryAllowed).toBe(false);
 }, 60000);

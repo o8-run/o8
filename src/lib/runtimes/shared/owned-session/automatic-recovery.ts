@@ -1,4 +1,4 @@
-import { packetAutomaticRecoveryHoldReason, packetCompletionHoldReason } from '@/lib/lane/packet-stop-hold';
+import { packetAutomaticRecoveryHoldReason, packetCompletionHoldReason, packetOperatorCorrectionHoldReason } from '@/lib/lane/packet-stop-hold';
 import { withOwnedActionGuard } from './action-admission';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ownedRoots, readOwnedSessionRecord } from '../owned-session-index';
@@ -48,6 +48,8 @@ async function readOwnedState(surfaceId: string, options?: { includeArchived?: b
     startedAt: session ? currentRecoveryRun(session)?.startedAt : undefined,
     finishedAt: session ? currentRecoveryRun(session)?.finishedAt : undefined,
     automaticRecoveryAllowed: Boolean(live && live.executionPolicy === undefined && !recoveryHoldReason),
+    operatorCorrectionAllowed: Boolean(live && live.executionPolicy === undefined
+      && (!live.packetId || !packetOperatorCorrectionHoldReason(live.packetId))),
     outcome: session ? currentRecoveryRun(session)?.outcome : undefined,
     interrupted: session ? recoveryInterrupted(session) : false };
 }
