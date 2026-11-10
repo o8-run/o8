@@ -67,7 +67,7 @@ import { materializationAwareExecFile } from '@/lib/worktree/materialization-exe
 import { enqueueLaneReview } from '@/lib/lane/review-queue';
 import { assertPacketCreationBaseAuthority, resolvePacketCreationBase, PacketCreationBaseError, type PacketCreationBaseAuthority } from '@/lib/lane/packet-creation-base';
 import { readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
-import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
+import { describeStopRefusal, persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
 import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
@@ -289,7 +289,7 @@ async function dispatchUnlocked(
             return {
               ok: false,
               laneId: command.laneId,
-              note: 'Stop refused because the packet hold could not be persisted.',
+              note: describeStopRefusal(lane.packetId),
               lane,
             };
           }

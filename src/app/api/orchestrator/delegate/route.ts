@@ -361,6 +361,29 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
       }, { status: 422 });
     }
 
+    // Step 4: Store the lane binding on the packet, the same binding mission dispatch stores.
+    // Stop verifies the lane against this stored owner before it holds the packet (#4028), so
+    // without it every delegated packet's Stop was refused (#5799). Mutate under the lock, as in
+    // step 1. A packet another writer already bound, removed, closed or reset (both clear the
+    // lane) is left alone, as is a lane that ended or no longer belongs to it. The worker is
+    // already running, so a failure here is logged rather than answered as a failed launch.
+    try {
+      const { createLaneBinding } = await import('@/lib/orchestrator/dispatch-lane-binding');
+      const { getLane } = await import('@/lib/lane/registry');
+      const { isLaneTerminal } = await import('@/lib/lane/terminal-states');
+      await withLockedState((current) => {
+        const stored = current.packets.find(candidate => candidate.id === packetId);
+        if (!stored || stored.lane?.laneId) return;
+        if (stored.archivedAt || stored.status === 'archived' || stored.status === 'draft' || stored.releaseState === 'released') return;
+        const lane = getLane(laneId);
+        if (!lane || lane.packetId !== packetId || isLaneTerminal(lane.status)) return;
+        // The lane row is what Stop compares against, so take its session key and nothing else.
+        stored.lane = createLaneBinding(stored, laneId, lane.sessionKey ?? null, workerRouting);
+      });
+    } catch (error) {
+      console.warn(`[delegate] Could not store the lane binding for packet ${packetId}; Stop will refuse it:`, error);
+    }
+
     // Broadcast the delegation event
     invalidateCommandCenterSnapshotCaches();
     invalidateInboxCache();

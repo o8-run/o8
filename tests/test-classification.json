@@ -3123,6 +3123,15 @@
       ]
     },
     {
+      "path": "tests/delegate-stop-binding-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dependency-directory-clone-real-path.test.ts",
       "reasons": [
         "apfs-tool",

@@ -50,6 +50,21 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
   const packets = mission.packets.map((packet) => {
     const lane = findLaneByPacket(packet.id);
     if (!lane) return packet;
+    // A stored binding is the owner Stop verifies (packet-stop-hold.ts), so show that one and only
+    // refresh its activity fields; rebuilding it here showed an owner Stop would refuse (#5799).
+    // Rows delegated before the binding was stored keep the rebuilt display.
+    if (packet.lane?.laneId) {
+      return {
+        ...packet,
+        lane: {
+          ...packet.lane,
+          lastEventAt: packet.lane.laneId === lane.id ? lane.lastEventAt : packet.lane.lastEventAt,
+          lastEventLabel: packet.lane.laneId === lane.id ? lane.lastEventLabel : packet.lane.lastEventLabel,
+          mergeMode: mergePolicy.mode,
+          mergeModeNote: mergePolicy.note,
+        },
+      };
+    }
     return {
       ...packet,
       lane: {
