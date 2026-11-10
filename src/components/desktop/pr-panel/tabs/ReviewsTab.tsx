@@ -1,14 +1,15 @@
 'use client';
 
 import { memo, useMemo } from 'react';
-import type { PrDetail, PrIssueComment, PrReviewComment } from '../types';
+import type { PrDetail, PrIssueComment, PrReviewComment, PrSubmittedReview } from '../types';
 import { PrMarkdown } from '../PrMarkdown';
 
 const MONO_FONT = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
 
 type CombinedComment =
   | { kind: 'issue'; id: number; author: string; body: string; createdAt: string }
-  | { kind: 'review'; id: number; author: string; body: string; createdAt: string; path: string; line: number | null };
+  | { kind: 'review'; id: number; author: string; body: string; createdAt: string; path: string; line: number | null }
+  | ({ kind: 'submitted'; createdAt: string } & PrSubmittedReview);
 
 interface ReviewsTabProps {
   reviewComments: PrReviewComment[];
@@ -72,7 +73,8 @@ const CommentRow = memo(function CommentRow({ comment, detail, onOpenFile }: { c
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>{comment.author}</span>
-          <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{formatTime(comment.createdAt)}</span>
+          <time dateTime={comment.createdAt} title={comment.createdAt} style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{formatTime(comment.createdAt)}</time>
+          {comment.kind === 'submitted' ? <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)' }}>{decisionPill(comment.state)?.label ?? 'Review submitted'}</span> : null}
           {comment.kind === 'review' && comment.path ? (
             <span
               style={{
@@ -89,6 +91,13 @@ const CommentRow = memo(function CommentRow({ comment, detail, onOpenFile }: { c
             </span>
           ) : null}
         </div>
+        {comment.kind === 'submitted' ? <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-muted)' }}>
+          <span title={comment.reviewedHeadSha ?? undefined}>
+            {comment.reviewedHeadSha ? `Reviewed ${comment.reviewedHeadSha.slice(0, 8)}` : 'Reviewed revision unavailable'}
+          </span>
+          {comment.reviewedHeadSha ? <span>{!detail?.headSha ? 'Current revision unavailable' : comment.reviewedHeadSha === detail.headSha ? 'Current revision' : 'Different revision'}</span> : null}
+          {comment.url?.startsWith('https://') ? <a href={comment.url} target="_blank" rel="noreferrer" aria-label={`Open review by ${comment.author} on GitHub`} style={{ color: 'var(--t-text-muted)', minHeight: 26, display: 'inline-flex', alignItems: 'center', textUnderlineOffset: 3 }}>Open review</a> : null}
+        </div> : null}
         <div
           style={{
             fontSize: 13,
@@ -108,6 +117,7 @@ const CommentRow = memo(function CommentRow({ comment, detail, onOpenFile }: { c
 });
 
 export const ReviewsTab = memo(function ReviewsTab({ reviewComments, issueComments, reviewDecision, detail, onOpenFile }: ReviewsTabProps) {
+  const submittedReviews = detail?.submittedReviews;
   const combined = useMemo<CombinedComment[]>(() => {
     const merged: CombinedComment[] = [
       ...issueComments.map((comment): CombinedComment => ({
@@ -126,10 +136,12 @@ export const ReviewsTab = memo(function ReviewsTab({ reviewComments, issueCommen
         path: comment.path,
         line: comment.line,
       })),
+      ...(submittedReviews ?? []).map((review): CombinedComment => ({ ...review, kind: 'submitted', createdAt: review.submittedAt })),
     ];
-    merged.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    return merged;
-  }, [issueComments, reviewComments]);
+    const unique = [...new Map(merged.map(comment => [`${comment.kind}-${comment.id}`, comment])).values()];
+    unique.sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0) || `${a.kind}-${a.id}`.localeCompare(`${b.kind}-${b.id}`));
+    return unique;
+  }, [issueComments, reviewComments, submittedReviews]);
 
   const pill = decisionPill(reviewDecision);
 
@@ -171,7 +183,8 @@ export const ReviewsTab = memo(function ReviewsTab({ reviewComments, issueCommen
         </div>
       ) : null}
 
-      {combined.length === 0 ? (
+      {detail?.discussionIncomplete ? <div role="status" style={{ paddingTop: 8, paddingRight: 14, paddingBottom: 8, paddingLeft: 14, fontSize: 11, color: 'var(--t-text-muted)' }}>Discussion is incomplete. Open GitHub for the full conversation.</div> : null}
+      {combined.length === 0 && !detail?.discussionIncomplete ? (
         <div style={{ padding: 16, fontSize: 12, color: 'var(--t-text-muted)' }}>
           No comments or reviews yet.
         </div>

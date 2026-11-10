@@ -12,7 +12,7 @@ const CHEVRON_RIGHT: &str = "m9 18 6-6-6-6";
 const CHEVRON_DOWN: &str = "m6 9 6 6 6-6";
 
 /// PrMarkdown: the transcript's markdown rows.
-fn markdown(id: &str, body: &str) -> AnyElement {
+pub(super) fn markdown(id: &str, body: &str) -> AnyElement {
     let state = Rc::new(RefCell::new(RowState::new(Row::Message {
         id: id.to_owned(),
         role: "assistant".into(),
@@ -27,7 +27,7 @@ fn markdown(id: &str, body: &str) -> AnyElement {
     .into_any_element()
 }
 
-fn muted(text: impl Into<gpui::SharedString>) -> gpui::Div {
+pub(super) fn muted(text: impl Into<gpui::SharedString>) -> gpui::Div {
     div()
         .text_size(px(12.))
         .text_color(theme().text_muted)
@@ -53,7 +53,7 @@ fn small_button(id: String, label: &'static str) -> gpui::Stateful<gpui::Div> {
         .child(label)
 }
 
-fn age(at: &str) -> String {
+pub(super) fn age(at: &str) -> String {
     crate::clock::age(crate::clock::timestamp(at), crate::clock::now())
 }
 
@@ -586,119 +586,4 @@ impl PullRequests {
         body.into_any_element()
     }
 
-    fn reviews_tab(&self) -> AnyElement {
-        let d = &self.detail;
-        let mut comments: Vec<(String, String, String, String)> = array(d, "issueComments")
-            .iter()
-            .map(|c| {
-                let author = match string(c, "user") { "" => string(c, "author"), user => user };
-                let at = match string(c, "created_at") { "" => string(c, "createdAt"), at => at };
-                (author.to_owned(), at.to_owned(), String::new(), string(c, "body").to_owned())
-            })
-            .collect();
-        comments.extend(array(d, "reviewComments").iter().map(|c| {
-            let author = match string(c, "author") { "" => string(c, "user"), author => author };
-            let at = match string(c, "createdAt") { "" => string(c, "created_at"), at => at };
-            let path = match c["line"].as_u64() {
-                Some(line) => format!("{}:{line}", string(c, "path")),
-                None => string(c, "path").to_owned(),
-            };
-            (author.to_owned(), at.to_owned(), path, string(c, "body").to_owned())
-        }));
-        comments.sort_by_key(|(_, at, _, _)| crate::clock::timestamp(at).unwrap_or(0));
-        let decision = match string(d, "reviewDecision").to_uppercase().as_str() {
-            "APPROVED" => Some(("Approved", theme().success)),
-            "CHANGES_REQUESTED" => Some(("Changes Requested", theme().danger)),
-            "COMMENTED" => Some(("Commented", theme().text_muted)),
-            "" => None,
-            _ => Some(("Reviewed", theme().text_muted)),
-        };
-        div()
-            .flex()
-            .flex_col()
-            .when_some(decision, |c, (label, color)| {
-                c.child(
-                    div()
-                        .py(px(10.))
-                        .px(px(14.))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .border_b_1()
-                        .border_color(theme().border)
-                        .bg(theme().surface_raised)
-                        .child(div().text_size(px(10.)).text_color(theme().text_faint).child("Latest review:"))
-                        .child(
-                            div()
-                                .px(px(8.))
-                                .py(px(2.))
-                                .rounded_full()
-                                .bg(gpui::Rgba { a: 0.14, ..color })
-                                .text_size(px(11.))
-                                .text_color(color)
-                                .child(label),
-                        ),
-                )
-            })
-            .when(d["discussionIncomplete"] == true, |c| {
-                c.child(div().px(px(14.)).py(px(8.)).child(muted("Discussion is incomplete. Open GitHub for the full conversation.")))
-            })
-            .when(comments.is_empty(), |c| c.child(div().p(px(16.)).child(muted("No discussion reported."))))
-            .children(comments.into_iter().enumerate().map(|(i, (author, at, path, body))| {
-                div()
-                    .flex()
-                    .gap(px(10.))
-                    .py(px(12.))
-                    .px(px(14.))
-                    .border_b_1()
-                    .border_color(theme().border)
-                    .child(
-                        div()
-                            .size(px(26.))
-                            .flex_shrink_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .bg(theme().surface_raised)
-                            .text_size(px(11.))
-                            .text_color(theme().text_secondary)
-                            .child(author.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or("?".into())),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_wrap()
-                                    .items_center()
-                                    .gap(px(8.))
-                                    .child(div().text_size(px(13.5)).font_weight(gpui::FontWeight::LIGHT).child(author))
-                                    .child(div().text_size(px(9.5)).text_color(theme().text_faint).child(age(&at)))
-                                    .when(!path.is_empty(), |h| {
-                                        h.child(
-                                            div()
-                                                .min_w_0()
-                                                .truncate()
-                                                .font_family(theme().font_mono)
-                                                .text_size(px(10.))
-                                                .text_color(theme().text_muted)
-                                                .child(path),
-                                        )
-                                    }),
-                            )
-                            .child(if body.trim().is_empty() {
-                                muted("No comment text.").into_any_element()
-                            } else {
-                                markdown(&format!("pr-review-{i}"), &body)
-                            }),
-                    )
-            }))
-            .into_any_element()
-    }
 }

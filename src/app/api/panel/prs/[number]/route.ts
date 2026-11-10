@@ -108,6 +108,7 @@ export async function GET(
         readiness,
         workflowStage,
         reviewComments: commentsData.comments,
+        submittedReviews: commentsData.reviews,
         issueComments: commentsData.issueComments,
         diffStat,
       },

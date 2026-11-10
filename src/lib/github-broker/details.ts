@@ -258,6 +258,8 @@ export async function fetchGitHubPullRequestComments(repoFullName: string, prNum
       body?: string | null;
       state?: string | null;
       submitted_at?: string | null;
+      commit_id?: string | null;
+      html_url?: string | null;
       user?: { login?: string | null } | null;
     }>>(reviewsResponse.response),
     parseGithubJson<Array<{
@@ -290,6 +292,8 @@ export async function fetchGitHubPullRequestComments(repoFullName: string, prNum
       body: review.body ?? '',
       state: review.state ?? '',
       submittedAt: review.submitted_at ?? '',
+      reviewedHeadSha: review.commit_id ?? null,
+      url: review.html_url ?? null,
     })),
     issueComments: issueComments.map((comment) => ({
       id: comment.id,
