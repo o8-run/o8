@@ -33,6 +33,8 @@ mod dock_window;
 mod first_run_install;
 mod fn_hotkey;
 mod voice_surfaces;
+#[cfg(target_os = "macos")]
+mod voice_only;
 mod voice_input;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod headless_dictation;
@@ -289,7 +291,8 @@ fn o8_data_dir() -> String {
     let directory = o8_restart_safety::resolve_data_directory(primary.as_deref(), legacy.as_deref(),
         std::path::Path::new(&home), &cwd).expect("Native data directory must be absolute");
     let resolved = directory.to_string_lossy().into_owned();
-    if !primary.as_ref().is_some_and(|value| !value.is_empty())
+    if !env_flag_enabled("O8_VOICE_ONLY")
+        && !primary.as_ref().is_some_and(|value| !value.is_empty())
         && !legacy.as_ref().is_some_and(|value| !value.is_empty()) {
         migrate_data_dir_once(&home, &resolved);
     }
@@ -3704,6 +3707,12 @@ fn read_data_file(name: &str) -> Option<String> {
 /// in `src/lib/panel/api-port.ts` — env var first, on-disk file second,
 /// production default last.
 pub(crate) fn resolve_api_port() -> u16 {
+    #[cfg(target_os = "macos")]
+    if env_flag_enabled("O8_VOICE_ONLY") {
+        // Follow a server started after voice-only launch, without pinning an
+        // inherited port override or contacting another profile's default port.
+        return voice_only::published_port(Path::new(&o8_data_dir())).unwrap_or(0);
+    }
     if let Ok(p) = std::env::var("O8_API_PORT") {
         if let Ok(parsed) = p.parse() {
             return parsed;
@@ -8373,6 +8382,22 @@ pub fn run() {
             }
         };
 
+    #[cfg(target_os = "macos")]
+    if env_flag_enabled("O8_VOICE_ONLY") {
+        if native_test_instance.is_some() {
+            eprintln!("[voice-only] incompatible with native-test sidecar isolation");
+            std::process::exit(78);
+        }
+        let _hotkey_owner = voice_only::claim_hotkey_or_exit();
+        if let voice_only::Launch::VoiceOnly { server_port } =
+            voice_only::inspect_launch(true, Path::new(&o8_data_dir()))
+        {
+            voice_only::run(server_port);
+        }
+        // Never fall through to boot identity, cleanup, sidecars or main UI.
+        return;
+    }
+
     // First statement in the process: everything else is measured against this.
     let _ = BOOT_T0.set(std::time::Instant::now());
     boot_trace("run() entry");
@@ -8405,6 +8430,14 @@ pub fn run() {
     // terminal launch. Runs only in the main process; no-op when the var is
     // unset. Placed AFTER minidump init so the reporter is already listening.
     telemetry::maybe_trigger_crash_test();
+
+    // The crash reporter must exit through minidump initialization above first.
+    // Real full-app launches claim the same per-user lock as voice-only mode,
+    // before reaping processes, touching server metadata or installing hotkeys.
+    #[cfg(target_os = "macos")]
+    let _hotkey_owner = native_test_instance
+        .is_none()
+        .then(voice_only::claim_hotkey_or_exit);
 
     let preship_gate = native_test_instance.is_some();
     let dev_frontend = match dev_frontend::from_env() {
