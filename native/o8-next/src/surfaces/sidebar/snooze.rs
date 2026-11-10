@@ -144,6 +144,8 @@ impl ThreadList {
     /// Restores the snoozes saved in the shell state.
     pub fn restore_snoozes(&mut self, snoozes: &std::collections::BTreeMap<String, u64>) {
         self.snoozes = snoozes.iter().map(|(id, at)| (id.clone(), *at)).collect();
+        // This rebuild already shows every snooze that ended while closed.
+        self.snoozes_woken_at = recents::now();
         self.rebuild();
     }
     /// Snooze applies where Settle does, to a thread not yet settled.
@@ -156,16 +158,14 @@ impl ThreadList {
             .get(id)
             .is_some_and(|until| *until > recents::now())
     }
-    /// A snooze shown as waiting whose time has now come.
+    /// A snooze whose time came since the list last rebuilt for one. The
+    /// woken thread may land anywhere (needing input, working, pinned, out of
+    /// scope), so each expiry is counted once by time, not by its marker.
     pub(super) fn snooze_due(&self) -> bool {
         let now = recents::now();
-        // A folded Snoozed shelf lists no rows, so ask the snoozes themselves:
-        // one is due when its time passed but its thread is not yet back.
-        self.snoozes.iter().any(|(id, until)| {
-            *until <= now
-                && self.sessions.iter().any(|s| &s.id == id && !s.settled() && s.status != "archived")
-                && !self.rows.iter().any(|r| r.id.as_ref() == Some(id) && r.marker == "back")
-        })
+        self.snoozes
+            .values()
+            .any(|until| *until <= now && *until > self.snoozes_woken_at)
     }
     pub(super) fn save_snoozes(&self, cx: &mut Context<Self>) {
         let mut snoozes: Vec<_> = self.snoozes.iter().map(|(k, v)| (k.clone(), *v)).collect();

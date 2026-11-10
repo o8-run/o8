@@ -137,6 +137,9 @@ pub struct ThreadList {
     /// Snoozed threads, by id, to the Unix second each comes back. An ended
     /// snooze stays until the thread is opened, so it can head the list.
     snoozes: HashMap<String, u64>,
+    /// The latest moment a snooze expiry was rebuilt for, so each expiry
+    /// rebuilds the list once, whatever marker its thread ends up with.
+    snoozes_woken_at: u64,
     picked: HashSet<String>,
     pick_anchor: Option<String>,
     /// Linked pull requests by thread id (pr_links.rs).
@@ -267,6 +270,7 @@ impl ThreadList {
             scope_menu: None,
             row_menu: None,
             snoozes: HashMap::new(),
+            snoozes_woken_at: 0,
             picked: HashSet::new(),
             pick_anchor: None,
             pr_links: HashMap::new(),
@@ -361,7 +365,7 @@ impl ThreadList {
             .iter()
             .find(|s| self.selected.as_ref() == Some(&s.id))
         {
-            self.expanded.insert(self.group_key(session).into());
+            self.expanded.insert(self.reveal_key(session));
         }
         let sessions = self.scoped_sessions();
         let mut rows = self.view_rows(&sessions);
@@ -374,7 +378,7 @@ impl ThreadList {
                 .iter()
                 .find(|s| self.choice.as_ref() == Some(&s.id))
         {
-            self.expanded.insert(self.group_key(session).into());
+            self.expanded.insert(self.reveal_key(session));
             rows = self.view_rows(&sessions);
         }
         self.note_arrivals(&rows);
@@ -432,6 +436,17 @@ impl ThreadList {
             folders::View::Inbox if self.snoozed(&session.id) => "Snoozed",
             folders::View::Inbox if sidebar::working(session) => "Working",
             folders::View::Inbox => "Active",
+        }
+    }
+    /// The disclosure key that brings a thread into view. An Inbox shelf
+    /// unfolds to its cap; its bare name would mean "show all" and drop the
+    /// cap and Show more for every other thread on it.
+    fn reveal_key(&self, session: &Session) -> String {
+        let group = self.group_key(session);
+        if self.view() == folders::View::Inbox && inbox::SHELVES.contains(&group) {
+            inbox::open_key(group)
+        } else {
+            group.into()
         }
     }
     fn view_rows(&self, sessions: &[Session]) -> Vec<Row> {
@@ -696,6 +711,7 @@ impl ThreadList {
             self.load_pr_links(cx);
         }
         if self.snooze_due() {
+            self.snoozes_woken_at = recents::now();
             self.rebuild();
             cx.notify();
         }
@@ -1302,3 +1318,6 @@ mod nesting;
 #[cfg(test)]
 #[path = "nesting_tests.rs"]
 mod nesting_tests;
+#[cfg(test)]
+#[path = "inbox_wake_tests.rs"]
+mod inbox_wake_tests;
