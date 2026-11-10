@@ -361,6 +361,19 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
       }, { status: 422 });
     }
 
+    // Step 4: Store the lane binding on the packet, the same binding mission dispatch stores.
+    // Stop verifies the lane against this stored owner before it holds the packet (#4028), so
+    // without it every delegated packet's Stop was refused (#5799). Mutate under the lock, as in
+    // step 1; a packet another writer already bound or removed is left alone.
+    const { createLaneBinding } = await import('@/lib/orchestrator/dispatch-lane-binding');
+    const { getLane } = await import('@/lib/lane/registry');
+    await withLockedState((current) => {
+      const stored = current.packets.find(candidate => candidate.id === packetId);
+      if (!stored || stored.lane?.laneId) return;
+      // The lane row is what Stop compares against, so take its session key and nothing else.
+      stored.lane = createLaneBinding(stored, laneId, getLane(laneId)?.sessionKey ?? null, workerRouting);
+    });
+
     // Broadcast the delegation event
     invalidateCommandCenterSnapshotCaches();
     invalidateInboxCache();

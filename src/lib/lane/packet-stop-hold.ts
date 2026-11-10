@@ -229,6 +229,20 @@ function copyStopFields(target: OrchestratorPacket, stopped: OrchestratorPacket)
     lastEventAt: stopped.lastEventAt, lastEventLabel: stopped.lastEventLabel });
 }
 
+/**
+ * Why persistLanePacketHold refused, for the operator. A control-plane packet with no stored lane
+ * binding has no owner to verify; packets delegated before the delegate route stored one (#5799)
+ * stay that way, so name it instead of the generic refusal.
+ */
+export function describeStopRefusal(packetId: string): string {
+  const packet = readOrchestratorControlPlaneState().packets.find(candidate => candidate.id === packetId);
+  if (packet && !terminalStopOwner(packet) && !packet.lane?.laneId) {
+    return `Stop refused: packet ${packetId} has no stored lane binding, so this lane cannot be verified as its owner. `
+      + 'Packets delegated before the binding was stored (#5799) are affected.';
+  }
+  return 'Stop refused because the packet hold could not be persisted.';
+}
+
 /** Persist the exact lane's stop in both stores before interrupting its worker. */
 export function persistLanePacketHold(packetId: string, lane?: StopLaneOwner): Promise<boolean> {
   return withMissionHandoffBarrier(() => withControlPlaneLock(async () => {

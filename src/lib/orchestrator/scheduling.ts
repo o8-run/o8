@@ -14,13 +14,13 @@ import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import {
-  MCP_DISPATCH_TILE_SENTINEL,
   type OrchestratorLaneBinding,
   type OrchestratorMissionState,
   type OrchestratorPacket,
   type OrchestratorRuntime,
   type WorkerRouting,
 } from '@/lib/orchestrator/types';
+import { createLaneBinding } from '@/lib/orchestrator/dispatch-lane-binding';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { bindWorkerLaunchParent } from '@/lib/orchestrator/worker-launch-context';
 import { launchPacketWithStorageAdmission } from '@/lib/orchestrator/dispatch-packet-launch';
@@ -83,39 +83,6 @@ const execFileAsync = promisify(execFile);
 // never drift.
 const isGitRepoSync = isGitWorkTreeSync;
 
-function createLaneBinding(
-  packet: OrchestratorPacket,
-  laneId: string,
-  sessionKey?: string | null,
-  workerRouting?: WorkerRouting,
-  dependencyMaterializationMode?: 'native' | 'image' | null,
-): OrchestratorLaneBinding {
-  // Read the SQLite lane row so the binding reflects what `updateLane` already
-  // persisted (most importantly `worktreePath`, written in commands.ts during
-  // `bind_worktree` / `launch_session`). Without this, MCP-dispatched packets
-  // saw `worktreePath: null` on the binding even though a real worktree
-  // existed, and the no_changes_produced check inspected the wrong tree.
-  // tileId/tabId do not live on the lane row, but writing empty strings here
-  // made every downstream truthy check (`hasInteractiveLane`, `hasLaneBinding`)
-  // hide the Focus button for MCP-dispatched packets (#1113). The sentinel
-  // keeps those checks truthy and is filtered out by the workspace tile-handle
-  // lookup, so this never collides with a real workspace binding.
-  const laneRow = getLane(laneId);
-  return {
-    tileId: MCP_DISPATCH_TILE_SENTINEL,
-    tabId: MCP_DISPATCH_TILE_SENTINEL,
-    repoPath: packet.workspaceTargetPath,
-    worktreePath: laneRow?.worktreePath ?? null,
-    runtime: workerRouting?.selectedRuntime ?? packet.runtime,
-    model: laneRow?.model ?? workerRouting?.selectedModel ?? packet.model ?? packet.assignedModel ?? null,
-    laneId,
-    sessionKey: sessionKey ?? null,
-    lastHeartbeatAt: null,
-    lastEventAt: new Date().toISOString(),
-    lastEventLabel: 'dispatch_started',
-    dependencyMaterializationMode: dependencyMaterializationMode ?? null,
-  };
-}
 
 function packetLaunchContext(packet: OrchestratorPacket) {
   return bindWorkerLaunchParent(packet.launchContext, {
