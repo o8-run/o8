@@ -49,7 +49,7 @@ export async function correctAuthorFromReview(input: ComposerQueueTarget & { rev
       }
       return prior;
     }
-    const current = () => {
+    const currentState = () => {
       const packet = readOrchestratorControlPlaneState().packets.find(item => item.id === review.packetId)
         ?? findMissionRegistryEntryByPacketId(review.packetId)?.mission.packets.find(item => item.id === review.packetId);
       const lane = findLaneByPacket(review.packetId);
@@ -71,15 +71,18 @@ export async function correctAuthorFromReview(input: ComposerQueueTarget & { rev
         || approval.args.reviewedHeadSha !== review.reviewedHeadSha) {
         throw new Error('The saved rejection changed or is incomplete. Read the latest review before sending findings.');
       }
+      return { packet, lane };
+    };
+    const checkCode = () => {
+      const { lane } = currentState();
       if (laneGitSync(lane.worktreePath || lane.repoPath, lane.repoPath, ['rev-parse', 'HEAD'], { timeout: 5000 }).trim() !== review.reviewedHeadSha) {
         throw new Error('The author code changed after review. Review the current HEAD before sending findings.');
       }
       if (laneGitSync(lane.worktreePath || lane.repoPath, lane.repoPath, ['status', '--porcelain', '--untracked-files=normal'], { timeout: 5000 }).trim()) {
         throw new Error('The author has uncommitted changes. Review the current code before sending findings.');
       }
-      return packet;
     };
-    const packet = current();
+    const { packet } = currentState();
     const spent = (getSqlite().prepare('SELECT COUNT(*) AS count FROM worker_corrections WHERE id LIKE ?')
       .get(`${scope}%`) as { count: number }).count;
     const existingRepairs = Math.max(packet.attemptCount ?? 0, packet.typecheckAutoRetries ?? 0, packet.recoveryCount ?? 0);
@@ -94,6 +97,8 @@ export async function correctAuthorFromReview(input: ComposerQueueTarget & { rev
     ].join('\n\n');
     if (message.length > 2000) throw new Error('The saved findings exceed the correction delivery limit. Inspect and split the review before sending.');
     return correctWorkers({ ...target, id, payload: { message, mode: 'send', holdMerges: false,
-      targets: [{ surfaceId: review.surfaceId, runId: review.runId }] } }, () => { current(); });
+      targets: [{ surfaceId: review.surfaceId, runId: review.runId }] } }, {
+      state: () => { currentState(); }, code: checkCode,
+    });
   });
 }

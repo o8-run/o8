@@ -239,3 +239,26 @@ it('retains an unknown receipt when code changes during admission and never retr
   expect(replay.receipt.deliveries[0].status).toBe('unknown');
   expect(record(target.surfaceId).recentRuns).toHaveLength(1);
 }, 60000);
+
+it('checks the reviewed code outside SQLite write transactions at admission and delivery', async () => {
+  const { target, review } = await reviewedAuthor('git-without-write-lock');
+  const laneGit = await import('@/lib/lane/lane-git');
+  const original = laneGit.laneGitSync;
+  const checked: string[] = [];
+  const spy = vi.spyOn(laneGit, 'laneGitSync').mockImplementation((...args) => {
+    if (args[0] === repo && ['rev-parse', 'status'].includes(args[2][0])) {
+      checked.push(args[2][0]);
+      expect(getSqlite().inTransaction, `Git ${args[2].join(' ')} held the SQLite transaction`).toBe(false);
+    }
+    return original(...args);
+  });
+  try {
+    const response = await corrections.POST(request(reviewBody(target, review)));
+    const value = await response.json();
+    expect(response.status, JSON.stringify(value)).toBe(200);
+    expect(value.receipt.deliveries[0].status).toBe('delivered');
+    await settled(target.surfaceId);
+    expect(checked.filter(command => command === 'rev-parse').length).toBeGreaterThanOrEqual(2);
+    expect(checked.filter(command => command === 'status').length).toBeGreaterThanOrEqual(2);
+  } finally { spy.mockRestore(); }
+}, 60000);
