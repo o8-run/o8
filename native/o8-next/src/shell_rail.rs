@@ -641,7 +641,10 @@ impl Shell {
             .flex_row()
             .items_center()
             .gap(px(2.))
-            .px(px(8.))
+            // The avatar's centre meets the cards' marks (23px) and Tools the
+            // list's right axis (22px).
+            .pl(px(6.))
+            .pr(px(5.))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),

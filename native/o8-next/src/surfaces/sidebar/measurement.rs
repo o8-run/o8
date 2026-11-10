@@ -11,7 +11,7 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
         let (shell, mut visual) = open(
             fixture.client.clone(),
             fixture.root.join(format!("measure-{sample}.json")),
-            State::default(),
+            by_date(),
             cx,
         );
         let cx = &mut visual;

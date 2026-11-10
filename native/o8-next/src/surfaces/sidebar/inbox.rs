@@ -57,8 +57,23 @@ pub(super) fn auto_note(reason: &str) -> &'static str {
     }
 }
 
-/// Active, then Snoozed, Settled newest first, then Archived. A child worker stays
-/// out: its parent conversation is listed and carries its state.
+/// The shelves pinned to the foot of the Inbox, in order (T3 Code's sidebar
+/// shelves; Working moved to the head of the list). Each folds to one line and
+/// hides when empty.
+pub(crate) const SHELVES: [&str; 3] = ["Snoozed", "Settled", "Archived"];
+
+/// The key that keeps a shelf unfolded.
+pub(crate) fn open_key(shelf: &str) -> String {
+    format!("open:{shelf}")
+}
+
+/// Working on top when anything runs, then Active; then the Snoozed and
+/// Settled shelves. A shelf is a
+/// `shelf` row (its count in `age`, "open" in `status` when unfolded) followed
+/// by its threads, each marked with the shelf's name. A folded shelf still
+/// lists the open thread, so the selection never disappears. A child worker
+/// stays out: its parent conversation is listed and carries its state.
+/// Archived threads live in the other views.
 pub(super) fn rows(
     sessions: &[Session],
     query: &str,
@@ -66,9 +81,14 @@ pub(super) fn rows(
     expanded: &HashSet<String>,
     branches: &HashSet<String>,
     snoozes: &HashMap<String, u64>,
+    selected: Option<&str>,
+    pinned: &[String],
+    working_shelf: bool,
+    lingering: &HashSet<String>,
 ) -> Vec<Row> {
     let now = recents::now();
     let searching = !query.trim().is_empty();
+    // Archived threads keep their bottom shelf, so a search still finds them.
     let (live, archived): (Vec<_>, Vec<_>) = recents::visible(sessions, query, matches)
         .into_iter()
         .filter(|s| s.parent_inbox_subject.is_none())
@@ -77,16 +97,49 @@ pub(super) fn rows(
     settled.sort_by(|a, b| b.settled_at.cmp(&a.settled_at));
     // A snooze hides an Active thread until its time; then it comes back on
     // top, under the threads waiting on you, until it is opened.
-    let (mut snoozed, mut active): (Vec<_>, Vec<_>) = active
+    let (mut snoozed, active): (Vec<_>, Vec<_>) = active
         .into_iter()
         .partition(|s| snoozes.get(&s.id).is_some_and(|until| *until > now));
     snoozed.sort_by_key(|s| snoozes[&s.id]);
-    // A work outcome does not settle attention; merged threads stay Active
-    // until their persisted inbox state changes.
+    // Running work heads the list so its live timers stay in view; a run
+    // that asks for you drops into Active with the other questions.
+    let (working, active): (Vec<_>, Vec<_>) = active
+        .into_iter()
+        // A pinned thread keeps its place on the Pinned shelf.
+        .partition(|s| {
+            (sidebar::working(s) || lingering.contains(&s.id))
+                && !needs_input(s)
+                && !pinned.contains(&s.id)
+        });
+    // With the shelf off, running threads stay in Active as working cards.
+    let (working, mut active) = if working_shelf {
+        (working, active)
+    } else {
+        (Vec::new(), working.into_iter().chain(active).collect())
+    };
     let woken = |s: &Session| snoozes.contains_key(&s.id);
     active.sort_by_key(|s| (!needs_input(s), !woken(s)));
-    // Active always heads the list; its row carries the view picker.
-    let mut rows = vec![recents::header("section", "Active", "")];
+    let mut rows = Vec::new();
+    if !working.is_empty() {
+        // Q 2026-11-09: Working on top, Settled at the bottom. As in T3 Code it
+        // folds to its count by default, so sixteen runs read as one line; a
+        // run that needs you leaves it for the top of Active.
+        let unfolded = searching || expanded.contains(&open_key("Working"));
+        let mut header = recents::header("shelf", "Working", if unfolded { "open" } else { "" });
+        header.age = working.len().to_string();
+        rows.push(header);
+        rows.extend(
+            working
+                .iter()
+                .filter(|s| unfolded || Some(s.id.as_str()) == selected)
+                .map(|s| {
+                    let mut row = recents::thread_row(s, now, branches);
+                    row.marker = "working";
+                    row
+                }),
+        );
+    }
+    rows.push(recents::header("section", "Active", ""));
     let open = searching || expanded.contains("Active");
     let count = if open {
         active.len()
@@ -111,32 +164,60 @@ pub(super) fn rows(
             "Active",
         ));
     }
-    let open = searching || expanded.contains("Snoozed");
-    let at = rows.len();
-    recents::group_rows(&mut rows, "Snoozed", &snoozed, 10, open, now, branches);
-    // A snoozed row reads when it comes back in place of its age.
-    for row in &mut rows[at..] {
-        if let Some(until) = row.id.as_ref().and_then(|id| snoozes.get(id)) {
-            row.age = snooze::until_label(*until, now);
+    for (name, group, cap) in [
+        ("Snoozed", &snoozed, 10),
+        ("Settled", &settled, 10),
+        ("Archived", &archived, 12),
+    ] {
+        if group.is_empty() {
+            continue;
         }
-    }
-    let open = searching || expanded.contains("Settled");
-    let at = rows.len();
-    recents::group_rows(&mut rows, "Settled", &settled, 10, open, now, branches);
-    // An automatic settle says why: "merged · 2h".
-    for row in &mut rows[at..] {
-        let reason = row.id.as_ref().and_then(|id| {
-            settled
+        let unfolded = searching || expanded.contains(&open_key(name));
+        let mut header = recents::header("shelf", name, if unfolded { "open" } else { "" });
+        header.age = group.len().to_string();
+        rows.push(header);
+        let shown: Vec<_> = if unfolded {
+            let count = if expanded.contains(name) {
+                group.len()
+            } else {
+                group.len().min(cap)
+            };
+            group.iter().take(count).collect()
+        } else {
+            group
                 .iter()
-                .find(|s| &s.id == id)
-                .and_then(|s| s.auto_settled_reason.as_deref())
-        });
-        if let Some(reason) = reason {
-            row.age = note_with_age(reason, &row.age);
+                .filter(|s| Some(s.id.as_str()) == selected)
+                .collect()
+        };
+        let more = unfolded && shown.len() < group.len();
+        for s in shown {
+            let mut row = recents::thread_row(s, now, branches);
+            row.marker = match name {
+                "Snoozed" => "snoozed",
+                "Settled" => "settled",
+                _ => "",
+            };
+            if let Some(until) = snoozes.get(&s.id).filter(|_| name == "Snoozed") {
+                row.age = snooze::until_label(*until, now);
+            }
+            // An automatic settle says why: "merged · 2h".
+            if let Some(reason) = s
+                .auto_settled_reason
+                .as_deref()
+                .filter(|_| name == "Settled")
+            {
+                row.age = note_with_age(reason, &row.age);
+            }
+            rows.push(row);
+        }
+        if more {
+            rows.push(recents::header(
+                "more",
+                &format!("Show {} more", group.len() - cap.min(group.len())),
+                name,
+            ));
         }
     }
-    let open = searching || expanded.contains("Archived");
-    recents::group_rows(&mut rows, "Archived", &archived, 12, open, now, branches);
     rows
 }
 
@@ -368,16 +449,20 @@ impl ThreadList {
     /// The Active thread now in the settled row's place, else the one above.
     pub(super) fn next_active(&self, index: Option<usize>) -> Option<String> {
         let index = index?;
-        let end = self
+        // The Active section runs from its heading to the next heading or
+        // shelf; the Working shelf can sit above it.
+        let start = self
             .rows
             .iter()
-            .skip(1)
-            .position(|r| r.kind == "section")
-            .map_or(self.rows.len(), |at| at + 1);
-        let active: Vec<_> = self.rows[..end]
+            .position(|r| r.kind == "section" && r.title == "Active")?;
+        let end = self.rows[start + 1..]
+            .iter()
+            .position(|r| matches!(r.kind.as_str(), "section" | "shelf"))
+            .map_or(self.rows.len(), |at| start + 1 + at);
+        let active: Vec<_> = self.rows[start + 1..end]
             .iter()
             .enumerate()
-            .filter_map(|(i, r)| r.id.clone().map(|id| (i, id)))
+            .filter_map(|(i, r)| r.id.clone().map(|id| (start + 1 + i, id)))
             .collect();
         active
             .iter()
@@ -490,9 +575,13 @@ mod auto_settle_tests {
             &sessions,
             "",
             &HashSet::new(),
-            &HashSet::new(),
+            &["open:Settled".to_owned()].into_iter().collect(),
             &HashSet::new(),
             &HashMap::new(),
+            None,
+            &[],
+            true,
+            &HashSet::new(),
         );
         let age = |id: &str| {
             rows.iter()
@@ -511,5 +600,102 @@ mod auto_settle_tests {
         assert_eq!(note_with_age("idle", "4d"), "idle 4d");
         assert_eq!(note_with_age("released", "2h"), "merged · 2h");
         assert_eq!(note_with_age("cleaned", "1d"), "cleaned · 1d");
+    }
+
+    fn with_status(id: &str, status: &str) -> Session {
+        let mut s = session(id, false, None);
+        s.status = status.into();
+        s
+    }
+    fn inbox(
+        sessions: &[Session],
+        expanded: &[&str],
+        selected: Option<&str>,
+        shelf: bool,
+        lingering: &[&str],
+    ) -> Vec<Row> {
+        rows(
+            sessions,
+            "",
+            &HashSet::new(),
+            &expanded.iter().map(|s| s.to_string()).collect(),
+            &HashSet::new(),
+            &HashMap::new(),
+            selected,
+            &[],
+            shelf,
+            &lingering.iter().map(|s| s.to_string()).collect(),
+        )
+    }
+    fn ids(rows: &[Row]) -> Vec<&str> {
+        rows.iter().filter_map(|r| r.id.as_deref()).collect()
+    }
+
+    #[test]
+    fn working_heads_the_inbox_folded_to_its_count() {
+        let sessions = [
+            with_status("a", "running"),
+            with_status("b", "running"),
+            with_status("c", "idle"),
+        ];
+        let rows = inbox(&sessions, &[], None, true, &[]);
+        assert_eq!(
+            (rows[0].kind.as_str(), rows[0].title.as_str()),
+            ("shelf", "Working")
+        );
+        assert_eq!(rows[0].age, "2");
+        assert_eq!(rows[1].title, "Active");
+        assert_eq!(ids(&rows), ["c"], "folded: only the count shows");
+        // The open thread stays listed under a folded shelf.
+        assert_eq!(
+            ids(&inbox(&sessions, &[], Some("b"), true, &[])),
+            ["b", "c"]
+        );
+        let open = inbox(&sessions, &["open:Working"], None, true, &[]);
+        assert_eq!(open[0].status, "open");
+        assert_eq!(ids(&open), ["a", "b", "c"]);
+        assert!(
+            open.iter()
+                .filter(|r| r.id.is_some())
+                .take(2)
+                .all(|r| r.marker == "working")
+        );
+    }
+
+    #[test]
+    fn working_shelf_off_keeps_runs_in_active() {
+        let sessions = [with_status("a", "running"), with_status("c", "idle")];
+        let rows = inbox(&sessions, &[], None, false, &[]);
+        assert_eq!(rows[0].title, "Active");
+        assert!(!rows.iter().any(|r| r.title == "Working"));
+        assert_eq!(ids(&rows), ["a", "c"]);
+    }
+
+    #[test]
+    fn a_run_inside_its_exit_grace_still_reads_working() {
+        let sessions = [with_status("a", "idle"), with_status("c", "idle")];
+        let rows = inbox(&sessions, &["open:Working"], None, true, &["a"]);
+        assert_eq!(rows[0].title, "Working");
+        assert_eq!(ids(&rows), ["a", "c"]);
+        assert_eq!(rows[1].marker, "working");
+    }
+
+    #[test]
+    fn archived_threads_keep_a_folded_bottom_shelf() {
+        let sessions = [with_status("a", "idle"), with_status("z", "archived")];
+        let folded = inbox(&sessions, &[], None, true, &[]);
+        let shelf = folded.last().unwrap();
+        assert_eq!(
+            (
+                shelf.kind.as_str(),
+                shelf.title.as_str(),
+                shelf.age.as_str()
+            ),
+            ("shelf", "Archived", "1")
+        );
+        assert_eq!(ids(&folded), ["a"]);
+        let open = inbox(&sessions, &["open:Archived"], None, true, &[]);
+        assert_eq!(ids(&open), ["a", "z"]);
+        assert_eq!(open.last().unwrap().id.as_deref(), Some("z"));
     }
 }

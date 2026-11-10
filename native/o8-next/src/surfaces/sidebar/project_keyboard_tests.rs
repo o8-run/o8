@@ -141,7 +141,7 @@ fn sidebar_project_chooser_delete_sends_no_archive_request(cx: &mut TestAppConte
 
 #[gpui::test]
 fn sidebar_header_menus_own_row_shortcuts_and_escape_preserves_rows(cx: &mut TestAppContext) {
-    for trigger in ["sidebar-project-switcher", "sidebar-repo-overflow"] {
+    for trigger in ["sidebar-project-switcher"] {
         let (fixture, shell, mut visual) = selected_chat(cx);
         let before = shell.read_with(&visual, |s, cx| {
             s.surfaces
@@ -152,6 +152,16 @@ fn sidebar_header_menus_own_row_shortcuts_and_escape_preserves_rows(cx: &mut Tes
                 .read(cx)
                 .diagnostic()["choice"]
                 .clone()
+        });
+        let rows = shell.read_with(&visual, |s, cx| {
+            s.surfaces
+                .sidebar
+                .view
+                .as_ref()
+                .unwrap()
+                .read(cx)
+                .rows
+                .len()
         });
         click(&mut visual, trigger);
         for key in [
@@ -218,7 +228,7 @@ fn sidebar_header_menus_own_row_shortcuts_and_escape_preserves_rows(cx: &mut Tes
                     .read(cx)
                     .rows
                     .len(),
-                3,
+                rows,
                 "closing a menu must preserve the search"
             )
         });

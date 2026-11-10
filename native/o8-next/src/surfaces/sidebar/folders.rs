@@ -201,18 +201,18 @@ const DOTS: &str = "M5 12h.001 M12 12h.001 M19 12h.001";
 pub(super) const CHECK: &str = "M20 6 9 17l-5-5";
 
 impl ThreadList {
-    /// The active project's view; By date until one is chosen.
+    /// The active project's view; the Inbox until one is chosen where the
+    /// host settles threads, else By date.
     pub(super) fn view(&self) -> View {
-        self.header
-            .ledger
-            .projects
-            .iter()
-            .find(|p| p.id == self.header.ledger.active_project_id)
-            .and_then(|p| self.views.get(&p.id))
+        // Without a project the choice is kept under the empty id, so the
+        // view menu still works before the first project exists.
+        self.views
+            .get(&self.header.ledger.active_project_id)
             .copied()
             // A host without inbox settlement keeps the sidebar it had.
             .filter(|view| *view != View::Inbox || self.inbox_ready())
-            .unwrap_or_default()
+            // The Inbox is the default where the host settles threads (Q 2026-11-09).
+            .unwrap_or(if self.inbox_ready() { View::Inbox } else { View::Date })
     }
     /// Restores each project's view and the closed folders from the shell state.
     pub fn restore_views(
@@ -230,10 +230,8 @@ impl ThreadList {
     pub(super) fn set_view(&mut self, view: View, cx: &mut Context<Self>) {
         self.view_menu = false;
         let project = self.header.ledger.active_project_id.clone();
-        if !project.is_empty() {
-            self.views.insert(project.clone(), view);
-            cx.emit(Event::View(project, view.key()));
-        }
+        self.views.insert(project.clone(), view);
+        cx.emit(Event::View(project, view.key()));
         self.rebuild();
         cx.notify();
     }
@@ -304,7 +302,12 @@ impl ThreadList {
                 .child(view.label())
                 .on_click(cx.listener(move |this, _, _, cx| this.set_view(view, cx)))
         };
-        let (detailed, working) = (self.detailed, self.working_section);
+        let detailed = self.detailed;
+        let working = if self.view() == View::Inbox {
+            self.inbox_working
+        } else {
+            self.working_section
+        };
         let toggle = |key: &'static str, label: &'static str, on: bool, cx: &mut Context<Self>| {
             let selector = format!("sidebar-view-{key}");
             div()

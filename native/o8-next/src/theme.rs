@@ -738,6 +738,22 @@ pub fn right_panel_width(viewport: f32) -> f32 {
 // src/lib/theme/glass-material.ts: the only window-wide fill in All Glass.
 // Darker through the top third, still clear at the bottom.
 pub const GLASS_VEIL: [(f32, f32); 4] = [(0., 0.9), (0.3, 0.7), (0.65, 0.32), (1., 0.06)];
+/// T3 Code's indigo for an Inbox thread waiting on you (indigo-600 / 300).
+pub fn inbox_input() -> Rgba {
+    if light() {
+        rgb(0x4f46e5)
+    } else {
+        rgb(0xa5b4fc)
+    }
+}
+/// T3 Code's teal for an Inbox card's live terminal (teal-600 / 300).
+pub fn inbox_terminal() -> Rgba {
+    if light() {
+        rgb(0x0d9488)
+    } else {
+        rgb(0x5eead4)
+    }
+}
 /// `--t-glass-muted` in WORKSPACE_GLASS_OVERRIDES (src/lib/theme/context.tsx).
 pub fn glass_muted() -> Rgba {
     translucent(0xffffff, 0.04)

@@ -16,6 +16,75 @@ pub const COMPOSER_MENU_ENTER_MS: u64 = 120;
 thread_local! {
     /// Hover fills in flight, by element id; GPUI's hover style switches instantly.
     static HOVERS: RefCell<HashMap<SharedString, Transition>> = RefCell::default();
+    /// Presses in flight, by element id, so a held button can sink a little.
+    static PRESSES: RefCell<HashMap<SharedString, Transition>> = RefCell::default();
+}
+
+/// How far an element's glyph has sunk under a press: 0 at rest, 1 held.
+pub fn press(key: &SharedString) -> f32 {
+    PRESSES.with(|presses| {
+        presses
+            .borrow()
+            .get(key)
+            .map_or(0., |motion| motion.value().0)
+    })
+}
+
+/// The scale a pressed glyph draws at: 0.9 of rest when held, since a
+/// 14px glyph needs more travel than a whole button to read as a press.
+pub fn press_scale(key: &SharedString) -> f32 {
+    1. - 0.1 * press(key)
+}
+
+/// Tracks the left button held on the element so [`press`] can sink its glyph
+/// over `milliseconds`, and springs it back on release inside or outside.
+pub fn track_press<E: gpui::InteractiveElement>(
+    element: E,
+    key: SharedString,
+    milliseconds: u64,
+) -> E {
+    let set =
+        move |key: &SharedString, held: bool, window: &mut gpui::Window, cx: &mut gpui::App| {
+            let changed = PRESSES.with(|presses| {
+                let mut presses = presses.borrow_mut();
+                let motion = presses
+                    .entry(key.clone())
+                    .or_insert_with(|| Transition::new(milliseconds));
+                let changed = motion.is_open() != held;
+                motion.set(held);
+                changed
+            });
+            if changed {
+                redraw_for(milliseconds, window, cx);
+            }
+        };
+    let (down, up, out) = (key.clone(), key.clone(), key);
+    element
+        .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+            set(&down, true, window, cx)
+        })
+        .on_mouse_up(gpui::MouseButton::Left, move |_, window, cx| {
+            set(&up, false, window, cx)
+        })
+        .on_mouse_up_out(gpui::MouseButton::Left, move |_, window, cx| {
+            set(&out, false, window, cx)
+        })
+}
+
+/// Redraws each frame for `milliseconds` so a transition in flight paints.
+fn redraw_for(milliseconds: u64, window: &mut gpui::Window, cx: &mut gpui::App) {
+    window
+        .spawn(cx, async move |cx| {
+            for _ in 0..milliseconds / 16 + 2 {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                if cx.update(|window, _| window.refresh()).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
 }
 
 /// How far an element's hover fill has faded in: 0 at rest, 1 hovered.
@@ -44,18 +113,7 @@ pub fn fade_hover<E: StatefulInteractiveElement>(
                 .set(*hovered)
         });
         // Redraw each frame until the fade settles.
-        window
-            .spawn(cx, async move |cx| {
-                for _ in 0..milliseconds / 16 + 2 {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(16))
-                        .await;
-                    if cx.update(|window, _| window.refresh()).is_err() {
-                        break;
-                    }
-                }
-            })
-            .detach();
+        redraw_for(milliseconds, window, cx);
     })
 }
 

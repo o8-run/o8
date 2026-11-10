@@ -9,9 +9,9 @@ pub(super) use data::HeaderSnapshot;
 mod identity;
 #[path = "scope.rs"]
 mod scope;
-pub(super) use scope::{Menu as ScopeMenu, RowMenu};
 use identity::glyph;
 pub(super) use identity::identity;
+pub(super) use scope::{Menu as ScopeMenu, RowMenu};
 
 /// A repository's icon override when it has one, else its monogram.
 pub(crate) fn repo_identity(
@@ -187,9 +187,10 @@ impl ThreadList {
     }
     pub(super) fn project_header(
         &mut self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let new_thread = (!self.scope_repos().is_empty()).then(|| self.new_thread_button(cx));
         let active = self
             .header
             .ledger
@@ -215,159 +216,84 @@ impl ThreadList {
             })
             .collect();
         repos.sort_by_key(|r| self.workspace.as_ref() != Some(&r.local_path));
-        // Match the desktop: selected first, max 140px per chip, at most three.
-        let widths: Vec<f32> = repos
-            .iter()
-            .map(|r| {
-                let text = crate::text::sanitize(&r.name);
-                let run = gpui::TextRun {
-                    len: text.len(),
-                    font: gpui::Font {
-                        weight: gpui::FontWeight::LIGHT,
-                        ..gpui::font(theme().font_ui)
-                    },
-                    color: theme().text.into(),
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                };
-                let line = window
-                    .text_system()
-                    .shape_line(text.into(), px(10.5), &[run], None);
-                (f32::from(line.width) + 30.).min(140.)
-            })
-            .collect();
-        let mut count = repos.len().min(3);
-        while count > 1
-            && widths[..count].iter().sum::<f32>()
-                + (count - 1) as f32 * 3.
-                + if count < repos.len() { 41. } else { 0. }
-                > 237.
-        {
-            count -= 1;
-        }
-        let chips = repos
-            .iter()
-            .take(count)
-            .enumerate()
-            .map(|(index, repo)| {
-                let id = repo.id.clone();
-                let project = project_id.clone();
-                div()
-                    .id(gpui::ElementId::Name(format!("sidebar-chip-{id}").into()))
-                    .debug_selector(move || format!("sidebar-repo-{index}"))
-                    .h(px(24.))
-                    .max_w(px(140.))
-                    .min_w_0()
-                    .pl(px(4.))
-                    .pr(px(7.))
-                    .py(px(3.))
-                    .rounded(px(7.))
-                    .flex()
-                    .items_center()
-                    .text_size(px(10.5))
-                    .gap(px(5.))
-                    .text_color(theme().text_muted)
-                    .bg(if self.workspace.as_ref() == Some(&repo.local_path) {
-                        theme().hover
-                    } else {
-                        theme().surface
-                    })
-                    .child(repo_identity(
-                        &repo.name,
-                        None,
-                        repo.icon.as_ref(),
-                        14.,
-                        "sidebar-repo-identity",
-                    ))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .text_ellipsis()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .child(crate::text::sanitize(&repo.name)),
-                    )
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.header_select(Action::Open(project.clone(), id.clone()), cx)
-                    }))
-            })
-            .collect::<Vec<_>>();
+        // Q 2026-11-09: one row, as T3 Code's sidebar head: Search fills it,
+        // then the project switcher as its mark and Add project. The active
+        // project's repositories moved into the switcher's menu.
+        let search: AnyElement = if self.editing || !self.query.is_empty() {
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(self.editor.clone())
+                .into_any_element()
+        } else {
+            self.search_field(cx)
+                .flex_1()
+                .min_w_0()
+                // The magnifier sits on the list's 16px content edge.
+                .pl(px(10.))
+                .mx(px(0.))
+                .mt(px(0.))
+                .mb(px(0.))
+                .into_any_element()
+        };
+        let tip = match repos.len() {
+            0 | 1 => crate::text::sanitize(&name),
+            n => format!("{} · {n} repositories", crate::text::sanitize(&name)),
+        };
         let mut view = div()
             .debug_selector(|| "sidebar-project-header".into())
-            // Classic's switcher sits 13px under the header strip (measured in
-            // the desktop DOM), level with the rail's home mark.
-            .pt(px(13.))
-            .pb(px(3.))
+            .pt(px(6.))
+            .pb(px(4.))
             .flex()
             .flex_col()
             .child(
                 div()
-                    .pl(px(8.))
-                    .pr(px(5.))
+                    .pl(px(6.))
+                    // The last control's centre meets the list's right axis,
+                    // 22px in, with the shelf chevrons and the dock's Tools.
+                    .pr(px(8.))
                     .flex()
                     .items_center()
                     .gap(px(2.))
+                    .child(search)
                     .child(
                         div()
                             .id("sidebar-project-switcher")
                             .debug_selector(|| "sidebar-project-switcher".into())
-                            .h(px(32.))
-                            .pl(px(2.))
-                            .pr(px(4.))
-                            .min_w_0()
-                            .flex_1()
+                            .h(px(28.))
+                            .px(px(6.))
+                            .flex_shrink_0()
                             .flex()
                             .items_center()
-                            .gap(px(10.))
+                            .gap(px(4.))
+                            .rounded(px(7.))
                             .cursor_pointer()
-                            .child(
-                                div()
-                                    .size(px(17.))
-                                    .flex_shrink_0()
-                                    .relative()
-                                    .left(px(-2.))
-                                    .child(repo_identity(
-                                        &name,
-                                        color,
-                                        project_icon.as_ref(),
-                                        17.,
-                                        "sidebar-project-identity",
-                                    )),
-                            )
+                            .hover(|s| s.bg(theme().hover))
+                            .tooltip(move |_, cx| {
+                                cx.new(|_| crate::icon::Tip(tip.clone().into())).into()
+                            })
                             .child(
                                 div()
                                     .debug_selector({
                                         let name = name.clone();
                                         move || format!("sidebar-project-name:{name}")
                                     })
-                                    .text_size(px(13.5))
-                                    .min_w_0()
-                                    .flex_1()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .child(crate::text::sanitize(&name)),
+                                    .size(px(16.))
+                                    .flex_shrink_0()
+                                    .child(repo_identity(
+                                        &name,
+                                        color,
+                                        project_icon.as_ref(),
+                                        16.,
+                                        "sidebar-project-identity",
+                                    )),
                             )
-                            .when(repos.len() > 1, |v| {
-                                v.child(
-                                    div()
-                                        .debug_selector({
-                                            let count = repos.len();
-                                            move || format!("sidebar-project-count:{count}")
-                                        })
-                                        .text_size(px(10.))
-                                        .text_color(theme().text_muted)
-                                        .child(repos.len().to_string()),
-                                )
-                            })
                             .child(
                                 div()
                                     .debug_selector(|| "sidebar-project-chevron".into())
-                                    .size(px(13.))
+                                    .size(px(11.))
                                     .flex_shrink_0()
-                                    .child(glyph(false, 13., theme().text_faint)),
+                                    .child(glyph(false, 11., theme().text_faint)),
                             )
                             .capture_any_mouse_down(cx.listener(
                                 |this, event: &gpui::MouseDownEvent, window, cx| {
@@ -399,55 +325,17 @@ impl ThreadList {
                             .p(px(6.))
                             .cursor_pointer()
                             .rounded(px(7.))
+                            .hover(|s| s.bg(theme().hover))
                             .child(glyph(true, 16., theme().text_muted))
                             .drag_over::<gpui::ExternalPaths>(|v, _, _, _| v.bg(theme().hover))
                             .on_drop(cx.listener(|this, paths: &gpui::ExternalPaths, _, cx| {
                                 this.header_drop_repository(paths, cx)
                             }))
                             .on_click(cx.listener(|this, _, _, cx| this.header_add_repository(cx))),
-                    ),
-            )
-            .when(repos.len() > 1, |v| {
-                v.child(
-                    div()
-                        .pl(px(37.))
-                        .pr(px(6.))
-                        .pb(px(5.))
-                        .flex()
-                        .gap(px(3.))
-                        .children(chips)
-                        .when(count < repos.len(), |v| {
-                            v.child(
-                                div()
-                                    .id("sidebar-repo-overflow")
-                                    .debug_selector(|| "sidebar-repo-overflow".into())
-                                    .h(px(24.))
-                                    .w(px(38.))
-                                    .flex_shrink_0()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .gap(px(2.))
-                                    .rounded(px(7.))
-                                    .text_size(px(10.5))
-                                    .child(format!("+{}", repos.len() - count))
-                                    .child(glyph(false, 10., theme().text_muted))
-                                    .cursor_pointer()
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if !this.header_busy {
-                                            this.header_menu = if this.header_menu == Some(false) {
-                                                None
-                                            } else {
-                                                Some(false)
-                                            };
-                                        }
-                                        this.focus.focus(window);
-                                        cx.notify();
-                                    })),
-                            )
-                        }),
-                )
-            });
+                    )
+                    // New thread closes the row, as in T3 Code's sidebar head.
+                    .children(new_thread),
+            );
         if let Some(projects) = self.header_menu {
             let mut menu = div()
                 .id("sidebar-header-menu")
@@ -458,6 +346,60 @@ impl ThreadList {
                 .p(px(6.))
                 .bg(theme().surface_raised);
             if projects {
+                // The project's repositories, the open one marked: they were
+                // the chips under the old switcher.
+                if repos.len() > 1 {
+                    menu = menu.child(
+                        div()
+                            .px(px(9.))
+                            .pt(px(4.))
+                            .pb(px(2.))
+                            .text_size(px(11.))
+                            .text_color(theme().text_faint)
+                            .child("Repositories"),
+                    );
+                    for (index, repo) in repos.iter().enumerate() {
+                        let id = repo.id.clone();
+                        let project = project_id.clone();
+                        let open = self.workspace.as_ref() == Some(&repo.local_path);
+                        menu = menu.child(
+                            div()
+                                .id(gpui::ElementId::Name(format!("sidebar-chip-{id}").into()))
+                                .debug_selector(move || format!("sidebar-repo-{index}"))
+                                .h(px(32.))
+                                .px(px(9.))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .rounded(px(9.))
+                                .text_size(px(12.5))
+                                .cursor_pointer()
+                                .when(open, |v| v.bg(theme().hover))
+                                .hover(|s| s.bg(theme().hover))
+                                .child(repo_identity(
+                                    &repo.name,
+                                    None,
+                                    repo.icon.as_ref(),
+                                    16.,
+                                    "sidebar-repo-identity",
+                                ))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_ellipsis()
+                                        .child(crate::text::sanitize(&repo.name)),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.header_select(
+                                        Action::Open(project.clone(), id.clone()),
+                                        cx,
+                                    )
+                                })),
+                        );
+                    }
+                    menu = menu.child(div().my(px(4.)).h(px(1.)).bg(theme().border));
+                }
                 let has_project_outside_default = self
                     .header
                     .ledger
@@ -568,38 +510,6 @@ impl ThreadList {
                                 this.header_menu = None;
                                 this.open_project_in_editor(path.clone(), cx);
                                 cx.notify();
-                            })),
-                    );
-                }
-            } else {
-                for (index, repo) in repos.iter().enumerate().skip(count) {
-                    let id = repo.id.clone();
-                    let project = project_id.clone();
-                    menu = menu.child(
-                        div()
-                            .id(gpui::ElementId::Name(
-                                format!("sidebar-overflow-{id}").into(),
-                            ))
-                            .debug_selector(move || format!("sidebar-repo-{index}"))
-                            .h(px(34.))
-                            .px(px(8.))
-                            .flex()
-                            .items_center()
-                            .gap(px(5.))
-                            .text_size(px(12.))
-                            .text_ellipsis()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(theme().hover))
-                            .child(repo_identity(
-                                &repo.name,
-                                None,
-                                repo.icon.as_ref(),
-                                14.,
-                                "sidebar-overflow-identity",
-                            ))
-                            .child(crate::text::sanitize(&repo.name))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.header_select(Action::Open(project.clone(), id.clone()), cx)
                             })),
                     );
                 }

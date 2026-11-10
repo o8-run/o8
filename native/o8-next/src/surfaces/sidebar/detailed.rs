@@ -115,15 +115,16 @@ pub(crate) fn fold_working(rows: Vec<Row>, closed: bool) -> Vec<Row> {
 }
 
 impl ThreadList {
-    pub fn restore_row_mode(&mut self, detailed: bool, working: bool) {
+    pub fn restore_row_mode(&mut self, detailed: bool, working: bool, inbox_working: bool) {
         self.detailed = detailed;
         self.working_section = working;
+        self.inbox_working = inbox_working;
         self.rebuild();
     }
     fn save_row_mode(&mut self, cx: &mut Context<Self>) {
         self.view_menu = false;
         self.rebuild();
-        cx.emit(Event::RowMode(self.detailed, self.working_section));
+        cx.emit(Event::RowMode(self.detailed, self.working_section, self.inbox_working));
         cx.notify();
     }
     pub(super) fn toggle_detailed(&mut self, cx: &mut Context<Self>) {
@@ -131,7 +132,12 @@ impl ThreadList {
         self.save_row_mode(cx);
     }
     pub(super) fn toggle_working_section(&mut self, cx: &mut Context<Self>) {
-        self.working_section = !self.working_section;
+        // The Inbox has its own Working shelf; the other views their section.
+        if self.view() == super::folders::View::Inbox {
+            self.inbox_working = !self.inbox_working;
+        } else {
+            self.working_section = !self.working_section;
+        }
         self.save_row_mode(cx);
     }
     pub(super) fn toggle_working_closed(&mut self, cx: &mut Context<Self>) {

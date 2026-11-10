@@ -29,6 +29,8 @@ pub(in crate::shell::sidebar) struct RowMenu {
     pub id: String,
     pub position: Point<Pixels>,
     pub copy_open: bool,
+    /// The menu shows only the snooze presets (the card's clock, or "Snooze…").
+    pub snooze_only: bool,
     /// Where the Copy submenu painted: it hangs outside the menu's own bounds,
     /// so a press on it must not read as a press outside.
     pub copy_bounds: std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<Pixels>>>>,
@@ -472,15 +474,29 @@ impl ThreadList {
             .find(|s| s.id == id)
             .and_then(|s| s.repo_path.clone())
             .filter(|repo| repos.iter().any(|(path, _)| path == repo));
+        self.snooze_custom = None;
         // Every thread row offers Archive or Restore.
         self.row_menu = Some(RowMenu {
             repo,
             id: id.to_owned(),
             position,
             copy_open: false,
+            snooze_only: false,
             copy_bounds: Default::default(),
         });
         cx.notify();
+    }
+    /// The card's clock: the row menu as the snooze preset list alone.
+    pub(in crate::shell::sidebar) fn open_snooze_menu(
+        &mut self,
+        id: &str,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_row_menu(id, position, cx);
+        if let Some(menu) = self.row_menu.as_mut() {
+            menu.snooze_only = true;
+        }
     }
     fn open_copy(&mut self, cx: &mut Context<Self>) {
         if let Some(menu) = self.row_menu.as_mut().filter(|menu| !menu.copy_open) {
@@ -497,7 +513,8 @@ impl ThreadList {
         if self.picked.len() > 1 && self.picked.contains(&id) {
             return self.bulk_menu(cx);
         }
-        let snooze = self.snooze_items(&id, cx);
+        let snooze_only = self.row_menu.as_ref().is_some_and(|menu| menu.snooze_only);
+        let snooze = self.snooze_items(&id, snooze_only, cx);
         let pin = self.pin_item(&id, cx);
         let auto_settle = self.auto_settle_item(&id, cx);
         let workspace_restores = self.workspace_restore_items(&id, cx);
@@ -713,16 +730,22 @@ impl ThreadList {
                                     cx.notify();
                                 }
                             }))
-                            .children(pin)
-                            .children(auto_settle)
-                            .children(workspace_restores)
-                            .children(filter)
-                            .children(snooze)
-                            .children(mark_unread)
-                            .children(editors)
-                            .child(regenerate)
-                            .child(copy)
-                            .child(archive),
+                            .map(|menu| {
+                                if snooze_only {
+                                    // One width for both Custom… tabs, so the menu holds still.
+                                    return menu.w(px(256.)).children(snooze);
+                                }
+                                menu.children(pin)
+                                    .children(auto_settle)
+                                    .children(workspace_restores)
+                                    .children(filter)
+                                    .children(snooze)
+                                    .children(mark_unread)
+                                    .children(editors)
+                                    .child(regenerate)
+                                    .child(copy)
+                                    .child(archive)
+                            }),
                     ),
             )
             .with_priority(1)

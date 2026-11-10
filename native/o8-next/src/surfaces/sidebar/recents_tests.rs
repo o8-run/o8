@@ -31,7 +31,7 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("recents.json"),
-        State::default(),
+        by_date(),
         cx,
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);
@@ -153,7 +153,7 @@ fn sidebar_recents_twelfth_keyboard_row_survives_live_cutoff(cx: &mut TestAppCon
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("cutoff.json"),
-        State::default(),
+        by_date(),
         cx,
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);
