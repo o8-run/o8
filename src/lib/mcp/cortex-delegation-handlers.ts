@@ -233,6 +233,14 @@ export function createCortexDelegationHandlers(config: {
     try {
       if (!config.repoPath || !config.parentThreadId) return textResult('Worker corrections require a persisted parent conversation.', true);
       const path = '/api/orchestrator/worker-corrections';
+      if (args.reviewSource !== undefined) {
+        const targets = args.targets as Array<{ surfaceId: string; runId: string }> | undefined;
+        if (!Array.isArray(targets) || targets.length !== 1 || args.message !== undefined || args.mode !== undefined || args.holdMerges === true) {
+          return textResult('A saved review handoff needs exactly one author target, without replacement feedback, mode or merge restrictions.', true);
+        }
+        return jsonResult(await config.apiFetch(path, { method: 'POST', body: JSON.stringify({ repoPath: config.repoPath,
+          threadId: config.parentThreadId, review: { ...(args.reviewSource as object), ...targets[0] } }) }));
+      }
       if (args.targets === undefined) return jsonResult(await config.apiFetch(`${path}?${new URLSearchParams({ repoPath: config.repoPath, threadId: config.parentThreadId })}`));
       return jsonResult(await config.apiFetch(path, { method: 'POST', body: JSON.stringify({ repoPath: config.repoPath,
         threadId: config.parentThreadId, id: args.idempotencyKey, payload: { targets: args.targets, message: args.message,

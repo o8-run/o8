@@ -87,7 +87,7 @@ export function holdWorkerCorrections(target: ComposerQueueTarget): void {
 }
 
 /** No automatic retry: an interrupted request can already have affected a worker. */
-export async function correctWorkers(input: ComposerQueueTarget & { id: string; payload: unknown }): Promise<WorkerCorrectionReceipt> {
+export async function correctWorkers(input: ComposerQueueTarget & { id: string; payload: unknown }, admissionCheck?: () => void): Promise<WorkerCorrectionReceipt> {
   const target = validateComposerQueueTarget(input);
   if (typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(input.id)) throw new Error('A correction identity is required.');
   const correction = payload(input.payload);
@@ -107,6 +107,7 @@ export async function correctWorkers(input: ComposerQueueTarget & { id: string; 
   }
   const created = await withSessionRuleMutation(target.threadId, () => getSqlite().transaction(() => {
     if (readWorkerCorrection(input.id)) return false;
+    admissionCheck?.();
     if (fences.some(fence => correctionStopVersion(fence.scope) !== fence.version)) throw new Error('Parent or worker stopped during correction preparation. Nothing was admitted.');
     const rule = correction.holdMerges ? addSessionRule(target.threadId, correction.message, 'no_merge') : null;
     getSqlite().prepare('INSERT INTO worker_corrections VALUES (?, ?, ?, ?, ?, ?)')
@@ -115,12 +116,13 @@ export async function correctWorkers(input: ComposerQueueTarget & { id: string; 
       .run(input.id, selected.surfaceId, selected.runId, 'pending', 'Awaiting delivery.', Date.now());
     return true;
   })());
-  if (!created) return correctWorkers(input);
+  if (!created) return correctWorkers(input, admissionCheck);
   for (const selected of correction.targets) {
     const claim = getSqlite().prepare(`UPDATE worker_correction_deliveries SET status = 'sending', note = 'Delivery in progress. An interrupted request needs inspection before retry.', updated_at = ?
       WHERE correction_id = ? AND surface_id = ? AND status = 'pending'`).run(Date.now(), input.id, selected.surfaceId);
     if (!claim.changes) continue;
     const check = () => {
+      admissionCheck?.();
       if (readWorkerCorrection(input.id)?.deliveries.find(item => item.surfaceId === selected.surfaceId)?.status !== 'sending') throw new Error('Correction was held before worker admission.');
       assertCurrentMember(target, selected.surfaceId);
     };
