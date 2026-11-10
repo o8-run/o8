@@ -47,17 +47,21 @@ it('trusts a relayed peer only with the bridge key and one IP literal', async ()
   expect((await dossiers({ 'x-o8-client-addr': '127.0.0.1' })).status).toBe(401);
 });
 
-it('refuses a packet worker from a remote peer on its lane diff', async () => {
+it('serves a packet worker only its own lane diff from a remote peer', async () => {
   const { getDataDir } = await import('@/lib/data-dir-migration');
   const { createLane } = await import('@/lib/lane/registry');
   const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
   const lane = createLane({ repoPath: getDataDir(), branch: 'fixture-unresolved-', runtime: 'codex', packetId: 'fixture-verified-peer' });
+  const other = createLane({ repoPath: getDataDir(), branch: 'fixture-unresolved-other-', runtime: 'codex', packetId: 'fixture-verified-peer-other' });
   const token = mintPacketWorkerToken(lane.packetId!);
-  const diff = (peer: string) => call(`/api/lanes/${lane.id}/diff`, token, { 'x-o8d-bridge': key, 'x-o8d-peer': peer });
-  // From loopback the worker reaches its own lane's handler (an unresolved branch is 409).
-  expect((await diff('127.0.0.1')).status).toBe(409);
-  // A packet token alone no longer stands in for a loopback address.
-  expect((await diff('203.0.113.5')).status).toBe(401);
+  const diff = (laneId: string, bearer: string, peer: string) =>
+    call(`/api/lanes/${laneId}/diff`, bearer, { 'x-o8d-bridge': key, 'x-o8d-peer': peer });
+  // The worker reaches its own lane's handler from either peer (an unresolved branch is 409).
+  expect((await diff(lane.id, token, '127.0.0.1')).status).toBe(409);
+  expect((await diff(lane.id, token, '203.0.113.5')).status).toBe(409);
+  // Another packet's lane is refused, and so is a worker credential bound to no packet.
+  expect((await diff(other.id, token, '203.0.113.5')).status).toBe(403);
+  expect((await diff(lane.id, worker, '203.0.113.5')).status).toBe(401);
 });
 
 it('never upgrades a request that carries an HTTP stamp', () => {
