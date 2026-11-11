@@ -28,6 +28,12 @@ Local changes:
   place, so a later measure paired short runs with the full text and a run
   boundary could fall inside a multibyte character, panicking in
   `layout_line` ("end byte index 13 is not a char boundary; it is inside '·'").
+- `src/elements/text.rs`: a text measure that learns a truncation width shapes
+  again. Unwrapped text (`whitespace_nowrap`) has no wrap width, so the layout
+  from its first measure, taken with no width, was reused for every later one.
+  `text_ellipsis` text kept its full length and its parent clipped it
+  mid-letter. The layout now records the width it was truncated to and is
+  reused only for that width, or when a later measure has none.
 - `src/window.rs`: a cached view's paint reuse keeps input-handler slots aligned.
   A frame drawn while the platform still holds the input handler (inside text
   entry) leaves the rendered list without the entry the view's range recorded;
