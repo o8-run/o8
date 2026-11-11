@@ -240,11 +240,23 @@ fn subscribe_worker(client: Client, key: String) -> Subscription {
     let cancel = Arc::new(Cancel::default());
     let stopped = cancel.clone();
     thread::spawn(move || {
+        let mut reconnecting = false;
         while !stopped.is_stopped() {
             let message = match client.history(&key) {
-                Ok(history) => Incoming::Frame(json!({"channel":"history","event":"update",
-                    "data":{"sessionKey":key,"entries":history.transcript,"replace":true}})),
-                Err(_) => Incoming::Status("Reconnecting · saved history retained"),
+                Ok(history) => {
+                    if reconnecting {
+                        if !emit(&sender, &stopped, &client, Incoming::Status("")) {
+                            break;
+                        }
+                        reconnecting = false;
+                    }
+                    Incoming::Frame(json!({"channel":"history","event":"update",
+                        "data":{"sessionKey":key,"entries":history.transcript,"replace":true}}))
+                }
+                Err(_) => {
+                    reconnecting = true;
+                    Incoming::Status("Reconnecting · saved history retained")
+                }
             };
             if !emit(&sender, &stopped, &client, message) {
                 break;

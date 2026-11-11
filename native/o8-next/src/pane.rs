@@ -261,6 +261,7 @@ impl Pane {
             .map(|s| s.receiver.try_iter().take(64).collect())
             .unwrap_or_default();
         let mut changed = false;
+        let mut notice_changed = false;
         for message in messages {
             match message {
                 Incoming::Frame(frame) => {
@@ -269,7 +270,9 @@ impl Pane {
                     }
                 }
                 Incoming::Status(status) => {
-                    self.notice = status.trim_end_matches(" · read-only").into()
+                    let notice = status.trim_end_matches(" · read-only");
+                    notice_changed |= self.notice != notice;
+                    self.notice = notice.into();
                 }
             }
         }
@@ -285,7 +288,7 @@ impl Pane {
                 self.navigate(true);
             }
         }
-        changed || visualizations_changed
+        changed || visualizations_changed || notice_changed
     }
     pub fn navigate(&mut self, end: bool) {
         if !self.rows.is_empty() {
@@ -443,6 +446,123 @@ mod tests {
     #[gpui::test]
     fn a_pane_shorter_than_its_first_row_scrolls_to_the_next(cx: &mut TestAppContext) {
         assert_eq!(scrolled_to(Pane::new(None), cx), 1);
+    }
+    #[test]
+    fn normalized_worker_recovery_notifies_without_new_transcript_rows() {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            sync::{
+                Arc,
+                atomic::{AtomicBool, Ordering},
+            },
+            time::{Duration, Instant},
+        };
+        struct Host {
+            stopped: Arc<AtomicBool>,
+            server: Option<std::thread::JoinHandle<()>>,
+        }
+        impl Drop for Host {
+            fn drop(&mut self) {
+                self.stopped.store(true, Ordering::Release);
+                self.server.take().unwrap().join().unwrap();
+            }
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let stopped = Arc::new(AtomicBool::new(false));
+        let failed = Arc::new(AtomicBool::new(false));
+        let stop = stopped.clone();
+        let failing = failed.clone();
+        let server = std::thread::spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::park_timeout(Duration::from_millis(1));
+                        continue;
+                    }
+                    Err(e) => panic!("worker fixture accept: {e}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut buf = [0; 8192];
+                let n = stream.read(&mut buf).unwrap();
+                let request = String::from_utf8_lossy(&buf[..n]);
+                let (status, body) = if request.contains("/api/mobile/history") {
+                    if failing.load(Ordering::Acquire) {
+                        (
+                            "500 Internal Server Error",
+                            serde_json::json!({"error":"temporarily unavailable"}),
+                        )
+                    } else {
+                        (
+                            "200 OK",
+                            serde_json::json!({"sessionKey":"codex-owned:notice","transcript":[{"id":"prompt","role":"user","text":"Review this patch."}]}),
+                        )
+                    }
+                } else {
+                    assert!(request.contains("/api/orchestrator/packet-transcript"));
+                    (
+                        "200 OK",
+                        serde_json::json!({"sessionKey":"codex-owned:notice","events":[{"seq":1,"ts":"2026-11-02T21:49:25.000Z","type":"done","exitCode":0}],"nextCursor":1}),
+                    )
+                };
+                let body = body.to_string();
+                write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+            }
+        });
+        let _host = Host {
+            stopped,
+            server: Some(server),
+        };
+        let client = Client::authenticated(&origin, None).unwrap();
+        let history = client.history("codex-owned:notice").unwrap();
+        failed.store(true, Ordering::Release);
+        let mut pane = Pane::new(Some("codex-owned:notice".into()));
+        pane.install(history, client);
+        let before: Vec<_> = pane.rows.iter().map(|r| r.borrow().row.clone()).collect();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let notified = pane.poll();
+            if !pane.notice.is_empty() {
+                assert!(
+                    notified,
+                    "a connection-only error invalidates the reading pane"
+                );
+                assert!(pane.notice.starts_with("Reconnecting"));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the worker error reaches the pane"
+            );
+            std::thread::park_timeout(Duration::from_millis(5));
+        }
+        failed.store(false, Ordering::Release);
+        loop {
+            let notified = pane.poll();
+            if pane.notice.is_empty() {
+                assert!(notified, "a recovered connection invalidates the notice");
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "a successful normalized poll clears the notice"
+            );
+            std::thread::park_timeout(Duration::from_millis(5));
+        }
+        assert_eq!(
+            before,
+            pane.rows
+                .iter()
+                .map(|r| r.borrow().row.clone())
+                .collect::<Vec<_>>(),
+            "notice recovery needs no new answer or tool row"
+        );
     }
 }
 
