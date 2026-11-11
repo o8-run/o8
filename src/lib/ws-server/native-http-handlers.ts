@@ -90,7 +90,7 @@ import { GET as api_panel_file_asset_GET } from '@/app/api/panel/file-asset/rout
 import { GET as api_v2_files_GET } from '@/app/api/v2/files/route';
 import { GET as api_v2_files_quick_docs_GET } from '@/app/api/v2/files/quick-docs/route';
 import { GET as api_panel_prs_number_timeline_GET } from '@/app/api/panel/prs/[number]/timeline/route';
-import { GET as api_repo_spec_GET } from '@/app/api/repo-spec/route';
+import { GET as api_repo_spec_GET, PUT as api_repo_spec_PUT, POST as api_repo_spec_POST } from '@/app/api/repo-spec/route';
 import { GET as api_review_workspace_GET } from '@/app/api/review/workspace/route';
 import { GET as api_runtime_capabilities_GET } from '@/app/api/runtime/capabilities/route';
 import { GET as api_runtime_capacity_GET } from '@/app/api/runtime/capacity/route';
@@ -186,7 +186,7 @@ export const api_panel_file_asset = { GET: api_panel_file_asset_GET };
 export const api_v2_files = { GET: api_v2_files_GET };
 export const api_v2_files_quick_docs = { GET: api_v2_files_quick_docs_GET };
 export const api_panel_prs_number_timeline = { GET: api_panel_prs_number_timeline_GET };
-export const api_repo_spec = { GET: api_repo_spec_GET };
+export const api_repo_spec = { GET: api_repo_spec_GET, PUT: api_repo_spec_PUT, POST: api_repo_spec_POST };
 export const api_review_workspace = { GET: api_review_workspace_GET };
 export const api_runtime_capabilities = { GET: api_runtime_capabilities_GET };
 export const api_runtime_capacity = { GET: api_runtime_capacity_GET };
