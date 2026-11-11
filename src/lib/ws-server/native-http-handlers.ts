@@ -76,7 +76,7 @@ import { POST as api_orchestrator_steer_packet_POST } from '@/app/api/orchestrat
 import { POST as api_cortex_reingest_POST } from '@/app/api/cortex/reingest/route';
 import { POST as api_orchestrator_stop_packet_POST } from '@/app/api/orchestrator/stop-packet/route';
 
-import { GET as api_panel_branches_GET } from '@/app/api/panel/branches/route';
+import { GET as api_panel_branches_GET, POST as api_panel_branches_POST } from '@/app/api/panel/branches/route';
 import { GET as api_panel_commits_hash_GET } from '@/app/api/panel/commits/[hash]/route';
 import { GET as api_panel_files_GET } from '@/app/api/panel/files/route';
 import { GET as api_panel_file_diff_GET } from '@/app/api/panel/file-diff/route';
@@ -172,7 +172,7 @@ export const api_runtime_launch = { POST: api_runtime_launch_POST };
 export const api_orchestrator_headless_tick = { POST: api_orchestrator_headless_tick_POST };
 export const api_review_auto_review = { POST: api_review_auto_review_POST };
 
-export const api_panel_branches = { GET: api_panel_branches_GET };
+export const api_panel_branches = { GET: api_panel_branches_GET, POST: api_panel_branches_POST };
 export const api_panel_commits_hash = { GET: api_panel_commits_hash_GET };
 export const api_panel_files = { GET: api_panel_files_GET };
 export const api_panel_file_diff = { GET: api_panel_file_diff_GET };

@@ -36,6 +36,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),
+    // Branch creation remains operator-only through panelGateMiddleware.
+    route('/api/panel/branches', 'POST', () => import('@/app/api/panel/branches/route')),
     route('/api/panel/files', 'GET', () => import('@/app/api/panel/files/route')),
     route('/api/panel/file-asset', 'GET', () => import('@/app/api/panel/file-asset/route')),
     route('/api/v2/files', 'GET', () => import('@/app/api/v2/files/route')),

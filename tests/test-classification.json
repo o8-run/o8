@@ -5452,6 +5452,14 @@
       ]
     },
     {
+      "path": "tests/o8d-branch-create-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-broadcast-commentary-native-real-path.test.ts",
       "reasons": [
         "real-path"
