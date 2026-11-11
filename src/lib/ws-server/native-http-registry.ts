@@ -383,13 +383,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
     route('/api/worktrees/retention-usage', 'GET', () => import('@/app/api/worktrees/retention-usage/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
-    route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
+    route('/api/setup/cli-updates', 'GET POST', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/route')),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('@/app/api/v2/keys/route')),
     route('/api/cortex/reingest', 'POST', () => import('@/app/api/cortex/reingest/route')),
   ],
   setup: [
-    route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
+    route('/api/setup/cli-updates', 'GET POST', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/setup/config', 'GET POST', () => import('@/app/api/setup/config/route')),
     // The o8 MCP server's operator status and agent setup: operator-only through the
     // middleware (no device, worker or spectator grant). Status reads SQLite and the

@@ -40,7 +40,6 @@ export const NEXT_ONLY_NATIVE_METHODS: NextOnlyTable = {
   'POST /api/panel/problem-dossiers': seek('record a decision on a problem dossier'),
   'POST /api/repo-spec': security('device and worker grants'),
   'PUT /api/repo-spec': security('device and worker grants'),
-  'POST /api/setup/cli-updates': seek('install or update a runtime CLI'),
 };
 
 // The shell's /api/v1/* hits were a provider's own URL (openrouter.ai), not the API port.
@@ -110,7 +109,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
   '/api/tasks/[id]/[id]': security('worker grant: task report and block'),
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
-  'POST /api/setup/cli-updates': seek('install or update a runtime CLI'),
 };
 
 /**

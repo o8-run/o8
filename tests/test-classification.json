@@ -5471,6 +5471,13 @@
       ]
     },
     {
+      "path": "tests/o8d-cli-update-stream-native-real-path.test.ts",
+      "reasons": [
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-cloud-drain-native-real-path.test.ts",
       "reasons": [
         "real-path"
