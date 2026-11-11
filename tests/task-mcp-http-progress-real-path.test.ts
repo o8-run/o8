@@ -413,3 +413,29 @@ it('resumes a modern persisted event cursor after restarting the standalone MCP 
     expect(next.nextSince).toBeGreaterThanOrEqual(first.nextSince);
   } finally { await stop(); }
 }, 60000);
+
+
+it('persists reviewer work mode before dispatch reaches the runtime', async () => {
+  const id = fixture();
+  h.launch.mockImplementationOnce(async () => ({ ok: true, surfaceId: 'fixture:readonly-review', note: 'Started' }));
+  const receipt = await call('o8_task_dispatch', { taskId: id, workerIntent: 'reviewer', requestedRuntime: 'codex' });
+  expect(receipt.ok, JSON.stringify(receipt)).toBe(true);
+  await vi.waitFor(() => expect(control.readOrchestratorControlPlaneState().packets[0].launchContext)
+    .toMatchObject({ workMode: 'read-only' }));
+});
+
+
+it('creates reviewer tasks with a durable read-only completion contract', async () => {
+  const receipt = await call('o8_task_create', { title: 'Read-only reviewer fixture', summary: 'Inspect the change and record a verdict.', repoPath: repo, workerIntent: 'reviewer', requestedRuntime: 'codex' });
+  expect(receipt.ok, JSON.stringify(receipt)).toBe(true);
+  expect(control.readOrchestratorControlPlaneState().packets.find(packet => packet.id === receipt.packetId)?.launchContext)
+    .toMatchObject({ workMode: 'read-only' });
+});
+
+it('does not relabel a legacy reviewer runtime during a plain claim', async () => {
+  const id = fixture();
+  await control.withLockedState(state => { state.packets[0].workerIntent = 'reviewer'; });
+  const { claimTask } = await import('@/lib/tasks/actions');
+  await claimTask(id);
+  expect(control.readOrchestratorControlPlaneState().packets[0].launchContext).toBeFalsy();
+});
