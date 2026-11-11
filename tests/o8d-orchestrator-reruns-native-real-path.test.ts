@@ -34,8 +34,12 @@ it.skipIf(process.platform === 'win32')('serves packet rerun, reset and spawn na
     const cases: Array<[keyof typeof handlers, Record<string, unknown>]> = [
       ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing', idempotencyKey: 'fixture-reset' }],
       ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing' }],
+      ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing', clearWorktree: false, reason: 'operator retry', idempotencyKey: 'fixture-native-retry' }],
+      ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing', clearWorktree: true, reason: 'operator reset', idempotencyKey: 'fixture-native-clear' }],
+      ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing', clearWorktree: true, reason: 'operator reset' }],
       ['/api/orchestrator/rerun-with-feedback', { packetId: 'fixture-missing', feedback: 'Fixture feedback', idempotencyKey: 'fixture-rerun' }],
       ['/api/orchestrator/rerun-with-feedback', { packetId: 'fixture-missing', feedback: 'Fixture feedback' }],
+      ['/api/orchestrator/rerun-with-feedback', { packetId: 'fixture-missing', feedback: '🙂'.repeat(2001), idempotencyKey: 'fixture-native-feedback-limit' }],
       ['/api/orchestrator/spawn-prompt', { repoPath: directory, task: 'Fixture task' }],
       ['/api/orchestrator/spawn-prompt', { repoPath: directory, task: 'Fixture task', clientMutationId: 'fixture-spawn', count: 0 }],
     ];

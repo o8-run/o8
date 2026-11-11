@@ -59,13 +59,18 @@ pub(super) enum Action {
     /// Stops the packet's worker (the lane stop keeps its worktree), then
     /// archives the packet once the stop is applied.
     StopArchive(Row),
+    Recovery(Row, recovery::Kind),
+    RecoveryConfirm(Row),
+    RecoveryCancel,
 }
 
 /// Routes whose persisted receipt is replayed with the same body until terminal
 /// (classic fetchCorrelatedActionReceipt).
-const RECEIPTS: [&str; 2] = [
+const RECEIPTS: [&str; 4] = [
     "/api/orchestrator/stop-mission",
     "/api/orchestrator/discard-packet",
+    "/api/orchestrator/reset-packet",
+    "/api/orchestrator/rerun-with-feedback",
 ];
 /// close-unmerged-shared.ts: each disposition and its label.
 pub(super) const CLOSE_REASONS: [(&str, &str); 4] = [
@@ -503,7 +508,8 @@ impl ActivityPane {
                     {
                         this.unsettled = Some((method, path, replay));
                         this.archive_after_stop = None;
-                        "Decision is unsettled. Refresh to check it.".into()
+                        value["error"]["message"].as_str().or(value["note"].as_str())
+                            .unwrap_or("Decision is unsettled. Refresh to check it.").into()
                     }
                     Ok(value) => {
                         // Archive only after the worker has stopped, so a running
@@ -511,12 +517,25 @@ impl ActivityPane {
                         if let Some(id) = this.archive_after_stop.take() {
                             this.packet_patch(&id, json!({"archivedAt": packet::iso_now()}), cx);
                         }
+                        if matches!(path, "/api/orchestrator/reset-packet" | "/api/orchestrator/rerun-with-feedback") {
+                            let applied = value["ok"] == true && value["result"]["reset"] != false;
+                            this.notice_error = !applied;
+                            this.packet.recovery.active = None;
+                            if applied {
+                                this.packet.recovery.ask = None;
+                                if path.ends_with("rerun-with-feedback") && let Some(id) = replay["packetId"].as_str()
+                                    && let Some(editor) = this.packet.recovery.inputs.get(id) {
+                                    editor.input.update(cx, |input, cx| input.set_text("", cx));
+                                }
+                            }
+                        }
                         this.stop_identity = None;
                         this.closing = None;
                         this.close_stage = None;
                         // A created PR's note carries its URL.
                         value["note"]
                             .as_str()
+                            .or(value["result"]["note"].as_str())
                             .filter(|note| !note.is_empty())
                             .map_or_else(|| "Decision applied.".into(), String::from)
                     }
@@ -549,6 +568,9 @@ impl ActivityPane {
             _ => {}
         }
         match action {
+            Action::Recovery(row, kind) => self.recovery_ask(row, kind, cx),
+            Action::RecoveryConfirm(row) => self.recovery_confirm(&row.id, cx),
+            Action::RecoveryCancel => self.packet.recovery.ask = None,
             Action::BackToFeed => self.commit = None,
             Action::Packet(command) => self.packet_act(command, cx),
             Action::Proposals => {self.proposals.open = !self.proposals.open; self.saved.proposals_open=Some(self.proposals.open); self.mark_proposals_seen(cx); self.remember_view(cx);},
@@ -621,8 +643,8 @@ impl ActivityPane {
                 }
                 self.mutate("POST", "/api/lanes", body, cx);
             }
-            Action::CloseAsk(packet) => { self.closing = packet; self.close_reason = CLOSE_REASONS[0].0; }
-            Action::ArchiveAsk(packet) => self.archiving = packet,
+            Action::CloseAsk(packet) => { self.packet.recovery.ask = None; self.closing = packet; self.close_reason = CLOSE_REASONS[0].0; }
+            Action::ArchiveAsk(packet) => { self.packet.recovery.ask = None; self.archiving = packet; },
             Action::StopArchive(row) => {
                 if self.pending { return; }
                 self.archiving = None;
@@ -675,6 +697,7 @@ impl ActivityPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.recovery_editing(window, cx) || self.packet.editor.as_ref().is_some_and(|editor| editor.input.read(cx).focus.is_focused(window)) { return; }
         if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
             return;
         }
@@ -732,6 +755,8 @@ mod view;
 mod commit;
 #[path = "packet.rs"]
 mod packet;
+#[path = "recovery.rs"]
+pub(super) mod recovery;
 #[path = "preferences.rs"]
 pub(super) mod preferences;
 #[path = "proposals.rs"]

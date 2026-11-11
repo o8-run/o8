@@ -161,6 +161,6 @@ impl ActivityPane {
             );
         }
 
-        view
+        view.child(self.recovery_controls(row, live, cx))
     }
 }

@@ -126,3 +126,22 @@ in [first-run evidence](../../evidence/activity/final-native-first.txt) and
 After rebasing onto #4696, Activity loads its request adapter through its own
 module using the shared transport helpers. Outside Activity's source, fixture,
 documentation and evidence files, the PR adds only one shell registration line.
+
+## Packet recovery controls
+
+Expanded packet cards offer Retry, Reset (Stop and reset while the worker is
+running), and Start over with feedback. Retry posts `clearWorktree: false` to the
+existing reset route. Reset posts `clearWorktree: true` after a discard confirmation
+and leaves the packet held, as the server already does. Start over uses the
+existing rerun-with-feedback route and confirms that current work is discarded
+before queuing a fresh attempt. Feedback uses the route's 4000 UTF-16-unit limit.
+
+Failures keep the confirmation and feedback. In-flight requests disable recovery
+controls. An unresolved outcome keeps its exact mutation body and identity; Refresh
+reads that original receipt before another action can begin. Server notes remain
+inline so a held packet is not presented as a launched worker.
+
+The Activity fixture records lifecycle submissions and authors responses without
+killing workers or starting provider turns. Native tests cover each control,
+confirmation, input retention, duplicate submission and receipt replay. Production
+route parity and cleanup remain covered by the corresponding real-path suites.
