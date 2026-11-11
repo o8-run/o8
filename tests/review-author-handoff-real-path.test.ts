@@ -74,6 +74,10 @@ const corrections = await import('@/app/api/orchestrator/worker-corrections/rout
 const { fastDelegationCapability } = await import('@/lib/orchestrator/fast-delegation-auth');
 const { holdWorkerCorrections } = await import('@/lib/orchestrator/worker-corrections');
 const owned = await import('@/lib/codex/owned');
+// This fixture refreshes owned state explicitly. Stop background scans before
+// any worker starts so none can outlive teardown and read the removed root.
+const refreshTimer = (globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>)[Symbol.for('o8.ownedSession.refreshTimer.codex')];
+if (refreshTimer) clearInterval(refreshTimer);
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { closeDb } = await import('@/lib/db');
 const surfaces: string[] = [];
@@ -105,8 +109,6 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   for (const surface of surfaces) if (existsSync(join(data, 'owned-codex', surface.slice('codex-owned:'.length), 'session.json')) && record(surface).activeRun) await owned.interruptOwnedCodexSession(surface);
-  const timer = (globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>)[Symbol.for('o8.ownedSession.refreshTimer.codex')];
-  if (timer) clearInterval(timer);
   closeDb(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(root, { recursive: true, force: true });
   expect(execFileSync('git', ['-C', sourceCheckout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(sourceHead);
 });
