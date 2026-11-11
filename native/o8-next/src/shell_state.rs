@@ -96,6 +96,9 @@ pub struct State {
     /// Native Quick docs pins, isolated by the workspace's repository path.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub quick_doc_pins: BTreeMap<String, Vec<String>>,
+    /// Canvas layouts by project id, with a workspace fallback outside projects.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub canvas_layouts: BTreeMap<String, crate::shell::canvas::model::Layout>,
     /// Browser page metadata, scoped by the selected workspace. Website data is never stored here.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub browser_pages: BTreeMap<String, crate::browser_panel::Snapshot>,
@@ -197,6 +200,7 @@ impl Default for State {
             right_panel: Default::default(),
             tab_labels: BTreeMap::new(),
             quick_doc_pins: BTreeMap::new(),
+            canvas_layouts: BTreeMap::new(),
             browser_pages: BTreeMap::new(),
             browser_pip_wide: false,
             browser_pip_position: None,

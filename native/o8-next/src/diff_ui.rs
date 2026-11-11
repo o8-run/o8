@@ -81,6 +81,11 @@ pub(crate) fn notice(target: &Target, document: &Document, label: String) -> Str
 }
 
 impl DiffSurface {
+    /// Embedded hosts focus the existing diff when its card is pressed.
+    pub(crate) fn focus(&self, window: &mut Window) {
+        self.focus.focus(window);
+    }
+
     pub(crate) fn new(
         client: Client,
         target: Target,
@@ -141,7 +146,9 @@ impl DiffSurface {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.generation != generation { return; }
+                if this.generation != generation {
+                    return;
+                }
                 match result {
                     Ok((document, state)) => {
                         this.document = Rc::new(document);
@@ -172,7 +179,8 @@ impl DiffSurface {
                 }
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
         cx.notify();
     }
     fn state_label(&self) -> String {

@@ -290,6 +290,20 @@
       ]
     },
     {
+      "id": "canvas",
+      "tab": "Canvas",
+      "flags": [
+        "--canvas",
+        "--review"
+      ],
+      "webRoute": "/preview/canvas-glass",
+      "nativeSelectors": [
+        "canvas-surface",
+        "canvas-background"
+      ],
+      "remaining": "Empty canvas only; equivalent diff cards and saved geometry are not automated"
+    },
+    {
       "id": "shortcuts",
       "flags": [],
       "nativeCommand": "Open keyboard shortcuts",

@@ -49,7 +49,10 @@ pub(super) fn toggle(shell: &mut Shell, cx: &mut gpui::App) {
     sidebar.hidden = !sidebar.hidden;
     sidebar
         .motion
-        .get_or_insert(crate::motion::Transition::settled(TRAVEL_MS, sidebar.hidden))
+        .get_or_insert(crate::motion::Transition::settled(
+            TRAVEL_MS,
+            sidebar.hidden,
+        ))
         .set(!sidebar.hidden);
     if !sidebar.hidden
         && let Some(view) = &sidebar.view
@@ -62,12 +65,19 @@ pub(super) fn toggle(shell: &mut Shell, cx: &mut gpui::App) {
 pub(super) fn travel(shell: &Shell) -> (f32, bool) {
     let sidebar = &shell.surfaces.sidebar;
     let smooth = |x: f32| x * x * (3. - 2. * x);
-    match sidebar.motion.map(|motion| (motion.position(), motion.is_open())) {
+    match sidebar
+        .motion
+        .map(|motion| (motion.position(), motion.is_open()))
+    {
         // Opening eases out with a soft start, so the card stays on the mark
         // for its first frames; closing eases in and out, so the fold back
         // into the mark reads as clearly as the way out.
         Some(((x, true), opening)) => (
-            if opening { smooth(crate::motion::ease_out(x)) } else { smooth(x) },
+            if opening {
+                smooth(crate::motion::ease_out(x))
+            } else {
+                smooth(x)
+            },
             true,
         ),
         _ => (if sidebar.hidden { 0. } else { 1. }, false),
@@ -85,7 +95,12 @@ pub(super) fn width(shell: &Shell) -> f32 {
 
 /// The space left of the workspace once the sidebar has settled.
 pub(super) fn workspace_inset(shell: &Shell) -> f32 {
-    WORKSPACE_INSET + if shell.surfaces.sidebar.hidden { 0. } else { COLUMN_HANDLE }
+    WORKSPACE_INSET
+        + if shell.surfaces.sidebar.hidden {
+            0.
+        } else {
+            COLUMN_HANDLE
+        }
 }
 
 /// A drag of the column's edge.
@@ -170,12 +185,13 @@ pub(super) const REGISTRATION: Registration = Registration {
             });
         let workspace = shell.state.selected.clone();
         // A far workspace's thread goes by its own server's id in its surface.
-        let selected = selected.map(|id| {
-            match workspace.as_deref().and_then(session::machine_workspace) {
-                Some((machine, _)) => session::machine_thread_id(machine, &id),
-                None => id,
-            }
-        });
+        let selected =
+            selected.map(
+                |id| match workspace.as_deref().and_then(session::machine_workspace) {
+                    Some((machine, _)) => session::machine_thread_id(machine, &id),
+                    None => id,
+                },
+            );
         shell
             .surfaces
             .sidebar
@@ -237,7 +253,10 @@ pub(super) const REGISTRATION: Registration = Registration {
                 let mix = |from: f32, to: f32| from + (to - from) * open;
                 let mark_left = 0.;
                 let lift = (open / 0.12).min(1.) * ((1. - open) / 0.25).min(1.);
-                let tint = |color: gpui::Rgba| gpui::Rgba { a: color.a * lift, ..color };
+                let tint = |color: gpui::Rgba| gpui::Rgba {
+                    a: color.a * lift,
+                    ..color
+                };
                 let card = div()
                     .absolute()
                     .left(px(mix(mark_left, 0.)))
@@ -460,6 +479,14 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     shell.surfaces.sidebar.view = Some(sidebar);
 }
 impl Shell {
+    /// The project selected by the sidebar, including a switch that keeps the same repository.
+    pub(super) fn sidebar_project_id(&self) -> Option<&str> {
+        self.surfaces
+            .sidebar
+            .workspace_ledger
+            .as_ref()
+            .map(|ledger| ledger.active_project_id.as_str())
+    }
     fn install_sessions(
         &mut self,
         sessions: Vec<Session>,
@@ -547,7 +574,12 @@ impl Shell {
     }
     /// Opens a thread a lineage row, created-thread link or "started by"
     /// marker named, or says so when this machine does not list it.
-    pub(crate) fn open_thread_by_id(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_thread_by_id(
+        &mut self,
+        id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.sessions.iter().any(|s| s.id == id) {
             self.open_thread(id, window, cx);
         } else {

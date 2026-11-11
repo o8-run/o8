@@ -14,8 +14,8 @@ use block::ConcreteBlock;
 use cocoa::{
     appkit::{
         NSAppKitVersionNumber, NSAppKitVersionNumber12_0, NSApplication, NSBackingStoreBuffered,
-        NSColor, NSEvent, NSEventModifierFlags, NSEventType, NSFilenamesPboardType, NSPasteboard, NSScreen,
-        NSView, NSViewHeightSizable, NSViewWidthSizable, NSVisualEffectMaterial,
+        NSColor, NSEvent, NSEventModifierFlags, NSEventType, NSFilenamesPboardType, NSPasteboard,
+        NSScreen, NSView, NSViewHeightSizable, NSViewWidthSizable, NSVisualEffectMaterial,
         NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowButton,
         NSWindowCollectionBehavior, NSWindowOcclusionState, NSWindowOrderingMode,
         NSWindowStyleMask, NSWindowTitleVisibility,
@@ -170,6 +170,10 @@ unsafe fn build_classes() {
                 );
                 decl.add_method(
                     sel!(scrollWheel:),
+                    handle_view_event as extern "C" fn(&Object, Sel, id),
+                );
+                decl.add_method(
+                    sel!(magnifyWithEvent:),
                     handle_view_event as extern "C" fn(&Object, Sel, id),
                 );
                 decl.add_method(

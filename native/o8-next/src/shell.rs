@@ -53,6 +53,7 @@ register_surfaces! {
         inbox: Inbox = "surfaces/inbox.rs";
         issues: Issues = "surfaces/issues.rs";
         diff: Diff = "surfaces/diff.rs";
+        canvas: Canvas = "surfaces/canvas.rs";
         terminal: Terminal = "surfaces/terminal.rs";
         scheduled: Scheduled = "surfaces/scheduled.rs";
         usage: Usage = "surfaces/usage.rs";
@@ -312,6 +313,9 @@ impl Shell {
         let Some(tab) = self.active() else {
             return;
         };
+        if !(tab.registration().available)(self) {
+            return;
+        }
         let key = self.key(&tab);
         if self.content.contains_key(&key) {
             return;
@@ -492,6 +496,9 @@ impl Shell {
             return;
         }
         let registration = command.registration();
+        if !(registration.available)(self) {
+            return;
+        }
         if registration.overlay_command {
             (registration.open)(self, command, window, cx);
             return;

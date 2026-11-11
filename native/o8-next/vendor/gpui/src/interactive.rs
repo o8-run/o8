@@ -397,6 +397,9 @@ pub enum ScrollDelta {
     Pixels(Point<Pixels>),
     /// An inexact scroll delta in lines.
     Lines(Point<f32>),
+    /// A logarithmic pinch delta, consumed explicitly by zoom surfaces.
+    /// Ordinary scroll views see zero distance from `pixel_delta`.
+    Magnification(f32),
 }
 
 impl Default for ScrollDelta {
@@ -406,10 +409,21 @@ impl Default for ScrollDelta {
 }
 
 impl ScrollDelta {
+    /// Normalize a trackpad magnification increment to a logarithmic zoom delta.
+    /// Consumers use an exponential zoom factor of `exp(delta_y / 100)`.
+    pub fn from_magnification(magnification: f32) -> Self {
+        let factor = if magnification.is_finite() {
+            (1. + magnification).clamp(0.01, 100.)
+        } else {
+            1.
+        };
+        Self::Magnification(100. * factor.ln())
+    }
+
     /// Returns true if this is a precise scroll delta in pixels.
     pub fn precise(&self) -> bool {
         match self {
-            ScrollDelta::Pixels(_) => true,
+            ScrollDelta::Pixels(_) | ScrollDelta::Magnification(_) => true,
             ScrollDelta::Lines(_) => false,
         }
     }
@@ -419,6 +433,7 @@ impl ScrollDelta {
         match self {
             ScrollDelta::Pixels(delta) => *delta,
             ScrollDelta::Lines(delta) => point(line_height * delta.x, line_height * delta.y),
+            ScrollDelta::Magnification(_) => point(crate::px(0.), crate::px(0.)),
         }
     }
 
@@ -426,8 +441,12 @@ impl ScrollDelta {
     /// If the signs of the deltas are the same (both positive or both negative),
     /// the deltas are added together. If the signs are opposite, the second delta
     /// (other) is used, effectively overriding the first delta.
+    /// Pinch deltas always add, preserving the product of their zoom factors.
     pub fn coalesce(self, other: ScrollDelta) -> ScrollDelta {
         match (self, other) {
+            (ScrollDelta::Magnification(a), ScrollDelta::Magnification(b)) => {
+                ScrollDelta::Magnification(a + b)
+            }
             (ScrollDelta::Pixels(a), ScrollDelta::Pixels(b)) => {
                 let x = if a.x.signum() == b.x.signum() {
                     a.x + b.x
