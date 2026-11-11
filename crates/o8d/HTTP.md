@@ -56,6 +56,7 @@ fetcher select routes from that same registry:
 | Setup | GET/POST setup config; GET/POST chat-history; existing defaults and repository requests | Existing first-run configuration, selected coding tools and saved conversation creation. |
 | Projects | GET projects and panel projects; POST projects, repos and active project; PATCH/DELETE project and member routes | Project/repository ledgers; IDs, canonical workspace paths and original mutation bodies. |
 | Issues | GET repos, issues and issue number; POST create and enhance | Repository selection, issue pages/details, creation/enhancement request and response. |
+| Held plugin tasks | GET plugins/task-drafts; POST plugins/task-drafts/control | Existing local operator, account/epoch, saved-contract and single-attempt admission. Safety stop retains its signed-out behavior. |
 | Inbox | GET supervisor-inbox and approvals; POST approvals | Existing inbox projection and approval ID/action decision. |
 | Brain | POST cortex/ask | Question/conversation/workspace body; original SSE event stream or validation refusal. |
 | Customize | GET inventory, directives, MCP servers and prompt library; GET/POST/PATCH/DELETE prompt entries | Existing inventories and saved-prompt revision checks; no new configuration writes. |

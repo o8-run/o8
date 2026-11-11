@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -8,9 +8,11 @@ import { startParityReference } from './fixtures/ws-parity-server';
 import { cutoverClient } from './fixtures/ws-cutover-client';
 
 const binary = process.env.O8D_BINARY ?? process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
+const taskFixtureKeys = generateKeyPairSync('ed25519');
 // A1 reads: exercise the gate and original handler through the public socket.
 const NATIVE_READS = [
   ['settings', '/api/cortex/codebase-memory', 200],
+  ['settings', '/api/plugins/task-drafts', 403],
   ['settings', '/api/cortex/diagnostics', 200],
   ['session', '/api/tasks?includeDone=true&includeBrief=true', 200],
   ['session', '/api/panel/branches', 400],
@@ -66,8 +68,15 @@ let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
 beforeAll(async () => {
   if (!process.env.O8D_BINARY && !process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
-  server = await startParityReference({ o8d: true, binary, nativeHttp: true, startupTimeoutMs: 120_000,
-    preload: './tests/fixtures/ws-parity-acp-registry.cjs' });
+  const priorTaskKey = process.env.O8_LICENSE_PUBKEY;
+  process.env.O8_LICENSE_PUBKEY = taskFixtureKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  try {
+    server = await startParityReference({ o8d: true, binary, nativeHttp: true, startupTimeoutMs: 120_000,
+      preload: './tests/fixtures/ws-parity-acp-registry.cjs' });
+  } finally {
+    if (priorTaskKey === undefined) delete process.env.O8_LICENSE_PUBKEY;
+    else process.env.O8_LICENSE_PUBKEY = priorTaskKey;
+  }
   // The fixture Next server has no project route; startup must own this write.
   expect(JSON.parse(readFileSync(join(server.directory, 'projects.json'), 'utf8')))
     .toMatchObject({ activeProjectId: 'default', projects: [{ id: 'default' }] });
@@ -400,9 +409,9 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   if (routePath === '/api/runtime/acp-registry') {
     expect(JSON.parse(body)).toMatchObject({ stale: false, agents: [{ id: 'fixture-agent', version: '1.0.0' }] });
   }
-  // Task creation and Cortex decisions reuse production POSTs; the remaining reads stay GET-only.
+  // These reads also register their existing production writes; all other reads stay GET-only.
   const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
-  expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
+  expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals', '/api/setup/cli-updates', '/api/panel/problem-dossiers'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
@@ -772,6 +781,7 @@ it('preserves packet-worker lane diff and visualization ownership through o8d', 
 // Write routes from #5243, each with the auth basis its gate and handler enforce.
 const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> = [
   ['POST', '/api/orchestrator/handoff', 403],
+  ['POST', '/api/plugins/task-drafts/control', 403],
   ['POST', '/api/orchestrator/reset-session', 403],
   ['POST', '/api/orchestrator/compact', 403],
   ['POST', '/api/orchestrator/session-rules', 403],
@@ -906,6 +916,7 @@ it('keeps proposal writes bound to the worker packet through the native transpor
 
 it.each([
   ['POST', '/api/orchestrator/handoff', {}, 400, 'invalid_handoff_request'],
+  ['POST', '/api/plugins/task-drafts/control', {}, 400, 'invalid_arguments'],
   ['POST', '/api/orchestrator/compact', { repoPath: '' }, 400, 'repoPath is required'],
   ['POST', '/api/orchestrator/delegate', {}, 400, 'clientMutationId is required'],
   ['POST', '/api/orchestrator/discard-packet', { packetId: 'fixture-missing' }, 400, 'client_mutation_id_required'],
@@ -931,4 +942,53 @@ it('resets an orchestrator session through the native transport', async () => {
     body: JSON.stringify({ repoPath: server.directory, threadId: 'thoughts-native-reset' }) });
   expect(response.status).toBe(200);
   expect((await response.json()).ok).toBe(true);
+});
+
+it('reviews a persisted plugin task and records its safety stop through native HTTP with Next stopped', async () => {
+  const port = new URL(origin).port;
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token,
+    CORTEX_REALTIME_INTERNAL_ORIGIN: origin, O8_API_PORT: port, O8_WS_PORT: port, PORT: port,
+    O8_LICENSE_PUBKEY: taskFixtureKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    O8_NATIVE_TASK_FIXTURE_KEY: Buffer.from(taskFixtureKeys.privateKey.export({ type: 'pkcs8', format: 'pem' })).toString('base64') };
+  const fixture = async (...args: string[]) => {
+    const result = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx',
+      'tests/fixtures/native-task-draft.fixture.ts', ...args], { env });
+    return result.stdout.split('\n').find(line => line.startsWith('{'));
+  };
+  const seeded = JSON.parse((await fixture())!) as { taskId: string; contractHash: string; attemptId: string; accountId: string };
+  const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const send = (action: string, contractHash = seeded.contractHash) => fetch(`${origin}/api/plugins/task-drafts/control`, {
+    method: 'POST', headers, body: JSON.stringify({ action, taskId: seeded.taskId, contractHash }),
+  });
+  const listed = await fetch(`${origin}/api/plugins/task-drafts`, { headers });
+  expect(listed.status).toBe(200);
+  expect(await listed.json()).toMatchObject({ ok: true, accountId: seeded.accountId, drafts: [{
+    taskId: seeded.taskId, contractHash: seeded.contractHash, sessionCurrent: true,
+    contract: { objective: 'Read the fixture and report evidence.', allowedFiles: ['README.md'] },
+    execution: { attemptId: seeded.attemptId, state: 'accepted' },
+  }] });
+  const conflict = await send('inspect', 'f'.repeat(64));
+  expect(conflict.status).toBe(409);
+  expect(await conflict.json()).toMatchObject({ error: 'contract_conflict' });
+  for (const action of ['inspect', 'launch']) {
+    const response = await send(action);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, execution: {
+      taskId: seeded.taskId, contractHash: seeded.contractHash, attemptId: seeded.attemptId,
+      state: 'accepted', replayed: true, retryAllowed: false,
+    } });
+  }
+  await fixture('sign-out');
+  const held = await fetch(`${origin}/api/plugins/task-drafts`, { headers });
+  expect(held.status).toBe(403);
+  expect(await held.json()).toMatchObject({ error: 'account_changed_or_unavailable' });
+  const launchHeld = await send('launch');
+  expect(launchHeld.status).toBe(403);
+  const stopped = await send('stop');
+  expect(stopped.status).toBe(200);
+  expect(await stopped.json()).toMatchObject({ ok: true, execution: { attemptId: seeded.attemptId, state: 'stop_requested' } });
+  const persisted = JSON.parse((await fixture('inspect', seeded.taskId))!);
+  expect(persisted).toMatchObject({ taskId: seeded.taskId, attemptId: seeded.attemptId, state: 'stop_requested' });
+  expect(persisted.stopRequestedAt).toEqual(expect.any(String));
 });

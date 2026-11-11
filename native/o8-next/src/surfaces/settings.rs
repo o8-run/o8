@@ -83,7 +83,9 @@ impl Shell {
                 crate::settings::Action::Shortcuts => {
                     (super::shortcuts::REGISTRATION.open)(this, Command::Shortcuts, window, cx);
                 }
-                crate::settings::Action::SnapshotHotkey => this.apply_snapshot_hotkey(true, window, cx),
+                crate::settings::Action::SnapshotHotkey => {
+                    this.apply_snapshot_hotkey(true, window, cx)
+                }
             },
         );
         self.surfaces.settings.subscription = Some((close_subscription, action_subscription));
@@ -92,14 +94,17 @@ impl Shell {
         let machines = cx.new(|cx| machines::Machines::new(self.client.clone(), cx));
         settings.update(cx, |s, _| s.machines = Some(machines.into()));
         let mcp = cx.new(|cx| mcp::Mcp::new(self.client.clone(), cx));
-        settings.update(cx, |s, _| s.mcp = Some(mcp.into()));
+        settings.update(cx, |s, cx| {
+            s.plugin_tasks = Some(mcp.read(cx).tasks.clone());
+            s.mcp = Some(mcp.into());
+        });
         let mobile = cx.new(|cx| mobile::Mobile::new(self.client.clone(), cx));
         settings.update(cx, |s, _| s.mobile = Some(mobile));
         let history = cx
             .new(|cx| voice_history::VoiceHistory::new(voice_history::history_path(), window, cx));
         settings.update(cx, |s, _| s.voice_history = Some(history));
-        let polish = cx
-            .new(|cx| voice_polish::VoicePolish::new(voice_prefs::prefs_path(), window, cx));
+        let polish =
+            cx.new(|cx| voice_polish::VoicePolish::new(voice_prefs::prefs_path(), window, cx));
         settings.update(cx, |s, _| s.voice_polish = Some(polish));
         self.surfaces.settings.view = Some(settings);
         self.revision += 1;
@@ -207,14 +212,16 @@ pub(crate) mod providers;
 // Settings › Limits lives with this surface; Settings only hosts its view.
 #[path = "settings/limits.rs"]
 pub(crate) mod limits;
+#[path = "settings/machine_links.rs"]
+pub(crate) mod machine_links;
 #[path = "settings/machines.rs"]
 pub(crate) mod machines;
 #[path = "settings/mcp.rs"]
 pub(crate) mod mcp;
 #[path = "settings/mobile.rs"]
 pub(crate) mod mobile;
-#[path = "settings/machine_links.rs"]
-pub(crate) mod machine_links;
+#[path = "settings/plugin_tasks.rs"]
+pub(crate) mod plugin_tasks;
 // Settings › Voice › History reads the desktop recorder's file on this Mac.
 #[path = "settings/voice_history.rs"]
 pub(crate) mod voice_history;
