@@ -33,7 +33,6 @@ export const NEXT_ONLY_NATIVE_PATHS: NextOnlyTable = {
 export const NEXT_ONLY_NATIVE_METHODS: NextOnlyTable = {
   'POST /api/panel/branches': seek('create a branch from the composer'),
   'POST /api/panel/file-io': security('local file write chosen by path: filesystem jail'),
-  'POST /api/panel/problem-dossiers': seek('record a decision on a problem dossier'),
   'POST /api/repo-spec': security('device and worker grants'),
   'PUT /api/repo-spec': security('device and worker grants'),
 };
