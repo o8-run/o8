@@ -39,11 +39,30 @@ pub(crate) struct HotkeyOwner {
 }
 
 impl HotkeyOwner {
-    pub(crate) fn for_process() -> Result<Self, String> {
-        let path = std::path::PathBuf::from(format!("/tmp/o8-dictation-{}.lock", unsafe {
-            libc::getuid()
-        }));
-        Self::acquire(&path)
+    /// `wait` covers a restart: the old shell spawns its replacement before it
+    /// exits, so the replacement can reach this claim while the lock is held.
+    pub(crate) fn for_process(wait: std::time::Duration) -> Result<Self, String> {
+        // Under the home directory, not /tmp: the system's daily temp cleaner
+        // unlinks old files there, and an unlinked lock file admits a second owner.
+        let home = std::env::var_os("HOME").ok_or("Cannot claim dictation hotkey: HOME is unset")?;
+        let dir = Path::new(&home).join("Library/Application Support/ai.o8.desktop");
+        std::fs::create_dir_all(&dir)
+            .map_err(|error| format!("Cannot claim dictation hotkey: {error}"))?;
+        Self::acquire_within(&dir.join("dictation-hotkey.lock"), wait)
+    }
+
+    pub(crate) fn acquire_within(path: &Path, wait: std::time::Duration) -> Result<Self, String> {
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            match Self::acquire(path) {
+                Err(error)
+                    if error.contains("already owns") && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                result => return result,
+            }
+        }
     }
 
     pub(crate) fn acquire(path: &Path) -> Result<Self, String> {
@@ -69,8 +88,8 @@ impl HotkeyOwner {
     }
 }
 
-pub(crate) fn claim_hotkey_or_exit() -> HotkeyOwner {
-    HotkeyOwner::for_process().unwrap_or_else(|error| {
+pub(crate) fn claim_hotkey_or_exit(wait: std::time::Duration) -> HotkeyOwner {
+    HotkeyOwner::for_process(wait).unwrap_or_else(|error| {
         eprintln!("[dictation-owner] {error}");
         std::process::exit(75);
     })
@@ -246,6 +265,25 @@ mod tests {
             assert_eq!(std::fs::read_to_string(dir.join(name)).unwrap(), *contents);
         }
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), files.len());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_restarted_shell_waits_for_the_old_one_to_release_the_hotkey() {
+        let dir = fixture();
+        let path = dir.join("hotkey.lock");
+        let old = HotkeyOwner::acquire(&path).unwrap();
+        assert!(
+            HotkeyOwner::acquire_within(&path, std::time::Duration::ZERO).is_err(),
+            "no wait still refuses a held lock"
+        );
+        let exiting = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            drop(old);
+        });
+        HotkeyOwner::acquire_within(&path, std::time::Duration::from_secs(5))
+            .expect("the replacement claims the hotkey once the old shell exits");
+        exiting.join().unwrap();
         std::fs::remove_dir_all(dir).unwrap();
     }
 

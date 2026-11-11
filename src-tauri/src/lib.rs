@@ -35,6 +35,11 @@ mod fn_hotkey;
 mod voice_surfaces;
 #[cfg(target_os = "macos")]
 mod voice_only;
+/// How long a full-app launch waits for a previous shell to release the
+/// dictation hotkey. `restart_app` spawns the new instance before the old one
+/// exits, so an immediate refusal would leave no app after an update restart.
+#[cfg(target_os = "macos")]
+const HOTKEY_HANDOVER_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 mod voice_input;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod headless_dictation;
@@ -8388,7 +8393,7 @@ pub fn run() {
             eprintln!("[voice-only] incompatible with native-test sidecar isolation");
             std::process::exit(78);
         }
-        let _hotkey_owner = voice_only::claim_hotkey_or_exit();
+        let _hotkey_owner = voice_only::claim_hotkey_or_exit(std::time::Duration::ZERO);
         if let voice_only::Launch::VoiceOnly { server_port } =
             voice_only::inspect_launch(true, Path::new(&o8_data_dir()))
         {
@@ -8437,7 +8442,7 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let _hotkey_owner = native_test_instance
         .is_none()
-        .then(voice_only::claim_hotkey_or_exit);
+        .then(|| voice_only::claim_hotkey_or_exit(HOTKEY_HANDOVER_WAIT));
 
     let preship_gate = native_test_instance.is_some();
     let dev_frontend = match dev_frontend::from_env() {
