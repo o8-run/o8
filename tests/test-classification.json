@@ -5417,6 +5417,15 @@
       ]
     },
     {
+      "path": "tests/o8d-acp-prepare-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-agent-bus-native-real-path.test.ts",
       "reasons": [
         "child-process",

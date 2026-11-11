@@ -368,6 +368,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/cortex/codebase-memory', 'GET', () => import('@/app/api/cortex/codebase-memory/route')),
     route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/runtime/acp-registry', 'GET', () => import('@/app/api/runtime/acp-registry/route')),
+    route('/api/runtime/acp-registry/prepare', 'POST', () => import('@/app/api/runtime/acp-registry/prepare/route')),
     route('/api/panel/o8-update-summary', 'GET', () => import('@/app/api/panel/o8-update-summary/route')),
     // Updater state has one owner: these load the handlers, not the Next routes,
     // and Next forwards them here while this transport is on (#5422).
