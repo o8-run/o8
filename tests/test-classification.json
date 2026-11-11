@@ -5555,6 +5555,13 @@
       ]
     },
     {
+      "path": "tests/o8d-devices-owner-real-path.test.ts",
+      "reasons": [
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-dispatch-readiness-native-real-path.test.ts",
       "reasons": [
         "real-path"

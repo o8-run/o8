@@ -81,6 +81,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/reset-packet', 'POST', () => import('@/app/api/orchestrator/reset-packet/route')),
     route('/api/orchestrator/spawn-prompt', 'POST', () => import('@/app/api/orchestrator/spawn-prompt/route')),
     route('/api/runtime/action', 'POST', () => import('@/app/api/runtime/action/route')),
+    // The WS process owns the device manager in native mode.
+    route('/api/panel/devices', 'GET POST', () => import('@/lib/devices/route')),
     // Loads the handler, not the Next route: Next forwards here while this
     // transport is on, so the edge-tts installer has one owner (#5422).
     route('/api/tts', 'POST', () => import('@/lib/tts/route')),
