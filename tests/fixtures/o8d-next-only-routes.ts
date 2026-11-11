@@ -31,7 +31,6 @@ export const NEXT_ONLY_NATIVE_PATHS: NextOnlyTable = {
 // Registered paths that o8 next sends a method the native registration lacks, read from each Rust
 // request's call. Hidden while the scan checked paths alone.
 export const NEXT_ONLY_NATIVE_METHODS: NextOnlyTable = {
-  'POST /api/bots/[id]/thread': seek("bot mailbox reply"),
   'POST /api/panel/branches': seek('create a branch from the composer'),
   'POST /api/panel/file-io': security('local file write chosen by path: filesystem jail'),
   'POST /api/panel/problem-dossiers': seek('record a decision on a problem dossier'),

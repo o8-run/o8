@@ -5446,6 +5446,12 @@
       ]
     },
     {
+      "path": "tests/o8d-bot-thread-writes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-broadcast-commentary-native-real-path.test.ts",
       "reasons": [
         "real-path"
