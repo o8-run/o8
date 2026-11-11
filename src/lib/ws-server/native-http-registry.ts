@@ -85,6 +85,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/devices', 'GET POST', () => import('@/lib/devices/route')),
     // Native only: Next's o8_device hand-off to the device owner (operator credential).
     route('/api/devices/owner', 'POST', () => import('@/lib/devices/owner-route')),
+    // Native mode keeps preview servers in the WS process.
+    route('/api/tasks/[taskId]/preview', 'POST DELETE', () => import('@/lib/cloud/task-preview-route')),
     // Loads the handler, not the Next route: Next forwards here while this
     // transport is on, so the edge-tts installer has one owner (#5422).
     route('/api/tts', 'POST', () => import('@/lib/tts/route')),

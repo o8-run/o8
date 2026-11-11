@@ -5841,6 +5841,13 @@
       ]
     },
     {
+      "path": "tests/o8d-task-preview-owner-real-path.test.ts",
+      "reasons": [
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-tasks-read-only-real-path.test.ts",
       "reasons": [
         "real-path"
