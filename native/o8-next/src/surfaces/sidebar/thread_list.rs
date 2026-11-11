@@ -365,7 +365,13 @@ impl ThreadList {
             .iter()
             .find(|s| self.selected.as_ref() == Some(&s.id))
         {
-            self.expanded.insert(self.reveal_key(session));
+            // A folded Inbox shelf still lists the open thread (T3 Code's
+            // routeThreadOnly), so the open thread never unfolds its shelf
+            // and the heading can fold it again.
+            let key = self.reveal_key(session);
+            if !inbox::is_open_key(&key) {
+                self.expanded.insert(key);
+            }
         }
         let sessions = self.scoped_sessions();
         let mut rows = self.view_rows(&sessions);

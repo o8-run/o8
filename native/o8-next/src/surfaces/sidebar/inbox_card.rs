@@ -500,13 +500,29 @@ impl ThreadList {
                     )
             })
             .on_click(cx.listener(move |this, _, _, cx| {
-                let key = super::inbox::open_key(&name);
-                if !this.expanded.remove(&key) {
-                    this.expanded.insert(key);
-                }
-                this.rebuild();
+                this.toggle_shelf(&name);
                 cx.notify();
             }))
+    }
+
+    /// Folds or unfolds an Inbox shelf. Folding moves the keyboard choice off
+    /// the shelf's hidden rows, so the next rebuild does not unfold it again.
+    pub(super) fn toggle_shelf(&mut self, name: &str) {
+        let key = super::inbox::open_key(name);
+        if self.expanded.remove(&key) {
+            let hidden = self
+                .choice
+                .as_ref()
+                .filter(|id| self.selected.as_ref() != Some(*id))
+                .and_then(|id| self.sessions.iter().find(|s| &s.id == id))
+                .is_some_and(|s| self.group_key(s) == name);
+            if hidden {
+                self.choice = self.selected.clone();
+            }
+        } else {
+            self.expanded.insert(key);
+        }
+        self.rebuild();
     }
 
     /// Unfolds the Snoozed and Settled shelves, for tests that follow a
