@@ -46,3 +46,12 @@ after capture.
 Window fit was checked at 900 × 700 and 1680 × 1050 in both light and dark themes.
 The additional `light-compact.png`, `light-wide.png`, `dark-compact.png` and
 `dark-wide.png` captures show those layouts.
+
+## Initial hosted receipt
+
+At `97875b9fc9e4cfd9d41038df1b7b887a3f044f81`, the changed-file integration
+job passed all 13 author-handoff tests. The three new correction-route transport
+assertions also passed with Next stopped. The transport suite had 131/133 passes:
+two pre-existing method expectations still described GET-only for setup CLI
+updates and problem dossiers, while both routes already registered GET and POST
+on the base commit. This change updates only those expected method lists.
