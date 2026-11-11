@@ -4,16 +4,34 @@ import { getDeviceManager } from '@/lib/devices/service';
 import { DeviceError } from '@/lib/devices/types';
 import { DeviceControllers } from '@/lib/devices/controllers';
 import { controllerStream } from '@/lib/devices/controller-stream';
+import { O8_PAGE_ORIGIN_HEADER } from '@/lib/ws-server/native-owner';
 
 function json(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
 }
 
+const refused = () => new DeviceError('device_origin_refused', 'Open device controls from this app.', 403);
+
 function authorize(request: Request): string {
   if (resolveRequestPrincipalContext(request).role !== 'operator') throw new DeviceError('device_operator_required', 'Device controls require the local operator.', 403);
+  return pageOrigin(request);
+}
+
+/** The loopback page that may frame the device viewer; the operator check runs separately. */
+export function pageOrigin(request: Request): string {
   const url = new URL(request.url);
   if (!headersIndicateLoopback((name) => request.headers.get(name)) || !isLoopbackHostname(url.hostname) || !['http:', 'https:'].includes(url.protocol)) {
     throw new DeviceError('device_local_required', 'Device controls are available only on this computer.', 403);
+  }
+  // Next ran this check against the browser's page before forwarding here, so
+  // the viewer is framed by that page rather than by this listener's port.
+  const forwarded = request.headers.get(O8_PAGE_ORIGIN_HEADER);
+  if (forwarded !== null) {
+    if (isTauriShellOrigin(forwarded)) return forwarded;
+    let page: URL;
+    try { page = new URL(forwarded); } catch { throw refused(); }
+    if (page.origin !== forwarded || !['http:', 'https:'].includes(page.protocol) || !isLoopbackHostname(page.hostname)) throw refused();
+    return forwarded;
   }
   // Next may normalize request.url to localhost while the browser uses 127.0.0.1.
   // Bind the page origin to the actual Host, retaining the server port and loopback gate.
@@ -29,7 +47,7 @@ function authorize(request: Request): string {
   return origin ?? page.origin;
 }
 
-function failure(error: unknown): Response {
+export function failure(error: unknown): Response {
   if (error instanceof DeviceError) return json({ error: { code: error.code, message: error.message } }, error.status);
   return json({ error: { code: 'device_request_failed', message: 'Device controls are unavailable. Retry from the panel.' } }, 500);
 }

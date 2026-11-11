@@ -5,17 +5,38 @@ import { getWsBase } from '@/lib/panel/api-port';
 type Handler = (request: Request) => Promise<Response>;
 
 /**
+ * The loopback page origin a browser used to reach Next. The WS listener sees
+ * its own Host, so a handler that embeds or allows the caller's page (a device
+ * viewer, a task preview) reads the origin Next checked from this header.
+ */
+export const O8_PAGE_ORIGIN_HEADER = 'x-o8-page-origin';
+
+type Options = {
+  /** Checks the caller's page on the Next side: its origin to forward, or a refusal. */
+  pageOrigin?: (request: Request) => string | Response;
+};
+
+/**
  * Some handlers keep per-process state (an installer, a pending request). With
  * the native transport on, the WS process owns that state (#5422), so the Next
  * route forwards to it and never keeps a second copy. The WS listener runs the
  * same bearer gate again; only the caller's credential, account header, body
  * and a remote-caller marker travel, never a local-address header.
  */
-export function ownedByNativeTransport(handler: Handler, unavailable: () => Response): Handler {
+export function ownedByNativeTransport(handler: Handler, unavailable: () => Response, options: Options = {}): Handler {
   return async request => {
+    // Only this wrapper sets the page origin; a caller never supplies it.
+    if (options.pageOrigin && request.headers.has(O8_PAGE_ORIGIN_HEADER)) {
+      return Response.json({ error: { code: 'page_origin_refused', message: 'Open this from the app.' } }, { status: 400 });
+    }
     if (process.env.O8_NEXT_O8D !== '1') return handler(request);
     const url = new URL(request.url);
     const headers = new Headers();
+    if (options.pageOrigin) {
+      const page = options.pageOrigin(request);
+      if (page instanceof Response) return page;
+      headers.set(O8_PAGE_ORIGIN_HEADER, page);
+    }
     for (const name of ['authorization', 'content-type', 'x-clerk-session-token']) {
       const value = request.headers.get(name);
       if (value !== null) headers.set(name, value);
