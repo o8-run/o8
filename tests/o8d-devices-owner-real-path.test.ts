@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -55,6 +55,24 @@ it.skipIf(process.platform === 'win32')('serves device controls with one WS mana
       expect(await response.json()).toMatchObject({ phase: 'idle', controllers: [] });
     }
     expect(localState.__o8DeviceManager).toBeUndefined();
+    // Operator MCP and the worker device endpoint run in Next; their device tool
+    // must reach the WS owner too, never a second idle manager here.
+    const { getDataDir } = await import('@/lib/data-dir-migration');
+    const tokenPath = join(getDataDir(), 'ws-token');
+    const previousToken = existsSync(tokenPath) ? readFileSync(tokenPath, 'utf8') : null;
+    writeFileSync(tokenPath, server.token, { mode: 0o600 });
+    try {
+      const { handleDevice } = await import('@/lib/mcp/operator-handlers/devices');
+      const text = (result: Awaited<ReturnType<typeof handleDevice>>) => result.content.map(part => part.type === 'text' ? part.text : '').join('');
+      const status = await handleDevice({ action: 'status' });
+      expect(JSON.parse(text(status))).toMatchObject({ devices: [], controllers: [] });
+      const acquire = await handleDevice({ action: 'acquire', deviceId: 'fixture-device' }, { worker: 'fixture-worker', conversation: 'fixture-thread', pid: process.pid });
+      expect(acquire.isError).toBe(true);
+      expect(text(acquire)).toContain('Open the iOS simulator in Devices first');
+      expect(localState.__o8DeviceManager).toBeUndefined();
+    } finally {
+      if (previousToken === null) rmSync(tokenPath, { force: true }); else writeFileSync(tokenPath, previousToken);
+    }
   } finally {
     await server?.stop();
     for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];

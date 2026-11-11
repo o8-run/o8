@@ -3,6 +3,9 @@ import { DeviceControllers } from '@/lib/devices/controllers';
 import type { DeviceControllerContext } from '@/lib/devices/controller-store';
 import { DeviceError } from '@/lib/devices/types';
 import { jsonResult, type McpTool, type McpToolResult } from './shared';
+import { isNativeCortexReader } from '@/lib/cortex/owner-process';
+import { getWsBase } from '@/lib/panel/api-port';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 export const DEVICE_TOOLS: McpTool[] = [{
   name: 'o8_device',
@@ -16,7 +19,29 @@ export const DEVICE_TOOLS: McpTool[] = [{
   }, required: ['action'] },
 }];
 
+/**
+ * With the native transport on, the WS process owns the device manager (#5422)
+ * and the panel starts the simulator there. Next serves operator MCP and the
+ * worker device endpoint after their own checks, so it hands the tool call to
+ * that owner instead of reading its own idle manager.
+ */
+async function callDeviceOwner(args: Record<string, unknown>, context?: DeviceControllerContext): Promise<McpToolResult> {
+  const headers: Record<string, string> = { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json' };
+  if (context) Object.assign(headers, { 'x-o8-device-worker': context.worker, 'x-o8-device-conversation': context.conversation, 'x-o8-device-pid': String(context.pid) });
+  let reply: { result?: McpToolResult; error?: { message?: string } };
+  try {
+    const response = await fetch(`${getWsBase().replace(/^ws:/, 'http:')}/api/mcp`, { method: 'POST', headers, cache: 'no-store',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'o8_device', arguments: args } }) });
+    reply = await response.json();
+  } catch {
+    throw new DeviceError('device_unavailable', 'Device controls are unavailable. Retry shortly.', 503);
+  }
+  if (!reply.result) throw new DeviceError('device_unavailable', reply.error?.message || 'Device controls are unavailable.', 503);
+  return reply.result;
+}
+
 export async function handleDevice(args: Record<string, unknown>, context?: DeviceControllerContext): Promise<McpToolResult> {
+  if (process.env.O8_NEXT_O8D === '1' && !isNativeCortexReader()) return callDeviceOwner(args, context);
   const action = String(args.action);
   const fields: Record<string, string[]> = { status: [], acquire: ['deviceId'], release: ['deviceId'], handoff: ['deviceId', 'targetSession'],
     press: ['deviceId', 'x', 'y'], swipe: ['deviceId', 'x', 'y', 'toX', 'toY'], scroll: ['deviceId', 'direction'], type: ['deviceId', 'text'], snapshot: ['deviceId'] };
