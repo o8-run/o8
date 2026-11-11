@@ -5843,6 +5843,7 @@
     {
       "path": "tests/o8d-task-preview-owner-real-path.test.ts",
       "reasons": [
+        "child-process",
         "native-build",
         "real-path"
       ]
