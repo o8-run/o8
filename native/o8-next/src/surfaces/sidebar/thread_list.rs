@@ -588,10 +588,7 @@ impl ThreadList {
                             this.header = header;
                         }
                         sessions.extend(
-                            this.sessions
-                                .iter()
-                                .filter(|s| s.machine.is_some())
-                                .cloned(),
+                            this.sessions.iter().filter(|s| s.machine.is_some()).cloned(),
                         );
                         let previous: HashMap<_, _> =
                             this.sessions.iter().map(|s| (s.id.as_str(), s)).collect();
@@ -1281,28 +1278,28 @@ pub(crate) mod folders;
 #[path = "archive_controls.rs"]
 mod archive_controls;
 
-#[path = "auto_settle_toggle.rs"]
-mod auto_settle_toggle;
-#[path = "bulk.rs"]
-mod bulk;
-#[path = "detailed.rs"]
-pub(crate) mod detailed;
 #[path = "inbox.rs"]
 mod inbox;
 #[path = "inbox_card.rs"]
 mod inbox_card;
-#[path = "open_editor.rs"]
-mod open_editor;
-#[path = "pins.rs"]
-pub(crate) mod pins;
-#[path = "pr_links.rs"]
-pub(crate) mod pr_links;
+#[path = "auto_settle_toggle.rs"]
+mod auto_settle_toggle;
 #[path = "snooze.rs"]
 mod snooze;
-#[path = "status_mark.rs"]
-pub(crate) mod status_mark;
+#[path = "bulk.rs"]
+mod bulk;
+#[path = "open_editor.rs"]
+mod open_editor;
+#[path = "pr_links.rs"]
+pub(crate) mod pr_links;
 #[path = "thread_hover.rs"]
 mod thread_hover;
+#[path = "detailed.rs"]
+pub(crate) mod detailed;
+#[path = "pins.rs"]
+pub(crate) mod pins;
+#[path = "status_mark.rs"]
+pub(crate) mod status_mark;
 
 impl ThreadList {
     /// Scroll either list to a row; detailed mode reveals it in its list.
@@ -1314,10 +1311,7 @@ impl ThreadList {
         }
         // A shelf row sits below the scrolling list, always in view.
         if self.cards() && index < self.top_len() {
-            self.detailed_list.scroll_to(gpui::ListOffset {
-                item_ix: index,
-                offset_in_item: gpui::px(0.),
-            });
+            self.detailed_list.scroll_to(gpui::ListOffset { item_ix: index, offset_in_item: gpui::px(0.) });
         }
     }
 }
@@ -1329,8 +1323,8 @@ mod parking;
 mod nesting;
 
 #[cfg(test)]
-#[path = "inbox_wake_tests.rs"]
-mod inbox_wake_tests;
-#[cfg(test)]
 #[path = "nesting_tests.rs"]
 mod nesting_tests;
+#[cfg(test)]
+#[path = "inbox_wake_tests.rs"]
+mod inbox_wake_tests;
