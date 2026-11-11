@@ -6,37 +6,41 @@
 
 [![CI](https://github.com/o8-run/o8/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/o8-run/o8/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/o8-run/o8)](https://github.com/o8-run/o8/releases)
 
-**Run a fleet of coding agents. Approve what ships.**
+**Your agents write the code. o8 reviews it, sends it back until it's right, and merges it.**
 
-o8 is a free, open-source control room for the coding agents you already use. Claude Code, Codex, Grok Build, OpenCode, Gemini and thirteen more work in parallel, each in its own git worktree. You read the diffs and decide what merges.
+o8 is a free, open-source review and merge layer for coding agents. Write code wherever you like: T3 Code, Codex, Claude Code, Cursor, or your own editor. o8 takes the work in, and an independent agent, ideally a different model, reviews the actual diff. o8 sends the findings back to the author, re-reviews the fix, and merges the approved commit with a receipt. It runs on one machine, usually your biggest, and serves every tool and machine you connect.
 
 [**Download for macOS**](https://o8.run/download) · [Linux](#linux) · [Build from source](#from-source)
 
-![One ask, three workers: the orchestrator splits the task into packets, each worker builds its page in its own worktree, and the plan and every tile report as they go](./assets/three-workers.gif)
+![A session reviews the working tree, gives its verdict, commits when asked, and shows the log](./assets/review-and-commit.gif)
 
-- **Bring your own agents.** o8 drives the CLIs already on your machine, on your own subscriptions or keys.
-- **Parallel work that stays apart.** Every packet gets its own worktree. Workers never merge their own work.
-- **You approve what ships.** Each result lands as a diff with receipts. Approve, reject, steer or rerun it from the app, the `o8` CLI, any MCP client or your phone.
+- **Independent review.** The agent that wrote the code never approves it. A separate reviewer reads the real diff, and its approval is tied to the exact commit it reviewed.
+- **Findings go back to the author.** Rejected work returns to the agent that wrote it, with the saved findings. Each handoff has a receipt, corrections are capped at two rounds, and a stopped worker is never restarted.
+- **Merges you can audit.** The commit that was reviewed is the commit that merges, and every step leaves evidence. A single governed merge operation is being built.
+- **Works with your tools.** Reach o8 from the `o8` CLI or any MCP client. It runs the agent CLIs already on your machine, on your own subscriptions or keys, as reviewers and fixers.
 
-Hand out several pieces of work, look away, and come back to a readable account of what finished, what is blocked and what needs your decision. The [roadmap](./ROADMAP.md) says how far along that is.
+**Where this stands.** On `main`: findings go back to their author, and submitted reviews show with the commit they reviewed. Being built, in order: re-review of a fix, autonomous merge within a policy the project sets once, intake of pull requests from any tool, and reviewers that learn from past outcomes. The [roadmap](./ROADMAP.md) tracks each one.
 
 | Platform | Status |
 |---|---|
 | macOS 14+ | Signed, auto-updating universal installer: [download](https://o8.run/download) |
-| Linux | Preview packages (AppImage, DEB, RPM) from 0.1.810 on [Releases](https://github.com/o8-run/o8/releases/tag/v0.1.810), or [run from source](#linux). Full Linux support is [in progress](https://github.com/o8-run/o8/issues/1672). |
+| Linux | Preview packages (AppImage, DEB, RPM) from 0.1.810 on [Releases](https://github.com/o8-run/o8/releases/tag/v0.1.810), or [run from source](#linux). Full Linux support, for running o8 on a server, is [in progress](https://github.com/o8-run/o8/issues/1672). |
 | Windows | An early x64 preview (0.1.664, August 2026) is on [Releases](https://github.com/o8-run/o8/releases/tag/v0.1.664). A Windows build of the current app is in progress. |
 
-## What happens when you dispatch
+## The review loop
 
-1. You, or the orchestrator model you chose, create a mission. It becomes packets.
-2. Each packet runs on the runtime you picked, in its own git worktree, and reports as it goes. Workers never merge their own work.
-3. The work lands for review: the diff, the receipts, and the cost when the runtime reports it.
-4. You approve, reject, steer, or rerun. You can delegate the review to an orchestrator. By default its approved merges go through, and the approval setting can make every merge wait for you.
-5. The merge writes the audit trail and records the outcome. Project rules and recorded outcomes are what the Brain and the next packet retrieve. Learning from your rejections and steers is still an open arc.
+1. **Work arrives.** Today work enters as an o8 mission or packet. Pull requests from any tool or person are next ([#5816](https://github.com/o8-run/o8/issues/5816)).
+2. **An independent reviewer reads the diff.** Its findings are saved together with the commit it reviewed.
+3. **Rejected work goes back to its author.** One action sends the saved findings to the agent that wrote the code, with a receipt. Corrections are capped at two rounds.
+4. **The fix is re-reviewed** against those findings, and approval moves to the new commit ([#5835](https://github.com/o8-run/o8/issues/5835), in progress).
+5. **The approved commit merges** through one governed operation. Rules the project sets once decide when o8 may merge without a person ([#5817](https://github.com/o8-run/o8/issues/5817), [#5822](https://github.com/o8-run/o8/issues/5822)).
+6. **Outcomes are recorded.** Reviewers retrieve verified past outcomes in the next relevant task ([#5823](https://github.com/o8-run/o8/issues/5823)).
 
-![A solo session reviews the working tree, gives its verdict, commits when asked, and shows the log](./assets/review-and-commit.gif)
+Reviewers keep every tool they need. A reviewer can spawn workers to reproduce a bug, run the tests or try a fix, and each one runs in its own git worktree.
 
-A merge that fails climbs a five-step ladder that ends at a human card. The lifecycle gaps that remain are on the roadmap. The same verbs work from the app, the `o8` CLI, any MCP client, your phone, and your voice. The long version is [How o8 works](./docs/user/how-o8-works.md).
+![One ask, three workers: the task splits into packets, each worker builds its page in its own worktree, and every tile reports as it goes](./assets/three-workers.gif)
+
+A merge that fails climbs a five-step ladder that ends at a human card. The same verbs work from the app, the `o8` CLI and any MCP client. The long version is [How o8 works](./docs/user/how-o8-works.md).
 
 ## Runtimes
 
@@ -46,7 +50,7 @@ A merge that fails climbs a five-step ladder that ends at a human card. The life
 | | Aider · Goose · Kimi Code · OpenHands · Qwen Code · Qoder |
 | | 3code · Prime Agent · DeepSeek Harness |
 
-o8 finds the coding-agent CLIs you already have installed and runs them behind one adapter contract. The table lists every runtime o8 can detect today, and a test keeps it equal to the registry. Readiness differs by CLI version and platform, so the first-run picker shows what is installed and working on your machine. Adding a runtime is a small documented patch: [runtime adapter contract](./docs/internals/runtime-adapter-contract.md). Claude Code can also keep its tools and session behavior while another model supplies inference: [model carriers](./docs/user/claude-code-model-carriers.md).
+o8 finds the coding-agent CLIs you already have installed and runs them behind one adapter contract, as reviewers, fixers and workers. The table lists every runtime o8 can detect today, and a test keeps it equal to the registry. Readiness differs by CLI version and platform, so the first-run picker shows what is installed and working on your machine. Adding a runtime is a small documented patch: [runtime adapter contract](./docs/internals/runtime-adapter-contract.md). Claude Code can also keep its tools and session behavior while another model supplies inference: [model carriers](./docs/user/claude-code-model-carriers.md).
 
 ![Before sending: the Lead chip sets the model and its thinking effort, and the mode chip sets Solo, Multitask, Compare plans, or Fusion](./assets/choose-before-you-send.gif)
 
@@ -120,9 +124,9 @@ Symon is the voice layer. Ask "what needs me?" without turning around, approve t
 
 ## Where it is going
 
-o8 is building toward an operating system for delegated work: models and agents can change while your project's rules, decisions, and history stay with you. The goal is to let you delegate more work without supervising every step, while keeping authority over what happens and evidence of the result. Coding is where we're proving that approach first.
+o8 aims to be the best substrate for reviewing and merging agent work. Any agent writes the code. o8 reviews it, gets it corrected, merges what you intended, and learns from every outcome. It asks a person only when your rules say so.
 
-[ROADMAP.md](./ROADMAP.md): seven pillars, what is open, what is missing on each, and what to claim.
+[ROADMAP.md](./ROADMAP.md) leads with three pillars: the review and merge loop, governance and security, and plugging into the tools you already use.
 
 ## Contributing
 
