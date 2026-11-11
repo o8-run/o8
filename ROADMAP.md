@@ -57,7 +57,8 @@ Ranked. Work on a lower item does not delay a higher one.
 3. **Other tools plug in.** Work written in another tool enters review without copy and paste. Its author sees verdicts and findings natively inside that tool, so nobody switches apps. o8's MCP server and CLI carry them ([#5841](https://github.com/o8-run/o8/issues/5841)).
 4. **The window shows the review.** o8 next keeps every surface it has. The sidebar lists work flowing in, and a selected item shows the reviewer's transcript. Reviewers can still spawn workers ([#5842](https://github.com/o8-run/o8/issues/5842)).
 5. **Linux as a home for o8.** The machine that hosts o8 is often a Linux server. A fresh Ubuntu machine goes from install to a merged review ([#1672](https://github.com/o8-run/o8/issues/1672)).
-6. **Next release.** What has merged since 0.1.818 ships together once the [release gate](#release-gate) passes. The integration suite on `main` must be green first ([#5317](https://github.com/o8-run/o8/issues/5317)). Releases go through beta, then stable ([#2205](https://github.com/o8-run/o8/issues/2205)).
+6. **Finish the Rust server port.** It is close to done, so it gets finished rather than left half moved. The remaining o8 next API paths move from the web server to the native daemon, one pull request per surface, with login rules unchanged ([#5243](https://github.com/o8-run/o8/issues/5243); plan in [#5422](https://github.com/o8-run/o8/issues/5422)). The classic web pages that nothing still loads are archived after it.
+7. **Next release.** What has merged since 0.1.818 ships together once the [release gate](#release-gate) passes. The integration suite on `main` must be green first ([#5317](https://github.com/o8-run/o8/issues/5317)). Releases go through beta, then stable ([#2205](https://github.com/o8-run/o8/issues/2205)).
 
 ### Release gate
 
@@ -88,7 +89,6 @@ Parked on 2026-11-10 when o8 became the review layer. These may not be needed. N
 
 | Work | Why parked | Where |
 | --- | --- | --- |
-| o8 next backend in Rust (Phase A and idle-memory targets) | It was for making the coding app feel instant; revisit only if the review loop needs the speed | [#5422](https://github.com/o8-run/o8/issues/5422) |
 | o8 next parity set (#5246–#5310) and classic right-panel parity | These existed for o8 as the coding app; review surfaces are re-aimed under Now item 4 instead | [#5576](https://github.com/o8-run/o8/issues/5576), [#5358](https://github.com/o8-run/o8/issues/5358) |
 | o8 on the phone: the phone PR tab, route failover, free relay access, relay encryption | One less surface for now. The goal is review that fixes and merges what the user intended, so fewer approvals reach a person. If o8 gains traction, phone review comes back | [#2445](https://github.com/o8-run/o8/issues/2445), [#5299](https://github.com/o8-run/o8/issues/5299), [#5787](https://github.com/o8-run/o8/issues/5787) |
 | First ten minutes measurement | Remeasure after the review loop is the main path | [#2211](https://github.com/o8-run/o8/issues/2211) |
@@ -134,12 +134,12 @@ These pillars are what o8 is. The top three, set on 2026-11-10, are review and m
 
 ### Speed targets
 
-The o8 next window keeps these targets. No new speed work is planned while the Rust port is parked:
+The o8 next window keeps these targets. The Rust server port is finishing under [Now](#now) item 6; no other speed work is planned:
 - launch in under 1 s;
 - a worker running in under 10 s;
 - a frame painted in under 8 ms.
 
-Idle memory gets measured if the Rust port resumes ([Parked](#parked)).
+Idle memory gets measured once the Rust server port lands.
 
 ## Shipped
 
