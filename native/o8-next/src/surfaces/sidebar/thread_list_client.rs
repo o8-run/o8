@@ -125,11 +125,6 @@ impl Client {
                 session.outcome = subject.outcome.clone();
             }
         }
-        // A worker started for a task is listed as that task. A failed read
-        // keeps the worker's own name.
-        let tasks: Value = self
-            .get("/api/tasks", &[("limit", "200")])
-            .unwrap_or(Value::Null);
         let inventory: Value = self.get("/api/runtime/inventory", &[("fresh", "1")])?;
         for agent in inventory["agents"].as_array().into_iter().flatten() {
             let Some(key) = agent["sessionKey"].as_str().filter(|key| key.contains(':')) else {
@@ -138,19 +133,15 @@ impl Client {
             if sessions.iter().any(|session| session.key() == key) {
                 continue;
             }
-            let task = task_on_branch(&tasks, agent);
             let packet_header = state["mission"]["packets"].as_array().and_then(|packets| packets.iter().find(|packet| packet["lane"]["sessionKey"] == key)).map(|packet| json!({
                 "enabled":true,"title":packet["title"],"branch":packet["branchTarget"],"runtime":packet["runtime"],"status":packet["status"],"repo":packet["workspaceTargetPath"].as_str().and_then(|path| path.rsplit('/').find(|part| !part.is_empty())),"launchContext":packet["launchContext"]
             }));
-            sessions.push(Session {
+            let mut worker = Session {
                 machine: None,
                 machine_label: None,
                 parked_workspaces: serde_json::from_value(agent["parkedWorkspaces"].clone())
                     .unwrap_or_default(),
-                repo_slug: task
-                    .and_then(|task| task["repoName"].as_str())
-                    .filter(|name| !name.is_empty())
-                    .map(str::to_owned),
+                repo_slug: None,
                 is_worktree: agent["isWorktree"].as_bool(),
                 worktree_path: agent["worktreePath"].as_str().map(str::to_owned),
                 pinned_at: agent["pinnedAt"].as_str().map(str::to_owned),
@@ -163,11 +154,7 @@ impl Client {
                     .map(str::to_owned),
                 tmux_session: agent["tmuxSession"].as_str().map(str::to_owned),
                 id: key.into(),
-                title: crate::text::sanitize(
-                    task.and_then(|task| task["title"].as_str())
-                        .filter(|title| !title.trim().is_empty())
-                        .unwrap_or_else(|| agent["name"].as_str().unwrap_or(key)),
-                ),
+                title: crate::text::sanitize(agent["name"].as_str().unwrap_or(key)),
                 runtime: agent["runtime"].as_str().unwrap_or("").into(),
                 status: agent["status"].as_str().unwrap_or("idle").into(),
                 message_count: 0,
@@ -194,7 +181,9 @@ impl Client {
                 current_task: None,
                 auto_settled_reason: agent["autoSettledReason"].as_str().map(str::to_owned),
                 auto_settle_disabled_at: agent["autoSettleDisabledAt"].as_str().map(str::to_owned),
-            });
+            };
+            label_from_task(&mut worker);
+            sessions.push(worker);
         }
         if let Some(workspace) = self.workspace() {
             // Home also lists the chats saved with no project (#5503).
@@ -327,41 +316,59 @@ mod worker_tests {
     }
 }
 
-/// The task a worker session was started for: the one on the worker's branch.
+/// A worker started for a task is listed by that task's title and project.
 /// The runtime names such a session after its branch, which says nothing to a
-/// person reading the list.
-fn task_on_branch<'a>(tasks: &'a Value, agent: &Value) -> Option<&'a Value> {
-    let branch = ["branch", "gitBranch"]
-        .iter()
-        .find_map(|key| agent[*key].as_str().filter(|branch| !branch.is_empty()))?;
-    tasks["tasks"]
-        .as_array()?
-        .iter()
-        .find(|task| task["branch"].as_str() == Some(branch))
+/// person reading the list. The task is the packet saved for this session, so
+/// the label needs no request of its own and survives an inventory refresh
+/// that keeps the packet header.
+pub(super) fn label_from_task(worker: &mut Session) {
+    let Some(header) = &worker.packet_header else {
+        return;
+    };
+    if let Some(title) = header["title"]
+        .as_str()
+        .filter(|title| !title.trim().is_empty())
+    {
+        worker.title = crate::text::sanitize(title);
+    }
+    if let Some(repo) = header["repo"].as_str().filter(|repo| !repo.is_empty()) {
+        worker.repo_slug = Some(repo.to_owned());
+    }
 }
 
 #[cfg(test)]
 mod task_title_tests {
-    use super::task_on_branch;
+    use super::{label_from_task, worker_session};
     use serde_json::json;
 
-    #[test]
-    fn a_worker_is_matched_to_the_task_on_its_branch() {
-        let tasks = json!({"tasks": [
-            {"title": "Other", "branch": "agent/other-1", "repoName": "o8"},
-            {"title": "Review PR 5870 request changes", "branch": "agent/review-pr-5870-4b4801", "repoName": "o8"},
-        ]});
-        let agent = json!({"name": "o8 • agent/review-pr-5870-4b4801", "branch": "agent/review-pr-5870-4b4801"});
-        let task = task_on_branch(&tasks, &agent).unwrap();
-        assert_eq!(task["title"], "Review PR 5870 request changes");
-        assert_eq!(task["repoName"], "o8");
+    fn worker() -> crate::client::Session {
+        worker_session(&json!({
+            "sessionKey": "codex:7", "name": "o8 • agent/review-pr-5870-4b4801",
+            "runtime": "codex", "branch": "agent/review-pr-5870-4b4801",
+        }))
+        .unwrap()
+        .unwrap()
     }
 
     #[test]
-    fn a_worker_with_no_task_or_no_branch_keeps_its_own_name() {
-        let tasks = json!({"tasks": [{"title": "T", "branch": "agent/a"}]});
-        assert!(task_on_branch(&tasks, &json!({"branch": "agent/b"})).is_none());
-        assert!(task_on_branch(&tasks, &json!({"name": "chat"})).is_none());
-        assert!(task_on_branch(&json!(null), &json!({"branch": "agent/a"})).is_none());
+    fn a_worker_is_listed_by_its_task_title_and_project() {
+        let mut worker = worker();
+        worker.packet_header =
+            Some(json!({"title": "Review PR 5870 request changes", "repo": "o8"}));
+        label_from_task(&mut worker);
+        assert_eq!(worker.title, "Review PR 5870 request changes");
+        assert_eq!(worker.repo_slug.as_deref(), Some("o8"));
+    }
+
+    #[test]
+    fn a_worker_with_no_task_or_an_untitled_one_keeps_its_own_name() {
+        let mut worker = worker();
+        label_from_task(&mut worker);
+        assert_eq!(worker.title, "o8 • agent/review-pr-5870-4b4801");
+        assert_eq!(worker.repo_slug, None);
+        worker.packet_header = Some(json!({"title": "  ", "repo": ""}));
+        label_from_task(&mut worker);
+        assert_eq!(worker.title, "o8 • agent/review-pr-5870-4b4801");
+        assert_eq!(worker.repo_slug, None);
     }
 }
