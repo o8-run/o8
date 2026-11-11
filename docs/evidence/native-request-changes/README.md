@@ -1,5 +1,10 @@
 # Native Request changes
 
+Correction round 1: **not checked by eye**. The images below are historical
+captures from before this layout correction, retained under the operator ruling.
+They do not establish the revised UI. Current evidence is headless native tests,
+production-route tests and macOS cargo check; the operator owns visual captures.
+
 The captures show the native packet diff and its shared Request changes control
 against a disposable loopback HTTP fixture. The fixture supplies authored saved-rejection,
 reviewed-HEAD and author-run metadata. It starts no worker and has no production data.
@@ -19,7 +24,7 @@ No new route, authorization exception or automatic destructive fallback is added
 The classic chat banner's orchestrator-composer recovery prefill is deliberately
 not ported. Start over with feedback belongs to the separate reset-controls change.
 
-## Verification scope
+## Original verification scope
 
 - Focused production-handler tests: four passed. The two new availability/note
   cases failed against the unchanged route/service before implementation.
@@ -55,3 +60,21 @@ assertions also passed with Next stopped. The transport suite had 131/133 passes
 two pre-existing method expectations still described GET-only for setup CLI
 updates and problem dossiers, while both routes already registered GET and POST
 on the base commit. This change updates only those expected method lists.
+
+## Correction round 1
+
+The toolbar/dismissal regression fails on the reviewed head: Request changes is
+at a different vertical position from Approve. The revised suite covers toolbar
+order, content-width Send/Cancel, dismissal with retained text, Cmd+Enter,
+UTF-16 remaining room, identical retry identity, read-only failed input and
+selection of a single outcome line. A production-handler capacity regression
+also fails on the reviewed service. Ten production-handler cases pass on the
+correction; three isolated-author cases remain skipped for the unavailable CLI.
+No further captures or operating-system input automation are used. The revised
+control is **not checked by eye**.
+
+Correction results: all four request-changes native tests passed, as did the
+existing Activity packet-review path test. macOS release cargo check passed.
+Touched ESLint, Rust formatting, rule-check and classification manifest checks
+passed. Full typecheck remains blocked by dependency/type resolution. No fresh
+visual acceptance is claimed.

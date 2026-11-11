@@ -99,7 +99,7 @@ const { getSqlite } = await import('@/lib/db');
 let packetId = 'pkt-review-author';
 const head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 let reviewSequence = 0;
-async function reviewedAuthor(name: string) {
+async function reviewedAuthor(name: string, description?: string) {
   packetId = `pkt-${name}`;
   for (const lane of listLanes().filter(lane => lane.packetId === packetId)) updateLane(lane.id, { packetId: '' });
   const target = await launch(name);
@@ -111,14 +111,14 @@ async function reviewedAuthor(name: string) {
       blockedReason: null, lane: null, review: null, workspaceTargetPath: repo, branchTarget: 'main',
       orchestratorThreadId: parent, launchContext: { source: 'desktop', presentation: 'tab', repoContext: 'registered', workMode: 'edit' },
     } as never] });
-  const review = await saveReview();
+  const review = await saveReview(description);
   return { target, review, lane };
 }
-async function saveReview() {
+async function saveReview(description?: string) {
   const res = await submitReview(new NextRequest('http://localhost/api/orchestrator/review', { method: 'POST',
     headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ packetId, approved: false, reviewedHeadSha: head, clientMutationId: `finding-${++reviewSequence}`,
-      findings: [{ file: 'README.md', severity: 'bug', description: `Preserve the original request ${reviewSequence}.`, status: 'deferred', fixSuggestion: 'Keep the original request in the response.' }] }),
+      findings: [{ file: 'README.md', severity: 'bug', description: description ?? `Preserve the original request ${reviewSequence}.`, status: 'deferred', fixSuggestion: 'Keep the original request in the response.' }] }),
   }));
   const value = await res.json(); expect(res.status, JSON.stringify(value)).toBe(200);
   return control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)!.review!;
@@ -363,7 +363,7 @@ it.each(['delivered', 'busy', 'stopped'] as const)('hands a persisted rejection 
 }, 60000);
 
 it('preflights the saved review without sending and delivers an optional note in the same correction record', async () => {
-  const { target, review } = await reviewedAuthor('manual-note');
+  const { target, review } = await reviewedAuthor('manual-note', 'Saved finding. '.repeat(60));
   const availability = async () => {
     const response = await corrections.GET(new NextRequest(`http://localhost/api/orchestrator/worker-corrections?packetId=${packetId}`, {
       headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` },
@@ -373,6 +373,12 @@ it('preflights the saved review without sending and delivers an optional note in
   };
   const before = record(target.surfaceId);
   expect(await availability()).toMatchObject({ available: true, review: { ...target, approvalId: review.auditApprovalId, reviewedHeadSha: head } });
+  const room = (await availability()).maxNoteLength;
+  expect(room).toBeGreaterThan(0);
+  expect(room).toBeLessThan(1000);
+  const tooLong = await corrections.POST(request({ ...reviewBody(target, review), note: 'x'.repeat(room + 1) }));
+  expect(tooLong.status).toBe(409);
+  expect((await tooLong.json()).error).toBe(`The operator note is 1 character too long. Shorten it to ${room} characters.`);
   expect(record(target.surfaceId).recentRuns).toHaveLength(before.recentRuns.length);
   writeFileSync(join(repo, 'unreviewed.txt'), 'unreviewed work');
   expect(await availability()).toMatchObject({ available: false, reason: expect.stringContaining('uncommitted changes') });

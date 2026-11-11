@@ -44,6 +44,7 @@ pub(super) struct State {
     pub editor: Option<Editor>,
     pub action: Option<String>,
     pub corrections: HashMap<String, Entity<crate::request_changes::RequestChanges>>,
+    pub correction_observers: HashMap<String, gpui::Subscription>,
 }
 pub(super) fn identity(row: &Row) -> String {
     json!([

@@ -25,6 +25,7 @@ pub(crate) use scope::Scope;
 pub(crate) struct DiffSurface {
     client: Client,
     request_changes: Option<gpui::Entity<crate::request_changes::RequestChanges>>,
+    _request_changes_observer: Option<gpui::Subscription>,
     pub(crate) target: Target,
     pub(crate) document: Rc<Document>,
     pub(crate) selected: usize,
@@ -91,10 +92,16 @@ impl DiffSurface {
         let focus = cx.focus_handle();
         focus.focus(window);
         let request_changes = match &target {
-            Target::Packet(packet) => Some(cx.new(|cx| crate::request_changes::RequestChanges::new(client.clone(), packet.clone(), cx))),
+            Target::Packet(packet) => Some(cx.new(|cx| {
+                crate::request_changes::RequestChanges::new(client.clone(), packet.clone(), cx)
+            })),
             _ => None,
         };
+        let observer = request_changes
+            .as_ref()
+            .map(|control| cx.observe(control, |_, _, cx| cx.notify()));
         let mut surface = Self {
+            _request_changes_observer: observer,
             request_changes,
             client,
             target,
@@ -130,7 +137,9 @@ impl DiffSurface {
         if self.busy {
             return;
         }
-        if let Some(view) = &self.request_changes { view.update(cx, |view, cx| view.refresh(cx)); }
+        if let Some(view) = &self.request_changes {
+            view.update(cx, |view, cx| view.refresh(cx));
+        }
         self.generation += 1;
         let generation = self.generation;
         self.ready = false;
@@ -148,7 +157,9 @@ impl DiffSurface {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.generation != generation { return; }
+                if this.generation != generation {
+                    return;
+                }
                 match result {
                     Ok((document, state)) => {
                         this.document = Rc::new(document);
@@ -179,7 +190,8 @@ impl DiffSurface {
                 }
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
         cx.notify();
     }
     fn state_label(&self) -> String {
@@ -364,6 +376,10 @@ fn cell(line: Option<&Line>, before: bool) -> gpui::Div {
 }
 impl Render for DiffSurface {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let request_trigger = self
+            .request_changes
+            .as_ref()
+            .map(|control| control.update(cx, |control, cx| control.trigger(cx)));
         let doc = self.document.clone();
         let painted = self.painted.clone();
         let selected = self.selected;
@@ -494,7 +510,13 @@ impl Render for DiffSurface {
             .text_size(px(13.5))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.request_changes.as_ref().is_some_and(|view| view.read(cx).editing(window, cx)) { return; }
+                if this
+                    .request_changes
+                    .as_ref()
+                    .is_some_and(|view| view.read(cx).editing(window, cx))
+                {
+                    return;
+                }
                 match event.keystroke.key.as_str() {
                     key @ ("home" | "end") if this.stacked() => {
                         let shown = this.shown();
@@ -613,7 +635,10 @@ impl Render for DiffSurface {
                             button("diff-approve", "Approve", false)
                                 .on_click(cx.listener(|s, _, _, cx| s.decide(true, cx))),
                         )
-                        .child(
+                    })
+                    .when_some(request_trigger, |bar, trigger| bar.child(trigger))
+                    .when(can_review, |bar| {
+                        bar.child(
                             button("diff-reject", "Reject", false)
                                 .on_click(cx.listener(|s, _, _, cx| s.decide(false, cx))),
                         )
@@ -624,6 +649,21 @@ impl Render for DiffSurface {
                                 .on_click(cx.listener(|s, _, _, cx| s.decide(false, cx))),
                         )
                     }),
+            )
+            .when_some(
+                self.request_changes
+                    .clone()
+                    .filter(|control| control.read(cx).visible()),
+                |view, control| {
+                    view.child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .px(px(16.))
+                            .py(px(6.))
+                            .child(control),
+                    )
+                },
             )
             .child(
                 div()
@@ -647,7 +687,6 @@ impl Render for DiffSurface {
                         },
                     ),
             )
-            .when_some(self.request_changes.clone(), |view, control| view.child(div().px(px(16.)).py(px(6.)).child(control)))
             .child(body)
     }
 }
