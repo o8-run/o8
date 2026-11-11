@@ -33,8 +33,6 @@ export const NEXT_ONLY_NATIVE_PATHS: NextOnlyTable = {
 // request's call. Hidden while the scan checked paths alone.
 export const NEXT_ONLY_NATIVE_METHODS: NextOnlyTable = {
   'POST /api/bots/[id]/thread': seek("bot mailbox reply"),
-  'POST /api/cortex/cross-repo-proposals': seek('accept or dismiss a cross-repo proposal'),
-  'POST /api/cortex/directives': seek('save an accepted directive'),
   'POST /api/panel/branches': seek('create a branch from the composer'),
   'POST /api/panel/file-io': security('local file write chosen by path: filesystem jail'),
   'POST /api/panel/problem-dossiers': seek('record a decision on a problem dossier'),

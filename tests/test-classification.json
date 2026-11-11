@@ -5517,6 +5517,14 @@
       ]
     },
     {
+      "path": "tests/o8d-cortex-writes-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-dispatch-readiness-native-real-path.test.ts",
       "reasons": [
         "real-path"

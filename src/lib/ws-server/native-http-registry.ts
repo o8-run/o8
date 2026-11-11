@@ -115,7 +115,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
     route('/api/cortex/proposals', 'GET POST', () => import('@/app/api/cortex/proposals/route')),
-    route('/api/cortex/cross-repo-proposals', 'GET', () => import('@/app/api/cortex/cross-repo-proposals/route')),
+    route('/api/cortex/cross-repo-proposals', 'GET POST', () => import('@/app/api/cortex/cross-repo-proposals/route')),
     route('/api/panel/problem-dossiers', 'GET', () => import('@/app/api/panel/problem-dossiers/route')),
     route('/api/panel/commits', 'GET', () => import('@/app/api/panel/commits/route')),
     route('/api/panel/ci', 'GET', () => import('@/app/api/panel/ci/route')),
@@ -444,7 +444,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   customize: [
     route('/api/customize/inventory', 'GET', () => import('@/app/api/customize/inventory/route')),
     route('/api/customize/actions', 'GET POST', () => import('@/app/api/customize/actions/route')),
-    route('/api/cortex/directives', 'GET', () => import('@/app/api/cortex/directives/route')),
+    route('/api/cortex/directives', 'GET POST', () => import('@/app/api/cortex/directives/route')),
     route('/api/setup/mcp-servers', 'GET', () => import('@/app/api/setup/mcp-servers/route')),
     route('/api/prompt-library', 'GET POST', () => import('@/app/api/prompt-library/route')),
     route('/api/prompt-library/[id]', 'GET PATCH DELETE', () => import('@/app/api/prompt-library/[id]/route')),
