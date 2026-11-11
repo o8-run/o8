@@ -54,7 +54,6 @@ import {
   markReviewDeferred,
   markReviewFailed,
   markReviewSkipped,
-  MAX_REVIEW_ATTEMPTS,
 } from './review-queue-settlement';
 import {
   cancelAutoReviewForLane,
@@ -188,7 +187,8 @@ async function processClaimedReview(slot: number, review: QueuedReview): Promise
       claimOwner: review.claim_owner,
       laneId: review.lane_id,
       error: errorMsg,
-      attempts: err instanceof CorrectionReviewBlocked ? MAX_REVIEW_ATTEMPTS : review.attempts + 1,
+      attempts: review.attempts + 1,
+      held: err instanceof CorrectionReviewBlocked,
     });
     console.error(`[auto-review] Review ${review.id} failed (attempt ${review.attempts + 1}): ${errorMsg}`);
     return 'pause';
@@ -531,7 +531,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   if (requeueIfReviewHeadMoved(review, lane)) {
     return skipped('HEAD moved while this review turn was running; its verdict was discarded.');
   }
-  prepareCorrectionReview(lane, review.head_sha ?? undefined);
+  prepareCorrectionReview(lane, review.head_sha ?? undefined, 'verdict');
   if (reviewTurn.unavailableReason === 'session_busy') {
     return deferred('Reviewer session busy');
   }

@@ -9,6 +9,7 @@ import { findMissionRegistryEntryByPacketId } from './mission-registry';
 import type { ReviewCorrectionSource } from './review-author-correction';
 import { ReviewValidationError } from './operator-mission-service/review-validation';
 import { readCompletionHandoff } from '@/lib/workspace/completion-handoff-store';
+import { listApprovalsForContext } from '@/lib/approvals/store';
 
 interface SavedSource extends ReviewCorrectionSource {
   repoPath: string;
@@ -41,6 +42,31 @@ export function latestCorrectionReview(packetId: string | null | undefined): Cor
   if (!packetId) return null;
   return getSqlite().prepare('SELECT * FROM correction_reviews WHERE packet_id = ? ORDER BY rowid DESC LIMIT 1')
     .get(packetId) as CorrectionReview | undefined ?? null;
+}
+
+/** A terminal queue row alone is not a verdict. Failed/skipped jobs remain
+ * recoverable; a recorded independent verdict closes this correction's scope. */
+export function correctionReviewSettled(row: CorrectionReview): boolean {
+  if (!row.review_id) return false;
+  const queue = getSqlite().prepare('SELECT status, last_error FROM review_queue WHERE id = ?')
+    .get(row.review_id) as { status: string; last_error: string | null } | undefined;
+  if (queue?.status !== 'completed' || queue.last_error) return false;
+  const thread = `auto-review-${row.lane_id}-${row.review_id}`;
+  const turns = getSqlite().prepare(`SELECT json_extract(payload_json, '$.reviewTurnId') AS id FROM lane_events
+    WHERE lane_id = ? AND verb = 'review_turn_started' AND json_extract(payload_json, '$.threadId') IN (?, ?)`)
+    .all(row.lane_id, thread, `${thread}-verdict-retry`) as Array<{ id: string }>;
+  return listApprovalsForContext({ packetId: row.packet_id, laneId: row.lane_id }).some(approval =>
+    approval.toolName === 'orchestrator_review' && ['approved', 'rejected'].includes(approval.status)
+    && approval.args?.reviewedHeadSha === row.head_sha && approval.args.reviewTurnOutcome === 'completed'
+    && approval.args.reviewSuperseded !== true && !approval.args.parseWarning
+    && turns.some(turn => turn.id === approval.args?.reviewTurnId));
+}
+
+export function settledCorrectionReplay(lane: Lane, headSha?: string): CorrectionReview | null {
+  const row = latestCorrectionReview(lane.packetId);
+  if (!row || !correctionReviewSettled(row) || row.lane_id !== lane.id || row.head_sha !== headSha) return null;
+  const source: SavedSource = JSON.parse(row.source_json);
+  return lane.sessionKey === source.surfaceId && event(lane.id, 'steer_run_admitted')?.clientMutationId === `${row.correction_id}-${source.surfaceId}` ? row : null;
 }
 
 function event(laneId: string, verb: string): Record<string, unknown> | null {
@@ -83,9 +109,9 @@ export function assertCorrectionReviewOwner(lane: Lane, row: CorrectionReview): 
 }
 
 /** Git checks run outside the queue transaction and again before reviewer entry. */
-export function prepareCorrectionReview(lane: Lane, headSha?: string): CorrectionReview | null {
+export function prepareCorrectionReview(lane: Lane, headSha?: string, phase: 'admission' | 'verdict' = 'admission'): CorrectionReview | null {
   const row = latestCorrectionReview(lane.packetId);
-  if (!row) return null;
+  if (!row || correctionReviewSettled(row)) return null;
   const runId = assertCorrectionReviewOwner(lane, row);
   const source: SavedSource = JSON.parse(row.source_json);
   const completion = source.repositoryUuid ? readCompletionHandoff(source.repositoryUuid, row.packet_id) : null;
@@ -95,7 +121,7 @@ export function prepareCorrectionReview(lane: Lane, headSha?: string): Correctio
   }
   if (!headSha || !/^[a-f0-9]{40}$/.test(headSha) || headSha === source.reviewedHeadSha
     || (row.head_sha && row.head_sha !== headSha)
-    || laneGitSync(lane.worktreePath || lane.repoPath, lane.repoPath, ['status', '--porcelain', '--untracked-files=normal'], { timeout: 5000 }).trim()
+    || (phase === 'admission' && laneGitSync(lane.worktreePath || lane.repoPath, lane.repoPath, ['status', '--porcelain', '--untracked-files=normal'], { timeout: 5000 }).trim())
     || laneGitSync(lane.worktreePath || lane.repoPath, lane.repoPath, ['rev-parse', 'HEAD'], { timeout: 5000 }).trim() !== headSha) {
     throw new CorrectionReviewBlocked('Correction re-review is held: the corrected commit is unchanged, dirty or has moved. Inspect and review the current code before continuing.');
   }
@@ -103,8 +129,9 @@ export function prepareCorrectionReview(lane: Lane, headSha?: string): Correctio
 }
 
 export function bindCorrectionReview(row: CorrectionReview, reviewId: string): void {
-  getSqlite().prepare(`UPDATE correction_reviews SET review_id = ?, head_sha = ?, run_id = ?
-    WHERE correction_id = ? AND review_id IS NULL`).run(reviewId, row.head_sha, row.run_id, row.correction_id);
+  const result = getSqlite().prepare(`UPDATE correction_reviews SET review_id = ?, head_sha = ?, run_id = ?
+    WHERE correction_id = ? AND review_id IS ?`).run(reviewId, row.head_sha, row.run_id, row.correction_id, row.review_id);
+  if (result.changes !== 1) throw new CorrectionReviewBlocked('Correction review ownership changed before enqueue. Inspect the current attempt.');
 }
 
 /** A completed Codex prose verdict uses the same review writer as tool calls.
@@ -121,7 +148,7 @@ export function completedCorrectionReviewTurn(lane: Lane, turnId: string, claimO
     || typeof started.sessionThreadId !== 'string' || !started.sessionThreadId.startsWith('thoughts-auto-review-')) {
     throw new CorrectionReviewBlocked('The independent correction review turn is missing, interrupted or superseded.');
   }
-  prepareCorrectionReview(lane, row.head_sha);
+  prepareCorrectionReview(lane, row.head_sha, 'verdict');
   return { id: turnId, threadId: String(started.threadId), surface: 'auto-review',
     expectedHeadSha: row.head_sha, backend: String(started.backend), formatRetryRejecting: started.formatRetryRejecting === true };
 }

@@ -403,7 +403,7 @@ export async function recordCodexAutoReviewVerdict(input: {
   }
 
   const { recordOrchestratorReview } = await import('@/lib/approvals/store');
-  const correction = prepareCorrectionReview(input.lane, reviewedHeadSha);
+  const correction = prepareCorrectionReview(input.lane, reviewedHeadSha, 'verdict');
   if (correction) {
     if (!reviewTurnId || !input.correctionClaimOwner) throw new Error('Correction re-review has no current independent review claim.');
     const { submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service/review');

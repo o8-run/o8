@@ -10,7 +10,7 @@ import {
 } from './review-attempt-head';
 import { REVIEW_CONCURRENCY_LIMIT } from './review-concurrency';
 import { notifyCorrectnessReviewQueued } from './packet-explainer-queue';
-import { assertCorrectionReviewOwner, bindCorrectionReview, prepareCorrectionReview } from '@/lib/orchestrator/correction-review';
+import { assertCorrectionReviewOwner, bindCorrectionReview, CorrectionReviewBlocked, prepareCorrectionReview, settledCorrectionReplay } from '@/lib/orchestrator/correction-review';
 import { getLane } from './registry';
 import { surfaceReviewQueueBlocker } from './review-queue-blocker';
 
@@ -42,6 +42,8 @@ interface ActiveQueuedReview {
 }
 
 export interface EnqueueLaneReviewOptions {
+  /** Explicit request_review after inspection may replace a terminal attempt. */
+  retryCorrection?: boolean;
   /**
    * A review already running may be locked to the previous HEAD. Leave one
    * pending successor behind so the current-head approval gets its own turn.
@@ -82,6 +84,8 @@ export function enqueueLaneReview(
   notifyCorrectnessReviewQueued();
   const db = getSqlite();
   const currentHeadSha = normalizeAttemptHeadSha(options.headSha) ?? laneReviewHeadSha(lane);
+  const replay = settledCorrectionReplay(lane, currentHeadSha);
+  if (replay) return { reviewId: replay.review_id!, queued: false, status: 'completed', supersededAttempts: 0 };
   const correction = prepareCorrectionReview(lane, currentHeadSha);
   const supersededAttempts = settleSupersededReviewAttempts({
     lane,
@@ -96,7 +100,10 @@ export function enqueueLaneReview(
       assertCorrectionReviewOwner(lane, correction);
       const linked = db.prepare(`SELECT q.id, q.status FROM correction_reviews c
         JOIN review_queue q ON q.id = c.review_id WHERE c.correction_id = ?`).get(correction.correction_id) as ActiveQueuedReview | undefined;
-      if (linked) return { reviewId: linked.id, queued: false, status: linked.status, supersededAttempts };
+      if (linked) {
+        if (linked.status === 'pending' || linked.status === 'in_progress') return { reviewId: linked.id, queued: false, status: linked.status, supersededAttempts };
+        if (!options.retryCorrection) throw new CorrectionReviewBlocked('Correction review needs inspection. Once the hold is cleared, explicitly request review to create a fresh attempt.');
+      }
     }
 
     const active = db.prepare(
@@ -135,7 +142,7 @@ export function enqueueLaneReview(
       queueDepth: queued.count,
       concurrencyLimit: REVIEW_CONCURRENCY_LIMIT,
       ...(correction ? { correctionId: correction.correction_id, originalApprovalId: JSON.parse(correction.source_json).approvalId,
-        authorRunId: correction.run_id, correctedHeadSha: correction.head_sha } : {}),
+        authorRunId: correction.run_id, correctedHeadSha: correction.head_sha, previousReviewId: correction.review_id } : {}),
     });
 
     console.log(`[auto-review] Enqueued review ${reviewId} for lane ${lane.id} (${lane.label})`);

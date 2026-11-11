@@ -298,7 +298,7 @@ it('checks the reviewed code outside SQLite write transactions at admission and 
   } finally { spy.mockRestore(); }
 }, 60000);
 
-it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-moved', 'reclaimed', 'stopped-after', 'interrupted', 'rejected', 'delivered'] as const)('hands a persisted rejection to a real isolated packet-bound author: %s', async outcome => {
+it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-moved', 'reclaimed', 'stopped-after', 'interrupted', 'rejected', 'hold-retry', 'provider-retry', 'review-artifact', 'manual-after-saved', 'delivered'] as const)('hands a persisted rejection to a real isolated packet-bound author: %s', async outcome => {
   const deliveryExpected = outcome !== 'busy' && outcome !== 'stopped';
   rmSync(join(root, 'release-worker'), { force: true });
   const response = await delegate(new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST',
@@ -404,6 +404,10 @@ it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-move
       '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'unreviewed successor']);
     if (outcome === 'moved-before-queue') moveHead();
     if (outcome === 'dirty') writeFileSync(join(launched.worktreePath, 'unreviewed.txt'), 'unreviewed edit');
+    if (outcome === 'hold-retry') {
+      expect((await enqueue()).status).toBe(200);
+      writeFileSync(join(launched.worktreePath, 'review-blocker.txt'), 'inspect before retry');
+    }
     if (outcome === 'moved') {
       // Bind the completed correction, then move its code before reviewer entry.
       expect((await enqueue()).status).toBe(200); moveHead();
@@ -421,11 +425,28 @@ it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-move
     reviewer.prompts.length = 0; reviewer.sessions.length = 0;
     reviewer.beforeVerdict = outcome === 'review-moved' ? moveHead : outcome === 'reclaimed' ? () => {
       getSqlite().prepare("UPDATE review_queue SET claim_owner = 'replacement-owner' WHERE lane_id = ? AND status = 'in_progress'").run(launched.laneId);
-    } : null;
+    } : outcome === 'review-artifact' ? () => writeFileSync(join(launched.worktreePath, 'test-output.txt'), 'reviewer test output')
+      : outcome === 'provider-retry' ? () => { throw new Error('Fixture reviewer temporarily unavailable'); } : null;
     reviewer.approve = outcome !== 'rejected';
     const { drainReviewQueue } = await import('@/lib/lane/auto-review');
     await drainReviewQueue();
+    if (outcome === 'provider-retry') for (let round = 1; round < 5; round++) await drainReviewQueue();
     reviewer.beforeVerdict = null;
+    if (outcome === 'hold-retry' || outcome === 'provider-retry') {
+      const failed = getSqlite().prepare('SELECT id, status FROM review_queue WHERE lane_id = ? ORDER BY rowid DESC LIMIT 1')
+        .get(launched.laneId) as { id: string; status: string };
+      expect(failed.status).toBe('failed');
+      if (outcome === 'hold-retry') rmSync(join(launched.worktreePath, 'review-blocker.txt'));
+      const retry = await dispatch({ verb: 'request_review', laneId: launched.laneId, actor: 'user' });
+      expect(retry.ok, JSON.stringify(retry)).toBe(true);
+      const linked = getSqlite().prepare('SELECT review_id FROM correction_reviews WHERE correction_id = ?')
+        .get(value.receipt.id) as { review_id: string };
+      expect(linked.review_id).not.toBe(failed.id);
+      expect((await enqueue()).status).toBe(200);
+      reviewer.prompts.length = 0; reviewer.sessions.length = 0;
+      await drainReviewQueue();
+      expect(record(target.surfaceId).recentRuns).toHaveLength(2);
+    }
     const { getApproval, listApprovalsForContext } = await import('@/lib/approvals/store');
     if (['moved-before-queue', 'dirty', 'moved', 'stopped-after', 'interrupted', 'review-moved', 'reclaimed'].includes(outcome)) {
       expect(reviewer.prompts).toHaveLength(['review-moved', 'reclaimed'].includes(outcome) ? 1 : 0);
@@ -462,6 +483,20 @@ it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-move
     const approved = listApprovalsForContext({ packetId }).filter(row => row.status === 'approved' && row.toolName === 'orchestrator_review');
     expect(approved).toHaveLength(1);
     expect(approved[0].args?.reviewedHeadSha).toBe(correctedHead);
+    if (outcome === 'review-artifact') expect(readFileSync(join(launched.worktreePath, 'test-output.txt'), 'utf8')).toBe('reviewer test output');
+    if (outcome === 'manual-after-saved') {
+      const manual = await handlers.handleCorrectWorkers({ targets: [{ surfaceId: target.surfaceId,
+        runId: record(target.surfaceId).recentRuns[0].id }], message: 'Make one more scoped correction.', mode: 'send', holdMerges: false,
+        idempotencyKey: 'manual-after-saved-round' });
+      expect(manual.isError, JSON.stringify(manual)).not.toBe(true);
+      await settled(target.surfaceId);
+      const requested = await dispatch({ verb: 'request_review', laneId: launched.laneId, actor: 'system' });
+      expect(requested.ok, JSON.stringify(requested)).toBe(true);
+      reviewer.prompts.length = 0;
+      await drainReviewQueue();
+      expect(reviewer.prompts).toHaveLength(1);
+      expect(reviewer.prompts[0]).not.toContain(`Saved rejection: ${review.auditApprovalId}`);
+    }
     const { isPacketMergeHeld } = await import('@/lib/lane/merge-hold');
     expect(isPacketMergeHeld(packetId)).toBe(true);
     expect(execFileSync('git', ['-C', repo, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(head);

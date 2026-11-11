@@ -429,7 +429,7 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
   // An operator may still reject/supersede work at any point. Only a new
   // approval or the queued reviewer must prove this correction's exact turn.
   const correction = verdictLane && (input.approved || activeReviewTurn?.surface === 'auto-review')
-    ? prepareCorrectionReview(verdictLane, reviewedHeadSha) : null;
+    ? prepareCorrectionReview(verdictLane, reviewedHeadSha, 'verdict') : null;
   if (correction && (!activeReviewTurn || activeReviewTurn.surface !== 'auto-review'
     || ![`auto-review-${verdictLane!.id}-${correction.review_id}`, `auto-review-${verdictLane!.id}-${correction.review_id}-verdict-retry`].includes(activeReviewTurn.threadId ?? ''))) {
     throw new ReviewValidationError('correction_reviewer_required', 'This correction requires its queued independent reviewer at the corrected HEAD.');
