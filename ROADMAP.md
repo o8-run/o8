@@ -37,7 +37,7 @@ Snapshot from 2026-11-10. Rerun the command for the current value.
 | Stable release | 0.1.818 (2026-11-10) | `gh release list --repo hurttlocker/o8-releases --limit 5` |
 | Commits on `main` since stable | 7 | `git rev-list --count v0.1.818..origin/main` |
 | Review and merge loop progress | see command | `node scripts/roadmap-status.mjs` (tracking issue #5815) |
-| Open issues | 185 | `gh issue list --repo o8-run/o8 --state open --limit 1000 --json number -q length` |
+| Open issues | 150 | `gh issue list --repo o8-run/o8 --state open --limit 1000 --json number -q length` |
 | Tracking issues and checklist progress | see command | `node scripts/roadmap-status.mjs` |
 
 ## Now
