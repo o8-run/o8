@@ -400,9 +400,9 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   if (routePath === '/api/runtime/acp-registry') {
     expect(JSON.parse(body)).toMatchObject({ stale: false, agents: [{ id: 'fixture-agent', version: '1.0.0' }] });
   }
-  // A2 adds POST to /api/cortex/proposals; every other A1 read stays GET-only.
+  // Task creation and Cortex decisions reuse production POSTs; the remaining reads stay GET-only.
   const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
-  expect(methods).toEqual(routePath === '/api/cortex/proposals' ? ['GET', 'POST'] : ['GET']);
+  expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);

@@ -331,3 +331,14 @@ The raw report is generated locally; no credentials or payloads are retained.
   GPUI TestAppContext and the HTTP adapter are not substitutes for those numbers.
 
 These gaps keep #4547 open. No 500 MB system-memory target is claimed.
+
+## Cortex decisions
+
+`POST /api/cortex/cross-repo-proposals` (Activity) and
+`POST /api/cortex/directives` (Customize) reuse their production handlers on
+native HTTP. `panelGateMiddleware` admits only the operator bearer for these
+methods; neither has a device, packet-worker, spectator or anonymous grant.
+The existing GET projections and unsupported-method refusals remain available.
+`tests/o8d-cortex-writes-real-path.test.ts` stops the fixture Next listener,
+writes a directive, accepts and dismisses a proposal, checks their persisted
+files, and checks non-operator refusals through the public o8d socket.
