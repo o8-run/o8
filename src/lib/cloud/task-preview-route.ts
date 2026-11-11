@@ -1,28 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
-import { isTrustedPanelRequest, requirePanelAuth } from '@/lib/panel/auth';
-import { isLoopbackHostname } from '@/lib/auth/loopback-request';
+import { requirePanelAuth } from '@/lib/panel/auth';
 import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
 import { ensureReviewServiceJob, stopReviewServiceJob } from '@/lib/cloud/review-service-session';
 import { resolveTaskPreview } from '@/lib/cloud/preview-authority';
 import { closePreviewServer, openPreviewServer } from '@/lib/cloud/preview-server';
 import { readPreviewMessage } from '@/lib/cloud/preview-message';
+import { coordinatorOrigin } from '@/lib/cloud/coordinator-origin';
 
 const headers = { 'Cache-Control': 'no-store' };
-
-function coordinatorOrigin(request: NextRequest): string | null {
-  // The packaged Next server may bind 0.0.0.0 (O8_LAN_ACCESS), so nextUrl is not the client's
-  // origin. Socket-peer truth must still win over a spoofed loopback Host.
-  if (!isTrustedPanelRequest(request)) return null;
-  const host = request.headers.get('host');
-  if (!host) return null;
-  try {
-    const url = new URL(`${request.nextUrl.protocol}//${host}`);
-    return ['http:', 'https:'].includes(url.protocol) && isLoopbackHostname(url.hostname)
-      && url.host === host && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash
-      ? url.origin : null;
-  } catch { return null; }
-}
 
 export async function POST(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
   if (requirePanelAuth(request) || resolveRequestPrincipalContext(request).role !== 'operator') {
