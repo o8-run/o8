@@ -18,14 +18,16 @@ impl Card {
         }
         let base = self.task.lane["baseBranch"].as_str().map(str::to_owned);
         let client = self.client.clone();
+        let lane = self.task.lane_id();
         self.diff = Some(cx.new(|cx| {
-            DiffSurface::new(
+            DiffSurface::in_lane(
                 client,
                 Target::Worktree {
                     path,
                     base,
                     file: None,
                 },
+                (!lane.is_empty()).then_some(lane),
                 window,
                 cx,
             )

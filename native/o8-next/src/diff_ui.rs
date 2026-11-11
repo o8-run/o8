@@ -16,6 +16,10 @@ use std::{
     rc::Rc,
 };
 
+#[path = "diff_ui_init.rs"]
+mod init;
+#[path = "diff_missing_ui.rs"]
+mod missing;
 #[path = "diff_ui_scope.rs"]
 mod scope;
 #[path = "diff_ui_stack.rs"]
@@ -33,6 +37,9 @@ pub(crate) struct DiffSurface {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) failed: bool,
     busy: bool,
+    missing: Option<missing::State>,
+    discarded_lanes: BTreeSet<String>,
+    lane_context: Option<String>,
     generation: u64,
     pending: Option<Value>,
     state: Value,
@@ -81,45 +88,6 @@ pub(crate) fn notice(target: &Target, document: &Document, label: String) -> Str
 }
 
 impl DiffSurface {
-    pub(crate) fn new(
-        client: Client,
-        target: Target,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let focus = cx.focus_handle();
-        focus.focus(window);
-        let mut surface = Self {
-            client,
-            target,
-            document: Rc::new(Document::default()),
-            selected: 0,
-            split: false,
-            ready: false,
-            failed: false,
-            busy: false,
-            generation: 0,
-            pending: None,
-            state: Value::Null,
-            notice: String::new(),
-            focus,
-            scroll: UniformListScrollHandle::new(),
-            painted: Rc::new(RefCell::new(BTreeSet::new())),
-            stack: Rc::new(vec![]),
-            chosen: HashMap::new(),
-            limit_note: None,
-            scope: Scope::All,
-            scope_paths: None,
-            scope_error: None,
-            scope_generation: 0,
-            drawer: None,
-            width: px(0.),
-            stack_scroll: gpui::ScrollHandle::new(),
-            stack_target: None,
-        };
-        surface.load(cx);
-        surface
-    }
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
         if self.busy {
             return;
@@ -128,6 +96,7 @@ impl DiffSurface {
         let generation = self.generation;
         self.ready = false;
         self.failed = false;
+        self.missing = None;
         self.pending = None;
         self.notice = "Reading diff…".into();
         if self.stacked() {
@@ -135,13 +104,16 @@ impl DiffSurface {
         }
         let client = self.client.clone();
         let target = self.target.clone();
+        let lane = self.lane_context.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { target.read(&client) });
+            .spawn(async move { target.read_in_lane(&client, lane.as_deref()) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.generation != generation { return; }
+                if this.generation != generation {
+                    return;
+                }
                 match result {
                     Ok((document, state)) => {
                         this.document = Rc::new(document);
@@ -166,13 +138,18 @@ impl DiffSurface {
                         this.notice = notice(&this.target, &this.document, this.state_label());
                     }
                     Err(error) => {
-                        this.notice = error;
+                        this.notice = error.message;
+                        this.missing = error.missing.map(|checkout| {
+                            let discarded = this.discarded_lanes.contains(&checkout.lane_id);
+                            missing::State::new(checkout).with_discarded(discarded)
+                        });
                         this.failed = true;
                     }
                 }
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
         cx.notify();
     }
     fn state_label(&self) -> String {
@@ -465,7 +442,9 @@ impl Render for DiffSurface {
             .track_scroll(self.scroll.clone())
             .size_full(),
         );
-        let body = if stacked {
+        let body = if self.missing.is_some() {
+            self.missing_notice().into_any_element()
+        } else if stacked {
             self.stack_view(files.into_any_element(), cx)
         } else {
             div()
@@ -487,6 +466,10 @@ impl Render for DiffSurface {
             .text_size(px(13.5))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if this.cancel_missing(event, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
                 match event.keystroke.key.as_str() {
                     key @ ("home" | "end") if this.stacked() => {
                         let shown = this.shown();
@@ -610,6 +593,7 @@ impl Render for DiffSurface {
                                 .on_click(cx.listener(|s, _, _, cx| s.decide(false, cx))),
                         )
                     })
+                    .children(self.missing_actions(cx))
                     .when(self.pending.is_some() && !self.busy, |bar| {
                         bar.child(
                             button("diff-retry", "Retry decision", false)
@@ -617,28 +601,30 @@ impl Render for DiffSurface {
                         )
                     }),
             )
-            .child(
-                div()
-                    .px(px(16.))
-                    .py(px(8.))
-                    .text_size(px(11.))
-                    .text_color(theme().text_muted)
-                    .child(match &self.limit_note {
-                        Some(note) => format!("{} · {note}", self.notice),
-                        None => self.notice.clone(),
-                    })
-                    .when_some(
-                        stacked.then(|| self.scope_stale()).flatten(),
-                        |row, stale| {
-                            row.child(
-                                div()
-                                    .debug_selector(|| "diff-scope-stale".into())
-                                    .text_color(theme().danger)
-                                    .child(stale),
-                            )
-                        },
-                    ),
-            )
+            .when(self.missing.is_none(), |surface| {
+                surface.child(
+                    div()
+                        .px(px(16.))
+                        .py(px(8.))
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .child(match &self.limit_note {
+                            Some(note) => format!("{} · {note}", self.notice),
+                            None => self.notice.clone(),
+                        })
+                        .when_some(
+                            stacked.then(|| self.scope_stale()).flatten(),
+                            |row, stale| {
+                                row.child(
+                                    div()
+                                        .debug_selector(|| "diff-scope-stale".into())
+                                        .text_color(theme().danger)
+                                        .child(stale),
+                                )
+                            },
+                        ),
+                )
+            })
             .child(body)
     }
 }

@@ -470,6 +470,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/orchestrator/review-state', 'GET', () => import('@/app/api/orchestrator/review-state/route')),
     route('/api/orchestrator/review', 'POST', () => import('@/app/api/orchestrator/review/route')),
+    // Reuse the operator-only handler; it proves the recorded checkout is absent.
+    route('/api/lanes/discard-orphaned', 'POST', () => import('@/app/api/lanes/discard-orphaned/route')),
     route('/api/lanes/[id]/diff', 'GET', () => import('@/app/api/lanes/[id]/diff/route')),
     route('/api/worktrees/diff', 'GET', () => import('@/app/api/worktrees/diff/route')),
     route('/api/review/last-turn', 'GET', () => import('@/app/api/review/last-turn/route')),

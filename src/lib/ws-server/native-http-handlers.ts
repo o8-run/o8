@@ -46,6 +46,7 @@ import { GET as api_panel_supervisor_inbox_GET } from '@/app/api/panel/superviso
 import { GET as api_panel_approvals_GET, POST as api_panel_approvals_POST } from '@/app/api/panel/approvals/route';
 import { GET as api_orchestrator_review_state_GET } from '@/app/api/orchestrator/review-state/route';
 import { POST as api_orchestrator_review_POST } from '@/app/api/orchestrator/review/route';
+import { POST as api_lanes_discard_orphaned_POST } from '@/app/api/lanes/discard-orphaned/route';
 import { GET as api_lanes_id_diff_GET } from '@/app/api/lanes/[id]/diff/route';
 import { GET as api_worktrees_diff_GET } from '@/app/api/worktrees/diff/route';
 import { GET as api_customize_inventory_GET } from '@/app/api/customize/inventory/route';
@@ -155,6 +156,7 @@ export const api_panel_supervisor_inbox = { GET: api_panel_supervisor_inbox_GET 
 export const api_panel_approvals = { GET: api_panel_approvals_GET, POST: api_panel_approvals_POST };
 export const api_orchestrator_review_state = { GET: api_orchestrator_review_state_GET };
 export const api_orchestrator_review = { POST: api_orchestrator_review_POST };
+export const api_lanes_discard_orphaned = { POST: api_lanes_discard_orphaned_POST };
 export const api_lanes_id_diff = { GET: api_lanes_id_diff_GET };
 export const api_worktrees_diff = { GET: api_worktrees_diff_GET };
 export const api_customize_inventory = { GET: api_customize_inventory_GET };
