@@ -5557,6 +5557,7 @@
     {
       "path": "tests/o8d-devices-owner-real-path.test.ts",
       "reasons": [
+        "child-process",
         "native-build",
         "real-path"
       ]

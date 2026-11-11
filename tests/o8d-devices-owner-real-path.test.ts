@@ -1,12 +1,16 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
 import { startParityReference } from './fixtures/ws-parity-server';
 
 // Build first: cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-ws
 it.skipIf(process.platform === 'win32')('serves device controls with one WS manager and the operator gate', async () => {
+  const binary = process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug/o8d');
+  if (!existsSync(binary)) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-devices-owner-')));
   const device = 'devices-fixture-device-0123456789abcdef';
   const worker = 'devices-fixture-worker-0123456789abcdef';
@@ -16,7 +20,7 @@ it.skipIf(process.platform === 'win32')('serves device controls with one WS mana
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     server = await startParityReference({ o8d: true, nativeHttp: true, directory, startupTimeoutMs: 120_000,
-      binary: process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug/o8d') });
+      binary });
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     expect((await (await fetch(`${origin}/health`)).json()).delivery.transport).toBe('o8d');
@@ -57,4 +61,4 @@ it.skipIf(process.platform === 'win32')('serves device controls with one WS mana
     Object.assign(process.env, saved);
     rmSync(directory, { recursive: true, force: true });
   }
-}, 180_000);
+}, 300_000);
