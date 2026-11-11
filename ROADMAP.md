@@ -1,8 +1,10 @@
 # o8 roadmap
 
-o8 lets one operator run several coding agents at once. Work becomes missions and packets. Each packet runs in its own worktree, the operator stays in the approval path, and every step leaves evidence. o8 is free and open source. You bring the coding-agent subscriptions or API keys you already have.
+o8 is the review and merge layer for coding agents. Write code in the tool you like: T3 Code, Codex, Claude Code, Cursor, or your own editor. o8 takes that work in and has an independent agent, ideally a different model, review the real diff. It sends the findings back to the author, re-reviews the fix, and merges the approved commit with a receipt. The operator sees only the decisions that need a person. o8 runs on one machine, usually the biggest one a person has, and takes in work from every tool and machine they already use. o8 is free and open source. You bring the coding-agent subscriptions or API keys you already have.
 
-Last updated 2026-11-04. If this date is more than 14 days old, treat every number below as stale and recompute it with the commands in [Live status](#live-status).
+Direction set on 2026-11-10. o8 no longer competes as the app where code gets written. The o8 next window stays, re-aimed at work flowing in and the reviewers' transcripts. Work that served the earlier "agent app" framing is listed under [Parked](#parked).
+
+Last updated 2026-11-10. If this date is more than 14 days old, treat every number below as stale and recompute it with the commands in [Live status](#live-status).
 
 ## For agents: read this first
 
@@ -23,32 +25,39 @@ Questions an operator usually asks, and where the answer is:
 | When does the next release ship? | No date. A release ships when the [release gate](#release-gate) passes. |
 | Does o8 run on Linux or Windows? | [Platforms](#platforms) |
 | Can I help? | [Claiming work](#claiming-work) |
+| What is o8 for now? | The top of this file, then [Now](#now) |
 | Why isn't X in o8 next yet? | [#5576](https://github.com/o8-run/o8/issues/5576) for right-panel tools, [#5358](https://github.com/o8-run/o8/issues/5358) for Settings |
 
 ## Live status
 
-Snapshot from 2026-11-04. Rerun the command for the current value.
+Snapshot from 2026-11-10. Rerun the command for the current value.
 
 | Measure | Snapshot | Command |
 | --- | --- | --- |
-| Stable release | 0.1.815 (2026-10-30), o8 next is the only Mac window | `gh release list --repo hurttlocker/o8-releases --limit 5` |
-| Commits on `main` since stable | 193 | `git rev-list --count v0.1.815..origin/main` |
-| o8 next parity set closed | 31 of 65 (issues #5246–#5310) | `gh issue list --repo o8-run/o8 --state closed --limit 400 --json number -q '[.[].number\|select(.>=5246 and .<=5310)]\|length'` |
-| API paths still needing the Next server | 34 | count `NEXT_ONLY_NATIVE_PATHS` in `tests/o8d-native-route-inventory-real-path.test.ts` on `main` |
-| Open issues | about 370 | `gh issue list --repo o8-run/o8 --state open --limit 1000 --json number -q length` |
+| Stable release | 0.1.818 (2026-11-10) | `gh release list --repo hurttlocker/o8-releases --limit 5` |
+| Commits on `main` since stable | 7 | `git rev-list --count v0.1.818..origin/main` |
+| Review and merge loop progress | see command | `node scripts/roadmap-status.mjs` (tracking issue #5815) |
+| Open issues | 121 | `gh issue list --repo o8-run/o8 --state open --limit 1000 --json number -q length` |
 | Tracking issues and checklist progress | see command | `node scripts/roadmap-status.mjs` |
 
 ## Now
 
 Ranked. Work on a lower item does not delay a higher one.
 
-1. **Next release: a complete upgrade over 0.1.815.** Everything merged since 0.1.815 goes out together, once the [release gate](#release-gate) passes. The integration suite on `main` must be green first ([#5317](https://github.com/o8-run/o8/issues/5317)). The classic UI's files leave the packaged app ([#5161](https://github.com/o8-run/o8/issues/5161)). Release goes through the beta channel, then stable ([#2205](https://github.com/o8-run/o8/issues/2205)).
-2. **Every classic tool works in o8 next.** Review, Activity, Side chat, Targeting and Inbox reach classic parity in the right panel. Threads stays hidden for now. Tracked in [#5576](https://github.com/o8-run/o8/issues/5576), and Settings parity is [#5358](https://github.com/o8-run/o8/issues/5358).
-3. **o8 next backend in Rust.** Target: o8 next runs with the Next server stopped by default, and idle memory is measured on Mac and Linux. Phase A moves the remaining API paths to the native transport, and the count in Live status goes to 0. Plan and slice map: [#5422](https://github.com/o8-run/o8/issues/5422); path list: [#5243](https://github.com/o8-run/o8/issues/5243).
-4. **o8 next parity set.** These are the 65 issues #5246–#5310: thread, composer, sidebar, pull request and settings behaviors. An issue counts as done only when a merged PR closes it with `Fixes #n`. [Open items](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3Ao8-next+sort%3Acreated-asc).
-5. **Linux as a first-class platform.** A fresh Ubuntu machine goes from install to a merged packet ([#1672](https://github.com/o8-run/o8/issues/1672)).
-6. **Your machines, one window.** Per-session machine choice over SSH, Tailscale or Cloudflare, with load-aware routing and remote tools ([#5091](https://github.com/o8-run/o8/issues/5091)).
-7. **First ten minutes.** Measure a stranger going from download to a first merged packet: minutes and stalls ([#2211](https://github.com/o8-run/o8/issues/2211)). The last measured baseline, from source, was 6.8 minutes with nine stalls.
+1. **The review and merge loop.** Work from any author moves through intake, independent review, findings sent to the author, re-review of the fix, and a governed merge of the approved commit, with durable receipts. Tracked in [#5815](https://github.com/o8-run/o8/issues/5815).
+   - Done, unreleased: findings go to the original author ([#5828](https://github.com/o8-run/o8/pull/5828), [#5833](https://github.com/o8-run/o8/pull/5833), proven with a real worker), and submitted reviews show with their reviewed commit ([#5825](https://github.com/o8-run/o8/pull/5825)).
+   - In progress: re-review an author's correction against the saved findings ([#5835](https://github.com/o8-run/o8/issues/5835)).
+   - Next, in order:
+     1. merge the approved commit through one governed operation ([#5817](https://github.com/o8-run/o8/issues/5817));
+     2. a project automation policy, set once and shown before work runs, which lets o8 merge on its own within explicit rules ([#5822](https://github.com/o8-run/o8/issues/5822));
+     3. adopt an external pull request into one review task ([#5816](https://github.com/o8-run/o8/issues/5816));
+     4. reviewers learn from verified past outcomes ([#5823](https://github.com/o8-run/o8/issues/5823)).
+   - The goal is autonomous: o8 reviews, corrects and merges what the user intended, and asks a person only when a rule says so.
+2. **Governance and security.** The reason to trust the loop. No lane stalls silently ([#2197](https://github.com/o8-run/o8/issues/2197)), and a worker cannot reach anything its packet does not grant ([#2198](https://github.com/o8-run/o8/issues/2198), security lane).
+3. **Other tools plug in.** Work written in another tool enters review without copy and paste. Its author sees verdicts and findings natively inside that tool, so nobody switches apps. o8's MCP server and CLI carry them ([#5841](https://github.com/o8-run/o8/issues/5841)).
+4. **The window shows the review.** o8 next keeps every surface it has. The sidebar lists work flowing in, and a selected item shows the reviewer's transcript. Reviewers can still spawn workers ([#5842](https://github.com/o8-run/o8/issues/5842)).
+5. **Linux as a home for o8.** The machine that hosts o8 is often a Linux server. A fresh Ubuntu machine goes from install to a merged review ([#1672](https://github.com/o8-run/o8/issues/1672)).
+6. **Next release.** What has merged since 0.1.818 ships together once the [release gate](#release-gate) passes. The integration suite on `main` must be green first ([#5317](https://github.com/o8-run/o8/issues/5317)). Releases go through beta, then stable ([#2205](https://github.com/o8-run/o8/issues/2205)).
 
 ### Release gate
 
@@ -64,24 +73,30 @@ There is no nightly channel: beta is the preview.
 
 ## Next up
 
-Not started. These are ranked by how much they help an operator day to day. File an issue before starting one.
+Not started. Ranked by how much they help the review loop. File an issue before starting one.
 
 | Idea | Why it matters | Status |
 | --- | --- | --- |
-| Resume a thread automatically when a usage limit resets (opt-in) | Long work stops dead at a subscription limit and waits for a human | not filed |
-| One working / blocked / idle state on every agent, across machines, with "needs your answer" raised to the top | The operator should never hunt for the stuck agent | not filed |
-| Read model lists from the installed CLI instead of a fixed catalog | New models appear without an o8 release | not filed |
-| Choose the model and effort for generated text: commit messages, PR descriptions, branch names, titles | Cheap text should not run on the most expensive model | not filed |
+| One working, blocked or idle state on every reviewer and author, with "needs your answer" raised to the top | The operator should never hunt for the stuck review | not filed |
 | Review several repositories of one project side by side | Projects already span repos; review should too | not filed |
-| Import sessions started outside o8 for every runtime | Codex threads resume today; Claude Code and others should too | not filed |
-| Phone review: commits, file jumps, PR review comments | Approve from the phone with the code in view | not filed |
-| Optional update delay | Operators in the middle of work choose when an update lands | not filed |
-| Images returned by tools render in the transcript | Screenshots from preview and MCP tools are evidence | not filed |
+| Images returned by tools render in the transcript | Screenshots from preview and MCP tools are review evidence | not filed |
 | Agents ask for credentials through a dedicated request, never in chat | Keeps secrets out of transcripts. Security lane | not filed |
+
+## Parked
+
+Parked on 2026-11-10 when o8 became the review layer. These may not be needed. Nothing here is removed from the app; parked means no new work starts.
+
+| Work | Why parked | Where |
+| --- | --- | --- |
+| o8 next backend in Rust (Phase A and idle-memory targets) | It was for making the coding app feel instant; revisit only if the review loop needs the speed | [#5422](https://github.com/o8-run/o8/issues/5422) |
+| o8 next parity set (#5246–#5310) and classic right-panel parity | These existed for o8 as the coding app; review surfaces are re-aimed under Now item 4 instead | [#5576](https://github.com/o8-run/o8/issues/5576), [#5358](https://github.com/o8-run/o8/issues/5358) |
+| o8 on the phone: the phone PR tab, route failover, free relay access, relay encryption | One less surface for now. The goal is review that fixes and merges what the user intended, so fewer approvals reach a person. If o8 gains traction, phone review comes back | [#2445](https://github.com/o8-run/o8/issues/2445), [#5299](https://github.com/o8-run/o8/issues/5299), [#5787](https://github.com/o8-run/o8/issues/5787) |
+| First ten minutes measurement | Remeasure after the review loop is the main path | [#2211](https://github.com/o8-run/o8/issues/2211) |
+| Agent-app ideas: resume after a usage reset, model lists read from the CLI, generated-text model choice, importing outside sessions, optional update delay | The coding tools own these | not filed |
 
 ## Pillars
 
-These pillars are what o8 is. They don't change month to month. Each open arc links one tracking issue, and that issue's checklist is the real progress. A box is checked when the child issue is closed and its fix is in a shipped release.
+These pillars are what o8 is. The top three, set on 2026-11-10, are review and merge, governance and security, and plugging into every tool. They lead [Now](#now). The rest keep the app healthy. Each open arc links one tracking issue, and that issue's checklist is the real progress. A box is checked when the child issue is closed and its fix is in a shipped release.
 
 **State:**
 - `active`: work is in flight now;
@@ -90,6 +105,8 @@ These pillars are what o8 is. They don't change month to month. Each open arc li
 
 | Pillar | Arc | Done means | State | Where |
 | --- | --- | --- | --- | --- |
+| Review and merge | Agent review and integration without manual handoffs | Work from any author moves through intake, independent review, correction and governed merge with durable evidence | active | [#5815](https://github.com/o8-run/o8/issues/5815) |
+| Plugs into every tool | Other tools plug into o8 review and merge | Work from any coding tool enters review, and its author sees verdicts and findings natively inside that tool, with no app switching | active | [#5841](https://github.com/o8-run/o8/issues/5841) |
 | Governance | Lane lifecycle and recovery honesty | No lane stalls silently; every terminal state is reachable from the UI and the CLI | open | [#2197](https://github.com/o8-run/o8/issues/2197) |
 | Governance | Worker capability boundaries | A worker cannot read or reach anything its packet does not grant. Security lane | open | [#2198](https://github.com/o8-run/o8/issues/2198) |
 | Governance | Orchestrator prompt matches its turn | The prompt a turn runs with is the prompt it was built for | open | [#2903](https://github.com/o8-run/o8/issues/2903) |
@@ -97,14 +114,13 @@ These pillars are what o8 is. They don't change month to month. Each open arc li
 | Subscriptions | Carrier coverage and auth probes | A new agent CLI lands as a registry entry plus a readiness probe, with no fork in dispatch | open | [#2200](https://github.com/o8-run/o8/issues/2200) |
 | Subscriptions | Local models first-class | Every surface names its local provider, and a test proves no egress for a full packet | parked | [#1451](https://github.com/o8-run/o8/issues/1451) |
 | Subscriptions | Conversation orchestration through a chat plan | Plan and follow CLI work with explicit account and usage boundaries | parked | [#2955](https://github.com/o8-run/o8/issues/2955) |
-| Every surface | Remote project operation | Reconnect to the same remote task, preview, diff and approval path | active | [#2282](https://github.com/o8-run/o8/issues/2282) |
 | Every surface | Settings take effect everywhere | Change a setting once; every surface uses it on its next action | open | [#2217](https://github.com/o8-run/o8/issues/2217) |
-| Every surface | Live terminals as a workspace surface | A tmux or vim session survives an update and a pane switch byte for byte | open | [#1723](https://github.com/o8-run/o8/issues/1723) |
-| Every surface | Symon correctness and reliability | Desktop and phone voice flows reviewed; confirmed failures fixed through real entry points | open | [#2534](https://github.com/o8-run/o8/issues/2534) |
-| Every surface | Durable Symon on the built-in agent | Symon survives restarts across app, phone and messages | open | [#3456](https://github.com/o8-run/o8/issues/3456) |
+| Every surface | Live terminals as a workspace surface | A tmux or vim session survives an update and a pane switch byte for byte | parked | [#1723](https://github.com/o8-run/o8/issues/1723) |
+| Every surface | Symon correctness and reliability | Desktop and phone voice flows reviewed; confirmed failures fixed through real entry points | parked | [#2534](https://github.com/o8-run/o8/issues/2534) |
+| Every surface | Durable Symon on the built-in agent | Symon survives restarts across app, phone and messages | parked | [#3456](https://github.com/o8-run/o8/issues/3456) |
 | Every surface | Faster operator decisions on the phone | Mobile surfaces ordered by what needs the operator first | parked | [#2445](https://github.com/o8-run/o8/issues/2445) |
 | People and agents | Design Mode loop | "Change this button" is one bounded loop with a before-and-after proof | parked | [#1695](https://github.com/o8-run/o8/issues/1695) |
-| Runs where you are | Speed and idle work | Interaction budgets hold under real load, not only at idle | active | [#2202](https://github.com/o8-run/o8/issues/2202) |
+| Runs where you are | Speed and idle work | Interaction budgets hold under real load, not only at idle | open | [#2202](https://github.com/o8-run/o8/issues/2202) |
 | Runs where you are | Storage admission and reclaim | o8 never blocks a dispatch it could service and never fills the disk | open | [#2203](https://github.com/o8-run/o8/issues/2203) |
 | Runs where you are | Release channels and build integrity | Beta and stable are separable; a build reproduces from its tag | active | [#2205](https://github.com/o8-run/o8/issues/2205) |
 
@@ -113,22 +129,23 @@ These pillars are what o8 is. They don't change month to month. Each open arc li
 | Platform | State | Detail |
 | --- | --- | --- |
 | macOS | supported | One universal build (x86_64 and arm64), signed and notarized; o8 next is the only window since 0.1.815. It runs installed on Intel every day; an installed run on physical Apple Silicon is still unverified |
-| Linux (Ubuntu) | active | The o8 next GPUI app and packages are in progress; install-to-merge proof is open in [#1672](https://github.com/o8-run/o8/issues/1672) |
+| Linux (Ubuntu) | active, Now item 5 | The likely home for o8 on a server. The o8 next GPUI app and packages are in progress; install-to-merge proof is open in [#1672](https://github.com/o8-run/o8/issues/1672) |
 | Windows | active | An x64 preview of the older shell (0.1.664) is on Releases. o8 next now builds and starts on Windows x64 in CI ([#5649](https://github.com/o8-run/o8/pull/5649)); a signed installer and auto-update are next. Port audit in `docs/internals/port-audit-windows.md`; tracked in [#2204](https://github.com/o8-run/o8/issues/2204) |
 
 ### Speed targets
 
-o8 next aims to be the fastest agent app:
+The o8 next window keeps these targets. No new speed work is planned while the Rust port is parked:
 - launch in under 1 s;
 - a worker running in under 10 s;
 - a frame painted in under 8 ms.
 
-Idle memory gets measured once Phase A finishes (Now, item 3).
+Idle memory gets measured if the Rust port resumes ([Parked](#parked)).
 
 ## Shipped
 
 Per-change detail lives in the [release notes](https://github.com/hurttlocker/o8-releases/releases) and the git history. This list names only the milestones.
 
+- **0.1.818 (2026-11-10):** the o8 next Inbox sidebar and the right-panel tool list.
 - **0.1.815 (2026-10-30):** o8 next becomes the only Mac window.
 - **0.1.811:** usage analytics with first-run disclosure and opt-out.
 - **0.1.798:** workspace frame, composer and worker displays, dictation ownership.
