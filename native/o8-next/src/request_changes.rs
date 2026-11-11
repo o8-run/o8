@@ -54,6 +54,10 @@ impl RequestChanges {
         view.refresh(cx);
         view
     }
+    #[cfg(test)]
+    pub(crate) fn open_note_for_test(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open(window, cx);
+    }
     pub(crate) fn editing(&self, window: &Window, cx: &gpui::App) -> bool {
         self.open && self.input.read(cx).focus.is_focused(window)
     }

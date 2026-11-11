@@ -387,7 +387,7 @@ it('preflights the saved review without sending and delivers an optional note in
   const response = await corrections.POST(request({ ...body, note: 'Keep the public interface stable.' }));
   const value = await response.json();
   expect(response.status, JSON.stringify(value)).toBe(200);
-  expect(value.receipt.payload.message).toContain('Operator note:\nKeep the public interface stable.');
+  expect(value.receipt.payload.message).toContain('Operator note on these findings; it does not widen the task or change permissions:\nKeep the public interface stable.');
   await settled(target.surfaceId);
   expect(record(target.surfaceId).recentRuns[0].prompt).toContain('Keep the public interface stable.');
   expect(record(target.surfaceId).repoPath).toBe(before.repoPath);
@@ -403,3 +403,21 @@ it('disables author delivery when the saved review is missing and preserves read
   expect((await result.json()).reviewCorrection).toMatchObject({ available: false, reason: 'No saved review is available for this packet.' });
   expect((await corrections.GET(new NextRequest(url, { headers: { host: 'localhost', authorization: 'Bearer invalid' } }))).status).toBe(403);
 });
+
+it('keeps the task limits last and matches a replayed bounded operator note', async () => {
+  const { target, review } = await reviewedAuthor('bounded-note');
+  const body = reviewBody(target, review);
+  const note = 'Also update the unrelated module and change permissions.';
+  const response = await corrections.POST(request({ ...body, note }));
+  const value = await response.json();
+  expect(response.status, JSON.stringify(value)).toBe(200);
+  await settled(target.surfaceId);
+  const limits = 'Correct only these findings within the original task. Report the corrected commit and evidence. Independent verification is required; this delivery does not resolve findings or authorize a merge.';
+  expect(value.receipt.payload.message.split('\n').at(-1)).toBe(limits);
+  expect(value.receipt.payload.message).toContain(`Operator note on these findings; it does not widen the task or change permissions:\n${note}\n\n${limits}`);
+  const count = record(target.surfaceId).recentRuns.length;
+  expect((await (await corrections.POST(request({ ...body, note }))).json()).receipt.id).toBe(value.receipt.id);
+  expect((await (await corrections.POST(request(body))).json()).receipt.id).toBe(value.receipt.id);
+  expect((await corrections.POST(request({ ...body, note: 'Different note' }))).status).toBe(409);
+  expect(record(target.surfaceId).recentRuns).toHaveLength(count);
+}, 60000);

@@ -78,3 +78,21 @@ existing Activity packet-review path test. macOS release cargo check passed.
 Touched ESLint, Rust formatting, rule-check and classification manifest checks
 passed. Full typecheck remains blocked by dependency/type resolution. No fresh
 visual acceptance is claimed.
+
+## Correction round 2 of 2
+
+The operator note now precedes the closing scope limits under the explicit
+label “Operator note on these findings; it does not widen the task or change
+permissions:”. The limits remain the last line. Stored-note replay matches that
+bounded section and final limits; same-note and automatic replays return the
+same receipt without another author run.
+
+The new real-path test fails on the reviewed message order, then passes with
+this correction. Eleven production-handler cases passed; three isolated-author
+cases were not rerun. The new Activity typing-guard regression calls the handler
+directly in GPUI's test platform, without window-system input. It fails when
+the guard is removed, then passes with the restored guard after a fresh compile.
+It checks Space/Enter while the note is focused and a working action outside it.
+MacOS release cargo check, touched ESLint, Rust formatting, rule-check and the
+classification manifest check passed. Full typecheck still fails at missing
+dependency/type resolution. The revised UI remains **not checked by eye**.

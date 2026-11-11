@@ -749,3 +749,7 @@ impl ActivityPane {
         (self.proposals.rows().len(), self.proposals.seen.len())
     }
 }
+
+#[cfg(test)]
+#[path = "typing_tests.rs"]
+mod typing_tests;
