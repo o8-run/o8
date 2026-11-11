@@ -195,6 +195,11 @@ impl Transcript {
         self.merge(next, true)
     }
     pub fn new(history: History) -> Self {
+        let worker_active = !history.session_key.starts_with("llm-chat:")
+            && history
+                .transcript
+                .last()
+                .is_some_and(|e| e.extra.get("nativeWorkerActive") == Some(&Value::Bool(true)));
         let mut this = Self {
             key: history.session_key,
             entries: vec![],
@@ -207,7 +212,7 @@ impl Transcript {
             shown: vec![],
             live_seq: 0,
             live_backend: None,
-            context_busy: false,
+            context_busy: worker_active,
             context_epoch: CONTEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
             reveal: None,
             paced: !cfg!(test),
@@ -682,6 +687,13 @@ impl Transcript {
         let Ok(entries) = serde_json::from_value::<Vec<Entry>>(payload["entries"].clone()) else {
             return false;
         };
+        if let Some(active) = entries
+            .last()
+            .and_then(|e| e.extra.get("nativeWorkerActive"))
+            .and_then(Value::as_bool)
+        {
+            self.context_busy = active;
+        }
         let replace = payload["replace"].as_bool().unwrap_or(false);
         let overlaps = entries
             .iter()

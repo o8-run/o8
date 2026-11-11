@@ -328,7 +328,7 @@ impl Inspector {
             }
         }
         if let Some(detail) = &self.detail {
-            content = content.child(detail.content());
+            content = content.child(detail.content_for(cx.entity()));
         } else {
             content = content.child(
                 div()

@@ -18,20 +18,20 @@ mod files_panel;
 mod grid_sessions;
 mod icon;
 mod inbox;
-mod lineage;
 #[cfg(test)]
 mod input_reuse_tests;
-#[cfg(test)]
-mod native_anchor_tests;
 mod issues;
+mod lineage;
 mod merge;
 mod mission_card;
 mod model;
 mod motion;
+#[cfg(test)]
+mod native_anchor_tests;
 mod pane;
-mod pane_tree;
 mod pane_grid;
 mod pane_layout;
+mod pane_tree;
 mod project_icon;
 mod projects;
 mod projects_model;
@@ -45,28 +45,31 @@ mod shell_state;
 mod sidebar;
 mod snapshot_hotkey;
 mod stream;
+mod subagents;
 mod switch_receipt;
 mod terminal;
 mod terminal_grid;
 mod terminal_transport;
 mod text;
-mod thread_messages;
 mod theme;
-mod theme_import;
 #[cfg(test)]
 mod theme_font_tests;
+mod theme_import;
 #[cfg(test)]
 mod theme_tests;
+mod thread_messages;
 mod trace;
-mod subagents;
 mod transcript_actions;
 mod transcript_diagram;
 mod transcript_peek;
-mod turn_files;
+mod transcript_view;
 mod transport;
+mod turn_files;
 mod ui;
 mod visualizations;
 mod wake;
+#[cfg(test)]
+mod worker_transcript_tests;
 use crate::{
     client::Client,
     model::{History, render_tree},

@@ -3,11 +3,11 @@ use crate::theme::current as theme;
 use crate::{
     client::{Client, Session},
     model::History,
-    retained::{RetainedRow, RowState},
+    retained::RowState,
     stream::Transcript,
     transport::{self, Incoming, Subscription},
 };
-use gpui::{AnyElement, ListAlignment, ListOffset, ListState, canvas, div, list, prelude::*, px};
+use gpui::{AnyElement, ListAlignment, ListOffset, ListState, canvas, div, prelude::*, px};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeSet,
@@ -92,6 +92,7 @@ pub struct Pane {
     /// it opens, as in the main chat.
     file_root: Option<gpui::SharedString>,
     peeks: crate::transcript_peek::Peeks,
+    action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
 }
 impl Pane {
     pub fn new(key: Option<String>) -> Self {
@@ -116,6 +117,7 @@ impl Pane {
             terminal: None,
             file_root: None,
             peeks: Default::default(),
+            action_feedback: Default::default(),
         }
     }
     pub fn metadata(&mut self, session: &Session) {
@@ -183,8 +185,7 @@ impl Pane {
         let anchor = self.list.logical_scroll_top();
         for (index, row) in self.rows.iter().enumerate() {
             let mut row = row.borrow_mut();
-            if !crate::subagents::trace::delegates(&row.row)
-            {
+            if !crate::subagents::trace::delegates(&row.row) {
                 continue;
             }
             row.bind_subagent_focus(cx);
@@ -298,6 +299,44 @@ impl Pane {
     /// Delay all child layout until bounds intersect the clip. A clipped pane
     /// never constructs a list or calls the retained row's shaping/paint path.
     pub fn content(&self) -> AnyElement {
+        self.content_with(
+            crate::transcript_actions::turn_ends(&self.rows)
+                .into_keys()
+                .collect(),
+            |_, row, _, _| row,
+        )
+    }
+    /// Finished answers use the chat's Play/Copy footer in the reading pane too.
+    pub(crate) fn content_for<V: 'static>(&self, view: gpui::Entity<V>) -> AnyElement {
+        let ends = crate::transcript_actions::turn_ends(&self.rows);
+        let client = self.client.clone();
+        let feedback = self.action_feedback.clone();
+        self.content_with(
+            ends.keys().copied().collect(),
+            move |index, row, _, _| match (ends.get(&index), &client) {
+                (Some(text), Some(client)) => div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .child(row)
+                    .child(crate::transcript_actions::row(
+                        view.clone(),
+                        client.clone(),
+                        feedback.clone(),
+                        index,
+                        text.clone(),
+                    ))
+                    .into_any_element(),
+                _ => row,
+            },
+        )
+    }
+    fn content_with(
+        &self,
+        ends: BTreeSet<usize>,
+        decorate: impl FnMut(usize, AnyElement, &mut gpui::Window, &mut gpui::App) -> AnyElement
+        + 'static,
+    ) -> AnyElement {
         let rows = self.rows.clone();
         let list_state = self.list.clone();
         let painted_rows = self.painted_rows.clone();
@@ -305,6 +344,7 @@ impl Pane {
         let painted = self.painted.clone();
         let paints = self.paints.clone();
         let notice = self.notice.clone();
+        let file_root = self.file_root.clone();
         canvas(
             move |bounds, window, cx| {
                 let clip = bounds.intersect(&window.content_mask().bounds);
@@ -316,26 +356,25 @@ impl Pane {
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .child(
-                        div()
-                            .h(px(18.))
-                            .px(px(8.))
-                            .text_size(px(9.5))
-                            .text_color(theme().text_muted)
-                            .child(notice),
-                    )
-                    .child(
-                        list(list_state.clone(), move |index, _, _| {
-                            RetainedRow {
-                                state: rows[index].clone(),
-                                index,
-                                painted: painted_rows.clone(),
-                            }
-                            .interactive(&list_state)
-                        })
-                        .flex_1()
-                        .min_h_0(),
-                    )
+                    .when(!notice.is_empty(), |view| {
+                        view.child(
+                            div()
+                                .h(px(18.))
+                                .px(px(8.))
+                                .truncate()
+                                .text_size(px(9.5))
+                                .text_color(theme().text_muted)
+                                .child(notice),
+                        )
+                    })
+                    .child(crate::transcript_view::list_view(
+                        list_state.clone(),
+                        rows,
+                        painted_rows,
+                        file_root,
+                        ends,
+                        decorate,
+                    ))
                     .into_any_element();
                 content.layout_as_root(bounds.size.map(gpui::AvailableSpace::Definite), window, cx);
                 content.prepaint_at(bounds.origin, window, cx);

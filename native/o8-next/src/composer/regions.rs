@@ -132,11 +132,15 @@ impl Surface {
                         .child(self.notice.clone()),
                 )
             })
-            .child(
-                list(self.list.clone(), {
-                    let list_state = self.list.clone();
+            .child(crate::transcript_view::list_view(
+                self.list.clone(),
+                self.rows.clone(),
+                painted_rows,
+                file_root.clone(),
+                ends.keys().copied().collect(),
+                {
                     let view = view.clone();
-                    move |index, window, _| {
+                    move |index, row, window, _| {
                         if index >= rows.len() {
                             let queue = (!queued.is_empty()).then(|| {
                                 super::conversation::queue_tail(
@@ -155,18 +159,8 @@ impl Surface {
                                 })
                                 .into_any_element();
                         }
-                        if rows[index].borrow().file_root != file_root {
-                            rows[index].borrow_mut().file_root = file_root.clone();
-                        }
-                        let row = RetainedRow {
-                            state: rows[index].clone(),
-                            index,
-                            painted: painted_rows.clone(),
-                        }
-                        .interactive(&list_state);
                         if let Some(prompt) = prompts.get(&index) {
                             return super::prompt_actions::container(view.clone(), prompt)
-                                .debug_selector(move || format!("transcript-row-{index}"))
                                 .w_full()
                                 .flex()
                                 .flex_col()
@@ -176,7 +170,6 @@ impl Surface {
                         }
                         match ends.get(&index) {
                             Some(text) => div()
-                                .debug_selector(move || format!("transcript-row-{index}"))
                                 .w_full()
                                 .flex()
                                 .flex_col()
@@ -201,17 +194,11 @@ impl Surface {
                                     text.clone(),
                                 ))
                                 .into_any_element(),
-                            None => div()
-                                .debug_selector(move || format!("transcript-row-{index}"))
-                                .w_full()
-                                .child(row)
-                                .into_any_element(),
+                            None => row,
                         }
                     }
-                })
-                .flex_1()
-                .min_h_0(),
-            )
+                },
+            ))
             .child(self.history_control(cx))
             .when(self.away_from_end && !self.changes_pill_shown(), |d| {
                 d.child(self.jump_to_end(cx))

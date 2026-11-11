@@ -10,6 +10,8 @@ mod image_loaded_shell_tests;
 #[cfg(test)]
 #[path = "../composer/loaded_shell_tests.rs"]
 mod loaded_shell_tests;
+#[path = "../worker_transcript.rs"]
+mod worker_transcript;
 pub(super) type Runtime = ();
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Slice {
@@ -267,9 +269,10 @@ pub struct Session {
 impl Session {
     /// This thread's id in the sidebar, given the shell's copy of it.
     pub(crate) fn list_id(&self) -> String {
-        self.machine
-            .as_deref()
-            .map_or_else(|| self.id.clone(), |machine| machine_thread_id(machine, &self.id))
+        self.machine.as_deref().map_or_else(
+            || self.id.clone(),
+            |machine| machine_thread_id(machine, &self.id),
+        )
     }
     /// Where this thread runs when that isn't this computer.
     pub(crate) fn away(&self) -> Option<&str> {
@@ -444,6 +447,10 @@ impl Client {
         let (history, bytes): (History, usize) = self.get_counted("/api/mobile/history", &query)?;
         if history.session_key != key {
             return Err("Server returned history for a different session".into());
+        }
+        if !key.starts_with("llm-chat:") {
+            let (history, normalized_bytes) = self.worker_history(history)?;
+            return Ok((history, bytes + normalized_bytes));
         }
         Ok((history, bytes))
     }

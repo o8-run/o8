@@ -35,7 +35,7 @@ use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
     model::Row,
-    retained::{RetainedRow, RowState},
+    retained::RowState,
     sidebar,
     stream::Transcript,
     transport::{self, Incoming, Subscription},
@@ -43,7 +43,7 @@ use crate::{
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Keystroke, ListAlignment,
     ListOffset, ListState, Render, Window, WindowBounds, WindowHandle, WindowOptions, canvas, div,
-    list, point, prelude::*, px, size,
+    point, prelude::*, px, size,
 };
 use serde_json::{Value, json};
 use std::{
@@ -372,9 +372,9 @@ impl Surface {
                     }
                     Err(error) => editor.controls.error = error,
                     Ok(None) => {
-                        if let Some(draft) =
-                            crate::composer::mode_store::load_draft(editor.controls.prompt.store.as_deref())
-                        {
+                        if let Some(draft) = crate::composer::mode_store::load_draft(
+                            editor.controls.prompt.store.as_deref(),
+                        ) {
                             editor.controls.files = draft.files;
                             editor.set_text(&draft.text, cx);
                         }

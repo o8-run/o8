@@ -2,6 +2,8 @@
 //! on a hairline rail. The live step shimmers under a spinning arc, new steps
 //! rise in, finished steps settle to past tense, and the header counts the
 //! seconds until it reads "Thought for Ns". Shell text is never executed.
+#[path = "trace_results.rs"]
+mod results;
 use crate::{
     activity::{Part, Step, summary},
     model::Trace,
@@ -163,6 +165,7 @@ struct Line {
     live: bool,
     chips: Vec<Chip>,
     more: usize,
+    results: Vec<String>,
 }
 
 fn noun(count: usize, one: &str, many: &str) -> String {
@@ -676,6 +679,16 @@ fn fit(chips: &[Chip], more: usize, width: f32) -> (Vec<usize>, usize) {
 
 /// One line per run of like work, worded as the work it did. Work that ran at
 /// the same time branches off the rail and rejoins it when it is done.
+fn result_ids(atoms: &[&Atom]) -> Vec<String> {
+    let mut ids = Vec::new();
+    for atom in atoms {
+        if atom.step.output.is_some() && !ids.contains(&atom.step.id) {
+            ids.push(atom.step.id.clone());
+        }
+    }
+    ids
+}
+
 fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
     let atoms = atoms(steps, trace.live);
     let titles: HashMap<String, String> = steps
@@ -720,6 +733,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
                 let (icon, label, chips, more) =
                     phrase(&group, running, running.then_some((done, total)), &titles);
                 out.push(Line {
+                    results: result_ids(&group),
                     key,
                     rail: Rail::Main,
                     icon,
@@ -746,6 +760,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
                 if atom.failed {
                     let (label, detail) = dead_end(atom, &titles);
                     out.push(Line {
+                        results: result_ids(&[atom]),
                         key: line_key,
                         rail,
                         icon: Icon::Cross,
@@ -759,11 +774,16 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
                 } else {
                     let (_, label, chips, more) = phrase(&[atom], atom.running, None, &titles);
                     out.push(Line {
+                        results: result_ids(&[atom]),
                         key: line_key,
                         rail,
                         icon: Icon::Dot,
                         label,
-                        detail: None,
+                        detail: atom
+                            .part
+                            .key
+                            .starts_with("git:")
+                            .then(|| atom.part.text.clone()),
                         tone: if atom.running {
                             Tone::Primary
                         } else {
@@ -777,6 +797,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
             }
             if !running {
                 out.push(Line {
+                    results: vec![],
                     key: format!("{key}:join"),
                     rail: Rail::Join,
                     icon: Icon::Ring,
@@ -794,6 +815,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
             index += 1;
             let (label, detail) = dead_end(first, &titles);
             out.push(Line {
+                results: result_ids(&[first]),
                 key,
                 rail: Rail::Dead,
                 icon: Icon::Cross,
@@ -809,6 +831,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
         let mut end = index + 1;
         while end < atoms.len()
             && !atoms[end].failed
+            && !shell_like(&first.part.key)
             && atoms[end].part.key == first.part.key
             && batch(&atoms[end]).is_none()
         {
@@ -819,11 +842,16 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
         let running = group.iter().any(|a| a.running);
         let (icon, label, chips, more) = phrase(&group, running, None, &titles);
         out.push(Line {
+            results: result_ids(&group),
             key,
             rail: Rail::Main,
             icon,
             label,
-            detail: None,
+            detail: first
+                .part
+                .key
+                .starts_with("git:")
+                .then(|| first.part.text.clone()),
             tone: if running {
                 Tone::Primary
             } else {
@@ -840,6 +868,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
             .zip(trace.ended)
             .is_some_and(|(s, e)| e - s >= 1000.);
         out.push(Line {
+            results: vec![],
             key: "done".into(),
             rail: Rail::Main,
             icon: if trace.stopped {
@@ -864,6 +893,11 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
             chips: vec![],
             more: 0,
         });
+    }
+    // A chained call can describe several actions, but exposes its result once.
+    let mut shown = std::collections::BTreeSet::new();
+    for line in &mut out {
+        line.results.retain(|id| shown.insert(id.clone()));
     }
     out
 }
@@ -1335,67 +1369,72 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
                         )
                     })
             });
-            body = body.child(
-                div()
-                    .id(("trace-line", position))
-                    .debug_selector(move || format!("trace-line-{index}-{position}"))
-                    .relative()
-                    .top(px(6. * (1. - appear)))
-                    .opacity(appear)
-                    .h(px((ROW + CHIPS * chips_open) * smooth(appear)))
-                    .overflow_hidden()
-                    .flex()
-                    .flex_col()
-                    .child(rail_canvas(
-                        line.rail,
-                        position == 0,
-                        position + 1 == count,
-                        slide,
-                    ))
-                    .child(
-                        div()
-                            .relative()
-                            .h(px(ROW))
-                            .flex_shrink_0()
-                            .flex()
-                            .items_center()
-                            .child(
-                                div()
-                                    .absolute()
-                                    .left(px(x - 8.))
-                                    .top(px(ROW / 2. - 8.))
-                                    .child(icon(line, beat)),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .pl(px(TEXT_X))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(7.))
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_color(tone(line.tone))
-                                    .opacity(0.3 + 0.7 * swap)
-                                    .child(div().flex_shrink_0().child(label))
-                                    .when_some(line.detail.clone(), |row, detail| {
-                                        row.child(
-                                            div()
-                                                .flex_1()
-                                                .min_w_0()
-                                                .overflow_hidden()
-                                                .whitespace_normal()
-                                                .text_ellipsis()
-                                                .line_clamp(1)
-                                                .text_color(theme().text_muted)
-                                                .child(detail),
-                                        )
-                                    }),
-                            ),
-                    )
-                    .children(chips_row),
-            );
+            let (result_toggle, result_body) =
+                results::elements(state.clone(), list, index, position, &line.results, &steps);
+            body = body
+                .child(
+                    div()
+                        .id(("trace-line", position))
+                        .debug_selector(move || format!("trace-line-{index}-{position}"))
+                        .relative()
+                        .top(px(6. * (1. - appear)))
+                        .opacity(appear)
+                        .h(px((ROW + CHIPS * chips_open) * smooth(appear)))
+                        .overflow_hidden()
+                        .flex()
+                        .flex_col()
+                        .child(rail_canvas(
+                            line.rail,
+                            position == 0,
+                            position + 1 == count,
+                            slide,
+                        ))
+                        .child(
+                            div()
+                                .relative()
+                                .h(px(ROW))
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .left(px(x - 8.))
+                                        .top(px(ROW / 2. - 8.))
+                                        .child(icon(line, beat)),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .pl(px(TEXT_X))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(7.))
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_color(tone(line.tone))
+                                        .opacity(0.3 + 0.7 * swap)
+                                        .child(div().min_w_0().truncate().child(label))
+                                        .when_some(line.detail.clone(), |row, detail| {
+                                            row.child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .overflow_hidden()
+                                                    .whitespace_normal()
+                                                    .text_ellipsis()
+                                                    .line_clamp(1)
+                                                    .text_color(theme().text_muted)
+                                                    .child(detail),
+                                            )
+                                        })
+                                        .children(result_toggle),
+                                ),
+                        )
+                        .children(chips_row),
+                )
+                .children(result_body);
         }
     }
 
