@@ -160,7 +160,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   bots: [
     route('/api/bots', 'GET', () => import('@/app/api/bots/route')),
-    route('/api/bots/[id]/thread', 'GET', () => import('@/app/api/bots/[id]/thread/route')),
+    route('/api/bots/[id]/thread', 'GET POST', () => import('@/app/api/bots/[id]/thread/route')),
     // Operator MCP host (the bots surface's mcp_url points here, surfaces/bots/client.rs). POST runs
     // the operator MCP tools over JSON-RPC; DELETE terminates a session (204); GET is 405. No
     // handler-level auth — gated by panelGateMiddleware, and /api/mcp is in no allowlist, so it is
