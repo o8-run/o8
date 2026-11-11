@@ -168,6 +168,7 @@ impl Client {
                 rejected: false,
                 unread: false,
                 packet_header,
+                runtime_name: None,
                 packet_state: false,
                 inbox_subject: Some(&agent["inboxSubject"])
                     .filter(|v| v.is_object())
@@ -329,6 +330,7 @@ pub(super) fn label_from_task(worker: &mut Session) {
         .as_str()
         .filter(|title| !title.trim().is_empty())
     {
+        worker.runtime_name = Some(std::mem::take(&mut worker.title));
         worker.title = crate::text::sanitize(title);
     }
     if let Some(repo) = header["repo"].as_str().filter(|repo| !repo.is_empty()) {
@@ -357,6 +359,7 @@ mod task_title_tests {
             Some(json!({"title": "Review PR 5870 request changes", "repo": "o8"}));
         label_from_task(&mut worker);
         assert_eq!(worker.title, "Review PR 5870 request changes");
+        assert_eq!(worker.runtime_name.as_deref(), Some("o8 • agent/review-pr-5870-4b4801"));
         assert_eq!(worker.repo_slug.as_deref(), Some("o8"));
     }
 
