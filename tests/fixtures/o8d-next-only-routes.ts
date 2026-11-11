@@ -35,7 +35,6 @@ export const NEXT_ONLY_NATIVE_METHODS: NextOnlyTable = {
   'POST /api/bots/[id]/thread': seek("bot mailbox reply"),
   'POST /api/panel/branches': seek('create a branch from the composer'),
   'POST /api/panel/file-io': security('local file write chosen by path: filesystem jail'),
-  'POST /api/panel/problem-dossiers': seek('record a decision on a problem dossier'),
   'POST /api/repo-spec': security('device and worker grants'),
   'PUT /api/repo-spec': security('device and worker grants'),
   'POST /api/setup/cli-updates': seek('install or update a runtime CLI'),

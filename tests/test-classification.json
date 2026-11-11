@@ -5531,6 +5531,13 @@
       ]
     },
     {
+      "path": "tests/o8d-dossier-writes-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-input-drain-real-path.test.ts",
       "reasons": [
         "child-process",
