@@ -784,6 +784,8 @@ const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> 
   ['POST', '/api/orchestrator/steer-packet', 403],
   ['POST', '/api/cortex/reingest', 403],
   ['POST', '/api/orchestrator/stop-packet', 403],
+  ['GET', '/api/orchestrator/worker-corrections?packetId=fixture-missing', 403],
+  ['POST', '/api/orchestrator/worker-corrections', 403],
   ['POST', '/api/orchestrator/rerun-with-feedback', 403],
   ['POST', '/api/orchestrator/reset-packet', 403],
   ['POST', '/api/orchestrator/spawn-prompt', 403],
@@ -815,7 +817,7 @@ it.each(WRITE_ROUTES)('refuses native %s %s without the operator bearer', async 
   const forged = { 'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged', 'content-type': 'application/json' };
   const send = (authorization?: string) => fetch(origin + path, { method,
     headers: { ...forged, ...(authorization ? { authorization } : {}) },
-    body: JSON.stringify({ action: 'dismiss_observation', id: 'fixture', threadId: 'thoughts-fixture', text: 'Denied fixture' }) });
+    body: method === 'GET' ? undefined : JSON.stringify({ action: 'dismiss_observation', id: 'fixture', threadId: 'thoughts-fixture', text: 'Denied fixture' }) });
   for (const [authorization, status] of [[undefined, 401], ['Bearer fixture-invalid', 401],
     ['Bearer o8ro_fixture-read-only', 403], [`Bearer ${worker.token}`, workerStatus]] as const) {
     const response = await send(authorization);
@@ -931,4 +933,12 @@ it('resets an orchestrator session through the native transport', async () => {
     body: JSON.stringify({ repoPath: server.directory, threadId: 'thoughts-native-reset' }) });
   expect(response.status).toBe(200);
   expect((await response.json()).ok).toBe(true);
+});
+
+it('serves saved-review correction availability through the native transport without Next', async () => {
+  const response = await fetch(`${origin}/api/orchestrator/worker-corrections?packetId=fixture-missing`, {
+    headers: { authorization: `Bearer ${server.token}` },
+  });
+  expect(response.status).toBe(200);
+  expect((await response.json()).reviewCorrection).toMatchObject({ available: false, reason: 'No saved review is available for this packet.' });
 });

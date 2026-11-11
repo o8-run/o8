@@ -675,6 +675,9 @@ impl ActivityPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.packet.corrections.values().any(|view| view.read(cx).editing(window, cx)) {
+            return;
+        }
         if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
             return;
         }

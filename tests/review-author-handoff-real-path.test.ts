@@ -361,3 +361,39 @@ it.each(['delivered', 'busy', 'stopped'] as const)('hands a persisted rejection 
     findings: [expect.objectContaining({ resolution: 'deferred' })] });
   expect((await readOwnedRecoveryState(target.surfaceId)).automaticRecoveryAllowed).toBe(false);
 }, 60000);
+
+it('preflights the saved review without sending and delivers an optional note in the same correction record', async () => {
+  const { target, review } = await reviewedAuthor('manual-note');
+  const availability = async () => {
+    const response = await corrections.GET(new NextRequest(`http://localhost/api/orchestrator/worker-corrections?packetId=${packetId}`, {
+      headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` },
+    }));
+    expect(response.status).toBe(200);
+    return (await response.json()).reviewCorrection;
+  };
+  const before = record(target.surfaceId);
+  expect(await availability()).toMatchObject({ available: true, review: { ...target, approvalId: review.auditApprovalId, reviewedHeadSha: head } });
+  expect(record(target.surfaceId).recentRuns).toHaveLength(before.recentRuns.length);
+  writeFileSync(join(repo, 'unreviewed.txt'), 'unreviewed work');
+  expect(await availability()).toMatchObject({ available: false, reason: expect.stringContaining('uncommitted changes') });
+  rmSync(join(repo, 'unreviewed.txt'));
+  const body = reviewBody(target, review);
+  const response = await corrections.POST(request({ ...body, note: 'Keep the public interface stable.' }));
+  const value = await response.json();
+  expect(response.status, JSON.stringify(value)).toBe(200);
+  expect(value.receipt.payload.message).toContain('Operator note:\nKeep the public interface stable.');
+  await settled(target.surfaceId);
+  expect(record(target.surfaceId).recentRuns[0].prompt).toContain('Keep the public interface stable.');
+  expect(record(target.surfaceId).repoPath).toBe(before.repoPath);
+  // The automatic loop, without a note, reads the same durable record.
+  expect((await (await corrections.POST(request(body))).json()).receipt.id).toBe(value.receipt.id);
+  expect((await availability()).available).toBe(false);
+  expect((await corrections.POST(request({ ...body, note: 'A different note' }))).status).toBe(409);
+}, 60000);
+
+it('disables author delivery when the saved review is missing and preserves read authorization', async () => {
+  const url = 'http://localhost/api/orchestrator/worker-corrections?packetId=missing-review';
+  const result = await corrections.GET(new NextRequest(url, { headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` } }));
+  expect((await result.json()).reviewCorrection).toMatchObject({ available: false, reason: 'No saved review is available for this packet.' });
+  expect((await corrections.GET(new NextRequest(url, { headers: { host: 'localhost', authorization: 'Bearer invalid' } }))).status).toBe(403);
+});

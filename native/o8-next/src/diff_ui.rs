@@ -24,6 +24,7 @@ pub(crate) use scope::Scope;
 
 pub(crate) struct DiffSurface {
     client: Client,
+    request_changes: Option<gpui::Entity<crate::request_changes::RequestChanges>>,
     pub(crate) target: Target,
     pub(crate) document: Rc<Document>,
     pub(crate) selected: usize,
@@ -89,7 +90,12 @@ impl DiffSurface {
     ) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
+        let request_changes = match &target {
+            Target::Packet(packet) => Some(cx.new(|cx| crate::request_changes::RequestChanges::new(client.clone(), packet.clone(), cx))),
+            _ => None,
+        };
         let mut surface = Self {
+            request_changes,
             client,
             target,
             document: Rc::new(Document::default()),
@@ -124,6 +130,7 @@ impl DiffSurface {
         if self.busy {
             return;
         }
+        if let Some(view) = &self.request_changes { view.update(cx, |view, cx| view.refresh(cx)); }
         self.generation += 1;
         let generation = self.generation;
         self.ready = false;
@@ -486,7 +493,8 @@ impl Render for DiffSurface {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.5))
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.request_changes.as_ref().is_some_and(|view| view.read(cx).editing(window, cx)) { return; }
                 match event.keystroke.key.as_str() {
                     key @ ("home" | "end") if this.stacked() => {
                         let shown = this.shown();
@@ -639,6 +647,7 @@ impl Render for DiffSurface {
                         },
                     ),
             )
+            .when_some(self.request_changes.clone(), |view, control| view.child(div().px(px(16.)).py(px(6.)).child(control)))
             .child(body)
     }
 }

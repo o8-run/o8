@@ -80,6 +80,7 @@ fn diff_real_server_selection_modes_review_and_virtualized_paint(cx: &mut TestAp
         assert_eq!(renamed.old_path, "old name.md");
         assert_eq!(renamed.path, "new name.md");
     });
+    assert!(cx.debug_bounds("request-changes").is_some(), "Packet diff must expose original-author delivery");
     // Exercise actual GPUI controls, including server-backed decision refresh.
     let file = cx.debug_bounds("diff-file-1").unwrap();
     cx.simulate_click(file.center(), gpui::Modifiers::default());

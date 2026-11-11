@@ -43,6 +43,7 @@ pub(super) struct State {
     pub briefs: HashSet<String>,
     pub editor: Option<Editor>,
     pub action: Option<String>,
+    pub corrections: HashMap<String, Entity<crate::request_changes::RequestChanges>>,
 }
 pub(super) fn identity(row: &Row) -> String {
     json!([
@@ -87,6 +88,9 @@ impl ActivityPane {
                 .is_some_and(|r| r.identity == key)
         {
             return;
+        }
+        if let Some(control) = self.packet.corrections.get(&row.id) {
+            control.update(cx, |control, cx| control.refresh(cx));
         }
         self.packet.request += 1;
         let request = self.packet.request;

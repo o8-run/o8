@@ -13,6 +13,7 @@ mod diff;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;
+mod request_changes;
 mod editor_command;
 mod files_panel;
 mod grid_sessions;

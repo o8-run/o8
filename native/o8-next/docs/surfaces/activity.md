@@ -28,6 +28,24 @@ lost-stop receipt replay. Existing [parity](../../evidence/activity/parity.md),
 under Activity's evidence directory. This extraction does not complete the
 missing parity items or change the installed app's opt-in behavior.
 
+## Request changes
+
+Packet verdicts and the packet diff expose Request changes through the shared
+native control in `src/request_changes.rs`. It inspects the saved rejection and
+exact author run through GET `/api/orchestrator/worker-corrections?packetId=...`,
+then posts that saved review and an optional note to the same existing route.
+The manual control and review loop share one correction identity and record.
+Availability is read-only; POST repeats the delivery checks under the packet lock.
+
+Unavailable authors leave the send control disabled with the reason inline and
+a pointer to Start over with feedback. No failure automatically retires a worker
+or removes its checkout. A transport retry preserves the exact review, run and
+note that may already have reached the author. An accepted delivery remains
+unresolved review evidence until independent verification.
+
+The classic banner's orchestrator-composer recovery prefill is deliberately not
+ported as a third control. Start over with feedback belongs to the reset controls.
+
 ## Extraction verification
 
 The real GPUI Hold/Release/Stop mission test failed before the discovered fixture

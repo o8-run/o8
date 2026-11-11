@@ -68,6 +68,7 @@ fn activity_packet_card_review_files_and_diff_controls(cx: &mut TestAppContext) 
         "activity-packet-tab-files",
         "activity-packet-tab-changes",
         "activity-packet-review",
+        "request-changes",
     ] {
         assert!(
             visual.debug_bounds(id).is_some(),

@@ -6,6 +6,9 @@ impl ActivityPane {
         read: &packet::Review,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        let control = self.packet.corrections.entry(row.id.clone()).or_insert_with(|| {
+            cx.new(|cx| crate::request_changes::RequestChanges::new(self.client.clone(), row.id.clone(), cx))
+        }).clone();
         let review = &row.data["review"];
         let verdict = if review.is_null() {
             "Review pending"
@@ -65,6 +68,6 @@ impl ActivityPane {
                 }
             }
         }
-        view.into_any_element()
+        view.child(control).into_any_element()
     }
 }
