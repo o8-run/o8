@@ -59,6 +59,15 @@ fn activity_packet_recovery_retry_control(cx: &mut TestAppContext) {
     activity_click(&mut visual, "activity-filter-packet");
     activity_click(&mut visual, "activity-row-packet-local-activity-packet");
     assert!(visual.debug_bounds("activity-recovery-retry").is_some());
+    let retry = visual.debug_bounds("activity-recovery-retry").unwrap();
+    let worker = visual.debug_bounds("activity-open-worker").unwrap();
+    assert_eq!(
+        retry.top(),
+        worker.top(),
+        "recovery belongs to the existing action row"
+    );
+    assert!(retry.size.width < px(140.));
+
     mode(&fixture, "recovery-unknown");
     click(&view, &mut visual, "activity-recovery-retry");
     settle(&view, &mut visual);
@@ -168,6 +177,10 @@ fn activity_packet_recovery_start_over_control(cx: &mut TestAppContext) {
     activity_click(&mut visual, "activity-filter-packet");
     activity_click(&mut visual, "activity-row-packet-local-activity-packet");
     click(&view, &mut visual, "activity-recovery-start-over");
+    assert!(
+        visual.debug_bounds("composer-input").unwrap().size.width > px(300.),
+        "the feedback field must retain the packet card's available width"
+    );
     let row = view.read_with(&visual, |view, _| {
         view.rows
             .iter()
@@ -192,6 +205,19 @@ fn activity_packet_recovery_start_over_control(cx: &mut TestAppContext) {
     );
     visual.simulate_keystrokes("cmd-a");
     visual.simulate_input("Keep the public interface stable.");
+    visual.simulate_keystrokes("escape");
+    draw(&mut visual);
+    assert!(visual.debug_bounds("activity-recovery-confirm").is_none());
+    assert!(
+        view.read_with(&visual, |view, _| view.expanded.is_some()),
+        "Escape closes the field without closing the packet"
+    );
+    click(&view, &mut visual, "activity-recovery-start-over");
+    click(&view, &mut visual, "activity-recovery-cancel");
+    draw(&mut visual);
+    assert!(visual.debug_bounds("activity-recovery-confirm").is_none());
+    click(&view, &mut visual, "activity-recovery-start-over");
+
     mode(&fixture, "recovery-refused");
     click(&view, &mut visual, "activity-recovery-confirm-submit");
     settle(&view, &mut visual);

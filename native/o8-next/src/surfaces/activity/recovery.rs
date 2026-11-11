@@ -1,4 +1,5 @@
 //! Existing packet lifecycle routes; an uncertain request keeps its original identity.
+use super::feed::text;
 use super::*;
 use crate::{composer::Composer, theme::current as theme};
 use gpui::{AppContext, Entity, div, prelude::*, px};
@@ -92,7 +93,15 @@ impl ActivityPane {
         if self.pending || self.unsettled.is_some() {
             return;
         }
-        let mut body = json!({"packetId": id, "idempotencyKey": format!("next-recovery-{}-{}",std::process::id(),SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos())});
+        let mutation = format!(
+            "next-recovery-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let mut body = json!({ "packetId": id, "idempotencyKey": mutation });
         let path = if kind == Kind::StartOver {
             let Some(editor) = self.packet.recovery.inputs.get(id) else {
                 return;
@@ -144,73 +153,82 @@ impl ActivityPane {
             self.button(id.to_string(), title.to_string(), action, cx)
         }
     }
-    pub(super) fn recovery_controls(
+    pub(super) fn recovery_actions(
         &mut self,
         row: &Row,
         live: bool,
         cx: &mut Context<Self>,
-    ) -> gpui::Div {
+    ) -> Vec<gpui::AnyElement> {
+        let status = text(&row.data, "status");
+        if row.data["archivedAt"].is_string()
+            || text(&row.data["lane"], "laneId").is_empty()
+            || !matches!(
+                status.as_str(),
+                "blocked" | "idle" | "recovering" | "awaiting_review" | "running" | "launching"
+            )
+        {
+            return vec![];
+        }
         let active = self.pending && self.packet.action.as_deref() == Some(row.id.as_str());
         let kind = self.packet.recovery.active;
-        let mut view = div()
-            .w_full()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .pt(px(6.))
-            .debug_selector(|| "activity-packet-recovery".into())
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(6.))
-                    .child(self.recovery_button(
-                        "activity-recovery-retry",
-                        if active && kind == Some(Kind::Retry) {
-                            "Retrying…"
-                        } else {
-                            "Retry"
-                        },
-                        Action::Recovery(row.clone(), Kind::Retry),
-                        cx,
-                    ))
-                    .child(self.recovery_button(
-                        if live {
-                            "activity-recovery-stop-reset"
-                        } else {
-                            "activity-recovery-reset"
-                        },
-                        if active && matches!(kind, Some(Kind::Reset | Kind::StopReset)) {
-                            "Resetting…"
-                        } else if live {
-                            "Stop and reset…"
-                        } else {
-                            "Reset…"
-                        },
-                        Action::Recovery(
-                            row.clone(),
-                            if live { Kind::StopReset } else { Kind::Reset },
-                        ),
-                        cx,
-                    ))
-                    .child(self.recovery_button(
-                        "activity-recovery-start-over",
-                        if active && kind == Some(Kind::StartOver) {
-                            "Starting over…"
-                        } else {
-                            "Start over with feedback…"
-                        },
-                        Action::Recovery(row.clone(), Kind::StartOver),
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .text_size(px(11.))
-                    .text_color(theme().text_muted)
-                    .child("Reset leaves the packet held for an explicit dispatch."),
+        let mut actions = vec![];
+        if matches!(status.as_str(), "blocked" | "idle" | "recovering") {
+            actions.push(
+                self.recovery_button(
+                    "activity-recovery-retry",
+                    if active && kind == Some(Kind::Retry) {
+                        "Retrying…"
+                    } else {
+                        "Retry"
+                    },
+                    Action::Recovery(row.clone(), Kind::Retry),
+                    cx,
+                )
+                .text_color(theme().text_muted)
+                .into_any_element(),
             );
+        }
+        actions.push(
+            self.recovery_button(
+                if live {
+                    "activity-recovery-stop-reset"
+                } else {
+                    "activity-recovery-reset"
+                },
+                if active && matches!(kind, Some(Kind::Reset | Kind::StopReset)) {
+                    "Resetting…"
+                } else if live {
+                    "Stop and reset…"
+                } else {
+                    "Reset…"
+                },
+                Action::Recovery(
+                    row.clone(),
+                    if live { Kind::StopReset } else { Kind::Reset },
+                ),
+                cx,
+            )
+            .text_color(theme().text_muted)
+            .into_any_element(),
+        );
+        actions.push(
+            self.recovery_button(
+                "activity-recovery-start-over",
+                if active && kind == Some(Kind::StartOver) {
+                    "Starting over…"
+                } else {
+                    "Start over with feedback…"
+                },
+                Action::Recovery(row.clone(), Kind::StartOver),
+                cx,
+            )
+            .text_color(theme().text_muted)
+            .into_any_element(),
+        );
+        actions
+    }
+    pub(super) fn recovery_confirmation(&mut self, row: &Row, cx: &mut Context<Self>) -> gpui::Div {
+        let view = div().w_full().min_w_0();
         let Some((id, kind)) = self
             .packet
             .recovery
@@ -221,12 +239,30 @@ impl ActivityPane {
             return view;
         };
         let starting_over = kind == Kind::StartOver;
-        let mut confirm = div().w_full().min_w_0().flex().flex_col().gap(px(8.)).p(px(10.)).rounded(px(6.))
-            .border_1().border_color(theme().danger).bg(theme().danger_surface)
+        let warning = if starting_over {
+            concat!(
+                "Current work will be discarded. The worker stops, its checkout is removed, ",
+                "and a new attempt is queued with your feedback."
+            )
+        } else {
+            concat!(
+                "Current work will be discarded. Stop the worker, remove its checkout, ",
+                "and reset this packet to a held draft?"
+            )
+        };
+        let mut confirm = div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .p(px(10.))
+            .rounded(px(6.))
+            .border_1()
+            .border_color(theme().danger)
+            .bg(theme().danger_surface)
             .debug_selector(|| "activity-recovery-confirm".into())
-            .child(div().text_size(px(11.)).child(if starting_over {
-                "Current work will be discarded. The worker stops, its checkout is removed, and a new attempt is queued with your feedback."
-            } else { "Current work will be discarded. Stop the worker, remove its checkout, and reset this packet to a held draft?" }));
+            .child(div().text_size(px(11.)).child(warning));
         let mut valid = true;
         if starting_over && let Some(editor) = self.packet.recovery.inputs.get(&id) {
             let input = editor.input.clone();
@@ -294,7 +330,6 @@ impl ActivityPane {
                     .child("This request is unsettled. Refresh to inspect the original receipt."),
             );
         }
-        view = view.child(confirm);
-        view
+        view.child(confirm)
     }
 }

@@ -124,7 +124,9 @@ impl ActivityPane {
                 cx,
             ));
         }
-        view = view.child(destructive);
+        view = view
+            .children(self.recovery_actions(row, live, cx))
+            .child(destructive);
         if self.closing.as_deref() == Some(row.id.as_str()) {
             view = view.child(self.close_unmerged(row, cx));
         }
@@ -161,6 +163,6 @@ impl ActivityPane {
             );
         }
 
-        view.child(self.recovery_controls(row, live, cx))
+        view.child(self.recovery_confirmation(row, cx))
     }
 }

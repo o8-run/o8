@@ -129,13 +129,16 @@ documentation and evidence files, the PR adds only one shell registration line.
 
 ## Packet recovery controls
 
-Expanded packet cards offer Retry, Reset (Stop and reset while the worker is
-running), and Start over with feedback. Retry posts `clearWorktree: false` to the
+Existing action rows on blocked, active or review lanes offer recovery controls;
+queued drafts and archived lanes do not. Retry appears for blocked, idle or
+recovering lanes. Reset (Stop and reset while running) and Start over with feedback
+use content-width secondary buttons in the same decision row. Retry posts `clearWorktree: false` to the
 existing reset route. Reset posts `clearWorktree: true` after a discard confirmation
 and leaves the packet held, as the server already does. Start over uses the
 existing rerun-with-feedback route and confirms that current work is discarded
 before queuing a fresh attempt. Feedback uses the route's 4000 UTF-16-unit limit.
 
+Cancel and Escape close an open recovery form without losing feedback.
 Failures keep the confirmation and feedback. In-flight requests disable recovery
 controls. An unresolved outcome keeps its exact mutation body and identity; Refresh
 reads that original receipt before another action can begin. Server notes remain
