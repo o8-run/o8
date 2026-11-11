@@ -779,6 +779,7 @@ const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> 
   ['POST', '/api/orchestrator/delegate', 403],
   ['POST', '/api/next/voice-host', 403],
   ['POST', '/api/orchestrator/discard-packet', 403],
+  ['POST', '/api/lanes/discard-orphaned', 403],
   ['POST', '/api/orchestrator/comparison-pick', 403],
   ['POST', '/api/orchestrator/workspace', 403],
   ['POST', '/api/orchestrator/steer-packet', 403],
@@ -909,6 +910,7 @@ it.each([
   ['POST', '/api/orchestrator/compact', { repoPath: '' }, 400, 'repoPath is required'],
   ['POST', '/api/orchestrator/delegate', {}, 400, 'clientMutationId is required'],
   ['POST', '/api/orchestrator/discard-packet', { packetId: 'fixture-missing' }, 400, 'client_mutation_id_required'],
+  ['POST', '/api/lanes/discard-orphaned', {}, 400, 'laneId is required'],
   ['POST', '/api/orchestrator/comparison-pick', {}, 400, 'packetId is required'],
   ['POST', '/api/orchestrator/workspace', { action: 'restore', packetId: 'fixture-missing', clientMutationId: 'fixture' }, 404, 'workspace_not_found'],
   ['POST', '/api/orchestrator/steer-packet', {}, 400, 'invalid_request'],
@@ -931,4 +933,43 @@ it('resets an orchestrator session through the native transport', async () => {
     body: JSON.stringify({ repoPath: server.directory, threadId: 'thoughts-native-reset' }) });
   expect(response.status).toBe(200);
   expect((await response.json()).ok).toBe(true);
+});
+
+
+it('discards only the missing-checkout lane through native HTTP with Next stopped', async () => {
+  const port = new URL(origin).port;
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token,
+    CORTEX_REALTIME_INTERNAL_ORIGIN: origin, O8_API_PORT: port, O8_WS_PORT: port, PORT: port };
+  const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { createLane, updateLane } = require('./src/lib/lane/registry.ts');
+    const { join } = require('node:path');
+    const root = process.env.CORTEX_IDE_DATA_DIR;
+    const missing = createLane({ repoPath: root, branch: 'fixture-orphaned', runtime: 'codex', worktreePath: join(root, 'removed-checkout') });
+    const present = createLane({ repoPath: root, branch: 'fixture-present', runtime: 'codex', worktreePath: root });
+    for (const lane of [missing, present]) updateLane(lane.id, { status: 'awaiting_orchestrator' });
+    console.log(JSON.stringify({ missing: missing.id, present: present.id }));
+    require('./src/lib/db/index.ts').closeDb();
+  `], { env });
+  const fixture = JSON.parse(seeded.stdout.split('\n').find(line => line.startsWith('{"missing":'))!) as { missing: string; present: string };
+  const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const post = (laneId: string) => fetch(`${origin}/api/lanes/discard-orphaned`, {
+    method: 'POST', headers, body: JSON.stringify({ laneId }),
+  });
+  const diff = await fetch(`${origin}/api/lanes/${fixture.missing}/diff`, { headers });
+  expect(diff.status).toBe(409);
+  expect((await diff.json()).error).toMatchObject({ code: 'worktree_missing', laneId: fixture.missing });
+  const refused = await post(fixture.present);
+  expect(refused.status).toBe(409);
+  expect((await refused.json()).error.code).toBe('worktree_present');
+  const discarded = await post(fixture.missing);
+  expect(discarded.status).toBe(200);
+  expect(await discarded.json()).toMatchObject({ ok: true, laneId: fixture.missing, status: 'archived' });
+  const again = await post(fixture.missing);
+  expect(again.status).toBe(409);
+  expect((await again.json()).error.code).toBe('already_terminal');
+  const active = await fetch(`${origin}/api/lanes?active=true`, { headers });
+  const lanes = await active.json();
+  expect(JSON.stringify(lanes)).not.toContain(fixture.missing);
+  expect(JSON.stringify(lanes)).toContain(fixture.present);
 });

@@ -734,3 +734,7 @@ pub fn try_launch(args: &[String]) -> Result<bool, String> {
     launch(client, target, offscreen);
     Ok(true)
 }
+
+#[cfg(test)]
+#[path = "diff_missing_tests.rs"]
+mod missing_tests;
