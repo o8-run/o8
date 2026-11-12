@@ -41,14 +41,17 @@ export async function forwardToSettingsWindowOwner(request: Request): Promise<Re
 
 export async function settingsWindowError(): Promise<string | null> {
   if (nextOwnsSettingsWindow() && isNativeCortexReader()) {
-    const { getOrCreateWsToken } = await import('@/lib/ws-auth');
-    const result = await forwardToSettingsWindowOwner(new Request('http://window-owner.invalid/api/panel/operator-defaults?include=window-error', {
-      headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
-    }));
-    if (!result.ok) throw new Error('Window owner unavailable');
-    const body = await result.json();
-    if (body.nextWindowError !== null && typeof body.nextWindowError !== 'string') throw new Error('Window owner unavailable');
-    return body.nextWindowError;
+    // A settings read must not fail because the window owner is down or slow: report no
+    // window error (there is no window to report on) within a short bound.
+    try {
+      const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+      const result = await forwardToSettingsWindowOwner(new Request('http://window-owner.invalid/api/panel/operator-defaults?include=window-error', {
+        headers: { authorization: `Bearer ${getOrCreateWsToken()}` }, signal: AbortSignal.timeout(2_000),
+      }));
+      if (!result.ok) { await result.body?.cancel(); return null; }
+      const body = await result.json();
+      return typeof body.nextWindowError === 'string' ? body.nextWindowError : null;
+    } catch { return null; }
   }
   return (await import('@/lib/next/app-window')).nextWindowError();
 }

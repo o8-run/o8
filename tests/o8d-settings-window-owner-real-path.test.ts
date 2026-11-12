@@ -69,7 +69,7 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(async () => {
   (await import('@/lib/db')).closeDb();
-  await server?.stop(); await new Promise<void>(resolve => next.close(() => resolve()));
+  await server?.stop(); if (next.listening) await new Promise<void>(resolve => next.close(() => resolve()));
   vi.unstubAllEnvs();
 });
 
@@ -199,4 +199,16 @@ it('serves the plain settings save from Next and keeps it when index reconciliat
     expect(runtime.__o8NativeWindow?.child).toBeUndefined();
     expect(existsSync(join(directory, 'ws-window-actions'))).toBe(false);
   } finally { vi.unstubAllGlobals(); rmdirSync(folder); }
+});
+
+it('answers native settings reads when the window owner is not running', async () => {
+  // o8 next can boot against WS with Next stopped; its settings reads must still succeed.
+  await new Promise<void>(resolve => next.close(() => resolve()));
+  for (const path of ['/api/panel/operator-defaults?include=values', '/api/panel/operator-defaults']) {
+    const started = Date.now();
+    const read = await call(undefined, path, origin);
+    expect(read.status, path).toBe(200);
+    expect((await read.json()).nextWindowError).toBeNull();
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }
 });
