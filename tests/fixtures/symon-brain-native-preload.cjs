@@ -1,17 +1,16 @@
-// Replace only model access. The singleton, harness, store claim and HTTP handlers are real.
+// Replace only the provider factory. Load the real module first so its constants
+// retain their identity; redirecting that module through an ESM loader creates a cycle.
+// The singleton, harness, store claim and HTTP handlers remain real.
 const Module = require('node:module');
 const { appendFileSync } = require('node:fs');
 const { join } = require('node:path');
-const { pathToFileURL } = require('node:url');
-// The async resolver chains with tsx; synchronous hooks cannot do so.
-Module.register(pathToFileURL(join(__dirname, 'symon-brain-native-loader.mjs')).href);
 const original = Module._load;
 Module._load = function(request, parent, isMain) {
   const real = original.call(this, request, parent, isMain);
   if (/\/symon\/durable\/managed-provider(?:\.ts)?$/.test(request) || (request === './managed-provider' && /symon[\/]durable[\/]brain/.test(parent?.filename ?? ''))) {
     return { ...real, createSymonManagedProvider: async () => {
       const stub = await import('./symon-brain-native-provider.mjs');
-      return stub.createSymonManagedProvider();
+      return stub.createSymonManagedProvider(real.SYMON_MANAGED_MODEL);
     } };
   }
   if (/\/cortex\/owner-process(?:\.ts)?$/.test(request)) {

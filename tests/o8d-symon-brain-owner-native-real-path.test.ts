@@ -35,7 +35,9 @@ describe.each([true, false])('WS brain owner, o8d=%s', o8d => {
   afterAll(async () => { await server?.stop(); });
   function call(method: string, path: string, token = server.token, body: unknown = {}) {
     return fetch(`${origin}${path}`, { method, headers: { ...forged, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: method === 'GET' ? undefined : JSON.stringify(body) });
+      body: method === 'GET' ? undefined : JSON.stringify(body) }).catch(error => {
+      throw new Error(`WS request failed: ${JSON.stringify(server.diagnostics())}`, { cause: error });
+    });
   }
   it('keeps all route auth grants and shapes with Next stopped, including socket peer stamping', async () => {
     for (const [method, path, status] of routes) {
@@ -89,13 +91,31 @@ it.each([true, false])('WS alone resumes an unfinished turn once (old owner aliv
       expect((await fetch(`${origin}/api/panel/symon/conversations`, { headers })).status).toBe(503);
       expect(existsSync(join(directory, 'resume-calls.log'))).toBe(false);
       const exited = once(holder, 'exit'); holder.kill('SIGKILL'); await exited;
+      expect((await fetch(`${origin}/api/panel/symon/conversations`, { headers })).status).toBe(200);
     } else {
       expect((await fetch(`${origin}/api/panel/symon/conversations`, { headers })).status).toBe(200);
+    }
+    // Recovery must happen on open, before any request can submit the turn again.
+    await expect.poll(() => existsSync(join(directory, 'resume-calls.log'))
+      ? readFileSync(join(directory, 'resume-calls.log'), 'utf8') : '', { timeout: 15_000 }).toBe('resume\n');
+    const probe = spawn(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--require=tsx/cjs',
+      'tests/fixtures/symon-brain-owner-child.cjs', join(directory, 'symon/durable.sqlite'), 'probe'],
+    { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    const probeExit = once(probe, 'exit');
+    try {
+      expect(await once(probe, 'message').then(([message]) => message)).toMatchObject({
+        opened: false, error: expect.stringContaining('symon_brain_owned'),
+      });
+    } finally {
+      if (probe.exitCode === null && probe.signalCode === null) probe.kill('SIGKILL');
+      await probeExit;
     }
     const resumed = await fetch(`${origin}/api/panel/symon/conversations/continue`, { method: 'POST', headers,
       body: JSON.stringify({ key: 'app:recovery', requestId: 'recovery-1', text: 'Recover this turn' }) });
     expect(await resumed.json()).toMatchObject({ state: 'done', text: 'Recovered once.' });
-    expect(readFileSync(join(directory, 'provider-bound.log'), 'utf8')).toBe(`${server.pid}\n`);
+    const firstPid = server.pid;
+    expect(firstPid).not.toBe(process.pid);
+    expect(readFileSync(join(directory, 'provider-bound.log'), 'utf8')).toBe(`${firstPid}\n`);
     // Next forwards the repeated in-flight request and neither opens nor resumes a store.
     vi.stubEnv('O8_NEXT_O8D', undefined); vi.stubEnv('O8_WS_PORT', new URL(origin).port);
     try {
@@ -109,6 +129,12 @@ it.each([true, false])('WS alone resumes an unfinished turn once (old owner aliv
     expect(readFileSync(join(directory, 'resume-calls.log'), 'utf8')).toBe('resume\n');
     const transcript = await (await fetch(`${origin}/api/panel/symon/conversations/transcript?key=app:recovery`, { headers })).json();
     expect(transcript.transcript.filter((entry: { role: string }) => entry.role === 'user')).toHaveLength(1);
+    await server.stop();
+    server = await startParityReference({ o8d: false, nativeHttp: true, directory, preload: './tests/fixtures/symon-brain-native-preload.cjs' });
+    const restartedOrigin = server.url.replace('ws:', 'http:').replace('/ws', '');
+    expect((await fetch(`${restartedOrigin}/api/panel/symon/conversations/transcript?key=app:recovery`, { headers })).status).toBe(200);
+    expect(readFileSync(join(directory, 'provider-bound.log'), 'utf8')).toBe(`${firstPid}\n${server.pid}\n`);
+    expect(readFileSync(join(directory, 'resume-calls.log'), 'utf8')).toBe('resume\n');
   } finally {
     if (holder && holder.exitCode === null && holder.signalCode === null) { const exited = once(holder, 'exit'); holder.kill('SIGKILL'); await exited; }
     await server?.stop(); rmSync(directory, { recursive: true, force: true });
