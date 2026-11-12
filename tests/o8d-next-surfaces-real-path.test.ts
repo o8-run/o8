@@ -402,8 +402,18 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   }
   // Task creation and Cortex decisions reuse production POSTs; the remaining reads stay GET-only.
   const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
-  expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
-  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
+  const readWriteMethods: Record<string, string[]> = {
+    '/api/tasks': ['GET', 'POST'],
+    '/api/cortex/proposals': ['GET', 'POST'],
+    '/api/cortex/cross-repo-proposals': ['GET', 'POST'],
+    '/api/setup/cli-updates': ['GET', 'POST'],
+    '/api/panel/problem-dossiers': ['GET', 'POST'],
+    '/api/repo-spec': ['GET', 'PUT', 'POST'],
+  };
+  expect(methods).toEqual(readWriteMethods[routePath] ?? ['GET']);
+  const registeredMethods = new Set(nativeSurfaceRoutes[surface]
+    .filter(route => route.path === routePath).flatMap(route => route.methods));
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !registeredMethods.has(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
     expect(refused.headers.get('allow')).toBe(methods.join(', '));
