@@ -22,7 +22,7 @@ jobs:
   check:
     name: macOS arm64 check and start
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: never
       CARGO_INCREMENTAL: '0'

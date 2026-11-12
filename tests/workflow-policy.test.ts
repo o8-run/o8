@@ -312,6 +312,22 @@ describe('workflow policy — every workflow is classified from the filesystem',
           'npx vitest run tests/tauri-prebuild-profile.test.ts --reporter=verbose',
         ]);
       }
+      // The native window has code that only compiles on macOS and no other
+      // check builds it (#5948). One job, half an hour at most, and only for
+      // pull requests that change the native window or this workflow.
+      const nativeWindow = file.name === 'next-macos.yml';
+      if (nativeWindow) {
+        expect([...triggers].sort()).toEqual(['pull_request', 'workflow_dispatch']);
+        expect((file.workflow.on as RecordValue).pull_request).toEqual({
+          branches: ['main'],
+          paths: ['native/o8-next/**', '.github/workflows/next-macos.yml'],
+        });
+        expect(jobsIn(file)).toHaveLength(1);
+        const job = jobsIn(file)[0][1];
+        expect(job['runs-on']).toBe('macos-15');
+        expect(job['timeout-minutes']).toBe(30);
+        expect(job.strategy).toBeUndefined();
+      }
       const localVerification = file.name === 'verify-ci-macos.yml';
       if (localVerification) {
         expect([...triggers]).toEqual(['workflow_dispatch']);
@@ -321,7 +337,7 @@ describe('workflow policy — every workflow is classified from the filesystem',
         expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { scenario: ['clean', 'integration', 'dependency', 'bundle'] } });
       }
       for (const [jobName, job] of jobsIn(file)) {
-        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg && !prebuildProfile && !localVerification) {
+        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg && !prebuildProfile && !nativeWindow && !localVerification) {
           violations.push(`${file.name}: jobs.${jobName}`);
         }
       }
