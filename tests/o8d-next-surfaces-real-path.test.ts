@@ -402,7 +402,7 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   }
   // These reads also register existing production writes; the remaining descriptors stay GET-only.
   const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
-  expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals', '/api/setup/cli-updates', '/api/panel/problem-dossiers'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
+  expect(methods).toEqual(routePath === '/api/repo-spec' ? ['GET', 'PUT', 'POST'] : ['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals', '/api/setup/cli-updates', '/api/panel/problem-dossiers'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
   const registeredMethods = new Set(nativeSurfaceRoutes[surface]
     .filter(route => route.path === routePath).flatMap(route => route.methods));
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !registeredMethods.has(method))) {
