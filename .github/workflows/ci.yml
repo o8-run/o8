@@ -232,14 +232,32 @@ jobs:
     needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      rust_changed: ${{ steps.rust-inputs.outputs.changed }}
     steps:
       - if: needs.reuse.outputs.reuse != 'true'
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
       - if: needs.reuse.outputs.reuse != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Select Rust inputs before runner admission
+        id: rust-inputs
+        if: needs.reuse.outputs.reuse != 'true'
+        run: |
+          selection=$(mktemp)
+          changed=true
+          if GITHUB_OUTPUT="$selection" node scripts/ci/native-changes.mjs; then
+            case "$(cat "$selection")" in
+              changed=false) changed=false ;;
+            esac
+          fi
+          printf 'changed=%s\n' "$changed" >> "$GITHUB_OUTPUT"
+          rm -f "$selection"
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - if: needs.reuse.outputs.reuse != 'true'
@@ -597,8 +615,8 @@ jobs:
   # queued commit, alongside pull requests, main pushes and manual runs.
   rust-check-windows:
     name: Rust Compile Gate (Windows)
-    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [reuse]
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && ((github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.classification.result == 'success' && needs.classification.outputs.rust_changed != 'false')
+    needs: [reuse, classification]
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -640,8 +658,8 @@ jobs:
 
   rust-check-linux:
     name: Rust Compile Gate (Linux)
-    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [reuse]
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && ((github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.classification.result == 'success' && needs.classification.outputs.rust_changed != 'false')
+    needs: [reuse, classification]
     # ubuntu-26.04 pulls amd64v3 package variants that the signed APT check rejects (#5140).
     runs-on: ubuntu-24.04
     timeout-minutes: 30
