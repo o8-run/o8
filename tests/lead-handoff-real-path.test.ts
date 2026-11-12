@@ -1040,7 +1040,12 @@ describe('persistent lead handoff real path', () => {
       updateLane(lane.id, { status: 'running' }, 'system');
       if (status !== 'running') updateLane(lane.id, { status: status as 'failed' | 'reviewing' | 'awaiting_human' }, 'system');
     }
-    await runCli(['lead', 'send', lead.id, '--message', `[fixture:outcome:${kind}]`, '--idempotency-key', 'reported-parity']);
+    if (kind === 'completed' && workers.includes('running')) {
+      const { runSilentExitTickForTesting } = await import('@/lib/supervisor/silent-exit-detector');
+      await runSilentExitTickForTesting();
+    }
+    const sent = await runCli(['lead', 'send', lead.id, '--message', `[fixture:outcome:${kind}]`, '--idempotency-key', 'reported-parity']);
+    expect(sent.exitCode, sent.stderr).toBe(0);
     await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe(expected), { timeout: 5_000 });
     expect(getLeadStatus(lead.id).latestTurn?.outcome?.kind).toBe(kind);
     const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
