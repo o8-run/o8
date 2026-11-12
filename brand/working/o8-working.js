@@ -15,7 +15,7 @@
   function mount(el, opts) {
     opts = opts || {};
     var base = opts.base || "/brand/working/composer/";
-    var reduce = false; try { reduce = matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+    var reduce = false; try { reduce = matchMedia("(prefers-reduced-motion: reduce)").matches; } catch {}
     el.classList.add("o8w");
     el.innerHTML = '<span class="o8w-face"></span><span class="o8w-line"></span><span class="o8w-time"></span>';
     var face = el.querySelector(".o8w-face"), line = el.querySelector(".o8w-line"), time = el.querySelector(".o8w-time");
@@ -29,14 +29,14 @@
         var old = [].slice.call(face.children); face.appendChild(layer);
         old.forEach(function (o) { o.classList.add("o8w-gone"); setTimeout(function () { o.remove(); }, FADE + 50); });
         svg = layer.querySelector("svg"); loops = 0;
-        try { svg.setCurrentTime(0); if (reduce) svg.pauseAnimations(); } catch (e) {}
+        try { svg.setCurrentTime(0); if (reduce) svg.pauseAnimations(); } catch {}
       });
     }
     function tick() {
       var s = (performance.now() - start) / 1000;
       time.textContent = Math.floor(s / 60) + ":" + ("0" + Math.floor(s % 60)).slice(-2) + " · esc to stop";
       if (svg && pending && !reduce) {
-        var t = 0; try { t = svg.getCurrentTime(); } catch (e) {}
+        var t = 0; try { t = svg.getCurrentTime(); } catch {}
         var n = Math.floor(t / LOOP[cur]);
         if (n > loops) { var p = pending; pending = null; show(p.key, p.text); }
       }

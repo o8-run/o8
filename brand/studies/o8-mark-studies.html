@@ -555,7 +555,7 @@ document.querySelectorAll('input[name="face"]').forEach(function(r){
       lineEl=root.querySelector('.wk-line'), timeEl=root.querySelector('.wk-time'),
       play=root.querySelector('.wk-play'), btns=[].slice.call(root.querySelectorAll('.wk-ctl button[data-i]'));
   var n=0, cur=-1, pending=null, demo=true, paused=false, svgs=[], lastLoop=0, left=0;
-  try{ paused=window.matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(e){}
+  try{ paused=window.matchMedia('(prefers-reduced-motion: reduce)').matches; }catch{}
   // New motion goes in a layer on top; the old layer fades out over 0.3s, which covers the edge change
   // between fog and hard-edged motions and the two loops that don't rest on full Glance.
   function mount(el, txt){
@@ -573,7 +573,7 @@ document.querySelectorAll('input[name="face"]').forEach(function(r){
   function show(i){
     cur=i; var s=D.mini[i];
     svgs=[mount(miniEl,s.svg), mount(bigEl,D.big[i])];
-    svgs.forEach(function(v){ try{ v.setCurrentTime(0); if(paused) v.pauseAnimations(); }catch(e){} });
+    svgs.forEach(function(v){ try{ v.setCurrentTime(0); if(paused) v.pauseAnimations(); }catch{} });
     lastLoop=0; left=s.loops; setText(s.line);
     btns.forEach(function(b,j){ b.setAttribute('aria-pressed', j===i?'true':'false'); b.classList.remove('queued'); });
   }
@@ -584,7 +584,7 @@ document.querySelectorAll('input[name="face"]').forEach(function(r){
   function fmt(t){ t=Math.floor(t); return Math.floor(t/60)+':'+('0'+(t%60)).slice(-2); }
   function tick(){
     if(svgs[0] && !paused){
-      var t=0; try{ t=svgs[0].getCurrentTime(); }catch(e){}
+      var t=0; try{ t=svgs[0].getCurrentTime(); }catch{}
       var L=Math.floor(t/D.mini[cur].dur);
       if(L>lastLoop){ lastLoop=L; landed(); }
       timeEl.textContent=fmt(t)+' · esc to stop';
@@ -592,7 +592,7 @@ document.querySelectorAll('input[name="face"]').forEach(function(r){
     requestAnimationFrame(tick);
   }
   function setPaused(p){
-    paused=p; svgs.forEach(function(v){ try{ p?v.pauseAnimations():v.unpauseAnimations(); }catch(e){} });
+    paused=p; svgs.forEach(function(v){ try{ if(p) v.pauseAnimations(); else v.unpauseAnimations(); }catch{} });
   }
   play.addEventListener('click',function(){
     if(demo && !paused){ demo=false; setPaused(true); }
