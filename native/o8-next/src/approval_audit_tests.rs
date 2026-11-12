@@ -66,6 +66,7 @@ impl Peer {
                         let seen = seen.clone();
                         let refused = refused.clone();
                         std::thread::spawn(move || {
+                            let _ = socket.set_nonblocking(false);
                             let _ = socket.set_read_timeout(Some(Duration::from_millis(300)));
                             let mut bytes = Vec::new();
                             while !bytes.ends_with(b"\r\n\r\n") && bytes.len() < 8192 {

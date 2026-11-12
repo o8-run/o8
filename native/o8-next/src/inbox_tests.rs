@@ -666,16 +666,19 @@ fn inbox_opens_related_session_and_pull_request_and_restores(cx: &mut TestAppCon
             expected["agents"][0]["id"].as_str().unwrap()
         ),
     );
-    assert_eq!(
-        shell.read_with(cx, |s, _| s.active()),
-        Some(Tab::Session("thoughts-review".into()))
-    );
+    shell.read_with(cx, |s, _| {
+        let saved = s.current().unwrap();
+        let index = Shell::tab_index(saved, &Tab::Session("thoughts-review".into()))
+            .expect("Inbox opens the related thread");
+        assert_eq!(saved.active, index, "the related thread is foreground");
+        assert_eq!(saved.tabs.iter().filter(|tab| match tab {
+            Tab::Session(key) => saved.selections.get(key).unwrap_or(key) == "thoughts-review",
+            _ => false,
+        }).count(), 1, "Inbox opens exactly one tab for the related thread");
+    });
     assert_eq!(
         shell.update_in(cx, |s, window, cx| {
-            match s
-                .content
-                .get(&s.key(&Tab::Session("thoughts-review".into())))
-                .unwrap()
+            match s.thread_content("thoughts-review").unwrap()
             {
                 Content::Session(session) => session.read(cx).shell_selection(window, cx).0,
                 _ => None,

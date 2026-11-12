@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -258,6 +259,66 @@ function permissiveAdmission(): PacketStorageAdmissionCoordinator {
 }
 
 describe('dispatch scheduling caps and waves', () => {
+  it('high real load cannot defer an ordinary test launch', async () => {
+    const packet = packetFixture(makeRepo(), 'hermetic-load');
+    const running = createLane({ runtime: 'codex', repoPath: packet.workspaceTargetPath!, branch: 'test/hermetic-holder' });
+    setLaneStatus(running.id, 'running', 'system', 'test');
+    const load = vi.spyOn(os, 'loadavg').mockReturnValue([99999, 99999, 99999]);
+    try {
+      await runDispatchTick(missionFixture(packet.workspaceTargetPath!, [packet]), { storageAdmission: permissiveAdmission() });
+      expect(launchMock.calls).toHaveLength(1);
+    } finally { load.mockRestore(); archiveLane(running.id); }
+  });
+  it('defers explicit high load without persisting a stale reason and supports force', async () => {
+    const packet = packetFixture(makeRepo(), 'machine-load');
+    const readLoad = () => [99999, 99999, 99999];
+    const running = createLane({ runtime: 'codex', repoPath: packet.workspaceTargetPath!, branch: 'test/load-holder' });
+    setLaneStatus(running.id, 'running', 'system', 'test');
+    try {
+      expect(getDispatchBlocker(packet, [packet], { readLoad })).toContain('Machine busy');
+      const state = await runDispatchTick(missionFixture(packet.workspaceTargetPath!, [packet]), { readLoad, storageAdmission: permissiveAdmission() });
+      expect(state.packets[0].blockedReason ?? '').not.toContain('Machine busy');
+      expect(launchMock.calls).toHaveLength(0);
+      await runDispatchTick(state, { readLoad, force: true, storageAdmission: permissiveAdmission() });
+      expect(launchMock.calls).toHaveLength(1);
+    } finally { archiveLane(running.id); }
+  });
+
+  it('clears a legacy load reason when a different blocker applies', async () => {
+    const packet = packetFixture(makeRepo(), 'stale-load');
+    packet.blockedReason = 'Machine busy: old sample';
+    packet.workspaceTargetPath = null;
+    const state = await runDispatchTick(missionFixture(makeRepo(), [packet]));
+    expect(state.packets[0].blockedReason ?? '').not.toContain('Machine busy');
+    expect(getDispatchBlocker(state.packets[0], state.packets)).toBe('No workspace target');
+  });
+  it('a deferred batch launch preserves the launch budget for the next packet', async () => {
+    const repo = makeRepo();
+    const first = packetFixture(repo, 'defer-first');
+    const second = packetFixture(repo, 'launch-second');
+    const running = createLane({ runtime: 'codex', repoPath: repo, branch: 'test/load-budget' });
+    setLaneStatus(running.id, 'running', 'system', 'test');
+    const readLoad = vi.fn().mockReturnValue([0, 0, 0]);
+    readLoad.mockReturnValueOnce([0, 0, 0]).mockReturnValueOnce([0, 0, 0]).mockReturnValueOnce([99999, 99999, 99999]);
+    try {
+      await runDispatchTick(missionFixture(repo, [first, second]), { readLoad, launchBudget: { maxLaunches: 1 }, storageAdmission: permissiveAdmission() });
+      expect(launchMock.calls.map(call => call.packetId)).toEqual([second.id]);
+    } finally { archiveLane(running.id); }
+  });
+  it('reports load deferral as queued with wait and computes the reason', async () => {
+    const { summarizeDispatchMission } = await import('./operator-mission-service/dispatch-result');
+    const machine = await import('./machine-load');
+    const spy = vi.spyOn(machine, 'machineLoadBlocker').mockReturnValue('Machine busy: fixture');
+    const packet = packetFixture(makeRepo(), 'summary-load');
+    const state = missionFixture(packet.workspaceTargetPath!, [packet]);
+    try {
+      const summary = summarizeDispatchMission(state, state);
+      expect(summary.status).toBe('queued');
+      expect(summary.skipped[0]).toMatchObject({ reason: 'scheduler-deferred', suggestedAction: 'wait' });
+      expect(packet.blockedReason ?? '').not.toContain('Machine busy');
+    } finally { spy.mockRestore(); }
+  });
+
   beforeEach(() => {
     launchMock.calls.length = 0;
     launchMock.outcome = 'success';
@@ -958,4 +1019,16 @@ describe('boot recovery launch guard (#1460)', () => {
       pinnedRuntime: 'codex',
     })).toBe('lane state does not expect a worker (awaiting_review)');
   });
+});
+it('continues scheduling other packets after loading an unknown saved runtime and retains substitution', async () => {
+  const repoPath = makeRepo();
+  const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  const state = normalizeOrchestratorMissionState(missionFixture(repoPath, [
+    packetFixture(repoPath, 'retired', { runtime: 'retired-runtime' as never }),
+    packetFixture(repoPath, 'healthy'),
+  ]));
+  const next = await runDispatchTick(state, { launchBudget: { maxLaunches: 2 }, storageAdmission: permissiveAdmission() });
+  expect(next.packets.find(p => p.id === 'retired')?.workerRouting?.runtimeSubstitution?.reason).toContain('retired-runtime');
+  expect(['launching', 'running']).toContain(next.packets.find(p => p.id === 'healthy')?.status);
+  await vi.waitFor(() => expect(launchMock.calls.some(call => call.packetId === 'healthy')).toBe(true));
 });
