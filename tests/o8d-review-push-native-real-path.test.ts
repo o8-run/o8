@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ let origin: string;
 let repo: string;
 let remote: string;
 const device = 'review-push-fixture-device';
+const spectator = 'review-push-fixture-spectator';
 const worker = 'review-push-fixture-worker';
 const forged = { 'x-forwarded-for': '127.0.0.1', 'x-real-ip': '127.0.0.1', 'x-o8-client-addr': '127.0.0.1' };
 const git = (root: string, ...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
@@ -39,12 +40,13 @@ beforeAll(async () => {
   git(repo, 'remote', 'add', 'origin', remote);
   writeFileSync(join(server.directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
   writeFileSync(join(server.directory, 'worker-token'), worker);
+  writeFileSync(join(server.directory, 'broadcast-spectator-tokens'), createHash('sha256').update(spectator).digest('hex'));
 }, 120_000);
 afterAll(async () => { await server?.stop(); });
 
 it('keeps push operator-only despite forged local headers and relay markers', async () => {
   for (const relay of [false, true]) {
-    for (const [token, status] of [['', 401], ['wrong', 401], [device, 403], [worker, 403]] as const) {
+    for (const [token, status] of [['', 401], ['wrong', 401], [device, 403], [worker, 403], [spectator, 403]] as const) {
       expect((await push(undefined, token, relay)).status).toBe(status);
     }
   }
@@ -213,3 +215,34 @@ it('kills the push and its hook when the native client aborts', async () => {
     expect(git(repo, 'rev-parse', 'HEAD')).not.toBe(git(remote, 'rev-parse', 'refs/heads/main'));
   } finally { controller.abort(); await pushing; }
 }, 25_000);
+
+
+it('kills the helper, Git and hook at a configurable push deadline without moving the remote', async () => {
+  const marker = join(remote, 'timeout-pids');
+  const completed = join(remote, 'timeout-completed');
+  const previous = git(remote, 'rev-parse', 'refs/heads/main');
+  writeFileSync(join(remote, 'hooks', 'pre-receive'), `#!/bin/sh\necho "$$ $PPID" > "${marker}"\nsleep 3\ntouch "${completed}"\n`, { mode: 0o755 });
+  const { runPushChild } = await import('@/lib/providers/child-process');
+  const pushing = runPushChild(repo, new AbortController().signal, 2000);
+  const rejected = expect(pushing).rejects.toThrow('Push timed out');
+  try {
+    const deadline = Date.now() + 1800;
+    while (!existsSync(marker) && Date.now() < deadline) await delay(10);
+    expect(existsSync(marker), 'hook reached before timeout').toBe(true);
+    const hookPids = readFileSync(marker, 'utf8').trim().split(/\s+/).map(Number);
+    const helper = Number(execFileSync('ps', ['-p', String(hookPids[0]), '-o', 'pgid='], { encoding: 'utf8' }).trim());
+    const group = execFileSync('ps', ['-axo', 'pid=,pgid=,command='], { encoding: 'utf8' })
+      .split('\n').map(line => line.trim()).filter(line => Number(line.split(/\s+/)[1]) === helper);
+    expect(group.some(line => /git push/.test(line))).toBe(true);
+    const pids = [...new Set([helper, ...hookPids, ...group.map(line => Number(line.split(/\s+/)[0]))])];
+    await rejected;
+    await delay(3300);
+    for (const pid of pids) {
+      let state = '';
+      try { state = execFileSync('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8' }).trim(); } catch { /* reaped */ }
+      expect(state === '' || state.startsWith('Z'), `process ${pid} stopped`).toBe(true);
+    }
+    expect(existsSync(completed)).toBe(false);
+    expect(git(remote, 'rev-parse', 'refs/heads/main')).toBe(previous);
+  } finally { await rejected; }
+}, 15_000);

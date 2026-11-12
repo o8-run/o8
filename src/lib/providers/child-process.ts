@@ -166,7 +166,7 @@ Object.defineProperty(execFileReadOnly, promisify.custom, { value: (...args: unk
 type PushResult = { status: number; body: Record<string, unknown> };
 const LIMIT = 2 * 1024 * 1024;
 
-export function runPushChild(root: string, signal: AbortSignal): Promise<PushResult> {
+export function runPushChild(root: string, signal: AbortSignal, timeoutMs = 125_000): Promise<PushResult> {
   assertIsolatedChildContext();
   if (signal.aborted) return Promise.reject(new Error('Push aborted'));
   const here = dirname(fileURLToPath(import.meta.url));
@@ -184,6 +184,7 @@ export function runPushChild(root: string, signal: AbortSignal): Promise<PushRes
     let stdout = '';
     let failure: Error | undefined;
     const stop = (message: string) => {
+      if (failure) return;
       failure = new Error(message);
       // Kill the Git/helper/hook process group, including a sync Git grandchild.
       if (process.platform !== 'win32' && child.pid) {
@@ -197,7 +198,7 @@ export function runPushChild(root: string, signal: AbortSignal): Promise<PushRes
       }
     };
     const abort = () => stop('Push aborted');
-    const timer = setTimeout(() => stop('Push timed out'), 125_000);
+    const timer = setTimeout(() => stop('Push timed out'), timeoutMs);
     const cleanup = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); };
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();

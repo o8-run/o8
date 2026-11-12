@@ -7566,6 +7566,14 @@
       ]
     },
     {
+      "path": "tests/review-push-next-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-ready-coalescer-real-path.test.ts",
       "reasons": [
         "real-path"
