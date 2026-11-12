@@ -167,6 +167,20 @@ describe('o8 next surface boundary CLI', () => {
     expect(run(root, ['not-shell-work']).status).toBe(1);
   });
 
+  it('rejects a vendored toolkit edit that leaves its patch log untouched, whatever the label', () => {
+    const root = fixture();
+    put(root, 'native/o8-next/vendor/gpui/src/window.rs', '// local edit\n');
+    commit(root);
+    for (const labels of [[], ['shell-work']]) {
+      const result = run(root, labels, ['--select-only']);
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr.split('\n')).toContain('vendored toolkit changed without its patch log: native/o8-next/vendor/gpui/src/window.rs; add the edit to native/o8-next/vendor/gpui/O8-PATCHES.md with the reason it cannot live in application code');
+    }
+    put(root, 'native/o8-next/vendor/gpui/O8-PATCHES.md', '- `src/window.rs`: why application code could not do it.\n');
+    commit(root);
+    expect(run(root, ['shell-work'], ['--select-only']).status).toBe(0);
+  });
+
   it('rejects a second registration line', () => {
     const root = fixture();
     put(root, shell, readFileSync(join(root, shell), 'utf8').replace(registration, registration + '        second: Second = "surfaces/second.rs";\n'));
