@@ -149,11 +149,17 @@ impl Surface {
                     let owner = view.downgrade();
                     Rc::new(move |event: &gpui::ScrollWheelEvent, _, cx| {
                         let _ = owner.update(cx, |this, cx| {
-                            if event.delta.pixel_delta(px(20.)).y > px(0.) {
+                            let upward = event.delta.pixel_delta(px(20.)).y > px(0.);
+                            let at_end = this.navigator.borrow().at_end(&this.list);
+                            if upward {
                                 this.following = None;
                                 this.pinned = false;
                             }
-                            this.on_transcript_scroll(cx);
+                            if upward || !at_end {
+                                this.on_transcript_scroll(cx);
+                            } else {
+                                this.away_from_end = false;
+                            }
                             cx.notify();
                         });
                     })
