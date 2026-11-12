@@ -45,6 +45,7 @@ fn render(
     let back = adjacent(s, -1);
     let forward = adjacent(s, 1);
     let hidden = s.surfaces.sidebar.hidden;
+    let inset = toggle_inset(window);
     // Redraw each frame while the sidebar column opens or closes.
     let (open, moving) = super::super::sidebar::travel(s);
     if moving {
@@ -88,7 +89,7 @@ fn render(
         .gap(px(4.))
         // 4px workspace inset, plus the strip's 10px collapsed padding, or its
         // 8px padding after the 4px sidebar resize edge.
-        .pl(px(if hidden && !moving { TOGGLE_INSET } else { 16. }))
+        .pl(px(if hidden && !moving { inset } else { 16. }))
         .pr(px(8.))
         .when(hidden && !moving, |row| row.child(nav(true, cx)))
         .child(tabs(s, cx))
@@ -140,7 +141,7 @@ fn render(
                         .flex()
                         .items_center()
                         .gap(px(4.))
-                        .pl(px(TOGGLE_INSET))
+                        .pl(px(inset))
                         .pr(px(8.))
                         .child(nav(false, cx)),
                 )
@@ -151,11 +152,11 @@ fn render(
             .when(moving, |row| {
                 let edge = super::super::sidebar::width(s) * open;
                 let top = (crate::theme::GEOMETRY.header - 26.) / 2.;
-                row.child(div().w(px(edge.max(FOLDED))).h_full().flex_shrink_0())
+                row.child(div().w(px(edge.max(folded(inset)))).h_full().flex_shrink_0())
                     .child(
                         div()
                             .absolute()
-                            .left(px(TOGGLE_INSET))
+                            .left(px(inset))
                             .top(px(top))
                             .child(nav(hidden, cx)),
                     )
@@ -194,12 +195,17 @@ fn edge_mark() -> gpui::Div {
 /// The toggle's and an arrow's widths: 7px either side of a 14px and a 15px glyph.
 const TOGGLE_W: f32 = 28.;
 const ARROW_W: f32 = 29.;
-/// Past the traffic lights, so the toggle never crowds them.
-const TOGGLE_INSET: f32 = 26. + super::super::rail::LIGHTS;
+/// Past the traffic lights, so the toggle never crowds them. The lights keep
+/// their size when the window zooms out, so the inset keeps its screen width.
+fn toggle_inset(window: &Window) -> f32 {
+    crate::zoom::chrome_clearance(26. + super::super::rail::LIGHTS, window)
+}
 /// The travelling slot's floor: the folded strip's inset, toggle, Back and
 /// Forward with their gaps and the 4px before the tabs, less the strip's 16px
 /// padding in flight, so the tabs land where the folded header puts them.
-const FOLDED: f32 = TOGGLE_INSET + TOGGLE_W + 4. + ARROW_W + 4. + ARROW_W + 4. - 16.;
+fn folded(inset: f32) -> f32 {
+    inset + TOGGLE_W + 4. + ARROW_W + 4. + ARROW_W + 4. - 16.
+}
 
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
     pill(

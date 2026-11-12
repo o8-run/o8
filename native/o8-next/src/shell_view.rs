@@ -47,7 +47,7 @@ impl Render for Shell {
                     .absolute()
                     .top_0()
                     .left_0()
-                    .w(px(rail::LIGHTS))
+                    .w(px(crate::zoom::chrome_clearance(rail::LIGHTS, window)))
                     .h(px(crate::theme::GEOMETRY.header))
                     .window_control_area(gpui::WindowControlArea::Drag),
             )
@@ -191,6 +191,7 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
     })
     .with_assets(crate::icon::Assets)
     .run(move |cx: &mut App| {
+        crate::zoom::install(false, cx);
         let (sender, receiver) = async_channel::bounded(1);
         let client = client.with_wakeup(sender);
         let handle = open_window(client, file, state, offscreen, cx);
@@ -257,7 +258,9 @@ pub(super) fn open_window(
             focus: false,
             show: !offscreen,
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_min_size: Some(size(px(600.), px(400.))),
+            // The 100% floor; zoom::apply_shell sets it for the opening zoom
+            // and the window's display, and again on each change.
+            window_min_size: Some(crate::zoom::min_size(1., None)),
             // On macOS the traffic lights sit in the header band above the rail, as in
             // the desktop shell: first light centred at x=20, all three on y=20 (the
             // position is the close button's frame origin, measured from a capture).
