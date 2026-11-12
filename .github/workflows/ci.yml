@@ -240,15 +240,24 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      - name: Select Rust inputs before runner admission
-        id: rust-inputs
-        if: needs.reuse.outputs.reuse != 'true'
-        run: node scripts/ci/native-changes.mjs
       - if: needs.reuse.outputs.reuse != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Select Rust inputs before runner admission
+        id: rust-inputs
+        if: needs.reuse.outputs.reuse != 'true'
+        run: |
+          selection=$(mktemp)
+          changed=true
+          if GITHUB_OUTPUT="$selection" node scripts/ci/native-changes.mjs; then
+            case "$(cat "$selection")" in
+              changed=false) changed=false ;;
+            esac
+          fi
+          printf 'changed=%s\n' "$changed" >> "$GITHUB_OUTPUT"
+          rm -f "$selection"
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - if: needs.reuse.outputs.reuse != 'true'

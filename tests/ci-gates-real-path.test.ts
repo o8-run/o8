@@ -226,13 +226,50 @@ describe('required CI gates through workflow commands', () => {
     const classifier = workflow.jobs.classification;
     expect(classifier.outputs.rust_changed).toBe('${{ steps.rust-inputs.outputs.changed }}');
     const selector = classifier.steps.find((step: { id?: string }) => step.id === 'rust-inputs');
-    expect(selector.run).toBe('node scripts/ci/native-changes.mjs');
+    expect(selector.run).toContain('node scripts/ci/native-changes.mjs');
     expect(classifier.steps[0].with['fetch-depth']).toBe(0);
     for (const id of ['rust-check-linux', 'rust-check-windows']) {
       expect(workflow.jobs[id].needs).toEqual(['reuse', 'classification']);
       for (const changed of ['false', 'true', '']) {
         expect(condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
           { classification: { result: 'success', outputs: { rust_changed: changed } } })).toBe(changed !== 'false');
+      }
+    }
+  });
+
+  it('selects Rust inputs after Node setup and defaults selector failures to changed=true', () => {
+    const steps = workflow.jobs.classification.steps;
+    const selector = steps.find((step: { id?: string }) => step.id === 'rust-inputs');
+    expect(steps.indexOf(selector)).toBeGreaterThan(steps.findIndex((step: { uses?: string }) => step.uses === 'actions/setup-node@v4'));
+    const directory = path.join(root, 'selector-fallback');
+    mkdirSync(path.join(directory, 'scripts/ci'), { recursive: true });
+    const output = path.join(directory, 'output');
+    for (const [source, expected] of [
+      ["import {appendFileSync} from 'node:fs'; appendFileSync(process.env.GITHUB_OUTPUT, 'changed=false\\n');", 'false'],
+      ["import {appendFileSync} from 'node:fs'; appendFileSync(process.env.GITHUB_OUTPUT, 'changed=false\\n'); process.exit(1);", 'true'],
+      ['', 'true'], ['invalid JavaScript {', 'true'],
+      ["import {appendFileSync} from 'node:fs'; appendFileSync(process.env.GITHUB_OUTPUT, 'changed=unknown\\n');", 'true'],
+    ]) {
+      writeFileSync(path.join(directory, 'scripts/ci/native-changes.mjs'), source);
+      writeFileSync(output, '');
+      const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', selector.run], {
+        cwd: directory, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: output },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(output, 'utf8')).toBe(`changed=${expected}\n`);
+    }
+  });
+
+  it('rejects failed classification in the aggregate even when Rust gates report skips', () => {
+    for (const result of ['failure', 'cancelled', 'skipped']) {
+      const aggregate = spawnSync(workflow.jobs.test.steps[0].run, {
+        shell: true, encoding: 'utf8', env: { ...process.env, SHARD_RESULT: 'success', NATIVE_RESULT: 'success', CLASSIFICATION_RESULT: result },
+      });
+      expect(aggregate.status, result).not.toBe(0);
+      for (const id of ['rust-check-linux', 'rust-check-windows']) {
+        const skipped = !condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
+          { classification: { result, outputs: { rust_changed: 'false' } } });
+        expect(skipped && aggregate.status === 0, `${id}: ${result} must not combine a Rust skip with a green aggregate`).toBe(false);
       }
     }
   });
