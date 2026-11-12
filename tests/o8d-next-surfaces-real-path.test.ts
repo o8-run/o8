@@ -412,7 +412,10 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   // These reads also register their existing production writes; all other reads stay GET-only.
   const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
   expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals', '/api/setup/cli-updates', '/api/panel/problem-dossiers'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
-  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
+  // A path may register its admitted GET and operator POST separately.
+  const registeredMethods = new Set(nativeSurfaceRoutes[surface]
+    .filter(route => route.path === routePath).flatMap(route => route.methods));
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !registeredMethods.has(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
     expect(refused.headers.get('allow')).toBe(methods.join(', '));
@@ -950,7 +953,7 @@ it('reviews a persisted plugin task and records its safety stop through native H
     CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token,
     CORTEX_REALTIME_INTERNAL_ORIGIN: origin, O8_API_PORT: port, O8_WS_PORT: port, PORT: port,
     O8_LICENSE_PUBKEY: taskFixtureKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
-    O8_NATIVE_TASK_FIXTURE_KEY: Buffer.from(taskFixtureKeys.privateKey.export({ type: 'pkcs8', format: 'pem' })).toString('base64') };
+    O8_NATIVE_TASK_FIXTURE_KEY: Buffer.from(taskFixtureKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()).toString('base64') };
   const fixture = async (...args: string[]) => {
     const result = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx',
       'tests/fixtures/native-task-draft.fixture.ts', ...args], { env });
