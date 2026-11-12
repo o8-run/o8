@@ -760,3 +760,94 @@ fn sidebar_ticks_and_refreshes_do_not_move_the_list(cx: &mut TestAppContext) {
         }
     }
 }
+
+/// Twenty runs for the drawer, then thirty idle threads in the list.
+fn runs_and_list() -> Vec<Session> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let mut all: Vec<_> = (0..20)
+        .map(|n| session(&format!("run-{n:02}"), "running", &super::iso_timestamp(now - 60 - n)))
+        .collect();
+    all.extend((0..30).map(|n| {
+        session(&format!("old-{n:02}"), "idle", &format!("2026-10-01T10:{n:02}:00Z"))
+    }));
+    all
+}
+
+#[gpui::test]
+fn sidebar_selection_in_the_open_drawer_scrolls_the_drawer_only(cx: &mut TestAppContext) {
+    let (list, cx) = make(cx, runs_and_list());
+    list.update(cx, |list, _| list.open_drawer());
+    for (detailed, id) in [(true, "run-19"), (false, "run-18")] {
+        set_detailed(&list, cx, detailed);
+        list.update(cx, |list, _| list.drawer_scroll.scroll_to_item(0, ScrollStrategy::Top));
+        draw(cx);
+        scroll_down(&list, cx);
+        let before = top_row(&list, cx);
+        list.update(cx, |list, cx| list.sync_selection(id.into(), cx));
+        draw(cx);
+        assert_eq!(top_row(&list, cx), before, "detailed {detailed}: the main list stays");
+        let ix = index_of(&list, cx, id);
+        let drawer = cx.debug_bounds("sidebar-working-rows").expect("the open drawer");
+        let selector: &'static str = Box::leak(format!("thread-row-{ix}").into_boxed_str());
+        let row = cx.debug_bounds(selector).expect("the drawer row drawn");
+        assert!(
+            row.top() >= drawer.top() - gpui::px(1.) && row.bottom() <= drawer.bottom() + gpui::px(1.),
+            "detailed {detailed}: {row:?} in {drawer:?}"
+        );
+    }
+}
+
+#[gpui::test]
+fn sidebar_selection_in_the_closed_drawer_never_pulls_the_list_later(cx: &mut TestAppContext) {
+    let (list, cx) = make(cx, runs_and_list());
+    for detailed in [true, false] {
+        list.update(cx, |list, _| {
+            list.working_closed = true;
+            list.selected = None;
+        });
+        set_detailed(&list, cx, detailed);
+        list.update(cx, |list, cx| list.sync_selection("run-15".into(), cx));
+        draw(cx);
+        scroll_down(&list, cx);
+        let before = top_row(&list, cx);
+        // The working tick, a refresh, then the drawer opening.
+        list.update(cx, |list, _| list.rebuild());
+        draw(cx);
+        assert_eq!(top_row(&list, cx), before, "tick, detailed {detailed}");
+        list.update(cx, |list, _| {
+            list.sessions.push(session(&format!("older-{detailed}"), "idle", "2026-09-01T10:00:00Z"));
+            list.rebuild();
+        });
+        draw(cx);
+        assert_eq!(top_row(&list, cx), before, "refresh, detailed {detailed}");
+        list.update(cx, |list, _| list.open_drawer());
+        draw(cx);
+        assert_eq!(top_row(&list, cx), before, "drawer opened, detailed {detailed}");
+    }
+}
+
+#[gpui::test]
+fn sidebar_search_return_is_dropped_when_the_project_changes(cx: &mut TestAppContext) {
+    let (list, cx) = make(cx, long_list("idle"));
+    for detailed in [true, false] {
+        set_detailed(&list, cx, detailed);
+        scroll_down(&list, cx);
+        let editor = list.read_with(cx, |list, _| list.editor.clone());
+        editor.update(cx, |e, cx| e.set_text("Thread", cx));
+        draw(cx);
+        let project = list.read_with(cx, |list, _| list.header.ledger.active_project_id.clone());
+        list.update(cx, |list, _| {
+            list.header.ledger.active_project_id = format!("other-{detailed}");
+            list.rebuild();
+        });
+        draw(cx);
+        editor.update(cx, |e, cx| e.clear(cx));
+        draw(cx);
+        first_row_at_list_top(cx);
+        list.update(cx, |list, _| {
+            list.header.ledger.active_project_id = project;
+            list.rebuild();
+        });
+        draw(cx);
+    }
+}

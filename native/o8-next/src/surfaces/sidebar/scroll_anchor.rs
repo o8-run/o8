@@ -38,8 +38,31 @@ fn detailed_height(row: &Row) -> Pixels {
 }
 
 impl ThreadList {
-    /// Brings row `ix` into view if it is not; a row in view stays put.
+    /// The project, view and scope a search began in; a return to the place
+    /// before it holds only while they are unchanged.
+    pub(super) fn scroll_place(&self) -> String {
+        format!(
+            "{}|{}|{:?}",
+            self.header.ledger.active_project_id,
+            self.view().key(),
+            self.scope_keys()
+        )
+    }
+
+    /// Whether the selected thread sits in the closed drawer, out of the rows.
+    pub(super) fn selection_in_closed_drawer(&self) -> bool {
+        self.selected.as_ref().is_some_and(|id| {
+            self.drawer_threads.contains_key(id)
+                && !self.rows.iter().any(|r| r.id.as_ref() == Some(id))
+        })
+    }
+
+    /// Brings row `ix` into view if it is not; a row in view stays put. A
+    /// drawer row scrolls the open drawer, as `scroll_row` routes it.
     pub(super) fn reveal_row(&self, ix: usize) {
+        if self.scroll_foot_row(ix, ScrollStrategy::Top) {
+            return;
+        }
         if !self.cards() {
             self.scroll.scroll_to_item(ix, ScrollStrategy::Top);
             return;

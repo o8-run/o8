@@ -221,7 +221,7 @@ pub struct ThreadList {
     /// Where the next rebuild puts the view instead of keeping it: a new
     /// search starts at the top; clearing it returns to `search_return`.
     scroll_next: Option<scroll_anchor::ScrollAnchor>,
-    search_return: Option<scroll_anchor::ScrollAnchor>,
+    search_return: Option<(String, scroll_anchor::ScrollAnchor)>,
     edit_generation: u64,
     loading: bool,
     saving: bool,
@@ -274,12 +274,17 @@ impl ThreadList {
                 }
                 let (was, now) = (!this.query.trim().is_empty(), !query.trim().is_empty());
                 if !was && now {
-                    this.search_return = Some(this.scroll_anchor());
+                    this.search_return = Some((this.scroll_place(), this.scroll_anchor()));
                 }
+                // The place before the search, if the view, project and
+                // scope are still the ones it was taken in; else the top.
+                let place = this.scroll_place();
                 this.scroll_next = Some(match (was, now) {
-                    (true, false) => {
-                        this.search_return.take().unwrap_or_else(scroll_anchor::ScrollAnchor::top)
-                    }
+                    (true, false) => this
+                        .search_return
+                        .take()
+                        .filter(|(at, _)| *at == place)
+                        .map_or_else(scroll_anchor::ScrollAnchor::top, |(_, anchor)| anchor),
                     _ => scroll_anchor::ScrollAnchor::top(),
                 });
                 this.query = query;
@@ -482,6 +487,10 @@ impl ThreadList {
             self.choice = Some(id);
             self.follow_selection = false;
             followed = Some(index);
+        } else if self.selection_in_closed_drawer() {
+            // Its header carries the selection; a later rebuild never pulls
+            // the list to it.
+            self.follow_selection = false;
         }
         // Rows that arrived or left above keep the view where it was
         // (#6021); a followed selection is then brought into view, and the
@@ -1107,7 +1116,7 @@ impl ThreadList {
             self.choice = Some(id);
             self.reveal_row(index);
         } else {
-            self.follow_selection = true;
+            self.follow_selection = !self.selection_in_closed_drawer();
         }
         cx.notify();
     }
@@ -1447,16 +1456,26 @@ pub(crate) mod status_mark;
 
 impl ThreadList {
     /// Scroll either list to a row; detailed mode reveals it in its list.
-    pub(crate) fn scroll_row(&self, index: usize, strategy: ScrollStrategy, strict: bool) {
-        // A foot row sits below the scrolling list; the drawer scrolls its own.
+    /// A foot row sits below the scrolling list; the drawer scrolls its own
+    /// (an open drawer's row), and a shelf row is always in view. Returns
+    /// false for a main-list row, which the caller scrolls.
+    pub(super) fn scroll_foot_row(&self, index: usize, strategy: ScrollStrategy) -> bool {
         if index < self.top_len() {
-            if strict {
-                self.scroll.scroll_to_item_strict(index, strategy);
-            } else {
-                self.scroll.scroll_to_item(index, strategy);
-            }
-        } else if let Some(at) = self.drawer_at().filter(|at| index > *at) {
+            return false;
+        }
+        if let Some(at) = self.drawer_at().filter(|at| index > *at) {
             self.drawer_scroll.scroll_to_item(index - at - 1, strategy);
+        }
+        true
+    }
+    pub(crate) fn scroll_row(&self, index: usize, strategy: ScrollStrategy, strict: bool) {
+        if self.scroll_foot_row(index, strategy) {
+            return;
+        }
+        if strict {
+            self.scroll.scroll_to_item_strict(index, strategy);
+        } else {
+            self.scroll.scroll_to_item(index, strategy);
         }
         // A shelf row sits below the scrolling list, always in view.
         if self.cards() && index < self.top_len() {
