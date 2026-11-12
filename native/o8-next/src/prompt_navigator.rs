@@ -17,10 +17,17 @@ use std::{
 
 type Rows = Rc<Vec<Rc<RefCell<RowState>>>>;
 pub(crate) type Jump = Rc<dyn Fn(&mut Window, &mut App)>;
+pub(crate) type Wheel = Rc<dyn Fn(&gpui::ScrollWheelEvent, &mut Window, &mut App)>;
 #[derive(Clone)]
 struct Prompt {
     id: String,
     row: usize,
+}
+struct CachedPreview {
+    prompt: Weak<RefCell<RowState>>,
+    answer_row: Option<Weak<RefCell<RowState>>>,
+    title: gpui::SharedString,
+    answer: gpui::SharedString,
 }
 pub(crate) struct Navigator {
     id: usize,
@@ -31,6 +38,10 @@ pub(crate) struct Navigator {
     selected: Option<String>,
     aligned: bool,
     pending: bool,
+    dismissed: bool,
+    range: Option<usize>,
+    current: Option<String>,
+    preview: Option<CachedPreview>,
 }
 impl Default for Navigator {
     fn default() -> Self {
@@ -44,6 +55,10 @@ impl Default for Navigator {
             selected: None,
             aligned: false,
             pending: false,
+            dismissed: false,
+            range: None,
+            current: None,
+            preview: None,
         }
     }
 }
@@ -124,6 +139,61 @@ impl Navigator {
             self.focus = Some(cx.focus_handle().tab_stop(true));
         }
     }
+    fn preview_text(
+        &mut self,
+        rows: &Rows,
+        index: usize,
+    ) -> (gpui::SharedString, gpui::SharedString) {
+        let prompt = &rows[self.prompts[index].row];
+        let end = self.prompts.get(index + 1).map_or(rows.len(), |p| p.row);
+        let answer = rows[self.prompts[index].row + 1..end]
+            .iter()
+            .rev()
+            .find(|row| matches!(&row.borrow().row, Row::Message{role,..} if role == "assistant"));
+        let same_prompt = self
+            .preview
+            .as_ref()
+            .and_then(|p| p.prompt.upgrade())
+            .is_some_and(|old| Rc::ptr_eq(&old, prompt));
+        let same_answer = self
+            .preview
+            .as_ref()
+            .is_some_and(|p| match (&p.answer_row, answer) {
+                (None, None) => true,
+                (Some(old), Some(answer)) => {
+                    old.upgrade().is_some_and(|old| Rc::ptr_eq(&old, answer))
+                }
+                _ => false,
+            });
+        if !same_prompt || !same_answer {
+            let title = if same_prompt {
+                self.preview.as_ref().unwrap().title.clone()
+            } else {
+                prompt_title(&prompt.borrow().row).into()
+            };
+            let text = answer
+                .map(|row| match &row.borrow().row {
+                    Row::Message { nodes, .. } => node_preview(nodes, 1500),
+                    _ => String::new(),
+                })
+                .filter(|text| !text.is_empty())
+                .unwrap_or_else(|| "No text response recorded".into());
+            self.preview = Some(CachedPreview {
+                prompt: Rc::downgrade(prompt),
+                answer_row: answer.map(Rc::downgrade),
+                title,
+                answer: text.into(),
+            });
+        }
+        let cached = self.preview.as_ref().unwrap();
+        (cached.title.clone(), cached.answer.clone())
+    }
+    #[cfg(test)]
+    pub(crate) fn cached_preview(&self) -> Option<(gpui::SharedString, gpui::SharedString)> {
+        self.preview
+            .as_ref()
+            .map(|p| (p.title.clone(), p.answer.clone()))
+    }
     pub(crate) fn focus(&self, window: &mut Window) -> bool {
         if self.prompts.len() < 2 {
             return false;
@@ -174,9 +244,8 @@ fn node_preview(nodes: &[crate::text::Node], limit: usize) -> String {
         limit,
     )
 }
-fn preview(rows: &Rows, prompts: &[Prompt], index: usize) -> (String, String) {
-    let prompt = &rows[prompts[index].row].borrow().row;
-    let title = match prompt {
+fn prompt_title(row: &Row) -> String {
+    let title = match row {
         Row::PacketHeader { prompt, .. } => {
             let source: String = prompt.chars().take(1500).collect();
             node_preview(&crate::text::markdown(&source), 512)
@@ -184,28 +253,11 @@ fn preview(rows: &Rows, prompts: &[Prompt], index: usize) -> (String, String) {
         Row::Message { nodes, .. } => node_preview(nodes, 512),
         _ => String::new(),
     };
-    let end = prompts.get(index + 1).map_or(rows.len(), |p| p.row);
-    let answer = (prompts[index].row + 1..end)
-        .rev()
-        .find_map(|i| {
-            if let Row::Message { role, nodes, .. } = &rows[i].borrow().row {
-                if role == "assistant" {
-                    let text = node_preview(nodes, 1500);
-                    return Some(text);
-                }
-            }
-            None
-        })
-        .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| "No text response recorded".into());
-    (
-        if title.is_empty() {
-            "Attachment".into()
-        } else {
-            title
-        },
-        answer,
-    )
+    if title.is_empty() {
+        "Attachment".into()
+    } else {
+        title
+    }
 }
 fn jump(
     state: &Rc<RefCell<Navigator>>,
@@ -233,50 +285,72 @@ pub(crate) fn overlay(
     rows: Rows,
     list: ListState,
     on_jump: Jump,
+    on_wheel: Wheel,
 ) -> AnyElement {
     canvas(
         move |bounds, window, cx| {
             let clip = bounds.intersect(&window.content_mask().bounds);
-            if clip.size.width <= px(0.) || clip.size.height <= px(0.) {
+            if clip.size.width <= px(0.)
+                || clip.size.height <= px(0.)
+                || bounds.size.height <= px(80.)
+            {
                 return Vec::new();
             }
-            let (id, prompts, focus, hovered, selected) = {
+            let (id, prompts, focus) = {
                 let mut s = state.borrow_mut();
                 s.prepare(&rows, cx);
-                if s.prompts.len() < 2 || bounds.size.height <= px(32.) {
+                if s.prompts.len() < 2 {
                     return Vec::new();
                 }
-                (
-                    s.id,
-                    s.prompts.clone(),
-                    s.focus.as_ref().unwrap().clone(),
-                    s.hovered.clone(),
-                    s.selected.clone(),
-                )
+                (s.id, s.prompts.clone(), s.focus.as_ref().unwrap().clone())
             };
             let current = prompts
                 .partition_point(|p| p.row <= list.logical_scroll_top().item_ix)
                 .saturating_sub(1);
-            let preview_index = hovered
-                .or_else(|| {
-                    focus
-                        .is_focused(window)
-                        .then(|| selected.unwrap_or_else(|| prompts[current].id.clone()))
-                })
-                .and_then(|id| prompts.iter().position(|p| p.id == id));
-            let height = (prompts.len() as f32 * 12.)
-                .min(360.)
-                .min(f32::from(bounds.size.height) - 32.);
+            // Virtualize prompt ticks, preserving a 12px target and access to
+            // every prompt through paging and keyboard selection.
+            let available = (f32::from(bounds.size.height) - 32.).min(360.);
+            let capacity = (((available - 36.) / 12.).floor() as usize).clamp(1, 24);
+            let visible = prompts.len().min(capacity);
+            let paged = prompts.len() > visible;
+            let (start, preview_index) = {
+                let mut s = state.borrow_mut();
+                if s.current.as_ref() != Some(&prompts[current].id) {
+                    if s.range
+                        .is_some_and(|start| current < start || current >= start + visible)
+                    {
+                        s.range = None;
+                    }
+                    s.current = Some(prompts[current].id.clone());
+                }
+                if !focus.is_focused(window) && s.hovered.is_none() {
+                    s.dismissed = false;
+                }
+                let start = s
+                    .range
+                    .unwrap_or(current.saturating_sub(visible / 2))
+                    .min(prompts.len() - visible);
+                let preview = s
+                    .hovered
+                    .clone()
+                    .or_else(|| {
+                        (focus.is_focused(window) && !s.dismissed).then(|| {
+                            s.selected
+                                .clone()
+                                .unwrap_or_else(|| prompts[current].id.clone())
+                        })
+                    })
+                    .and_then(|id| prompts.iter().position(|p| p.id == id));
+                (start, preview)
+            };
+            let height = visible as f32 * 12. + if paged { 36. } else { 0. };
             let top = (f32::from(bounds.size.height) - height) / 2.;
             let rail_origin = point(bounds.origin.x, bounds.origin.y + px(top));
+            let tick_top = if paged { 18. } else { 0. };
             let pointer_index = move |y: gpui::Pixels| {
-                ((f32::from(y - rail_origin.y) / height * prompts.len() as f32)
-                    .floor()
-                    .max(0.) as usize)
-                    .min(prompts.len() - 1)
+                let y = f32::from(y - rail_origin.y) - tick_top;
+                (y >= 0. && y < visible as f32 * 12.).then(|| start + (y / 12.).floor() as usize)
             };
-            // Capture only cheap prompt identities in tick and input elements.
-            let prompts = state.borrow().prompts.clone();
             let mouse_state = state.clone();
             let mouse_prompts = prompts.clone();
             let hover_state = state.clone();
@@ -291,7 +365,8 @@ pub(crate) fn overlay(
             let key_jump = on_jump.clone();
             let click_index = pointer_index.clone();
             let wheel_list = list.clone();
-            let wheel_jump = on_jump.clone();
+            let wheel_state = state.clone();
+            let wheel = on_wheel.clone();
             let mut rail = div()
                 .id(("prompt-navigator", id))
                 .debug_selector(|| "prompt-navigator".into())
@@ -304,8 +379,14 @@ pub(crate) fn overlay(
                 .rounded(px(4.))
                 .focus(|s| s.bg(theme().hover))
                 .on_scroll_wheel(move |event, window, cx| {
-                    wheel_jump(window, cx);
                     wheel_list.scroll_by(-event.delta.pixel_delta(px(20.)).y);
+                    {
+                        let mut s = wheel_state.borrow_mut();
+                        s.hovered = None;
+                        s.dismissed = true;
+                        s.range = None;
+                    }
+                    wheel(event, window, cx);
                     window.refresh();
                     cx.stop_propagation();
                 })
@@ -313,10 +394,14 @@ pub(crate) fn overlay(
                     if event.pressed_button.is_some() {
                         return;
                     }
-                    let next = Some(mouse_prompts[pointer_index(event.position.y)].id.clone());
+                    let next = pointer_index(event.position.y)
+                        .map(|index| mouse_prompts[index].id.clone());
                     let mut s = mouse_state.borrow_mut();
                     if s.hovered != next {
-                        s.selected = next.clone();
+                        if next.is_some() {
+                            s.selected = next.clone();
+                            s.dismissed = false;
+                        }
                         s.hovered = next;
                         window.refresh();
                     }
@@ -327,23 +412,24 @@ pub(crate) fn overlay(
                     }
                 })
                 .on_click(move |event, window, cx| {
-                    let index = event
-                        .mouse_position()
-                        .map(|position| click_index(position.y))
-                        .unwrap_or_else(|| {
-                            click_state
-                                .borrow()
-                                .selected
-                                .as_ref()
-                                .and_then(|id| click_prompts.iter().position(|p| &p.id == id))
-                                .unwrap_or(current)
-                        });
+                    let index = if let Some(position) = event.mouse_position() {
+                        let Some(index) = click_index(position.y) else {
+                            return;
+                        };
+                        index
+                    } else {
+                        click_state
+                            .borrow()
+                            .selected
+                            .as_ref()
+                            .and_then(|id| click_prompts.iter().position(|p| &p.id == id))
+                            .unwrap_or(current)
+                    };
                     {
                         let mut s = click_state.borrow_mut();
                         s.selected = Some(click_prompts[index].id.clone());
-                        s.hovered = event
-                            .mouse_position()
-                            .map(|_| click_prompts[index].id.clone());
+                        s.hovered = None;
+                        s.dismissed = true;
                     }
                     click_focus.focus(window);
                     jump(
@@ -368,7 +454,16 @@ pub(crate) fn overlay(
                         "down" => (index + 1).min(key_prompts.len() - 1),
                         "home" => 0,
                         "end" => key_prompts.len() - 1,
+                        "escape" if !s.dismissed || s.hovered.is_some() => {
+                            s.hovered = None;
+                            s.dismissed = true;
+                            window.refresh();
+                            cx.stop_propagation();
+                            return;
+                        }
                         "enter" | "space" => {
+                            s.hovered = None;
+                            s.dismissed = true;
                             drop(s);
                             jump(
                                 &key_state,
@@ -383,12 +478,19 @@ pub(crate) fn overlay(
                         }
                         _ => return,
                     };
+                    if next < start {
+                        s.range = Some(next);
+                    } else if next >= start + visible {
+                        s.range = Some(next + 1 - visible);
+                    }
                     s.selected = Some(key_prompts[next].id.clone());
                     s.hovered = None;
+                    s.dismissed = false;
                     window.refresh();
                     cx.stop_propagation();
                 });
-            for (index, prompt) in prompts.iter().enumerate() {
+            for (offset, prompt) in prompts.iter().skip(start).take(visible).enumerate() {
+                let index = start + offset;
                 let selector = prompt.id.clone();
                 let marked = prompt.id.clone();
                 let selected = preview_index == Some(index);
@@ -398,9 +500,9 @@ pub(crate) fn overlay(
                         .debug_selector(move || format!("prompt-nav-tick-{selector}"))
                         .absolute()
                         .left_0()
-                        .top(px(index as f32 * height / prompts.len() as f32))
+                        .top(px(tick_top + offset as f32 * 12.))
                         .w(px(24.))
-                        .h(px(height / prompts.len() as f32))
+                        .h(px(12.))
                         .child(
                             div()
                                 .when(active, |v| {
@@ -408,7 +510,7 @@ pub(crate) fn overlay(
                                 })
                                 .absolute()
                                 .left(px(6.))
-                                .top(px(height / prompts.len() as f32 / 2. - 1.))
+                                .top(px(5.))
                                 .w(px(if active {
                                     16.
                                 } else if selected {
@@ -427,6 +529,61 @@ pub(crate) fn overlay(
                         ),
                 );
             }
+            if paged {
+                for (earlier, to, show) in [
+                    (true, start.saturating_sub(visible), start > 0),
+                    (
+                        false,
+                        (start + visible).min(prompts.len() - visible),
+                        start + visible < prompts.len(),
+                    ),
+                ] {
+                    if !show {
+                        continue;
+                    }
+                    let page_state = state.clone();
+                    let page_focus = focus.clone();
+                    let page_selected = prompts[to].id.clone();
+                    rail = rail.child(
+                        div()
+                            .id(if earlier {
+                                "prompt-nav-earlier"
+                            } else {
+                                "prompt-nav-later"
+                            })
+                            .debug_selector(move || {
+                                if earlier {
+                                    "prompt-nav-earlier".into()
+                                } else {
+                                    "prompt-nav-later".into()
+                                }
+                            })
+                            .absolute()
+                            .left_0()
+                            .top(px(if earlier { 0. } else { height - 18. }))
+                            .w(px(24.))
+                            .h(px(18.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(11.))
+                            .text_color(theme().text_muted)
+                            .hover(|s| s.bg(theme().hover))
+                            .child(if earlier { "↑" } else { "↓" })
+                            .on_click(move |_, window, cx| {
+                                let mut s = page_state.borrow_mut();
+                                s.range = Some(to);
+                                s.selected = Some(page_selected.clone());
+                                s.hovered = None;
+                                s.dismissed = true;
+                                drop(s);
+                                page_focus.focus(window);
+                                window.refresh();
+                                cx.stop_propagation();
+                            }),
+                    );
+                }
+            }
             let mut elements = Vec::new();
             let mut rail = rail.into_any_element();
             rail.layout_as_root(
@@ -437,18 +594,23 @@ pub(crate) fn overlay(
             rail.prepaint_at(rail_origin, window, cx);
             elements.push(rail);
             if let Some(index) = preview_index {
-                let (title, answer) = preview(&rows, &prompts, index);
-                #[cfg(test)]
-                crate::ui::prompt_navigator_tests::record_preview(&title, &answer);
+                let (title, answer) = state.borrow_mut().preview_text(&rows, index);
                 let width = (f32::from(bounds.size.width) - 36.).clamp(0., 320.);
                 let card_list = list.clone();
-                let card_jump = on_jump.clone();
+                let card_state = state.clone();
+                let card_wheel = on_wheel.clone();
                 let mut card = div()
                     .id(("prompt-nav-preview", id))
                     .occlude()
                     .on_scroll_wheel(move |event, window, cx| {
-                        card_jump(window, cx);
                         card_list.scroll_by(-event.delta.pixel_delta(px(20.)).y);
+                        {
+                            let mut s = card_state.borrow_mut();
+                            s.hovered = None;
+                            s.dismissed = true;
+                            s.range = None;
+                        }
+                        card_wheel(event, window, cx);
                         window.refresh();
                         cx.stop_propagation();
                     })
@@ -498,9 +660,9 @@ pub(crate) fn overlay(
                     window,
                     cx,
                 );
-                let y = (top + (index as f32 + 0.5) * height / prompts.len() as f32
-                    - f32::from(size.height) / 2.)
-                    .clamp(0., (f32::from(bounds.size.height - size.height)).max(0.));
+                let slot = index.saturating_sub(start).min(visible - 1);
+                let y = (top + tick_top + (slot as f32 + 0.5) * 12. - f32::from(size.height) / 2.)
+                    .clamp(0., f32::from(bounds.size.height - size.height).max(0.));
                 card.prepaint_at(bounds.origin + point(px(28.), px(y)), window, cx);
                 elements.push(card);
             }
@@ -508,7 +670,7 @@ pub(crate) fn overlay(
         },
         |_, elements, window, cx| {
             for mut element in elements {
-                element.paint(window, cx)
+                element.paint(window, cx);
             }
         },
     )

@@ -155,7 +155,22 @@ impl Pane {
             row.borrow_mut().file_root = self.file_root.clone();
         }
     }
+    fn reset_navigation_for(&mut self, history: &History) {
+        if self
+            .transcript
+            .as_ref()
+            .is_some_and(|old| old.key != history.session_key)
+        {
+            self.navigator = Default::default();
+            self.list = ListState::new(0, ListAlignment::Top, px(400.));
+            self.subscription = None;
+            if self.key.is_some() {
+                self.key = Some(history.session_key.clone());
+            }
+        }
+    }
     pub fn install(&mut self, history: History, client: Client) {
+        self.reset_navigation_for(&history);
         self.backfill = crate::worker_backfill::Backfill::new(client.clone(), &history);
         self.client = Some(client.clone());
         self.peeks.connect(client.clone());
@@ -166,6 +181,7 @@ impl Pane {
     }
     /// A transcript with no live session behind it: a delegate call's own words.
     pub(crate) fn install_saved(&mut self, history: History) {
+        self.reset_navigation_for(&history);
         self.backfill = None;
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
@@ -460,6 +476,7 @@ impl Pane {
                         ends,
                         navigator,
                         Rc::new(|_, _| {}),
+                        Rc::new(|_, _, _| {}),
                         decorate,
                     ))
                     .into_any_element();

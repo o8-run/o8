@@ -146,6 +146,19 @@ impl Surface {
                     })
                 },
                 {
+                    let owner = view.downgrade();
+                    Rc::new(move |event: &gpui::ScrollWheelEvent, _, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            if event.delta.pixel_delta(px(20.)).y > px(0.) {
+                                this.following = None;
+                                this.pinned = false;
+                            }
+                            this.on_transcript_scroll(cx);
+                            cx.notify();
+                        });
+                    })
+                },
+                {
                     let view = view.clone();
                     move |index, row, window, _| {
                         if index >= rows.len() {
