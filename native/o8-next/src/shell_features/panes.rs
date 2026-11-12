@@ -473,8 +473,7 @@ fn close_main(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     s.execute(Command::Session(shown.clone()), window, cx);
     // The pane folds away only once its chat is a tab, so nothing is lost
     // when the tab can't open.
-    let tab = Tab::Session(shown);
-    if !s.current().is_some_and(|w| w.tabs.contains(&tab)) || !tree.close(&leaf) {
+    if s.thread_content(&shown).is_none() || !tree.close(&leaf) {
         return;
     }
     let key = key(s, &leaf);
