@@ -213,8 +213,11 @@ fn ring_path(radius: f32, share: f32) -> String {
     )
 }
 
-/// The usage mark: two rings that fill with the week's use, Codex outside
-/// and Claude inside. A ring turns orange from 80%.
+/// Codex's ring colour in every theme, as Claude's is o8 orange.
+const CODEX_BLUE: gpui::Rgba = gpui::Rgba { r: 0.231, g: 0.510, b: 0.965, a: 1. };
+
+/// The usage mark: two rings that fill with the week's use, Codex outside in
+/// blue and Claude inside in orange.
 fn usage_rings(usage: Usage) -> impl IntoElement {
     const SIZE: f32 = 19.;
     let layer = |path: String, color: Rgba, weight: f32| {
@@ -222,13 +225,6 @@ fn usage_rings(usage: Usage) -> impl IntoElement {
             .absolute()
             .top_0()
             .left_0()
-    };
-    let ink = |share: f32, calm: Rgba| {
-        if share >= 0.8 {
-            crate::theme::brand_orange()
-        } else {
-            calm
-        }
     };
     let track = Rgba {
         a: 0.28,
@@ -244,13 +240,13 @@ fn usage_rings(usage: Usage) -> impl IntoElement {
             usage
                 .codex
                 .filter(|share| *share >= 0.025)
-                .map(|share| layer(ring_path(9., share), ink(share, theme().accent), 2.4)),
+                .map(|share| layer(ring_path(9., share), CODEX_BLUE, 2.4)),
         )
         .children(
             usage
                 .claude
                 .filter(|share| *share >= 0.025)
-                .map(|share| layer(ring_path(4.6, share), ink(share, theme().text), 2.4)),
+                .map(|share| layer(ring_path(4.6, share), crate::theme::brand_orange(), 2.4)),
         )
 }
 
