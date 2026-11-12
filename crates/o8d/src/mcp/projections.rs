@@ -165,9 +165,13 @@ pub fn status(data: Value, runtime: Value, snapshot: Value, args: &Value) -> Val
             agent
         })
         .collect();
-    json!({"summary":format!("{}.",pieces.join(". ")),"data":{
+    let mut result = json!({"summary":format!("{}.",pieces.join(". ")),"data":{
         "runtimeConnections":runtime,"snapshot":snapshot,"agents":projected,"approvals":approvals,"approvalCount":count,
         "recentActivity":recent,"spendCapHits":array(&data["spendCapHits"]),
         "terminalReasons":array(&data["terminalReasons"]),"terminalReasonsTruncated":data["terminalReasonsTruncated"] == true
-    }})
+    }});
+    if let Some(leads) = data.get("leads") {
+        result["data"]["leads"] = leads.clone();
+    }
+    result
 }

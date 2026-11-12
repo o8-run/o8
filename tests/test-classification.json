@@ -4530,6 +4530,14 @@
       ]
     },
     {
+      "path": "tests/mcp-lead-outcomes-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-project-install.test.ts",
       "reasons": [
         "child-process",

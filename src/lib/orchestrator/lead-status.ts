@@ -34,6 +34,28 @@ export function findLeadTurnByKey(leadId: string, key: string): TurnRow | null {
   ).get(leadId, key) as TurnRow | undefined ?? null;
 }
 
+/** Live projections of the same durable receipt used by CLI lead status/wait. */
+export function readLeadStatuses(input: { threadIds?: string[]; sessionKey?: string } = {}) {
+  const sqlite = getSqlite();
+  // Capture before reading: a concurrent change must invalidate a native snapshot.
+  const cursor = (sqlite.prepare('SELECT COALESCE(MAX(cursor), 0) AS cursor FROM orchestrator_lead_events')
+    .get() as { cursor: number }).cursor;
+  const key = input.sessionKey ?? null;
+  const rows = sqlite.prepare(`
+    SELECT id, thread_id FROM orchestrator_leads
+    WHERE ? IS NULL OR id = ? OR thread_id = ? OR EXISTS (
+      SELECT 1 FROM orchestrator_lead_turns t WHERE t.lead_id = orchestrator_leads.id AND t.session_id = ?
+    ) ORDER BY updated_at DESC, id
+  `).all(key, key, key, key) as Array<{ id: string; thread_id: string }>;
+  const threads = input.threadIds === undefined ? null : new Set(input.threadIds);
+  const leads = rows.filter(row => !threads || threads.has(row.thread_id)).map(row => {
+    const receipt = getLeadStatus(row.id);
+    return { ...receipt.lead, reason: receipt.latestTurn?.reason ?? null,
+      latestTurn: receipt.latestTurn, queueDepth: receipt.queueDepth };
+  });
+  return { cursor, leads };
+}
+
 export function recoverInterruptedLeadTurns(): number {
   const sqlite = getSqlite();
   const stale = sqlite.prepare(`

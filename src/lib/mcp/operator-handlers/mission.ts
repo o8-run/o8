@@ -42,7 +42,7 @@ import {
   textResult,
 } from './shared';
 import {
-  findMissionAttentionPacket,
+  findMissionAttention,
   missionPacketSignature,
   type MinimalMissionStatusShape,
 } from './mission-wait';
@@ -55,7 +55,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'get_mission_status',
     description:
-      'USE THIS WHEN the user asks "how\'s the mission going", "what\'s the status of my dispatch", or right before each tick of an automated review loop to see which packets are awaiting_review / running / blocked. Returns waves, packet state, active agents, blockers, optional cost and timing receipts.',
+      'USE THIS WHEN the user asks "how\'s the mission going", "what\'s the status of my dispatch", or right before each tick of an automated review loop to see which packets are awaiting_review / running / blocked. Returns waves, packet state, active agents, blockers, bound lead turn/outcome receipts, optional cost and timing receipts.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -431,7 +431,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'wait_for_mission_ready',
     description:
-      'Long-poll until a packet reaches an attention state or its packet/lane state changes. Reruns and packets with running/reviewing lanes remain active instead of returning already-terminal. Returns the get_mission_status payload plus `wakeReason` ("state-change" | "timeout" | "already-terminal"). Specify packetId to watch one packet. Default timeout 600000ms; cap 1800000ms.',
+      'Long-poll until a bound lead hands back or needs attention, a packet needs attention, or its packet/lane/lead state changes. Reruns and packets with running/reviewing lanes remain active instead of returning already-terminal. Returns the get_mission_status payload plus `wakeReason` ("state-change" | "timeout" | "already-terminal"). Specify packetId to watch one packet. Default timeout 600000ms; cap 1800000ms.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -877,12 +877,12 @@ export async function handleWaitForMissionReady(
 
     // If a terminal state already exists at baseline, return immediately so
     // the caller never blocks unnecessarily.
-    const baselineTerminal = findMissionAttentionPacket(baseline, packetIdFilter);
+    const baselineTerminal = findMissionAttention(baseline, packetIdFilter);
     if (baselineTerminal) {
-      return jsonResult({ ...baseline, wakeReason: 'already-terminal', terminalPacketId: baselineTerminal.id ?? null });
+      return jsonResult({ ...baseline, wakeReason: 'already-terminal', ...baselineTerminal });
     }
 
-    const baselineSig = missionPacketSignature(baseline.packets);
+    const baselineSig = missionPacketSignature(baseline.packets, packetIdFilter ? [] : baseline.leads);
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
@@ -895,11 +895,11 @@ export async function handleWaitForMissionReady(
       if (Date.now() >= deadline) break;
 
       const next = (await readStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
-      const terminal = findMissionAttentionPacket(next, packetIdFilter);
+      const terminal = findMissionAttention(next, packetIdFilter);
       if (terminal) {
-        return jsonResult({ ...next, wakeReason: 'state-change', terminalPacketId: terminal.id ?? null });
+        return jsonResult({ ...next, wakeReason: 'state-change', ...terminal });
       }
-      if (missionPacketSignature(next.packets) !== baselineSig) {
+      if (missionPacketSignature(next.packets, packetIdFilter ? [] : next.leads) !== baselineSig) {
         return jsonResult({ ...next, wakeReason: 'state-change', terminalPacketId: null });
       }
     }

@@ -37,6 +37,7 @@ const { mintPluginToken } = await import('@/lib/auth/plugin-token');
 const mcp = await import('@/app/api/mcp/route');
 const tasks = await import('@/app/api/tasks/route');
 const mission = await import('@/app/api/orchestrator/status/route');
+const lead = await import('@/lib/orchestrator/http/lead');
 const status = await import('@/app/api/operator/status/route');
 const defaults = await import('@/app/api/panel/operator-defaults/route');
 const repos = await import('@/app/api/panel/repos/route');
@@ -45,7 +46,7 @@ const leases = await import('@/app/api/leases/route');
 const spec = await import('@/app/api/repo-spec/route');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
-const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { writeOrchestratorControlPlaneState, readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { probeMetadataLockProcessIdentitySync } = await import('@/lib/worktree/metadata-lock-process-identity');
 const children: ChildProcess[] = [];
@@ -55,6 +56,7 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
   '/api/mcp': { POST: mcp.POST, GET: mcp.GET, DELETE: mcp.DELETE },
   '/api/tasks': { GET: tasks.GET, POST: tasks.POST },
   '/api/orchestrator/status': { GET: mission.GET },
+  '/api/orchestrator/lead': { GET: lead.GET },
   '/api/operator/status': { GET: status.GET },
   '/api/panel/operator-defaults': { GET: defaults.GET, POST: defaults.POST },
   '/api/panel/repos': { GET: repos.GET, POST: repos.POST },
@@ -380,6 +382,55 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
       expect(seen.map((entry) => entry.path)).toEqual([]);
     },
   );
+
+  nativeReadTest('invalidates a completed lead snapshot and returns its newer unreported receipt', async () => {
+    const db = getSqlite();
+    const id = 'native-lead-outcome';
+    const threadId = 'native-lead-thread';
+    const original = readOrchestratorControlPlaneState();
+    const now = Date.now();
+    db.prepare(`INSERT INTO orchestrator_leads
+      (id, start_key, request_digest, thread_id, repo_path, backend, model, effort, status,
+       result_turn_id, result_status, created_at, updated_at) VALUES (?, ?, 'fixture', ?, ?, 'codex', 'fixture',
+       'high', 'completed', 'native-lead-done', 'completed', ?, ?)`)
+      .run(id, id, threadId, join(directory, 'repo'), now, now);
+    db.prepare(`INSERT INTO orchestrator_lead_turns
+      (id, lead_id, idempotency_key, ordinal, kind, message, status, outcome_kind,
+       outcome_summary, outcome_evidence_json, created_at, finished_at)
+      VALUES ('native-lead-done', ?, 'done', 1, 'operator', 'Fixture', 'completed', 'completed',
+       'Recorded handback', '["fixture check"]', ?, ?)`).run(id, now, now);
+    const event = db.prepare(`INSERT INTO orchestrator_lead_events (lead_id, turn_id, kind, status, created_at)
+      VALUES (?, ?, 'turn', ?, ?)`);
+    event.run(id, 'native-lead-done', 'completed', now);
+    writeOrchestratorControlPlaneState({ ...original, packets: original.packets.map(packet => ({ ...packet,
+      orchestratorThreadId: threadId, status: 'released', queueState: 'held', releaseState: 'released' })) });
+    try {
+      await call(base, 'o8_status', { fresh: true });
+      seen.length = 0;
+      expect(toolPayload(await call(nativeRust, 'o8_status')).data.leads[0]).toMatchObject({ id, status: 'completed' });
+      expect(seen).toHaveLength(0);
+      db.prepare(`INSERT INTO orchestrator_lead_turns
+        (id, lead_id, idempotency_key, ordinal, kind, message, status, created_at, finished_at)
+        VALUES ('native-lead-unreported', ?, 'more', 2, 'operator', 'More work', 'unreported', ?, ?)`).run(id, now, now);
+      db.prepare(`UPDATE orchestrator_leads SET status = 'unreported', result_status = 'unreported',
+        result_turn_id = 'native-lead-unreported' WHERE id = ?`).run(id);
+      event.run(id, 'native-lead-unreported', 'unreported', now);
+      seen.length = 0;
+      for (const endpoint of [nativeRust, rust, base]) {
+        const overview = toolPayload(await call(endpoint, 'o8_status'));
+        expect(overview.data.leads[0]).toMatchObject({ id, status: 'unreported',
+          reason: 'turn ended without an outcome report', latestTurn: { id: 'native-lead-unreported', outcome: null } });
+        if (endpoint === nativeRust) expect(seen.some(request => request.path === '/api/mcp')).toBe(true);
+        const missionStatus = toolPayload(await call(endpoint, 'get_mission_status'));
+        expect(missionStatus.leads[0]).toMatchObject({ id, status: 'unreported', reason: overview.data.leads[0].reason });
+      }
+    } finally {
+      db.prepare('DELETE FROM orchestrator_lead_events WHERE lead_id = ?').run(id);
+      db.prepare('DELETE FROM orchestrator_lead_turns WHERE lead_id = ?').run(id);
+      db.prepare('DELETE FROM orchestrator_leads WHERE id = ?').run(id);
+      writeOrchestratorControlPlaneState(original);
+    }
+  });
 
   it('replays additional native credential and profile refusals', async () => {
     const additional: RecordedMcpRequest[] = JSON.parse(readFileSync('tests/fixtures/mcp-parity/native-reads.json', 'utf8')

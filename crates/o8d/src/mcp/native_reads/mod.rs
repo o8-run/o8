@@ -17,6 +17,22 @@ mod spec;
 mod tasks;
 type ReadResult<T> = Result<T, ()>;
 
+fn lead_cursor(db: &Connection) -> ReadResult<i64> {
+    let exists = db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'orchestrator_lead_events')",
+        [], |row| row.get::<_, bool>(0),
+    ).map_err(|_| ())?;
+    if !exists {
+        return Ok(0);
+    }
+    db.query_row(
+        "SELECT COALESCE(MAX(cursor), 0) FROM orchestrator_lead_events",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|_| ())
+}
+
 pub struct NativeReads {
     directory: PathBuf,
     database: PathBuf,
@@ -168,7 +184,13 @@ impl NativeReads {
                         super::projections::projects(registries::projects(self, &tx)?)
                     }
                     "o8_task_list" => tasks::read(self, &tx, &args)?,
-                    "get_mission_status" => mission::read(self, &tx, &args)?,
+                    "get_mission_status" => {
+                        // Bound lead outcomes belong to the canonical TypeScript projection.
+                        if lead_cursor(&tx)? != 0 {
+                            return Err(());
+                        }
+                        mission::read(self, &tx, &args)?
+                    }
                     "o8_lease_list" => leases::read(&tx)?,
                     "o8_lease_status" => leases::status(&tx, &args)?,
                     "o8_spec_read" => spec::read(&args)?,
@@ -210,6 +232,9 @@ impl NativeReads {
             return Err(());
         }
         let snapshot = &source["snapshot"];
+        if snapshot["leadCursor"].as_i64().unwrap_or(0) != lead_cursor(db)? {
+            return Err(());
+        }
         if !snapshot["data"].is_object()
             || !snapshot["runtimeConnections"].is_object()
             || !snapshot["data"]["agents"].is_array()

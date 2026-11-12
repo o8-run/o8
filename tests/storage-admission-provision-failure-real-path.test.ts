@@ -109,6 +109,7 @@ const server = createServer(async (request, response) => {
   const { getOrCreateWsToken } = await import('@/lib/ws-auth');
   const req = new NextRequest(url, { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } });
   const routes: Record<string, () => Promise<Response>> = {
+    '/api/orchestrator/lead': async () => (await import('@/lib/orchestrator/http/lead')).GET(req),
     '/api/orchestrator/status': async () => (await import('@/app/api/orchestrator/status/route')).GET(req),
     '/api/orchestrator/lane-events': async () => (await import('@/app/api/orchestrator/lane-events/route')).GET(req),
     '/api/orchestrator/packet-transcript': async () => (await import('@/app/api/orchestrator/packet-transcript/route')).GET(req),

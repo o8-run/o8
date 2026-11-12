@@ -108,6 +108,7 @@ afterEach(() => { vi.restoreAllMocks(); invalidateRuntimeInventoryCache(); });
 describe('o8_status coalesced snapshot through /api/mcp (#4392)', () => {
   it('rejects runtime observations that expire while live lead receipts are read', async () => {
     await call();
+    const log = vi.spyOn(console, 'error');
     fixture.leadAdvanceMs = 15_000;
     const response = await POST(new Request('http://localhost/api/mcp', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -116,7 +117,9 @@ describe('o8_status coalesced snapshot through /api/mcp (#4392)', () => {
     }));
     const body = await response.json();
     expect(body.result.isError).toBe(true);
-    expect(body.result.content[0].text).toContain('freshness bound');
+    expect(body.result.content[0].text).toContain('Failed to fetch status');
+    expect(log).toHaveBeenCalledWith('[o8-operator] o8_status failed: ',
+      expect.objectContaining({ message: expect.stringContaining('freshness bound') }));
   });
 
   it('coalesces concurrent cold callers into one status and connection inventory refresh', async () => {
