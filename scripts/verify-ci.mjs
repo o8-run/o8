@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import './register-server-only-stub.mjs';
+import { register } from 'tsx/cjs/api';
+import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -78,6 +81,7 @@ async function runStep(step, onQueueWait = () => {}) {
   finally { release(); }
 }
 
+async function verify() {
 try {
   const branch = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
     cwd: root, encoding: 'utf8', env: environment(),
@@ -150,6 +154,17 @@ try {
   for (const note of plan.notes) console.log(`[verify:ci] ${note}`);
   for (const [id, reason] of Object.entries(plan.hostedJobs)) console.log(`[verify:ci] HOSTED ${id}: ${reason}`);
   process.exitCode = interrupted ? 130 : results.every(Boolean) ? 0 : 1;
+} catch (error) {
+  console.error(`[verify:ci] ${error.message}`);
+  process.exitCode = 1;
+}
+
+}
+register();
+const { withMachineLease } = createRequire(import.meta.url)('../src/lib/leases/machine-heavy.ts');
+try {
+  if (process.argv.includes('--allow-concurrent')) await verify();
+  else await withMachineLease('verify-ci', verify, false);
 } catch (error) {
   console.error(`[verify:ci] ${error.message}`);
   process.exitCode = 1;

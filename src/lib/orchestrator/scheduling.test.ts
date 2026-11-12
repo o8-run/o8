@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -258,6 +259,24 @@ function permissiveAdmission(): PacketStorageAdmissionCoordinator {
 }
 
 describe('dispatch scheduling caps and waves', () => {
+  it.skipIf(process.platform === 'win32')('defers dispatch above machine load threshold and admits below it', async () => {
+    const packet = packetFixture(makeRepo(), 'machine-load');
+    const cores = vi.spyOn(os, 'cpus').mockReturnValue(Array(8).fill({}));
+    const load = vi.spyOn(os, 'loadavg').mockReturnValue([8, 8, 8]);
+    try {
+      expect(getDispatchBlocker(packet, [packet])).toContain('Machine busy');
+      const state = await runDispatchTick(missionFixture(packet.workspaceTargetPath!, [packet]), {
+        launchBudget: { maxLaunches: 1 }, storageAdmission: permissiveAdmission(),
+      });
+      expect(state.packets[0]).toMatchObject({ queueState: 'queued', blockedReason: expect.stringContaining('Machine busy') });
+      expect(launchMock.calls).toHaveLength(0);
+      load.mockReturnValue([0, 0, 0]);
+      expect(getDispatchBlocker(packet, [packet])).toBe(null);
+      await runDispatchTick(state, { launchBudget: { maxLaunches: 1 }, storageAdmission: permissiveAdmission() });
+      expect(launchMock.calls).toHaveLength(1);
+    } finally { cores.mockRestore(); load.mockRestore(); }
+  });
+
   beforeEach(() => {
     launchMock.calls.length = 0;
     launchMock.outcome = 'success';

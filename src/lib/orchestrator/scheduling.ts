@@ -1,3 +1,4 @@
+import { machineLoadBlocker, MachineLoadDeferredError } from './machine-load';
 import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { observeWsHealthHandler } from '@/lib/ws-server/handler-activity';
@@ -340,7 +341,7 @@ export function getDispatchBlocker(
       return 'Already dispatched';
     }
   }
-  return null;
+  return machineLoadBlocker();
 }
 
 /**
@@ -526,7 +527,9 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
         return false;
       }
       forgetRecoverySkip(packet.id);
-      if (getDispatchBlocker(packet, nextState.packets) !== null) {
+      const dispatchBlocker = getDispatchBlocker(packet, nextState.packets);
+      if (dispatchBlocker !== null) {
+        if (dispatchBlocker.startsWith('Machine busy:')) packet.blockedReason = dispatchBlocker;
         return false;
       }
       // #455 — Recovery cooldown: skip packets that were recovered too recently
@@ -634,6 +637,9 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
         // degrades that single packet to 'blocked' (terminal for getDispatchBlocker).
         try {
           const result = results[batchIndex];
+          if (result.status === 'rejected' && result.reason instanceof MachineLoadDeferredError) {
+            return { ...candidate, blockedReason: result.reason.message };
+          }
           if (result.status === 'fulfilled') {
             if (result.value.kind === 'awaiting_review') {
               return {

@@ -1,3 +1,4 @@
+import { runHeavy } from './commands/run-heavy.js';
 import { runPrStack } from './commands/pr-stack.js';
 import { runBrainSources } from './commands/brain-sources.js';
 import { runThreads } from './commands/threads.js';
@@ -241,6 +242,7 @@ commands:
   lead stop            durably stop the lead; recovery cannot auto-resume it
   connect [--status]   register this signed-in machine, or list connected machines
   disconnect           remove this machine from the operator's connected devices
+  run-heavy -- <cmd>   queue a native build or full suite on this machine
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
   run --last           show the latest command, start, exit receipt, and retained log
@@ -511,6 +513,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
       throw unknownSubcommandError('lane', secondary);
     }
+    case 'run-heavy':
+      return runHeavy(process.argv.slice(3));
     case 'lease':
       return runLease(args.mode, secondary, args.rest);
     case 'mission':
