@@ -652,6 +652,7 @@ fn strip(
                 .unwrap_or_default()
                 .into_iter()
                 .enumerate()
+                .filter(|(_, t)| (t.registration().available)(s))
                 .map(|(i, t)| {
                     let selected = active.as_ref() == Some(&t);
                     let key = s.key(&t);

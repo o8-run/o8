@@ -461,6 +461,14 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     shell.surfaces.sidebar.view = Some(sidebar);
 }
 impl Shell {
+    /// The project selected by the sidebar, including a switch that keeps the same repository.
+    pub(super) fn sidebar_project_id(&self) -> Option<&str> {
+        self.surfaces
+            .sidebar
+            .workspace_ledger
+            .as_ref()
+            .map(|ledger| ledger.active_project_id.as_str())
+    }
     fn install_sessions(
         &mut self,
         sessions: Vec<Session>,

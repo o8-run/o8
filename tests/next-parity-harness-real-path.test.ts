@@ -77,8 +77,8 @@ it('recomputes all 52 recorded numeric gaps without changing the accepted measur
 it('serves the same persisted history and selected desktop tab through production fixture routes', async () => {
   const token = 'fixture-parity-test';
   const host = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
-    'scripts/next/dev-server.ts', '--shell', '--parity', '--transcript', '--composer'], {
-    env: { PATH: process.env.PATH, NODE_ENV: 'test', O8_NEXT_API_TOKEN: token }, stdio: ['ignore', 'pipe', 'ignore'],
+    'scripts/next/dev-server.ts', '--shell', '--parity', '--canvas', '--transcript', '--composer'], {
+    env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, NODE_ENV: 'test', O8_NEXT_API_TOKEN: token }, stdio: ['ignore', 'pipe', 'ignore'],
   });
   const lines = createInterface({ input: host.stdout! });
   try {
@@ -104,7 +104,7 @@ it('serves the same persisted history and selected desktop tab through productio
     const history = await read('/api/mobile/history?sessionKey=llm-chat:thoughts-rich&limit=100');
     expect(history.transcript.length).toBeGreaterThan(0);
     const defaults = await read('/api/panel/operator-defaults');
-    expect(defaults.values).toMatchObject({ telemetryConsentAnswered: true, crashReportsEnabled: false, productTelemetryEnabled: false });
+    expect(defaults.values).toMatchObject({ experimentalCanvas: true, telemetryConsentAnswered: true, crashReportsEnabled: false, productTelemetryEnabled: false });
   } finally {
     lines.close();
     if (host.exitCode === null && host.signalCode === null) {

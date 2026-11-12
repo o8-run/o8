@@ -10,7 +10,8 @@ export default async function register({ repo, dataDir, seeds, transcriptFixture
   const defaults = await import('../../../src/app/api/panel/operator-defaults/route');
   await defaults.POST(new Request('http://127.0.0.1/api/panel/operator-defaults', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ crashReportsEnabled: false, productTelemetryEnabled: false, telemetryConsentAnswered: true }),
+    body: JSON.stringify({ experimentalCanvas: process.argv.includes('--canvas'),
+      crashReportsEnabled: false, productTelemetryEnabled: false, telemetryConsentAnswered: true }),
   }));
   if (!process.argv.includes('--onboarding')) {
     writeFileSync(join(dataDir, 'setup.json'), JSON.stringify({ setupComplete: true, skippedSteps: [] }));

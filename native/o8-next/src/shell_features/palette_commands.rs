@@ -18,6 +18,7 @@ impl ShellFeature for Commands {
 fn collect(s: &Shell) -> Vec<Command> {
     let mut entries = registrations()
         .iter()
+        .filter(|r| (r.available)(s))
         .filter_map(|r| r.command)
         .collect::<Vec<_>>();
     entries.sort_by_key(|(order, _)| *order);
