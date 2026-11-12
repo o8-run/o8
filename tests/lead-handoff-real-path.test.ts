@@ -699,17 +699,16 @@ describe('persistent lead handoff real path', () => {
     await withMissionRegistryState(worker.missionId, (state) => {
       const packet = state.packets.find(candidate => candidate.id === worker.packetId)!;
       packet.status = 'running';
-      if (packet.lane) packet.lane.status = 'running';
       return { state, result: undefined };
     });
     updateLane(worker.laneId, { status: 'running' }, 'system', { reason: 'fixture successor admitted' });
+    expect(findLaneByPacket(worker.packetId)?.status).toBe('running');
     const { withLockedState } = await import('@/lib/orchestrator/control-plane');
     await withLockedState(state => {
       const packet = state.packets.find(candidate => candidate.id === worker.packetId);
       if (packet) {
         packet.status = 'running';
-        if (packet.lane) packet.lane.status = 'running';
-      }
+        }
     });
 
     appendEvent(worker.laneId, 'runtime_process_exit', 'system', {
