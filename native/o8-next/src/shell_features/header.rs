@@ -38,9 +38,10 @@ fn render(
 ) -> Option<AnyElement> {
     // The desktop header, measured from WorkspaceHeaderStrip, LeftHeaderStrip
     // and PanelHeaderStrip. The sidebar toggle stays at x=78 (rail 52 + 26)
-    // whether the sidebar is open or not, with back and forward beside it, as
-    // T3 Code's sidebar header holds its history arrows (Q 2026-11-09). The
-    // tabs start the workspace header; search is the sidebar's own field.
+    // whether the sidebar is open or not, with the Ring beside it; Back and
+    // Forward end on the sidebar column's right padding when it is open and
+    // follow the Ring when it is folded. The tabs start the workspace header;
+    // search is the sidebar's own field.
     super::right_panel::sync(s, window, cx);
     // Settings is its own page with its own header, as in classic.
     if s.surfaces.settings.view.is_some() {
@@ -163,8 +164,9 @@ fn render(
                 )
             })
             // In flight the column's slot travels with it, so the tabs move with
-            // the workspace, while toggle, Back and Forward hold their place. At
-            // either end every button sits where the resting header puts it.
+            // the workspace; toggle and Ring hold their place while Back and
+            // Forward slide with the column's edge. At either end every button
+            // sits where the resting header puts it.
             .when(moving, |row| {
                 let edge = super::super::sidebar::width(s) * open;
                 let top = (crate::theme::GEOMETRY.header - 26.) / 2.;
@@ -229,8 +231,9 @@ const ARROWS_GAP: f32 = 12.;
 
 /// The gap between the Ring and Back. With the sidebar's `column` width,
 /// Forward's right edge meets the column's right padding, the same edge the
-/// sidebar's own controls end on below; a column too narrow for that, or no
-/// column, keeps the 12-unit gap after the Ring.
+/// sidebar's own controls end on below; with no column the 12-unit gap
+/// follows the Ring. A resting column (250 units or more) always has room;
+/// the 12-unit floor applies to the travelling edge while it opens or closes.
 fn arrows_lead(column: Option<f32>, inset: f32) -> f32 {
     let cluster = TOGGLE_W + 4. + RING_W;
     let arrows = ARROW_W + 4. + ARROW_W;
