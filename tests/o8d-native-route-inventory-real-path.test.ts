@@ -249,9 +249,12 @@ const DYNAMIC_NEXT_CALLS = ['src/lib/ws-server/next-fetch.ts: buildNextUrl(pathn
  * hid here (#5768). A new module of this kind shows up as a change to this list.
  */
 const API_BASE_CLIENTS = [
+  'src/lib/cortex/knowledge/reconcile.ts',
   'src/lib/hooks/claude-code-pretool-hook.ts',
+  'src/lib/operator/settings-window-owner.ts',
   'src/lib/runtimes/shared/dispatch-readiness.ts',
   'src/lib/startup/schedule.ts',
+  'src/lib/tasks/dispatch-owner-client.ts',
 ];
 function apiBaseClients() {
   return [...sourceFiles('src', '.ts'), ...sourceFiles('src', '.tsx')]

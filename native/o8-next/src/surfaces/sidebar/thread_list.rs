@@ -1388,8 +1388,10 @@ mod archive_controls;
 
 #[path = "inbox.rs"]
 mod inbox;
+/// A thread waiting on the user, for an empty thread's overview.
+pub(crate) use inbox::needs_input;
 #[path = "inbox_card.rs"]
-mod inbox_card;
+pub(crate) mod inbox_card;
 #[path = "auto_settle_toggle.rs"]
 mod auto_settle_toggle;
 #[path = "snooze.rs"]

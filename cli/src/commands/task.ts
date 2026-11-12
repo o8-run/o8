@@ -254,9 +254,18 @@ async function runTaskMutation(
 ): Promise<number> {
   const id = taskIdFromRest(rest, action);
   const cfg = resolveConfig();
+  const operatorPaths = {
+    claim: `/api/tasks/${encodeURIComponent(id)}/claim`,
+    dispatch: `/api/tasks/${encodeURIComponent(id)}/dispatch`,
+    archive: `/api/tasks/${encodeURIComponent(id)}/archive`,
+    prune: `/api/tasks/${encodeURIComponent(id)}/prune`,
+  };
+  const path = action in operatorPaths
+    ? operatorPaths[action as keyof typeof operatorPaths]
+    : `/api/tasks/${encodeURIComponent(id)}/${action}`;
   const res = await apiFetch<TaskMutation>(
     cfg,
-    `/api/tasks/${encodeURIComponent(id)}/${action}`,
+    path,
     { method: 'POST', body },
   );
   if (!res.data) {

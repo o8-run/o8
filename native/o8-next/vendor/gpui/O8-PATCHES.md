@@ -4,6 +4,14 @@ Source: the crates.io `gpui` 0.2.2 package, Apache-2.0, checksum
 `979b45cfa6ec723b6f42330915a1b3769b930d02b2d505f9697f8ca602bee707`.
 The original `LICENSE-APACHE` and package metadata are retained.
 
+Rule: application code first. Before a new edit here, try it in o8 next's own
+code through GPUI's public API. An edit lands only with an entry below that
+says what changed and why application code could not do it; every entry is
+redone by hand at each toolkit upgrade. A pull request that changes this
+directory without changing this file fails the `o8 next surface boundary`
+check, whatever its labels. To run it before pushing:
+`node scripts/next/check-surface-boundary.mjs --base origin/main --head HEAD --select-only`.
+
 Local changes:
 
 - `src/platform/mac/frame_clock.rs`: a deterministic 100 ms idle policy.
@@ -60,6 +68,20 @@ Local changes:
   records an invisible marker in paint order, replayed with cached views;
   `native_anchor_cover` returns the visible quads the drawn frame placed above
   it; `on_drawn` runs a hook after each drawn frame, before presentation.
+
+- `src/window.rs`: `Window::debug_selector_bounds`, a read-only accessor for
+  the last frame's debug selector bounds, and `Window::dispatch_input_event`,
+  which forwards to `dispatch_event`. It also adds
+  `Window::topmost_hitbox_bounds`, so a press is refused when something else
+  is on top of the named control, and `Window::dispatch_text_input`, which
+  hands text to the focused input without a key event (the frame's press
+  areas and the platform input handler are both crate-private). All four
+  compile only in tests and with the `test-support` feature. The development driver (`src/driver.rs` in the parent
+  crate, behind its `driver` feature) presses controls by name through them.
+  Application code could not do this: the selector map is `pub(crate)` and a
+  second naming mechanism would have to be added at about 745 call sites, and
+  `dispatch_event` returns a crate-private type, so it cannot be called from
+  outside the toolkit.
 
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit

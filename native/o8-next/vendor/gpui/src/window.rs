@@ -1797,6 +1797,56 @@ impl Window {
         self.viewport_size
     }
 
+    /// The bounds of every element that has a debug selector, as of the last
+    /// frame. o8: read by the development driver (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn debug_selector_bounds(&self) -> Vec<(String, Bounds<Pixels>)> {
+        self.rendered_frame
+            .debug_bounds
+            .iter()
+            .map(|(selector, bounds)| (selector.clone(), *bounds))
+            .collect()
+    }
+
+    /// Dispatches a mouse, scroll or key event as the platform would.
+    /// `dispatch_event` returns a crate-private type, so it cannot be called
+    /// from outside. o8: used by the development driver (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn dispatch_input_event(&mut self, event: PlatformInput, cx: &mut App) {
+        self.dispatch_event(event, cx);
+    }
+
+    /// The bounds of the topmost press area at a point in the last frame,
+    /// before clipping. o8: the development driver checks a press reaches
+    /// the control it named (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn topmost_hitbox_bounds(&self, position: Point<Pixels>) -> Option<Bounds<Pixels>> {
+        self.rendered_frame
+            .hitboxes
+            .iter()
+            .rev()
+            .find(|hitbox| {
+                hitbox
+                    .bounds
+                    .intersect(&hitbox.content_mask.bounds)
+                    .contains(&position)
+            })
+            .map(|hitbox| hitbox.bounds)
+    }
+
+    /// Gives text to the focused text input without a key event, so no key
+    /// listener sees it. False when nothing that takes text has focus. o8:
+    /// used by the development driver (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn dispatch_text_input(&mut self, text: &str, cx: &mut App) -> bool {
+        let Some(mut input_handler) = self.platform_window.take_input_handler() else {
+            return false;
+        };
+        input_handler.dispatch_input(text, self, cx);
+        self.platform_window.set_input_handler(input_handler);
+        true
+    }
+
     /// Returns whether this window is focused by the operating system (receiving key events).
     pub fn is_window_active(&self) -> bool {
         self.active.get()
