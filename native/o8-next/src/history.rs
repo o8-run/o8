@@ -11,7 +11,7 @@ impl Surface {
         // Far enough above the latest message, the jump button appears.
         let below = self.list.max_offset_for_scrollbar().height
             + self.list.scroll_px_offset_for_scrollbar().y;
-        let away = below > px(240.);
+        let away = self.navigator.borrow().is_aligned() || below > px(240.);
         if away != self.away_from_end {
             self.away_from_end = away;
             cx.notify();

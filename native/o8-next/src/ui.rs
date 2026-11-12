@@ -249,6 +249,7 @@ pub(crate) struct Surface {
     wave: Rc<RefCell<conversation::dictation_wave::Wave>>,
     /// The `!` line this composer last ran, for Esc and Add to chat.
     shell_run: Option<crate::composer::shell::ShellRun>,
+    navigator: Rc<RefCell<crate::prompt_navigator::Navigator>>,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -346,6 +347,7 @@ impl Surface {
             fork_send: None,
             wave: Default::default(),
             shell_run: None,
+            navigator: Default::default(),
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
@@ -527,6 +529,7 @@ impl Surface {
         self.rows = Rc::new(vec![]);
         self.images.borrow_mut().clear();
         self.list = ListState::new(0, ListAlignment::Top, px(400.));
+        self.navigator = Default::default();
         self.notice = "Reading history…".into();
         cx.notify();
         let client = self.client.clone();
@@ -712,6 +715,8 @@ impl Surface {
             .as_ref()
             .is_some_and(|t| t.context_snapshot().1);
         if self.following.is_some() || (self.pinned && live) {
+            self.navigator.borrow_mut().resume();
+            self.away_from_end = false;
             crate::retained::pin_end(&self.list);
         }
     }
@@ -733,9 +738,15 @@ impl Surface {
         if visualizations_changed {
             cx.notify();
         }
+        let navigation_changed = self.navigator.borrow_mut().resume_at_end(&self.list);
+        if navigation_changed {
+            self.pinned = true;
+            self.away_from_end = false;
+            cx.notify();
+        }
         // Rows measure on the next paint, so the end is only read once they rest.
         if self.changed_at.elapsed() > std::time::Duration::from_millis(200) {
-            self.pinned = crate::retained::at_end(&self.list);
+            self.pinned = self.navigator.borrow().at_end(&self.list);
         }
         let messages: Vec<_> = self
             .subscription
@@ -770,7 +781,7 @@ impl Surface {
             }
             cx.notify();
         }
-        changed || visualizations_changed
+        changed || visualizations_changed || navigation_changed
     }
     fn snapshot_label(&self) -> String {
         let count = self
@@ -835,6 +846,7 @@ impl Surface {
                             this.rows = Rc::new(vec![]);
                             this.images.borrow_mut().clear();
                             this.list = ListState::new(0, ListAlignment::Top, px(400.));
+                            this.navigator = Default::default();
                             this.notice = "No saved sessions.".into();
                         }
                     }
@@ -846,6 +858,7 @@ impl Surface {
         .detach();
     }
     fn navigate(&mut self, end: bool, cx: &mut Context<Self>) {
+        self.navigator.borrow_mut().resume();
         if !self.rows.is_empty() {
             self.list.scroll_to(ListOffset {
                 item_ix: if end { self.rows.len() - 1 } else { 0 },
@@ -924,10 +937,23 @@ impl Render for Surface {
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 match event.keystroke.key.as_str() {
                     "tab" => {
-                        if this.composer.read(cx).focus.is_focused(window) {
+                        let composer = this.composer.read(cx).focus.clone();
+                        let at_composer = composer.is_focused(window);
+                        let at_navigator = this.navigator.borrow().is_focused(window);
+                        if event.keystroke.modifiers.shift {
+                            if at_composer {
+                                if !this.navigator.borrow().focus(window) {
+                                    this.focus.focus(window);
+                                }
+                            } else if at_navigator {
+                                this.focus.focus(window);
+                            } else {
+                                composer.focus(window);
+                            }
+                        } else if at_composer {
                             this.focus.focus(window);
-                        } else {
-                            this.composer.read(cx).focus.focus(window);
+                        } else if at_navigator || !this.navigator.borrow().focus(window) {
+                            composer.focus(window);
                         }
                     }
                     "up" | "down" => {
@@ -1377,3 +1403,7 @@ mod enter_default_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "prompt_navigator_tests.rs"]
+pub(crate) mod prompt_navigator_tests;
