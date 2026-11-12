@@ -192,21 +192,71 @@ fn leave_usage(s: &mut Shell, cx: &mut Context<Shell>) {
     .detach();
 }
 
+/// A ring's arc on the 24-unit icon grid, from twelve o'clock clockwise.
+/// The share snaps to twentieths so the icon cache holds a handful of arcs.
+fn ring_path(radius: f32, share: f32) -> String {
+    let share = (share.clamp(0., 1.) * 20.).round() / 20.;
+    let top = 12. - radius;
+    if share >= 1. {
+        // A full turn has no distinct end point; draw it as two halves.
+        return format!(
+            "M12 {top} A{radius} {radius} 0 1 1 12 {bottom} A{radius} {radius} 0 1 1 12 {top}",
+            bottom = 12. + radius
+        );
+    }
+    let angle = share * std::f32::consts::TAU;
+    format!(
+        "M12 {top} A{radius} {radius} 0 {large} 1 {x:.2} {y:.2}",
+        large = u8::from(share > 0.5),
+        x = 12. + radius * angle.sin(),
+        y = 12. - radius * angle.cos(),
+    )
+}
+
+/// The usage mark: two rings that fill with the week's use, Codex outside
+/// and Claude inside. A ring turns orange from 80%.
+fn usage_rings(usage: Usage) -> impl IntoElement {
+    const SIZE: f32 = 19.;
+    let layer = |path: String, color: Rgba, weight: f32| {
+        crate::icon::stroke(&path, color, SIZE, weight)
+            .absolute()
+            .top_0()
+            .left_0()
+    };
+    let ink = |share: f32, calm: Rgba| {
+        if share >= 0.8 {
+            crate::theme::brand_orange()
+        } else {
+            calm
+        }
+    };
+    let track = Rgba {
+        a: 0.28,
+        ..theme().text_muted
+    };
+    div()
+        .relative()
+        .size(px(SIZE))
+        .flex_shrink_0()
+        .child(layer(ring_path(9., 1.), track, 2.4))
+        .child(layer(ring_path(4.6, 1.), track, 2.4))
+        .children(
+            usage
+                .codex
+                .filter(|share| *share >= 0.025)
+                .map(|share| layer(ring_path(9., share), ink(share, theme().accent), 2.4)),
+        )
+        .children(
+            usage
+                .claude
+                .filter(|share| *share >= 0.025)
+                .map(|share| layer(ring_path(4.6, share), ink(share, theme().text), 2.4)),
+        )
+}
+
 fn gauge(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
     let usage = *USAGE.lock().unwrap();
     let open = s.features.get::<UsageCard>().open;
-    let meter = |ratio: Option<f32>, color: Rgba, bottom: f32| {
-        div()
-            .absolute()
-            .left(px((TARGET - 12.) / 2.))
-            .bottom(px(bottom))
-            .w(px(12.))
-            .h(px(2.))
-            .rounded(px(2.))
-            .overflow_hidden()
-            .bg(theme().border)
-            .children(ratio.map(|r| div().h_full().w(px(12. * r)).bg(color)))
-    };
     div()
         .relative()
         .flex_shrink_0()
@@ -230,16 +280,7 @@ fn gauge(s: &mut Shell, cx: &mut Context<Shell>) -> AnyElement {
                         leave_usage(this, cx);
                     }
                 }))
-                .child(glyph(
-                    Icon::Gauge,
-                    if usage.highest.is_some_and(|r| r >= 0.8) {
-                        crate::theme::brand_orange()
-                    } else {
-                        theme().text_muted
-                    },
-                ))
-                .child(meter(usage.codex, theme().accent, 5.))
-                .child(meter(usage.claude, crate::theme::brand_orange(), 2.)),
+                .child(usage_rings(usage)),
         )
         .when(open, |anchor| anchor.child(usage_card(cx)))
         .into_any_element()
@@ -724,7 +765,7 @@ fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
 
 #[cfg(test)]
 mod usage_card_tests {
-    use super::{countdown, elapsed_share, standing, window_seconds};
+    use super::{countdown, elapsed_share, ring_path, standing, window_seconds};
     use serde_json::json;
 
     #[test]
@@ -733,6 +774,15 @@ mod usage_card_tests {
         assert_eq!(countdown(39 * 60), "39m");
         assert_eq!(countdown(9 * 3600 + 34 * 60), "9h 34m");
         assert_eq!(countdown(6 * 86_400 + 11 * 3600 + 59), "6d 11h");
+    }
+
+    #[test]
+    fn a_ring_arc_starts_at_the_top_and_closes_at_a_full_turn() {
+        assert_eq!(ring_path(9., 0.25), "M12 3 A9 9 0 0 1 21.00 12.00");
+        assert_eq!(ring_path(9., 0.75), "M12 3 A9 9 0 1 1 3.00 12.00");
+        assert_eq!(ring_path(9., 1.4), "M12 3 A9 9 0 1 1 12 21 A9 9 0 1 1 12 3");
+        // 0.12 snaps to a tenth, so nearby shares reuse one cached arc.
+        assert_eq!(ring_path(9., 0.12), ring_path(9., 0.1));
     }
 
     #[test]
