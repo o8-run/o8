@@ -84,6 +84,50 @@ pub(super) fn activity_click(cx: &mut VisualTestContext, selector: &'static str)
     start.elapsed().as_secs_f64() * 1000.
 }
 
+/// Stop mission asks first: one press to ask, a second to stop.
+fn stop_mission(cx: &mut VisualTestContext) {
+    activity_click(cx, "activity-stop-mission");
+    activity_click(cx, "activity-stop-mission");
+}
+
+#[gpui::test]
+fn stop_mission_asks_before_it_stops(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    activity_click(cx, "activity-filter-packet");
+    activity_click(cx, "activity-row-packet-local-activity-queued");
+    let _: Value = fixture
+        .client
+        .get("/api/activity-fixture", &[("mode", "stop-ready")])
+        .unwrap();
+    let stops = |fixture: &Fixture| {
+        let receipt: Value = fixture.client.get("/api/activity-fixture", &[]).unwrap();
+        // The fixture keeps each mutation's body; only a stop carries this key.
+        receipt["mutations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|body| body.as_str().is_some_and(|body| body.contains("idempotencyKey")))
+            .count()
+    };
+    // One press, such as one meant for Refresh beside it, stops nothing.
+    activity_click(cx, "activity-stop-mission");
+    assert_eq!(stops(&fixture), 0, "one press only asks");
+    assert!(view.read_with(cx, |v, _| v.stop_armed.is_some()));
+    // The question lapses; a press after that asks again.
+    cx.executor().advance_clock(Duration::from_secs(6));
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |v, _| v.stop_armed.is_none()));
+    activity_click(cx, "activity-stop-mission");
+    assert_eq!(stops(&fixture), 0, "a lapsed question does not count");
+    // A second press while it is asking stops the mission.
+    activity_click(cx, "activity-stop-mission");
+    assert!(stops(&fixture) >= 1, "the second press stops");
+    assert!(view.read_with(cx, |v, _| v.stop_armed.is_none()));
+}
+
 #[gpui::test]
 fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--activity");
@@ -299,7 +343,7 @@ fn activity_packet_hold_release_and_stop_mission(cx: &mut TestAppContext) {
         .client
         .get("/api/activity-fixture", &[("mode", "stop-ready")])
         .unwrap();
-    activity_click(cx, "activity-stop-mission");
+    stop_mission(cx);
     let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
     assert_eq!(state["mission"]["packets"][0]["queueState"], "held");
     let origin = fixture
@@ -335,7 +379,7 @@ fn activity_stop_replays_lost_response_with_one_identity(cx: &mut TestAppContext
         .client
         .get("/api/activity-fixture", &[("mode", "drop-stop")])
         .unwrap();
-    activity_click(cx, "activity-stop-mission");
+    stop_mission(cx);
     assert_eq!(
         view.read_with(cx, |v, _| v.notice.clone()),
         "Decision applied."
@@ -364,7 +408,7 @@ fn activity_unsettled_stop_blocks_until_refresh_reads_its_receipt(cx: &mut TestA
         .client
         .get("/api/activity-fixture", &[("mode", "stop-unknown")])
         .unwrap();
-    activity_click(cx, "activity-stop-mission");
+    stop_mission(cx);
     assert_eq!(
         view.read_with(cx, |v, _| v.notice.clone()),
         "Decision is unsettled. Refresh to check it."
@@ -453,7 +497,7 @@ fn activity_refused_stop_and_archive_never_archives_later(cx: &mut TestAppContex
     activity_click(cx, "activity-filter-packet");
     activity_click(cx, "activity-row-packet-local-activity-packet");
     activity_click(cx, "activity-release");
-    activity_click(cx, "activity-stop-mission");
+    stop_mission(cx);
     assert_eq!(
         view.read_with(cx, |v, _| v.notice.clone()),
         "Decision is unsettled. Refresh to check it."
