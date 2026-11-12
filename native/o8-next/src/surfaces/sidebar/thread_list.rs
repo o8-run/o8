@@ -218,6 +218,10 @@ pub struct ThreadList {
     choice: Option<String>,
     // A selection made before its thread is listed moves the choice once it arrives.
     follow_selection: bool,
+    /// Where the next rebuild puts the view instead of keeping it: a new
+    /// search starts at the top; clearing it returns to `search_return`.
+    scroll_next: Option<scroll_anchor::ScrollAnchor>,
+    search_return: Option<scroll_anchor::ScrollAnchor>,
     edit_generation: u64,
     loading: bool,
     saving: bool,
@@ -268,6 +272,16 @@ impl ThreadList {
                 if query == this.query {
                     return;
                 }
+                let (was, now) = (!this.query.trim().is_empty(), !query.trim().is_empty());
+                if !was && now {
+                    this.search_return = Some(this.scroll_anchor());
+                }
+                this.scroll_next = Some(match (was, now) {
+                    (true, false) => {
+                        this.search_return.take().unwrap_or_else(scroll_anchor::ScrollAnchor::top)
+                    }
+                    _ => scroll_anchor::ScrollAnchor::top(),
+                });
                 this.query = query;
                 this.search_matches.clear();
                 this.search_error.clear();
@@ -356,6 +370,8 @@ impl ThreadList {
             editing: false,
             choice: None,
             follow_selection: false,
+            scroll_next: None,
+            search_return: None,
             edit_generation: 0,
             loading: false,
             saving: false,
@@ -388,7 +404,7 @@ impl ThreadList {
     }
     fn rebuild(&mut self) {
         self.track_working();
-        let anchor = self.scroll_anchor();
+        let anchor = self.scroll_next.take().unwrap_or_else(|| self.scroll_anchor());
         let previous_choice = self
             .rows
             .iter()
@@ -458,16 +474,22 @@ impl ThreadList {
         {
             self.choice = self.rows.iter().find_map(|r| r.id.clone());
         }
+        let mut followed = None;
         if self.follow_selection
             && let Some(id) = self.selected.clone()
-            && self.rows.iter().any(|r| r.id.as_ref() == Some(&id))
+            && let Some(index) = self.rows.iter().position(|r| r.id.as_ref() == Some(&id))
         {
             self.choice = Some(id);
             self.follow_selection = false;
+            followed = Some(index);
         }
         // Rows that arrived or left above keep the view where it was
-        // (#6021); the choice is followed only when the view lost its row.
-        if !self.restore_scroll(anchor)
+        // (#6021); a followed selection is then brought into view, and the
+        // choice is followed only when the view lost its row.
+        let anchored = self.restore_scroll(anchor);
+        if let Some(index) = followed {
+            self.reveal_row(index);
+        } else if !anchored
             && let Some(index) = self
                 .rows
                 .iter()
@@ -1081,8 +1103,9 @@ impl ThreadList {
         }
         self.reveal(&id, cx);
         self.rebuild();
-        if self.rows.iter().any(|r| r.id.as_deref() == Some(&id)) {
+        if let Some(index) = self.rows.iter().position(|r| r.id.as_deref() == Some(&id)) {
             self.choice = Some(id);
+            self.reveal_row(index);
         } else {
             self.follow_selection = true;
         }
