@@ -173,7 +173,7 @@ async function stdioDispatch(data: string, port: number, taskId: string, steer =
   });
   let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
   try {
-    const response = await new Promise<{ result?: { isError?: boolean }; error?: { message?: string } }>((resolve, reject) => {
+    const response = await new Promise<{ result?: { isError?: boolean }; error?: { code?: number; message?: string } }>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`stdio timeout: ${stderr.slice(-2000)}`)), 30000);
       let pending = '';
       child.stdout.on('data', chunk => {
@@ -191,7 +191,7 @@ async function stdioDispatch(data: string, port: number, taskId: string, steer =
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 101, method: 'tools/call', params: { name: tool, arguments: args } }) + '\n');
     });
     if (options.refuse) {
-      expect(response.error?.message, JSON.stringify(response)).toContain('Runtime owner could not be confirmed');
+      expect(response.error, JSON.stringify(response)).toMatchObject({ code: -32603, message: 'o8 operation failed' });
       expect(existsSync(join(data, 'task-runtime.json'))).toBe(false);
       expect(existsSync(join(data, 'steer-runtime.json'))).toBe(false);
       return { pid: child.pid, receipt: JSON.parse('{}') };
