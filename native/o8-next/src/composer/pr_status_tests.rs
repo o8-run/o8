@@ -26,3 +26,33 @@ fn pr_status_card_opens_and_dismisses_headlessly(cx: &mut TestAppContext) {
     draw(cx);
     assert!(cx.debug_bounds("composer-pr-card").is_none());
 }
+
+#[gpui::test]
+fn pr_status_resolve_prepares_thread_composer_without_losing_draft(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    surface.update(cx, |s, cx| {
+        s.fixture_pr_status(
+            json!({"number":128,"title":"Conflicts fixture","headSha":"abcdef012345",
+            "state":"open","mergeable":false,"baseRefName":"main","conflictingFiles":["src/a.rs"]}),
+        );
+        s.composer
+            .update(cx, |input, cx| input.set_text("Keep my draft", cx));
+        cx.notify();
+    });
+    click("composer-pr-pill", cx);
+    cx.simulate_keystrokes("escape");
+    cx.simulate_keystrokes("enter");
+    draw(cx);
+    click("composer-pr-resolve", cx);
+    surface.read_with(cx, |s, cx| {
+        assert!(
+            s.composer
+                .read(cx)
+                .text
+                .starts_with("Keep my draft\n\nMerge main")
+        );
+        assert!(s.composer.read(cx).text.contains("PR #128"));
+    });
+    assert!(cx.debug_bounds("composer-pr-card").is_none());
+}

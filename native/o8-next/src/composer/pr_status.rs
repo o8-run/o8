@@ -43,7 +43,40 @@ fn checks(pr: &Value) -> Vec<Value> {
     rows.sort_by_key(|c| (!failed(c), c["name"].as_str().unwrap_or("").to_owned()));
     rows
 }
+fn conflicting(pr: &Value) -> bool {
+    pr["mergeable"] == false && pr["state"] == "open" && pr["mergedAt"].is_null()
+}
+fn conflict_files(pr: &Value) -> Option<Vec<String>> {
+    Some(
+        pr["conflictingFiles"]
+            .as_array()?
+            .iter()
+            .filter_map(|p| p.as_str().map(str::to_owned))
+            .collect(),
+    )
+}
+fn resolve_message(pr: &Value) -> String {
+    let base = pr["baseRefName"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("main");
+    format!(
+        "Merge {base} into the branch for PR #{} and resolve its merge conflicts. Inspect the conflicting files, preserve the intended changes, and run the relevant tests. Do not force-push or merge the pull request.",
+        pr["number"].as_u64().unwrap_or(0)
+    )
+}
 fn label(pr: &Value) -> String {
+    if conflicting(pr) {
+        let base = pr["baseRefName"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("main");
+        let text = conflict_files(pr)
+            .filter(|f| !f.is_empty())
+            .map(|f| format!("{} conflicts with {base}", f.len()))
+            .unwrap_or_else(|| format!("Conflicts with {base}"));
+        return format!("#{} · {text}", pr["number"].as_u64().unwrap_or(0));
+    }
     let rows = checks(pr);
     format!(
         "#{} · Checks {}/{}",
@@ -90,6 +123,7 @@ fn read(client: &Client, repo: &str, number: u64) -> Result<Option<Value>, Strin
     ) {
         if extra["headSha"] == pr["headSha"] {
             pr["mergeable"] = extra["mergeable"].clone();
+            pr["conflictingFiles"] = extra["conflictingFiles"].clone();
             if let Some(rows) = pr["statusCheckRollup"].as_array_mut() {
                 for row in rows {
                     if let Some(timing) = extra["timings"]
@@ -191,7 +225,11 @@ impl Surface {
         let state = &self.changes_pill.pr;
         let pr = state.detail.as_ref().unwrap();
         let rows = checks(pr);
-        let tint = color(&rows);
+        let tint = if conflicting(pr) {
+            theme().warning
+        } else {
+            color(&rows)
+        };
         let focus = state.focus.as_ref().unwrap();
         let mut card = div()
             .id("composer-pr-card")
@@ -279,7 +317,64 @@ impl Surface {
                         }
                     }))
             }));
-        card = card.child(list);
+        if conflicting(pr) {
+            let files = conflict_files(pr);
+            card = card.child(div().text_color(theme().warning).child("Conflicting files"));
+            if let Some(files) = files.filter(|f| !f.is_empty()) {
+                card =
+                    card.child(
+                        div()
+                            .id("composer-pr-conflicts")
+                            .flex()
+                            .flex_col()
+                            .when(files.len() > 12, |d| d.max_h(px(240.)).overflow_y_scroll())
+                            .children(files.into_iter().map(|path| {
+                                div().h(px(20.)).flex_shrink_0().truncate().child(path)
+                            })),
+                    );
+            } else {
+                card =
+                    card.child("File list unavailable until both commits are available locally.");
+            }
+            let message = resolve_message(pr);
+            card = card.child(
+                div()
+                    .id("composer-pr-resolve")
+                    .debug_selector(|| "composer-pr-resolve".into())
+                    .px(px(10.))
+                    .py(px(6.))
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(theme().accent)
+                    .text_color(theme().accent)
+                    .cursor_pointer()
+                    .hover(|d| d.bg(theme().hover))
+                    .child("Resolve conflicts")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        let draft = this.composer.read(cx).text.clone();
+                        let prepared = if draft.trim().is_empty() {
+                            message.clone()
+                        } else {
+                            format!("{draft}\n\n{message}")
+                        };
+                        this.composer
+                            .update(cx, |input, cx| input.set_text(&prepared, cx));
+                        this.composer.read(cx).focus.focus(window);
+                        this.changes_pill.pr.open = false;
+                        cx.notify();
+                    })),
+            );
+        } else {
+            card = card.child(list);
+        }
+        let card_height = if conflicting(pr) {
+            180. + conflict_files(pr)
+                .map(|files| files.len().min(12))
+                .unwrap_or(0) as f32
+                * 20.
+        } else {
+            80. + rows.len().min(12) as f32 * 36.
+        };
         let progress = state
             .opened
             .map(|at| (at.elapsed().as_secs_f32() / 0.18).min(1.))
@@ -295,9 +390,7 @@ impl Surface {
         }
         card = card
             .opacity(crate::motion::ease_out(progress))
-            .max_h(px(
-                (80. + rows.len().min(12) as f32 * 36.) * crate::motion::ease_out(progress)
-            ))
+            .max_h(px(card_height * crate::motion::ease_out(progress)))
             .overflow_hidden()
             .on_mouse_down_out(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
                 if this
@@ -363,7 +456,9 @@ impl Surface {
             .h(px(0.))
             .text_size(px(12.))
             .text_color(theme().text);
-        root.text_style().get_or_insert_with(Default::default).font_features = Some(gpui::FontFeatures(std::sync::Arc::new(vec![(
+        root.text_style()
+            .get_or_insert_with(Default::default)
+            .font_features = Some(gpui::FontFeatures(std::sync::Arc::new(vec![(
             "tnum".into(),
             1,
         )])));
@@ -423,5 +518,18 @@ mod tests {
         .unwrap();
         assert_eq!(linked_pr(&links), Some(("example/repo".into(), 2)));
         assert!(linked_pr(&[]).is_none());
+    }
+    #[test]
+    fn conflict_warning_requires_confirmed_open_pr() {
+        let mut pr = json!({"number":128,"state":"open","mergeable":false,"baseRefName":"main","conflictingFiles":["a.rs","b.rs","c.rs"]});
+        assert_eq!(label(&pr), "#128 · 3 conflicts with main");
+        pr["conflictingFiles"] = Value::Null;
+        assert_eq!(label(&pr), "#128 · Conflicts with main");
+        assert!(resolve_message(&pr).starts_with("Merge main into the branch for PR #128"));
+        pr["mergeable"] = Value::Null;
+        assert!(!conflicting(&pr));
+        pr["mergeable"] = json!(false);
+        pr["state"] = json!("closed");
+        assert!(!conflicting(&pr));
     }
 }
