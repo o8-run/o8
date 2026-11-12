@@ -5849,6 +5849,14 @@
       ]
     },
     {
+      "path": "tests/o8d-task-operator-mutations-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-task-preview-owner-real-path.test.ts",
       "reasons": [
         "child-process",

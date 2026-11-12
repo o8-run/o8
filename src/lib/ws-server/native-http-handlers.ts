@@ -226,3 +226,7 @@ export const api_panel_browse_folder = { POST: api_panel_browse_folder_POST };
 export const api_repo_spec_asset = { POST: api_repo_spec_asset_POST };
 export const api_worktrees_retention_usage = { GET: api_worktrees_retention_usage_GET };
 export const api_review_commit = { POST: api_review_commit_POST };
+export * as api_tasks_taskId_claim from '@/lib/tasks/http/claim';
+export * as api_tasks_taskId_dispatch from '@/lib/tasks/http/dispatch';
+export * as api_tasks_taskId_archive from '@/lib/tasks/http/archive';
+export * as api_tasks_taskId_prune from '@/lib/tasks/http/prune';
