@@ -134,7 +134,9 @@ it.skipIf(process.platform !== 'linux')('derives the exact registration cache ke
   // The nested check compiles the app and vendored path dependencies, so its target is keyed by
   // the same source digest and restored by exact key only.
   expect(outputs['registration-key']).toBe(`native-registration-v2-${configuration}-${dependency}-${source}`);
-  expect(outputs['registration-restore-key']).toBeUndefined();
+  expect(outputs['restore-key']).toBe(`native-tests-v1-${configuration}-${dependency}-`);
+  // No registration prefix: a target built from other sources is never restored.
+  expect(Object.keys(outputs).sort()).toEqual(['key', 'registration-key', 'restore-key']);
 }, 30_000);
 
 it.skipIf(process.platform !== 'linux')('backdates only unchanged sources and safe directories on a prefix cache hit, and every source on an exact hit', () => {
