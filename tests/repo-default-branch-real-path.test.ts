@@ -39,6 +39,13 @@ describe('resolveDefaultBranch', () => {
     expect(await resolveDefaultBranch(join(root, 'not-a-repo'), false)).toBe('main');
   });
 
+  it('recognizes an unborn repository whatever language git reports in', async () => {
+    vi.stubEnv('LC_ALL', 'de_DE.UTF-8');
+    vi.stubEnv('LANGUAGE', 'de');
+    expect(await resolveDefaultBranch(repo('trunk', { commit: false }))).toBe('main');
+    expect(await resolveDefaultBranch(repo('master'))).toBe('master');
+  });
+
   it('surfaces a repository git cannot read instead of answering main', async () => {
     const directory = join(root, 'broken');
     mkdirSync(directory);

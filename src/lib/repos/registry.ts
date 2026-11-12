@@ -188,10 +188,9 @@ async function gitProbe(
   }
 }
 
-// `symbolic-ref --quiet` and `show-ref --verify --quiet` exit 1, silently, when the ref is absent.
+// `symbolic-ref --quiet`, `show-ref --verify --quiet` and `rev-parse --verify --quiet` exit 1,
+// silently and in any locale, when the ref is absent. No probe matches git's message text.
 const quietRefAbsent = (exitCode: number) => exitCode === 1;
-// `rev-parse HEAD` in a repository with no commits yet.
-const unbornHead = (exitCode: number, stderr: string) => exitCode === 128 && /unknown revision|ambiguous argument 'HEAD'/.test(stderr);
 
 export async function resolveDefaultBranch(repoRoot: string, isGitRepo = true) {
   if (!isGitRepo) return 'main';
@@ -208,10 +207,12 @@ export async function resolveDefaultBranch(repoRoot: string, isGitRepo = true) {
     return 'master';
   }
 
-  const current = await gitProbe(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'], unbornHead);
+  // No commit yet: `rev-parse --verify --quiet` exits 1 silently, whatever git's message language.
+  if (await gitProbe(repoRoot, ['rev-parse', '--verify', '--quiet', 'HEAD'], quietRefAbsent) === null) return 'main';
+  const current = await gitProbe(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'], () => false);
   if (current && current !== 'HEAD') return current;
 
-  // Every probe ran and found nothing: an unborn or detached repository with no main or master.
+  // Every probe ran and found nothing: a detached repository with no main or master.
   return 'main';
 }
 
