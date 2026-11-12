@@ -5908,6 +5908,14 @@
       ]
     },
     {
+      "path": "tests/o8d-workspace-reads-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/onboarding-runtime-picker-real-path.test.ts",
       "reasons": [
         "real-path"
