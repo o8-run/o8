@@ -80,8 +80,13 @@ fn dispatch(
             .and_then(|w| s.state.workspaces.get_mut(w))
             && !saved.tabs.is_empty()
         {
-            saved.active = (saved.active + 1) % saved.tabs.len();
+            saved.active = if modifiers.shift {
+                (saved.active + saved.tabs.len() - 1) % saved.tabs.len()
+            } else {
+                (saved.active + 1) % saved.tabs.len()
+            };
         }
+        crate::shell::sidebar::navigation(s, cx);
         s.ensure(window, cx);
         s.restore_focus(window, cx);
         s.persist();

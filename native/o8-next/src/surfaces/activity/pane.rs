@@ -88,6 +88,8 @@ pub(super) struct Detail {
     pub retry_at: Option<Instant>,
     pub updated: Option<Instant>,
 }
+/// How long Stop mission waits for its second press.
+const STOP_ASKS_FOR: Duration = Duration::from_secs(4);
 pub struct ActivityPane {
     pub(crate) background: bool,
     pr_browser: Option<bool>,
@@ -123,6 +125,10 @@ pub struct ActivityPane {
     generation: u64,
     pub(super) loaded_at: Instant,
     stop_identity: Option<(String, String)>,
+    /// Set while Stop mission is asking for its second press: which question
+    /// (so a lapsed one cannot clear the next) and which mission it is about.
+    pub(super) stop_armed: Option<(u64, String)>,
+    stop_asked: u64,
     /// The packet whose close-unmerged confirmation is open, and its reason.
     pub(super) closing: Option<String>,
     /// The live packet whose stop-and-archive confirmation is open.
@@ -185,6 +191,8 @@ impl ActivityPane {
             generation: 0,
             loaded_at: Instant::now(),
             stop_identity: None,
+            stop_armed: None,
+            stop_asked: 0,
             closing: None,
             archiving: None,
             archive_after_stop: None,
@@ -328,6 +336,10 @@ impl ActivityPane {
                 this.errors = snapshot.errors;
                 this.cache = snapshot.cache;
                 this.mission = snapshot.mission;
+                let mission = feed::text(&this.mission, "missionId");
+                if this.stop_armed.as_ref().is_some_and(|(_, about)| *about != mission) {
+                    this.stop_armed = None;
+                }
                 this.remote_updated = snapshot.remote_updated;
                 // A CI run grouped onto its commit stays expanded across reloads.
                 let expanded = this

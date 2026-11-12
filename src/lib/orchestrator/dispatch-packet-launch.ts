@@ -1,3 +1,4 @@
+import { machineLoadBlocker, MachineLoadDeferredError } from './machine-load';
 import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 import { resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import 'server-only';
@@ -200,11 +201,15 @@ function appendTurnWorkerSafely(
 }
 
 export async function launchPacketWithStorageAdmission(input: {
+  force?: boolean;
+  readLoad?: () => number[];
   packet: OrchestratorPacket;
   allPackets: OrchestratorPacket[];
   workerRouting: WorkerRouting;
   storageAdmission: PacketStorageAdmissionCoordinator;
 }): Promise<LaunchPacketResult> {
+  const busy = machineLoadBlocker(input);
+  if (busy) throw new MachineLoadDeferredError(busy);
   const { packet, allPackets, storageAdmission } = input;
   const workerRouting = resolveLaunchWorkerRouting(input.workerRouting);
   // A concrete persisted pin that was actually honored at creation must still be

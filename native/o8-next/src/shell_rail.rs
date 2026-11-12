@@ -470,7 +470,7 @@ pub(crate) fn last_usage_snapshot() -> Option<Value> {
 }
 
 /// Seconds since the epoch, for the card's countdowns.
-fn now_seconds() -> u64 {
+pub(crate) fn now_seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs())
@@ -536,6 +536,134 @@ fn standing(capacity: &Value, now: u64) -> (String, bool) {
     (format!("{}% left", ((1. - ratio) * 100.).round()), false)
 }
 
+/// One runtime in the usage card: its name and standing, then each window's
+/// bar with the share used, an even-pace tick and the time to reset. Shared by
+/// the rail's hover card and an empty thread's overview.
+pub(crate) fn usage_runtime(capacity: &Value, now: u64) -> Div {
+    let muted = |text: SharedString, size: f32| {
+        div()
+            .text_size(px(size))
+            .text_color(theme().text_muted)
+            .child(text)
+    };
+    let (word, attention) = standing(capacity, now);
+    let exact = capacity["confidence"] == "exact";
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(px(6.))
+        .pt(px(10.))
+        .border_t_1()
+        .border_color(theme().border)
+        .child(
+            div()
+                .flex()
+                .justify_between()
+                .items_baseline()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_size(px(12.5))
+                        .child(runtime_name(capacity["runtime"].as_str().unwrap_or(""))),
+                )
+                .child(
+                    div()
+                        .text_size(px(10.5))
+                        .text_color(if attention {
+                            crate::theme::brand_orange()
+                        } else {
+                            theme().text_muted
+                        })
+                        .child(word),
+                ),
+        );
+    let buckets = capacity["buckets"].as_array().cloned().unwrap_or_default();
+    for bucket in &buckets {
+        let ratio = bucket["usedRatio"]
+            .as_f64()
+            .map(|ratio| ratio.clamp(0., 1.) as f32);
+        let pace = exact.then(|| elapsed_share(bucket, now)).flatten();
+        let left = exact
+            .then(|| bucket["resetsAt"].as_str().and_then(epoch_seconds))
+            .flatten()
+            .and_then(|reset| reset.checked_sub(now));
+        let label = div()
+            .w(px(88.))
+            .flex_shrink_0()
+            .truncate()
+            .text_color(theme().text_secondary)
+            .child(bucket["label"].as_str().unwrap_or("").to_string());
+        let row = div()
+            .h(px(18.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .text_size(px(11.))
+            .child(label);
+        section = section.child(match ratio {
+            Some(ratio) => row
+                .child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .h(px(4.))
+                        .rounded(px(2.))
+                        .bg(theme().border)
+                        .child(div().h_full().rounded(px(2.)).w(gpui::relative(ratio)).bg(
+                            if ratio >= 0.8 {
+                                crate::theme::brand_orange()
+                            } else {
+                                theme().accent
+                            },
+                        ))
+                        // Where an even spend would be by now.
+                        .children(pace.map(|pace| {
+                            div()
+                                .absolute()
+                                .top(px(-2.))
+                                .left(gpui::relative(pace))
+                                .w(px(1.))
+                                .h(px(8.))
+                                .bg(theme().text_muted)
+                        })),
+                )
+                .child(
+                    div()
+                        .w(px(32.))
+                        .flex_shrink_0()
+                        .flex()
+                        .justify_end()
+                        .child(format!("{}%", (ratio * 100.).round())),
+                )
+                .child(
+                    div()
+                        .w(px(46.))
+                        .flex_shrink_0()
+                        .flex()
+                        .justify_end()
+                        .text_size(px(10.))
+                        .text_color(theme().text_muted)
+                        .child(left.map(countdown).unwrap_or_default()),
+                ),
+            None => row
+                .justify_between()
+                .child(div().child(value_label(bucket))),
+        });
+    }
+    if buckets.is_empty() {
+        section = section.child(muted(
+            if capacity["reason"] == "subscription_limits_unsupported" {
+                "This login does not report plan allowances."
+            } else {
+                "No usage windows were reported."
+            }
+            .into(),
+            10.5,
+        ));
+    }
+    section
+}
+
 /// The hover card: every connected runtime's windows on one line each, with
 /// the share used, an even-pace mark and the time to reset. It never scrolls.
 fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
@@ -578,126 +706,7 @@ fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
                 )),
         );
     for capacity in &capacities {
-        let (word, attention) = standing(capacity, now);
-        let exact = capacity["confidence"] == "exact";
-        let mut section = div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .pt(px(10.))
-            .border_t_1()
-            .border_color(theme().border)
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .items_baseline()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .text_size(px(12.5))
-                            .child(runtime_name(capacity["runtime"].as_str().unwrap_or(""))),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(10.5))
-                            .text_color(if attention {
-                                crate::theme::brand_orange()
-                            } else {
-                                theme().text_muted
-                            })
-                            .child(word),
-                    ),
-            );
-        let buckets = capacity["buckets"].as_array().cloned().unwrap_or_default();
-        for bucket in &buckets {
-            let ratio = bucket["usedRatio"]
-                .as_f64()
-                .map(|ratio| ratio.clamp(0., 1.) as f32);
-            let pace = exact.then(|| elapsed_share(bucket, now)).flatten();
-            let left = exact
-                .then(|| bucket["resetsAt"].as_str().and_then(epoch_seconds))
-                .flatten()
-                .and_then(|reset| reset.checked_sub(now));
-            let label = div()
-                .w(px(88.))
-                .flex_shrink_0()
-                .truncate()
-                .text_color(theme().text_secondary)
-                .child(bucket["label"].as_str().unwrap_or("").to_string());
-            let row = div()
-                .h(px(18.))
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .text_size(px(11.))
-                .child(label);
-            section = section.child(match ratio {
-                Some(ratio) => row
-                    .child(
-                        div()
-                            .relative()
-                            .flex_1()
-                            .h(px(4.))
-                            .rounded(px(2.))
-                            .bg(theme().border)
-                            .child(
-                                div()
-                                    .h_full()
-                                    .rounded(px(2.))
-                                    .w(gpui::relative(ratio))
-                                    .bg(if ratio >= 0.8 {
-                                        crate::theme::brand_orange()
-                                    } else {
-                                        theme().accent
-                                    }),
-                            )
-                            // Where an even spend would be by now.
-                            .children(pace.map(|pace| {
-                                div()
-                                    .absolute()
-                                    .top(px(-2.))
-                                    .left(gpui::relative(pace))
-                                    .w(px(1.))
-                                    .h(px(8.))
-                                    .bg(theme().text_muted)
-                            })),
-                    )
-                    .child(
-                        div()
-                            .w(px(32.))
-                            .flex_shrink_0()
-                            .flex()
-                            .justify_end()
-                            .child(format!("{}%", (ratio * 100.).round())),
-                    )
-                    .child(
-                        div()
-                            .w(px(46.))
-                            .flex_shrink_0()
-                            .flex()
-                            .justify_end()
-                            .text_size(px(10.))
-                            .text_color(theme().text_muted)
-                            .child(left.map(countdown).unwrap_or_default()),
-                    ),
-                None => row
-                    .justify_between()
-                    .child(div().child(value_label(bucket))),
-            });
-        }
-        if buckets.is_empty() {
-            section = section.child(muted(
-                if capacity["reason"] == "subscription_limits_unsupported" {
-                    "This login does not report plan allowances."
-                } else {
-                    "No usage windows were reported."
-                }
-                .into(),
-                10.5,
-            ));
-        }
-        body = body.child(section);
+        body = body.child(usage_runtime(capacity, now));
     }
     let body = body
         .when(snapshot.is_some() && capacities.is_empty(), |body| {
@@ -890,6 +899,7 @@ impl Shell {
             self.surfaces.setup.view = None;
             self.revision += 1;
         }
+        crate::shell::sidebar::navigation(self, cx);
     }
     pub(super) fn render_rail(
         &mut self,
