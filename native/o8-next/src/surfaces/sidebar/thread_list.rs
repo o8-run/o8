@@ -1,6 +1,9 @@
 //! Workspace sidebar. Rebuild descriptors on data/search changes; GPUI only
 //! materializes visible rows. Global snapshots are invalidations, since the
 //! desktop socket's initial tail is smaller than the complete HTTP inventory.
+#[cfg(test)]
+#[path = "takeover_tests.rs"]
+mod takeover_tests;
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
