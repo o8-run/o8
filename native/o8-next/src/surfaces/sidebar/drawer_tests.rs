@@ -294,3 +294,108 @@ fn sidebar_drawer_runs_take_no_place_under_a_group_cap(cx: &mut TestAppContext) 
         assert_eq!(list.rows[more + 1].age, "1");
     });
 }
+
+#[gpui::test]
+fn sidebar_choice_that_starts_running_keeps_its_group_folded(cx: &mut TestAppContext) {
+    // One date group of 14: twelve show, then Show 2 more.
+    let all: Vec<_> = (0..14)
+        .map(|n| session(&format!("t{n:02}"), "idle", &format!("2026-10-01T10:{n:02}:00Z")))
+        .collect();
+    let (list, cx) = make(cx, all);
+    cx.simulate_keystrokes("down down");
+    assert_eq!(choice(&list, cx).as_deref(), Some("t11"));
+    // Sending to it opens it and starts a run: it moves to the closed drawer.
+    list.update(cx, |list, _| {
+        list.selected = Some("t11".into());
+        list.sessions.iter_mut().find(|s| s.id == "t11").unwrap().status = "running".into();
+        list.rebuild();
+    });
+    let shown = ids(&list, cx);
+    assert!(!shown.contains(&"t11".into()));
+    assert_eq!(shown.len(), 12, "the group stays folded: {shown:?}");
+    list.read_with(cx, |list, _| {
+        let more = list.rows.iter().find(|r| r.kind == "more").expect("Show more stays");
+        assert_eq!(more.title, "Show 1 more");
+    });
+    assert_eq!(choice(&list, cx).as_deref(), Some("t12"), "the choice moves to the nearest row");
+    // The header carries the selection while the drawer is closed.
+    draw(cx);
+    let fill = cx.debug_bounds("sidebar-working-selected").expect("selection drawn on the header");
+    let head = cx.debug_bounds("sidebar-working-header").unwrap();
+    assert_eq!(fill, head);
+    // Open, the thread's own row carries it and the header lets go.
+    list.update(cx, |list, _| list.open_drawer());
+    draw(cx);
+    assert!(cx.debug_bounds("sidebar-working-selected").is_none());
+    assert_eq!(ids(&list, cx).last().map(String::as_str), Some("t11"));
+}
+
+#[gpui::test]
+fn sidebar_drawer_leaves_out_archived_and_archiving_threads(cx: &mut TestAppContext) {
+    let (list, cx) = make(cx, sessions());
+    assert_eq!(drawer(&list, cx), Some(("Working".into(), "1".into())));
+    // An archive in flight keeps the thread where the archive will take it from.
+    list.update(cx, |list, _| {
+        list.pending_archives.insert("run".into(), "mutation".into());
+        list.rebuild();
+    });
+    assert_eq!(drawer(&list, cx), None);
+    assert!(ids(&list, cx).contains(&"run".into()));
+    // Archived, with Archived folded, it is in neither the drawer nor the list.
+    list.update(cx, |list, _| {
+        list.pending_archives.clear();
+        list.sessions[1].status = "archived".into();
+        list.rebuild();
+    });
+    assert_eq!(drawer(&list, cx), None);
+    assert!(!ids(&list, cx).contains(&"run".into()));
+}
+
+#[test]
+fn fold_leaves_running_rows_under_merged_and_settled() {
+    let mut late = thread("late", true);
+    late.marker = detailed::DRAWER_RUN;
+    let rows = vec![
+        header("section", "Today"),
+        thread("a", false),
+        header("section", "Merged"),
+        thread("m", true),
+        header("section", "Settled"),
+        thread("s", true),
+        late,
+    ];
+    assert_eq!(
+        titles(&detailed::fold_working(rows, true, |_| false)),
+        ["Today", "a", "Merged", "m", "Settled", "s", "Working", "late"],
+        "shelf rows stay; a run held out of the groups still reaches the drawer"
+    );
+}
+
+#[gpui::test]
+fn sidebar_drawer_in_date_and_repo_views_takes_settled_runs_not_merged(cx: &mut TestAppContext) {
+    // Date and Repo views have no Merged or Settled shelves (the Inbox has,
+    // and keeps its own Working shelf): a settled thread that runs is
+    // running work; a merged one is done and stays listed.
+    let mut all = sessions();
+    let mut settled = session("settled-run", "running", "2026-10-02T11:00:00Z");
+    settled.settled_override = Some("settled".into());
+    let mut merged = session("merged", "running", "2026-10-02T12:00:00Z");
+    merged.outcome = Some("merged".into());
+    all.extend([settled, merged]);
+    let (list, cx) = make(cx, all);
+    for view in [folders::View::Date, folders::View::Repo] {
+        list.update(cx, |list, _| {
+            list.views.insert(String::new(), view);
+            list.working_closed = false;
+            list.rebuild();
+        });
+        assert_eq!(drawer(&list, cx), Some(("Working".into(), "2".into())), "{view:?}");
+        let rows = ids(&list, cx);
+        assert!(rows.contains(&"merged".into()), "{view:?}: {rows:?}");
+        let drawer_ids = list.read_with(cx, |list, _| {
+            let at = list.drawer_index.unwrap();
+            list.rows[at + 1..].iter().filter_map(|r| r.id.clone()).collect::<Vec<_>>()
+        });
+        assert_eq!(drawer_ids, ["settled-run", "run"], "{view:?}");
+    }
+}

@@ -75,15 +75,16 @@ pub(super) fn mark_dev_working(rows: &mut [Row]) {
 }
 /// Running top-level threads leave their groups for the Working drawer at
 /// the foot of the sidebar (T3 Code's sidebar idea, reimplemented). Nested
-/// children travel with their row; a thread that needs input stays where it
-/// is, and so do Merged, Snoozed, Settled and Archived threads. The drawer is
+/// children travel with their row; a thread that needs input (or that
+/// `stays` names, such as one being archived) stays where it is, and so do
+/// Merged, Snoozed, Settled and Archived threads. The drawer is
 /// a `drawer` row (its count in `age`, "open" in `status` when open) followed,
 /// when open, by its threads; it is absent when nothing runs. The caller
 /// keeps the pinned shelf outside this fold.
 pub(crate) fn fold_working(
     rows: Vec<Row>,
     open: bool,
-    needs_input: impl Fn(&str) -> bool,
+    stays: impl Fn(&str) -> bool,
 ) -> Vec<Row> {
     let (mut working, mut rest) = (Vec::new(), Vec::new());
     let (mut moving, mut count, mut tail) = (false, 0, false);
@@ -103,7 +104,7 @@ pub(crate) fn fold_working(
                 && row.running
                 && row.marker != "input"
                 && (!tail || run)
-                && !row.id.as_deref().is_some_and(&needs_input);
+                && !row.id.as_deref().is_some_and(&stays);
             if moving {
                 count += 1;
             }

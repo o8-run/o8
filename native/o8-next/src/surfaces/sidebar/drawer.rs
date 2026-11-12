@@ -41,9 +41,7 @@ impl ThreadList {
             return 0;
         }
         let pinned = pins::pinned_order(sessions);
-        let run = |s: &Session| {
-            sidebar::working(s) && !inbox::needs_input(s) && !pinned.contains(&s.id)
-        };
+        let run = |s: &Session| self.drawer_run(s, &pinned);
         let count = sessions.iter().filter(|s| run(s)).count();
         if count > 0 {
             sessions.sort_by_key(|s| run(s));
@@ -51,16 +49,33 @@ impl ThreadList {
         count
     }
 
+    /// Whether a session belongs in the drawer: running, not asking for
+    /// input, not pinned, and not archived or being archived.
+    pub(super) fn drawer_run(&self, s: &Session, pinned: &[String]) -> bool {
+        self.drawer_on()
+            && sidebar::working(s)
+            && !inbox::needs_input(s)
+            && !pinned.contains(&s.id)
+            && s.status != "archived"
+            && !self.pending_archives.contains_key(&s.id)
+    }
+
     /// Whether the drawer lists its threads: open, or still closing on screen.
     pub(super) fn drawer_rows_shown(&self) -> bool {
         !self.working_closed || self.drawer_motion.is_some_and(|(_, opening)| !opening)
     }
 
+    /// The one scan for the drawer's header, made per rebuild and counted
+    /// in tests; painting reads `drawer_index` instead.
+    pub(super) fn find_drawer(&self, rows: &[Row]) -> Option<usize> {
+        #[cfg(test)]
+        self.drawer_scans.set(self.drawer_scans.get() + 1);
+        rows.iter().position(|r| r.kind == "drawer")
+    }
+
     /// The drawer's header row in the list, while anything runs.
     pub(super) fn drawer_at(&self) -> Option<usize> {
-        (self.view() != folders::View::Inbox)
-            .then(|| self.top_len())
-            .filter(|at| *at < self.rows.len())
+        self.drawer_index
     }
 
     /// Opens or closes the drawer; a click animates, the keyboard does not.
@@ -75,6 +90,18 @@ impl ThreadList {
             self.choice = self.rows[..at].iter().rev().find_map(|r| r.id.clone());
         }
         self.save_row_mode(cx);
+    }
+
+    /// The date group each drawer thread left, for tests that count a run
+    /// out of its group.
+    #[cfg(test)]
+    pub(crate) fn drawer_groups(&self) -> Vec<&'static str> {
+        let now = recents::now();
+        self.sessions
+            .iter()
+            .filter(|s| self.drawer_threads.contains_key(&s.id))
+            .map(|s| recents::group(s, now))
+            .collect()
     }
 
     /// Opens the drawer, for tests that follow a running thread into it.
@@ -119,12 +146,8 @@ impl ThreadList {
     pub(super) fn drawer_age(&self, i: usize) -> Option<String> {
         self.drawer_at().filter(|at| i > *at)?;
         let id = self.rows.get(i)?.id.as_ref()?;
-        self.sessions
-            .iter()
-            .find(|s| &s.id == id)
-            .and_then(|s| s.run_started_at.as_deref())
-            .and_then(recents::timestamp)
-            .map(|start| detailed::elapsed(start, recents::now()))
+        let start = (*self.drawer_threads.get(id)?)?;
+        Some(detailed::elapsed(start, recents::now()))
     }
 
     /// The drawer: a hairline over its header, then its threads when open.
@@ -142,9 +165,14 @@ impl ThreadList {
         // The dot breathes once a second, as the Inbox's terminal mark.
         let pulse = if recents::now() % 2 == 1 { 0.45 } else { 1. };
         let open = !self.working_closed;
+        // The open thread sits in the closed drawer: its header carries the
+        // selection, so the person sees where the thread went.
+        let holds_selection = !self.drawer_rows_shown()
+            && self.selected.as_ref().is_some_and(|id| self.drawer_threads.contains_key(id));
         let header = div()
             .id("sidebar-working-header")
             .debug_selector(|| "sidebar-working-header".into())
+            .relative()
             .w_full()
             .flex_shrink_0()
             .h(px(HEADER_HEIGHT))
@@ -157,7 +185,17 @@ impl ThreadList {
             .hover(|v| v.bg(theme().hover))
             .text_size(px(12.))
             .font_weight(gpui::FontWeight(450.))
-            .text_color(theme().text_muted)
+            .text_color(if holds_selection { theme().text } else { theme().text_muted })
+            .when(holds_selection, |header| {
+                header.child(
+                    div()
+                        .debug_selector(|| "sidebar-working-selected".into())
+                        .absolute()
+                        .inset_0()
+                        .rounded(px(6.))
+                        .bg(theme().selection),
+                )
+            })
             .child(
                 div()
                     .debug_selector(|| "sidebar-working-dot".into())
