@@ -94,9 +94,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
   '/api/task-artifacts/[id]/actions': seek('operator task artifact actions'),
 
 
-  // The CLI builds `/api/tasks/${id}/${action}`, which this inventory cannot resolve to the
-  // explicit report, block and operator-verb registrations.
-  '/api/tasks/[id]/[id]': seek('dynamic CLI task URL; every verb is registered at its explicit path'),
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
 };
