@@ -57,3 +57,29 @@ fn review_layout_title_cache_visits_only_open_tabs(cx: &mut TestAppContext) {
         assert!(s.review_title_visits <= count, "title caching must look up only open threads");
     });
 }
+
+#[gpui::test]
+fn review_layout_delta_split_uses_project_tool(cx: &mut TestAppContext) {
+    let (_f, shell, mut v) = setup(cx);
+    shell.update_in(&mut v, |s, w, cx| {
+        let a = s.state.selected.clone().unwrap();
+        let b = s.workspaces.iter().find(|p| **p != a).unwrap().clone();
+        s.switch(b.clone(), w, cx);
+        layout::sync(s, w, cx);
+        let p = s.features.get::<Panel>();
+        p.lower = Some(Tool::Prs); p.lower_tabs = vec![Tool::Prs];
+        layout::save(s);
+        layout::split(s, w, cx); // B retains its tabs after collapsing the split.
+        assert_eq!(s.features.get::<Panel>().lower, None);
+        s.switch(a, w, cx);
+        layout::sync(s, w, cx);
+        let p = s.features.get::<Panel>();
+        p.lower = Some(Tool::Browser); p.lower_tabs = vec![Tool::Browser];
+        layout::save(s);
+        s.switch(b, w, cx);
+        layout::sync(s, w, cx);
+        assert_eq!(s.features.get::<Panel>().lower, None);
+        layout::split(s, w, cx);
+        assert_eq!(s.features.get::<Panel>().lower, Some(Tool::Prs), "B opens its own lower tool after A");
+    });
+}
