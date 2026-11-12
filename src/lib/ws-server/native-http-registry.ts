@@ -35,6 +35,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/workspace/maintenance', 'GET POST', () => import('@/app/api/orchestrator/workspace/maintenance/route')),
     route('/api/orchestrator/workspace/preservation', 'GET POST', () => import('@/app/api/orchestrator/workspace/preservation/route')),
     route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
+    route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
+    route('/api/harness', 'POST', () => import('@/lib/harness/route')),
 
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
