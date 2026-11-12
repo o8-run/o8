@@ -2203,6 +2203,15 @@
       ]
     },
     {
+      "path": "tests/ci-audit-tool-cache-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ci-gates-real-path.test.ts",
       "reasons": [
         "child-process",
