@@ -8985,6 +8985,12 @@
       ]
     },
     {
+      "path": "tests/worker-target-packet-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-transcript-route-real-path.test.ts",
       "reasons": [
         "real-path"

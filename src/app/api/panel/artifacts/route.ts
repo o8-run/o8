@@ -150,10 +150,10 @@ export async function POST(request: Request) {
   if (buffer.length > MAX_BYTES) {
     return NextResponse.json({ error: `Artifact too large (max ${Math.round(MAX_BYTES / 1024 / 1024)} MB).` }, { status: 413 });
   }
-  const ownershipRefusal = workerPacketRefusal(
-    resolveRequestPrincipalContext(request),
-    meta.packetId || (meta.laneId ? getLane(meta.laneId)?.packetId : null),
-  );
+  const principal = resolveRequestPrincipalContext(request);
+  const ownershipRefusal = workerPacketRefusal(principal,
+    meta.packetId || (meta.laneId ? getLane(meta.laneId)?.packetId : null))
+    || (meta.laneId ? workerPacketRefusal(principal, getLane(meta.laneId)?.packetId) : null);
   if (ownershipRefusal) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }

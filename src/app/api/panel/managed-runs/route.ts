@@ -141,7 +141,8 @@ async function post(req: Request) {
     return NextResponse.json({ ok: true, run: findManagedRun(run.id) });
   }
   if (body.action === 'register' || !body.action) {
-    const ownershipRefusal = workerPacketRefusal(principal, body.packetId);
+    const ownershipRefusal = workerPacketRefusal(principal, body.packetId)
+      || (body.laneId ? workerPacketRefusal(principal, getLane(body.laneId)?.packetId) : null);
     if (ownershipRefusal) {
       return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
     }

@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { mirrorProofToPr } from '@/lib/artifacts/pr-mirror';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
-import { getLane } from '@/lib/lane/registry';
+import { getLane, listLanes } from '@/lib/lane/registry';
 
 /**
  * POST /api/panel/artifacts/mirror — mirror a packet/lane's before/after proof
@@ -30,12 +30,25 @@ export async function POST(request: Request) {
   if (!packetId && !laneId) {
     return NextResponse.json({ error: 'Provide packetId or laneId.' }, { status: 400 });
   }
+  const principal = resolveRequestPrincipalContext(request);
   const ownershipRefusal = workerPacketRefusal(
-    resolveRequestPrincipalContext(request),
+    principal,
     packetId || (laneId ? getLane(laneId)?.packetId : null),
-  );
+  ) || (laneId ? workerPacketRefusal(principal, getLane(laneId)?.packetId) : null);
   if (ownershipRefusal) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
+
+  if (principal.role === 'worker') {
+    const recorded = principal.packetId && listLanes(new Set([principal.packetId])).some(lane => {
+      const match = lane.outcomeNote?.match(/^Pull request opened: https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/([1-9]\d*)(?:$|\.)/);
+      return match && lane.prNumber === prNumber && Number(match[2]) === prNumber
+        && match[1].toLowerCase() === repoSlug.toLowerCase();
+    });
+    if (!recorded) {
+      return NextResponse.json({ ok: false, error: { code: 'worker_packet_mismatch',
+        message: 'The destination must be a recorded PR for the caller packet.' } }, { status: 403 });
+    }
   }
 
   const result = await mirrorProofToPr({ repoSlug, prNumber, packetId, laneId });
