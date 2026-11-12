@@ -50,11 +50,8 @@ pub(super) struct Runtime {
 }
 /// The sidebar column; the header lays its toggle and search over it.
 pub(super) const WIDTH: f32 = 280.;
-/// The right padding of the column's head row, where its last control ends;
-/// the header's Back and Forward end on the same edge above it.
-pub(super) const HEAD_PAD: f32 = 8.;
 /// The narrowest the column drags to; below this, row titles and ages crowd.
-pub(super) const MIN_WIDTH: f32 = 250.;
+const MIN_WIDTH: f32 = 250.;
 const MAX_WIDTH: f32 = 500.;
 /// The edge's grab target reaches this far either side of the boundary.
 const EDGE_SLOP: f32 = 8.;

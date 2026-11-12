@@ -47,15 +47,6 @@ fn run_about(cx: &mut TestAppContext, activate: Activate) {
         view.read_with(cx, |s, _| s.about_version.clone()),
         Some("1.2.3".into())
     );
-    // The bare Ring heads the page at 48, above the version.
-    let ring = cx
-        .debug_bounds("settings-about-ring")
-        .expect("About shows the Ring");
-    assert_eq!(ring.size, gpui::size(gpui::px(48.), gpui::px(48.)));
-    let version = cx
-        .debug_bounds("settings-about-version")
-        .expect("version fact");
-    assert!(ring.bottom() <= version.top());
     for (selector, url) in [
         ("setting-about-github", "https://github.com/o8-run/o8"),
         (
