@@ -51,12 +51,16 @@ like) is refused unless the request lists that exact name in `allow`. The same
 holds when such a control is drawn over the point a press would land on.
 
 A press is also refused when it would not reach the named control: the control
-is clipped or hidden, something without a name is on top of it, or its press
-area belongs to a larger wrapper (press the wrapper's name instead, for
+is clipped or hidden, something without a name is on top of it, it is a
+container with another button at its centre, or its press area belongs to a
+larger wrapper (press the wrapper's name instead, for
 example `header-right-panel-hit`).
 
-Keys that can confirm, send or run something are refused unless named in
-`allow`: `key:enter`, `key:space`, `key:ctrl-m`, `key:ctrl-j`.
+Keys that can confirm, send, run or close something are refused unless named
+in `allow`: `key:enter`, `key:space`, `key:ctrl-m`, `key:ctrl-j`, `key:cmd-w`.
+
+`type` is refused while a terminal has focus unless `allow` contains
+`type:terminal`: a program in a terminal can act on a single letter.
 
 A request the window could not start within five seconds is dropped, not run
 late. If the answer is "the window did not answer", take a snapshot before

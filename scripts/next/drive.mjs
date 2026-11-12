@@ -34,7 +34,7 @@ const path = process.env.O8_NEXT_DRIVER_SOCKET || join(homedir(), '.o8', 'next-d
 const socket = connect(path);
 let answer = '';
 socket.setEncoding('utf8');
-socket.setTimeout(15_000, () => { console.error('the window did not answer'); process.exit(1); });
+socket.setTimeout(15_000, () => { console.error('the window did not answer; the request may still have run, so take a snapshot before trying again'); process.exit(1); });
 socket.on('error', error => { console.error(`${path}: ${error.message}`); process.exit(1); });
 socket.on('connect', () => socket.write(`${JSON.stringify(request)}\n`));
 socket.on('data', chunk => {

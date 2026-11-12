@@ -12,6 +12,7 @@ struct Probe {
     stop: usize,
     covered: usize,
     under: usize,
+    inner: usize,
     scrolled: f32,
     keys: Vec<String>,
 }
@@ -51,6 +52,26 @@ impl Render for Probe {
                     .child(button("probe-merge-over")),
             )
             .child(button("probe-far").absolute().top(px(5000.)))
+            .child(
+                div()
+                    .id("probe-box")
+                    .debug_selector(|| "probe-box".into())
+                    .absolute()
+                    .top(px(200.))
+                    .w(px(200.))
+                    .h(px(100.))
+                    .on_click(|_, _, _| {})
+                    .child(
+                        div()
+                            .id("inner")
+                            .absolute()
+                            .top(px(30.))
+                            .left(px(60.))
+                            .w(px(80.))
+                            .h(px(40.))
+                            .on_click(cx.listener(|probe, _, _, _| probe.inner += 1)),
+                    ),
+            )
             .child(button("probe-under").on_click(cx.listener(|probe, _, _, _| probe.under += 1)))
             .child(
                 // Nothing names this, and it takes the press meant for
@@ -77,6 +98,7 @@ fn probe(cx: &mut TestAppContext) -> (gpui::Entity<Probe>, &mut VisualTestContex
             stop: 0,
             covered: 0,
             under: 0,
+            inner: 0,
             scrolled: 0.,
             keys: vec![],
         }
@@ -166,6 +188,7 @@ fn the_snapshot_lists_named_controls_and_marks_guarded_ones(cx: &mut TestAppCont
     assert_eq!(
         names,
         [
+            "probe-box",
             "probe-covered",
             "probe-far",
             "probe-merge-over",
@@ -174,10 +197,10 @@ fn the_snapshot_lists_named_controls_and_marks_guarded_ones(cx: &mut TestAppCont
             "probe-under"
         ]
     );
-    let ok = &controls[3];
+    let ok = &controls[4];
     assert_eq!((ok["width"].as_f64(), ok["height"].as_f64()), (Some(120.), Some(30.)));
     assert_eq!(ok["guarded"], false);
-    assert_eq!(controls[4]["guarded"], true);
+    assert_eq!(controls[5]["guarded"], true);
     assert!(answer["result"]["viewport"]["width"].as_f64().unwrap() > 0.);
 }
 
@@ -193,6 +216,8 @@ fn keys_and_the_wheel_reach_the_window(cx: &mut TestAppContext) {
         ("tab space", "key:space"),
         ("ctrl-m", "key:ctrl-m"),
         ("ctrl-j", "key:ctrl-j"),
+        ("shift-enter", "key:enter"),
+        ("cmd-w", "key:cmd-w"),
     ] {
         let answer = ask(cx, json!({"command": "key", "keys": keys}));
         assert_eq!(answer["ok"], false, "{keys}");
@@ -215,6 +240,34 @@ fn keys_and_the_wheel_reach_the_window(cx: &mut TestAppContext) {
     assert_eq!(probe.read_with(cx, |probe, _| probe.scrolled), 36.);
     let answer = ask(cx, json!({"command": "dance"}));
     assert!(answer["error"].as_str().unwrap().contains("unknown command"));
+}
+
+#[gpui::test]
+fn a_press_on_a_container_does_not_go_to_the_button_inside_it(cx: &mut TestAppContext) {
+    let (probe, cx) = probe(cx);
+    // "probe-box" is named; the button at its centre is not.
+    let answer = ask(cx, json!({"command": "press", "selector": "probe-box"}));
+    assert_eq!(answer["ok"], false, "{answer}");
+    assert!(answer["error"].as_str().unwrap().contains("container"));
+    assert_eq!(probe.read_with(cx, |probe, _| probe.inner), 0);
+}
+
+#[gpui::test]
+fn text_for_a_focused_terminal_must_be_named(cx: &mut TestAppContext) {
+    let (_probe, cx) = probe(cx);
+    cx.update(|window, cx| {
+        settle(window, cx);
+        terminal_has_focus();
+        let refused = handle(&json!({"command": "type", "text": "y"}), window, cx);
+        assert!(refused["error"].as_str().unwrap().contains("type:terminal"), "{refused}");
+        // Named, it gets as far as finding nothing here that takes text.
+        let named = handle(
+            &json!({"command": "type", "text": "y", "allow": ["type:terminal"]}),
+            window,
+            cx,
+        );
+        assert!(named["error"].as_str().unwrap().contains("takes text"), "{named}");
+    });
 }
 
 #[gpui::test]
@@ -251,6 +304,8 @@ fn names_that_change_real_state_are_guarded() {
         "worker-pane-steer-7",
         "pane-close-7",
         "inbox-respond-4",
+        "provider-sign-in",
+        "sidebar-row-regenerate-title",
     ] {
         assert!(guarded(name), "{name}");
     }

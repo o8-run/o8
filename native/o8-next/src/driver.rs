@@ -14,11 +14,11 @@ use gpui::{
 use serde_json::{Value, json};
 
 /// Words in a control's name that mark it as changing real state.
-const GUARDED: [&str; 31] = [
+const GUARDED: [&str; 33] = [
     "accept", "approve", "archive", "close", "confirm", "delete", "discard", "dismiss", "kill",
     "logout", "merge", "off", "pick", "publish", "ready", "reject", "release", "remove", "reply",
-    "reset", "respond", "revoke", "send", "settle", "ship", "snooze", "steer", "stop", "submit",
-    "suppress", "unmerged",
+    "regenerate", "reset", "respond", "revoke", "send", "settle", "ship", "sign", "snooze", "steer",
+    "stop", "submit", "suppress", "unmerged",
 ];
 
 /// True when a control's name says it changes real state.
@@ -108,24 +108,36 @@ fn target(request: &Value, window: &Window) -> Result<(String, Bounds<Pixels>), 
 }
 
 /// Bounds are recorded before clipping, and only for named controls. So a
-/// press is sent only when the topmost press area at the point lies inside
-/// the named control: not when the control is clipped away, hidden, or under
-/// something that has no name.
+/// press is sent only when the topmost press area at the point is the named
+/// control's own: not when the control is clipped away, hidden, under
+/// something that has no name, or a container whose centre holds some other
+/// button.
 fn reaches(target: Bounds<Pixels>, window: &Window) -> bool {
-    let slack = px(0.5);
+    let near = |a: Pixels, b: Pixels| (a - b).abs() <= px(0.5);
     window
         .topmost_hitbox_bounds(target.center())
         .is_some_and(|top| {
-            top.left() >= target.left() - slack
-                && top.top() >= target.top() - slack
-                && top.right() <= target.right() + slack
-                && top.bottom() <= target.bottom() + slack
+            near(top.left(), target.left())
+                && near(top.top(), target.top())
+                && near(top.right(), target.right())
+                && near(top.bottom(), target.bottom())
         })
+}
+
+thread_local! {
+    /// Set while the frame being drawn gives text input to a terminal.
+    static TERMINAL_FOCUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Called by a terminal pane when it paints with keyboard focus.
+pub(crate) fn terminal_has_focus() {
+    TERMINAL_FOCUSED.set(true);
 }
 
 /// Draws every view afresh, so the frame holds the bounds of every named
 /// control as the window stands now, then asks the platform to show it.
 pub(crate) fn settle(window: &mut Window, cx: &mut App) {
+    TERMINAL_FOCUSED.set(false);
     window.refresh();
     window.draw(cx).clear();
     window.refresh();
@@ -149,7 +161,7 @@ fn press(request: &Value, window: &mut Window, cx: &mut App) -> Result<Value, St
     if !reaches(bounds, window) {
         return Err(format!(
             "{selector:?} is not what a press there would reach: it is clipped, hidden, \
-             covered, or has no press area of its own"
+             covered, a container, or has no press area of its own"
         ));
     }
     let modifiers = Modifiers::default();
@@ -198,13 +210,17 @@ fn scroll(request: &Value, window: &mut Window, cx: &mut App) -> Result<Value, S
     Ok(json!({"selector": selector, "dx": dx, "dy": dy}))
 }
 
-/// The name a keystroke must be allowed under, when it can confirm, send or
-/// run something: Enter, Space on a focused button, and the control keys a
-/// terminal reads as a line end.
+/// The name a keystroke must be allowed under, when it can confirm, send,
+/// run or close something: Enter, Space on a focused button, the control
+/// keys a terminal reads as a line end, and the close-tab chord.
 fn confirms(key: &Keystroke) -> Option<String> {
-    let line_end = key.modifiers.control && matches!(key.key.as_str(), "m" | "j");
-    (matches!(key.key.as_str(), "enter" | "space") || line_end)
-        .then(|| format!("key:{}", if line_end { format!("ctrl-{}", key.key) } else { key.key.clone() }))
+    let chord = key.modifiers.control || key.modifiers.platform;
+    match key.key.as_str() {
+        "enter" | "space" => Some(format!("key:{}", key.key)),
+        "m" | "j" if key.modifiers.control => Some(format!("key:ctrl-{}", key.key)),
+        "w" if chord => Some("key:cmd-w".into()),
+        _ => None,
+    }
 }
 
 /// Keystrokes such as `cmd-k` or `escape`, separated by spaces. One that can
@@ -225,7 +241,7 @@ fn keys(request: &Value, window: &mut Window, cx: &mut App) -> Result<Value, Str
         .find(|name| !allowed(request, name))
     {
         return Err(format!(
-            "that key can confirm, send or run something; name {name:?} in \"allow\" to press it"
+            "that key can confirm, send, run or close something; name {name:?} in \"allow\" to press it"
         ));
     }
     let count = parsed.len();
@@ -246,6 +262,13 @@ fn type_text(request: &Value, window: &mut Window, cx: &mut App) -> Result<Value
     if text.chars().any(char::is_control) {
         return Err("type takes printable text; use key for enter, tab and the rest".into());
     }
+    // A program in a terminal can act on one letter: "y" answers a prompt.
+    if TERMINAL_FOCUSED.get() && !allowed(request, "type:terminal") {
+        return Err(
+            "a terminal has focus and may act on a single key; name \"type:terminal\" in \"allow\""
+                .into(),
+        );
+    }
     if !window.dispatch_text_input(text, cx) {
         return Err("nothing that takes text has focus".into());
     }
@@ -263,7 +286,7 @@ mod socket {
     use std::{
         io::{BufRead, BufReader, Read, Write},
         os::unix::{
-            fs::{DirBuilderExt, FileTypeExt, OpenOptionsExt, PermissionsExt},
+            fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt},
             net::{UnixListener, UnixStream},
         },
         path::{Path, PathBuf},
@@ -425,12 +448,22 @@ mod socket {
             "ok": answer["ok"],
             "error": answer["error"],
         });
-        if let Ok(mut file) = std::fs::OpenOptions::new()
+        // Never through a link, and only a file this account owns; an older
+        // log may have been left readable by others.
+        let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(log)
-        {
+        else {
+            return;
+        };
+        // SAFETY: geteuid has no preconditions.
+        let mine = file
+            .metadata()
+            .is_ok_and(|meta| meta.uid() == unsafe { libc::geteuid() });
+        if mine && file.set_permissions(std::fs::Permissions::from_mode(0o600)).is_ok() {
             let _ = writeln!(file, "{line}");
         }
     }
