@@ -57,7 +57,23 @@ impl ThreadList {
             && !inbox::needs_input(s)
             && !pinned.contains(&s.id)
             && s.status != "archived"
-            && !self.pending_archives.contains_key(&s.id)
+            && !self.archiving.contains_key(&s.id)
+    }
+
+    /// An archive or restore answered: the thread leaves the in-flight set
+    /// and the list rebuilds. A successful archive marks the thread archived
+    /// at once, so it does not flash back into the drawer before the reload.
+    pub(super) fn archive_done(&mut self, id: &str, ok: bool) {
+        let Some(archiving) = self.archiving.remove(id) else {
+            return;
+        };
+        if ok
+            && archiving
+            && let Some(session) = self.sessions.iter_mut().find(|s| s.id == id)
+        {
+            session.status = "archived".into();
+        }
+        self.rebuild();
     }
 
     /// Whether the drawer lists its threads: open, or still closing on screen.
@@ -214,6 +230,17 @@ impl ThreadList {
                     .text_ellipsis()
                     .child("Working"),
             )
+            // Unread news inside the closed drawer: the folder's unread dot.
+            .when(self.drawer_unread && !self.drawer_rows_shown(), |header| {
+                header.child(
+                    div()
+                        .debug_selector(|| "sidebar-working-unread".into())
+                        .size(px(6.))
+                        .flex_shrink_0()
+                        .rounded_full()
+                        .bg(theme().success),
+                )
+            })
             .child(
                 tabular(div())
                     .debug_selector(|| "sidebar-working-count".into())

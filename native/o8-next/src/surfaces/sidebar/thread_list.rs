@@ -193,6 +193,8 @@ pub struct ThreadList {
     /// never scans the rows or the sessions.
     pub(super) drawer_index: Option<usize>,
     pub(super) drawer_threads: HashMap<String, Option<u64>>,
+    /// A thread in the drawer has unread news, for the closed header's dot.
+    pub(super) drawer_unread: bool,
     /// Full scans of the rows or sessions made for the drawer, so a test
     /// can prove painting makes none.
     #[cfg(test)]
@@ -220,6 +222,9 @@ pub struct ThreadList {
     loading: bool,
     saving: bool,
     pending_archives: HashMap<String, String>,
+    /// Archives and restores in flight, any thread kind: true archives.
+    /// Cleared, with a rebuild, when the request succeeds or fails.
+    pub(super) archiving: HashMap<String, bool>,
     pending_workspace_restores: HashMap<String, String>,
     dirty: Option<Instant>,
     /// The next dirty reload skips the stream gap: the user just changed the list.
@@ -333,6 +338,7 @@ impl ThreadList {
             drawer_motion: None,
             drawer_index: None,
             drawer_threads: HashMap::new(),
+            drawer_unread: false,
             #[cfg(test)]
             drawer_scans: Cell::new(0),
             archived_open: false,
@@ -354,6 +360,7 @@ impl ThreadList {
             loading: false,
             saving: false,
             pending_archives: HashMap::new(),
+            archiving: HashMap::new(),
             pending_workspace_restores: HashMap::new(),
             dirty: None,
             urgent: false,
@@ -434,6 +441,8 @@ impl ThreadList {
         }
         self.note_arrivals(&rows);
         self.drawer_index = self.find_drawer(&rows);
+        self.drawer_unread = !drawer.is_empty()
+            && self.sessions.iter().any(|s| s.unread && drawer.contains_key(&s.id));
         self.drawer_threads = drawer;
         self.rows = Rc::new(rows);
         // Remeasure detailed rows; keep the reader's place.
@@ -550,7 +559,7 @@ impl ThreadList {
                 .collect();
             // A run that asks for input, or whose archive is in flight, stays
             // put. Folded open, so the drawer's threads are known while closed.
-            let stays = |id: &str| asks.contains(id) || self.pending_archives.contains_key(id);
+            let stays = |id: &str| asks.contains(id) || self.archiving.contains_key(id);
             rows.extend(detailed::fold_working(rest, true, stays));
             if let Some(at) = rows.iter().position(|r| r.kind == "drawer") {
                 let by_id: HashMap<&str, &Session> =
@@ -1148,6 +1157,9 @@ impl ThreadList {
             return;
         };
         let archived = session.status == "archived";
+        // In flight until the request answers, either way (archive_done).
+        self.archiving.insert(id.clone(), !archived);
+        self.rebuild();
         if id.contains(':') {
             let mutation = self
                 .pending_archives
@@ -1188,6 +1200,7 @@ impl ThreadList {
         let draft_owner = self.rename.clone();
         let renaming = draft_owner.as_ref() == Some(&id) && patch["title"].is_string();
         let (client, thread) = self.owner(&id);
+        let done_id = id.clone();
         let workspace = self
             .sessions
             .iter()
@@ -1210,6 +1223,7 @@ impl ThreadList {
                 let current_draft = this.edit_generation == edit_generation
                     && this.editor.read(cx).revision == editor_revision
                     && this.rename == draft_owner;
+                this.archive_done(&done_id, result.is_ok());
                 match result {
                     Ok(()) => {
                         if let Some(message) = archive_notice {

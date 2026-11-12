@@ -336,14 +336,14 @@ fn sidebar_drawer_leaves_out_archived_and_archiving_threads(cx: &mut TestAppCont
     assert_eq!(drawer(&list, cx), Some(("Working".into(), "1".into())));
     // An archive in flight keeps the thread where the archive will take it from.
     list.update(cx, |list, _| {
-        list.pending_archives.insert("run".into(), "mutation".into());
+        list.archiving.insert("run".into(), true);
         list.rebuild();
     });
     assert_eq!(drawer(&list, cx), None);
     assert!(ids(&list, cx).contains(&"run".into()));
     // Archived, with Archived folded, it is in neither the drawer nor the list.
     list.update(cx, |list, _| {
-        list.pending_archives.clear();
+        list.archiving.clear();
         list.sessions[1].status = "archived".into();
         list.rebuild();
     });
@@ -398,4 +398,68 @@ fn sidebar_drawer_in_date_and_repo_views_takes_settled_runs_not_merged(cx: &mut 
         });
         assert_eq!(drawer_ids, ["settled-run", "run"], "{view:?}");
     }
+}
+
+#[gpui::test]
+fn sidebar_archive_in_flight_stays_out_and_a_failed_one_returns(cx: &mut TestAppContext) {
+    let mut all = sessions();
+    all.push(session("box:run", "running", "2026-10-02T09:00:00Z"));
+    let (list, cx) = make(cx, all);
+    assert_eq!(drawer(&list, cx), Some(("Working".into(), "2".into())));
+    // A native thread mid-archive stays out of the drawer.
+    list.update(cx, |list, cx| list.archive_id("run".into(), cx));
+    assert_eq!(drawer(&list, cx), Some(("Working".into(), "1".into())));
+    // The archive fails (the test host is unreachable): it is back.
+    cx.run_until_parked();
+    assert_eq!(drawer(&list, cx), Some(("Working".into(), "2".into())));
+    // The same for a machine thread, whose retry id outlives the attempt.
+    list.update(cx, |list, cx| list.archive_id("box:run".into(), cx));
+    assert_eq!(drawer(&list, cx), Some(("Working".into(), "1".into())));
+    cx.run_until_parked();
+    assert_eq!(drawer(&list, cx), Some(("Working".into(), "2".into())));
+}
+
+#[gpui::test]
+fn sidebar_archive_that_succeeds_leaves_and_a_restored_run_returns(cx: &mut TestAppContext) {
+    let (list, cx) = make(cx, sessions());
+    // Archived: it leaves the drawer and, with Archived folded, the list.
+    list.update(cx, |list, cx| {
+        list.archive_id("run".into(), cx);
+        list.archive_done("run", true);
+    });
+    assert_eq!(drawer(&list, cx), None);
+    assert!(!ids(&list, cx).contains(&"run".into()));
+    // Restored while its run goes on: out while the restore is in flight,
+    // in the drawer once it answers (the reload brings the running status).
+    list.update(cx, |list, cx| {
+        list.saving = false;
+        list.archive_id("run".into(), cx);
+        list.sessions[1].status = "running".into();
+        list.rebuild();
+    });
+    assert_eq!(drawer(&list, cx), None);
+    list.update(cx, |list, _| list.archive_done("run", true));
+    assert_eq!(drawer(&list, cx), Some(("Working".into(), "1".into())));
+}
+
+#[gpui::test]
+fn sidebar_closed_drawer_shows_unread_news_inside(cx: &mut TestAppContext) {
+    let (list, cx) = make(cx, sessions());
+    draw(cx);
+    assert!(cx.debug_bounds("sidebar-working-unread").is_none(), "nothing unread yet");
+    list.update(cx, |list, _| {
+        list.sessions[1].unread = true;
+        list.rebuild();
+    });
+    draw(cx);
+    let dot = cx.debug_bounds("sidebar-working-unread").expect("the closed header shows it");
+    let head = cx.debug_bounds("sidebar-working-header").unwrap();
+    assert!(head.contains(&dot.center()));
+    // Open, the thread's own row speaks for it and the header's dot goes.
+    list.update(cx, |list, _| list.open_drawer());
+    draw(cx);
+    assert!(cx.debug_bounds("sidebar-working-unread").is_none());
+    assert_eq!(ids(&list, cx).last().map(String::as_str), Some("run"));
+    let unread = list.read_with(cx, |list, _| list.rows.last().unwrap().unread);
+    assert!(unread, "the row keeps its unread state");
 }
