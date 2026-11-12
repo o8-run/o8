@@ -1,3 +1,4 @@
+import { withToolRuntimeOwner } from '@/lib/runtime/owner-context';
 import { DISPATCH_MISSION_TOOL } from './mission-dispatch-tool';
 import { RuntimeSelectionError, validateRequestedRuntime } from '@/lib/agents/routing';
 export { handleCreateMission } from './mission-create';
@@ -775,7 +776,7 @@ export async function handleTaskClaim(args: Record<string, unknown>): Promise<Mc
 
 export async function handleTaskDispatch(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
-    const result = await dispatchTask(requiredString(args, 'taskId'), {
+    const result = await withToolRuntimeOwner(() => dispatchTask(requiredString(args, 'taskId'), {
       waitForLaunch: false,
       actor: 'orchestrator',
       message: optionalString(args, 'message') || null,
@@ -785,7 +786,7 @@ export async function handleTaskDispatch(args: Record<string, unknown>): Promise
       requestedRuntime: validateRequestedRuntime(args.requestedRuntime),
       projectId: optionalString(args, 'projectId') || null,
       repoPath: optionalString(args, 'repoPath') || null,
-    });
+    }));
     if (!result.ok) return lifecycleErrorResult('o8_task_dispatch', { code: 'task_dispatch_failed', note: result.note }, result.packetId ?? args.taskId);
     return jsonResult(result);
   } catch (error) {

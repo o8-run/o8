@@ -161,6 +161,7 @@ it('retains main local delivery with the native flag unset', async () => {
 }, 30000);
 
 async function stdioDispatch(data: string, port: number, taskId: string, steer = false, options: { required?: boolean; portFile?: boolean; refuse?: boolean; tool?: string } = {}) {
+  const tool = options.tool ?? (steer ? 'steer_packet' : 'o8_task_dispatch');
   const api = steer ? server.apiUrl : `http://127.0.0.1:${port}`;
   const receiptFile = join(data, steer ? 'steer-runtime.json' : 'task-runtime.json');
   const child = spawn(process.execPath, [steer ? '--require=./tests/fixtures/ws-parity-packet-steer.cjs' : '--require=./tests/fixtures/ws-parity-task-dispatch.cjs',
@@ -173,7 +174,7 @@ async function stdioDispatch(data: string, port: number, taskId: string, steer =
   });
   let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
   try {
-    const response = await new Promise<{ result?: { isError?: boolean }; error?: { code?: number; message?: string } }>((resolve, reject) => {
+    const response = await new Promise<{ result?: { isError?: boolean; content?: Array<{ type: string; text?: string }> }; error?: { code?: number; message?: string } }>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`stdio timeout: ${stderr.slice(-2000)}`)), 30000);
       let pending = '';
       child.stdout.on('data', chunk => {
@@ -185,13 +186,18 @@ async function stdioDispatch(data: string, port: number, taskId: string, steer =
         }
       });
       child.once('exit', code => { clearTimeout(timer); reject(new Error(`stdio exited ${code}: ${stderr.slice(-2000)}`)); });
-      const tool = options.tool ?? (steer ? 'steer_packet' : 'o8_task_dispatch');
       const args = tool === 'o8_task_dispatch' ? { taskId } : tool === 'steer_packet'
         ? { packetId: taskId, message: 'stdio fixture' } : { sessionKey: 'codex-owned:refusal', message: 'stdio fixture' };
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 101, method: 'tools/call', params: { name: tool, arguments: args } }) + '\n');
     });
     if (options.refuse) {
-      expect(response.error, JSON.stringify(response)).toMatchObject({ code: -32603, message: 'o8 operation failed' });
+      expect(response.error, JSON.stringify(response)).toBeUndefined();
+      expect(response.result?.isError, JSON.stringify(response)).toBe(true);
+      const failure = JSON.parse(response.result?.content?.find(block => block.type === 'text')?.text ?? '{}');
+      expect(failure).toMatchObject({ ok: false, code: 'outcome_unknown' });
+      expect(failure.next).toMatch(/inspect/i);
+      if (tool === 'o8_send') expect(failure).toMatchObject({ state: 'unknown', sessionKey: 'codex-owned:refusal' });
+      else expect(failure).toMatchObject({ packetId: taskId, state: 'queued', packetState: 'queued' });
       expect(existsSync(join(data, 'task-runtime.json'))).toBe(false);
       expect(existsSync(join(data, 'steer-runtime.json'))).toBe(false);
       return { pid: child.pid, receipt: JSON.parse('{}') };
@@ -269,14 +275,15 @@ it.each(['o8_task_dispatch', 'steer_packet', 'o8_send'].flatMap(tool =>
       rmSync(data, { recursive: true, force: true });
     }
   }, 60000);
-it.each([401, 403])('flag-unset stdio refuses a reachable unverifiable owner (%i)', async status => {
+it.each([401, 403].flatMap(status => ['o8_task_dispatch', 'steer_packet'].map(tool => ({ status, tool }))))(
+  'flag-unset stdio refuses a reachable unverifiable owner ($status, $tool)', async ({ status, tool }) => {
   let probes = 0;
   const listener = createServer((_, response) => { probes++; response.writeHead(status).end(); });
   await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
   const port = (listener.address() as { port: number }).port;
   const data = await refusalData(port);
   try {
-    await stdioDispatch(data, port, 'stdio-refused-task', false, { refuse: true });
+    await stdioDispatch(data, port, 'stdio-refused-task', false, { refuse: true, tool });
     expect(probes).toBe(1);
   } finally { await new Promise<void>(resolve => listener.close(() => resolve())); rmSync(data, { recursive: true, force: true }); }
 }, 60000);
@@ -313,4 +320,18 @@ it.each(['unchanged', 'head', 'dirty'])('review-correct rebuilds WS spawn admiss
     if (drift !== 'unchanged') expect(receipt.deliveries[0].note).toContain(drift === 'head' ? 'code changed after review' : 'uncommitted changes');
     expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(drift === 'unchanged' ? 1 : 0);
   } finally { flag('hold-steer', false); await settled.catch(() => {}); if (existsSync(dirty)) unlinkSync(dirty); }
+}, 60000);
+
+it.each(['timeout', 'malformed'])('required WS owner returns a structured refusal for %s discovery', async mode => {
+  const listener = createServer((_, response) => {
+    if (mode === 'malformed') response.writeHead(200, { 'content-type': 'application/json' }).end('not-json');
+  });
+  await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
+  const port = (listener.address() as { port: number }).port;
+  const data = await refusalData(port);
+  try { await stdioDispatch(data, port, 'stdio-refused-task', false, { required: true, refuse: true }); }
+  finally {
+    listener.closeAllConnections(); await new Promise<void>(resolve => listener.close(() => resolve()));
+    rmSync(data, { recursive: true, force: true });
+  }
 }, 60000);

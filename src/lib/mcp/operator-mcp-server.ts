@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { withLiveRuntimeOwner } from '@/lib/runtime/owner-context';
+import { withStdioRuntimeOwner } from '@/lib/runtime/owner-context';
 import { safeErrorText } from '@/lib/mcp/api-error';
 /**
  * o8 Operator MCP Server — stdio JSON-RPC 2.0 server that lets users
@@ -214,7 +214,7 @@ setApiBase(API_BASE);
 // HTTP route and this compatibility entrypoint share one registry.
 const buildResponse = (message: JsonRpcRequest) => message.method === 'tools/call'
   && ['o8_task_dispatch', 'steer_packet', 'o8_send'].includes(String(message.params?.name))
-  ? withLiveRuntimeOwner(() => handleOperatorMcpMessage(message))
+  ? withStdioRuntimeOwner(() => handleOperatorMcpMessage(message))
   : handleOperatorMcpMessage(message);
 
 function send(message: JsonRpcResponse): void {
