@@ -96,6 +96,34 @@ function withoutReuseGate(jobs) {
     job.if = job.if.slice(1, -suffix.length);
   }
 }
+// Hosted tool provisioning is normalized away; local verification still audits
+// with the installed cargo-audit. Reject any attempt to cache advisory results.
+function withoutAuditToolCache(security) {
+  const identity = security.steps.find(step => step.id === 'audit-tool');
+  const cache = security.steps.find(step => step.id === 'audit-tool-cache');
+  const install = security.steps.find(step => step.name === 'Install cargo-audit');
+  requireCondition(isDeepStrictEqual(identity, {
+    name: 'Resolve current audit tool identity', id: 'audit-tool',
+    run: 'node scripts/ci/audit-tool-cache.mjs "$(rustc -Vv)"',
+  }) && isDeepStrictEqual(cache, {
+    uses: 'actions/cache@v4', id: 'audit-tool-cache', if: "steps.audit-tool.outputs.cacheable == 'true'", with: {
+      path: '~/.cargo/bin/cargo-audit',
+      key: '${{ runner.os }}-${{ runner.arch }}-cargo-audit-v2-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.source }}-${{ steps.audit-tool.outputs.toolchain }}-${{ steps.audit-tool.outputs.image }}-${{ steps.audit-tool.outputs.recipe }}',
+    },
+  }) && isDeepStrictEqual(install, {
+    name: 'Install cargo-audit',
+    env: { AUDIT_TOOL_VERSION: '${{ steps.audit-tool.outputs.version }}', AUDIT_TOOL_CACHEABLE: '${{ steps.audit-tool.outputs.cacheable }}',
+      AUDIT_TOOL_CACHE_HIT: '${{ steps.audit-tool-cache.outputs.cache-hit }}' },
+    run: 'bash scripts/ci/install-audit-tool.sh',
+  }) && ['Audit root dependencies', 'Audit Rust dependencies', 'Review dependency changes'].every(name => {
+    const audit = security.steps.find(step => step.name === name);
+    return audit && !audit.if && !audit['continue-on-error'];
+  }), 'audit executable cache needs a verify:ci equivalent; advisory data must not be cached');
+  security.steps = security.steps.filter(step => step !== identity && step !== cache);
+  delete install.if;
+  delete install.env;
+  install.run = 'cargo install cargo-audit --locked';
+}
 function usesTestProcess(command, scripts, seen = new Set()) {
   if (/\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs|native-test-shard\.mjs --cargo --phase=timed/.test(command)) return true;
   return [...command.matchAll(/\bnpm run ([\w:-]+)/g)].some(([, name]) => {
@@ -156,6 +184,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   requireCondition(jobs && typeof jobs === 'object', 'CI must define jobs');
   requireCondition(workflow.defaults?.run === undefined, 'workflow run defaults need a verify:ci equivalent');
   withoutReuseGate(jobs);
+  withoutAuditToolCache(jobs.security);
   for (const id of Object.keys(jobs)) {
     requireCondition(localJobs.includes(id) || Object.hasOwn(hostedJobs, id), `CI job ${id} is missing from verify:ci`);
   }
