@@ -24,7 +24,6 @@ const seek = (reason: string): NextOnlyEntry => ({ owner: 'seek', reason });
 export const NEXT_ONLY_NATIVE_PATHS: NextOnlyTable = {
   '/api/panel/ssh-machines': security('local-only trust gate (isTrustedPanelRequest) and SSH commands on saved machines'),
   '/api/runtime/acp-connection': seek('native inventory drift outside the A1 and A2 slices'),
-  '/api/panel/devices': security('device pairing and revocation'),
   '/api/tasks/[id]/preview': seek('native inventory drift outside the A1 and A2 slices'),
   '/api/review/push': seek("review's push button: a POST outside the Phase A reads"),
 };

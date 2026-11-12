@@ -1,3 +1,4 @@
+export * as api_panel_devices from '@/lib/devices/route';
 import { GET as api_cortex_codebase_memory_GET } from '@/app/api/cortex/codebase-memory/route';
 import { GET as api_cortex_diagnostics_GET } from '@/app/api/cortex/diagnostics/route';
 /** Named handler exports for the lazy native shell transport; retain existing route auth. */

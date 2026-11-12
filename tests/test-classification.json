@@ -3227,6 +3227,12 @@
       ]
     },
     {
+      "path": "tests/device-owner-handoff-paging.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "tests/device-session-routes-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -5548,6 +5554,14 @@
     },
     {
       "path": "tests/o8d-cortex-writes-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-devices-owner-real-path.test.ts",
       "reasons": [
         "child-process",
         "native-build",
