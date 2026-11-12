@@ -240,7 +240,7 @@ impl Transcript {
             retained.retain(|entry| !next.iter().any(|current| current.id == entry.id));
             retained.extend(next);
             next = retained;
-        } else if !self.backfilled && next.len() > 200 {
+        } else if self.key.starts_with("llm-chat:") && !self.backfilled && next.len() > 200 {
             next.drain(..next.len() - 200);
         }
         if next == self.entries {
@@ -693,6 +693,41 @@ impl Transcript {
             .and_then(Value::as_bool)
         {
             self.context_busy = active;
+        }
+        // Normalized worker frames contain only changed entries. The mobile
+        // merger intentionally trims windows and deduplicates equal commands;
+        // neither rule applies to distinct, cursor-addressed worker events.
+        if entries
+            .last()
+            .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
+        {
+            let mut next = if payload["replace"] == true {
+                vec![]
+            } else {
+                self.entries.clone()
+            };
+            next.retain(|e| !e.extra.contains_key("nativeWorkerReadback"));
+            for entry in entries {
+                if let Some(old) = next.iter_mut().find(|e| e.id == entry.id) {
+                    *old = entry;
+                } else {
+                    next.push(entry);
+                }
+            }
+            let marker = next.pop().unwrap();
+            next.sort_by_key(|e| {
+                e.extra
+                    .get("timestamp")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+            });
+            next.push(marker);
+            if next == self.entries {
+                return false;
+            }
+            self.rows = self.render(&next);
+            self.entries = next;
+            return true;
         }
         let replace = payload["replace"].as_bool().unwrap_or(false);
         let overlaps = entries

@@ -8,6 +8,8 @@ pub struct Step {
     pub command: String,
     #[serde(skip)]
     pub output: Option<std::sync::Arc<str>>,
+    #[serde(skip)]
+    pub(crate) worker: bool,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -702,10 +704,9 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
             "web-search" => (arg(&["query", "q"]), None),
             "web-read" => (arg(&["url", "uri"]), None),
             "agent" => (arg(&["description", "prompt"]), None),
-            _ if name.contains("launch_task") || name.contains("dispatch") => (
-                arg(&["title", "name", "description", "prompt", "taskId"]),
-                None,
-            ),
+            _ if name.contains("launch_task") || name.contains("dispatch") => {
+                (arg(&["title", "name", "description", "prompt", "taskId"]), None)
+            }
             _ => (subject.clone(), None),
         };
         vec![Part {
@@ -732,7 +733,8 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
     Step {
         id: id.into(),
         command,
-        output: (!output.trim().is_empty()).then(|| {
+        worker: tool["nativeWorkerTrace"] == true,
+        output: (tool["nativeWorkerTrace"] == true && !output.trim().is_empty()).then(|| {
             let mut chars = output.chars();
             let mut preview: String = chars.by_ref().take(32_000).collect();
             if chars.next().is_some() {
@@ -926,6 +928,7 @@ mod tests {
             id: command.into(),
             command: command.into(),
             output: None,
+            worker: false,
             status: status.into(),
             reason: None,
             group: 0,

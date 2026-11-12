@@ -141,10 +141,9 @@ impl Pane {
     pub fn install(&mut self, history: History, client: Client) {
         self.client = Some(client.clone());
         self.peeks.connect(client.clone());
-        let key = history.session_key.clone();
+        self.subscription = Some(transport::subscribe_history(client, &history));
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
-        self.subscription = Some(transport::subscribe(client, key));
         self.notice.clear();
     }
     /// A transcript with no live session behind it: a delegate call's own words.
@@ -185,7 +184,8 @@ impl Pane {
         let anchor = self.list.logical_scroll_top();
         for (index, row) in self.rows.iter().enumerate() {
             let mut row = row.borrow_mut();
-            if !crate::subagents::trace::delegates(&row.row) {
+            if !crate::subagents::trace::delegates(&row.row)
+            {
                 continue;
             }
             row.bind_subagent_focus(cx);
@@ -493,22 +493,25 @@ mod tests {
                 let n = stream.read(&mut buf).unwrap();
                 let request = String::from_utf8_lossy(&buf[..n]);
                 let (status, body) = if request.contains("/api/mobile/history") {
-                    if failing.load(Ordering::Acquire) {
-                        (
-                            "500 Internal Server Error",
-                            serde_json::json!({"error":"temporarily unavailable"}),
-                        )
-                    } else {
-                        (
-                            "200 OK",
-                            serde_json::json!({"sessionKey":"codex-owned:notice","transcript":[{"id":"prompt","role":"user","text":"Review this patch."}]}),
-                        )
-                    }
-                } else {
-                    assert!(request.contains("/api/orchestrator/packet-transcript"));
                     (
                         "200 OK",
-                        serde_json::json!({"sessionKey":"codex-owned:notice","events":[{"seq":1,"ts":"2026-11-02T21:49:25.000Z","type":"done","exitCode":0}],"nextCursor":1}),
+                        serde_json::json!({"sessionKey":"codex-owned:notice","transcript":[{"id":"prompt","role":"user","text":"Review this patch."}]}),
+                    )
+                } else if failing.load(Ordering::Acquire) {
+                    (
+                        "500 Internal Server Error",
+                        serde_json::json!({"error":"temporarily unavailable"}),
+                    )
+                } else {
+                    assert!(request.contains("/api/orchestrator/packet-transcript"));
+                    let events = if request.contains("cursor=0") {
+                        serde_json::json!([{"seq":1,"ts":"2026-11-02T21:49:25.000Z","type":"assistant","text":"Reviewing."}])
+                    } else {
+                        serde_json::json!([])
+                    };
+                    (
+                        "200 OK",
+                        serde_json::json!({"sessionKey":"codex-owned:notice","events":events,"nextCursor":1}),
                     )
                 };
                 let body = body.to_string();

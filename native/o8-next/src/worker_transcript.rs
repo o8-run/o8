@@ -37,226 +37,261 @@ fn entry(id: String, role: &str, text: String, event: &Value) -> Entry {
     }
 }
 
-/// Keep prompts and durable cards from mobile history; normalized events own
-/// the answer and work. In particular, never infer calls from prose prefixes.
+/// Only unfinished calls and the current answer travel with the cursor. Completed
+/// history belongs to Transcript, not to the polling thread.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct State {
+    key: String,
+    pub(crate) cursor: u64,
+    run: u64,
+    calls: HashMap<String, Entry>,
+    pending: HashMap<String, Vec<String>>,
+    answer: Option<Entry>,
+    pub(crate) done: bool,
+    active: bool,
+}
+
+fn upsert(entries: &mut Vec<Entry>, entry: Entry) {
+    if let Some(old) = entries.iter_mut().find(|e| e.id == entry.id) {
+        *old = entry;
+    } else {
+        entries.push(entry);
+    }
+}
+
+impl State {
+    pub(crate) fn from_history(history: &History) -> Option<Self> {
+        serde_json::from_value(
+            history
+                .transcript
+                .last()?
+                .extra
+                .get("nativeWorkerReadback")?
+                .clone(),
+        )
+        .ok()
+    }
+    fn marker(&self) -> Entry {
+        let mut row = entry(
+            format!("{}:worker-state", self.key),
+            "assistant",
+            String::new(),
+            &Value::Null,
+        );
+        row.extra
+            .insert("nativeWorkerActive".into(), json!(self.active));
+        row.extra.insert("nativeWorkerReadback".into(), json!(self));
+        row
+    }
+    fn apply(&mut self, events: &[Value], entries: &mut Vec<Entry>) {
+        for event in events {
+            let seq = event["seq"].as_u64().unwrap_or(0);
+            if seq <= self.cursor {
+                continue;
+            }
+            self.cursor = seq;
+            let kind = event["type"].as_str().unwrap_or("");
+            let text = event["text"].as_str().unwrap_or("");
+            if kind == "steer" && text.trim().is_empty() {
+                continue;
+            }
+            if !(kind == "steer" && event["failed"] == true) {
+                self.done = kind == "done";
+                let recent = timestamp(event).as_u64().is_none_or(|at| {
+                    (crate::clock::now().saturating_mul(1000).saturating_sub(at) as f64)
+                        < crate::model::LIVE_WINDOW_MS
+                });
+                self.active = !self.done && recent;
+            }
+            let id = format!("{}:event:{seq}", self.key);
+            let tool = event["tool"].as_str().unwrap_or("tool");
+            match kind {
+                "tool_call" => {
+                    let call = event["callId"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(&id)
+                        .to_owned();
+                    let args = event["args"].as_str().unwrap_or("");
+                    let args = serde_json::from_str::<Value>(args)
+                        .ok()
+                        .filter(Value::is_object)
+                        .unwrap_or_else(|| {
+                            if event["summary"]
+                                .as_str()
+                                .is_some_and(|s| s.starts_with("Running ") || s.starts_with("Run "))
+                            {
+                                json!({})
+                            } else {
+                                json!({"input":args})
+                            }
+                        });
+                    let mut row = entry(id, "tool", String::new(), event);
+                    let tool_id = format!("{}:call:{}:{call}", self.key, self.run);
+                    row.tools = Some(vec![json!({"id":tool_id,"name":tool,"args":args,
+                        "nativeWorkerTrace":true,"preview":event["summary"],"status":"running","startedAt":row.extra["timestamp"]})]);
+                    if !self.calls.contains_key(&call) {
+                        self.pending
+                            .entry(tool.into())
+                            .or_default()
+                            .push(call.clone());
+                    }
+                    self.calls.insert(call, row.clone());
+                    upsert(entries, row);
+                }
+                "tool_result" => {
+                    let call = event["callId"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned)
+                        .or_else(|| self.pending.get(tool).and_then(|ids| ids.first().cloned()));
+                    if let Some(mut row) = call.as_ref().and_then(|call| self.calls.remove(call)) {
+                        let result = &mut row.tools.as_mut().unwrap()[0];
+                        result["status"] =
+                            json!(if event["ok"] == true { "done" } else { "error" });
+                        result["result"] = event["summary"].clone();
+                        result["finishedAt"] = timestamp(event);
+                        if let Some(ids) = self.pending.get_mut(tool) {
+                            ids.retain(|id| Some(id) != call.as_ref());
+                        }
+                        upsert(entries, row);
+                    } else {
+                        upsert(
+                            entries,
+                            entry(
+                                id,
+                                "system",
+                                event["summary"].as_str().unwrap_or("").into(),
+                                event,
+                            ),
+                        );
+                    }
+                }
+                "assistant" => {
+                    let row = entry(id, "assistant", text.into(), event);
+                    self.answer = Some(row.clone());
+                    upsert(entries, row);
+                }
+                "steer" => {
+                    let at = timestamp(event);
+                    let note = event["note"]
+                        .as_str()
+                        .filter(|s| !s.is_empty() && *s != text);
+                    if let Some(saved) = entries.iter_mut().find(|e| {
+                        e.role == "user"
+                            && e.text.contains(text)
+                            && at.is_number()
+                            && e.extra.get("timestamp") == Some(&at)
+                    }) {
+                        if event["failed"] != true && note.is_none() {
+                            saved.text = text.into();
+                        }
+                    } else {
+                        let mut text = if event["failed"] == true {
+                            format!("Steer failed to start\n\n{text}")
+                        } else {
+                            text.into()
+                        };
+                        if let Some(note) = note {
+                            text.push_str(&format!("\n\n{note}"));
+                        }
+                        upsert(entries, entry(id, "user", text, event));
+                    }
+                    self.answer = None;
+                }
+                "error" => upsert(
+                    entries,
+                    entry(
+                        id,
+                        "system",
+                        event["message"].as_str().unwrap_or("Worker failed").into(),
+                        event,
+                    ),
+                ),
+                "done" => {
+                    let outcome = if event["exitCode"].as_i64().unwrap_or(1) == 0 {
+                        "completed"
+                    } else {
+                        "failed"
+                    };
+                    for (_, mut row) in self.calls.drain() {
+                        for t in row.tools.iter_mut().flatten() {
+                            t["status"] = json!(if outcome == "completed" {
+                                "done"
+                            } else {
+                                "error"
+                            });
+                            t["finishedAt"] = timestamp(event);
+                        }
+                        upsert(entries, row);
+                    }
+                    let mut answer = self
+                        .answer
+                        .take()
+                        .unwrap_or_else(|| entry(id, "assistant", String::new(), event));
+                    answer.extra.insert(
+                        "receipt".into(),
+                        json!({"terminal":{"outcome":outcome,"completedAt":timestamp(event)}}),
+                    );
+                    upsert(entries, answer);
+                    self.run = seq;
+                    self.pending.clear();
+                }
+                _ => {}
+            }
+        }
+    }
+    pub(crate) fn poll(&mut self, client: &Client) -> Result<Vec<Entry>, String> {
+        // Read a complete batch before advancing state, so a later page failure
+        // retries the same cursor without losing events.
+        let (events, _) = client.worker_events(&self.key, self.cursor)?;
+        if events.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut entries = vec![];
+        self.apply(&events, &mut entries);
+        entries.push(self.marker());
+        Ok(entries)
+    }
+}
+
 fn adapt(mut history: History, events: &[Value]) -> History {
     let mut entries: Vec<_> = history
         .transcript
         .into_iter()
         .filter(|e| e.role == "user" || e.extra.get("type").is_some_and(|t| t == "card"))
         .collect();
-    let mut calls: HashMap<String, usize> = HashMap::new();
-    let mut pending: HashMap<String, Vec<String>> = HashMap::new();
-    let mut last_answer = None;
-    let mut turn = 0;
-    let mut run = 0;
-    for event in events {
-        let seq = event["seq"].as_u64().unwrap_or(0);
-        let id = format!("{}:event:{seq}", history.session_key);
-        let tool = event["tool"].as_str().unwrap_or("tool");
-        match event["type"].as_str().unwrap_or("") {
-            "tool_call" => {
-                let call = event["callId"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| id.clone());
-                let args = event["args"].as_str().unwrap_or("");
-                let args = serde_json::from_str::<Value>(args)
-                    .ok()
-                    .filter(Value::is_object)
-                    .unwrap_or_else(|| {
-                        // The server caps argument strings. A truncated JSON
-                        // command still has its authoritative tool preview.
-                        if event["summary"]
-                            .as_str()
-                            .is_some_and(|s| s.starts_with("Running ") || s.starts_with("Run "))
-                        {
-                            json!({})
-                        } else {
-                            json!({"input":args})
-                        }
-                    });
-                let mut row = entry(id, "tool", String::new(), event);
-                let tool_id = format!("{}:call:{run}:{call}", history.session_key);
-                row.tools = Some(vec![json!({"id":tool_id,"name":tool,"args":args,
-                    "preview":event["summary"],"status":"running","startedAt":row.extra["timestamp"]})]);
-                if let Some(index) = calls.get(&call).copied() {
-                    entries[index] = row;
-                } else {
-                    calls.insert(call.clone(), entries.len());
-                    pending.entry(tool.into()).or_default().push(call);
-                    entries.push(row);
-                }
-            }
-            "tool_result" => {
-                // Older normalizers omit callId. Pair results FIFO by tool,
-                // never by command text (two identical invocations are real).
-                let call = event["callId"]
-                    .as_str()
-                    .map(str::to_owned)
-                    .or_else(|| pending.get(tool).and_then(|ids| ids.first().cloned()));
-                if let Some(index) = call.as_ref().and_then(|call| calls.get(call)).copied() {
-                    let result = &mut entries[index].tools.as_mut().unwrap()[0];
-                    result["status"] = json!(if event["ok"] == true { "done" } else { "error" });
-                    result["result"] = event["summary"].clone();
-                    result["finishedAt"] = timestamp(event);
-                    if let Some(ids) = pending.get_mut(tool) {
-                        ids.retain(|id| Some(id) != call.as_ref());
-                    }
-                } else {
-                    entries.push(entry(
-                        id,
-                        "system",
-                        event["summary"].as_str().unwrap_or("").into(),
-                        event,
-                    ));
-                }
-            }
-            "assistant" => {
-                entries.push(entry(
-                    id,
-                    "assistant",
-                    event["text"].as_str().unwrap_or("").into(),
-                    event,
-                ));
-                last_answer = Some(entries.len() - 1);
-            }
-            "steer" => {
-                let text = event["text"].as_str().unwrap_or("");
-                // The mobile endpoint also carries durable steers.
-                let at = timestamp(event);
-                let note = event["note"]
-                    .as_str()
-                    .filter(|s| !s.is_empty() && *s != text);
-                if let Some(saved) = entries.iter_mut().find(|e| {
-                    e.role == "user"
-                        && e.text.contains(text)
-                        && at.is_number()
-                        && e.extra.get("timestamp") == Some(&at)
-                }) {
-                    if event["failed"] != true && note.is_none() {
-                        saved.text = text.into();
-                    }
-                } else {
-                    let mut text = if event["failed"] == true {
-                        format!("Steer failed to start\n\n{text}")
-                    } else {
-                        text.into()
-                    };
-                    if let Some(note) = note {
-                        text.push_str(&format!("\n\n{note}"));
-                    }
-                    entries.push(entry(id, "user", text, event));
-                }
-                turn = entries.len();
-                last_answer = None;
-            }
-            "error" => entries.push(entry(
-                id,
-                "system",
-                event["message"].as_str().unwrap_or("Worker failed").into(),
-                event,
-            )),
-            "done" => {
-                let outcome = if event["exitCode"].as_i64().unwrap_or(1) == 0 {
-                    "completed"
-                } else {
-                    "failed"
-                };
-                for e in &mut entries[turn..] {
-                    for t in e.tools.iter_mut().flatten() {
-                        if t["status"] == "running" {
-                            t["status"] = json!(if outcome == "completed" {
-                                "done"
-                            } else {
-                                "error"
-                            });
-                        }
-                    }
-                }
-                let index = last_answer.unwrap_or_else(|| {
-                    entries.push(entry(id, "assistant", String::new(), event));
-                    entries.len() - 1
-                });
-                entries[index].extra.insert(
-                    "receipt".into(),
-                    json!({"terminal":{"outcome":outcome,"completedAt":timestamp(event)}}),
-                );
-                last_answer = None;
-                turn = entries.len();
-                run = seq;
-                calls.clear();
-                pending.clear();
-            }
-            _ => {}
-        }
-    }
+    let mut state = State {
+        key: history.session_key.clone(),
+        ..Default::default()
+    };
+    state.apply(events, &mut entries);
     entries.sort_by_key(|e| {
         e.extra
             .get("timestamp")
             .and_then(Value::as_u64)
             .unwrap_or(0)
     });
-    // The live marker uses the chat merger's working row, including the
-    // interval before the first call and after commentary. It is not prose.
-    let last = events.last().cloned().unwrap_or(Value::Null);
-    let mut state = entry(
-        format!("{}:worker-state", history.session_key),
-        "assistant",
-        String::new(),
-        &last,
-    );
-    state.extra.insert(
-        "nativeWorkerActive".into(),
-        json!(
-            events
-                .iter()
-                .rev()
-                .find(|e| !(e["type"] == "steer" && e["failed"] == true))
-                .is_some_and(|e| {
-                    // Saved sources that omit done settle by the chat's existing
-                    // recency rule, rather than presenting an old verdict as live.
-                    let recent = timestamp(e).as_u64().is_none_or(|at| {
-                        (crate::clock::now().saturating_mul(1000).saturating_sub(at) as f64)
-                            < crate::model::LIVE_WINDOW_MS
-                    });
-                    e["type"] != "done" && recent
-                })
-        ),
-    );
-    entries.push(state);
+    entries.push(state.marker());
     history.transcript = entries;
     history
 }
 
 impl Client {
-    pub(crate) fn worker_history(&self, mut history: History) -> Result<(History, usize), String> {
-        let mut cursor = 0u64;
+    fn worker_events(&self, key: &str, mut cursor: u64) -> Result<(Vec<Value>, usize), String> {
         let mut events = Vec::new();
         let mut bytes = 0;
         loop {
-            let page: Result<(Value, usize), _> = self.get_counted(
+            let (page, size): (Value, usize) = self.get_counted(
                 "/api/orchestrator/packet-transcript",
                 &[
-                    ("sessionKey", &history.session_key),
+                    ("sessionKey", key),
                     ("cursor", &cursor.to_string()),
                     ("limit", "200"),
                 ],
-            );
-            let (page, size) = match page {
-                // Older hosts and runtimes without normalized readback retain
-                // their existing history. Other failures must remain visible.
-                Err(e) if cursor == 0 && (e.ends_with("HTTP 501") || e.ends_with("HTTP 404")) => {
-                    return Ok((history, bytes));
-                }
-                other => other?,
-            };
+            )?;
             bytes += size;
-            if bytes > 16 * 1024 * 1024 {
-                return Err("Worker transcript exceeds 16 MiB".into());
-            }
-            if page["sessionKey"].as_str() != Some(&history.session_key) {
+            if page["sessionKey"].as_str() != Some(key) {
                 return Err("Server returned events for a different session".into());
             }
             let batch = page["events"]
@@ -266,12 +301,20 @@ impl Client {
             if batch.len() < 200 {
                 break;
             }
-            let next = page["nextCursor"]
+            cursor = page["nextCursor"]
                 .as_u64()
                 .filter(|next| *next > cursor)
                 .ok_or("Worker transcript cursor did not advance")?;
-            cursor = next;
         }
+        Ok((events, bytes))
+    }
+    pub(crate) fn worker_history(&self, mut history: History) -> Result<(History, usize), String> {
+        let (events, mut bytes) = match self.worker_events(&history.session_key, 0) {
+            Ok(result) => result,
+            // Normalization is an optional readback capability. Its failure
+            // must not make an already authorized, readable history fail.
+            Err(_) => return Ok((history, 0)),
+        };
         // Normalized events are complete, so include every prompt too. Keeping
         // a mobile cursor here would later mix legacy paragraphs into the list.
         let mut before = None;
@@ -295,7 +338,7 @@ impl Client {
             );
             let (older, size) = match older {
                 // A live append can invalidate the prompt cursor. Keep the
-                // coherent normalized work; the next poll retries prompts.
+                // coherent normalized work and the prompts already loaded.
                 Err(error) if error.ends_with("HTTP 409") => break,
                 result => result?,
             };
@@ -303,9 +346,6 @@ impl Client {
                 return Err("Server returned history for a different session".into());
             }
             bytes += size;
-            if bytes > 16 * 1024 * 1024 {
-                return Err("Worker transcript exceeds 16 MiB".into());
-            }
             history.transcript.splice(0..0, older.transcript);
             history.page = older.page;
             before = Some(cursor);

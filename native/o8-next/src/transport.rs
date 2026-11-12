@@ -228,40 +228,60 @@ fn run(
     Ok(())
 }
 pub fn subscribe(client: Client, key: String) -> Subscription {
-    if !key.starts_with("llm-chat:") {
-        return subscribe_worker(client, key);
-    }
     subscribe_stream(client, format!("session:{key}"), None)
 }
-/// Worker sockets publish legacy mobile paragraphs. Read the normalized event
-/// contract instead, then feed the same history frame into Transcript::apply.
-fn subscribe_worker(client: Client, key: String) -> Subscription {
+/// Select normalized readback only when the initial history established that
+/// capability. Legacy hosts retain their live socket, including on 404/501.
+pub(crate) fn subscribe_history(client: Client, history: &crate::model::History) -> Subscription {
+    let Some(mut state) = crate::shell::session::worker_transcript::State::from_history(history)
+    else {
+        return subscribe(client, history.session_key.clone());
+    };
+    let key = history.session_key.clone();
     let (sender, receiver) = mpsc::sync_channel(64);
     let cancel = Arc::new(Cancel::default());
     let stopped = cancel.clone();
     thread::spawn(move || {
         let mut reconnecting = false;
-        while !stopped.is_stopped() {
-            let message = match client.history(&key) {
-                Ok(history) => {
+        while !stopped.is_stopped() && !state.done {
+            match state.poll(&client) {
+                Ok(entries) => {
                     if reconnecting {
                         if !emit(&sender, &stopped, &client, Incoming::Status("")) {
                             break;
                         }
                         reconnecting = false;
                     }
-                    Incoming::Frame(json!({"channel":"history","event":"update",
-                        "data":{"sessionKey":key,"entries":history.transcript,"replace":true}}))
+                    if !entries.is_empty()
+                        && !emit(
+                            &sender,
+                            &stopped,
+                            &client,
+                            Incoming::Frame(json!({
+                                "channel":"history","event":"update","data":{"sessionKey":key,"entries":entries,"replace":false}
+                            })),
+                        )
+                    {
+                        break;
+                    }
                 }
                 Err(_) => {
+                    if !reconnecting
+                        && !emit(
+                            &sender,
+                            &stopped,
+                            &client,
+                            Incoming::Status("Reconnecting · saved history retained"),
+                        )
+                    {
+                        break;
+                    }
                     reconnecting = true;
-                    Incoming::Status("Reconnecting · saved history retained")
                 }
-            };
-            if !emit(&sender, &stopped, &client, message) {
-                break;
             }
-            pause(&stopped, Duration::from_secs(2));
+            if !state.done {
+                pause(&stopped, Duration::from_secs(2));
+            }
         }
     });
     Subscription { receiver, cancel }

@@ -18,7 +18,7 @@ pub struct Entry {
     pub extra: HashMap<String, Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct History {
     #[serde(rename = "sessionKey")]
     pub session_key: String,

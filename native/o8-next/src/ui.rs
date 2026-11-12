@@ -372,9 +372,9 @@ impl Surface {
                     }
                     Err(error) => editor.controls.error = error,
                     Ok(None) => {
-                        if let Some(draft) = crate::composer::mode_store::load_draft(
-                            editor.controls.prompt.store.as_deref(),
-                        ) {
+                        if let Some(draft) =
+                            crate::composer::mode_store::load_draft(editor.controls.prompt.store.as_deref())
+                        {
                             editor.controls.files = draft.files;
                             editor.set_text(&draft.text, cx);
                         }
@@ -540,6 +540,9 @@ impl Surface {
                 match result {
                     Ok((history, queue, routing)) => {
                         let key = history.session_key.clone();
+                        let readback = repo
+                            .is_none()
+                            .then(|| transport::subscribe_history(this.client.clone(), &history));
                         let transcript = Transcript::new(history);
                         let rows = transcript.rows.clone();
                         this.transcript = Some(transcript);
@@ -553,7 +556,7 @@ impl Surface {
                             Some(repo) => {
                                 transport::subscribe_live(this.client.clone(), key, repo, backend)
                             }
-                            None => transport::subscribe(this.client.clone(), key),
+                            None => readback.unwrap(),
                         });
                         this.notice = "Connecting live stream".into();
                         match (queue, routing) {

@@ -831,7 +831,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
         let mut end = index + 1;
         while end < atoms.len()
             && !atoms[end].failed
-            && !shell_like(&first.part.key)
+            && !(first.step.worker && shell_like(&first.part.key))
             && atoms[end].part.key == first.part.key
             && batch(&atoms[end]).is_none()
         {
