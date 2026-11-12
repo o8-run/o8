@@ -2,19 +2,16 @@
 const Module = require('node:module');
 const { appendFileSync } = require('node:fs');
 const { join } = require('node:path');
+const { pathToFileURL } = require('node:url');
+// The async resolver chains with tsx; synchronous hooks cannot do so.
+Module.register(pathToFileURL(join(__dirname, 'symon-brain-native-loader.mjs')).href);
 const original = Module._load;
 Module._load = function(request, parent, isMain) {
   const real = original.call(this, request, parent, isMain);
   if (/\/symon\/durable\/managed-provider(?:\.ts)?$/.test(request) || (request === './managed-provider' && /symon[\/]durable[\/]brain/.test(parent?.filename ?? ''))) {
     return { ...real, createSymonManagedProvider: async () => {
-      const { fauxProvider, fauxAssistantMessage } = await import('@earendil-works/pi-ai');
-      const faux = fauxProvider({ provider: real.SYMON_MANAGED_MODEL.provider,
-        api: 'faux-symon-owner-fixture', models: [{ id: real.SYMON_MANAGED_MODEL.id }] });
-      faux.setResponses([() => {
-        appendFileSync(join(process.env.CORTEX_IDE_DATA_DIR, 'resume-calls.log'), 'resume\n');
-        return fauxAssistantMessage('Recovered once.');
-      }]);
-      return faux.provider;
+      const stub = await import('./symon-brain-native-provider.mjs');
+      return stub.createSymonManagedProvider();
     } };
   }
   if (/\/cortex\/owner-process(?:\.ts)?$/.test(request)) {

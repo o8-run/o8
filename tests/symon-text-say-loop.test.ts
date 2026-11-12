@@ -151,6 +151,11 @@ beforeAll(async () => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = Buffer.concat(chunks);
+    if (url.pathname === '/api/panel/status') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end('{}');
+      return;
+    }
     if (url.pathname === '/api/mobile/symon/text-session' && request.method === 'POST') {
       const routeResponse = await mintTextSession(new NextRequest(url, {
         method: 'POST',

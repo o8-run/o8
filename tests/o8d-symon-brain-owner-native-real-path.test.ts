@@ -95,6 +95,17 @@ it.each([true, false])('WS alone resumes an unfinished turn once (old owner aliv
     const resumed = await fetch(`${origin}/api/panel/symon/conversations/continue`, { method: 'POST', headers,
       body: JSON.stringify({ key: 'app:recovery', requestId: 'recovery-1', text: 'Recover this turn' }) });
     expect(await resumed.json()).toMatchObject({ state: 'done', text: 'Recovered once.' });
+    expect(readFileSync(join(directory, 'provider-bound.log'), 'utf8')).toBe(`${server.pid}\n`);
+    // Next forwards the repeated in-flight request and neither opens nor resumes a store.
+    vi.stubEnv('O8_NEXT_O8D', undefined); vi.stubEnv('O8_WS_PORT', new URL(origin).port);
+    try {
+      const { POST } = await import('@/app/api/panel/symon/conversations/continue/route');
+      const repeated = await POST(new Request(`${origin}/api/panel/symon/conversations/continue`, {
+        method: 'POST', headers, body: JSON.stringify({ key: 'app:recovery', requestId: 'recovery-1', text: 'Recover this turn' }),
+      }));
+      expect(await repeated.json()).toMatchObject({ state: 'done', text: 'Recovered once.' });
+      expect((globalThis as { __o8SymonBrain?: unknown }).__o8SymonBrain).toBeUndefined();
+    } finally { vi.unstubAllEnvs(); }
     expect(readFileSync(join(directory, 'resume-calls.log'), 'utf8')).toBe('resume\n');
     const transcript = await (await fetch(`${origin}/api/panel/symon/conversations/transcript?key=app:recovery`, { headers })).json();
     expect(transcript.transcript.filter((entry: { role: string }) => entry.role === 'user')).toHaveLength(1);
