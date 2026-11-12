@@ -43,7 +43,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
   '/api/browser/proxy': security('loopback read grant'),
 
-  '/api/cortex/sources': seek('operator MCP tool read'),
 
   '/api/devices/agent': security('worker grant: packet-bound device authority'),
 
@@ -92,7 +91,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/browser/engine/capture': security('headless browser loads any URL; the handler relies on loopback plus token'),
 
-  '/api/cortex/sources': seek('Brain source listing'),
 
   '/api/harness': seek('harness bundle and measure'),
 
