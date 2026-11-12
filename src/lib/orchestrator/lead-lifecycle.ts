@@ -145,8 +145,8 @@ async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: Lea
   const unresolvedPackets = packets.filter((packet) => !packetIsResolved(packet));
   const obligations = unresolvedPackets.map((packet) => ({ packet, lane: authoritativeLane(packet) }));
   const lanes = obligations.flatMap(({ lane }) => lane ? [lane] : []);
-  if (lanes.some((lane) => lane.status === 'failed')
-    || obligations.some(({ packet, lane }) => !lane && ['failed', 'blocked'].includes(packet.status))) {
+  if (!turn.outcome_kind && (lanes.some((lane) => lane.status === 'failed')
+    || obligations.some(({ packet, lane }) => !lane && ['failed', 'blocked'].includes(packet.status)))) {
     return { status: 'blocked', detail: 'A bound worker failed or is blocked.' };
   }
   if (lanes.some((lane) => lane.status === 'awaiting_human')) {
@@ -160,14 +160,14 @@ async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: Lea
     return { status: 'needs_approval', detail: 'Lead review passed; operator-controlled release remains pending.' };
   }
   const activeWorker = lanes.some((lane) => [
-    'idle', 'launching', 'running', 'paused', 'recovering', 'merging', 'reviewing',
+    'idle', 'launching', 'running', 'paused', 'recovering', 'merging',
   ].includes(lane.status));
   const missingActiveLane = obligations.some(({ packet, lane }) => !lane
     && !['failed', 'blocked'].includes(packet.status));
   if (activeWorker || missingActiveLane) {
     return { status: 'waiting_workers', detail: 'Lead is waiting for a bound worker return.' };
   }
-  const unresolvedReview = lanes.some((lane) => ['awaiting_orchestrator', 'awaiting_input', 'failed'].includes(lane.status));
+  const unresolvedReview = lanes.some((lane) => ['reviewing', 'awaiting_orchestrator', 'awaiting_input', 'failed'].includes(lane.status));
   const unresolvedPacket = obligations.some(({ packet, lane }) => !lane
     && ['failed', 'blocked'].includes(packet.status));
   if (unresolvedReview || unresolvedPacket) {

@@ -332,6 +332,8 @@ impl Transcript {
         }
         let event = message["event"].as_str().unwrap_or("");
         let status = data["status"].as_str().unwrap_or("");
+        // Active: busy, starting, queued, running, waiting_workers.
+        // Unknown statuses settle; the next output or tool event sets busy again.
         let active = matches!(
             status,
             "busy" | "starting" | "queued" | "running" | "waiting_workers"

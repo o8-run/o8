@@ -60,8 +60,14 @@ not a completed handback. `o8 lead wait` prints the JSON receipt (including the 
 and reason) and exits immediately with code **7** (`lead_unreported`). The turn's `error` remains
 null. Late reports are not supported after the provider exits; send new work or stop the lead.
 Scripts that previously received `blocked` with exit 0 for this case now receive `unreported`
-with exit 7. Failed workers, approval obligations, and active workers retain their respective
-`blocked`, `needs_approval`, and `waiting_workers` states ahead of missing-report classification.
+with exit 7. Only turns without an outcome report give worker failure precedence over worker
+approval or active-worker obligations. Turns with a recorded outcome retain main's classification
+order: bound-worker approval obligations, active workers, unresolved worker review/failure
+obligations, then the reported outcome. A `reviewing`
+lane alone is unresolved (`blocked`) for both kinds of turn. Its per-attempt review return may
+already be consumed, so its status cannot promise another wake; send new work or stop the lead.
+A new worker attempt's return can admit a new continuation, but a failed merge does not restart
+that worker or create a new return key.
 
 Human approval remains separate. A lead can surface `needs_approval`, but it cannot approve a card, grant itself merge authority, or bypass the existing governance inbox.
 

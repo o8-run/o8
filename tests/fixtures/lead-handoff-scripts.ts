@@ -65,6 +65,13 @@ if (process.env.O8_WORKER_PACKET_ID) {
   ], { cwd: process.cwd(), encoding: 'utf8' });
   if (saved.status !== 0) { console.error(saved.stderr); process.exit(saved.status || 1); }
   mark('worker_committed');
+  // Hold the worker active until the lead has reported waiting_workers.
+  const returnDeadline = Date.now() + 20_000;
+  while (!existsSync(process.env.O8_TEST_WORKER_RETURN_READY_FILE)) {
+    if (Date.now() >= returnDeadline) throw new Error('Timed out waiting for the lead waiting_workers receipt.');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
   console.log(JSON.stringify({ type: 'item.completed', item: { id: 'worker-reply', type: 'agent_message', text: 'offline worker reply' } }));
   console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
   mark('worker_exit_requested');
@@ -72,7 +79,7 @@ if (process.env.O8_WORKER_PACKET_ID) {
 }
 if (prompt.includes('[fixture:dispatch-worker]')) {
   // The parent prepares and launches the real worker before releasing this turn.
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + 20_000;
   while (!process.env.O8_TEST_DISPATCH_READY_FILE || !existsSync(process.env.O8_TEST_DISPATCH_READY_FILE)) {
     if (Date.now() >= deadline) throw new Error('Timed out waiting for real-path worker dispatch.');
     await new Promise((resolve) => setTimeout(resolve, 25));

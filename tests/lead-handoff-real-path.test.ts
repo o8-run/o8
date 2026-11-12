@@ -39,6 +39,7 @@ const workerMarkersPath = path.join(testHome, 'lead-worker-markers.jsonl');
 const reviewCapturePath = path.join(testHome, 'lead-review.json');
 const dispatchDebugPath = path.join(testHome, 'lead-dispatch-debug.json');
 const dispatchReadyPath = path.join(testHome, 'lead-dispatch-ready');
+const workerReturnReadyPath = path.join(testHome, 'lead-worker-return-ready');
 const token = 'lead-handoff-operator-token-0123456789abcdef';
 const workerToken = 'lead-handoff-worker-token-0123456789abcdef';
 const originalEnv = {
@@ -62,6 +63,7 @@ const originalEnv = {
   O8_TEST_SOURCE_ROOT: process.env.O8_TEST_SOURCE_ROOT,
   O8_TEST_TARGET_REPO: process.env.O8_TEST_TARGET_REPO,
   O8_TEST_DISPATCH_READY_FILE: process.env.O8_TEST_DISPATCH_READY_FILE,
+  O8_TEST_WORKER_RETURN_READY_FILE: process.env.O8_TEST_WORKER_RETURN_READY_FILE,
 };
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(repoPath, { recursive: true });
@@ -236,6 +238,7 @@ beforeAll(async () => {
   process.env.O8_TEST_SOURCE_ROOT = process.cwd();
   process.env.O8_TEST_TARGET_REPO = repoPath;
   process.env.O8_TEST_DISPATCH_READY_FILE = dispatchReadyPath;
+  process.env.O8_TEST_WORKER_RETURN_READY_FILE = workerReturnReadyPath;
   execFileSync(process.execPath, [path.join(process.cwd(), 'cli/esbuild.config.mjs')], { cwd: process.cwd(), stdio: 'ignore' });
 
   apiServer = createServer(async (request, response) => {
@@ -586,13 +589,14 @@ describe('persistent lead handoff real path', () => {
     rmSync(workerMarkersPath, { force: true });
     rmSync(reviewCapturePath, { force: true });
     rmSync(dispatchReadyPath, { force: true });
+    rmSync(workerReturnReadyPath, { force: true });
     const sent = await runCli([
       'lead', 'send', lead.id, '--message', '[fixture:dispatch-worker]',
       '--idempotency-key', 'dispatch-real-worker',
     ]);
     expect(sent.exitCode, sent.stderr).toBe(0);
     const waitedPromise = runCli(['lead', 'wait', lead.id, '--turn',
-      (JSON.parse(sent.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '80s']);
+      (JSON.parse(sent.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '40s']);
     const leadTurnId = (JSON.parse(sent.stdout) as LeadCliReceipt).admittedTurnId!;
     const [{ getOrCreateWsToken }, { resolvePortInfo }] = await Promise.all([
       import('@/lib/ws-auth'),
@@ -642,6 +646,8 @@ describe('persistent lead handoff real path', () => {
       turnId: `lead-assistant-${leadTurnId}`,
     }));
     writeFileSync(dispatchReadyPath, 'ready');
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('waiting_workers'), { timeout: 5_000 });
+    writeFileSync(workerReturnReadyPath, 'ready');
     await vi.waitFor(() => expect(existsSync(workerCapturePath)).toBe(true), { timeout: 20_000 });
     const waited = await waitedPromise;
     globalThis.fetch = originalFetch;
@@ -742,7 +748,7 @@ describe('persistent lead handoff real path', () => {
     ]);
     expect(released.exitCode, released.stderr).toBe(0);
     expect((await settled(lead.id)).lead.status).toBe('completed');
-  }, 120_000);
+  }, 90_000);
 
   it('preserves legacy WS chat and governs persistent WS execution, display, permissions, and stop', async () => {
     const started = await runCli(startArgs('outcome-and-ws'));
