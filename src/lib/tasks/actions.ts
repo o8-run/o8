@@ -559,11 +559,15 @@ export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}
     }),
     settle: async (lane, result, guard) => {
       guard();
-      const latest = result.lane ?? getLane(lane.id) ?? lane;
-      const settled = !result.ok
-        ? setLaneStatus(latest.id, 'awaiting_orchestrator', actor, 'dispatch_failed') ?? latest : latest;
+      const latest = getLane(lane.id) ?? result.lane ?? lane;
+      const ownsFailure = latest.status === 'launching'
+        || (latest.status === 'idle' && ['launch_failed', 'launch_error'].includes(latest.lastEventLabel ?? ''))
+        || (latest.status === 'running' && result.reason === 'dispatch_settlement_failed')
+        || (result.reason === 'runtime_launch_timeout' && latest.lastEventLabel === result.reason);
+      const settled = !result.ok && ownsFailure
+        ? setLaneStatus(latest.id, result.reason === 'runtime_launch_timeout' && !result.effectStarted && !latest.sessionKey ? 'failed' : 'awaiting_orchestrator', actor, 'dispatch_failed') ?? latest : latest;
       await syncPacketForLane(task, settled, {
-        status: result.ok ? settled.status === 'running' ? 'running' : 'launching' : 'blocked',
+        status: result.ok ? settled.status === 'running' ? 'running' : 'launching' : settled.status === 'failed' ? 'failed' : 'blocked',
         blockedReason: result.ok ? null : result.note,
         lastEventLabel: result.ok ? settled.lastEventLabel ?? 'session_launched' : 'dispatch_failed', workerRouting,
       }, guard);

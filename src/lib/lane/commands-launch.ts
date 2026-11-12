@@ -1,4 +1,4 @@
-import { RuntimeLaunchTimeoutError } from '@/lib/runtime/launch-deadline';
+import { runtimeLaunchStep, RuntimeLaunchTimeoutError } from '@/lib/runtime/launch-deadline';
 import { assertLaunchAttachment } from '@/lib/lane/commands-launch-admission';
 import { withPreRunLaunchCancellation } from '@/lib/lane/pre-run-cancellation';
 import { assertOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action-admission';
@@ -58,6 +58,8 @@ export async function launchSession(
   command: LaunchSessionCommand,
   actor: LaneEventActor,
 ): Promise<LaneCommandResult> {
+  const lane = getLane(command.laneId);
+  if (lane?.status === 'awaiting_orchestrator' && lane.lastEventLabel?.startsWith('runtime_launch_held:')) return { ok: false, laneId: lane.id, note: `A held spawn still owns this lane (${lane.lastEventLabel}). Inspect its original session before retrying.`, reason: 'runtime_launch_held', effectStarted: true };
   return withPreRunLaunchCancellation(command.laneId, () => launchSessionInner(command, actor));
 }
 
@@ -115,7 +117,7 @@ async function launchSessionInner(
   }
 
   if (command.clientMutationId) {
-    const recovered = await findOwnedLaunchByMutationId(command.clientMutationId);
+    const recovered = await runtimeLaunchStep({ laneId: lane.id }, 'owned_launch_recovery', () => findOwnedLaunchByMutationId(command.clientMutationId!));
     const recoveredRefusal = assertLaunchAttachment(command.laneId, recovered?.surfaceId);
     if (recoveredRefusal) await recoveredRefusal;
     if (recovered) {
@@ -181,10 +183,10 @@ async function launchSessionInner(
       setLaneStatus(command.laneId, 'launching', actor, 'launching_session');
     }
     try {
-      await getWorktreeManager(lane.repoPath).rebaseOntoMain(refreshTarget, {
+      await runtimeLaunchStep({ laneId: lane.id }, 'worktree_refresh', () => getWorktreeManager(lane.repoPath).rebaseOntoMain(refreshTarget, {
         baseBranch: lane.baseBranch,
         branchName: lane.branch,
-      });
+      }));
       assertOwnedActionGuard();
       appendEvent(command.laneId, 'worktree_refreshed', 'system', {
         packetId: lane.packetId,
@@ -243,7 +245,7 @@ async function launchSessionInner(
 
   try {
     const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
-    const result = await launchRuntimeSurface({
+    const result = await runtimeLaunchStep({ laneId: lane.id }, 'runtime_surface', () => launchRuntimeSurface({
       runtime: lane.runtime,
       instanceId: command.instanceId,
       prompt: command.prompt,
@@ -264,12 +266,12 @@ async function launchSessionInner(
       packetId: lane.packetId ?? undefined,
       spendCap: command.spendCap,
       storageAdmissionReservationId: command.storageAdmissionReservationId,
-    });
+    }));
 
     const attachmentRefusal = assertLaunchAttachment(command.laneId, result.surfaceId || undefined);
     if (attachmentRefusal) await attachmentRefusal;
     if (!result.ok) {
-      recordLaunchFailure(lane, 'idle', 'launch_failed', result.note);
+      if (getLane(lane.id)?.status === 'launching') recordLaunchFailure(lane, 'idle', 'launch_failed', result.note);
       return { ok: false, laneId: command.laneId, note: result.note };
     }
 
@@ -347,7 +349,7 @@ async function launchSessionInner(
       dependencyMaterializationMode: result.worktree?.dependencyMaterialization?.mode ?? null,
     };
   } catch (err) {
-    if (err instanceof RuntimeLaunchTimeoutError) return { ok: false, laneId: command.laneId, note: err.message };
+    if (err instanceof RuntimeLaunchTimeoutError) return { ok: false, laneId: command.laneId, note: err.message, reason: err.code, effectStarted: err.effectStarted };
     const refusal = assertLaunchAttachment(command.laneId,
       err instanceof RuntimeLaunchPostEffectError ? err.result.surfaceId : undefined);
     if (refusal) {

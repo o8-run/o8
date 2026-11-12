@@ -7847,6 +7847,12 @@
       "browser": true
     },
     {
+      "path": "tests/runtime-surface-deadline-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/sandbox-owned-stop-real-path.test.ts",
       "reasons": [
         "child-process",
