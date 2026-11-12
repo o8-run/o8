@@ -124,9 +124,9 @@ pub struct ActivityPane {
     generation: u64,
     pub(super) loaded_at: Instant,
     stop_identity: Option<(String, String)>,
-    /// Set while Stop mission is asking for its second press; the number
-    /// tells one question from the next when the first lapses.
-    pub(super) stop_armed: Option<u64>,
+    /// Set while Stop mission is asking for its second press: which question
+    /// (so a lapsed one cannot clear the next) and which mission it is about.
+    pub(super) stop_armed: Option<(u64, String)>,
     stop_asked: u64,
     /// The packet whose close-unmerged confirmation is open, and its reason.
     pub(super) closing: Option<String>,
@@ -335,6 +335,10 @@ impl ActivityPane {
                 this.errors = snapshot.errors;
                 this.cache = snapshot.cache;
                 this.mission = snapshot.mission;
+                let mission = feed::text(&this.mission, "missionId");
+                if this.stop_armed.as_ref().is_some_and(|(_, about)| *about != mission) {
+                    this.stop_armed = None;
+                }
                 this.remote_updated = snapshot.remote_updated;
                 // A CI run grouped onto its commit stays expanded across reloads.
                 let expanded = this
@@ -568,6 +572,7 @@ impl ActivityPane {
             Action::Scope(scope) => {
                 self.remember_view(cx);
                 self.scope_menu = false;
+                self.stop_armed = None;
                 self.scope = scope;
                 self.restore_view();
                 if let Some(y)=self.restore_y {self.scroll.set_offset(gpui::point(gpui::px(0.),gpui::px(y)));} self.generation += 1; self.loading = false;
@@ -614,14 +619,17 @@ impl ActivityPane {
                 if mission.is_empty() { return; }
                 // Stopping holds every packet and sits beside Refresh, so one
                 // press only asks. A second press while it asks stops (#5975).
-                if self.stop_armed.take().is_none() {
+                // The question is about one mission; an answer for another
+                // mission asks again.
+                let answered = self.stop_armed.take().is_some_and(|(_, about)| about == mission);
+                if !answered {
                     self.stop_asked += 1;
                     let asked = self.stop_asked;
-                    self.stop_armed = Some(asked);
+                    self.stop_armed = Some((asked, mission));
                     cx.spawn(async move |this, cx| {
                         cx.background_executor().timer(STOP_ASKS_FOR).await;
                         let _ = this.update(cx, |this, cx| {
-                            if this.stop_armed == Some(asked) {
+                            if this.stop_armed.as_ref().is_some_and(|(at, _)| *at == asked) {
                                 this.stop_armed = None;
                                 cx.notify();
                             }

@@ -123,6 +123,14 @@ fn stop_mission_asks_before_it_stops(cx: &mut TestAppContext) {
     activity_click(cx, "activity-stop-mission");
     assert_eq!(stops(&fixture), 0, "a lapsed question does not count");
     // A second press while it is asking stops the mission.
+    // A question about one mission is not an answer for another.
+    view.update(cx, |v, _| {
+        let (asked, _) = v.stop_armed.take().unwrap();
+        v.stop_armed = Some((asked, "another-mission".into()));
+    });
+    activity_click(cx, "activity-stop-mission");
+    assert_eq!(stops(&fixture), 0, "the question was about another mission");
+    assert!(view.read_with(cx, |v, _| v.stop_armed.is_some()));
     activity_click(cx, "activity-stop-mission");
     assert!(stops(&fixture) >= 1, "the second press stops");
     assert!(view.read_with(cx, |v, _| v.stop_armed.is_none()));
