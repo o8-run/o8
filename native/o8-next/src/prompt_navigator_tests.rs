@@ -480,6 +480,43 @@ fn wheel_down_over_the_rail_keeps_chat_following(cx: &mut TestAppContext) {
         assert!(s.following.is_none());
         assert!(s.away_from_end);
     });
+    view.update(cx, |s, cx| {
+        let mut h = history("short-wheel", 3);
+        h.session_key = "llm-chat:short-wheel".into();
+        for entry in &mut h.transcript {
+            entry.text = "Short text".into();
+        }
+        let transcript = Transcript::new(h);
+        let rows = transcript.rows.clone();
+        s.transcript = Some(transcript);
+        s.navigator = Default::default();
+        s.list = ListState::new(0, ListAlignment::Top, px(400.));
+        s.install_rows(rows, cx);
+        s.away_from_end = false;
+        cx.notify();
+    });
+    paint(cx);
+    view.update(cx, |s, cx| {
+        s.following = Some(0);
+        s.pinned = true;
+        s.follow_frame();
+        cx.notify();
+    });
+    paint(cx);
+    let rail = cx.debug_bounds("prompt-navigator").unwrap();
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position: rail.center(),
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-100.))),
+        ..Default::default()
+    });
+    paint(cx);
+    view.read_with(cx, |s, _| {
+        assert!(
+            s.following.is_some(),
+            "down at the end of a short thread does not trigger backfill or cancel following"
+        );
+        assert!(!s.away_from_end);
+    });
 }
 
 struct LiveHost {
