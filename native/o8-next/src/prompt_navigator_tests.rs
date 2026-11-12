@@ -330,8 +330,17 @@ fn a_dense_rail_pages_bounded_ticks_and_reaches_every_prompt(cx: &mut TestAppCon
             "Short answer".into()
         };
     }
+    // A large retained thread includes explicitly loaded older pages. Legacy
+    // live windows keep their existing 200-entry bound.
+    let split = h.transcript.len() - 100;
+    let older = crate::model::History {
+        session_key: h.session_key.clone(),
+        transcript: h.transcript.drain(..split).collect(),
+        page: None,
+    };
     let mut p = Pane::new(None);
     p.install_saved(h);
+    p.prepend(older);
     p.navigate(false);
     let (view, cx) = cx.add_window_view(|_, _| Reading(p, None));
     paint(cx);
@@ -498,7 +507,10 @@ impl LiveHost {
                 let mut buf = [0; 8192];
                 let n = stream.read(&mut buf).unwrap();
                 let request = String::from_utf8_lossy(&buf[..n]);
-                let body=if request.contains("/api/mobile/history") {
+                // Exercise active HTTP fallback when a fixture has no socket.
+                let socket_info = request.contains("/api/panel/ws-info");
+                let body=if socket_info { json!({"error":"this fixture has no socket"})
+                } else if request.contains("/api/mobile/history") {
                     json!({"sessionKey":"codex-owned:live-nav","transcript":[
                         {"id":"live-p0","role":"user","text":"First **prompt**","packetHeader":{"enabled":true}},
                         {"id":"live-p1","role":"user","text":"Second prompt"}]})
@@ -508,7 +520,12 @@ impl LiveHost {
                     let page:Vec<_>=recorded.lock().unwrap().iter().filter(|e| e["seq"].as_u64().unwrap()>cursor).cloned().collect();
                     json!({"sessionKey":"codex-owned:live-nav","nextCursor":page.last().map(|e|e["seq"].clone()),"events":page})
                 }.to_string();
-                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+                let status = if socket_info {
+                    "404 Not Found"
+                } else {
+                    "200 OK"
+                };
+                write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
             }
         });
         Self {
