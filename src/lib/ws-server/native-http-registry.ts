@@ -516,7 +516,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   inbox: [
     route('/api/panel/supervisor-inbox', 'GET', () => import('@/app/api/panel/supervisor-inbox/route')),
-    route('/api/panel/approvals', 'GET POST', () => import('@/app/api/panel/approvals/route')),
+    route('/api/panel/approvals', 'GET POST', () => import('@/lib/approvals/route')),
   ],
   diff: [
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),

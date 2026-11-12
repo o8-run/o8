@@ -370,16 +370,17 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         shell.state.sidebar_closed_folders.clone(),
     );
     let snoozes = shell.state.sidebar_snoozes.clone();
-    let (detailed, working, inbox_working) = (
+    let (detailed, working, inbox_working, working_open) = (
         shell.state.sidebar_detailed_rows,
-        shell.state.sidebar_working_section,
+        !shell.state.sidebar_working_off,
         !shell.state.sidebar_inbox_working_off,
+        shell.state.sidebar_working_open,
     );
     sidebar.update(cx, |sidebar, _| {
         sidebar.restore_scopes(scopes);
         sidebar.restore_views(&views, &closed);
         sidebar.restore_snoozes(&snoozes);
-        sidebar.restore_row_mode(detailed, working, inbox_working);
+        sidebar.restore_row_mode(detailed, working, inbox_working, working_open);
     });
     shell.subscriptions.push(
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
@@ -434,9 +435,10 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     shell.state.sidebar_closed_folders = closed.iter().cloned().collect();
                     shell.persist();
                 }
-                ThreadEvent::RowMode(detailed, working, inbox_working) => {
+                ThreadEvent::RowMode(detailed, working, inbox_working, working_open) => {
                     shell.state.sidebar_detailed_rows = *detailed;
-                    shell.state.sidebar_working_section = *working;
+                    shell.state.sidebar_working_off = !*working;
+                    shell.state.sidebar_working_open = *working_open;
                     shell.state.sidebar_inbox_working_off = !*inbox_working;
                     shell.persist();
                 }
