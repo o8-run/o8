@@ -38,6 +38,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
     route('/api/harness', 'POST', () => import('@/lib/harness/route')),
 
+    route('/api/mobile/symon', 'GET POST', () => import('@/lib/mobile/symon-relay-route')),
+    route('/api/mobile/symon/confirm', 'POST', () => import('@/lib/mobile/symon-confirm-route')),
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
