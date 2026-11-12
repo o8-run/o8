@@ -208,3 +208,18 @@ fn request_changes_enforces_remaining_note_room(cx: &mut TestAppContext) {
         assert!(s.notice.contains("1 character too long"));
     });
 }
+
+#[gpui::test]
+fn request_changes_send_renders_without_duplicate_hover(cx: &mut TestAppContext) {
+    let client = Client::authenticated("http://127.0.0.1:9", Some("fixture".into())).unwrap();
+    let (view, cx) = cx.add_window_view(|_, cx| {
+        let mut view = RequestChanges::new(client, "style-fixture".into(), cx);
+        view.open = true;
+        view.loading = false;
+        view.availability = json!({"available":true});
+        view
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("request-changes-send").is_some());
+    view.read_with(cx, |view, _| assert!(view.open));
+}

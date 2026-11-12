@@ -225,7 +225,6 @@ impl Render for RequestChanges {
                             )
                             .bg(theme().accent)
                             .text_color(crate::theme::on_accent())
-                            .hover(|style| style.bg(theme().accent).opacity(0.9))
                             .active(|style| style.bg(theme().accent).opacity(0.8))
                             .track_focus(&self.focus[2])
                             .tab_stop(true)
