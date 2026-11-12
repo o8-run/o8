@@ -137,3 +137,21 @@ it('uses a three-day threshold and preserves unknown check and mergeability evid
   expect(body.drafts[0]).toMatchObject({ ageDays: 3, checks: null, conflictsWithMain: null });
   expect(h.dispatch).not.toHaveBeenCalled();
 });
+it('coalesces repeated Inbox refreshes without reusing summaries across sign-in epochs', async () => {
+  const { bumpSignInEpoch } = await import('@/lib/github-broker/managed');
+  bumpSignInEpoch();
+  await inbox(new NextRequest('http://localhost/api/mobile/inbox?fresh=1'));
+  await inbox(new NextRequest('http://localhost/api/mobile/inbox?fresh=1'));
+  expect(h.list).toHaveBeenCalledTimes(1);
+  bumpSignInEpoch();
+  await inbox(new NextRequest('http://localhost/api/mobile/inbox?fresh=1'));
+  expect(h.list).toHaveBeenCalledTimes(2);
+});
+
+it('reports an uncertain owner assignment without posting a handoff comment', async () => {
+  h.assign.mockResolvedValueOnce({ response: Response.json({ error: 'unknown assignment' }, { status: 502 }) });
+  const response = await post('handoff', { owner: 'fixture-owner' });
+  expect(response.status).toBe(502);
+  expect(await response.json()).toMatchObject({ ownerAssigned: null, commentPosted: false });
+  expect(h.comment).not.toHaveBeenCalled(); expect(h.dispatch).not.toHaveBeenCalled();
+});

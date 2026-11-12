@@ -1,6 +1,6 @@
 import 'server-only';
 import { DEFAULT_GITHUB_REPO, resolveRepoSlug, fetchGitHubPullRequestDetail, commentOnGitHubPullRequest, closeGitHubPullRequest } from '@/lib/github-broker';
-import { githubInstallationFetch } from './auth';
+import { captureGitHubAccount, requireGitHubAccount, githubInstallationFetch } from './auth';
 import { githubProvider } from '@/lib/git-providers/github';
 import type { PullRequestListItem, PullRequestListPage } from './pull-request-list.types';
 
@@ -27,14 +27,36 @@ export function idleDraftPage(page: PullRequestListPage, now = Date.now()): Idle
     }),
   };
 }
+const idleDraftCache = new Map<string, { startedAt: number; promise: Promise<IdleDraftPage> }>();
+let idleDraftAccountScope: string | null = null;
 export async function readIdleDrafts(repo?: string, page = 1, fresh = false): Promise<IdleDraftPage> {
+  const account = captureGitHubAccount();
   const slug = await resolveRepoSlug(repo ?? null, DEFAULT_GITHUB_REPO);
+  requireGitHubAccount(account);
   if (!slug) return { repo: null, drafts: [], nextPage: null };
-  const result = await githubProvider.listPullRequests(slug, { state: 'open', page, sort: 'oldest', fresh });
-  return idleDraftPage(result);
+  const scope = JSON.stringify(account);
+  if (scope !== idleDraftAccountScope) { idleDraftCache.clear(); idleDraftAccountScope = scope; }
+  const key = JSON.stringify([slug.toLowerCase(), page]);
+  const cached = idleDraftCache.get(key);
+  // Fleet refresh signals must not turn Inbox polling into repeated remote PR reads.
+  if (!fresh && cached && Date.now() - cached.startedAt < 20_000) {
+    const result = await cached.promise;
+    requireGitHubAccount(account);
+    return result;
+  }
+  const promise: Promise<IdleDraftPage> = githubProvider.listPullRequests(slug, { state: 'open', page, sort: 'oldest', fresh }).then(result => {
+    requireGitHubAccount(account);
+    return idleDraftPage(result);
+  }).catch(error => {
+    if (idleDraftCache.get(key)?.promise === promise) idleDraftCache.delete(key);
+    throw error;
+  });
+  if (idleDraftCache.size >= 64 && !idleDraftCache.has(key)) idleDraftCache.delete(idleDraftCache.keys().next().value!);
+  idleDraftCache.set(key, { startedAt: Date.now(), promise });
+  return promise;
 }
 export class DraftDecisionError extends Error {
-  constructor(readonly status: number, message: string, readonly commentPosted: boolean | null = false, readonly ownerAssigned = false) { super(message); }
+  constructor(readonly status: number, message: string, readonly commentPosted: boolean | null = false, readonly ownerAssigned: boolean | null = false) { super(message); }
 }
 /** Explicit triage only. This path never dispatches work or marks a draft ready. */
 export async function recordDraftDecision(repo: string, number: number, input: Record<string, unknown>) {
@@ -46,13 +68,14 @@ export async function recordDraftDecision(repo: string, number: number, input: R
   const owner = typeof input.owner === 'string' ? input.owner.trim() : '';
   if (decision === 'handoff' && !/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(owner)) throw new DraftDecisionError(400, 'A GitHub owner login is required.');
   const pr = await fetchGitHubPullRequestDetail(repo, number);
+  idleDraftCache.clear();
   if (pr.state !== 'open' || !pr.draft) throw new DraftDecisionError(409, 'This pull request is no longer an open draft. Refresh before deciding.');
   let ownerAssigned = false;
   if (decision === 'handoff') {
     const { response } = await githubInstallationFetch(repo, `/repos/${repo}/issues/${number}/assignees`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignees: [owner] }),
     });
-    if (!response.ok) throw new DraftDecisionError(502, 'GitHub could not confirm the handoff owner. Inspect the pull request before retrying.');
+    if (!response.ok) throw new DraftDecisionError(502, 'GitHub could not confirm the handoff owner. Inspect the pull request before retrying.', false, response.status >= 500 ? null : false);
     const result = await response.json() as { assignees?: Array<{ login: string }> };
     if (!result.assignees?.some(row => row.login.toLowerCase() === owner.toLowerCase())) throw new DraftDecisionError(422, 'GitHub did not assign this owner. Choose an assignable GitHub user.');
     ownerAssigned = true;
@@ -61,6 +84,7 @@ export async function recordDraftDecision(repo: string, number: number, input: R
     : decision === 'close' ? `Close draft: ${reason}` : `Continue draft: ${reason || 'Work will continue.'}`;
   try { await commentOnGitHubPullRequest(repo, number, comment); }
   catch { throw new DraftDecisionError(502, 'Comment outcome is unknown. Inspect the pull request before retrying.', null, ownerAssigned); }
+  idleDraftCache.clear();
   if (decision === 'close') {
     try { await closeGitHubPullRequest(repo, number); }
     catch { throw new DraftDecisionError(502, 'Reason posted; closing could not be confirmed. Inspect the pull request before retrying.', true); }
