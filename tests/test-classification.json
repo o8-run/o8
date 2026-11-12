@@ -4925,6 +4925,12 @@
       ]
     },
     {
+      "path": "tests/native-dispatch-long-forward.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "tests/native-helper-tracing-real-path.test.ts",
       "reasons": [
         "native-build",
@@ -5713,6 +5719,12 @@
       ]
     },
     {
+      "path": "tests/o8d-orchestrator-mission-writes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-orchestrator-reads-native-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5753,6 +5765,13 @@
     {
       "path": "tests/o8d-projects-create-native-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-propose-spec-cache-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },

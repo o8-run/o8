@@ -12,6 +12,8 @@ type Handler = (request: Request) => Promise<Response>;
 export const O8_PAGE_ORIGIN_HEADER = 'x-o8-page-origin';
 
 type Options = {
+  /** Preserve synchronous dispatch responses beyond fetch's header deadline. */
+  longResponse?: boolean;
   /** Checks the caller's page on the Next side: its origin to forward, or a refusal. */
   pageOrigin?: (request: Request) => string | Response;
   /**
@@ -52,12 +54,15 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
     if (!headersIndicateLoopback(name => request.headers.get(name))) headers.set(O8_RELAY_FORWARD_HEADER, '1');
     try {
       const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
-      const response = await fetch(`${getWsBase().replace(/^ws:/, 'http:')}${url.pathname}${url.search}`,
+      const target = `${getWsBase().replace(/^ws:/, 'http:')}${url.pathname}${url.search}`;
+      const response = options.longResponse
+        ? await (await import('./native-owner-long-request')).forwardLongNativeRequest(target, request, headers, body)
+        : await fetch(`${getWsBase().replace(/^ws:/, 'http:')}${url.pathname}${url.search}`,
         { method: request.method, headers, body, redirect: 'manual', cache: 'no-store', signal: request.signal });
       // fetch has already decoded the body; framing headers belong to that hop.
       const forwarded = new Headers(response.headers);
-      if (forwarded.has('content-encoding')) forwarded.delete('content-length');
-      for (const name of ['connection', 'keep-alive', 'transfer-encoding', 'content-encoding']) forwarded.delete(name);
+      if (!options.longResponse && forwarded.has('content-encoding')) forwarded.delete('content-length');
+      for (const name of ['connection', 'keep-alive', 'transfer-encoding', ...(!options.longResponse ? ['content-encoding'] : [])]) forwarded.delete(name);
       return new Response(response.body, { status: response.status, headers: forwarded });
     } catch (error) {
       console.warn(`[native-owner] ${url.pathname} could not reach the WS listener:`, error instanceof Error ? error.message : error);

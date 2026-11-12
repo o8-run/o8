@@ -42,13 +42,10 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
 
 
-  '/api/orchestrator/create-mission': seek('operator mission mutation'),
 
-  '/api/orchestrator/dispatch': seek('operator mission mutation'),
 
   '/api/orchestrator/merge': seek('operator merge mutation'),
 
-  '/api/orchestrator/propose-spec': seek('operator mission mutation'),
 
   '/api/orchestrator/reload': seek('operator reload'),
 
@@ -79,9 +76,7 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
 
 
-  '/api/orchestrator/create-mission': seek('operator mission mutation'),
 
-  '/api/orchestrator/dispatch': seek('operator mission mutation'),
 
 
   '/api/orchestrator/lead': seek('lead session control'),
