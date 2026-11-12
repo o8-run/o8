@@ -374,7 +374,10 @@ pub(super) fn split(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
     let p = s.features.get::<Panel>();
     if p.lower.take().is_none() {
         let upper = p.selected;
-        let lower = Tool::find(&s.state.right_panel.secondary).unwrap_or(Tool::Spec);
+        let lower = s.state.right_panel.lower_tools.get(p.scope.as_deref().unwrap_or(""))
+            .and_then(|value| Tool::find(value))
+            .or_else(|| p.lower_tabs.first().copied())
+            .unwrap_or(Tool::Spec);
         let lower = if lower == upper {
             if upper == Tool::Browser {
                 Tool::Spec

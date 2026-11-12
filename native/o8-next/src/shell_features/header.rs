@@ -661,7 +661,7 @@ fn strip(
     let tabs = s.current().map(|w| w.tabs.as_slice()).unwrap_or(&[]);
     let chats = tabs.iter().filter(|tab| matches!(tab, Tab::Session(_))).count();
     let fixed = tabs.iter().filter(|tab| !matches!(tab, Tab::Session(_)))
-        .map(|tab| tab_label(s, tab).chars().count() as f32 * 7. + 40.).sum::<f32>();
+        .map(|tab| (tab_label(s, tab).chars().count() as f32 * 7.).min(180.) + 40.).sum::<f32>();
     let chat_width = ((scroll.viewport_width() - fixed - 24. - tabs.len().saturating_sub(1) as f32 * 2.) / chats.max(1) as f32 - 40.).clamp(120., 180.);
     let geometry = crate::theme::GEOMETRY;
     let motion = s.features.read::<pills::Pills>();
@@ -801,6 +801,7 @@ fn strip(
                                 let shown = label.clone();
                                 pill.child(
                                     div()
+                                        .max_w(px(180.))
                                         .when(matches!(&t, Tab::Session(_)), |title| {
                                             title.w(px(chat_width)).min_w(px(120.)).max_w(px(180.))
                                         })
