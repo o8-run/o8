@@ -71,7 +71,7 @@ describe('approved plan dispatch', () => {
     const ticks = vi.mocked(runHeadlessSprintTick).mock.calls.length;
     const { card, response } = await approvePlan(6004, '/fixture/plan-persist', ['Held task']);
     expect(response.status).toBe(200);
-    expect((await response.json()).note).toContain('a mission stop is in progress');
+    expect((await response.json()).note).toContain('Plan not dispatched: a mission stop was in progress.');
     expect(getApproval(card.id)?.resolution?.continuationStatus).toBe('failed');
     expect(savedPackets().map(packet => packet.id)).toEqual(before);
     expect(vi.mocked(runHeadlessSprintTick).mock.calls.length).toBe(ticks);

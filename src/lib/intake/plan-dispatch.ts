@@ -103,7 +103,7 @@ export async function dispatchApprovedPlan(
   });
   const committedMissionId = state.missionId || missionId;
   if (held && 'held' in held) {
-    const note = `Not dispatched: a mission stop is in progress. Approve the plan for issue #${plan.issueNumber} again after it finishes.`;
+    const note = `Plan not dispatched: a mission stop was in progress. Create a new plan for issue #${plan.issueNumber} once the stop finishes.`;
     console.log(`${LOG_PREFIX} ${note}`);
     return { ok: false, missionId: committedMissionId, packetCount: 0, note };
   }
