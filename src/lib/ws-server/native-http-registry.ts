@@ -1,3 +1,4 @@
+import { ARTIFACT_REQUEST_MAX_BYTES } from '@/lib/artifacts/limits';
 import { viewerHttpRoutes } from '@/lib/viewers/http-routes';
 
 /** Shared shell transport registrations; importing this module loads no handlers or middleware. */
@@ -5,8 +6,9 @@ interface Route {
   path: string;
   methods: string[];
   load: () => Promise<unknown>;
+  maxBodyBytes?: number;
 }
-const route = (path: string, methods: string, load: Route['load']): Route => ({ path, methods: methods.split(' '), load });
+const route = (path: string, methods: string, load: Route['load'], maxBodyBytes?: number): Route => ({ path, methods: methods.split(' '), load, maxBodyBytes });
 
 /** The public middleware still runs first; the private reader reuses its existing bearer gate. */
 const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
@@ -38,6 +40,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
     route('/api/tasks', 'GET POST', () => import('@/app/api/tasks/route')),
+    route('/api/tasks/worker-availability', 'GET', () => import('@/app/api/tasks/worker-availability/route')),
+    route('/api/tasks/[taskId]', 'GET', () => import('@/lib/tasks/detail-route')),
+    route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route'), ARTIFACT_REQUEST_MAX_BYTES),
+    route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
+    route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),
@@ -532,7 +539,7 @@ const retired = [
   // Canvas intents drive the canvas page Next renders in the desktop webview (#5576).
   route('/api/canvas/intent', 'POST', () => import('@/lib/canvas/intent-unavailable-route')),
 ];
-const routes = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...retired, ...viewerHttpRoutes];
+const routes: Route[] = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...retired, ...viewerHttpRoutes];
 function parameters(pattern: string, pathname: string): Record<string, string> | null {
   const expected = pattern.split('/');
   const actual = pathname.split('/');
