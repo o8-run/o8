@@ -52,6 +52,7 @@ export async function dispatchApprovedPlan(
 ): Promise<{ ok: boolean; missionId: string; packetCount: number; note: string }> {
   const { withLockedState } = await import('@/lib/orchestrator/control-plane');
   const { runHeadlessSprintTick } = await import('@/lib/orchestrator/headless-loop');
+  const { releaseAbandonedMissionLifecycleHold } = await import('@/lib/orchestrator/mission-lifecycle-hold');
 
   const missionId = `intake-${plan.issueNumber}-${Date.now().toString(36)}`;
   let packetCount = 0;
@@ -59,14 +60,24 @@ export async function dispatchApprovedPlan(
   // Read-modify-write under the control-plane lock (#460) — a raw write here
   // races the headless loop and concurrent approvals (last writer wins,
   // silently dropping packets). The returned state is what gets persisted.
-  const { state } = await withLockedState((current) => {
+  const { state, result: held } = await withLockedState((current) => {
+    // An operator stop acts only on the packets it captured, then clears its
+    // hold, so packets added meanwhile would launch after the stop. Refuse
+    // until the stop finishes; an expired hold no longer blocks.
+    if (releaseAbandonedMissionLifecycleHold(current).lifecycleHold) return { held: true };
     // Never replace packets that are already in the current mission: append to
     // it, keeping its identity and settings. Only an empty control plane gets a
     // fresh intake mission, and that mission carries no creation receipt or
     // comparison groups from whatever was there before.
     const appending = current.packets.length > 0;
+    // Continue after the highest existing P-label: packets can be deleted, so the
+    // count can fall below a label that is still in use.
+    const firstLabel = current.packets.reduce((highest, packet) => {
+      const match = /^P(\d+)$/.exec(packet.referenceLabel ?? '');
+      return match ? Math.max(highest, Number(match[1])) : highest;
+    }, 0);
     const packets = plan.tasks.map((task, index) =>
-      buildPacketFromTask(task, current.packets.length + index, plan.repoPath, plan.runtime, plan.issueNumber),
+      buildPacketFromTask(task, firstLabel + index, plan.repoPath, plan.runtime, plan.issueNumber),
     );
     packetCount = packets.length;
     if (appending) {
@@ -85,11 +96,17 @@ export async function dispatchApprovedPlan(
       creationMutationId: null,
       creationReceipt: null,
       activeComparisonGroups: [],
+      lifecycleHold: null,
       packets,
       updatedAt: new Date().toISOString(),
     };
   });
   const committedMissionId = state.missionId || missionId;
+  if (held && 'held' in held) {
+    const note = `Not dispatched: a mission stop is in progress. Approve the plan for issue #${plan.issueNumber} again after it finishes.`;
+    console.log(`${LOG_PREFIX} ${note}`);
+    return { ok: false, missionId: committedMissionId, packetCount: 0, note };
+  }
 
   // Trigger the headless loop to pick up the new packets
   void runHeadlessSprintTick().catch((error) => {
