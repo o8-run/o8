@@ -171,6 +171,7 @@ enum Tool {
     #[allow(dead_code)]
     Threads,
     Activity,
+    Scorecard,
     Issues,
     SideChat,
     Resources,
@@ -197,7 +198,7 @@ impl Tool {
                 Tool::Spec,
             ],
         ),
-        ("More", &[Tool::Activity, Tool::SideChat]),
+        ("More", &[Tool::Activity, Tool::Scorecard, Tool::SideChat]),
         ("Diagnostics", &[Tool::Resources, Tool::Targeting]),
     ];
     fn tab(self) -> Option<Tab> {
@@ -206,6 +207,7 @@ impl Tool {
             Tool::Terminal => Some(Tab::Terminal),
             Tool::Review => Some(Tab::Diff),
             Tool::Activity => Some(Tab::Activity),
+            Tool::Scorecard => Some(Tab::Scorecard),
 
             _ => None,
         }
@@ -226,6 +228,7 @@ impl Tool {
             Tool::Review => "Review",
             Tool::Threads => "Threads",
             Tool::Activity => "Activity",
+            Tool::Scorecard => "Review scorecard",
             Tool::Issues => "Issues",
             Tool::SideChat => "Side chat",
             Tool::Resources => "Resources",
@@ -247,6 +250,7 @@ impl Tool {
             Tool::Review => "Working changes across your project",
             Tool::Threads => "Project tasks and agent exchanges",
             Tool::Activity => "Repository history and mission decisions",
+            Tool::Scorecard => "Review outcomes, corrections and merge receipts",
             Tool::Issues => "Read a GitHub issue beside the chat",
             Tool::SideChat => "A separate conversation with its own messages",
             Tool::Resources => "Live session CPU and memory",
@@ -268,6 +272,7 @@ impl Tool {
             Tool::Review => REVIEW,
             Tool::Threads => THREADS,
             Tool::Activity => ACTIVITY,
+            Tool::Scorecard => REVIEW,
             Tool::Issues => ISSUES,
             Tool::SideChat => SIDE_CHAT,
             Tool::Resources => RESOURCES,
@@ -290,6 +295,7 @@ impl Tool {
             Tool::Inbox => 'i',
             Tool::Spec => 'o',
             Tool::Activity => 'a',
+            Tool::Scorecard => 'v',
             Tool::SideChat => 's',
             Tool::Resources => 'r',
             Tool::Targeting => 'x',
@@ -722,7 +728,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         && !s.content.contains_key(&key)
     {
         // Workspace-scoped tools read their saved slice; Inbox also works before one exists.
-        if !matches!(tab, Tab::Inbox | Tab::Activity)
+        if !matches!(tab, Tab::Inbox | Tab::Activity | Tab::Scorecard)
             && !s.state.workspaces.contains_key(&workspace)
         {
             layout::select(s, tool, window, cx);
@@ -847,6 +853,7 @@ pub(super) fn open_surface(
     let tool = match surface {
         "inbox" => Tool::Inbox,
         "activity" => Tool::Activity,
+        "review-scorecard" => Tool::Scorecard,
         "review" => Tool::Review,
         "o8md" => Tool::Spec,
         "workspace" | "files" => Tool::Files,

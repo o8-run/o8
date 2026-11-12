@@ -45,6 +45,7 @@ fn panel_chrome_launcher_lists_every_tool_with_keys_and_distinct_drawer(cx: &mut
     // One list, everyday tools then the rest, with no disclosure (Q 2026-11-09).
     bounds(&mut v, "panel-tool-files");
     bounds(&mut v, "panel-tool-activity");
+    bounds(&mut v, "panel-tool-review scorecard");
     bounds(&mut v, "panel-tool-targeting");
     assert!(v.debug_bounds("panel-launcher-more").is_none());
     click(&mut v, "panel-tool-devices");
@@ -65,6 +66,42 @@ fn panel_chrome_launcher_lists_every_tool_with_keys_and_distinct_drawer(cx: &mut
     v.simulate_keystrokes("end enter");
     settle(&mut v);
     bounds(&mut v, "panel-tab-close-targeting");
+}
+#[gpui::test]
+fn review_scorecard_opens_beside_activity_and_keeps_compact_policy(cx: &mut TestAppContext) {
+    let f = Fixture::start_mode(false, "--scorecard");
+    let (s, mut v) = open(
+        f.client.clone(),
+        f.root.join("scorecard-panel.json"),
+        crate::shell_state::State::default(),
+        cx,
+    );
+    ready(&s, &mut v);
+    v.simulate_resize(size(px(1680.), px(1050.)));
+    settle(&mut v);
+    click(&mut v, "header-right-panel");
+    bounds(&mut v, "panel-tool-activity");
+    click(&mut v, "panel-tool-review scorecard");
+    let until = Instant::now() + Duration::from_secs(20);
+    loop {
+        v.run_until_parked();
+        draw(&mut v);
+        if v.debug_bounds("scorecard-metric-without-person").is_some() {
+            break;
+        }
+        assert!(Instant::now() < until, "scorecard never loaded in panel");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let panel = bounds(&mut v, "review-scorecard");
+    assert!(panel.right() <= px(1680.));
+    assert!(panel.size.width > px(0.));
+    bounds(&mut v, "panel-tab-close-review-scorecard");
+    click(&mut v, "scorecard-metric-without-person");
+    let row = bounds(&mut v, "scorecard-change-scorecard-clean");
+    assert!(row.left() >= panel.left() && row.right() <= panel.right());
+    v.simulate_resize(size(px(900.), px(700.)));
+    settle(&mut v);
+    assert!(v.debug_bounds("review-scorecard").is_none());
 }
 #[gpui::test]
 fn panel_chrome_launcher_starts_at_its_head_when_the_panel_is_short(cx: &mut TestAppContext) {

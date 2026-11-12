@@ -10,6 +10,7 @@ import { cutoverClient } from './fixtures/ws-cutover-client';
 const binary = process.env.O8D_BINARY ?? process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
 // A1 reads: exercise the gate and original handler through the public socket.
 const NATIVE_READS = [
+  ['scorecard', '/api/panel/analytics?view=review&range=7', 200],
   ['settings', '/api/cortex/codebase-memory', 200],
   ['settings', '/api/cortex/diagnostics', 200],
   ['session', '/api/tasks?includeDone=true&includeBrief=true', 200],
@@ -75,6 +76,29 @@ beforeAll(async () => {
   await server.stopNext();
 }, 180_000);
 afterAll(async () => { await server?.stop(); });
+
+it('reads persisted review scorecard figures through o8d with Next stopped', async () => {
+  const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { createLane, appendEvent } = require('./src/lib/lane/registry.ts');
+    const { recordOrchestratorReview } = require('./src/lib/approvals/store.ts');
+    const lane = createLane({ repoPath: process.env.O8_DATA_DIR, branch: 'fixture-scorecard', runtime: 'codex', packetId: 'fixture-native-scorecard' });
+    recordOrchestratorReview(lane.packetId, { approved: true, findings: [], reviewer: 'fixture-reviewer', reviewedHeadSha: 'a'.repeat(40), reviewTurnOutcome: 'completed' });
+    appendEvent(lane.id, 'merge_dispatch_succeeded', 'system', { reviewedHeadSha: 'a'.repeat(40), mergeSha: 'b'.repeat(40) });
+    console.log(JSON.stringify({ laneId: lane.id }));
+    require('./src/lib/db/index.ts').closeDb();
+  `], { env: { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token } });
+  const fixture = JSON.parse(seeded.stdout.split('\n').find(line => line.startsWith('{"laneId":'))!);
+  const response = await fetch(`${origin}/api/panel/analytics?view=review&range=7&repoPath=${encodeURIComponent(server.directory)}`, {
+    headers: { authorization: `Bearer ${server.token}` },
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.metrics.find((metric: { id: string }) => metric.id === 'without-person')).toMatchObject({
+    value: 1, changes: [expect.objectContaining({ id: fixture.laneId })],
+  });
+  expect(body.metrics.find((metric: { id: string }) => metric.id === 'learned').value).toBeNull();
+});
 
 it.each([
   ['Settings', 'GET', '/api/panel/operator-defaults?include=native', 200],

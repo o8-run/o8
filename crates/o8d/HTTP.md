@@ -332,6 +332,26 @@ The raw report is generated locally; no credentials or payloads are retained.
 
 These gaps keep #4547 open. No 500 MB system-memory target is claimed.
 
+## Review scorecard
+
+`GET /api/panel/analytics?view=review&range=7|30|all` is registered by the
+native `scorecard` surface. Optional `repoPath` scopes tracked changes to a
+project; `source=all|chat|external|pr|unknown` applies the same figures to an
+intake source. The existing middleware and bearer rules apply unchanged.
+The production analytics handler delegates this projection to
+`src/app/api/panel/analytics/review-scorecard.ts`, reading one SQLite snapshot
+of lanes, approval audits, mission provenance, correction deliveries and merge
+events. It does not scan usage logs or discover runtimes. Classic analytics
+requests without `view=review` retain their existing response.
+
+Ranges select changes by their first lane creation, with receipts through the
+present. Retry lanes for one packet count once. Missing merge provenance,
+fixing-author identity and verified-outcome reuse links are not inferred.
+Every figure includes its backing change list and its measurement basis.
+The public-socket test in `tests/o8d-next-surfaces-real-path.test.ts` checks
+the registered route with Next stopped and retains the middleware refusal
+checks for forged callers.
+
 ## Cortex decisions
 
 `POST /api/cortex/cross-repo-proposals` (Activity) and

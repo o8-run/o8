@@ -28,6 +28,7 @@ const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
 // Keys mirror register_surfaces!, including surfaces whose transport is WebSocket-only.
 // Each route loads its own implementation; unrelated surfaces stay cold.
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
+  scorecard: [route('/api/panel/analytics', 'GET', () => import('@/app/api/panel/analytics/route'))],
   session: [
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
