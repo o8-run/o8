@@ -120,6 +120,18 @@ fn cards_sit_two_abreast_on_a_wide_pane_and_stack_on_a_narrow_one(cx: &mut gpui:
     assert!(recent > needs, "one column");
 }
 
+/// The layout test above runs at the saved chat width. This holds the same
+/// two columns for every width Settings offers, by the rule the row wraps on:
+/// a card takes its share of the width, or its minimum when that is larger.
+#[test]
+fn every_chat_width_gives_two_columns() {
+    for (name, _, width) in crate::theme::CHAT_WIDTHS {
+        let card = (width * CARD_SHARE).max(CARD_MIN);
+        let per_row = ((width + GAP) / (card + GAP)).floor();
+        assert_eq!(per_row, 2., "{name}");
+    }
+}
+
 #[test]
 fn needs_you_lists_questions_first_as_the_inbox_does_and_skips_what_is_not_waiting() {
     let sessions = vec![

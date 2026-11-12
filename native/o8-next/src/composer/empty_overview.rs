@@ -17,8 +17,10 @@ const STAGGER_MS: u64 = 40;
 /// The width a card asks for, and the least it takes. The least decides how
 /// many sit side by side; the workspace is never narrower than its 420-point
 /// reserve, so one card always fits.
-const CARD_BASIS: f32 = 280.;
-const CARD_MIN: f32 = 240.;
+/// A card's share of the overview's width before it grows. Two shares and a
+/// gap fit a row and three never do, so every chat width gives two columns.
+pub(super) const CARD_SHARE: f32 = 0.4;
+pub(super) const CARD_MIN: f32 = 240.;
 const GAP: f32 = 12.;
 
 /// One thread row in a list card.
@@ -389,7 +391,7 @@ fn card(title: &'static str, selector: &'static str) -> gpui::Div {
     div()
         .debug_selector(move || selector.into())
         .flex_grow()
-        .flex_basis(px(CARD_BASIS))
+        .flex_basis(gpui::relative(CARD_SHARE))
         .min_w(px(CARD_MIN))
         .overflow_hidden()
         .p(px(8.))
