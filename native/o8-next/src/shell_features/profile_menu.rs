@@ -482,7 +482,13 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Shell>,
     ) {
-        if crate::theme::set_appearance(mode) {
+        // Settings sends a glass clarity change the same way: the backdrop
+        // may change kind, so the material is applied again.
+        let changed = match mode.strip_prefix("glass-level:") {
+            Some(level) => crate::theme::set_glass_level(level),
+            None => crate::theme::set_appearance(mode),
+        };
+        if changed {
             self.system_glass = crate::shell::material::switch(window, self.offscreen);
             window.refresh();
         }

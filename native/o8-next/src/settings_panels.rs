@@ -91,9 +91,7 @@ impl Settings {
                     window,
                     cx,
                     move |this, _, cx| {
-                        if theme::set_glass_level(name) {
-                            cx.refresh_windows();
-                        }
+                        cx.emit(Action::Appearance(format!("glass-level:{name}")));
                         this.changed(cx);
                     },
                 )

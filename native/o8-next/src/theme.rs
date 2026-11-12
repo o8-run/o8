@@ -309,11 +309,17 @@ fn saved_chat_width() -> Option<String> {
 }
 /// How much of the dark veil All Glass keeps: saved name, label and the share
 /// of each veil stop's alpha. Less veil lets more of the desktop's colour through.
-pub const GLASS_LEVELS: [(&str, &str, f32); 3] = [
+pub const GLASS_LEVELS: [(&str, &str, f32); 4] = [
     ("deep", "Deep", 1.),
     ("balanced", "Balanced", 0.6),
     ("clear", "Clear", 0.3),
+    // A plain blur with no system tint, so the desktop keeps its colour.
+    ("vivid", "Vivid", 0.45),
 ];
+/// Whether All Glass sits on a plain blur instead of the system material.
+pub fn glass_vivid() -> bool {
+    glass() && glass_level_name() == "vivid"
+}
 static LAUNCH_GLASS_LEVEL: LazyLock<usize> = LazyLock::new(|| {
     glass_level_path()
         .and_then(|path| std::fs::read_to_string(path).ok())
