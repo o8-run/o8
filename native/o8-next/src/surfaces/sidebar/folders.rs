@@ -423,6 +423,7 @@ impl ThreadList {
             self.pending_open = None;
             self.selected = Some(id.clone());
             self.follow_selection = true;
+            self.follow_reveals = true;
             cx.emit(Event::Selected(id.clone()));
             cx.notify();
             return id;
@@ -528,6 +529,7 @@ impl ThreadList {
         {
             self.selected = Some(id.clone());
             self.follow_selection = true;
+            self.follow_reveals = true;
             self.rebuild();
             cx.emit(Event::Selected(id));
         }
