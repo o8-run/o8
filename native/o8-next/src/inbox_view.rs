@@ -3,8 +3,16 @@ use crate::theme::current as palette;
 use gpui::{FontWeight, IntoElement, KeyDownEvent, Render, div, prelude::*, px};
 
 impl Inbox {
-    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
+            return;
+        }
+        if self.audit_key(event, window, cx) {
             return;
         }
         match event.keystroke.key.as_str() {
@@ -40,10 +48,10 @@ impl Inbox {
             }
             "left" | "right" | "home" | "end" => {
                 let lane = match event.keystroke.key.as_str() {
-                    "left" => (self.lane + 4) % 5,
-                    "right" => (self.lane + 1) % 5,
+                    "left" => (self.lane + VIEWS.len() - 1) % VIEWS.len(),
+                    "right" => (self.lane + 1) % VIEWS.len(),
                     "home" => 0,
-                    _ => 4,
+                    _ => VIEWS.len() - 1,
                 };
                 self.focus.focus(window);
                 self.select_lane(lane, cx);
@@ -200,9 +208,14 @@ impl Inbox {
 }
 impl Render for Inbox {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let error = self.error().map(str::to_owned);
-        let empty =
-            self.loaded && !self.loading && error.is_none() && self.cards[self.lane].is_empty();
+        let error = (self.lane != approval_audit::LANE)
+            .then(|| self.error().map(str::to_owned))
+            .flatten();
+        let empty = self.lane != approval_audit::LANE
+            && self.loaded
+            && !self.loading
+            && error.is_none()
+            && self.cards[self.lane].is_empty();
         div()
             .size_full()
             .flex()
@@ -230,7 +243,8 @@ impl Render for Inbox {
                             .items_center()
                             .gap(px(8.))
                             .child(div().flex_1().text_size(px(15.)).child("Inbox"))
-                            .child(
+                            .when(self.lane == approval_audit::LANE, |v| v.child(self.audit_controls(cx)))
+                            .when(self.lane != approval_audit::LANE, |v| v.child(
                                 div()
                                     .id("inbox-scope")
                                     .debug_selector(|| "inbox-scope".into())
@@ -249,35 +263,43 @@ impl Render for Inbox {
                                             .hover(|s| s.bg(palette().hover))
                                             .on_click(cx.listener(|this, _, _, cx| this.scope(cx)))
                                     }),
-                            )
-                            .child(
+                            ))
+                            .when(self.lane != approval_audit::LANE, |v| v.child(
                                 div()
                                     .id("inbox-refresh")
                                     .debug_selector(|| "inbox-refresh".into())
                                     .p(px(6.))
                                     .rounded(px(7.))
                                     .text_size(px(11.))
-                                    .child(if self.loading {
+                                    .child(if self.view_loading() {
                                         "Refreshing…"
                                     } else {
                                         "Refresh"
                                     })
-                                    .when(!self.loading, |v| {
+                                    .when(!self.view_loading(), |v| {
                                         v.cursor_pointer()
                                             .hover(|s| s.bg(palette().hover))
                                             .on_click(cx.listener(|this, _, _, cx| this.load(cx)))
                                     }),
-                            ),
+                            )),
                     )
                     .child(
                         div()
                             .text_size(px(9.5))
                             .text_color(palette().text_muted)
-                            .child(self.freshness()),
+                            .child(if self.lane == approval_audit::LANE {
+                                "Approval evidence trail · active project".into()
+                            } else {
+                                self.freshness()
+                            }),
                     )
                     .child(div().flex().flex_wrap().gap(px(4.)).mt(px(8.)).children(
                         VIEWS.iter().enumerate().map(|(i, (lane, label))| {
-                            let count = self.cards[i].len();
+                            let count = if i == approval_audit::LANE {
+                                self.audit.rows.len()
+                            } else {
+                                self.cards[i].len()
+                            };
                             div()
                                 .id(("inbox-view", i))
                                 .debug_selector(move || format!("inbox-view-{lane}"))
@@ -320,7 +342,8 @@ impl Render for Inbox {
                         .child("Approvals across all workspaces"),
                 )
             })
-            .when(!self.loaded, |v| {
+            .when(self.lane == approval_audit::LANE, |v| v.child(self.audit_body(cx)))
+            .when(self.lane != approval_audit::LANE && !self.loaded, |v| {
                 v.child(div().p(px(12.)).child(if self.loading {
                     "Loading inbox…"
                 } else {
@@ -337,7 +360,7 @@ impl Render for Inbox {
                         .child(error),
                 )
             })
-            .when(!self.notice.is_empty(), |v| {
+            .when(self.lane != approval_audit::LANE && !self.notice.is_empty(), |v| {
                 v.child(
                     div()
                         .debug_selector(|| "inbox-notice".into())
@@ -378,7 +401,7 @@ impl Render for Inbox {
                         }),
                 )
             })
-            .child(
+            .when(self.lane != approval_audit::LANE, |v| v.child(
                 div()
                     .id("inbox-cards")
                     .debug_selector(|| "inbox-cards".into())
@@ -394,6 +417,6 @@ impl Render for Inbox {
                             .enumerate()
                             .map(|(i, card)| self.card(card, i, window, cx)),
                     ),
-            )
+            ))
     }
 }
