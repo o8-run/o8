@@ -8,6 +8,10 @@ fn cancelled_retry(cx: &mut TestAppContext, settings: bool) {
         crate::shell_state::State::default(), cx,
     );
     ready(&shell, &mut visual);
+    shell.update_in(&mut visual, |s, w, cx| {
+        s.open_thread("thoughts-composer-first".into(), w, cx);
+    });
+    ready(&shell, &mut visual);
     let path = fixture.root.join("capture.png");
     fs::write(&path, b"retained capture").unwrap();
     let (id, workspace, active, focus) = shell.update_in(&mut visual, |s, w, cx| {
