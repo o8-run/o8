@@ -153,6 +153,23 @@ impl Shell {
         shell
     }
     fn persist(&mut self) {
+        let open = self.state.workspaces.iter().flat_map(|(scope, saved)| {
+            saved.tabs.iter().filter_map(|tab| match tab {
+                Tab::Session(id) => Some(format!(
+                    "{scope}|{}", saved.selections.get(id).unwrap_or(id)
+                )),
+                _ => None,
+            })
+        }).collect::<BTreeSet<_>>();
+        self.state.thread_titles.retain(|key, _| open.contains(key));
+        for session in &self.sessions {
+            let key = format!("{}|{}", session.workspace(), session.id);
+            if open.contains(&key) && !session.title.trim().is_empty() {
+                self.state.thread_titles.insert(
+                    key, session.title.chars().take(256).collect()
+                );
+            }
+        }
         if let Some(local) = self
             .state
             .selected

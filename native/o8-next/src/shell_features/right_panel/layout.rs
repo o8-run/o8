@@ -93,6 +93,7 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         contextual::refresh(s, window, cx);
         return;
     }
+    side::cancel_focus(s);
     let saved = s.state.right_panel.clone();
     let p = s.features.get::<Panel>();
     p.scope = Some(scope.clone());
@@ -110,14 +111,14 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
             out
         });
     // A saved tool that is no longer offered gives way to the first saved tab.
-    p.selected = Tool::find(&saved.primary)
+    p.selected = saved.selected_tools.get(&scope)
+        .and_then(|v| Tool::find(v))
+        .filter(|tool| !tool.utility() || p.tabs.contains(tool))
         .or_else(|| p.tabs.first().copied())
         .unwrap_or(Tool::Launcher);
     p.active = p.tabs.iter().position(|t| *t == p.selected).unwrap_or(0);
-    p.lower = saved
-        .split
-        .then(|| Tool::find(&saved.secondary))
-        .flatten()
+    p.lower = saved.lower_tools.get(&scope)
+        .and_then(|v| Tool::find(v))
         .map(|t| {
             if t == p.selected {
                 if t == Tool::Browser {
@@ -152,20 +153,13 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         saved.pr_selected.get(&scope),
     );
     if saved.visible && fits {
-        match contextual::unopened(s).filter(|_| upper == Tool::Prs) {
-            Some((repo, n)) => contextual::open_pr(s, repo, n, window, cx),
-            None => show(s, upper, window, cx),
-        }
+        restore_tool(s, upper, window, cx);
         if let Some(lower) = lower {
-            s.features.get::<Panel>().into_lower = true;
-            show(s, lower, window, cx);
-            let p = s.features.get::<Panel>();
-            p.into_lower = false;
-            p.selected = upper;
+            restore_tool(s, lower, window, cx);
         }
-        save(s);
     }
     contextual::refresh(s, window, cx);
+    cx.notify();
 }
 
 pub(super) fn save(s: &mut Shell) {
@@ -184,7 +178,16 @@ pub(super) fn save(s: &mut Shell) {
         None => saved.pr_selected.remove(&scope),
     };
     saved.pr_tabs.insert(scope.clone(), prs);
-    saved.primary = primary;
+    saved.primary = primary.clone();
+    saved.selected_tools.insert(scope.clone(), primary);
+    match lower {
+        Some(tool) => {
+            saved.lower_tools.insert(scope.clone(), tool.slug());
+        }
+        None => {
+            saved.lower_tools.remove(&scope);
+        }
+    }
     saved.secondary_tabs.insert(scope.clone(), lower_tabs);
     saved.utility_tabs.insert(scope, tabs);
     saved.split = lower.is_some();
@@ -643,5 +646,16 @@ pub(super) struct SplitDrag;
 impl Render for SplitDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         gpui::Empty
+    }
+}
+
+/// Restore resources without selecting, saving tabs, starting chat or focusing.
+fn restore_tool(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    let focus = window.focused(cx);
+    show_mode(s, tool, false, window, cx);
+    if let Some(focus) = focus {
+        focus.focus(window);
+    } else {
+        window.blur();
     }
 }

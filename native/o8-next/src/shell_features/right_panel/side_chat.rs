@@ -4,13 +4,16 @@ use serde_json::json;
 #[derive(Default)]
 struct Starts {
     pending: std::collections::HashSet<String>,
+    focus: std::collections::HashSet<String>,
     failed: std::collections::HashSet<String>,
 }
 
 pub(super) fn start(s: &mut Shell, cx: &mut Context<Shell>) -> Option<String> {
     let workspace = s.state.selected.clone()?;
     if let Some(id) = s.state.right_panel.side_chats.get(&workspace) {
-        return Some(id.clone());
+        let id = id.clone();
+        s.features.get::<Starts>().focus.insert(id.clone());
+        return Some(id);
     }
     let id = format!(
         "thoughts-side-chat-{}",
@@ -25,6 +28,7 @@ pub(super) fn start(s: &mut Shell, cx: &mut Context<Shell>) -> Option<String> {
         .side_chats
         .insert(workspace.clone(), id.clone());
     s.features.get::<Starts>().pending.insert(id.clone());
+    s.features.get::<Starts>().focus.insert(id.clone());
     s.persist();
     let client = s.panel_client(&workspace);
     let target = id.clone();
@@ -90,7 +94,10 @@ pub(super) fn ensure(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     let Some(p) = s.features.read::<Panel>() else {
         return;
     };
-    if !p.motion.is_open() || !(p.selected == Tool::SideChat || p.lower == Some(Tool::SideChat)) {
+    if p.scope.as_deref() != s.state.selected.as_deref()
+        || !p.motion.is_open()
+        || !(p.selected == Tool::SideChat || p.lower == Some(Tool::SideChat))
+    {
         return;
     }
     let key = key(s, Tool::SideChat);
@@ -113,10 +120,13 @@ pub(super) fn ensure(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     let client = s.panel_client(&ws);
     let view = cx.new(|cx| {
         let mut view = crate::ui::Surface::shell_new(client, vec![session], id.clone(), w, cx);
-        view.shell_bind_thread(id);
+        view.shell_bind_thread(id.clone());
         view
     });
-    view.read(cx).shell_focus(true, w, cx);
+
+    if s.features.get::<Starts>().focus.remove(&id) {
+        view.read(cx).shell_focus(true, w, cx);
+    }
     s.content.insert(key, Content::Session(view));
     cx.notify();
 }
@@ -162,4 +172,8 @@ pub(super) fn element(s: &Shell, cx: &mut Context<Shell>) -> AnyElement {
             .child(div().text_size(px(12.)).text_color(theme().text).child("Side chat"))
             .child(div().mt(px(4.)).text_size(px(11.)).text_color(theme().text_muted).child("A separate conversation with its own messages. Your main conversation stays in place.")))
         .child(div().flex_1().min_h_0().child(content)).into_any_element()
+}
+
+pub(super) fn cancel_focus(s: &mut Shell) {
+    s.features.get::<Starts>().focus.clear();
 }

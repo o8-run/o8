@@ -87,6 +87,11 @@ fn render(
         .when(hidden && !moving, |row| row.child(nav(true, cx)))
         .child(tabs(s, cx))
         .child(
+            div().w(px(32.)).flex_shrink_0().children(
+                s.active().as_ref().and_then(|tab| thread_worktree_badge(s, tab))
+            )
+        )
+        .child(
             div()
                 .flex()
                 .flex_shrink_0()
@@ -462,7 +467,13 @@ pub(super) fn tab_label(s: &Shell, t: &Tab) -> String {
             s.sessions
                 .iter()
                 .find(|s| &s.id == selected)
+                .filter(|session| !session.title.trim().is_empty())
                 .map(|s| s.title.clone())
+                .or_else(|| {
+                    s.state.thread_titles.get(&format!(
+                        "{}|{}", s.state.selected.as_deref().unwrap_or(""), selected
+                    )).cloned()
+                })
                 .unwrap_or_else(|| "Chat".into())
         }
         _ => t.label().into(),
@@ -748,7 +759,7 @@ fn strip(
                                 let shown = label.clone();
                                 pill.child(
                                     div()
-                                        .max_w(px(180.))
+                                        .w(px(180.))
                                         .overflow_hidden()
                                         .whitespace_nowrap()
                                         .text_ellipsis()
@@ -814,11 +825,7 @@ fn strip(
                         .items_center()
                         .gap(px(2.))
                         .child(pill)
-                        .when(selected, |group| {
-                            group
-                                .child(scroll.probe())
-                                .children(thread_worktree_badge(s, &t))
-                        });
+                        .when(selected, |group| group.child(scroll.probe()));
                     match motion {
                         Some(m) => m.wrap(&key, pill).into_any_element(),
                         None => pill.into_any_element(),
