@@ -10,7 +10,7 @@ map from former always-loaded instructions to scoped sources live in
 
 | Collection | What it contains |
 |---|---|
-| [Design](design/) | The visual language, interaction rules, review rules, and operator-locked geometry. |
+| [Design](design/) | The brand ([BRAND.md](design/BRAND.md)), the visual language, interaction rules, review rules, and operator-locked geometry. |
 | [Agents](agents/) | Guidance for external agents that drive o8 through its supported interfaces. |
 
 ## User
