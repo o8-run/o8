@@ -1,4 +1,7 @@
 export * as api_worktrees_conflicts from '@/app/api/worktrees/conflicts/route';
+export * as api_orchestrator_workspace_maintenance from '@/app/api/orchestrator/workspace/maintenance/route';
+export * as api_orchestrator_workspace_preservation from '@/app/api/orchestrator/workspace/preservation/route';
+export * as api_runtime_session_transform from '@/lib/runtime/session-transform-route';
 export * as api_panel_devices from '@/lib/devices/route';
 export * as api_tasks_taskId_preview from '@/lib/cloud/task-preview-route';
 import { GET as api_cortex_codebase_memory_GET } from '@/app/api/cortex/codebase-memory/route';
