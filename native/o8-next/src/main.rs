@@ -38,6 +38,7 @@ mod project_icon;
 mod projects;
 mod projects_model;
 mod retained;
+mod ring;
 mod rich;
 mod settings;
 mod settings_fields;
