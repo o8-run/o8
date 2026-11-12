@@ -1,3 +1,4 @@
+import { readIdleDrafts } from '@/lib/github-broker/idle-drafts';
 import { snapshotCacheInvalidation } from '@/lib/snapshot-cache-invalidation';
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
 import {
@@ -474,7 +475,13 @@ async function buildMobileInboxSnapshot(options: {
     ? summarizeTranscript(primaryTranscript[primaryTranscript.length - 1]?.text ?? '')
     : '';
 
-  const items: MobileInboxItem[] = [];
+  const staleDrafts = includeWorkspaceReview ? await readIdleDrafts().catch(() => ({ repo: null, drafts: [], nextPage: null, error: 'Idle drafts could not be loaded.' })) : { repo: null, drafts: [], nextPage: null };
+  const items: MobileInboxItem[] = staleDrafts.drafts.map(pr => ({
+    id: `idle-draft:${staleDrafts.repo}:${pr.number}`, kind: 'review', severity: 'warning', title: `Idle draft #${pr.number}: ${pr.title}`,
+    detail: `${pr.ageDays} days idle · checks ${pr.checks ?? 'unknown'} · conflicts with main ${pr.conflictsWithMain === null ? 'unknown' : pr.conflictsWithMain ? 'yes' : 'no'} · Continue / Handoff / Close`,
+    metadata: { repo: staleDrafts.repo ?? '', number: String(pr.number), decisions: pr.decisions.join(', ') },
+    actions: [{ kind: 'open_desktop', label: 'Open draft', href: pr.url, available: true }],
+  }));
   const reviewUnits = await buildMobileReviewUnits({
     sessions: orderedSessions,
     pendingApprovals,
@@ -633,6 +640,7 @@ async function buildMobileInboxSnapshot(options: {
 
   return {
     generatedAt: new Date().toISOString(),
+    staleDrafts,
     mode: fleet.meta.mode,
     sourceLabel: fleet.meta.sourceLabel,
     primarySessionKey: primarySession?.sessionKey,

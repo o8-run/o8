@@ -85,7 +85,39 @@ async function resolveApproval(mode: OutputMode, rest: string[], action: 'approv
   return 0;
 }
 
+function flag(rest: string[], name: string) { return rest[rest.indexOf(name) + 1]; }
+async function runDrafts(mode: OutputMode, action: string, rest: string[]): Promise<number> {
+  const value = (name: string) => rest.includes(name) ? flag(rest, name) : undefined;
+  const repo = value('--repo');
+  let data: unknown;
+  if (action === 'drafts') {
+    data = (await apiFetch<{ drafts: Array<{ number: number; ageDays: number; checks: string | null; conflictsWithMain: boolean | null }>; nextPage: number | null }>(resolveConfig(), '/api/panel/prs', {
+      query: { view: 'idle-drafts', repo, page: value('--page') ?? '1' },
+    })).data;
+  } else {
+    const number = Number(rest[0]);
+    const decision = action.replace('-draft', '');
+    const owner = value('--owner'); const reason = value('--reason');
+    if (!Number.isSafeInteger(number) || number < 1 || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new CliError('invalid_args', 'A PR number and --repo owner/repository are required.', EXIT.INVALID_ARGS);
+    if (decision === 'handoff' && !owner) throw new CliError('invalid_args', 'Handoff requires --owner <GitHub login>.', EXIT.INVALID_ARGS);
+    if (decision === 'close' && !reason?.trim()) throw new CliError('invalid_args', 'Close requires --reason.', EXIT.INVALID_ARGS);
+    data = (await apiFetch(resolveConfig(), `/api/panel/prs/${number}`, { method: 'POST',
+      body: { action: 'draft-decision', decision, repo, owner, reason },
+    })).data;
+  }
+  if (!mode.human) printJson(data);
+  else if (action !== 'drafts') printHumanKv([['decision', action], ['result', JSON.stringify(data)]]);
+  else {
+    const page = data as { drafts: Array<{ number: number; ageDays: number; checks: string | null; conflictsWithMain: boolean | null }>; nextPage: number | null };
+    printHumanHeading('Idle draft decisions (three days)');
+    printHumanKv(page.drafts.map(pr => [String(pr.number), `${pr.ageDays} days idle · checks ${pr.checks ?? 'unknown'} · conflicts with main ${pr.conflictsWithMain === null ? 'unknown' : pr.conflictsWithMain ? 'yes' : 'no'} · Continue / Handoff / Close`]));
+    printHumanKv([['commands', 'inbox continue-draft | handoff-draft | close-draft <number> --repo owner/repository [--owner login] [--reason text]'], ['next page', String(page.nextPage ?? 'none')]]);
+  }
+  return 0;
+}
+
 export async function runInbox(mode: OutputMode, secondary: string | undefined, rest: string[]): Promise<number> {
+  if (secondary && ['drafts', 'continue-draft', 'handoff-draft', 'close-draft'].includes(secondary)) return runDrafts(mode, secondary, rest);
   switch (secondary) {
     case 'list':
       return runInboxList(mode, rest);
@@ -98,7 +130,7 @@ export async function runInbox(mode: OutputMode, secondary: string | undefined, 
         'unknown_inbox_subcommand',
         `Unknown inbox subcommand: ${secondary ?? '(none)'}`,
         EXIT.INVALID_ARGS,
-        'Subcommands: list | approve | reject. Run `o8 --help`.',
+        'Subcommands: list | approve | reject | drafts | continue-draft | handoff-draft | close-draft. Run `o8 --help`.',
       );
   }
 }

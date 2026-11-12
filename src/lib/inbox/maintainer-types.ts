@@ -1,4 +1,6 @@
+import type { IdleDraft } from '@/lib/github-broker/idle-drafts';
 export interface MaintainerContribution {
+  idleDraft?: IdleDraft;
   id: string;
   kind: 'pull_request' | 'claim' | 'reply';
   repo: string;
@@ -18,6 +20,7 @@ export interface MaintainerContribution {
 }
 
 export interface MaintainerFeed {
+  idleDraftsUnavailable?: string[];
   contributions: MaintainerContribution[];
   replies: MaintainerContribution[];
   sources: Array<{ repo: string; repoPaths: string[]; lastSuccessfulAt: string | null; stale: boolean }>;

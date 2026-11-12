@@ -542,3 +542,11 @@ Workers authenticate with `Authorization: Bearer cwk_*` per-request.
 | GET | `/api/worktrees/diff?sessionKey=...&worktreePath=...&baseBranch=...` | Full unified diff for an agent's worktree vs base. |
 | GET | `/api/worktrees/diff-summary?sessionKey=...&worktreePath=...&baseBranch=...` | `{ additions, deletions, fileCount }` for a worktree. |
 | POST | `/api/worktrees/merge` | Create PR, merge to main, or discard a worktree. |
+
+### Idle draft decisions
+
+`GET /api/panel/prs?view=idle-drafts&repo=owner/repository&page=1` lists open drafts whose GitHub `updatedAt` is at least 72 hours old. Follow `nextPage`; the first page is not a complete inventory when it is present. Rows retain check state and report conflicts with main as true, false or unknown. A non-main base or missing GitHub mergeability is unknown, not conflict-free.
+
+The existing desktop Inbox contribution feed and mobile Inbox data path carry these rows. Existing contribution cards show age, checks, conflicts and Continue / Handoff / Close; no new UI is added. The desktop feed prioritizes idle drafts and marks pagination as truncated. Failure to read draft summaries is exposed separately from mirror freshness.
+
+Use `o8 inbox drafts --repo owner/repository [--page N]`, then `o8 inbox continue-draft NUMBER --repo owner/repository [--reason TEXT]`, `handoff-draft` with `--owner LOGIN`, or `close-draft` with a required `--reason TEXT`. The registered MCP tool `o8_idle_drafts` exposes list, continue, handoff and close using the same routes. These explicit decisions start no workers and do not mark drafts ready. Continue posts a comment; Handoff assigns the named GitHub user and posts a comment; Close posts the required reason before closing. Refresh current PR state before recording a decision. After an uncertain write, inspect GitHub before retrying; MCP decisions disable automatic HTTP replay.
