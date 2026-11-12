@@ -4,8 +4,6 @@
 mod material;
 #[path = "../src/theme.rs"]
 mod theme;
-#[path = "../src/theme_bespoke.rs"]
-mod theme_bespoke;
 #[path = "../src/theme_import.rs"]
 mod theme_import;
 use gpui::{

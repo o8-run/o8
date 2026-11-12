@@ -54,7 +54,6 @@ mod text;
 mod text_ellipsis_tests;
 mod thread_messages;
 mod theme;
-mod theme_bespoke;
 mod theme_import;
 #[cfg(test)]
 mod theme_font_tests;
