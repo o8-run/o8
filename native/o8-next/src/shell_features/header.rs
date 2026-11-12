@@ -66,15 +66,15 @@ fn render(
             }))
         })
     };
-    // Ring, Toggle, Back and Forward: one cluster that never moves.
+    // Toggle, Ring, Back and Forward: one cluster that never moves.
     let nav = |hidden: bool, cx: &mut Context<Shell>| {
         div()
             .flex()
             .flex_shrink_0()
             .items_center()
             .gap(px(4.))
-            .child(header_ring())
             .child(sidebar_toggle(hidden, cx))
+            .child(header_ring())
             .child(history("header-back", BACK, "Back", back, cx))
             .child(history("header-forward", FORWARD, "Forward", forward, cx))
     };
@@ -189,7 +189,7 @@ fn edge_mark() -> gpui::Div {
         .bg(theme().border)
 }
 
-/// SidebarTogglePill: 14px panel glyph, orange while the sidebar is pinned open.
+/// SidebarTogglePill: 14px panel glyph, brighter while the sidebar is open.
 /// The toggle's and an arrow's widths: 7px either side of a 14px and a 15px glyph.
 const TOGGLE_W: f32 = 28.;
 const ARROW_W: f32 = 29.;
@@ -198,7 +198,7 @@ const ARROW_W: f32 = 29.;
 fn toggle_inset(window: &Window) -> f32 {
     crate::zoom::chrome_clearance(26. + super::super::rail::LIGHTS, window)
 }
-/// The travelling slot's floor: the folded strip's inset, Ring, toggle, Back
+/// The travelling slot's floor: the folded strip's inset, toggle, Ring, Back
 /// and Forward with their gaps and the 4px before the tabs, less the strip's
 /// 16px padding in flight, so the tabs land where the folded header puts them.
 fn folded(inset: f32) -> f32 {
@@ -208,7 +208,7 @@ fn folded(inset: f32) -> f32 {
 /// The Ring's side, in layout units, so it zooms with the header.
 const RING_W: f32 = 16.;
 
-/// The Ring between the traffic lights and the sidebar toggle. Not a control:
+/// The Ring between the sidebar toggle and Back. Not a control:
 /// it has no hover, click or tip, and a press on it moves the window as the
 /// bare header does (a drag area of its own, so it is the topmost hitbox).
 fn header_ring() -> gpui::Div {
@@ -218,6 +218,17 @@ fn header_ring() -> gpui::Div {
         .flex_shrink_0()
         .window_control_area(gpui::WindowControlArea::Drag)
         .child(crate::ring::ring(RING_W))
+}
+
+/// The toggle's glyph: neutral like the other header toggles, brighter while
+/// the sidebar is open. Never orange: the Ring's point is the corner's one
+/// orange.
+fn toggle_color(hidden: bool) -> gpui::Rgba {
+    if hidden {
+        theme().text_secondary
+    } else {
+        theme().text
+    }
 }
 
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
@@ -233,11 +244,7 @@ fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui:
     .child(
         crate::icon::stroke(
             SIDEBAR,
-            if hidden {
-                theme().text_secondary
-            } else {
-                crate::theme::brand_orange()
-            },
+            toggle_color(hidden),
             14.,
             1.8,
         )

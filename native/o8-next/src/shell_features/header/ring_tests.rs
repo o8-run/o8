@@ -1,11 +1,12 @@
 use super::*;
 use crate::shell::test_support::*;
 
-/// The Ring sits past the traffic lights' space, before the sidebar toggle,
-/// on the header icons' line; the toggle, Back and Forward move right by its
-/// width and one gap, at every zoom.
+/// Traffic lights | sidebar toggle | Ring | Back | Forward: the toggle keeps
+/// its place past the lights' space, the Ring follows it on the header icons'
+/// line, and Back and Forward move right by its width and one gap, at every
+/// zoom.
 #[gpui::test]
-fn header_ring_sits_between_the_lights_and_the_toggle_at_every_zoom(cx: &mut TestAppContext) {
+fn header_ring_sits_between_the_toggle_and_back_at_every_zoom(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -41,24 +42,35 @@ fn header_ring_sits_between_the_lights_and_the_toggle_at_every_zoom(cx: &mut Tes
         // 16 layout units, zooming with the header like its icons.
         near(ring.size.width, RING_W, &at);
         near(ring.size.height, RING_W, &at);
-        // Where the toggle used to start, clear of the lights' space.
-        near(ring.left(), inset, &at);
-        assert!(ring.left() > px(lights), "{at}");
+        // The toggle where it is without the Ring, clear of the lights' space.
+        near(toggle.left(), inset, &at);
+        assert!(toggle.left() > px(lights), "{at}");
+        // The Ring right after it, with the icons' 4-unit gap either side.
+        near(ring.left(), f32::from(toggle.right()) + 4., &at);
         // Centred on the header icons' line (y 20 of the 40-unit header).
         near(ring.center().y - header.top(), 20., &at);
         near(ring.center().y, f32::from(toggle.center().y), &at);
-        // The toggle shifts by the Ring's width plus the icons' 4-unit gap;
-        // Back and Forward keep their gaps after it.
-        near(toggle.left(), inset + RING_W + 4., &at);
-        near(back.left(), f32::from(toggle.right()) + 4., &at);
+        // Back and Forward shift by the Ring's width plus one gap.
+        near(back.left(), inset + TOGGLE_W + 4. + RING_W + 4., &at);
+        near(back.left(), f32::from(ring.right()) + 4., &at);
         near(forward.left(), f32::from(back.right()) + 4., &at);
     }
     assert!(visual.simulate_close());
 }
 
-/// The Ring is drawn for the running theme: ink on light, paper on dark.
+/// The Ring is drawn for the running theme: ink on light, paper on dark; the
+/// sidebar toggle never competes with its orange point.
 #[test]
 fn header_ring_colour_follows_the_theme() {
+    let orange = crate::theme::brand_orange();
+    assert_ne!(
+        toggle_color(false),
+        orange,
+        "open sidebar toggle is not orange"
+    );
+    assert_ne!(toggle_color(true), orange);
+    assert_eq!(toggle_color(false), theme().text);
+    assert_eq!(toggle_color(true), theme().text_secondary);
     let (ink, orange) = crate::ring::colors(true);
     let (paper, point) = crate::ring::colors(false);
     assert_eq!(ink, gpui::rgb(0x17140F));
