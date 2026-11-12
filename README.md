@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./assets/o8-ring-dark.png">
-    <img src="./assets/o8-ring-light.png" alt="o8" width="256">
+    <img src="./assets/o8-ring-light.png" alt="o8" width="160">
   </picture>
 </p>
 

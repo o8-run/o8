@@ -1,13 +1,13 @@
 {
   "name": "o8",
-  "short_name": "Cortex",
-  "description": "Mobile command surface for AI agent orchestration",
+  "short_name": "o8",
+  "description": "Your agents write the code. o8 reviews it, sends it back until it's right, and merges it.",
   "start_url": "/mobile",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "theme_color": "#1C1C1E",
-  "background_color": "#1C1C1E",
+  "theme_color": "#F4F2EC",
+  "background_color": "#F4F2EC",
   "categories": ["developer", "productivity"],
   "icons": [
     {
