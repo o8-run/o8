@@ -1,3 +1,4 @@
+import { cliBuildOptions } from '../../cli/build-options.mjs';
 // Disposable session workload. Raw logs/snapshots stay in work/; receipts contain no paths.
 // Production: npm run build, then node scripts/bench/session-memory.mjs
 //   --standalone --sessions=96 --worker-sessions=48 --transcript-mib=4
@@ -39,7 +40,7 @@ async function bundleFixture(entryPoint, outfile) {
   // Same ESM format, native externals and server-only shim as the existing WS probe.
   await build({
     entryPoints: [entryPoint], outfile, bundle: true, platform: 'node', format: 'esm',
-    minify: true, keepNames: true, target: 'node22', external: ['typescript'],
+    minify: true, keepNames: true, target: 'node22', external: ['typescript', ...cliBuildOptions({ outfile, version: 'test' }).external],
     alias: { 'server-only': path.join(root, 'scripts/server-only-stub.js'),
       'next/server': path.join(root, 'scripts/lib/next-server-exports.mjs') },
     // The CI fixture can live outside the checkout. Resolve native externals
