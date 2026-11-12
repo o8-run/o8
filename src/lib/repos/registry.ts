@@ -135,19 +135,6 @@ async function gitValue(repoRoot: string, args: string[]) {
   }
 }
 
-async function gitCommandSucceeds(repoRoot: string, args: string[]) {
-  try {
-    await execFileAsync('git', ['-C', repoRoot, ...args], {
-      windowsHide: true,
-      maxBuffer: 256 * 1024,
-      timeout: 10_000,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function normalizeBranchRef(value: string | null) {
   if (!value) return null;
   const trimmed = value.trim();
@@ -161,24 +148,70 @@ function normalizeBranchRef(value: string | null) {
   return trimmed.split('/').pop() ?? trimmed;
 }
 
+/** A default-branch probe failed for a reason other than the ref being absent. */
+export class GitProbeError extends Error {
+  readonly repoRoot: string;
+  readonly args: readonly string[];
+
+  constructor(repoRoot: string, args: readonly string[], detail: string) {
+    super(`Could not read the default branch of ${repoRoot}: git ${args.join(' ')} failed: ${detail}`);
+    this.name = 'GitProbeError';
+    this.repoRoot = repoRoot;
+    this.args = args;
+  }
+}
+
+/**
+ * Runs one default-branch probe. Returns stdout, or null when git ran and reported the ref absent
+ * (`isAbsent` matches its exit code and stderr). Every other failure throws: a binary that cannot
+ * start, a timeout or signal, or a repository git cannot read.
+ */
+async function gitProbe(
+  repoRoot: string,
+  args: string[],
+  isAbsent: (exitCode: number, stderr: string) => boolean,
+): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', repoRoot, ...args], {
+      windowsHide: true,
+      maxBuffer: 256 * 1024,
+      timeout: 10_000,
+    });
+    return String(stdout).trim();
+  } catch (error) {
+    const failure = error as { code?: unknown; killed?: boolean; signal?: unknown; stderr?: unknown; message?: string };
+    const stderr = String(failure.stderr ?? '').trim();
+    if (typeof failure.code === 'number' && !failure.killed && !failure.signal && isAbsent(failure.code, stderr)) {
+      return null;
+    }
+    throw new GitProbeError(repoRoot, args, (stderr || failure.message || String(error)).slice(0, 500));
+  }
+}
+
+// `symbolic-ref --quiet` and `show-ref --verify --quiet` exit 1, silently, when the ref is absent.
+const quietRefAbsent = (exitCode: number) => exitCode === 1;
+// `rev-parse HEAD` in a repository with no commits yet.
+const unbornHead = (exitCode: number, stderr: string) => exitCode === 128 && /unknown revision|ambiguous argument 'HEAD'/.test(stderr);
+
 export async function resolveDefaultBranch(repoRoot: string, isGitRepo = true) {
   if (!isGitRepo) return 'main';
 
   const remoteHead = normalizeBranchRef(
-    await gitValue(repoRoot, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']),
+    await gitProbe(repoRoot, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], quietRefAbsent),
   );
   if (remoteHead) return remoteHead;
 
-  if (await gitCommandSucceeds(repoRoot, ['show-ref', '--verify', '--quiet', 'refs/heads/main'])) {
+  if (await gitProbe(repoRoot, ['show-ref', '--verify', '--quiet', 'refs/heads/main'], quietRefAbsent) !== null) {
     return 'main';
   }
-  if (await gitCommandSucceeds(repoRoot, ['show-ref', '--verify', '--quiet', 'refs/heads/master'])) {
+  if (await gitProbe(repoRoot, ['show-ref', '--verify', '--quiet', 'refs/heads/master'], quietRefAbsent) !== null) {
     return 'master';
   }
 
-  const current = await gitValue(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const current = await gitProbe(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'], unbornHead);
   if (current && current !== 'HEAD') return current;
 
+  // Every probe ran and found nothing: an unborn or detached repository with no main or master.
   return 'main';
 }
 
