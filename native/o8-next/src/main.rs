@@ -71,6 +71,7 @@ mod transport;
 mod ui;
 mod visualizations;
 mod wake;
+mod zoom;
 use crate::{
     client::Client,
     model::{History, render_tree},

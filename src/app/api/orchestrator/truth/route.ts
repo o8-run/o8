@@ -113,3 +113,6 @@ export async function GET(request: NextRequest) {
     return truthError('truth_query_failed', 'The truth query could not be completed.', 500);
   }
 }
+
+// Preserve Next's implicit read-only HEAD behavior on the native listener.
+export const HEAD = GET;

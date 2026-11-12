@@ -45,11 +45,14 @@ jobs:
   # inside that commit's history. Every other event, several pull requests,
   # a moved main, differing trees, a missing or unsuccessful check, or
   # unreadable API data answers reuse=false and everything runs in full.
-  # Heavy jobs skip their steps, never the job, so each still reports success
+  # Outside merge groups the decision job is skipped without a runner.
+  # Downstream jobs explicitly accept that skip, but reject failures and cancellation.
+  # Heavy jobs skip their steps on reuse, so each still reports success
   # under its required name. If this job itself fails, the jobs that need it
   # are skipped and the required Hermetic Unit Tests aggregate fails, which
   # blocks the merge.
   reuse:
+    if: github.event_name == 'merge_group'
     name: Merge Queue Reuse
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -76,7 +79,7 @@ jobs:
 
   typecheck:
     name: Type Check
-    if: github.event_name != 'schedule'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name != 'schedule')
     needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -142,7 +145,7 @@ jobs:
 
   server-bundle-size:
     name: Server Bundle Size
-    if: github.event_name != 'schedule'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name != 'schedule')
     needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -188,7 +191,7 @@ jobs:
   # being linted). Warnings don't fail the job; errors do.
   lint:
     name: Lint
-    if: github.event_name != 'schedule'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name != 'schedule')
     needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -225,7 +228,7 @@ jobs:
 
   classification:
     name: Test Classification
-    if: github.event.schedule != '41 13 * * 1'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event.schedule != '41 13 * * 1')
     needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -249,7 +252,7 @@ jobs:
 
   test-shards:
     name: Hermetic Unit Tests (shard ${{ matrix.shard }}/4)
-    if: github.event.schedule != '41 13 * * 1'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event.schedule != '41 13 * * 1')
     needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -317,7 +320,7 @@ jobs:
   # a PR touching roughly 150 resource-owning files.
   integration-changed:
     name: Integration Tests (changed files)
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.integration_base != '')
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.integration_base != ''))
     needs: [reuse]
     # ubuntu-26.04 pulls amd64v3 package variants that the signed APT check rejects (#5140).
     runs-on: ubuntu-24.04
@@ -460,7 +463,7 @@ jobs:
   # entry points report the same result.
   security:
     name: Security Audit
-    if: github.event.schedule != '41 13 * * 1'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event.schedule != '41 13 * * 1')
     needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -537,7 +540,7 @@ jobs:
 
   governance-smoke:
     name: Governance Smoke
-    if: github.event_name != 'schedule'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && needs.typecheck.result == 'success' && (github.event_name != 'schedule')
     runs-on: ubuntu-latest
     # timeout is load-bearing: this job hung at the 6h GitHub ceiling 3x on
     # 2026-07-11 (open handle keeps node alive after the smoke passes) —
@@ -606,7 +609,7 @@ jobs:
   # queued commit, alongside pull requests, main pushes and manual runs.
   rust-check-windows:
     name: Rust Compile Gate (Windows)
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [reuse]
     runs-on: windows-latest
     timeout-minutes: 30
@@ -649,7 +652,7 @@ jobs:
 
   rust-check-linux:
     name: Rust Compile Gate (Linux)
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [reuse]
     # ubuntu-26.04 pulls amd64v3 package variants that the signed APT check rejects (#5140).
     runs-on: ubuntu-24.04
@@ -703,7 +706,7 @@ jobs:
 
   o8-next-tests:
     name: o8 next Native Tests (Linux)
-    if: github.event.schedule != '41 13 * * 1'
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event.schedule != '41 13 * * 1')
     needs: [reuse]
     runs-on: ubuntu-24.04
     # Keep cold-build headroom; warm runs distribute tests over eight shards.

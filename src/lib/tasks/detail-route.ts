@@ -14,6 +14,13 @@ export async function GET(
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
+  const principal = resolveRequestPrincipalContext(request);
+  const unbound = workerPacketRefusal(principal, principal.role === 'worker' ? principal.packetId : null);
+  if (unbound) {
+    return NextResponse.json({ ok: false, error: unbound }, {
+      status: 403, headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  }
   const { taskId } = await context.params;
   if (!taskId?.trim()) {
     return NextResponse.json({ error: 'taskId is required' }, { status: 400 });
@@ -23,8 +30,13 @@ export async function GET(
   const repoPath = request.nextUrl.searchParams.get('repoPath')?.trim() || null;
 
   try {
-    const task = await getTaskPoolTask(taskId, { projectId, repoPath });
-    const refusal = workerPacketRefusal(resolveRequestPrincipalContext(request), task?.packetId);
+    // A worker's lookup only sees its own packet, so another packet's id and an unknown id
+    // get the same refusal below, and no other packet's brief is built.
+    const task = await getTaskPoolTask(taskId, {
+      projectId, repoPath,
+      packetId: principal.role === 'worker' ? principal.packetId : undefined,
+    });
+    const refusal = workerPacketRefusal(principal, task?.packetId);
     if (refusal) {
       return NextResponse.json({ ok: false, error: refusal }, {
         status: 403, headers: { 'Cache-Control': 'no-store, max-age=0' },

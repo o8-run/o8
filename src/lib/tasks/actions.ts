@@ -3,6 +3,8 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { inspectPacketManagedRunAdmission } from '@/lib/lane/packet-stop-hold';
 import { dispatchWithReceipt } from './dispatch-receipt';
+import { isNativeCortexReader } from '@/lib/cortex/owner-process';
+import { callTaskDispatchOwner } from './dispatch-owner-client';
 
 import {
   archiveLane,
@@ -491,6 +493,7 @@ export async function claimTask(taskId: string, input: TaskClaimInput = {}): Pro
 }
 
 export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}): Promise<TaskMutationResult> {
+  if (process.env.O8_NEXT_O8D === '1' && !isNativeCortexReader()) return callTaskDispatchOwner(taskId, input);
   const actor = normalizeActor(input.actor);
   const task = await resolveTask(taskId, input);
   const workerRouting = await resolveTaskWorkerRouting({

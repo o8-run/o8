@@ -4249,6 +4249,15 @@
       ]
     },
     {
+      "path": "tests/machine-heavy-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/macos-cpu-packages.test.ts",
       "reasons": [
         "child-process",
@@ -4934,6 +4943,12 @@
       ]
     },
     {
+      "path": "tests/native-dispatch-long-forward.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "tests/native-helper-tracing-real-path.test.ts",
       "reasons": [
         "native-build",
@@ -5454,6 +5469,14 @@
       ]
     },
     {
+      "path": "tests/o8d-approval-runtime-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-artifacts-harness-native-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5658,6 +5681,18 @@
       ]
     },
     {
+      "path": "tests/o8d-mobile-symon-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-mobile-symon-tool-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-more-reads-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5710,7 +5745,25 @@
       ]
     },
     {
+      "path": "tests/o8d-orchestrator-control-writes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-orchestrator-digest-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-orchestrator-mission-writes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-orchestrator-reads-native-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -5749,6 +5802,19 @@
     },
     {
       "path": "tests/o8d-projects-create-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-propose-spec-cache-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-proxy-write-origin-native-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -5840,6 +5906,12 @@
       ]
     },
     {
+      "path": "tests/o8d-setup-writes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-shell-reads-native-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5850,6 +5922,13 @@
       "reasons": [
         "child-process",
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-spectator-preview-native-real-path.test.ts",
+      "reasons": [
+        "network-listener",
         "real-path"
       ]
     },
@@ -5882,6 +5961,14 @@
     {
       "path": "tests/o8d-symon-watches-native-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-task-dispatch-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
@@ -5979,6 +6066,12 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-worker-task-native-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -9076,6 +9169,12 @@
       "browser": true
     },
     {
+      "path": "tests/worker-packet-reads-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-pane-drafts-real-path.test.ts",
       "reasons": [
         "browser",
@@ -9397,6 +9496,12 @@
       "reasons": [
         "child-process",
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/ws-parity-server-child-exit-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },

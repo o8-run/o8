@@ -1,3 +1,4 @@
+import { cliBuildOptions } from '../cli/build-options.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -96,7 +97,7 @@ function child(): { token: string; statuses: number[]; injected: number; secrets
 function coldResolution(): { identity: { tokenId: string; runId: string } | null } {
   const cold = join(root, 'cold-resolver.cjs');
   buildSync({ entryPoints: ['tests/fixtures/read-only-worker-resolver.fixture.ts'], outfile: cold,
-    platform: 'node', format: 'cjs', bundle: true, logLevel: 'silent', external: ['better-sqlite3'],
+    platform: 'node', format: 'cjs', bundle: true, logLevel: 'silent', external: ['better-sqlite3', ...cliBuildOptions({ outfile: cold, version: 'test' }).external!],
     alias: { 'server-only': join(process.cwd(), 'tests/stubs/server-only.ts') } });
   return JSON.parse(execFileSync(process.execPath, [cold, child().token], { encoding: 'utf8',
     env: { ...process.env, NODE_PATH: join(process.cwd(), 'node_modules') } }));

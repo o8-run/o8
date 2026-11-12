@@ -324,10 +324,10 @@ describe('merge-queue reuse decision', () => {
 });
 
 describe('merge-queue reuse wiring', () => {
-  it('runs the decision first on every event and only skips steps, never jobs', () => {
+  it('schedules reuse only for merge groups and preserves downstream failure gates', () => {
     const jobs = workflow.jobs;
     expect(Object.keys(jobs)[0]).toBe('reuse');
-    expect(jobs.reuse.if).toBeUndefined();
+    expect(jobs.reuse.if).toBe("github.event_name == 'merge_group'");
     expect(jobs.reuse.needs).toBeUndefined();
     expect(jobs.reuse.outputs).toEqual({ reuse: '${{ steps.decide.outputs.reuse }}' });
     const decision = jobs.reuse.steps.find((step: { id?: string }) => step.id === 'decide');
@@ -336,7 +336,38 @@ describe('merge-queue reuse wiring', () => {
     expect(gated.sort()).toEqual(['classification', 'governance-smoke', 'integration-changed', 'lint', 'o8-next-tests',
       'rust-check-linux', 'rust-check-windows', 'security', 'server-bundle-size', 'test-shards', 'typecheck']);
     for (const id of gated) {
-      expect(String(jobs[id].if ?? ''), `${id} job condition`).not.toContain('reuse');
+      const prefix = "cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && ";
+      expect(jobs[id].if.startsWith(prefix), `${id} job condition`).toBe(true);
+      if (id === 'governance-smoke') expect(jobs[id].if).toContain("needs.typecheck.result == 'success'");
+      // Evaluate the actual Actions condition with each dependency state.
+      for (const event of ['pull_request', 'push', 'merge_group', 'workflow_dispatch']) {
+        for (const result of ['success', 'skipped', 'failure', 'cancelled']) {
+          for (const cancelled of [false, true]) {
+            const expression = jobs[id].if
+              .replaceAll('cancelled() == false', String(!cancelled))
+              .replaceAll('github.event_name', JSON.stringify(event))
+              .replaceAll('github.event.schedule', "''")
+              .replaceAll('inputs.integration_base', "''")
+              .replaceAll('needs.reuse.result', JSON.stringify(result))
+              .replaceAll('needs.typecheck.result', "'success'");
+            if (cancelled || result === 'failure' || result === 'cancelled' || (event === 'merge_group' && result === 'skipped')) {
+              expect(Function(`return (${expression})`)(), `${id} ${event} ${result}`).toBe(false);
+            } else if (event === 'pull_request') {
+              expect(Function(`return (${expression})`)(), `${id} runs on PRs`).toBe(true);
+            }
+          }
+        }
+      }
+      if (id === 'governance-smoke') {
+        for (const typecheck of ['failure', 'cancelled', 'skipped']) {
+          const expression = jobs[id].if
+            .replaceAll('cancelled() == false', 'true')
+            .replaceAll('github.event_name', "'pull_request'")
+            .replaceAll('needs.reuse.result', "'skipped'")
+            .replaceAll('needs.typecheck.result', JSON.stringify(typecheck));
+          expect(Function(`return (${expression})`)(), `governance rejects ${typecheck} typecheck`).toBe(false);
+        }
+      }
       for (const step of jobs[id].steps) {
         expect(step.if === gate || (step.if.startsWith(`${gate} && `) && !step.if.includes('||')),
           `${id} step ${step.name ?? step.uses ?? step.run}`).toBe(true);

@@ -49,7 +49,7 @@ function expand(value, shard) {
 }
 function withoutReuseGate(jobs) {
   const reuse = jobs.reuse;
-  requireCondition(reuse && !reuse.if && !reuse.needs && !reuse.strategy
+  requireCondition(reuse && reuse.if === "github.event_name == 'merge_group'" && !reuse.needs && !reuse.strategy
     && isDeepStrictEqual(reuse.outputs, { reuse: '${{ steps.decide.outputs.reuse }}' }),
   'merge-queue reuse job changed; update verify:ci coverage');
   for (const [id, job] of Object.entries(jobs)) {
@@ -57,6 +57,11 @@ function withoutReuseGate(jobs) {
     const gated = reuseGatedJobs.includes(id);
     requireCondition(needs.includes('reuse') === gated, `${id} merge-queue reuse gating needs a verify:ci equivalent`);
     if (!gated) continue;
+    const prefix = "cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && "
+      + (id === 'governance-smoke' ? "needs.typecheck.result == 'success' && " : '');
+    requireCondition(typeof job.if === 'string' && job.if.startsWith(prefix) && job.if.endsWith(')'),
+      `${id} must preserve merge-queue dependency failure and cancellation gates`);
+    job.if = job.if.slice(prefix.length + 1, -1);
     const rest = needs.filter(need => need !== 'reuse');
     if (rest.length === 0) delete job.needs;
     else job.needs = rest.length === 1 ? rest[0] : rest;

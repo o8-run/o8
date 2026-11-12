@@ -75,8 +75,10 @@ pub struct Pane {
     pub painted_bytes: Rc<Cell<u64>>,
     pub painted_cells: Rc<Cell<usize>>,
     pub painted_cursor: Rc<Cell<bool>>,
-    #[cfg(test)]
+    /// Where the grid was last painted, so a wheel report names the cell under it.
     painted_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The part of a line a wheel has moved without yet scrolling one.
+    wheel_carry: f32,
     pub paints: Rc<Cell<usize>>,
     composition: String,
     /// A command waiting for the shell to attach.
@@ -112,8 +114,8 @@ impl Pane {
             painted_bytes: Rc::new(Cell::new(0)),
             painted_cells: Rc::new(Cell::new(0)),
             painted_cursor: Rc::new(Cell::new(false)),
-            #[cfg(test)]
             painted_bounds: Rc::new(Cell::new(Bounds::default())),
+            wheel_carry: 0.,
             paints: Rc::new(Cell::new(0)),
             composition: String::new(),
             waiting_line: None,
@@ -212,6 +214,38 @@ impl Pane {
         }
         cx.notify();
     }
+    /// A wheel or trackpad movement over the terminal.
+    fn wheel(&mut self, event: &gpui::ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // A part-line carry belongs to one trackpad gesture. A mouse wheel
+        // click is a whole line or more, so a carry left over must not eat
+        // it. Part-line wheel steps (an accelerated wheel) still add up.
+        let click = matches!(event.delta, gpui::ScrollDelta::Lines(lines) if lines.y.abs() >= 1.);
+        if matches!(event.touch_phase, gpui::TouchPhase::Started) || click {
+            self.wheel_carry = 0.;
+        }
+        let delta = f32::from(event.delta.pixel_delta(px(CELL_HEIGHT)).y);
+        let lines = wheel_lines(&mut self.wheel_carry, delta);
+        if lines == 0 {
+            return;
+        }
+        let (mode, Size(columns, rows)) = {
+            let grid = self.grid.lock().unwrap();
+            (*grid.term.mode(), grid.size())
+        };
+        let origin = self.painted_bounds.get().origin;
+        let cell = |offset: Pixels, extent: f32, count: usize| {
+            ((f32::from(offset) / extent).floor().max(0.) as usize).min(count.saturating_sub(1))
+        };
+        let column = cell(event.position.x - origin.x, CELL_WIDTH, columns);
+        let row = cell(event.position.y - origin.y, CELL_HEIGHT, rows);
+        match wheel_action(mode, lines, column, row) {
+            Wheel::Display(lines) => {
+                self.grid.lock().unwrap().scroll(lines);
+                cx.notify();
+            }
+            Wheel::Send(text) => self.input(text, cx),
+        }
+    }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = &event.keystroke;
         if !self.composition.is_empty() {
@@ -253,6 +287,58 @@ impl Pane {
         }
     }
 }
+/// Whole lines out of a wheel movement. The fraction carries to the next
+/// event: a trackpad sends many movements smaller than a line, and rounding
+/// each one alone never scrolled.
+fn wheel_lines(carry: &mut f32, pixels: f32) -> i32 {
+    *carry += pixels / CELL_HEIGHT;
+    let lines = carry.trunc();
+    *carry -= lines;
+    lines as i32
+}
+
+/// What a wheel does, by the terminal's mode, as xterm does it.
+#[derive(Debug, PartialEq)]
+enum Wheel {
+    /// Move the scrollback by this many lines; positive shows older output.
+    Display(i32),
+    /// Bytes for the program in the terminal.
+    Send(String),
+}
+
+/// The most wheel steps one event sends to a program.
+const WHEEL_BURST: usize = 30;
+
+/// `column` and `row` are the zero-based cell under the pointer.
+fn wheel_action(mode: TermMode, lines: i32, column: usize, row: usize) -> Wheel {
+    let up = lines > 0;
+    let steps = (lines.unsigned_abs() as usize).min(WHEEL_BURST);
+    if mode.intersects(TermMode::MOUSE_MODE) {
+        // A program that asked for the mouse gets wheel buttons 64 and 65.
+        let button = if up { 64 } else { 65 };
+        let report = if mode.contains(TermMode::SGR_MOUSE) {
+            format!("\x1b[<{button};{};{}M", column + 1, row + 1)
+        } else {
+            // The original encoding adds 32 to each value in one byte; past
+            // column or row 95 that byte is not ASCII, so those cells clamp.
+            let byte = |value: usize| char::from((32 + value.min(95)) as u8);
+            format!("\x1b[M{}{}{}", byte(button), byte(column + 1), byte(row + 1))
+        };
+        return Wheel::Send(report.repeat(steps));
+    }
+    if mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL) {
+        // A full-screen program has no scrollback; it gets arrow keys.
+        let arrow = match (mode.contains(TermMode::APP_CURSOR), up) {
+            (true, true) => "\x1bOA",
+            (true, false) => "\x1bOB",
+            (false, true) => "\x1b[A",
+            (false, false) => "\x1b[B",
+        };
+        return Wheel::Send(arrow.repeat(steps));
+    }
+    Wheel::Display(lines)
+}
+
 fn encode_key(key: &Keystroke, mode: TermMode) -> Option<String> {
     let modifiers = key.modifiers;
     if modifiers.platform {
@@ -353,7 +439,6 @@ impl Render for Pane {
         let painted_bytes = self.painted_bytes.clone();
         let painted_cells = self.painted_cells.clone();
         let painted_cursor = self.painted_cursor.clone();
-        #[cfg(test)]
         let painted_bounds = self.painted_bounds.clone();
         let paints = self.paints.clone();
         let focus = self.focus.clone();
@@ -370,14 +455,7 @@ impl Render for Pane {
                 MouseButton::Left,
                 cx.listener(|this, _, window, _| this.focus.focus(window)),
             )
-            .on_scroll_wheel(cx.listener(|this, event: &gpui::ScrollWheelEvent, _, cx| {
-                let delta = event.delta.pixel_delta(px(CELL_HEIGHT)).y;
-                this.grid
-                    .lock()
-                    .unwrap()
-                    .scroll((f32::from(delta) / CELL_HEIGHT).round() as i32);
-                cx.notify();
-            }))
+            .on_scroll_wheel(cx.listener(Self::wheel))
             // Like classic's xterm panels, a working terminal has no status
             // line; connecting, exits and failures still say so.
             .when(self.notice != "Terminal · connected", |pane| {
@@ -418,7 +496,6 @@ impl Render for Pane {
                                 });
                             },
                             move |bounds, _, window, cx| {
-                                #[cfg(test)]
                                 painted_bounds.set(bounds);
                                 #[cfg(any(test, feature = "driver"))]
                                 if focus.is_focused(window) {
@@ -630,6 +707,7 @@ pub fn launch(client: Client, session: String, offscreen: bool) {
         Application::new()
     })
     .run(move |cx: &mut App| {
+        crate::zoom::install(true, cx);
         let handle = cx
             .open_window(
                 WindowOptions {
@@ -645,7 +723,13 @@ pub fn launch(client: Client, session: String, offscreen: bool) {
                     }),
                     ..Default::default()
                 },
-                |window, cx| cx.new(|cx| Pane::new(client, session, window, cx)),
+                |window, cx| {
+                    crate::zoom::apply(window, cx);
+                    cx.new(|cx| {
+                        crate::zoom::follow(window, false, cx);
+                        Pane::new(client, session, window, cx)
+                    })
+                },
             )
             .expect("GPUI terminal window");
         cx.on_window_closed(|cx| {
