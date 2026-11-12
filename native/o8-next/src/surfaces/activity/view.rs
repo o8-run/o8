@@ -1411,7 +1411,9 @@ impl Render for ActivityPane {
                 .line_height(relative(1.45))
                 .text_color(theme().text_faint)
         };
-        if self.loading {
+        // A refresh of a feed that has rows is quiet: the line says there is
+        // nothing to show yet, not that a request is in flight.
+        if self.loading && rows.is_empty() {
             list = list.child(
                 quiet()
                     .debug_selector(|| "activity-loading".into())
