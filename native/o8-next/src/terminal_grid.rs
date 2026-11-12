@@ -342,6 +342,12 @@ impl Grid {
 const SWITCH: &[u8] = b"\x1b[?1049";
 /// Clears the screen where it stands; nothing moves into the scrollback.
 const CLEAR_IN_PLACE: &[u8] = b"\x1b[H\x1b[J";
+/// tmux clears the whole screen before it redraws. On the first screen that
+/// would push what is showing into the scrollback, a second copy of lines
+/// the redraw then paints again (or a blank line when nothing is showing).
+const FULL_CLEAR: &[u8] = b"\x1b[2J";
+/// The same clear, above and below the cursor, which moves nothing.
+const FULL_CLEAR_IN_PLACE: &[u8] = b"\x1b[1J\x1b[J";
 
 /// Output from tmux with its own screen switch taken out.
 ///
@@ -352,7 +358,8 @@ const CLEAR_IN_PLACE: &[u8] = b"\x1b[H\x1b[J";
 /// us unless passthrough is on: tmux keeps their second screens to itself,
 /// and sends its own again only when it suspends, locks or detaches. So on
 /// entry the screen is cleared in place for the repaint, and leaving is
-/// dropped, whichever of those sent it.
+/// dropped, whichever of those sent it. tmux's whole-screen clear before a
+/// redraw is made to clear in place for the same reason.
 ///
 /// `tail` holds a switch cut short by the end of a feed until the next one.
 pub(crate) fn keep_one_screen(tail: &mut Vec<u8>, bytes: &[u8]) -> Vec<u8> {
@@ -364,10 +371,17 @@ pub(crate) fn keep_one_screen(tail: &mut Vec<u8>, bytes: &[u8]) -> Vec<u8> {
         let start = at + found;
         kept.extend_from_slice(&data[at..start]);
         let rest = &data[start..];
-        if rest.len() <= SWITCH.len() && SWITCH.starts_with(rest) {
-            // Maybe a switch; the next feed finishes it.
+        if (rest.len() <= SWITCH.len() && SWITCH.starts_with(rest))
+            || (rest.len() < FULL_CLEAR.len() && FULL_CLEAR.starts_with(rest))
+        {
+            // Maybe a switch or a clear; the next feed finishes it.
             *tail = rest.to_vec();
             return kept;
+        }
+        if rest.starts_with(FULL_CLEAR) {
+            kept.extend_from_slice(FULL_CLEAR_IN_PLACE);
+            at = start + FULL_CLEAR.len();
+            continue;
         }
         at = match rest.strip_prefix(SWITCH).and_then(|after| after.first()) {
             Some(b'h') => {

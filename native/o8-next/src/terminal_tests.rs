@@ -618,5 +618,20 @@ fn a_tmux_screen_switch_keeps_the_scrollback() {
     assert_eq!(keep_one_screen(&mut tail, b"a\x1b[31mb\x1b[?1049"), b"a\x1b[31mb");
     assert_eq!(keep_one_screen(&mut tail, b"7h\x1b"), b"\x1b[?10497h");
     assert_eq!(keep_one_screen(&mut tail, b"[?25l"), b"\x1b[?25l");
+    // tmux's whole-screen clear before a redraw clears in place, also when
+    // it is cut across feeds; a clear that only looks like it passes through.
+    assert_eq!(keep_one_screen(&mut tail, b"x\x1b[2"), b"x");
+    assert_eq!(keep_one_screen(&mut tail, b"Jy\x1b[2K"), b"\x1b[1J\x1b[Jy\x1b[2K");
+    assert!(tail.is_empty());
+    // A redraw over a full screen must not copy that screen into the history.
+    let mut redrawn = Grid::new(Size(20, 5));
+    redrawn.set_multiplexed(true);
+    redrawn.feed(lines.join("\r\n").as_bytes(), false);
+    let before = redrawn.term.grid().history_size();
+    let mut redraw = String::from("\x1b[H\x1b[2J");
+    redraw.push_str(&lines[lines.len() - 5..].join("\r\n"));
+    redrawn.feed(redraw.as_bytes(), false);
+    assert_eq!(redrawn.term.grid().history_size(), before);
+    assert_eq!(redrawn.tail(12), lines);
     assert!(tail.is_empty());
 }
