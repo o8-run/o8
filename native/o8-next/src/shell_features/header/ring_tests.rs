@@ -120,7 +120,8 @@ fn header_ring_colour_follows_the_theme() {
     assert_eq!(toggle_color(true), theme().text_secondary);
     let (ink, orange) = crate::ring::colors(true);
     let (paper, point) = crate::ring::colors(false);
-    assert_eq!(ink, gpui::rgb(0x17140F));
-    assert_eq!(paper, gpui::rgb(0xF4F2EC));
-    assert_eq!((orange, point), (gpui::rgb(0xFF5A1F), gpui::rgb(0xFF5A1F)));
+    use crate::theme::brand::{INK, ORANGE, PAPER};
+    assert_eq!(ink, gpui::rgb(INK));
+    assert_eq!(paper, gpui::rgb(PAPER));
+    assert_eq!((orange, point), (gpui::rgb(ORANGE), gpui::rgb(ORANGE)));
 }

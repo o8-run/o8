@@ -20,10 +20,7 @@ pub(crate) const GAP: f32 = 3.4;
 /// −45°: upper right, in the box's y-down coordinates.
 const POINT_ANGLE: f32 = -std::f32::consts::FRAC_PI_4;
 
-/// brand/tokens ink, paper and orange.
-const INK: u32 = 0x17140F;
-const PAPER: u32 = 0xF4F2EC;
-const ORANGE: u32 = 0xFF5A1F;
+use crate::theme::brand::{INK, ORANGE, PAPER};
 
 /// The review point's centre: (71.92, 28.08), as in ring-light.svg.
 pub(crate) fn point_centre() -> (f32, f32) {
@@ -247,10 +244,16 @@ mod tests {
         assert_eq!(
             app_icon(),
             AppIcon {
-                tile: 0xF4F2EC,
-                ring: 0x17140F,
-                point: 0xFF5A1F
+                tile: PAPER,
+                ring: INK,
+                point: ORANGE
             }
+        );
+        // And those are brand/tokens' paper, ink and orange.
+        let hex = |c: u32| format!("{c:06X}");
+        assert_eq!(
+            (hex(PAPER), hex(INK), hex(ORANGE)),
+            ("F4F2EC".into(), "17140F".into(), "FF5A1F".into())
         );
     }
 
