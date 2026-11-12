@@ -167,6 +167,16 @@ describe('merge-queue reuse decision', () => {
     ]);
   });
 
+  it('reuses reportable Rust skips only alongside green classification and aggregate checks', async () => {
+    const listing = green(prHead);
+    for (const run of listing.check_runs) if (run.name.startsWith('Rust Compile Gate')) run.conclusion = 'skipped';
+    arm(prHead, listing);
+    expect((await decide(group(7, unmoved, main0))).output).toBe('reuse=true\n');
+    listing.check_runs.find(run => run.name === 'Test Classification')!.conclusion = 'failure';
+    arm(prHead, listing);
+    expect((await decide(group(7, unmoved, main0))).output).toBe('reuse=false\n');
+  });
+
   it('runs fully when main moved, because the squashed tree differs', async () => {
     git(work, 'checkout', '-q', 'main');
     git(work, 'reset', '-q', '--hard', main0);
@@ -349,7 +359,9 @@ describe('merge-queue reuse wiring', () => {
               .replaceAll('github.event.schedule', "''")
               .replaceAll('inputs.integration_base', "''")
               .replaceAll('needs.reuse.result', JSON.stringify(result))
-              .replaceAll('needs.typecheck.result', "'success'");
+              .replaceAll('needs.typecheck.result', "'success'")
+              .replaceAll('needs.classification.result', "'success'")
+              .replaceAll('needs.classification.outputs.rust_changed', "'true'");
             if (cancelled || result === 'failure' || result === 'cancelled' || (event === 'merge_group' && result === 'skipped')) {
               expect(Function(`return (${expression})`)(), `${id} ${event} ${result}`).toBe(false);
             } else if (event === 'pull_request') {
