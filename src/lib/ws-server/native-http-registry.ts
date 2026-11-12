@@ -487,6 +487,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
 
 // Authoritative producers requested by the existing WS checkpoint/command path.
 const producers = [
+  route('/api/v2/proxy/llm', 'POST', () => import('@/lib/llm/proxy-route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
   // Worker-dispatch readiness: dispatch-readiness.ts probes it on the API base with the operator
