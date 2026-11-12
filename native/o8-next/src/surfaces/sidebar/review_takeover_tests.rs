@@ -1,6 +1,6 @@
 use super::ThreadList;
 use crate::shell::test_support::*;
-use crate::shell::{Command, Shell, Tab};
+use crate::shell::{Command, Content, Shell, Tab};
 use gpui::{Entity, FocusHandle};
 use std::collections::BTreeSet;
 use std::time::Duration;
