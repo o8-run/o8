@@ -1,3 +1,4 @@
+import { runtimeSelectionRefusal } from '@/lib/agents/routing';
 import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
 import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
 import { NextRequest } from 'next/server';
@@ -143,7 +144,7 @@ export async function POST(request: NextRequest) {
 
   let issues: LoadedIssue[] | null;
   try { issues = normalizeIssues(record.issues); }
-  catch (error) { return operatorError('invalid_runtime', (error as Error).message, 400); }
+  catch (error) { const refusal = runtimeSelectionRefusal(error); return operatorError(refusal.code, refusal.message, refusal.status); }
   if (!issues) {
     return operatorError('invalid_request', 'issues must be a non-empty array.', 400);
   }
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest) {
   const explicitRuntimeRequested = !(requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === '');
   let requestedRuntime: OrchestratorRuntime | null;
   try { requestedRuntime = validateRequestedRuntime(requestedRuntimeRaw, resolveDefaultDispatchRuntimeSync()); }
-  catch (error) { return operatorError('invalid_runtime', (error as Error).message, 400); }
+  catch (error) { const refusal = runtimeSelectionRefusal(error); return operatorError(refusal.code, refusal.message, refusal.status); }
   if (!requestedRuntime) {
     return operatorError('invalid_request', `runtime must be one of: ${formatDispatchableRuntimeChoices()}.`, 400);
   }

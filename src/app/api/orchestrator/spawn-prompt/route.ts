@@ -1,3 +1,4 @@
+import { runtimeSelectionRefusal } from '@/lib/agents/routing';
 import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
   const requestedEffort = effortAliases.requestedEffort;
   let requestedRuntime: OrchestratorRuntime | null;
   try { requestedRuntime = validateRequestedRuntime(requestedRuntimeRaw, resolveDefaultDispatchRuntimeSync()); }
-  catch (error) { return operatorError('invalid_runtime', (error as Error).message, 400); }
+  catch (error) { const refusal = runtimeSelectionRefusal(error); return operatorError(refusal.code, refusal.message, refusal.status); }
   if (!requestedRuntime) {
     return operatorError('invalid_request', `runtime must be one of: ${formatDispatchableRuntimeChoices()}.`, 400);
   }

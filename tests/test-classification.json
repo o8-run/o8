@@ -7924,6 +7924,13 @@
       "browser": true
     },
     {
+      "path": "tests/runtime-refusal-consistency-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/sandbox-owned-stop-real-path.test.ts",
       "reasons": [
         "child-process",
