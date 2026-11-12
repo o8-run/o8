@@ -5472,6 +5472,12 @@
       ]
     },
     {
+      "path": "tests/o8d-broadcast-writes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-browse-folder-real-path.test.ts",
       "reasons": [
         "executable-fixture",
