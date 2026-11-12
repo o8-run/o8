@@ -17,6 +17,8 @@ import {
 } from '@/lib/artifacts/store';
 import { publishArtifactRecorded } from '@/lib/realtime/publisher';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { packetOwnsPrNumber } from '@/lib/artifacts/worker-binding';
+import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { getLane } from '@/lib/lane/registry';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25MB — generous for PNG; videos gate later.
@@ -150,12 +152,23 @@ export async function POST(request: Request) {
   if (buffer.length > MAX_BYTES) {
     return NextResponse.json({ error: `Artifact too large (max ${Math.round(MAX_BYTES / 1024 / 1024)} MB).` }, { status: 413 });
   }
-  const ownershipRefusal = workerPacketRefusal(
-    resolveRequestPrincipalContext(request),
-    meta.packetId || (meta.laneId ? getLane(meta.laneId)?.packetId : null),
-  );
+  const principal = resolveRequestPrincipalContext(request);
+  const ownershipRefusal = workerPacketRefusal(principal,
+    meta.packetId || (meta.laneId ? getLane(meta.laneId)?.packetId : null))
+    || (meta.laneId ? workerPacketRefusal(principal, getLane(meta.laneId)?.packetId) : null);
   if (ownershipRefusal) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
+
+  if (principal.role === 'worker') {
+    const packet = readOrchestratorControlPlaneState().packets.find(p => p.id === principal.packetId);
+    if (!packet
+      || (meta.prNumber !== null && !packetOwnsPrNumber(packet.id, meta.prNumber))
+      || (meta.threadId !== null && meta.threadId !== packet.orchestratorThreadId)
+      || (meta.repoPath !== null && meta.repoPath !== packet.workspaceTargetPath)) {
+      return NextResponse.json({ ok: false, error: { code: 'worker_packet_mismatch',
+        message: 'Artifact associations must match the caller packet.' } }, { status: 403 });
+    }
   }
 
   const id = newArtifactId();

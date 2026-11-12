@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import { packetHasRecordedPr } from '@/lib/artifacts/worker-binding';
 import { NextResponse } from 'next/server';
 import { mirrorProofToPr } from '@/lib/artifacts/pr-mirror';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
@@ -30,12 +31,21 @@ export async function POST(request: Request) {
   if (!packetId && !laneId) {
     return NextResponse.json({ error: 'Provide packetId or laneId.' }, { status: 400 });
   }
+  const principal = resolveRequestPrincipalContext(request);
   const ownershipRefusal = workerPacketRefusal(
-    resolveRequestPrincipalContext(request),
+    principal,
     packetId || (laneId ? getLane(laneId)?.packetId : null),
-  );
+  ) || (laneId ? workerPacketRefusal(principal, getLane(laneId)?.packetId) : null);
   if (ownershipRefusal) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
+
+  if (principal.role === 'worker') {
+    const recorded = principal.packetId && packetHasRecordedPr(principal.packetId, prNumber, repoSlug);
+    if (!recorded) {
+      return NextResponse.json({ ok: false, error: { code: 'worker_packet_mismatch',
+        message: 'The destination must be a recorded PR for the caller packet.' } }, { status: 403 });
+    }
   }
 
   const result = await mirrorProofToPr({ repoSlug, prNumber, packetId, laneId });
