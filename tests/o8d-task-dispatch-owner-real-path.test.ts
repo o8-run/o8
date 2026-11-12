@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
@@ -56,8 +57,25 @@ async function fixture() {
   });
   return id;
 }
+let repo: string;
+// The repository is complete before the WS process starts: a commit on main and an origin, so
+// dispatch resolves and fetches its base without falling back to a default branch name.
+function ownedRepository() {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-task-owner-')));
+  const git = (...args: string[]) => execFileSync('git', ['-C', directory, ...args]);
+  execFileSync('git', ['init', '--quiet', '--initial-branch=main', directory]);
+  git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '--allow-empty', '-m', 'fixture');
+  git('remote', 'add', 'origin', directory);
+  return directory;
+}
+/** Fails with the dispatch receipt and the WS stderr tail, so a refusal is diagnosable from CI. */
+function expectAccepted(receipt: Record<string, unknown>) {
+  expect(receipt, `dispatch receipt ${JSON.stringify(receipt)}; WS stderr tail:\n${server.diagnostics().stderr.slice(-4_000) || '(none)'}`)
+    .toMatchObject({ ok: true });
+}
 beforeAll(async () => {
-  server = await startParityReference({ o8d: true, nativeHttp: true, preload: './tests/fixtures/ws-parity-task-dispatch.cjs', entry: './tests/fixtures/ws-parity-task-dispatch-entry.mjs' });
+  repo = ownedRepository();
+  server = await startParityReference({ o8d: true, nativeHttp: true, directory: repo, preload: './tests/fixtures/ws-parity-task-dispatch.cjs', entry: './tests/fixtures/ws-parity-task-dispatch-entry.mjs' });
   await server.stopNext();
   origin = server.url.replace('ws:', 'http:').replace('/ws', '');
   vi.stubEnv('CORTEX_IDE_DATA_DIR', server.directory);
@@ -65,26 +83,28 @@ beforeAll(async () => {
   vi.stubEnv('O8_DATA_DIR', server.directory);
   vi.stubEnv('O8_NEXT_O8D', '1');
   vi.stubEnv('O8_WS_PORT', new URL(origin).port);
-  execFileSync('git', ['-C', server.directory, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture']);
-  execFileSync('git', ['-C', server.directory, 'remote', 'add', 'origin', server.directory]);
   db = await import('@/lib/db');
   actions = await import('@/lib/tasks/actions');
   lanes = await import('@/lib/lane/registry');
   control = await import('@/lib/orchestrator/control-plane');
   mcp = await import('@/app/api/mcp/route');
   taskRoute = await import('@/app/api/tasks/[taskId]/dispatch/route');
-  await (await import('@/lib/repos/registry')).addRepo(server.directory);
+  const registry = await import('@/lib/repos/registry');
+  await registry.addRepo(server.directory);
+  // Dispatch in WS resolves the same base from the same repository.
+  expect(await registry.resolveDefaultBranch(server.directory)).toBe('main');
 }, 120_000);
 afterEach(async () => {
   release();
   // Running lane status can precede the deferred continuation's final state write.
   if (db) await vi.waitFor(() => expect(requireLeaseCount()).toBe(0), { timeout: 10000 });
 });
-afterAll(async () => { release(); (await import('@/lib/db')).closeDb(); vi.unstubAllEnvs(); await server?.stop(); });
+afterAll(async () => { release(); (await import('@/lib/db')).closeDb(); vi.unstubAllEnvs(); await server?.stop(); if (repo) rmSync(repo, { recursive: true, force: true }); });
 it('accepts through Next and owns admission, deferred launch and replay in WS', async () => {
   const id = await fixture(); gate();
   try {
     const receipt = await throughNext(id);
+    expectAccepted(receipt);
     expect(receipt).toMatchObject({ ok: true, packetId: id, status: 'launching', dispatchId: expect.any(String) });
     await vi.waitFor(() => expect(read().calls.some(call => call.laneId === receipt.laneId)).toBe(true), { timeout: 10000 });
     expect(read().pid).toBe(server.pid);
@@ -106,6 +126,7 @@ it('honours cancellation before spawn in WS', async () => {
   const id = await fixture(); gate();
   try {
     const receipt = await throughNext(id);
+    expectAccepted(receipt);
     await vi.waitFor(() => expect(read().calls.some(call => call.laneId === receipt.laneId)).toBe(true), { timeout: 10000 });
     (await import('@/lib/lane/pre-run-cancellation')).cancelPreRunPacketLaunches([id], 'stop');
     release();
@@ -122,6 +143,7 @@ it('refuses a superseded deferred receipt without spawning or settling over it',
   const id = await fixture(); gate();
   try {
     const receipt = await throughNext(id);
+    expectAccepted(receipt);
     await vi.waitFor(() => expect(read().calls.some(call => call.laneId === receipt.laneId)).toBe(true), { timeout: 10000 });
     lanes.appendEvent(receipt.laneId, 'task_dispatch_accepted', 'user', { dispatchId: 'new-admission', intentHash: 'new-intent', packetId: id });
     release();
