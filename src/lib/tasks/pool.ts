@@ -108,6 +108,7 @@ export interface TaskPool {
 }
 
 export interface TaskPoolOptions {
+  packetId?: string | null;
   includeMissionHistory?: boolean;
   projectId?: string | null;
   repoPath?: string | null;
@@ -292,6 +293,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
   const nowMs = Date.now();
 
   for (const packet of packets) {
+    if (options.packetId && packet.id !== options.packetId) continue;
     const lane = lanesByPacketId.get(packet.id) ?? null;
     const remoteJob = lane?.runtime === 'cloud'
       ? getLatestPacketJob(DEFAULT_CLOUD_TEAM_ID, packet.id)
@@ -345,6 +347,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
   }
 
   for (const lane of lanes) {
+    if (options.packetId && lane.packetId !== options.packetId) continue;
     if (lane.packetId && packetIds.has(lane.packetId)) continue;
     const repoPath = normalizePath(lane.repoPath);
     const context = await resolveProjectContext(projectCache, repoPath, lane.projectId);
