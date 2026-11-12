@@ -28,6 +28,8 @@ struct Navigation {
     shown: Option<String>,
     settings_open: bool,
     projects_open: bool,
+    customize_open: bool,
+    refresh_revision: u64,
 }
 #[derive(Default)]
 pub(super) struct Runtime {
@@ -414,6 +416,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                         shell.switch(path.clone(), window, cx);
                     } else {
                         shell.state.selected = None;
+                        navigation(shell, cx);
                         shell.persist();
                     }
                 }
@@ -439,6 +442,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     None => shell.open_thread_in_tab(id.clone(), window, cx),
                 },
                 ThreadEvent::Created(id, foreground, started) => {
+                    navigation(shell, cx);
                     let foreground = *foreground && *started == shell.surfaces.sidebar.generation.get();
                     if let Some(session) = shell.sessions.iter().find(|s| s.list_id() == *id) {
                         let list_id = session.list_id();
@@ -709,7 +713,21 @@ pub(super) fn navigation(s: &mut Shell, cx: &mut Context<Shell>) {
         }),
         settings_open: s.surfaces.settings.view.is_some(),
         projects_open: s.surfaces.projects.open,
+        customize_open: s.surfaces.customize.open,
+        refresh_revision: s.active().and_then(|tab| s.content.get(&s.key(&tab)))
+            .map_or(0, |content| match content {
+                Content::Session(view) => view.read(cx).navigation_refresh_revision,
+                _ => 0,
+            }),
     };
+    // A catalogue fallback changes the displayed thread, not the user's intent.
+    if let Some(previous) = s.surfaces.sidebar.navigation.as_mut()
+        && previous.workspace == next.workspace && previous.tab == next.tab
+        && next.refresh_revision > previous.refresh_revision
+    {
+        previous.shown.clone_from(&next.shown);
+        previous.refresh_revision = next.refresh_revision;
+    }
     if s.surfaces.sidebar.navigation.as_ref() != Some(&next) {
         s.surfaces.sidebar.navigation = Some(next);
         let generation = &s.surfaces.sidebar.generation;

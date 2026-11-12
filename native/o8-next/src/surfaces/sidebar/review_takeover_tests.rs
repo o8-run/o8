@@ -460,6 +460,7 @@ fn delta_refresh_fallback_keeps_creation_foreground(cx: &mut TestAppContext) {
         view.update(cx, |view, cx| view.shell_select(sessions, stale.id, cx));
         view
     });
+    shell.update(&mut v, |s, cx| crate::shell::sidebar::navigation(s, cx));
     let list = list(&shell, &v);
     let id = pending(&shell, &list, &mut v, false);
     let generation = list.read_with(&v, |l, _| l.navigation_generation());
