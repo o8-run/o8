@@ -327,6 +327,14 @@ describe('workflow policy — every workflow is classified from the filesystem',
         expect(job['runs-on']).toBe('macos-15');
         expect(job['timeout-minutes']).toBe(30);
         expect(job.strategy).toBeUndefined();
+        const runs = (job.steps as RecordValue[]).filter(step => step.run !== undefined).map(step => String(step.run).trim());
+        expect(runs).toHaveLength(4);
+        expect(runs.slice(0, 2)).toEqual([
+          'cargo check --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next --tests --message-format short',
+          'cargo build --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next',
+        ]);
+        expect(runs[2]).toMatch(/^native\/o8-next\/target\/debug\/o8-next --help /);
+        expect(runs[3]).toMatch(/^size=/);
       }
       const localVerification = file.name === 'verify-ci-macos.yml';
       if (localVerification) {
