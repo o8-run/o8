@@ -9634,6 +9634,8 @@ async function recoverFromPortInUse(): Promise<void> {
 }
 
 httpServer.on('error', (err: NodeJS.ErrnoException) => {
+  // A second WS uses the same receiver lock path; on this port it dies with
+  // EADDRINUSE before receiver startup. A different port still cannot steal the claim.
   if (err.code === 'EADDRINUSE') {
     void recoverFromPortInUse();
   } else {

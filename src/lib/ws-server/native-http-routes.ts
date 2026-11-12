@@ -50,7 +50,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     const match = matchNativeHttpRoute(url.pathname, req.method) ?? matchNativeHttpRoute(url.pathname);
     if (!match) return false;
     // Symon alone uses this dispatch in default mode; it does not own Cortex.
-    if (process.env.O8_NEXT_O8D === '1') markNativeCortexReader();
+    if (process.env.O8_NEXT_O8D === '1' && match.route.path !== '/api/panel/symon/messages-receiver') markNativeCortexReader();
     const headers = new Headers();
     for (const [name, value] of Object.entries(req.headers)) {
       if (Array.isArray(value)) for (const item of value) headers.append(name, item);
