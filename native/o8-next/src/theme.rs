@@ -413,7 +413,7 @@ impl ZoomStore {
     pub fn set(&self, percent: u16) -> bool {
         let percent = clamp_zoom(percent);
         if let Some(path) = &self.path {
-            let _ = std::fs::write(path, percent.to_string());
+            let _ = write_replacing(path, &percent.to_string());
         }
         self.percent.swap(percent, Ordering::Relaxed) != percent
     }
@@ -469,6 +469,17 @@ pub fn set_zoom_percent(percent: u16) -> bool {
 }
 fn zoom_path() -> Option<std::path::PathBuf> {
     preference_path("next-zoom")
+}
+/// Writes a small preference file whole: a temporary file in the same
+/// directory renamed over it, so a reader in another process never sees it
+/// empty or half written.
+pub fn write_replacing(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, text)?;
+    std::fs::rename(&temporary, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temporary);
+    })
 }
 /// A small preference file beside the appearance file; None under test.
 pub fn preference_path(name: &str) -> Option<std::path::PathBuf> {

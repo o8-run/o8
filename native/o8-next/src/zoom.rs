@@ -27,16 +27,24 @@ fn apply_to(window: &mut Window, shell: bool, cx: &mut App) {
     let min = min_size(window.zoom(), display_size(window, cx));
     set_min_size(window, min);
     let current = window.viewport_size().map(|v| v * window.zoom());
-    if let Some(grown) = grown(current, min) {
+    let fixed = window.is_fullscreen() || window.is_maximized();
+    if let Some(grown) = grown(current, min, fixed) {
         // Platform resizes run after the current dispatch, as GPUI's own do.
         window.defer(cx, move |window, _| window.resize(grown));
     }
 }
-/// The size a window of `current` content size grows to, when it is below
-/// `min`.
-pub(crate) fn grown(current: Size<Pixels>, min: Size<Pixels>) -> Option<Size<Pixels>> {
-    let grown = current.max(&min);
-    (grown != current).then_some(grown)
+/// The size a window of `current` content size grows to, when a side is
+/// more than half a point below `min`. `current` comes from the zoomed
+/// viewport, so a window exactly at its minimum can read a hair short. A
+/// fullscreen or maximized window (`fixed`) never resizes.
+pub(crate) fn grown(
+    current: Size<Pixels>,
+    min: Size<Pixels>,
+    fixed: bool,
+) -> Option<Size<Pixels>> {
+    let short = |current: Pixels, min: Pixels| min - current > px(0.5);
+    (!fixed && (short(current.width, min.width) || short(current.height, min.height)))
+        .then(|| current.max(&min))
 }
 /// Re-reads the zoom and the rebound shortcuts saved by any o8 next process
 /// each time `window` is activated, and applies the zoom.
@@ -127,7 +135,8 @@ pub(crate) fn save_bindings(next: Bindings) {
         return;
     }
     if let Some(path) = crate::theme::preference_path("next-zoom-keys") {
-        let _ = std::fs::write(path, next.clone().map(Option::unwrap_or_default).join("\n"));
+        let text = next.clone().map(Option::unwrap_or_default).join("\n");
+        let _ = crate::theme::write_replacing(&path, &text);
     }
     keep_bindings(next);
 }
@@ -475,15 +484,59 @@ mod tests {
     }
 
     #[test]
+    fn zoom_file_is_replaced_whole() {
+        use crate::theme::ZoomStore;
+        let dir = crate::shell::test_support::scratch_path("zoom-write");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("next-zoom");
+        std::fs::write(&path, "150").unwrap();
+        let store = ZoomStore::new(Some(path.clone()));
+        assert_eq!(store.percent(), 150);
+        store.set(120);
+        // The final content is whole, and no temporary file is left beside it.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "120");
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["next-zoom"]);
+        // The same path replaces whole on every write, not truncate-then-fill.
+        crate::theme::write_replacing(&path, "130").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "130");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn zoom_window_grows_to_the_new_minimum() {
         use gpui::size;
         let min = super::min_size(1.2, None);
-        assert_eq!(super::grown(size(px(600.), px(400.)), min), Some(min));
+        assert_eq!(super::grown(size(px(600.), px(400.)), min, false), Some(min));
         assert_eq!(
-            super::grown(size(px(900.), px(400.)), min),
+            super::grown(size(px(900.), px(400.)), min, false),
             Some(size(px(900.), min.height))
         );
-        assert_eq!(super::grown(size(px(900.), px(700.)), min), None);
+        assert_eq!(super::grown(size(px(900.), px(700.)), min, false), None);
+        // A fullscreen or maximized window queues no resize.
+        assert_eq!(super::grown(size(px(600.), px(400.)), min, true), None);
+    }
+
+    #[test]
+    fn zoom_window_at_its_capped_minimum_queues_no_resize() {
+        use gpui::size;
+        // A small display caps the floor; the window fills it exactly, and
+        // its size read back through the zoomed viewport is a hair short.
+        for (zoom, display) in [(1.1, size(px(640.), px(430.))), (1.3, size(px(700.), px(480.)))] {
+            let min = super::min_size(zoom, Some(display));
+            assert_eq!(min, display, "the floor is capped at {zoom}");
+            let current = display.map(|v| v / zoom).map(|v| v * zoom);
+            assert_eq!(super::grown(current, min, false), None, "at {zoom}");
+            // Half a point short is a rounding error, not a small window.
+            let hair = size(min.width - px(0.4), min.height - px(0.4));
+            assert_eq!(super::grown(hair, min, false), None, "at {zoom}");
+            let short = size(min.width - px(1.), min.height);
+            assert_eq!(super::grown(short, min, false), Some(min), "at {zoom}");
+        }
     }
 
     #[test]
