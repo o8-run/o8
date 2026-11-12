@@ -83,14 +83,15 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     } else if (match.route.path === '/api/runtime/archive' && typeof mutationWorkspace({ url: url.href }) !== 'string') {
       response = Response.json({ error: 'An absolute workspace is required for native archive' }, { status: 400 });
     } else {
+      const requestLimit = match.route.maxBodyBytes ?? REQUEST_LIMIT;
       let size = 0;
       const chunks: Buffer[] = [];
       for await (const chunk of req.iterator({ destroyOnReturn: false })) {
         size += chunk.length;
-        if (size > REQUEST_LIMIT) break;
+        if (size > requestLimit) break;
         chunks.push(Buffer.from(chunk));
       }
-      if (size > REQUEST_LIMIT) response = Response.json({ error: 'Request exceeds 16 MiB' }, { status: 413 });
+      if (size > requestLimit) response = Response.json({ error: requestLimit === REQUEST_LIMIT ? 'Request exceeds 16 MiB' : `Request exceeds ${requestLimit} bytes` }, { status: 413 });
       else {
         const handlers = await match.route.load() as Record<string, Handler>;
         const request = new NextRequest(url, { ...init, ...(size ? { body: Buffer.concat(chunks) } : {}) });

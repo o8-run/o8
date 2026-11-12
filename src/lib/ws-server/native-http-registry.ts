@@ -1,3 +1,4 @@
+import { ARTIFACT_REQUEST_MAX_BYTES } from '@/lib/artifacts/limits';
 import { viewerHttpRoutes } from '@/lib/viewers/http-routes';
 
 /** Shared shell transport registrations; importing this module loads no handlers or middleware. */
@@ -5,8 +6,9 @@ interface Route {
   path: string;
   methods: string[];
   load: () => Promise<unknown>;
+  maxBodyBytes?: number;
 }
-const route = (path: string, methods: string, load: Route['load']): Route => ({ path, methods: methods.split(' '), load });
+const route = (path: string, methods: string, load: Route['load'], maxBodyBytes?: number): Route => ({ path, methods: methods.split(' '), load, maxBodyBytes });
 
 /** The public middleware still runs first; the private reader reuses its existing bearer gate. */
 const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
@@ -39,7 +41,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // WS process already writes for its own lane and mission work. (#5243)
     route('/api/tasks', 'GET POST', () => import('@/app/api/tasks/route')),
     route('/api/tasks/[taskId]', 'GET', () => import('@/lib/tasks/detail-route')),
-    route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route')),
+    route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route'), ARTIFACT_REQUEST_MAX_BYTES),
     route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
     route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),

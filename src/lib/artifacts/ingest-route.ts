@@ -21,7 +21,7 @@ import { packetHasRecordedPr } from '@/lib/artifacts/worker-binding';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { getLane } from '@/lib/lane/registry';
 
-const MAX_BYTES = 25 * 1024 * 1024; // 25MB — generous for PNG; videos gate later.
+import { ARTIFACT_MAX_BYTES as MAX_BYTES } from '@/lib/artifacts/limits';
 const VALID_SOURCES: ReadonlySet<string> = new Set<ArtifactSource>(['agent-capture', 'review-boundary', 'manual']);
 const VALID_KINDS: ReadonlySet<string> = new Set<ArtifactKind>(['screenshot', 'video']);
 

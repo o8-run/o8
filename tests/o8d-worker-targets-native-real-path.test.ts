@@ -93,3 +93,16 @@ it('keeps the paired read methods on the native owner', async () => {
   expect(runs.status).toBe(200);
   expect(await runs.json()).toMatchObject({ schema: 'o8/managed-runs/v1', runs: expect.any(Array) });
 });
+
+it('accepts the artifact upload size range and retains the default for other routes', async () => {
+  const body = { packetId: 'packet-a', kind: 'video', mimeType: 'video/mp4' };
+  const accepted = await call('/api/panel/artifacts', { ...body, bytesBase64: Buffer.alloc(17 * 1024 * 1024, 120).toString('base64') });
+  expect(accepted.status).toBe(200);
+  expect(await accepted.json()).toMatchObject({ artifactId: expect.any(String) });
+  const oversized = await call('/api/panel/artifacts', { ...body, bytesBase64: Buffer.alloc(25 * 1024 * 1024 + 1, 120).toString('base64') });
+  expect(oversized.status).toBe(413);
+  expect(await oversized.json()).toMatchObject({ error: 'Artifact too large (max 25 MB).' });
+  const other = await call('/api/panel/managed-runs', { padding: 'x'.repeat(16 * 1024 * 1024 - 13) });
+  expect(other.status).toBe(413);
+  expect(await other.json()).toMatchObject({ error: 'Request exceeds 16 MiB' });
+}, 120_000);
