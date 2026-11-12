@@ -70,7 +70,7 @@ pub(crate) fn start(app: tauri::AppHandle, identity: Option<(u16, String)>) {
                 }
             }
             let port = crate::resolve_api_port();
-            crate::next_main_startup::request_window(port, &crate::agent::o8_http::ws_token())
+            crate::next_main_startup::request_window(port, &crate::resolve_ws_token())
         })();
         if let Err(reason) = result {
             use tauri_plugin_dialog::DialogExt;
