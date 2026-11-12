@@ -739,7 +739,7 @@ describe('persistent lead handoff real path', () => {
     const missingDone = await runCli(['lead', 'wait', lead.id, '--turn',
       (JSON.parse(missing.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '1s']);
     expect(missingDone.exitCode).not.toBe(0);
-    expect((JSON.parse(missingDone.stdout) as LeadCliReceipt).lead.status).toBe('waiting');
+    expect((JSON.parse(missingDone.stdout) as LeadCliReceipt).lead.status).toBe('unreported');
     const errored = await runCli([
       'lead', 'send', lead.id, '--message', '[fixture:event-error]', '--idempotency-key', 'event-error',
     ]);
@@ -942,14 +942,18 @@ describe('persistent lead handoff real path', () => {
     const sent = await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]',
       '--idempotency-key', 'missing-report']);
     expect(sent.exitCode, sent.stderr).toBe(0);
-    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('waiting'), { timeout: 5_000 });
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('unreported'), { timeout: 5_000 });
     const status = await runCli(['lead', 'status', lead.id]);
-    expect(JSON.parse(status.stdout)).toMatchObject({ lead: { status: 'waiting', result: {
-      outcome: null, reason: 'Turn ended without an outcome report.',
+    expect(JSON.parse(status.stdout)).toMatchObject({ lead: { status: 'unreported', result: {
+      outcome: null, error: null, reason: 'turn ended without an outcome report',
     } } });
     const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
-    expect(waited.exitCode).not.toBe(0);
-    expect(waited.stderr).toContain('lead_wait_timeout');
+    expect(waited.exitCode).toBe(7);
+    expect(waited.stderr).toContain('unreported: turn ended without an outcome report');
+    expect(JSON.parse(waited.stdout).requestedTurn).toMatchObject({
+      id: JSON.parse(sent.stdout).admittedTurnId, status: 'unreported', error: null,
+      reason: 'turn ended without an outcome report',
+    });
     const more = await runCli(['lead', 'send', lead.id, '--message', '[fixture:hang]',
       '--idempotency-key', 'more-work']);
     expect(more.exitCode, more.stderr).toBe(0);
@@ -958,5 +962,25 @@ describe('persistent lead handoff real path', () => {
     await runCli(['lead', 'stop', lead.id]);
   }, 20_000);
 
+
+  it.each([
+    ['failed', 'blocked'], ['awaiting_human', 'needs_approval'], ['running', 'waiting_workers'],
+  ] as const)('preserves %s worker obligations without a lead report', async (workerStatus, expected) => {
+    const started = await runCli(startArgs(`obligation-${workerStatus}`));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    await settled(lead.id);
+    const mission = await createMission({
+      issues: [{ number: 6040, title: 'Worker obligation', body: 'Keep the obligation visible.', url: '' }],
+      repoPath, runtime: 'codex', constraints: '', orchestratorThreadId: lead.threadId,
+    });
+    const lane = createLane({ repoPath, branch: `obligation-${workerStatus}`, runtime: 'codex',
+      packetId: mission.packets[0].id, sessionKey: `obligation-${workerStatus}`, label: 'Obligation' });
+    updateLane(lane.id, { status: 'running' }, 'system');
+    if (workerStatus !== 'running') updateLane(lane.id, { status: workerStatus }, 'system');
+    await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]',
+      '--idempotency-key', `missing-${workerStatus}`]);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe(expected), { timeout: 5_000 });
+    await runCli(['lead', 'stop', lead.id]);
+  }, 20_000);
 
 });

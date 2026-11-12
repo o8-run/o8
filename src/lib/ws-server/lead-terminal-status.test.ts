@@ -5,11 +5,11 @@ const { waitForLead } = vi.hoisted(() => ({ waitForLead: vi.fn() }));
 vi.mock('@/lib/orchestrator/lead-lifecycle', () => ({ waitForLead }));
 
 describe('lead caller notices', () => {
-  it.each(['waiting', 'completed'])('publishes %s with the outcome and reason', async (status) => {
+  it.each(['unreported', 'completed'])('publishes %s with the outcome and reason', async (status) => {
     const outcome = status === 'completed'
       ? { kind: 'completed', summary: 'Verified', evidence: ['checks passed at revision abc'] }
       : null;
-    const reason = outcome ? 'Verified' : 'Turn ended without an outcome report.';
+    const reason = outcome ? 'Verified' : 'turn ended without an outcome report';
     waitForLead.mockResolvedValue({ cursor: 1,
       lead: { status, repoPath: '/repo', threadId: 'thread', routing: { backend: 'codex' } },
       requestedTurn: { id: 'turn', status, outcome, reason, resultText: 'Provider text' },
@@ -18,7 +18,7 @@ describe('lead caller notices', () => {
     await sendLeadTerminalStatus(send, 'lead', 'turn', 0);
     expect(send).toHaveBeenLastCalledWith(expect.objectContaining({
       event: 'status', data: expect.objectContaining({
-        status: status === 'waiting' ? 'waiting' : 'ready',
+        status: status === 'unreported' ? 'unreported' : 'ready',
         leadStatus: status, outcome, reason,
       }),
     }));
