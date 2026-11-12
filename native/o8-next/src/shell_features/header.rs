@@ -66,17 +66,24 @@ fn render(
             }))
         })
     };
-    // Toggle, Ring, Back and Forward: one cluster that never moves.
-    let nav = |hidden: bool, cx: &mut Context<Shell>| {
+    // Toggle and Ring hold their place; Back and Forward sit at the right of
+    // the sidebar's `column` width when there is one (see `arrows_lead`).
+    let nav = |hidden: bool, column: Option<f32>, cx: &mut Context<Shell>| {
         div()
             .flex()
             .flex_shrink_0()
             .items_center()
-            .gap(px(4.))
             .child(sidebar_toggle(hidden, cx))
-            .child(header_ring())
-            .child(history("header-back", BACK, "Back", back, cx))
-            .child(history("header-forward", FORWARD, "Forward", forward, cx))
+            .child(header_ring().ml(px(4.)))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .ml(px(arrows_lead(column, inset)))
+                    .child(history("header-back", BACK, "Back", back, cx))
+                    .child(history("header-forward", FORWARD, "Forward", forward, cx)),
+            )
     };
     let workspace = div()
         .flex()
@@ -89,7 +96,7 @@ fn render(
         // 8px padding after the 4px sidebar resize edge.
         .pl(px(if hidden && !moving { inset } else { 16. }))
         .pr(px(8.))
-        .when(hidden && !moving, |row| row.child(nav(true, cx)))
+        .when(hidden && !moving, |row| row.child(nav(true, None, cx)))
         .child(tabs(s, cx))
         .child(
             div()
@@ -140,8 +147,8 @@ fn render(
                         .items_center()
                         .gap(px(4.))
                         .pl(px(inset))
-                        .pr(px(8.))
-                        .child(nav(false, cx)),
+                        .pr(px(super::super::sidebar::HEAD_PAD))
+                        .child(nav(false, Some(super::super::sidebar::width(s)), cx)),
                 )
             })
             // In flight the column's slot travels with it, so the tabs move with
@@ -156,7 +163,7 @@ fn render(
                             .absolute()
                             .left(px(inset))
                             .top(px(top))
-                            .child(nav(hidden, cx)),
+                            .child(nav(hidden, Some(edge), cx)),
                     )
             })
             .when(!super::right_panel::maximized(s), |row| {
@@ -202,7 +209,23 @@ fn toggle_inset(window: &Window) -> f32 {
 /// and Forward with their gaps and the 4px before the tabs, less the strip's
 /// 16px padding in flight, so the tabs land where the folded header puts them.
 fn folded(inset: f32) -> f32 {
-    inset + RING_W + 4. + TOGGLE_W + 4. + ARROW_W + 4. + ARROW_W + 4. - 16.
+    inset + TOGGLE_W + 4. + RING_W + arrows_lead(None, inset) + ARROW_W + 4. + ARROW_W + 4. - 16.
+}
+
+/// The folded header's gap between the Ring and Back, and the least it gets
+/// in a narrow column.
+const ARROWS_GAP: f32 = 12.;
+
+/// The gap between the Ring and Back. With the sidebar's `column` width,
+/// Forward's right edge meets the column's right padding, the same edge the
+/// sidebar's own controls end on below; a column too narrow for that, or no
+/// column, keeps the 12-unit gap after the Ring.
+fn arrows_lead(column: Option<f32>, inset: f32) -> f32 {
+    let cluster = TOGGLE_W + 4. + RING_W;
+    let arrows = ARROW_W + 4. + ARROW_W;
+    column.map_or(ARROWS_GAP, |width| {
+        (width - super::super::sidebar::HEAD_PAD - arrows - inset - cluster).max(ARROWS_GAP)
+    })
 }
 
 /// The Ring's side, in layout units, so it zooms with the header.
@@ -242,13 +265,8 @@ fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui:
         true,
     )
     .child(
-        crate::icon::stroke(
-            SIDEBAR,
-            toggle_color(hidden),
-            14.,
-            1.8,
-        )
-        .with_transformation(press_glyph("header-sidebar")),
+        crate::icon::stroke(SIDEBAR, toggle_color(hidden), 14., 1.8)
+            .with_transformation(press_glyph("header-sidebar")),
     )
     .on_click(cx.listener(|this, _, window, cx| {
         this.capture(window, cx);

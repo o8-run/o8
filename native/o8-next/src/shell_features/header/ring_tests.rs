@@ -1,10 +1,11 @@
 use super::*;
 use crate::shell::test_support::*;
 
-/// Traffic lights | sidebar toggle | Ring | Back | Forward: the toggle keeps
-/// its place past the lights' space, the Ring follows it on the header icons'
-/// line, and Back and Forward move right by its width and one gap, at every
-/// zoom.
+/// Traffic lights | sidebar toggle | Ring | Back | Forward. The toggle keeps
+/// its place past the lights' space and the Ring follows it on the header
+/// icons' line. With the sidebar open, Forward ends on the column's head
+/// padding, over the sidebar's last head control, at any column width that
+/// leaves room; folded, Back follows the Ring after 12 units. At every zoom.
 #[gpui::test]
 fn header_ring_sits_between_the_toggle_and_back_at_every_zoom(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
@@ -19,43 +20,99 @@ fn header_ring_sits_between_the_toggle_and_back_at_every_zoom(cx: &mut TestAppCo
     let near = |a: gpui::Pixels, b: f32, what: &str| {
         assert!((f32::from(a) - b).abs() < 0.01, "{what}: {a:?} vs {b}");
     };
-    for zoom in [0.7, 1.0, 1.4, 2.0] {
-        visual.update(|window, cx| window.set_zoom(zoom, cx));
-        draw(&mut visual);
-        let (inset, lights) = visual.update(|window, _| {
-            (
-                toggle_inset(window),
-                crate::zoom::chrome_clearance(super::super::super::rail::LIGHTS, window),
-            )
+    let sidebar = super::super::super::sidebar::WIDTH;
+    let narrow = super::super::super::sidebar::MIN_WIDTH;
+    let pad = super::super::super::sidebar::HEAD_PAD;
+    for (layout, width) in [
+        ("open", Some(sidebar)),
+        ("narrowest", Some(narrow)),
+        ("folded", None),
+    ] {
+        shell.update(&mut visual, |s, cx| {
+            s.surfaces.sidebar.hidden = width.is_none();
+            s.state.sidebar_width = width;
+            cx.notify();
         });
-        let mut bounds = |id: &'static str| {
-            visual
-                .debug_bounds(id)
-                .unwrap_or_else(|| panic!("{id} at zoom {zoom}"))
-        };
-        let ring = bounds("header-ring");
-        let toggle = bounds("header-sidebar");
-        let back = bounds("header-back");
-        let forward = bounds("header-forward");
-        let header = bounds("thread-header");
-        let at = format!("zoom {zoom}");
-        // 16 layout units, zooming with the header like its icons.
-        near(ring.size.width, RING_W, &at);
-        near(ring.size.height, RING_W, &at);
-        // The toggle where it is without the Ring, clear of the lights' space.
-        near(toggle.left(), inset, &at);
-        assert!(toggle.left() > px(lights), "{at}");
-        // The Ring right after it, with the icons' 4-unit gap either side.
-        near(ring.left(), f32::from(toggle.right()) + 4., &at);
-        // Centred on the header icons' line (y 20 of the 40-unit header).
-        near(ring.center().y - header.top(), 20., &at);
-        near(ring.center().y, f32::from(toggle.center().y), &at);
-        // Back and Forward shift by the Ring's width plus one gap.
-        near(back.left(), inset + TOGGLE_W + 4. + RING_W + 4., &at);
-        near(back.left(), f32::from(ring.right()) + 4., &at);
-        near(forward.left(), f32::from(back.right()) + 4., &at);
+        for zoom in [0.7, 1.0, 1.4, 2.0] {
+            visual.update(|window, cx| window.set_zoom(zoom, cx));
+            draw(&mut visual);
+            let (inset, lights) = visual.update(|window, _| {
+                (
+                    toggle_inset(window),
+                    crate::zoom::chrome_clearance(super::super::super::rail::LIGHTS, window),
+                )
+            });
+            let mut bounds = |id: &'static str| {
+                visual
+                    .debug_bounds(id)
+                    .unwrap_or_else(|| panic!("{id}, {layout} at zoom {zoom}"))
+            };
+            let ring = bounds("header-ring");
+            let toggle = bounds("header-sidebar");
+            let back = bounds("header-back");
+            let forward = bounds("header-forward");
+            let header = bounds("thread-header");
+            let at = format!("{layout} at zoom {zoom}");
+            // 16 layout units, zooming with the header like its icons.
+            near(ring.size.width, RING_W, &at);
+            near(ring.size.height, RING_W, &at);
+            // The toggle where it is on main, clear of the lights' space.
+            near(toggle.left(), inset, &at);
+            assert!(toggle.left() > px(lights), "{at}");
+            // The Ring right after it, on the icons' line (y 20 of 40).
+            near(ring.left(), f32::from(toggle.right()) + 4., &at);
+            near(ring.center().y - header.top(), 20., &at);
+            near(ring.center().y, f32::from(toggle.center().y), &at);
+            // Back and Forward keep their 4-unit gap and never crowd the Ring.
+            near(forward.left(), f32::from(back.right()) + 4., &at);
+            assert!(back.left() >= ring.right() + px(ARROWS_GAP - 0.01), "{at}");
+            match width {
+                Some(width) => {
+                    let room = width - pad - (ARROW_W + 4. + ARROW_W);
+                    let aligned = room >= f32::from(ring.right()) + ARROWS_GAP;
+                    if aligned {
+                        // Forward ends on the column's head padding...
+                        near(forward.right(), width - pad, &at);
+                        // ...over the right edge of the sidebar's last head control.
+                        let last = ["sidebar-new-thread", "sidebar-project-add"]
+                            .into_iter()
+                            .filter_map(|id| visual.debug_bounds(id))
+                            .map(|b| f32::from(b.right()))
+                            .fold(f32::MIN, f32::max);
+                        assert!(last > 0., "{at}: no head control in the sidebar");
+                        near(forward.right(), last, &at);
+                    } else {
+                        // Too narrow to align: the folded gap, still inside the column.
+                        near(back.left(), f32::from(ring.right()) + ARROWS_GAP, &at);
+                        assert!(forward.right() <= px(width - pad + 0.01), "{at}");
+                    }
+                }
+                None => near(back.left(), f32::from(ring.right()) + ARROWS_GAP, &at),
+            }
+        }
     }
     assert!(visual.simulate_close());
+}
+
+/// Back and Forward right-align to the column while it has room, and fall
+/// back to the 12-unit gap after the Ring when it does not, or when folded.
+#[test]
+fn header_arrows_align_to_the_column_or_keep_the_gap() {
+    let pad = super::super::super::sidebar::HEAD_PAD;
+    let inset = 78.;
+    let cluster = TOGGLE_W + 4. + RING_W;
+    let arrows = ARROW_W + 4. + ARROW_W;
+    // Open at the default width: Forward's right edge is the column's less its padding.
+    let lead = arrows_lead(Some(280.), inset);
+    assert!((inset + cluster + lead + arrows - (280. - pad)).abs() < 1e-3);
+    // Folded, and a column too narrow to align: the 12-unit gap.
+    assert_eq!(arrows_lead(None, inset), ARROWS_GAP);
+    assert_eq!(arrows_lead(Some(150.), inset), ARROWS_GAP);
+    // The folded width counts the wider gap.
+    assert_eq!(
+        folded(inset),
+        inset + cluster + ARROWS_GAP + arrows + 4. - 16.
+    );
 }
 
 /// The Ring is drawn for the running theme: ink on light, paper on dark; the
