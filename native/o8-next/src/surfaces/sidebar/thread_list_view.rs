@@ -14,6 +14,35 @@ const STAGGER_ROWS: usize = 10;
 const SETTLE_PX: f32 = 6.;
 
 impl ThreadList {
+    /// Dispatch a thread-row click; tests use the same production entry point.
+    pub(crate) fn click_thread(
+        &mut self,
+        id: String,
+        modifiers: gpui::Modifiers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pick(&id, modifiers, cx) {
+            return;
+        }
+        if self.rows.iter().any(|r| r.id.as_ref() == Some(&id)) {
+            self.focus.focus(window);
+            self.choose(id.clone(), cx);
+            let generation = self.edit_generation;
+            // Opening another workspace can restore its content
+            // focus while handling Selected. Keep row navigation
+            // focused after that event, unless a newer edit won.
+            cx.defer_in(window, move |this, window, _| {
+                if this.edit_generation == generation
+                    && this.choice.as_ref() == Some(&id)
+                    && !this.editing
+                {
+                    this.focus.focus(window);
+                }
+            });
+        }
+    }
+
     /// Fades the rows in top-down, as the column opens.
     pub(crate) fn stagger_in(&mut self, cx: &mut Context<Self>) {
         // The first row waits for the card to clear the rail's mark.
@@ -532,27 +561,7 @@ impl ThreadList {
                         })
                         .when(thread, |view| {
                             view.on_click(cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                                let id = row.id.clone().unwrap();
-                                if this.pick(&id, event.modifiers(), cx) {
-                                    return;
-                                }
-                                if this.rows.iter().any(|r| r.id.as_ref() == Some(&id))
-                                {
-                                    this.focus.focus(window);
-                                    this.choose(id.clone(), cx);
-                                    let generation = this.edit_generation;
-                                    // Opening another workspace can restore its content
-                                    // focus while handling Selected. Keep row navigation
-                                    // focused after that event, unless a newer edit won.
-                                    cx.defer_in(window, move |this, window, _| {
-                                        if this.edit_generation == generation
-                                            && this.choice.as_ref() == Some(&id)
-                                            && !this.editing
-                                        {
-                                            this.focus.focus(window);
-                                        }
-                                    });
-                                }
+                                this.click_thread(row.id.clone().unwrap(), event.modifiers(), window, cx);
                             }))
                         })
                         .child(

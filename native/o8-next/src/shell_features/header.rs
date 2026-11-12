@@ -1,4 +1,7 @@
 #[cfg(test)]
+#[path = "header/review_tests.rs"]
+mod review_tests;
+#[cfg(test)]
 #[path = "header/thread_tab_tests.rs"]
 mod thread_tab_tests;
 use super::*;
