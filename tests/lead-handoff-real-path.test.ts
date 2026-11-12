@@ -272,6 +272,15 @@ beforeAll(async () => {
   process.env.O8_API_PORT = String(apiPort);
   wsPort = await freePort();
   process.env.O8_WS_PORT = String(wsPort);
+  // The runtime intentionally filters private fixture variables from child env.
+  // Bake this isolated provider's configuration into its executable instead.
+  const fixtureEnv = Object.fromEntries(Object.entries(process.env)
+    .filter(([key]) => key.startsWith('O8_TEST_')));
+  writeFileSync(fakeCodex, fakeCodexScript.replace("const args = process.argv.slice(2);",
+    `Object.assign(process.env, ${JSON.stringify({ ...fixtureEnv,
+      O8_API_PORT: String(apiPort), O8_API_TOKEN: token, O8_DATA_DIR: dataDir,
+      CORTEX_IDE_DATA_DIR: dataDir })});\nconst args = process.argv.slice(2);`));
+
   wsProcess = execFile(process.execPath, [
     '--import=./scripts/register-server-only-stub.mjs',
     '--import=tsx',
@@ -316,6 +325,40 @@ afterAll(async () => {
 });
 
 describe('persistent lead handoff real path', () => {
+  it('includes the structured outcome in the caller handback receipt', async () => {
+    const started = await runCli(startArgs('outcome-receipt'));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    const completed = await settled(lead.id);
+    expect(completed.lead.result).toMatchObject({
+      outcome: { kind: 'completed', summary: expect.any(String), evidence: expect.any(Array) },
+    });
+  });
+
+  it('requires a turn outcome before handback and clears it on more work', async () => {
+    const started = await runCli(startArgs('turn-outcome-required'));
+    expect(started.exitCode, started.stderr).toBe(0);
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    const completed = await settled(lead.id);
+    expect(completed.lead.status).toBe('completed');
+    const sent = await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]',
+      '--idempotency-key', 'missing-report']);
+    expect(sent.exitCode, sent.stderr).toBe(0);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('waiting'), { timeout: 5_000 });
+    const status = await runCli(['lead', 'status', lead.id]);
+    expect(JSON.parse(status.stdout)).toMatchObject({ lead: { status: 'waiting', result: {
+      outcome: null, reason: 'Turn ended without an outcome report.',
+    } } });
+    const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
+    expect(waited.exitCode).not.toBe(0);
+    expect(waited.stderr).toContain('lead_wait_timeout');
+    const more = await runCli(['lead', 'send', lead.id, '--message', '[fixture:hang]',
+      '--idempotency-key', 'more-work']);
+    expect(more.exitCode, more.stderr).toBe(0);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).lead.status).toBe('running'));
+    expect(getLeadStatus(lead.id).lead.result).toBeNull();
+    await runCli(['lead', 'stop', lead.id]);
+  }, 20_000);
+
   it('drives actual CLI, authenticated route, provider process, and persisted resume pins', async () => {
     const started = await runCli(startArgs('lead-start-main'));
     expect(started.exitCode, started.stderr).toBe(0);
@@ -728,8 +771,9 @@ describe('persistent lead handoff real path', () => {
     ]);
     expect(missing.exitCode, missing.stderr).toBe(0);
     const missingDone = await runCli(['lead', 'wait', lead.id, '--turn',
-      (JSON.parse(missing.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '10s']);
-    expect((JSON.parse(missingDone.stdout) as LeadCliReceipt).lead.status).toBe('blocked');
+      (JSON.parse(missing.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '1s']);
+    expect(missingDone.exitCode).not.toBe(0);
+    expect((JSON.parse(missingDone.stdout) as LeadCliReceipt).lead.status).toBe('waiting');
     const errored = await runCli([
       'lead', 'send', lead.id, '--message', '[fixture:event-error]', '--idempotency-key', 'event-error',
     ]);
