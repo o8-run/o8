@@ -27,9 +27,7 @@ it('keeps wait dispatch on an abortable HTTP hop without the fetch header deadli
   } finally { fetchMock.mockRestore(); vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
-it('waits for delayed headers after a fetch header deadline expires', async () => {
-  const { Agent, fetch: boundedFetch } = await import('undici');
-  const agent = new Agent({ headersTimeout: 250, bodyTimeout: 0 });
+it('waits for delayed headers after a fetch control times out', async () => {
   const server = createServer((_req, res) => {
     const timer = setTimeout(() => res.end(JSON.stringify({ ok: true, dispatched: 2 })), 3_000);
     res.once('close', () => clearTimeout(timer));
@@ -42,8 +40,8 @@ it('waits for delayed headers after a fetch header deadline expires', async () =
   vi.stubEnv('O8_WS_PORT', String(address.port));
   vi.stubEnv('O8_API_PORT', '1');
   try {
-    // Compress fetch's header deadline for a bounded test of the same failure.
-    const timedOut = expect(boundedFetch(`http://127.0.0.1:${address.port}`, { dispatcher: agent })).rejects.toThrow();
+    // This control shows Node's undici-backed fetch timing out; the first test's fetchMock assertion proves dispatch avoids fetch.
+    const timedOut = expect(fetch(`http://127.0.0.1:${address.port}`, { signal: AbortSignal.timeout(250) })).rejects.toMatchObject({ name: 'TimeoutError' });
     const { POST } = await import('@/app/api/orchestrator/dispatch/route');
     const started = performance.now();
     const response = await POST(new NextRequest('http://127.0.0.1/api/orchestrator/dispatch', { method: 'POST', body: JSON.stringify({ wait: true }) }));
@@ -53,7 +51,6 @@ it('waits for delayed headers after a fetch header deadline expires', async () =
     await timedOut;
   } finally {
     vi.unstubAllEnvs();
-    await agent.destroy();
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
