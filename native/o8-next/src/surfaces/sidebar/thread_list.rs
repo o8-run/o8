@@ -920,6 +920,7 @@ impl ThreadList {
                         for worker in &mut workers {
                             if let Some(old) = this.sessions.iter().find(|s| s.id == worker.id) {
                                 worker.packet_header = old.packet_header.clone();
+                                super::thread_list_client::label_from_task(worker);
                                 worker.unread = old.unread
                                     || this.selected.as_ref() != Some(&worker.id)
                                         && worker.last_message_at > old.last_message_at;

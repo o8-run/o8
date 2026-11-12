@@ -214,6 +214,9 @@ pub struct Session {
     pub unread: bool,
     #[serde(default)]
     pub packet_header: Option<Value>,
+    /// A worker's own name, kept for search once the row is titled after its task.
+    #[serde(default)]
+    pub runtime_name: Option<String>,
     #[serde(default)]
     pub tmux_session: Option<String>,
     #[serde(default)]
