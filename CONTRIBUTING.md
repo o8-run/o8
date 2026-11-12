@@ -2,6 +2,27 @@
 
 o8 is maintained by one person, and review capacity is limited. Small, focused changes have a realistic path to review; large unsolicited patches usually do not.
 
+## How fast this moves
+
+`main` changes many times a day. Most of the code is written by coding agents, every change gets an independent review by a different agent or a person, and approved pull requests land through a merge queue.
+
+Measured on 2026-11-12 (recompute before you quote these):
+
+| Measure | Value | Command |
+| --- | --- | --- |
+| Pull requests merged in the last 7 days | 299 | `gh pr list --repo o8-run/o8 --state merged --search "merged:>=2026-11-05" --limit 500 --json number --jq length` |
+| Pull requests merged on 2026-11-12 | 65 | same command with `merged:>=2026-11-12` |
+| Open issues labeled `claimable` | 23 | `gh issue list --repo o8-run/o8 --label claimable --limit 100 --json number --jq length` |
+| CI on a pull request | about 20 minutes | the Actions tab |
+
+What that means for you:
+
+- **Claim before you start.** An unclaimed issue can be picked up and fixed within hours. See [Claiming work](#claiming-work).
+- **Keep it small.** One concern per pull request. A change that takes a week to write will conflict with `main` several times before it is ready.
+- **Rebase or merge `main` before you ask for review,** and expect to do it again if review takes more than a day.
+- **A red check is not ready,** even when the failure looks unrelated. Check whether it also fails on `main`; if it does, say so with the run link.
+- **Merged is not released.** A change is on `main` first, then in a beta build, then in a stable release. [`ROADMAP.md`](./ROADMAP.md) keeps those states apart.
+
 ## What we accept
 
 - Bug fixes with a clear reproduction.
@@ -22,7 +43,14 @@ The way we run issues, pull requests, and merges is written down in [docs/operat
 
 ## Claiming work
 
-Start with the [focus plan through October 27](./docs/operations/focus-through-2026-10-27.md#two-contributor-queues) for two bounded contributor queues. Recheck issue claims before starting; the dated plan does not reserve work.
+Where help is most useful right now:
+
+- **Issues labeled [`claimable`](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3Aclaimable).** Many are test failures and flaky tests with the failing test named in the issue, which makes them good first changes.
+- **Runtime adapters** for a coding tool o8 does not support yet, following the six-file recipe linked above.
+- **Platform reports.** macOS opens the native app in [`native/o8-next/`](./native/o8-next/); Linux and Windows still open the web window. A reproduction on a platform the maintainer does not run every day is worth a lot.
+- **Command-line and MCP gaps.** If a command's help does not tell you how to use it, or a tool returns an error an agent cannot act on, file it with the exact command and output.
+
+Security-sensitive areas (worker sandboxing, credentials, authentication, network binding) are handled by the security maintainers. Report a problem there through [`SECURITY.md`](./SECURITY.md) instead of opening a pull request.
 
 Find work through [`ROADMAP.md`](./ROADMAP.md). Each open arc there links to one tracking issue, and that issue's checklist lists its children. Pick an unchecked child labeled `claimable`: those have a brief that is complete enough to start from.
 
@@ -46,7 +74,7 @@ npm test                  # judge by the final summary, not by stderr
 npx eslint <files you changed>
 ```
 
-Rust changes also need the relevant Cargo check or test from `src-tauri/`.
+Rust changes also need the relevant Cargo check or test: from `native/o8-next/` for the native app, or from `src-tauri/` for the installer and host.
 Documentation-only changes validate links and the checks relevant to the affected documentation.
 
 ### Test lanes
