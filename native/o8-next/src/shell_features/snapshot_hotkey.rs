@@ -1,5 +1,5 @@
 #[cfg(test)]
-#[path = "snapshot_retry_tests.rs"]
+#[path = "snapshot_hotkey/retry_tests.rs"]
 mod retry_tests;
 // Both Shift keys: capture, open a new chat in the open project, and attach
 // the capture through the composer's own image path, ready to type.
