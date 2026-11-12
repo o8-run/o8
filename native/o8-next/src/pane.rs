@@ -92,6 +92,7 @@ pub struct Pane {
     file_root: Option<gpui::SharedString>,
     peeks: crate::transcript_peek::Peeks,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
+    pub(crate) navigator: Rc<RefCell<crate::prompt_navigator::Navigator>>,
     action_ends: RefCell<crate::transcript_actions::TurnEndsCache>,
     backfill: Option<crate::worker_backfill::Backfill>,
     prompt_actions: Rc<RefCell<crate::ui::prompt_actions::reading::Reading>>,
@@ -122,6 +123,7 @@ impl Pane {
             file_root: None,
             peeks: Default::default(),
             action_feedback: Default::default(),
+            navigator: Default::default(),
             action_ends: Default::default(),
             backfill: None,
             prompt_actions: Default::default(),
@@ -294,7 +296,11 @@ impl Pane {
                 visualizations_changed = true;
             }
         }
-        let follow = self.rows.is_empty() || crate::retained::at_end(&self.list);
+        let navigation_changed = self.navigator.borrow_mut().resume_at_end(&self.list);
+        if navigation_changed {
+            self.revision += 1;
+        }
+        let follow = self.rows.is_empty() || self.navigator.borrow().at_end(&self.list);
         let messages: Vec<_> = self
             .subscription
             .as_ref()
@@ -328,9 +334,10 @@ impl Pane {
                 self.navigate(true);
             }
         }
-        changed || visualizations_changed || notice_changed || backfilled
+        changed || visualizations_changed || notice_changed || navigation_changed || backfilled
     }
     pub fn navigate(&mut self, end: bool) {
+        self.navigator.borrow_mut().resume();
         if !self.rows.is_empty() {
             self.list.scroll_to(ListOffset {
                 item_ix: if end { self.rows.len() - 1 } else { 0 },
@@ -430,6 +437,7 @@ impl Pane {
         let paints = self.paints.clone();
         let notice = self.notice.clone();
         let file_root = self.file_root.clone();
+        let navigator = self.navigator.clone();
         canvas(
             move |bounds, window, cx| {
                 let clip = bounds.intersect(&window.content_mask().bounds);
@@ -450,6 +458,8 @@ impl Pane {
                         painted_rows,
                         file_root,
                         ends,
+                        navigator,
+                        Rc::new(|_, _| {}),
                         decorate,
                     ))
                     .into_any_element();

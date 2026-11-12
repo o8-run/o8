@@ -133,6 +133,18 @@ impl Surface {
                 painted_rows,
                 file_root.clone(),
                 ends.keys().copied().collect(),
+                self.navigator.clone(),
+                {
+                    let owner = view.downgrade();
+                    Rc::new(move |_, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            this.following = None;
+                            this.pinned = false;
+                            this.away_from_end = true;
+                            cx.notify();
+                        });
+                    })
+                },
                 {
                     let view = view.clone();
                     move |index, row, window, _| {
