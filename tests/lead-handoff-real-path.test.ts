@@ -708,7 +708,7 @@ describe('persistent lead handoff real path', () => {
       const packet = state.packets.find(candidate => candidate.id === worker.packetId);
       if (packet) {
         packet.status = 'running';
-        }
+      }
     });
 
     appendEvent(worker.laneId, 'runtime_process_exit', 'system', {
