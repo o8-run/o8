@@ -317,7 +317,7 @@ pub(crate) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Contex
 struct Visits {
     scope: Option<String>,
     tabs: Vec<Tab>,
-    recent: Vec<Tab>,
+    recent: std::collections::BTreeMap<Option<String>, Vec<Tab>>,
     index: usize,
 }
 
@@ -326,16 +326,16 @@ fn record_visit(s: &mut Shell) {
     let active = s.active();
     let visits = s.features.get::<Visits>();
     if visits.scope != scope {
-        *visits = Visits {
-            scope,
-            ..Default::default()
-        };
+        visits.scope = scope.clone();
+        visits.tabs.clear();
+        visits.index = 0;
     }
     let Some(tab) = active else { return };
-    visits.recent.retain(|visited| visited != &tab);
-    visits.recent.push(tab.clone());
-    if visits.recent.len() > 100 {
-        visits.recent.remove(0);
+    let recent = visits.recent.entry(scope).or_default();
+    recent.retain(|visited| visited != &tab);
+    recent.push(tab.clone());
+    if recent.len() > 100 {
+        recent.remove(0);
     }
     if visits.tabs.get(visits.index) == Some(&tab) {
         return;
@@ -428,10 +428,15 @@ pub(crate) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
     };
     record_visit(s);
     let previous = s.features.read::<Visits>().and_then(|visits| {
-        visits.recent.iter().rev().find(|visited| {
-            *visited != &tab && s.current().is_some_and(|w| w.tabs.contains(visited))
+        visits.recent.get(&s.state.selected).and_then(|recent| {
+            recent
+                .iter()
+                .rev()
+                .find(|visited| {
+                    *visited != &tab && s.current().is_some_and(|w| w.tabs.contains(visited))
+                })
+                .cloned()
         })
-            .cloned()
     });
     s.content.remove(&s.key(&tab));
     s.state.tab_labels.remove(&s.key(&tab));

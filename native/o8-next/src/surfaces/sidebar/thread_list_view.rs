@@ -22,6 +22,12 @@ impl ThreadList {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.shift {
+            if self.rows.iter().any(|row| row.id.as_ref() == Some(&id)) {
+                self.choose_mode(id, true, cx);
+            }
+            return;
+        }
         if self.pick(&id, modifiers, cx) {
             return;
         }

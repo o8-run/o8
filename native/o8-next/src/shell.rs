@@ -260,13 +260,16 @@ impl Shell {
     /// Content for the thread a tab displays, independent of its stable key.
     fn thread_content(&self, id: &str) -> Option<&Content> {
         let saved = self.current()?;
-        let tab = saved.tabs.iter().find(|tab| match tab {
-            Tab::Session(original) => {
-                saved.selections.get(original).unwrap_or(original).as_str() == id
-            }
-            _ => false,
-        })?;
+        let tab = &saved.tabs[Self::tab_index(saved, &Tab::Session(id.to_owned()))?];
         self.content.get(&self.key(tab))
+    }
+    fn tab_index(saved: &Workspace, target: &Tab) -> Option<usize> {
+        saved.tabs.iter().position(|tab| match (target, tab) {
+            (Tab::Session(id), Tab::Session(original)) => {
+                saved.selections.get(original).unwrap_or(original) == id
+            }
+            _ => tab == target,
+        })
     }
     fn active(&self) -> Option<Tab> {
         self.current().and_then(|w| w.tabs.get(w.active)).cloned()
@@ -525,12 +528,7 @@ impl Shell {
             .or_else(|| tab.registration().global.then(String::new))
         {
             let saved = self.state.workspaces.entry(workspace).or_default();
-            let index = saved.tabs.iter().position(|t| match (&tab, t) {
-                (Tab::Session(id), Tab::Session(original)) => {
-                    saved.selections.get(original).unwrap_or(original) == id
-                }
-                _ => t == &tab,
-            });
+            let index = Self::tab_index(saved, &tab);
             if index.is_none() && saved.tabs.len() >= 32 {
                 toasts::show(
                     toasts::Kind::Info,

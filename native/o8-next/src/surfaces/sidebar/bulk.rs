@@ -1,5 +1,5 @@
 //! Range selection and bulk actions on thread rows, after T3 Code's inbox
-//! sidebar: Shift-click selects a range, Cmd/Ctrl-click toggles one row, and
+//! sidebar: Shift-click selects a range, Ctrl-click toggles one row, and
 //! right-clicking a picked row acts on all of them. Reimplemented; no code shared.
 use super::*;
 use super::inbox::Undo;
