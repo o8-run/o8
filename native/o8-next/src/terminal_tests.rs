@@ -320,6 +320,34 @@ fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
             .display_offset()),
         0
     );
+    // A trackpad sends movements smaller than a line. Seven 3px steps pass one
+    // 18px line; rounding each step alone never moved the scrollback.
+    for step in 0..7 {
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: point(px(100.), px(100.)),
+            delta: gpui::ScrollDelta::Pixels(point(px(0.), px(3.))),
+            touch_phase: if step == 0 {
+                gpui::TouchPhase::Started
+            } else {
+                gpui::TouchPhase::Moved
+            },
+            ..Default::default()
+        });
+    }
+    draw(&pane, cx);
+    assert_eq!(
+        pane.read_with(cx, |pane, _| pane
+            .grid
+            .lock()
+            .unwrap()
+            .term
+            .grid()
+            .display_offset()),
+        1,
+        "small trackpad steps must add up to a line of scrollback"
+    );
+    cx.simulate_keystrokes("shift-end");
+    draw(&pane, cx);
     // Full 50 MB at an explicit 2.5 MB/s, following the repository's fixed-rate
     // terminal workload pattern. Unpaced saturation remains a separate probe.
     let before = pane.read_with(cx, |pane, _| pane.grid.lock().unwrap().bytes);
