@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { findLanesTouching, findLanesTouchingPacketDiff } from '@/lib/lane/registry';
 
@@ -23,6 +24,9 @@ export async function GET(req: NextRequest) {
   const repo = url.searchParams.get('repo');
   const packetId = url.searchParams.get('packet')?.trim() || null;
   const paths = parsePathParams(url.searchParams);
+  const principal = resolveRequestPrincipalContext(req);
+  const refusal = workerPacketRefusal(principal, packetId);
+  if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
 
   try {
     if (packetId) {
@@ -36,7 +40,7 @@ export async function GET(req: NextRequest) {
         paths: result.paths,
         packetId: result.packetId,
         laneId: result.laneId,
-        lanes: result.lanes,
+        lanes: principal.role === 'worker' ? result.lanes.filter(lane => lane.packetId === principal.packetId) : result.lanes,
       }, {
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });

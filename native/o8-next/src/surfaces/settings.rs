@@ -107,6 +107,7 @@ impl Shell {
             cx.new(|cx| voice_polish::VoicePolish::new(voice_prefs::prefs_path(), window, cx));
         settings.update(cx, |s, _| s.voice_polish = Some(polish));
         self.surfaces.settings.view = Some(settings);
+        super::sidebar::navigation(self, cx);
         self.revision += 1;
         cx.notify();
     }
@@ -122,6 +123,7 @@ impl Shell {
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.surfaces.settings.view = None;
         self.surfaces.settings.subscription = None;
+        super::sidebar::navigation(self, cx);
         self.restore_focus(window, cx);
         self.tick(false, window, cx);
         self.revision += 1;

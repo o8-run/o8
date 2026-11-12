@@ -51,52 +51,64 @@ impl Peer {
                     std::thread::sleep(Duration::from_millis(2));
                     continue;
                 };
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
-                let mut header = vec![];
-                while !header.ends_with(b"\r\n\r\n") {
-                    let mut byte = [0];
-                    stream.read_exact(&mut byte).unwrap();
-                    header.push(byte[0]);
-                }
-                let header = String::from_utf8(header).unwrap();
-                let length = header
-                    .lines()
-                    .find_map(|line| {
-                        line.to_lowercase()
-                            .strip_prefix("content-length:")
-                            .and_then(|value| value.trim().parse::<usize>().ok())
-                    })
-                    .unwrap_or(0);
-                let mut body = vec![0; length];
-                stream.read_exact(&mut body).unwrap();
-                let (status, value) = if header.starts_with("GET /api/plugins/task-drafts ") {
-                    if worker_deny.load(Ordering::SeqCst) {
-                        (403, json!({"error":"account_changed_or_unavailable"}))
-                    } else {
-                        (200, worker_data.lock().unwrap().clone())
-                    }
-                } else if header.starts_with("POST /api/plugins/task-drafts/control ") {
-                    let body: Value = serde_json::from_slice(&body).unwrap();
-                    worker_posts.lock().unwrap().push(body.clone());
-                    match worker_mode.load(Ordering::SeqCst) {
-                        0 => (409, json!({"error":"fixture_control_held"})),
-                        mode => {
-                            let stop = body["action"] == "stop";
-                            let receipt = json!({"taskId":body["taskId"],"contractHash":if mode == 2 { json!("wrong") } else { body["contractHash"].clone() },
-                            "attemptId":"attempt-fixture","state":if stop { "stopped" } else { "accepted" },"stopped":stop,"completed":false});
-                            (200, json!({"ok":true,"execution":receipt}))
+                let (worker_mode, worker_deny, worker_data, worker_posts) = (
+                    worker_mode.clone(), worker_deny.clone(), worker_data.clone(), worker_posts.clone(),
+                );
+                // Accepted sockets can inherit nonblocking mode on macOS. An idle
+                // Settings connection must not stall the task request behind it.
+                std::thread::spawn(move || {
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut header = vec![];
+                    while !header.ends_with(b"\r\n\r\n") {
+                        let mut byte = [0];
+                        if stream.read_exact(&mut byte).is_err() {
+                            return;
                         }
+                        header.push(byte[0]);
                     }
-                } else {
-                    (
-                        200,
-                        json!({"ok":true,"diagnostics":{},"installed":false,"fileExists":false}),
-                    )
-                };
-                let body = value.to_string();
-                write!(stream, "HTTP/1.1 {} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", status, body.len(), body).unwrap();
+                    let header = String::from_utf8(header).unwrap();
+                    let length = header
+                        .lines()
+                        .find_map(|line| {
+                            line.to_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    let mut body = vec![0; length];
+                    if stream.read_exact(&mut body).is_err() {
+                        return;
+                    }
+                    let (status, value) = if header.starts_with("GET /api/plugins/task-drafts ") {
+                        if worker_deny.load(Ordering::SeqCst) {
+                            (403, json!({"error":"account_changed_or_unavailable"}))
+                        } else {
+                            (200, worker_data.lock().unwrap().clone())
+                        }
+                    } else if header.starts_with("POST /api/plugins/task-drafts/control ") {
+                        let body: Value = serde_json::from_slice(&body).unwrap();
+                        worker_posts.lock().unwrap().push(body.clone());
+                        match worker_mode.load(Ordering::SeqCst) {
+                            0 => (409, json!({"error":"fixture_control_held"})),
+                            mode => {
+                                let stop = body["action"] == "stop";
+                                let receipt = json!({"taskId":body["taskId"],"contractHash":if mode == 2 { json!("wrong") } else { body["contractHash"].clone() },
+                                "attemptId":"attempt-fixture","state":if stop { "stopped" } else { "accepted" },"stopped":stop,"completed":false});
+                                (200, json!({"ok":true,"execution":receipt}))
+                            }
+                        }
+                    } else {
+                        (
+                            200,
+                            json!({"ok":true,"diagnostics":{},"installed":false,"fileExists":false}),
+                        )
+                    };
+                    let body = value.to_string();
+                    let _ = write!(stream, "HTTP/1.1 {} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", status, body.len(), body);
+                });
             }
         });
         Self {
