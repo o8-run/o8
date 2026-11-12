@@ -1,7 +1,7 @@
 //! Native counterparts of src/app/globals.css. Keep appearance selection here;
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
 use std::sync::{LazyLock, Mutex, RwLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -373,6 +373,58 @@ fn glass_path() -> Option<std::path::PathBuf> {
 /// Whether All Glass sits on a plain blur instead of the system material.
 pub fn glass_vivid() -> bool {
     glass() && glass_settings().vivid
+}
+/// The interface zoom range and step, in percent. 100 is the designed size.
+pub const ZOOM_MIN: u16 = 70;
+pub const ZOOM_MAX: u16 = 200;
+pub const ZOOM_STEP: u16 = 10;
+pub const ZOOM_DEFAULT: u16 = 100;
+static LAUNCH_ZOOM: LazyLock<u16> = LazyLock::new(|| {
+    zoom_path()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| parse_zoom(&text))
+        .unwrap_or(ZOOM_DEFAULT)
+});
+static CHOSEN_ZOOM: AtomicU16 = AtomicU16::new(u16::MAX);
+/// A saved zoom, clamped to the range and rounded to a step; None when it is
+/// not a number.
+pub fn parse_zoom(text: &str) -> Option<u16> {
+    let percent = text.trim().parse::<f32>().ok().filter(|p| p.is_finite())?;
+    let steps = (percent / f32::from(ZOOM_STEP)).round();
+    Some(clamp_zoom((steps.max(0.) as u16).saturating_mul(ZOOM_STEP)))
+}
+fn clamp_zoom(percent: u16) -> u16 {
+    percent.clamp(ZOOM_MIN, ZOOM_MAX)
+}
+/// The zoom one step in or out of `percent` (`steps` may be negative),
+/// kept in range.
+pub fn step_zoom(percent: u16, steps: i32) -> u16 {
+    let next = i32::from(percent) + steps * i32::from(ZOOM_STEP);
+    clamp_zoom(next.clamp(0, i32::from(u16::MAX)) as u16)
+}
+/// The interface zoom in percent.
+pub fn zoom_percent() -> u16 {
+    match CHOSEN_ZOOM.load(Ordering::Relaxed) {
+        u16::MAX => *LAUNCH_ZOOM,
+        percent => percent,
+    }
+}
+/// The interface zoom as a scale, 1.0 at 100%.
+pub fn zoom() -> f32 {
+    f32::from(zoom_percent()) / 100.
+}
+/// Sets the interface zoom (clamped) and saves it. True when it changed.
+pub fn set_zoom_percent(percent: u16) -> bool {
+    let percent = clamp_zoom(percent);
+    if let Some(path) = zoom_path() {
+        let _ = std::fs::write(path, percent.to_string());
+    }
+    let changed = percent != zoom_percent();
+    CHOSEN_ZOOM.store(percent, Ordering::Relaxed);
+    changed
+}
+fn zoom_path() -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name("next-zoom"))
 }
 /// Changes with the appearance, for caches that keep painted colors.
 pub fn generation() -> u8 {

@@ -953,7 +953,13 @@ impl PlatformInputHandler {
 
     fn bounds_for_range(&mut self, range_utf16: Range<usize>) -> Option<Bounds<Pixels>> {
         self.cx
-            .update(|window, cx| self.handler.bounds_for_range(range_utf16, window, cx))
+            .update(|window, cx| {
+                // o8: the platform measures in unzoomed window coordinates.
+                let zoom = window.zoom();
+                self.handler
+                    .bounds_for_range(range_utf16, window, cx)
+                    .map(|bounds| bounds.map(|v| v * zoom))
+            })
             .ok()
             .flatten()
     }
@@ -969,21 +975,27 @@ impl PlatformInputHandler {
 
     pub fn selected_bounds(&mut self, window: &mut Window, cx: &mut App) -> Option<Bounds<Pixels>> {
         let selection = self.handler.selected_text_range(true, window, cx)?;
-        self.handler.bounds_for_range(
-            if selection.reversed {
-                selection.range.start..selection.range.start
-            } else {
-                selection.range.end..selection.range.end
-            },
-            window,
-            cx,
-        )
+        let zoom = window.zoom();
+        self.handler
+            .bounds_for_range(
+                if selection.reversed {
+                    selection.range.start..selection.range.start
+                } else {
+                    selection.range.end..selection.range.end
+                },
+                window,
+                cx,
+            )
+            .map(|bounds| bounds.map(|v| v * zoom))
     }
 
     #[allow(unused)]
     pub fn character_index_for_point(&mut self, point: Point<Pixels>) -> Option<usize> {
         self.cx
-            .update(|window, cx| self.handler.character_index_for_point(point, window, cx))
+            .update(|window, cx| {
+                let point = point.map(|v| v / window.zoom());
+                self.handler.character_index_for_point(point, window, cx)
+            })
             .ok()
             .flatten()
     }

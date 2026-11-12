@@ -47,7 +47,7 @@ impl Render for Shell {
                     .absolute()
                     .top_0()
                     .left_0()
-                    .w(px(rail::LIGHTS))
+                    .w(px(crate::zoom::chrome_clearance(rail::LIGHTS, window)))
                     .h(px(crate::theme::GEOMETRY.header))
                     .window_control_area(gpui::WindowControlArea::Drag),
             )
@@ -254,7 +254,12 @@ pub(super) fn open_window(
             focus: false,
             show: !offscreen,
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_min_size: Some(size(px(600.), px(400.))),
+            // Screen points, so the minimum keeps 600 by 400 layout units at the
+            // zoom the window opens with (a later zoom change keeps this floor).
+            window_min_size: Some(size(
+                px(600. * crate::theme::zoom().max(1.)),
+                px(400. * crate::theme::zoom().max(1.)),
+            )),
             // On macOS the traffic lights sit in the header band above the rail, as in
             // the desktop shell: first light centred at x=20, all three on y=20 (the
             // position is the close button's frame origin, measured from a capture).

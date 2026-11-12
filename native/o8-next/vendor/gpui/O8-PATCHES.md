@@ -61,6 +61,17 @@ Local changes:
   `native_anchor_cover` returns the visible quads the drawn frame placed above
   it; `on_drawn` runs a hook after each drawn frame, before presentation.
 
+- `src/window.rs`, `src/platform.rs`: per-window interface zoom.
+  `Window::set_zoom` multiplies the window's scale factor by the zoom and
+  divides its layout viewport by it, so layout runs in a smaller (or larger)
+  logical viewport and every primitive, glyph and image paints and rasterizes
+  at the zoomed device size. Platform input positions and pixel scroll deltas
+  are divided by it before hit testing; the window menu position, IME text
+  bounds and IME point queries are converted back to platform coordinates.
+  `Window::zoom` reads it (1.0 by default, which changes nothing).
+  `painted_quad_bounds` (test-support only) lists the last frame's quads in
+  device pixels for regression tests.
+
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit
 probe live in the parent crate.

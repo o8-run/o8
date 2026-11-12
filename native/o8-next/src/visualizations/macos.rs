@@ -339,7 +339,12 @@ pub fn track(host: &Rc<Host>, window: &mut gpui::Window) {
                 let parent: id = unsafe { msg_send![host.clip, superview] };
                 if parent == view {
                     match window.native_anchor_cover(host.key) {
-                        Some(covered) => host.cover(&covered),
+                        Some(covered) => host.cover(
+                            &covered
+                                .into_iter()
+                                .map(|part| native(part, window))
+                                .collect::<Vec<_>>(),
+                        ),
                         None => host.hide(),
                     }
                 }
@@ -467,7 +472,9 @@ impl Host {
         viewport: gpui::Bounds<gpui::Pixels>,
         window: &gpui::Window,
     ) {
-        let visible = bounds.intersect(&viewport);
+        // AppKit frames, and so `visible`, are in unzoomed window points.
+        let bounds = native(bounds, window);
+        let visible = bounds.intersect(&native(viewport, window));
         if visible.size.width <= gpui::px(0.) || visible.size.height <= gpui::px(0.) {
             self.hide();
             return;
@@ -476,7 +483,7 @@ impl Host {
         unsafe {
             let parent: id = msg_send![self.clip, superview];
             let flipped: BOOL = msg_send![parent, isFlipped];
-            let height = f64::from(f32::from(window.viewport_size().height));
+            let height = f64::from(f32::from(window.viewport_size().height) * window.zoom());
             let x = |v: gpui::Pixels| f64::from(f32::from(v));
             let top = if flipped == YES {
                 x(visible.top())
@@ -571,4 +578,13 @@ impl Drop for Host {
             let _: () = msg_send![self.delegate, release];
         }
     }
+}
+/// Window bounds in AppKit's unzoomed window points. Also compiled by the
+/// visualization check, so it does not reach into the app's zoom module.
+fn native(
+    bounds: gpui::Bounds<gpui::Pixels>,
+    window: &gpui::Window,
+) -> gpui::Bounds<gpui::Pixels> {
+    let zoom = window.zoom();
+    bounds.map(|v| v * zoom)
 }

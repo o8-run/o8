@@ -21,7 +21,7 @@ macro_rules! tabs {
     };
 }
 const TAB_JUMPS: [Builtin; 9] = tabs!("1", "2", "3", "4", "5", "6", "7", "8", "9");
-const CORE: [Builtin; 9] = [
+const CORE: [Builtin; 12] = [
     Builtin {
         id: "chat.new",
         label: "New chat",
@@ -66,6 +66,22 @@ const CORE: [Builtin; 9] = [
         id: "tab.next",
         label: "Next tab",
         default: "cmd-alt-right",
+    },
+    // Cmd++ (Shift+=) zooms in too.
+    Builtin {
+        id: "view.zoom_in",
+        label: "Zoom in",
+        default: "secondary-=",
+    },
+    Builtin {
+        id: "view.zoom_out",
+        label: "Zoom out",
+        default: "secondary--",
+    },
+    Builtin {
+        id: "view.zoom_reset",
+        label: "Reset zoom",
+        default: "secondary-0",
     },
 ];
 pub(crate) fn builtins() -> impl Iterator<Item = &'static Builtin> {
