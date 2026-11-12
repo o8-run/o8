@@ -97,6 +97,7 @@ fn render(
                 .flex_shrink_0()
                 .items_center()
                 .gap(px(4.))
+                .debug_selector(|| "thread-header-controls".into())
                 .mt(px(1.3))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {

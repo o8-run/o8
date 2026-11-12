@@ -94,6 +94,13 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         return;
     }
     side::cancel_focus(s);
+    // Hidden tools must leave every retained layout, including the global empty scope.
+    let saved = &mut s.state.right_panel;
+    for tabs in saved.utility_tabs.values_mut().chain(saved.secondary_tabs.values_mut()) {
+        tabs.retain(|value| Tool::find(value).is_some_and(Tool::utility));
+    }
+    saved.selected_tools.retain(|_, value| Tool::find(value).is_some());
+    saved.lower_tools.retain(|_, value| Tool::find(value).is_some());
     let saved = s.state.right_panel.clone();
     let p = s.features.get::<Panel>();
     p.scope = Some(scope.clone());
