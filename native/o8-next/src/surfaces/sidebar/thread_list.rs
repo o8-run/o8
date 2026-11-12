@@ -26,6 +26,7 @@ pub enum Event {
     Loaded(Vec<Session>),
     Refreshed(Vec<Session>, Option<Ledger>),
     Selected(String),
+    OpenInTab(String),
     Error(String),
     Workspace(Option<String>, Ledger),
     /// A `ui-command` frame for the main window. Every socket receives the
@@ -1145,6 +1146,9 @@ impl ThreadList {
         cx.notify();
     }
     pub fn choose(&mut self, id: String, cx: &mut Context<Self>) {
+        self.choose_mode(id, false, cx);
+    }
+    fn choose_mode(&mut self, id: String, new_tab: bool, cx: &mut Context<Self>) {
         if !self.rows.iter().any(|r| r.id.as_ref() == Some(&id)) {
             return;
         }
@@ -1160,7 +1164,11 @@ impl ThreadList {
         }
         self.clear_woken(&id, cx);
         self.rebuild();
-        cx.emit(Event::Selected(id));
+        cx.emit(if new_tab {
+            Event::OpenInTab(id)
+        } else {
+            Event::Selected(id)
+        });
         cx.notify();
     }
     fn submit(&mut self, cx: &mut Context<Self>) {

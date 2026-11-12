@@ -418,6 +418,12 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     }
                     None => shell.open_thread(id.clone(), window, cx),
                 },
+                ThreadEvent::OpenInTab(id) => match shell.unreachable_machine(id) {
+                    Some(machine) => {
+                        toasts::info(format!("{machine} can't be reached right now."), cx);
+                    }
+                    None => shell.open_thread_in_tab(id.clone(), window, cx),
+                },
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
                 ThreadEvent::Scope(project, keys) => {
                     if keys.is_empty() {
@@ -570,7 +576,7 @@ impl Shell {
     /// marker named, or says so when this machine does not list it.
     pub(crate) fn open_thread_by_id(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.sessions.iter().any(|s| s.id == id) {
-            self.open_thread(id, window, cx);
+            self.open_thread_in_tab(id, window, cx);
         } else {
             toasts::show(
                 toasts::Kind::Info,
@@ -582,6 +588,18 @@ impl Shell {
         }
     }
     pub(super) fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_thread_mode(id, true, window, cx);
+    }
+    fn open_thread_in_tab(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_thread_mode(id, false, window, cx);
+    }
+    fn open_thread_mode(
+        &mut self,
+        id: String,
+        replace: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // A sidebar id names one computer's thread; a link from inside a far
         // thread names a thread in that thread's own workspace.
         let selected = self.state.selected.clone();
@@ -604,11 +622,18 @@ impl Shell {
         if self.state.selected.as_ref() != Some(&workspace) {
             self.switch(workspace, window, cx);
         }
-        if let Some(Tab::Session(original)) = self.active() {
+        self.capture(window, cx);
+        let already_open = self
+            .current()
+            .is_some_and(|saved| Self::tab_index(saved, &Tab::Session(id.clone())).is_some());
+        if replace
+            && !already_open
+            && let Some(Tab::Session(original)) = self.active()
+        {
             let key = self.key(&Tab::Session(original.clone()));
             let sessions = self.workspace_sessions();
             if let Some(Content::Session(surface)) = self.content.get(&key) {
-                surface.update(cx, |s, cx| s.shell_select(sessions, id.clone(), cx));
+                surface.update(cx, |surface, cx| surface.shell_select(sessions, id.clone(), cx));
                 self.state
                     .workspaces
                     .get_mut(self.state.selected.as_ref().unwrap())
