@@ -31,18 +31,44 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable:
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: readiness }));
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => true) }));
+// Keep dashboard discovery and quota polling inside the fixture boundary.
+// Inventory still comes from the real owned-session store, including process
+// observation; unrelated installed providers must not write lifecycle state.
+vi.mock('@/lib/runtime/inventory', () => ({
+  invalidateRuntimeInventoryCache: vi.fn(),
+  getRuntimeInventorySnapshot: vi.fn(async (options: { fresh?: boolean } = {}) => {
+    const { getOwnedCodexFleetAdditions } = await import('@/lib/codex/owned');
+    const { agents, squads, events, artifacts } = await getOwnedCodexFleetAdditions(options);
+    return { agents, squads, events, artifacts, generatedAt: new Date().toISOString(),
+      meta: { mode: 'live', sourceLabel: 'Isolated test', mirrorMode: 'current-session-first', gatewayFreshness: 'fresh' } };
+  }),
+}));
+vi.mock('@/lib/orchestrator/capacity-snapshots', () => ({ capturePacketCapacitySnapshot: vi.fn(async () => {}) }));
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn(), triggerScanIfStale: vi.fn(), startChangePolling: vi.fn(), stopChangePolling: vi.fn() }));
 vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] }, reasoningEfforts: { 'gpt-5.6-terra': ['low'] } }) }));
 const sourceCheckout = process.cwd();
 const sourceHead = execFileSync('git', ['-C', sourceCheckout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-review-author-')));
 const data = join(root, 'data'); const repo = join(data, 'repo'); const bin = join(root, 'codex');
+const bundledCliDir = join(root, 'cli');
+// Build the real CLI once, as the packaged launch path does. Every author turn
+// still copies and verifies it; repeated source builds must not serialize
+// inside the runtime artifact lock while this handoff test is running.
+execFileSync(process.execPath, [join(sourceCheckout, 'cli/esbuild.config.mjs'),
+  '--worker-output', join(bundledCliDir, 'bin/o8.mjs')], {
+  cwd: sourceCheckout, stdio: 'pipe', timeout: 30000, env: { PATH: process.env.PATH, NODE_ENV: 'test' },
+});
 mkdirSync(join(data, 'chat-history'), { recursive: true }); mkdirSync(repo);
+// Telemetry resolves rollout paths independently of runtime inventory. Keep
+// that lookup out of the developer's installed provider history as well.
+mkdirSync(join(root, 'codex-home'));
 execFileSync('git', ['init', '-q', '-b', 'main', repo]);
 execFileSync('git', ['-C', repo, '-c', 'user.name=o8 test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture']);
 for (const [key, value] of Object.entries({ O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,
   CORTEX_IDE_DB_PATH: join(data, 'cortex-ide.db'), CORTEX_IDE_OWNED_CODEX_ROOT: join(data, 'owned-codex'),
-  O8_CODEX_BIN: bin, O8_CRASH_SURVIVABLE_WORKERS: '0', O8_WORKER_SANDBOX: '0' })) vi.stubEnv(key, value);
+  O8_CODEX_BIN: bin, O8_CRASH_SURVIVABLE_WORKERS: '0', O8_WORKER_SANDBOX: '0',
+  O8_PACKAGED_APP: '0', O8_BUNDLED_MCP_DIR: bundledCliDir,
+  CODEX_HOME: join(root, 'codex-home') })) vi.stubEnv(key, value);
 writeFileSync(bin, `#!/usr/bin/env node
 if (process.argv.includes('--version')) { console.log('codex-cli 1.0.0'); process.exit(0); }
 if (!process.argv.includes('exec')) process.exit(0);
@@ -118,6 +144,12 @@ const { createLane, updateLane, listLanes } = await import('@/lib/lane/registry'
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const control = await import('@/lib/orchestrator/control-plane');
 const { getSqlite } = await import('@/lib/db');
+// Load the real review modules before timing handoff execution, rather than
+// charging first-use Vite transformation to the first packet's runtime bound.
+const autoReview = await import('@/app/api/review/auto-review/route');
+const { drainReviewQueue } = await import('@/lib/lane/auto-review');
+const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+const { transitionPostCompletionLaneToReviewing } = await import('@/lib/supervisor/post-completion-packet');
 let packetId = 'pkt-review-author';
 const head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 let reviewSequence = 0;
@@ -347,6 +379,8 @@ it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-move
   const snapshot = JSON.parse((await handlers.handleCorrectWorkers({})).content[0].text);
   expect(snapshot.workers).toEqual(expect.arrayContaining([expect.objectContaining(target)]));
   const args = { targets: [target], reviewSource: { packetId, approvalId: review.auditApprovalId, reviewedHeadSha: packetHead } };
+  expect(execFileSync('git', ['-C', launched.worktreePath, 'status', '--porcelain'], { encoding: 'utf8' }).trim(),
+    'The author checkout must be clean before testing the intentional dirty-code refusal.').toBe('');
   const dirtyPath = join(launched.worktreePath, 'unreviewed.txt');
   writeFileSync(dirtyPath, 'unreviewed');
   const dirty = await handlers.handleCorrectWorkers(args);
@@ -389,17 +423,14 @@ it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-move
     // Use the same production entry as the supervisor's completion callback.
     // Retire earlier fixture reviews so this drain only consumes this packet.
     getSqlite().prepare("UPDATE review_queue SET status = 'completed' WHERE lane_id != ?").run(launched.laneId);
-    const autoReview = await import('@/app/api/review/auto-review/route');
     const enqueue = () => autoReview.POST(new NextRequest('http://localhost/api/review/auto-review', {
       method: 'POST', headers: { host: 'localhost', 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'enqueue', laneId: launched.laneId }),
     }));
     const correctedHead = execFileSync('git', ['-C', launched.worktreePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     if (outcome !== 'interrupted') expect(correctedHead).not.toBe(packetHead);
-    const { transitionPostCompletionLaneToReviewing } = await import('@/lib/supervisor/post-completion-packet');
     transitionPostCompletionLaneToReviewing(launched.laneId, packetId);
     if (outcome !== 'interrupted') {
-      const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
       await capturePacketCompletionContext(packetId, target.surfaceId);
     }
     const moveHead = () => execFileSync('git', ['-C', launched.worktreePath, '-c', 'user.name=o8 test',
@@ -430,7 +461,6 @@ it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-move
     } : outcome === 'review-artifact' ? () => writeFileSync(join(launched.worktreePath, 'test-output.txt'), 'reviewer test output')
       : outcome === 'provider-retry' ? () => { throw new Error('Fixture reviewer temporarily unavailable'); } : null;
     reviewer.approve = outcome !== 'rejected';
-    const { drainReviewQueue } = await import('@/lib/lane/auto-review');
     await drainReviewQueue();
     if (outcome === 'provider-retry') for (let round = 1; round < 5; round++) await drainReviewQueue();
     reviewer.beforeVerdict = null;
