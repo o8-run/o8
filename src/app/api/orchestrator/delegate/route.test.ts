@@ -250,3 +250,20 @@ describe('orchestrator Fast delegation entry', () => {
     })]);
   });
 });
+it('refuses a typo and applies the saved default through the delegate API', async () => {
+  const { repoPath, state } = fixture();
+  vi.stubEnv('O8_DATA_DIR', state);
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+  const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+  await updateOperatorDefaults({ workerRuntimes: ['codex', 'claude-code'], defaultDispatchRuntime: 'claude-code', subscriptionProfile: 'both' });
+  const { fastDelegationCapability } = await import('@/lib/orchestrator/fast-delegation-auth');
+  const { POST } = await import('./route');
+  const base = { prompt: 'Read fixture', repoPath, checkoutMode: 'shared', parentThreadId: 'thoughts-fast-route', fastCapability: fastDelegationCapability(repoPath, 'thoughts-fast-route'), assignedPaths: ['README.md'], readOnly: true };
+  const send = (runtime?: string) => POST(new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST', body: JSON.stringify({ ...base, runtime, clientMutationId: runtime ?? 'saved-default' }) }));
+  const invalid = await send('typo-runtime');
+  expect(invalid.status).toBe(400);
+  expect(JSON.stringify(await invalid.json())).toContain('typo-runtime');
+  const accepted = await send();
+  expect(accepted.status).toBe(200);
+  expect((await accepted.json()).workerRouting.selectedRuntime).toBe('claude-code');
+});

@@ -1,3 +1,4 @@
+import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { pushLfsObjects } from '@/lib/git/lfs-push';
 import { withWorkAdmission } from '@/lib/app-update/work-launch-admission';
@@ -48,7 +49,7 @@ import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import { isPacketMergeHeld, MERGE_HOLD_POLICY_RULE_ID } from '@/lib/lane/merge-hold';
 import { assertSessionMergeAllowed } from '@/lib/orchestrator/session-merge-restriction';
-import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { resolvePortInfo } from '@/lib/panel/api-port';
@@ -141,7 +142,7 @@ async function dispatchUnlocked(
     case 'open_lane': {
       try { assertNotKnowledgeSource(command.repoPath); } catch (error) { return { ok: false, laneId: '', note: error instanceof Error ? error.message : 'Knowledge sources are read-only.' }; }
       const workerRouting = resolveWorkerRouting({
-        requestedRuntime: command.runtime,
+        requestedRuntime: validateRequestedRuntime(command.runtime, resolveDefaultDispatchRuntimeSync()),
         source: 'lane-open',
       });
       const existing = (await import('@/lib/lane/registry')).findLaneByRepoAndBranch(

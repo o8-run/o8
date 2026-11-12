@@ -14,7 +14,6 @@ import { normalizeLaneBinding } from '@/lib/orchestrator/lane-binding';
 import { normalizeTerminalStatusEvidenceField } from '@/lib/terminal-status/normalize';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
 import {
-  normalizeRequestedRuntime,
   normalizeWorkerIntent,
   normalizeWorkerProvider,
   resolveWorkerRouting,
@@ -284,7 +283,7 @@ function normalizeComparisonModels(value: unknown): string[] | undefined {
   return models.length > 0 ? models : undefined;
 }
 
-function normalizeWorkerRouting(value: unknown, runtime: OrchestratorRuntime, workerIntent: unknown): WorkerRouting {
+function normalizeWorkerRouting(value: unknown, runtime: unknown, workerIntent: unknown): WorkerRouting {
   if (!value || typeof value !== 'object') {
     return resolveWorkerRouting({
       workerIntent,
@@ -299,7 +298,7 @@ function normalizeWorkerRouting(value: unknown, runtime: OrchestratorRuntime, wo
   return resolveWorkerRouting({
     workerIntent: routing.workerIntent ?? workerIntent,
     requestedProvider: normalizeWorkerProvider(routing.requestedProvider),
-    requestedRuntime: normalizeRequestedRuntime(routing.requestedRuntime) ?? runtime,
+    requestedRuntime: routing.runtimeSubstitution?.requestedRuntime ?? routing.requestedRuntime ?? runtime,
     requestedModel: routing.requestedModel,
     // Carry requestedEffort through the round-trip so selectedEffort survives a
     // reload before launch (normalize re-derives via resolveWorkerRouting).
@@ -317,7 +316,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
   const branchTarget = typeof packet.branchTarget === 'string' ? packet.branchTarget.trim() : '';
   const runtime = normalizeRuntime(packet.runtime);
   const workerIntent = normalizeWorkerIntent(packet.workerIntent);
-  const workerRouting = normalizeWorkerRouting(packet.workerRouting, runtime, workerIntent);
+  const workerRouting = normalizeWorkerRouting(packet.workerRouting, packet.runtime ?? runtime, workerIntent);
   return {
     id: typeof packet.id === 'string' && packet.id.trim() ? packet.id.trim() : `pkt-${Date.now()}-${index + 1}`,
     referenceLabel,

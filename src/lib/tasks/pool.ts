@@ -11,6 +11,7 @@ import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 
 import { listLanes } from '@/lib/lane/registry';
+import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { Lane, LaneStatus } from '@/lib/lane/types';
 import { currentMissionState } from '@/lib/orchestrator/operator-mission-service/shared';
 import type {
@@ -21,6 +22,26 @@ import type {
   WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext, ProjectNotFoundError, type ProjectContext } from '@/lib/projects/context';
+
+/** Project the durable fallback receipt, keeping the original requested route. */
+function taskWorkerRouting(packet: OrchestratorPacket, lane: Lane | null): WorkerRouting | null {
+  const routing = packet.workerRouting;
+  if (!routing || !lane || routing.selectedRuntime === lane.runtime) return routing ?? null;
+  const fallback = getSqlite().prepare(`SELECT payload_json FROM lane_events WHERE lane_id = ?
+    AND verb = 'worker_fallback' AND json_extract(payload_json, '$.status') = 'redispatched'
+    AND json_extract(payload_json, '$.toRuntime') = ? ORDER BY rowid DESC LIMIT 1`)
+    .get(lane.id, lane.runtime) as { payload_json: string } | undefined;
+  if (!fallback) return routing;
+  const receipt = JSON.parse(fallback.payload_json) as { fromRuntime?: string; suggestedModel?: string };
+  return {
+    ...routing,
+    selectedRuntime: lane.runtime,
+    selectedProvider: getRuntimeCapability(lane.runtime).workerProvider,
+    selectedModel: receipt.suggestedModel ?? null,
+    selectedEffort: null,
+    reason: `Worker quota fallback from ${receipt.fromRuntime ?? routing.selectedRuntime} to ${lane.runtime}.`,
+  };
+}
 
 export type TaskPoolGroup = 'ready' | 'running' | 'review' | 'blocked' | 'done';
 
@@ -81,6 +102,7 @@ export interface TaskPoolTask {
   runtime: OrchestratorRuntime | Lane['runtime'];
   workerIntent: WorkerIntent | null;
   workerRouting: WorkerRouting | null;
+  runtimeSubstitution?: string | null;
   branch: string | null;
   baseBranch: string | null;
   repoPath: string | null;
@@ -309,6 +331,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
     const group = chooseGroup(packet, lane, execution ? remoteJob : undefined);
     if (!options.includeDone && group === 'done') continue;
 
+    const routing = taskWorkerRouting(packet, lane);
     tasks.push({
       id: packet.id,
       packetId: packet.id,
@@ -319,7 +342,9 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       status: lane?.status ?? packet.status,
       runtime: lane?.runtime ?? packet.runtime,
       workerIntent: packet.workerIntent ?? null,
-      workerRouting: packet.workerRouting ?? null,
+      workerRouting: routing,
+      runtimeSubstitution: routing?.runtimeSubstitution?.reason ?? (routing && ((routing.requestedRuntime && routing.requestedRuntime !== routing.selectedRuntime)
+        || packet.workerRouting?.selectedRuntime !== routing.selectedRuntime) ? routing.reason : null),
       branch: lane?.branch ?? packet.branchTarget ?? null,
       baseBranch: lane?.baseBranch ?? null,
       repoPath,
@@ -368,6 +393,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       runtime: lane.runtime,
       workerIntent: null,
       workerRouting: null,
+      runtimeSubstitution: null,
       branch: lane.branch,
       baseBranch: lane.baseBranch,
       repoPath,

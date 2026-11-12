@@ -68,7 +68,26 @@ export function normalizeWorkerProvider(value: unknown): WorkerProvider | null {
 }
 
 export function normalizeRequestedRuntime(value: unknown): OrchestratorRuntime | null {
-  return isOrchestratorRuntime(value) ? value : null;
+  const runtime = value === 'claude' ? 'claude-code' : value;
+  return isOrchestratorRuntime(runtime) ? runtime : null;
+}
+
+function runtimeText(value: unknown): string { return typeof value === 'string' ? value : `<${typeof value}>`; }
+
+export class RuntimeSelectionError extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
+}
+
+/** All dispatch entry points validate before choosing a runtime. */
+export function validateRequestedRuntime(value: unknown, defaultRuntime?: unknown): OrchestratorRuntime | null {
+  if (value == null || value === '') value = defaultRuntime;
+  if (value == null || value === '') return null;
+  const runtime = normalizeRequestedRuntime(value);
+  if (!runtime) throw new RuntimeSelectionError(400, `Unknown requested runtime: ${runtimeText(value)}.`);
+  if (runtime !== 'cloud' && !listDispatchableRuntimes({ includeExperimental: true }).includes(runtime)) {
+    throw new RuntimeSelectionError(409, `Requested runtime ${runtime} is not dispatchable.`);
+  }
+  return runtime;
 }
 
 function normalizeModel(value: unknown): string | null {
@@ -160,20 +179,14 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
   const workerIntent = normalizeWorkerIntent(input.workerIntent);
   const requestedProvider = normalizeWorkerProvider(input.requestedProvider);
   const requestedRuntime = normalizeRequestedRuntime(input.requestedRuntime);
+  const substituted = input.requestedRuntime != null && input.requestedRuntime !== ''
+    && (!requestedRuntime || (requestedRuntime !== 'cloud' && !listDispatchableRuntimes({ includeExperimental: true }).includes(requestedRuntime)));
   const requestedModel = normalizeModel(input.requestedModel);
   const requestedEffort = normalizeEffort(input.requestedEffort);
 
-  // Preserve explicit remote placement even where dispatch is unsupported; a refusal must never run locally.
-  // Anything else falls back to Codex. An explicit operator default is resolved
-  // by the SERVER entry points (create-mission / spawn-prompt routes,
-  // parseMissionRuntime) and arrives here as requestedRuntime — this module is
-  // client-bundled via the dashboard, so it must never require the server-only
-  // operator defaults itself (broke the 0.1.553 next build).
-  const dispatchable = listDispatchableRuntimes({ includeExperimental: true });
-  const selectedRuntime = requestedRuntime && (dispatchable.includes(requestedRuntime)
-    || requestedRuntime === 'cloud')
-    ? requestedRuntime
-    : PRODUCTION_AGENT_RUNTIME;
+  // Admission validates strictly. Saved-state readers retain a visible
+  // substitution so one retired runtime cannot abort the whole pass.
+  const selectedRuntime = substituted ? PRODUCTION_AGENT_RUNTIME : requestedRuntime ?? PRODUCTION_AGENT_RUNTIME;
   const selectedProvider = providerForRuntime(selectedRuntime);
 
   // Every upstream model source (explicit hint, stored dispatch default,
@@ -194,6 +207,7 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
   const modelDisposition = requestedModel
     ? modelTargetsSelected ? 'requested' : 'rejected-incompatible'
     : 'runtime-default';
+  const substitutionReason = substituted ? `Saved runtime ${runtimeText(input.requestedRuntime)} is unavailable; substituted ${selectedRuntime}.` : null;
   const resolvedReason = routingReason({
     requestedModel,
     modelTargetsSelected: Boolean(modelTargetsSelected),
@@ -205,6 +219,7 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
 
   return {
     workerIntent,
+    runtimeSubstitution: substitutionReason ? { requestedRuntime: runtimeText(input.requestedRuntime), reason: substitutionReason } : undefined,
     requestedProvider,
     requestedRuntime,
     requestedModel,
@@ -216,7 +231,7 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
     selectedEffort,
     enforcement: PRODUCTION_AGENT_ENFORCEMENT,
     confidence: input.confidence ?? routingConfidence(workerIntent),
-    reason: modelDisposition === 'rejected-incompatible' ? resolvedReason : input.reason ?? resolvedReason,
+    reason: substitutionReason ?? (modelDisposition === 'rejected-incompatible' ? resolvedReason : input.reason ?? resolvedReason),
     decidedAt: new Date().toISOString(),
   };
 }

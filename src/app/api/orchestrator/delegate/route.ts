@@ -1,3 +1,4 @@
+import { validateRequestedRuntime } from '@/lib/agents/routing';
 import { delegationInstance, withDelegationInstance } from '@/lib/orchestrator/delegation-instance';
 import { findPrRepairOwner, PrRepairOwnerError, repairPacketStillOwned, samePrRepairRepo } from '@/lib/orchestrator/pr-repair-owner';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
@@ -449,6 +450,8 @@ export function POST(request: NextRequest) {
 
 async function postDelegate(request: NextRequest) {
   const body = await request.clone().json().catch(() => null) as Record<string, unknown> | null;
+  try { validateRequestedRuntime(body?.runtime); }
+  catch (error) { return NextResponse.json({ ok: false, code: 'invalid_runtime', error: (error as Error).message }, { status: 400 }); }
   let instance;
   try { instance = delegationInstance(body ?? {}); } catch (error) {
     return NextResponse.json({ ok: false, code: 'invalid_instance', error: error instanceof Error ? error.message : 'Invalid provider instance.' }, { status: 400 });

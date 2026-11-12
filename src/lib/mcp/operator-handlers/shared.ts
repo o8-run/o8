@@ -1,13 +1,11 @@
+import { RuntimeSelectionError, validateRequestedRuntime } from '@/lib/agents/routing';
+import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { apiError, McpInputError, O8ApiError, safeErrorText, unreachableApiError } from '@/lib/mcp/api-error';
 export { McpInputError } from '@/lib/mcp/api-error';
 export { parseDirectivesApplied, parseDirectivesViolated } from '@/lib/orchestrator/review-finding-input';
 import { parseReviewFindings as readReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import {
-  formatDispatchableRuntimeChoices,
-  isDispatchableRuntime,
-} from '@/lib/orchestrator/runtime-capabilities';
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
   pollCorrelatedMcpMutation,
@@ -253,7 +251,7 @@ export function jsonResult(data: unknown, isError = false): McpToolResult {
 }
 
 export function errorText(error: unknown) {
-  return safeErrorText(error);
+  return error instanceof RuntimeSelectionError ? error.message : safeErrorText(error);
 }
 
 export function requiredString(args: Record<string, unknown>, key: string) {
@@ -270,17 +268,9 @@ export function optionalString(args: Record<string, unknown>, key: string) {
 }
 
 export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
-  if (value === undefined || value === null || value === '') {
-    // Preserve the effective operator default as a requested-routing hint.
-    try {
-      const { resolveDefaultDispatchRuntimeSync } = require('@/lib/operator/defaults') as typeof import('@/lib/operator/defaults');
-      return resolveDefaultDispatchRuntimeSync();
-    } catch {
-      return 'codex';
-    }
-  }
-  if (isDispatchableRuntime(value)) return value;
-  throw new McpInputError(`runtime must be one of ${formatDispatchableRuntimeChoices()}`);
+  try {
+    return validateRequestedRuntime(value, resolveDefaultDispatchRuntimeSync())!;
+  } catch (error) { throw new McpInputError((error as Error).message); }
 }
 
 export function parseIssueList(value: unknown) {
