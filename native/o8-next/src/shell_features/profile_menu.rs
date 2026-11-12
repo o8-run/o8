@@ -482,7 +482,30 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Shell>,
     ) {
-        if crate::theme::set_appearance(mode) {
+        // Settings tunes All Glass the same way. A new backdrop kind applies
+        // the material again; a veil change only repaints.
+        let glass = crate::theme::glass_settings();
+        let tuned = if let Some(kind) = mode.strip_prefix("glass-backdrop:") {
+            Some(crate::theme::Glass {
+                vivid: kind == "vivid",
+                ..glass
+            })
+        } else {
+            mode.strip_prefix("glass-veil:")
+                .and_then(|veil| veil.parse::<f32>().ok())
+                .map(|veil| crate::theme::Glass { veil, ..glass })
+        };
+        let changed = match tuned {
+            Some(tuned) => {
+                let backdrop = crate::theme::set_glass(tuned);
+                if !backdrop {
+                    window.refresh();
+                }
+                backdrop
+            }
+            None => crate::theme::set_appearance(mode),
+        };
+        if changed {
             self.system_glass = crate::shell::material::switch(window, self.offscreen);
             window.refresh();
         }
