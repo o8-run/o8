@@ -217,10 +217,10 @@ impl Pane {
     /// A wheel or trackpad movement over the terminal.
     fn wheel(&mut self, event: &gpui::ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
         // A part-line carry belongs to one trackpad gesture. A mouse wheel
-        // reports whole lines, so one left over must not eat its first step.
-        if matches!(event.touch_phase, gpui::TouchPhase::Started)
-            || matches!(event.delta, gpui::ScrollDelta::Lines(_))
-        {
+        // click is a whole line or more, so a carry left over must not eat
+        // it. Part-line wheel steps (an accelerated wheel) still add up.
+        let click = matches!(event.delta, gpui::ScrollDelta::Lines(lines) if lines.y.abs() >= 1.);
+        if matches!(event.touch_phase, gpui::TouchPhase::Started) || click {
             self.wheel_carry = 0.;
         }
         let delta = f32::from(event.delta.pixel_delta(px(CELL_HEIGHT)).y);
