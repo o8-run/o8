@@ -44,10 +44,8 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
 
 
-  '/api/orchestrator/merge': seek('operator merge mutation'),
 
 
-  '/api/orchestrator/reload': seek('operator reload'),
 
 
 
@@ -79,9 +77,7 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
 
 
-  '/api/orchestrator/lead': seek('lead session control'),
 
-  '/api/orchestrator/merge': seek('operator merge mutation'),
 
 
 
