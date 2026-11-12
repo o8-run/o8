@@ -8439,9 +8439,10 @@ pub fn run() {
     // The crash reporter must exit through minidump initialization above first.
     // Real full-app launches claim the same per-user lock as voice-only mode,
     // before reaping processes, touching server metadata or installing hotkeys.
+    // Debug builds skip it: they run beside the installed app during
+    // development, and would otherwise exit after the handover wait.
     #[cfg(target_os = "macos")]
-    let _hotkey_owner = native_test_instance
-        .is_none()
+    let _hotkey_owner = (native_test_instance.is_none() && !cfg!(debug_assertions))
         .then(|| voice_only::claim_hotkey_or_exit(HOTKEY_HANDOVER_WAIT));
 
     let preship_gate = native_test_instance.is_some();
