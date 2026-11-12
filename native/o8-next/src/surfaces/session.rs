@@ -448,8 +448,7 @@ impl Client {
             return Err("Server returned history for a different session".into());
         }
         if !key.starts_with("llm-chat:") && before.is_none() {
-            let (history, normalized_bytes) =
-                self.worker_history(history.clone()).unwrap_or((history, 0));
+            let (history, normalized_bytes) = self.worker_history(history)?;
             return Ok((history, bytes + normalized_bytes));
         }
         Ok((history, bytes))

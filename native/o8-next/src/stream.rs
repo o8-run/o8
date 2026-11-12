@@ -22,6 +22,7 @@ pub struct Transcript {
     pub seq: u64,
     pub page: Option<crate::model::Page>,
     backfilled: bool,
+    worker_lookup: std::collections::HashMap<String, usize>,
     boot: Option<String>,
     /// The in-flight reply built from orchestrator events, shown until saved
     /// history carries that turn's work.
@@ -207,6 +208,7 @@ impl Transcript {
             seq: 0,
             page: history.page,
             backfilled: false,
+            worker_lookup: Default::default(),
             boot: None,
             live: None,
             shown: vec![],
@@ -240,7 +242,12 @@ impl Transcript {
             retained.retain(|entry| !next.iter().any(|current| current.id == entry.id));
             retained.extend(next);
             next = retained;
-        } else if self.key.starts_with("llm-chat:") && !self.backfilled && next.len() > 200 {
+        } else if !self.backfilled
+            && next.len() > 200
+            && !next
+                .last()
+                .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
+        {
             next.drain(..next.len() - 200);
         }
         if next == self.entries {
@@ -248,7 +255,76 @@ impl Transcript {
         }
         self.rows = self.render(&next);
         self.entries = next;
+        self.index_worker_entries();
         true
+    }
+    fn index_worker_entries(&mut self) {
+        self.worker_lookup.clear();
+        if self
+            .entries
+            .last()
+            .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
+        {
+            self.worker_lookup.extend(
+                self.entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| !e.extra.contains_key("nativeWorkerReadback"))
+                    .map(|(i, e)| (e.id.clone(), i)),
+            );
+        }
+    }
+    fn worker_entries(&mut self, mut incoming: Vec<Entry>, replace: bool, was_busy: bool) -> bool {
+        let marker = incoming.pop().unwrap();
+        let mut next = if replace {
+            self.worker_lookup.clear();
+            vec![]
+        } else {
+            std::mem::take(&mut self.entries)
+        };
+        if next
+            .last()
+            .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
+        {
+            next.pop();
+        }
+        let mut changed = replace || was_busy != self.context_busy;
+        let time = |e: &Entry| {
+            e.extra
+                .get("timestamp")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        };
+        for entry in incoming {
+            if let Some(&index) = self.worker_lookup.get(&entry.id) {
+                if next[index] != entry {
+                    next[index] = entry;
+                    changed = true;
+                }
+            } else {
+                let at = if next.last().is_none_or(|last| time(last) <= time(&entry)) {
+                    next.len()
+                } else {
+                    next.partition_point(|old| time(old) <= time(&entry))
+                };
+                if at < next.len() {
+                    for index in self.worker_lookup.values_mut() {
+                        if *index >= at {
+                            *index += 1;
+                        }
+                    }
+                }
+                self.worker_lookup.insert(entry.id.clone(), at);
+                next.insert(at, entry);
+                changed = true;
+            }
+        }
+        next.push(marker);
+        if changed {
+            self.rows = self.render(&next);
+        }
+        self.entries = next;
+        changed
     }
     /// Rows for `entries` with the live reply over its saved placeholder; a saved
     /// reply with text or tools replaces the live one.
@@ -678,6 +754,7 @@ impl Transcript {
         self.backfilled = true;
         self.rows = self.render(&next);
         self.entries = next;
+        self.index_worker_entries();
         true
     }
     fn history(&mut self, payload: &Value) -> bool {
@@ -687,6 +764,7 @@ impl Transcript {
         let Ok(entries) = serde_json::from_value::<Vec<Entry>>(payload["entries"].clone()) else {
             return false;
         };
+        let was_busy = self.context_busy;
         if let Some(active) = entries
             .last()
             .and_then(|e| e.extra.get("nativeWorkerActive"))
@@ -701,33 +779,7 @@ impl Transcript {
             .last()
             .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
         {
-            let mut next = if payload["replace"] == true {
-                vec![]
-            } else {
-                self.entries.clone()
-            };
-            next.retain(|e| !e.extra.contains_key("nativeWorkerReadback"));
-            for entry in entries {
-                if let Some(old) = next.iter_mut().find(|e| e.id == entry.id) {
-                    *old = entry;
-                } else {
-                    next.push(entry);
-                }
-            }
-            let marker = next.pop().unwrap();
-            next.sort_by_key(|e| {
-                e.extra
-                    .get("timestamp")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0)
-            });
-            next.push(marker);
-            if next == self.entries {
-                return false;
-            }
-            self.rows = self.render(&next);
-            self.entries = next;
-            return true;
+            return self.worker_entries(entries, payload["replace"] == true, was_busy);
         }
         let replace = payload["replace"].as_bool().unwrap_or(false);
         let overlaps = entries

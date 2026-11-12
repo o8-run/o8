@@ -242,46 +242,68 @@ pub(crate) fn subscribe_history(client: Client, history: &crate::model::History)
     let cancel = Arc::new(Cancel::default());
     let stopped = cancel.clone();
     thread::spawn(move || {
-        let mut reconnecting = false;
-        while !stopped.is_stopped() && !state.done {
-            match state.poll(&client) {
-                Ok(entries) => {
-                    if reconnecting {
-                        if !emit(&sender, &stopped, &client, Incoming::Status("")) {
+        // Keep the session socket after completion. Its flattened paragraphs
+        // only invalidate the normalized cursor; they never enter the renderer.
+        let updates = subscribe(client.clone(), key.clone());
+        let mut dirty = !state.done;
+        let mut next = Instant::now();
+        let mut socket_notice = "";
+        let mut read_notice = "";
+        let mut notice = "";
+        while !stopped.is_stopped() {
+            for message in updates.receiver.try_iter().take(64) {
+                match message {
+                    Incoming::Frame(frame)
+                        if frame["channel"] == "history" || frame["channel"] == "realtime" =>
+                    {
+                        dirty = true
+                    }
+                    Incoming::Status(status) => {
+                        socket_notice = if status == "Live · read-only" {
+                            ""
+                        } else {
+                            status
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if dirty || (!state.done && Instant::now() >= next) {
+                dirty = false;
+                match state.poll(&client) {
+                    Ok(entries) => {
+                        read_notice = "";
+                        if !entries.is_empty()
+                            && !emit(
+                                &sender,
+                                &stopped,
+                                &client,
+                                Incoming::Frame(json!({
+                                    "channel":"history","event":"update","data":{"sessionKey":key,"entries":entries,"replace":false}
+                                })),
+                            )
+                        {
                             break;
                         }
-                        reconnecting = false;
                     }
-                    if !entries.is_empty()
-                        && !emit(
-                            &sender,
-                            &stopped,
-                            &client,
-                            Incoming::Frame(json!({
-                                "channel":"history","event":"update","data":{"sessionKey":key,"entries":entries,"replace":false}
-                            })),
-                        )
-                    {
-                        break;
-                    }
+                    Err(error) => read_notice = error.notice(),
                 }
-                Err(_) => {
-                    if !reconnecting
-                        && !emit(
-                            &sender,
-                            &stopped,
-                            &client,
-                            Incoming::Status("Reconnecting · saved history retained"),
-                        )
-                    {
-                        break;
-                    }
-                    reconnecting = true;
+                next = Instant::now() + Duration::from_secs(2);
+            }
+            let status = if !read_notice.is_empty() {
+                read_notice
+            } else if state.done {
+                socket_notice
+            } else {
+                ""
+            };
+            if status != notice {
+                if !emit(&sender, &stopped, &client, Incoming::Status(status)) {
+                    break;
                 }
+                notice = status;
             }
-            if !state.done {
-                pause(&stopped, Duration::from_secs(2));
-            }
+            pause(&stopped, Duration::from_millis(100));
         }
     });
     Subscription { receiver, cancel }

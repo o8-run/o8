@@ -72,6 +72,8 @@ mod visualizations;
 mod wake;
 #[cfg(test)]
 mod worker_transcript_tests;
+#[cfg(test)]
+mod worker_transport_tests;
 use crate::{
     client::Client,
     model::{History, render_tree},

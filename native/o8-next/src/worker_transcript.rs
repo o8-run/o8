@@ -241,7 +241,7 @@ impl State {
             }
         }
     }
-    pub(crate) fn poll(&mut self, client: &Client) -> Result<Vec<Entry>, String> {
+    pub(crate) fn poll(&mut self, client: &Client) -> Result<Vec<Entry>, ReadbackError> {
         // Read a complete batch before advancing state, so a later page failure
         // retries the same cursor without losing events.
         let (events, _) = client.worker_events(&self.key, self.cursor)?;
@@ -277,26 +277,101 @@ fn adapt(mut history: History, events: &[Value]) -> History {
     history
 }
 
+const MAX_READBACK_BYTES: usize = 64 * 1024 * 1024;
+const MAX_READBACK_EVENTS: usize = 100_000;
+
+#[derive(Debug)]
+pub(crate) enum ReadbackError {
+    Unavailable(String),
+    Invalid(String),
+    Limit,
+}
+impl ReadbackError {
+    fn request(error: String) -> Self {
+        if error.ends_with("HTTP 401") || error.ends_with("HTTP 403") {
+            Self::Invalid(error)
+        } else {
+            Self::Unavailable(error)
+        }
+    }
+    pub(crate) fn notice(&self) -> &'static str {
+        match self {
+            Self::Unavailable(_) => "Reconnecting · saved history retained",
+            Self::Invalid(_) => "Invalid transcript response · saved history retained",
+            Self::Limit => "Transcript readback limit reached · saved history retained",
+        }
+    }
+    fn reason(&self) -> &str {
+        match self {
+            Self::Unavailable(reason) | Self::Invalid(reason) => reason,
+            Self::Limit => "Worker transcript readback limit reached",
+        }
+    }
+}
+fn warning(mut history: History, reason: &str) -> History {
+    let reason: String = crate::text::sanitize(reason)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(240)
+        .collect();
+    let mut row = entry(
+        format!("{}:readback-warning", history.session_key),
+        "system",
+        format!("Structured work unavailable · saved history retained ({reason})"),
+        &Value::Null,
+    );
+    if let Some(at) = history
+        .transcript
+        .iter()
+        .rev()
+        .find_map(|e| e.extra.get("timestamp").filter(|t| t.is_number()))
+    {
+        row.extra.insert("timestamp".into(), at.clone());
+    }
+    let at = history.transcript.len().saturating_sub(usize::from(
+        history
+            .transcript
+            .last()
+            .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback")),
+    ));
+    history.transcript.insert(at, row);
+    history
+}
 impl Client {
-    fn worker_events(&self, key: &str, mut cursor: u64) -> Result<(Vec<Value>, usize), String> {
+    fn worker_events(
+        &self,
+        key: &str,
+        mut cursor: u64,
+    ) -> Result<(Vec<Value>, usize), ReadbackError> {
         let mut events = Vec::new();
-        let mut bytes = 0;
+        let mut bytes = 0usize;
         loop {
-            let (page, size): (Value, usize) = self.get_counted(
-                "/api/orchestrator/packet-transcript",
-                &[
-                    ("sessionKey", key),
-                    ("cursor", &cursor.to_string()),
-                    ("limit", "200"),
-                ],
-            )?;
-            bytes += size;
+            let (page, size): (Value, usize) = self
+                .get_counted(
+                    "/api/orchestrator/packet-transcript",
+                    &[
+                        ("sessionKey", key),
+                        ("cursor", &cursor.to_string()),
+                        ("limit", "200"),
+                    ],
+                )
+                .map_err(ReadbackError::request)?;
+            bytes = bytes.saturating_add(size);
             if page["sessionKey"].as_str() != Some(key) {
-                return Err("Server returned events for a different session".into());
+                return Err(ReadbackError::Invalid(
+                    "Server returned events for a different session".into(),
+                ));
             }
             let batch = page["events"]
                 .as_array()
-                .ok_or("Invalid worker transcript events")?;
+                .ok_or_else(|| ReadbackError::Invalid("Invalid worker transcript events".into()))?;
+            if bytes > MAX_READBACK_BYTES
+                || events.len().saturating_add(batch.len()) > MAX_READBACK_EVENTS
+            {
+                return Err(ReadbackError::Limit);
+            }
             events.extend(batch.iter().cloned());
             if batch.len() < 200 {
                 break;
@@ -304,19 +379,23 @@ impl Client {
             cursor = page["nextCursor"]
                 .as_u64()
                 .filter(|next| *next > cursor)
-                .ok_or("Worker transcript cursor did not advance")?;
+                .ok_or_else(|| {
+                    ReadbackError::Invalid("Worker transcript cursor did not advance".into())
+                })?;
         }
         Ok((events, bytes))
     }
     pub(crate) fn worker_history(&self, mut history: History) -> Result<(History, usize), String> {
         let (events, mut bytes) = match self.worker_events(&history.session_key, 0) {
             Ok(result) => result,
-            // Normalization is an optional readback capability. Its failure
-            // must not make an already authorized, readable history fail.
-            Err(_) => return Ok((history, 0)),
+            Err(ReadbackError::Unavailable(reason))
+                if reason.ends_with("HTTP 404") || reason.ends_with("HTTP 501") =>
+            {
+                return Ok((history, 0));
+            }
+            Err(ReadbackError::Invalid(reason)) => return Err(reason),
+            Err(error) => return Ok((warning(history, error.reason()), 0)),
         };
-        // Normalized events are complete, so include every prompt too. Keeping
-        // a mobile cursor here would later mix legacy paragraphs into the list.
         let mut before = None;
         while let Some(cursor) = history
             .page
@@ -337,13 +416,31 @@ impl Client {
                 ],
             );
             let (older, size) = match older {
-                // A live append can invalidate the prompt cursor. Keep the
-                // coherent normalized work and the prompts already loaded.
                 Err(error) if error.ends_with("HTTP 409") => break,
-                result => result?,
+                Err(error) => match ReadbackError::request(error) {
+                    ReadbackError::Invalid(reason) => return Err(reason),
+                    error => {
+                        history.page = None;
+                        return Ok((warning(adapt(history, &events), error.reason()), bytes));
+                    }
+                },
+                Ok(result) => result,
             };
             if older.session_key != history.session_key {
                 return Err("Server returned history for a different session".into());
+            }
+            if bytes.saturating_add(size) > MAX_READBACK_BYTES
+                || history
+                    .transcript
+                    .len()
+                    .saturating_add(older.transcript.len())
+                    > MAX_READBACK_EVENTS
+            {
+                history.page = None;
+                return Ok((
+                    warning(adapt(history, &events), ReadbackError::Limit.reason()),
+                    bytes,
+                ));
             }
             bytes += size;
             history.transcript.splice(0..0, older.transcript);

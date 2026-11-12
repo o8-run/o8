@@ -492,7 +492,12 @@ mod tests {
                 let mut buf = [0; 8192];
                 let n = stream.read(&mut buf).unwrap();
                 let request = String::from_utf8_lossy(&buf[..n]);
-                let (status, body) = if request.contains("/api/mobile/history") {
+                let (status, body) = if request.contains("/api/panel/ws-info") {
+                    (
+                        "404 Not Found",
+                        serde_json::json!({"error":"fixture has no socket"}),
+                    )
+                } else if request.contains("/api/mobile/history") {
                     (
                         "200 OK",
                         serde_json::json!({"sessionKey":"codex-owned:notice","transcript":[{"id":"prompt","role":"user","text":"Review this patch."}]}),
