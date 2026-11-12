@@ -57,7 +57,18 @@ Files: `brand/ring/` (light, dark, mono, `currentColor`, PNGs), app icon in `bra
 
 ### App icon
 
-Flat Ring on a tile. Light: paper tile, ink ring. Dark: graphite (`#242424`) tile, paper ring. The macOS file follows Apple's grid (824px rounded tile inside 1024, radius 185, soft drop). Square full-bleed versions are for iOS, Windows and Linux. Glass on the icon is allowed later as the one place glass goes, but v1 ships flat.
+Flat Ring on a tile. Light: paper tile, ink ring. Dark: graphite (`#242424`) tile, paper ring. The macOS file follows Apple's grid (824px rounded tile inside 1024, radius 185, soft drop). Square full-bleed versions are for iOS, Windows and Linux. Glass on the icon is allowed later as the one place glass goes.
+
+**v1.1 (Q, 2026-11-12):** the app icon carries one soft colour edge: a thin rim, cool at the top (`#8DB8FF`) and warm at the bottom (`#FF7A3D`), fading to nothing through the middle, at 60% strength. The Ring itself stays flat. The square full-bleed versions stay flat, because their edge is cropped by the platform.
+
+| Icon | Tile | Mark | File |
+| --- | --- | --- | --- |
+| Default | paper | ink Ring | `brand/app-icon/icon-light-edge.svg` |
+| Alternate | paper | Glance (tight) | `brand/app-icon/icon-glance-light.svg` |
+| Dark variation | ink | paper Ring | `brand/app-icon/icon-dark-edge.svg` |
+| Dark alternate | ink | paper Glance (tight) | `brand/app-icon/icon-glance-dark.svg` |
+
+The default is what ships in the installer and what the app shows wherever it shows its own icon. The alternates are a later customization; whichever icon a person picks is the one the app shows them. Glance on an app icon is the one exception to "Glance is never the logo": it is an alternate icon, never the mark in a lockup.
 
 ## 4. The loop (the brand's story)
 

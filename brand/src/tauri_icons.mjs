@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 // Exports the desktop installer's icons (src-tauri/icons) from the Ring masters in brand/.
 // Nothing is drawn here: every file is a raster of a brand SVG. Run from the repository root:
-//   node brand/src/tauri_icons.mjs && iconutil -c icns brand/app-icon/o8-light.iconset -o src-tauri/icons/icon.icns
-import { writeFileSync } from 'node:fs';
+//   node brand/src/tauri_icons.mjs
+// Default icon (brand v1.1): paper tile, ink Ring, soft colour edge. Alternates stay in brand/app-icon/.
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import sharp from 'sharp';
 
 const out = 'src-tauri/icons';
@@ -10,9 +14,21 @@ const render = (svg, size) => sharp(svg, { density: 72 * Math.max(1, size / 100)
   .resize(size, size).png({ compressionLevel: 9 }).toBuffer();
 
 // macOS tile (Apple grid, transparent margin): bundle PNGs used by macOS and Linux.
-const tile = 'brand/app-icon/icon-light.svg';
+const tile = 'brand/app-icon/icon-light-edge.svg';
 for (const [name, size] of [['32x32', 32], ['128x128', 128], ['128x128@2x', 256], ['icon', 512]]) {
   writeFileSync(`${out}/${name}.png`, await render(tile, size));
+}
+
+// icon.icns from the same master (macOS only: iconutil).
+if (process.platform === 'darwin') {
+  const iconset = path.join(mkdtempSync(path.join(tmpdir(), 'o8-icon-')), 'o8.iconset');
+  mkdirSync(iconset);
+  for (const size of [16, 32, 128, 256, 512]) {
+    writeFileSync(path.join(iconset, `icon_${size}x${size}.png`), await render(tile, size));
+    writeFileSync(path.join(iconset, `icon_${size}x${size}@2x.png`), await render(tile, size * 2));
+  }
+  execFileSync('iconutil', ['-c', 'icns', iconset, '-o', `${out}/icon.icns`]);
+  rmSync(path.dirname(iconset), { recursive: true, force: true });
 }
 
 // Square full-bleed tile: Windows store logos and icon.ico.
