@@ -30,6 +30,10 @@ const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
     route('/api/worktrees/conflicts', 'GET', () => import('@/app/api/worktrees/conflicts/route')),
+    route('/api/orchestrator/workspace/maintenance', 'GET POST', () => import('@/app/api/orchestrator/workspace/maintenance/route')),
+    route('/api/orchestrator/workspace/preservation', 'GET POST', () => import('@/app/api/orchestrator/workspace/preservation/route')),
+    route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
+
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
