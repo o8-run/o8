@@ -72,3 +72,12 @@ it('forwards Next thread requests without loading its local inventory handler', 
     expect(await response.json()).toEqual({ error: 'Use grouping A, B or C.' });
   } finally { vi.unstubAllEnvs(); }
 });
+
+it('keeps retention writes operator-only and executes their real validation', async () => {
+  for (const relay of [false, true]) {
+    for (const [token, status] of [['', 401], ['wrong', 401], [device, 403], [worker, 403], [server.token, 400]] as const) {
+      const response = await fetch(`${origin}/api/orchestrator/workspace/retention`, { method: 'POST', headers: { ...forged, ...(relay ? { 'x-o8-relay-forward': '1' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json' }, body: '{}' });
+      expect(response.status).toBe(status);
+    }
+  }
+});
