@@ -199,6 +199,33 @@ it('keeps the bearer matrix and gives forged local headers no authority', async 
     expect(response.status).toBe(status);
   }
 });
+it('forwards no cookie, and a cookie changes no WS principal', async () => {
+  const cookie = `o8-token=${server.token}`;
+  const original = globalThis.fetch;
+  const forwarded: Headers[] = [];
+  const spy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+    if (String(input).startsWith(origin)) forwarded.push(new Headers(init?.headers));
+    return original(input, init);
+  });
+  try {
+    const card = createFixtureApproval({ source: 'runtime', runtime: 'codex', agent: 'Fixture', sessionKey: 'runtime:cookie-launch',
+      title: 'Launch', description: 'Launch', summary: 'Launch', risk: 'low',
+      continuation: { kind: 'runtime', runtimeId: 'codex', action: 'launch', sessionKey: 'runtime:cookie-launch', prompt: 'Fixture', cwd: server.directory } });
+    const response = await next({ action: 'approve', id: card.id }, device, { cookie });
+    expect(response.status).toBe(200);
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0].has('cookie')).toBe(false);
+    expect(forwarded[0].get('authorization')).toBe(`Bearer ${device}`);
+  } finally { spy.mockRestore(); }
+  // WS resolves the caller from the bearer alone: an operator cookie neither adds nor removes authority.
+  for (const [token, status] of [[worker, 403], [device, 404], ['wrong', 401]] as const) {
+    for (const extra of [{}, { cookie }]) {
+      const response = await fetch(origin + '/api/panel/approvals', { method: 'POST', body: JSON.stringify({ action: 'approve', id: 'missing', runtimeApprovalOperation: true }),
+        headers: { ...forged, ...extra, 'content-type': 'application/json', authorization: `Bearer ${token}` } });
+      expect(response.status).toBe(status);
+    }
+  }
+});
 it('launches an approved runtime in WS', async () => {
   const before = receipt().launches;
   const card = createFixtureApproval({ source: 'runtime', runtime: 'codex', agent: 'Fixture', sessionKey: 'runtime:pending-launch',
