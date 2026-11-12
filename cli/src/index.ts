@@ -203,6 +203,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       rest.push(tok);
     } else if (command.length < 2 && !tok.startsWith('-')) {
       command.push(tok);
+      if (command.length === 1 && tok === 'run-heavy') {
+        rest.push(...argv.slice(i + 1));
+        break;
+      }
       if (command.length === 2) secondaryIndex = i;
     } else {
       if (firstRestIndex === null) firstRestIndex = i;
@@ -514,7 +518,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       throw unknownSubcommandError('lane', secondary);
     }
     case 'run-heavy':
-      return runHeavy(process.argv.slice(3));
+      return runHeavy(args.rest);
     case 'lease':
       return runLease(args.mode, secondary, args.rest);
     case 'mission':

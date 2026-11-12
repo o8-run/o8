@@ -4,7 +4,7 @@
  * buildPacketPrompt is the single documented injection chokepoint, so pinning
  * the clause here proves every dispatch path carries it.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -47,4 +47,10 @@ it('teaches detached heavy steps only to writable packets', async () => {
   expect(await buildPacketPrompt(minimalPacket(), [])).toContain('Run heavy steps detached');
   const packet = minimalPacket({ launchContext: { workMode: 'read-only' } as OrchestratorPacket['launchContext'] });
   expect(await buildPacketPrompt(packet, [])).not.toContain('Heavy steps:');
+});
+
+it('omits heavy-step queue instructions for confined workers', async () => {
+  vi.stubEnv('O8_WORKER_SANDBOX', 'on');
+  try { expect(await buildPacketPrompt(minimalPacket(), [])).not.toContain('Heavy steps:'); }
+  finally { vi.unstubAllEnvs(); }
 });

@@ -4,12 +4,13 @@ Dispatch reads the OS five-minute load average on macOS and Linux, including wor
 started outside o8. `operator.dispatch_load_per_core` in settings.toml defaults to **1.5** per core
 reported by `os.availableParallelism()`. `O8_DISPATCH_LOAD_PER_CORE` overrides it.
 Zero disables load admission. Idle machines with no o8 workers always admit;
-per-dispatch `force` bypasses load admission. Above this limit workers stay queued with a plain-language reason; the
-scheduler retries on later ticks. Invalid settings fall back to 1.5. Windows
+Operator-only per-dispatch `force` bypasses load admission. Above this limit workers stay queued with a plain-language reason; the
+scheduler retries on later ticks. Blank or invalid environment overrides preserve
+the saved setting. Windows
 load is unknown and admits. Load is a sampled guard, not a CPU reservation.
 
 Workers must wrap native builds and full suites with
-`o8 run-heavy -- <command> [args...]`. The packet brief teaches this command.
+`o8 run-heavy -- <command> [args...]`. Unconfined writable packet briefs teach this command.
 Concurrency is **1**, shared by all heavy steps and worktrees for the signed-in
 OS user. o8 cannot intercept arbitrary shell commands or builds from other tools;
 those tools can opt into this same wrapper. The wrapper preserves argument

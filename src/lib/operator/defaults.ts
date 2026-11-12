@@ -654,7 +654,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   });
   const defaultDispatchRuntime = profileDefaults?.defaultDispatchRuntime ?? baseDefaultDispatchRuntime;
 
-  const loadOverride = process.env.O8_DISPATCH_LOAD_PER_CORE;
+  const loadOverride = process.env.O8_DISPATCH_LOAD_PER_CORE?.trim() || undefined;
   const envLoad = loadOverride !== undefined && Number.isFinite(Number(loadOverride)) && Number(loadOverride) >= 0 ? Number(loadOverride) : undefined;
   const resolved: OperatorDefaults = {
     knowledgeSources: fileValues.knowledgeSources ?? [],

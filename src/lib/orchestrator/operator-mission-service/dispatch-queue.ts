@@ -21,6 +21,7 @@ export interface DispatchQueueEntry {
 export function missionDispatchQueue(state: OrchestratorMissionState): DispatchQueueEntry[] {
   const active = listActiveLanes().filter((lane) => lane.status === 'launching' || lane.status === 'running');
   const limit = resolveParallelCapSync();
+  const loadBlocker = machineLoadBlocker({ runningWorkers: active.length });
   return getDispatchableWave(state.packets)
     .filter((packet) => !packet.archivedAt && !packet.operatorStopped)
     .map<DispatchQueueEntry>((packet, index) => {
@@ -46,7 +47,7 @@ export function missionDispatchQueue(state: OrchestratorMissionState): DispatchQ
         return { ...base, limit: runtimeLimit, running: runtimeRunning, reason: 'runtime-concurrency-limit',
           detail: `Queued behind the ${runtime} concurrency limit (${runtimeRunning}/${runtimeLimit}); mission queue position ${index + 1}.` };
       }
-      return { ...base, reason: 'scheduler-deferred', detail: machineLoadBlocker() ?? packet.blockedReason
+      return { ...base, reason: 'scheduler-deferred', detail: packet.blockedReason ?? loadBlocker
         ?? `Queued for a scheduler launch; mission queue position ${index + 1}.` };
     });
 }

@@ -15,7 +15,7 @@ export function machineLoadBlocker(options: MachineLoadOptions = {}): string | n
   const readLoad = options.readLoad ?? (process.env.VITEST ? () => [0, 0, 0] : () => os.loadavg());
   const running = options.runningWorkers ?? listActiveLanes().filter(lane => lane.status === 'running' || lane.status === 'launching').length;
   if (running === 0) return null;
-  const configured = Number(process.env.O8_DISPATCH_LOAD_PER_CORE ?? options.ratio ?? getOperatorDefaultsSync().values.dispatchLoadPerCore);
+  const configured = Number(options.ratio ?? getOperatorDefaultsSync().values.dispatchLoadPerCore);
   const ratio = Number.isFinite(configured) && configured >= 0 ? configured : 1.5;
   if (ratio === 0) return null;
   const cores = Math.max(1, os.availableParallelism());
