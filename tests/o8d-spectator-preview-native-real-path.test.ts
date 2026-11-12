@@ -93,7 +93,7 @@ it('keeps spectator truth reads and loopback preview resources narrowly granted 
     const granted = `${path}&previewResource=${access}`;
     expect((await call(granted, '', { origin: 'null' })).status).toBe(200);
     expect((await call(granted)).status).toBe(200);
-    expect((await call(granted, '', { origin: 'null' }, 'POST')).status).toBe(401);
+    expect((await call(granted, '', { origin: 'null' }, 'POST')).status).toBe(403);
     expect((await call(granted, '', { origin: 'null' }, 'HEAD')).status).toBe(200);
     const otherTarget = `http://127.0.0.1:${address.port + 1}/style.css`;
     expect((await call(`/api/browser/proxy?url=${encodeURIComponent(otherTarget)}&previewResource=${access}`, '', { origin: 'null' })).status).toBe(401);

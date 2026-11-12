@@ -349,8 +349,16 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // (resolveRequestPrincipalContext), never x-o8-client-addr or loopback, so they behave as on Next. Both read
     // and write SQLite only, and calendar ingest reads operator defaults from disk on every call. (#5422)
     route('/api/panel/cli-usage', 'GET', () => import('@/app/api/panel/cli-usage/route')),
+    // Truth reads admit the operator and active spectators through panelGateMiddleware. The
+    // handler rechecks the principal and scopes spectator queries to repository grants. No
+    // device or worker grant; projections read durable receipts without a process-local owner. (#5243)
     route('/api/orchestrator/truth', 'GET HEAD', () => import('@/app/api/orchestrator/truth/route')),
+    // Preview reads retain the gate's attested-loopback/local-origin and signed resource grants,
+    // or the operator bearer. No device, worker or spectator capability is added. The handler
+    // validates the local target and rewrites resources; it holds no process-local state. (#5243)
     route('/api/panel/proxy', 'GET HEAD', () => import('@/app/api/panel/proxy/route')),
+    // The browser alias uses the same preview handler and grants as panel/proxy above. Native
+    // stamps the peer before the gate; Origin checks and target restrictions stay unchanged. (#5243)
     route('/api/browser/proxy', 'GET HEAD', () => import('@/app/api/browser/proxy/route')),
     route('/api/broadcast/why', 'GET', () => import('@/app/api/broadcast/why/route')),
     // Symon's commentary reader (lib/broadcast/speaker.ts) and broadcast spectators. GET only. The
