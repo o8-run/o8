@@ -1,5 +1,6 @@
 import { RuntimeSelectionError, validateRequestedRuntime } from '@/lib/agents/routing';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { operatorSteerOrigin } from '@/lib/runtime/owner-context';
 import { apiError, McpInputError, O8ApiError, safeErrorText, unreachableApiError } from '@/lib/mcp/api-error';
 export { McpInputError } from '@/lib/mcp/api-error';
 export { parseDirectivesApplied, parseDirectivesViolated } from '@/lib/orchestrator/review-finding-input';
@@ -168,7 +169,7 @@ async function apiFetchResponse(
     }
 
     try {
-      const baseUrl = resolveApiBaseLive();
+      const baseUrl = (['/api/orchestrator/steer-packet', '/api/runtime/action'].includes(path) ? operatorSteerOrigin() : undefined) ?? resolveApiBaseLive();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       const panelToken = readPanelToken();
@@ -197,7 +198,7 @@ async function apiFetchResponse(
       return res;
     } catch (err) {
       lastError = err instanceof O8ApiError ? err : apiError(path, null, '', err);
-      if (lastError.noRetry) {
+      if (lastError.noRetry || lastError.managedBrainUnavailable) {
         _apiHealthy = true; // backend responded; the request itself was rejected
         throw lastError;
       }

@@ -294,3 +294,33 @@ fn sidebar_views_fold_threads_into_repo_folders_and_start_threads(cx: &mut TestA
         Some(first.to_owned())
     );
 }
+
+#[gpui::test]
+fn sidebar_new_thread_after_in_pane_navigation_refreshes_start_snapshot(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(true, "--shell --composer --sidebar --settings");
+    let (shell, mut visual) = open_past_setup(
+        fixture.client.clone(), fixture.root.join("new-thread-snapshot.json"), State::default(), cx,
+    );
+    ready(&shell, &mut visual);
+    shell.update_in(&mut visual, |s, w, cx| s.open_thread("thoughts-composer-first".into(), w, cx));
+    ready(&shell, &mut visual);
+    let (repo, list) = shell.update(&mut visual, |s, cx| {
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        // A thread switch completed before New chat belongs in its starting
+        // snapshot; the same switch after New chat must still cancel takeover.
+        view.update(cx, |view, cx| view.shell_select(s.sessions.clone(), "thoughts-composer-second".into(), cx));
+        (s.state.selected.clone().unwrap(), s.surfaces.sidebar.view.clone().unwrap())
+    });
+    list.update(&mut visual, |list, cx| list.new_thread(repo, cx));
+    wait_for(&shell, &mut visual, |s, cx| started(s, cx, None).is_some());
+    shell.read_with(&visual, |s, cx| {
+        let created = started(s, cx, None).unwrap();
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        assert_eq!(view.read(cx).shown_thread().as_deref(), Some(created.as_str()));
+        let saved = s.current().unwrap();
+        assert_eq!(saved.tabs.iter().filter(|tab| match tab {
+            Tab::Session(key) => saved.selections.get(key).unwrap_or(key) == &created,
+            _ => false,
+        }).count(), 1, "the new thread is displayed in exactly one tab");
+    });
+}

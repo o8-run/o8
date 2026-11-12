@@ -1,3 +1,4 @@
+import { RuntimeOwnerUnconfirmedError, withToolRuntimeOwner } from '@/lib/runtime/owner-context';
 import { errorText } from '@/lib/mcp/operator-handlers/shared';
 import { lifecycleErrorResult } from './lifecycle-error';
 import {
@@ -484,10 +485,10 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
 
     if (sessionKey) {
       // Steer existing session
-      result = await steerSession(sessionKey, message);
+      result = await withToolRuntimeOwner(() => steerSession(sessionKey, message));
     } else {
       // Launch new task via orchestrator
-      result = await apiFetchCorrelatedMutation<Record<string, unknown>>(
+      result = await withToolRuntimeOwner(() => apiFetchCorrelatedMutation<Record<string, unknown>>(
         '/api/orchestrator/delegate',
         {
           prompt: message,
@@ -496,7 +497,7 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
           readOnly: args.readOnly === true,
         },
         'clientMutationId',
-      );
+      ));
     }
 
     if (result.ok === false) {
@@ -527,6 +528,11 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
       },
     });
   } catch (err) {
+    if (err instanceof RuntimeOwnerUnconfirmedError) {
+      return jsonResult({ ok: false, code: err.code, message: err.message, state: 'unknown',
+        sessionKey: typeof args.sessionKey === 'string' ? args.sessionKey : null,
+        next: 'Inspect the session in o8 before retrying. Do not resend automatically.' }, true);
+    }
     console.error(`[o8-operator] o8_send failed: `, err);
     return textResult(`Failed to send: ${errorText(err)}`, true);
   }
@@ -539,14 +545,14 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
     // #2 Stage 4: route through /api/orchestrator/steer-packet so the lane
     // resolution + status flip run in the Next process (the live registry +
     // warm-session pool), not this MCP process's stale registry instance.
-    const res = await apiFetchCorrelatedMutation<{
+    const res = await withToolRuntimeOwner(() => apiFetchCorrelatedMutation<{
       ok?: boolean;
       result?: Record<string, unknown>;
     }>(
       '/api/orchestrator/steer-packet',
       { packetId, message, source: 'orchestrator' },
       'idempotencyKey',
-    );
+    ));
     return jsonResult({ ok: true, ...(res.result ?? {}) });
   } catch (err) {
     return lifecycleErrorResult('steer_packet', err, args.packetId);

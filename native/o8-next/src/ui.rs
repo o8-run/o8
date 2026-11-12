@@ -200,6 +200,8 @@ pub(crate) struct Surface {
     selected: Option<String>,
     /// Embedded side conversations must not follow main-history navigation.
     bound_session: Option<String>,
+    pub(crate) shell_navigation: Option<Rc<Cell<u64>>>,
+    pub(crate) navigation_refresh_revision: u64,
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     images: images::Cache,
     peeks: crate::transcript_peek::Peeks,
@@ -224,6 +226,8 @@ pub(crate) struct Surface {
     painted: Rc<Cell<u64>>,
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
     composer_card: Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
+    /// The window viewport the transcript was last laid out in.
+    end_viewport: Option<gpui::Size<gpui::Pixels>>,
     voice: VoiceState,
     dictation: DictationState,
     /// The primary button's press count and whether that press's hold
@@ -248,8 +252,17 @@ pub(crate) struct Surface {
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_focus(client, Some(window), cx)
+    }
+    fn new_with_focus(
+        client: Client,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus = cx.focus_handle();
-        focus.focus(window);
+        if let Some(window) = window {
+            focus.focus(window);
+        }
         let defaults = client.clone();
         let task = cx.background_executor().spawn(async move {
             defaults
@@ -294,6 +307,8 @@ impl Surface {
             overview_snoozes: Default::default(),
             selected: None,
             bound_session: None,
+            shell_navigation: None,
+            navigation_refresh_revision: 0,
             rows: Rc::new(vec![]),
             images: Default::default(),
             peeks,
@@ -317,6 +332,7 @@ impl Surface {
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
             composer_card: Default::default(),
+            end_viewport: None,
             voice: VoiceState::Off,
             dictation: DictationState::Off,
             voice_hold: (0, false),
@@ -333,6 +349,9 @@ impl Surface {
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
+        self.select_mode(id, true, cx);
+    }
+    fn select_mode(&mut self, id: String, navigation: bool, cx: &mut Context<Self>) {
         if self
             .bound_session
             .as_ref()
@@ -341,6 +360,13 @@ impl Surface {
             return;
         }
         if self.selected.as_ref() != Some(&id) {
+            if navigation {
+                if let Some(generation) = &self.shell_navigation {
+                    generation.set(generation.get().wrapping_add(1));
+                }
+            } else {
+                self.navigation_refresh_revision = self.navigation_refresh_revision.wrapping_add(1);
+            }
             self.prompt_actions.selection_changed();
             if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id)) {
                 brain.update(cx, |brain, cx| {
@@ -793,11 +819,14 @@ impl Surface {
                             .filter(|id| this.sessions.iter().any(|s| &s.id == id))
                             .or_else(|| this.sessions.first().map(|s| s.id.clone()))
                         {
-                            this.select(id, cx);
+                            this.select_mode(id, false, cx);
                         } else {
                             this.generation += 1;
                             this.subscription = None;
                             this.transcript = None;
+                            if this.selected.is_some() {
+                                this.navigation_refresh_revision = this.navigation_refresh_revision.wrapping_add(1);
+                            }
                             this.selected = None;
                             this.saved_visualizations.select(None);
                             this.rows = Rc::new(vec![]);

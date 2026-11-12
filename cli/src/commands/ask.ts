@@ -37,6 +37,7 @@ interface AskCitation {
 }
 
 interface AskAnswerResponse {
+  code?: string;
   ok?: boolean;
   answer?: string;
   citations?: AskCitation[];
@@ -98,6 +99,7 @@ export async function runAsk(mode: OutputMode, rest: string[]): Promise<number> 
   const res = await apiFetch<AskAnswerResponse>(cfg, '/api/cortex/ask/answer', {
     method: 'POST',
     timeoutMs: ASK_API_TIMEOUT_MS,
+    allowUnavailable: true,
     body: {
       question: args.question,
       ...(args.terse ? { terse: true } : {}),
@@ -108,7 +110,7 @@ export async function runAsk(mode: OutputMode, rest: string[]): Promise<number> 
 
   const data = res.data;
   if (!data?.ok || typeof data.answer !== 'string') {
-    throw new CliError('ask_failed', data?.error ?? 'The Engineering Brain did not return an answer.', EXIT.CONFLICT);
+    throw new CliError(data?.code === 'managed_brain_unavailable' ? data.code : 'ask_failed', data?.error ?? 'The Engineering Brain did not return an answer.', EXIT.CONFLICT);
   }
 
   const citations = (data.citations ?? []).map((citation) => ({
