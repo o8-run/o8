@@ -50,6 +50,8 @@ mod terminal;
 mod terminal_grid;
 mod terminal_transport;
 mod text;
+#[cfg(test)]
+mod text_ellipsis_tests;
 mod thread_messages;
 mod theme;
 mod theme_import;
