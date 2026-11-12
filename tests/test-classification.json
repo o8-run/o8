@@ -5766,6 +5766,15 @@
       ]
     },
     {
+      "path": "tests/o8d-packet-steer-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-packet-transcript-real-path.test.ts",
       "reasons": [
         "real-path"

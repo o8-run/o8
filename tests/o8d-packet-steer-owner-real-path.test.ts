@@ -98,23 +98,30 @@ it('runs the direct Codex fallback in WS', async () => {
   expect(local.calls).toBe(0);
 }, 30000);
 it('routes the UI-loop caller to WS', async () => {
-  const f = await fixture('design-mode');
+  const f = await fixture('design-mode'); flag('steer-busy');
   (await import('@/lib/orchestrator/ui-loop')).setUiLoopSettleTimeoutForTest(20);
   const ui = await import('@/app/api/orchestrator/ui-loop/steer/route');
   const response = await ui.POST(request('/api/orchestrator/ui-loop/steer', { repo, text: 'Edit the button' }));
   expect(response.status, await response.clone().text()).toBe(200);
   expect((await response.json()).result.kind).toBe('steered');
+  expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(0);
+  flag('steer-busy', false);
+  await fetch(origin + '/api/orchestrator/headless-tick', { method: 'POST', headers: { authorization: `Bearer ${server.token}` } });
   expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(1); expect(local.calls).toBe(0);
   const leases = (await import('@/lib/leases/resource-lease-default-store')).getResourceLeaseStore();
   await vi.waitFor(async () => expect((await leases.status(`ui-loop:${repo}`)).holder).toBeNull(), { timeout: 10000 });
 }, 30000);
 it('routes task-artifact delivery to WS', async () => {
-  const f = await fixture();
+  const f = await fixture(); flag('steer-busy');
   const { createTaskArtifact, submitTaskArtifactAction } = await import('@/lib/task-artifacts/service');
   const artifact = await createTaskArtifact({ title: 'Fixture', html: '<p>Fixture</p>', packetId: f.id,
     actions: [{ name: 'submit', label: 'Submit', schema: { fields: { note: { type: 'string' } } } }] }, { role: 'operator' });
   const result = await submitTaskArtifactAction(artifact.id, { action: 'submit', nonce: 'owner-artifact-nonce', payload: { note: 'fixture' }, target: artifact.target, actor: 'operator' });
-  expect(result).toMatchObject({ accepted: true, deliverVia: 'packet', action: { delivery: 'delivered' } }); expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(1);
+  expect(result).toMatchObject({ accepted: true, deliverVia: 'packet', action: { delivery: 'delivered' } });
+  expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(0);
+  flag('steer-busy', false);
+  await fetch(origin + '/api/orchestrator/headless-tick', { method: 'POST', headers: { authorization: `Bearer ${server.token}` } });
+  expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(1);
 }, 30000);
 it('routes exact-run worker correction through its WS admission', async () => {
   const f = await fixture();
@@ -125,6 +132,7 @@ it('routes exact-run worker correction through its WS admission', async () => {
   expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(1);
 }, 30000);
 it('keeps owner admission fail closed for device, worker and forged local headers', async () => {
+  const f = await fixture(); flag('steer-busy');
   const device = 'steer-owner-device'; const worker = 'steer-owner-worker';
   writeFileSync(join(server.directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
   writeFileSync(join(server.directory, 'worker-token'), worker);
@@ -135,6 +143,16 @@ it('keeps owner admission fail closed for device, worker and forged local header
     const probe = await fetch(origin + '/api/runtime/owner', { headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), 'x-o8-relay-forward': '1' } });
     expect(probe.status).toBe(status);
   }
+  const route = await import('@/app/api/orchestrator/steer-packet/route');
+  for (const [token, status] of [['', 401], ['bad', 401], [worker, 403], [device, 200]] as const) {
+    const response = await route.POST(new NextRequest('http://localhost/api/orchestrator/steer-packet', { method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ packetId: f.id, message: 'auth fixture', idempotencyKey: `auth-${token}` }) }));
+    expect(response.status).toBe(status);
+  }
+  flag('steer-busy', false);
+  await fetch(origin + '/api/orchestrator/headless-tick', { method: 'POST', headers: { authorization: `Bearer ${server.token}` } });
+  expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(1);
 });
 it('retains main local delivery with the native flag unset', async () => {
   const f = await fixture(); vi.stubEnv('O8_NEXT_O8D', '');
@@ -142,12 +160,14 @@ it('retains main local delivery with the native flag unset', async () => {
   expect(local.calls).toBe(1); vi.stubEnv('O8_NEXT_O8D', '1');
 }, 30000);
 
-async function stdioDispatch(data: string, port: number, taskId: string) {
-  const child = spawn(process.execPath, ['--require=./tests/fixtures/ws-parity-task-dispatch.cjs',
+async function stdioDispatch(data: string, port: number, taskId: string, steer = false) {
+  const api = steer ? server.apiUrl : `http://127.0.0.1:${port}`;
+  const receiptFile = join(data, steer ? 'steer-runtime.json' : 'task-runtime.json');
+  const child = spawn(process.execPath, [steer ? '--require=./tests/fixtures/ws-parity-packet-steer.cjs' : '--require=./tests/fixtures/ws-parity-task-dispatch.cjs',
     '--require=./scripts/next/brain-runtime.cjs', 'tests/fixtures/stdio-runtime-owner-entry.mjs'], {
     cwd: process.cwd(), env: { ...process.env, HOME: data, USERPROFILE: data, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,
-      CORTEX_IDE_DB_PATH: join(data, 'cortex-ide.db'), O8_NEXT_O8D: '', O8_WS_PORT: String(port), O8_API_PORT: String(port),
-      PORT: String(port), O8_API_BASE: `http://127.0.0.1:${port}`, WS_TOKEN: server.token, O8_MCP_NO_ORPHAN_KILL: '1' },
+      CORTEX_IDE_DB_PATH: join(data, 'cortex-ide.db'), O8_NEXT_O8D: '', O8_WS_PORT: String(port), O8_API_PORT: new URL(api).port,
+      PORT: new URL(api).port, O8_API_BASE: api, WS_TOKEN: server.token, O8_MCP_NO_ORPHAN_KILL: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
@@ -164,11 +184,15 @@ async function stdioDispatch(data: string, port: number, taskId: string) {
         }
       });
       child.once('exit', code => { clearTimeout(timer); reject(new Error(`stdio exited ${code}: ${stderr.slice(-2000)}`)); });
-      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 101, method: 'tools/call', params: { name: 'o8_task_dispatch', arguments: { taskId } } }) + '\n');
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 101, method: 'tools/call', params: steer ? { name: 'steer_packet', arguments: { packetId: taskId, message: 'stdio fixture' } } : { name: 'o8_task_dispatch', arguments: { taskId } } }) + '\n');
     });
     expect(response.result?.isError, JSON.stringify(response)).not.toBe(true);
-    await vi.waitFor(() => expect(JSON.parse(readFileSync(join(data, 'task-runtime.json'), 'utf8')).spawns).toHaveLength(1), { timeout: 15000 });
-    return { pid: child.pid, receipt: JSON.parse(readFileSync(join(data, 'task-runtime.json'), 'utf8')) };
+    await vi.waitFor(() => {
+      const receipt = JSON.parse(readFileSync(receiptFile, 'utf8'));
+      if (steer) expect(receipt.delivered.filter((row: { surfaceId: string }) => row.surfaceId === `codex-owned:${taskId}`)).toHaveLength(1);
+      else expect(receipt.spawns).toHaveLength(1);
+    }, { timeout: 15000 });
+    return { pid: child.pid, receipt: JSON.parse(readFileSync(receiptFile, 'utf8')) };
   } finally {
     child.stdin.end();
     if (child.exitCode === null) await new Promise<void>(resolve => child.once('exit', () => resolve()));
@@ -197,4 +221,11 @@ it('stdio task dispatch remains local with no WS owner', async () => {
     const result = await stdioDispatch(data, port, 'stdio-local-task');
     expect(result.receipt.pid).toBe(result.pid); expect(result.receipt.pid).not.toBe(server.pid);
   } finally { rmSync(data, { recursive: true, force: true }); }
+}, 60000);
+
+it('stdio packet steer uses WS while its Next API listener is stopped', async () => {
+  const f = await fixture();
+  writeFileSync(join(server.directory, 'api-port'), new URL(server.apiUrl).port);
+  const result = await stdioDispatch(server.directory, Number(new URL(origin).port), f.id, true);
+  expect(result.receipt.pid).toBe(server.pid); expect(result.receipt.pid).not.toBe(result.pid);
 }, 60000);
