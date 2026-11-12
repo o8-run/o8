@@ -12,4 +12,3 @@ export async function POST(request: Request) {
     return visualizationResponse({ visualization: visualizationReference(document), warnings, check }, 201);
   } catch (error) { return visualizationFailure(error); }
 }
-
