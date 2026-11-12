@@ -159,6 +159,7 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         }
     }
     contextual::refresh(s, window, cx);
+    save(s);
     cx.notify();
 }
 
