@@ -297,10 +297,12 @@ it.each(['unchanged', 'head', 'dirty'])('review-correct rebuilds WS spawn admiss
   expect(response.status, await response.clone().text()).toBe(200);
   const review = control.readOrchestratorControlPlaneState().packets[0].review!;
   const dirty = join(repo, 'dirty-review-fixture'); flag('hold-steer');
+  let settled: Promise<unknown> = Promise.resolve();
   try {
     const { correctAuthorFromReview } = await import('@/lib/orchestrator/review-author-correction');
     const delivery = correctAuthorFromReview({ repoPath: repo, threadId: 'thoughts-owner-parent',
       review: { packetId: f.id, approvalId: review.auditApprovalId, reviewedHeadSha: head, surfaceId: f.surfaceId, runId: 'run-original' } });
+    settled = delivery; void delivery.catch(() => {});
     await vi.waitFor(() => expect(read().calls.some(row => row.surfaceId === f.surfaceId)).toBe(true), { timeout: 15000 });
     expect(read().pid).toBe(server.pid);
     if (drift === 'head') execFileSync('git', ['-C', repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'changed review head']);
@@ -310,5 +312,5 @@ it.each(['unchanged', 'head', 'dirty'])('review-correct rebuilds WS spawn admiss
     expect(receipt.deliveries[0].status).toBe(drift === 'unchanged' ? 'delivered' : 'unknown');
     if (drift !== 'unchanged') expect(receipt.deliveries[0].note).toContain(drift === 'head' ? 'code changed after review' : 'uncommitted changes');
     expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(drift === 'unchanged' ? 1 : 0);
-  } finally { flag('hold-steer', false); if (existsSync(dirty)) unlinkSync(dirty); }
+  } finally { flag('hold-steer', false); await settled.catch(() => {}); if (existsSync(dirty)) unlinkSync(dirty); }
 }, 60000);
