@@ -403,7 +403,10 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   // These reads also register their existing production writes; all other reads stay GET-only.
   const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
   expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals', '/api/setup/cli-updates', '/api/panel/problem-dossiers'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
-  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
+  // A path may register its admitted GET and operator POST separately.
+  const registeredMethods = new Set(nativeSurfaceRoutes[surface]
+    .filter(route => route.path === routePath).flatMap(route => route.methods));
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !registeredMethods.has(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
     expect(refused.headers.get('allow')).toBe(methods.join(', '));
