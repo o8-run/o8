@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, expect, it, vi } from 'vitest';
 import { startParityReference } from './fixtures/ws-parity-server';
+import type { Lane } from '@/lib/lane/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 vi.mock('@/lib/cortex/qa/ask', () => ({ askCortex: async (_q: string, _r: string, options: { projectId: string }) => ({
@@ -27,7 +28,7 @@ const tasks = await import('@/app/api/tasks/route');
 const touches = await import('@/app/api/lanes/touches/route');
 const dossiers = await import('@/app/api/panel/problem-dossiers/route');
 const brain = await import('@/app/api/cortex/ask/answer/route');
-const lanes = [];
+const lanes: Lane[] = [];
 for (const id of ['A', 'B']) {
   const repoPath = join(directory, id);
   mkdirSync(repoPath);
@@ -39,7 +40,7 @@ for (const id of ['A', 'B']) {
 }
 await withLockedState(state => {
   state.packets.push(...['A', 'B'].map(id => ({ id: `packet-${id}`, title: id, summary: id,
-    status: 'ready', projectId: `project-${id}`, workspaceTargetPath: join(directory, id) } as OrchestratorPacket)));
+    status: 'ready', projectId: `project-${id}`, workspaceTargetPath: join(directory, id) } as unknown as OrchestratorPacket)));
   return state;
 });
 listProblemDossiers();
