@@ -119,7 +119,7 @@ pub(super) fn ensure(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     };
     let client = s.panel_client(&ws);
     let view = cx.new(|cx| {
-        let mut view = crate::ui::Surface::shell_new(client, vec![session], id.clone(), w, cx);
+        let mut view = crate::ui::Surface::shell_restore(client, vec![session], id.clone(), cx);
         view.shell_bind_thread(id.clone());
         view
     });

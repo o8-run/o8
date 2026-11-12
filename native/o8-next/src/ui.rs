@@ -248,8 +248,17 @@ pub(crate) struct Surface {
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_focus(client, Some(window), cx)
+    }
+    fn new_with_focus(
+        client: Client,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus = cx.focus_handle();
-        focus.focus(window);
+        if let Some(window) = window {
+            focus.focus(window);
+        }
         let defaults = client.clone();
         let task = cx.background_executor().spawn(async move {
             defaults
