@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -13,21 +15,26 @@ let seeded: { own: string; other: string; worker: string; noPr: string };
 const device = 'worker-target-device-fixture';
 const forged = { 'x-forwarded-for': '127.0.0.1', 'x-real-ip': '127.0.0.1', 'x-o8-client-addr': '127.0.0.1' };
 beforeAll(async () => {
-  server = await startParityReference({ o8d: true, nativeHttp: true, startupTimeoutMs: 120_000 });
-  await server.stopNext();
-  directory = server.directory;
-  operator = server.token;
-  origin = server.url.replace('ws:', 'http:').replace('/ws', '');
-  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+  directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-native-worker-targets-')));
+  mkdirSync(join(directory, 'native-checkout'));
+  mkdirSync(join(directory, 'native-foreign'));
+  await promisify(execFile)('git', ['init', '--quiet', join(directory, 'native-foreign')]);
   const result = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
     (async () => {
       const { seedWorkerTargets } = require('./tests/fixtures/worker-targets.ts');
-      console.log('seed ' + JSON.stringify(await seedWorkerTargets(process.env.CORTEX_IDE_DATA_DIR)));
+      const seeded = await seedWorkerTargets(process.env.CORTEX_IDE_DATA_DIR);
+      require('./src/lib/lane/registry.ts').updateLane(seeded.own, { worktreePath: require('node:path').join(process.env.CORTEX_IDE_DATA_DIR, 'native-checkout') });
+      console.log('seed ' + JSON.stringify(seeded));
       require('./src/lib/db/index.ts').closeDb();
     })();
   `], { env: { ...process.env, O8_DATA_DIR: directory, CORTEX_IDE_DATA_DIR: directory,
-    CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'), WS_TOKEN: operator } });
+    CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db') } });
   seeded = JSON.parse(result.stdout.split('\n').find(line => line.startsWith('seed '))!.slice(5));
+  server = await startParityReference({ directory, o8d: true, nativeHttp: true, startupTimeoutMs: 120_000 });
+  await server.stopNext();
+  operator = server.token;
+  origin = server.url.replace('ws:', 'http:').replace('/ws', '');
+  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
 }, 180_000);
 afterAll(async () => { await server?.stop(); });
 async function call(path: string, body?: unknown, token = seeded.worker, extra: Record<string, string> = {}) {
@@ -66,7 +73,7 @@ it('checks every artifact association against the caller packet', async () => {
   expect((await call('/api/panel/artifacts', { ...body, packetId: 'packet-b', laneId: seeded.other }, operator)).status).toBe(200);
 });
 it('checks the managed run lane against the caller packet', async () => {
-  const body = { id: 'targetfixture', session: 'cortex-run-targetfixture', command: 'fixture', cwd: directory, packetId: 'packet-a' };
+  const body = { id: 'targetfixture', session: 'cortex-run-targetfixture', command: 'fixture', cwd: join(directory, 'native-checkout'), packetId: 'packet-a' };
   expect((await call('/api/panel/managed-runs', { ...body, laneId: seeded.other })).status).toBe(403);
   expect((await call('/api/panel/managed-runs', { ...body, laneId: 'missing' })).status).toBe(403);
   const accepted = await call('/api/panel/managed-runs', { ...body, laneId: seeded.own });
@@ -106,3 +113,30 @@ it('accepts the artifact upload size range and retains the default for other rou
   expect(other.status).toBe(413);
   expect(await other.json()).toMatchObject({ error: 'Request exceeds 16 MiB' });
 }, 120_000);
+
+it.each([
+  ['foreign', 'native-foreign', false, 403],
+  ['own', 'native-checkout', false, 200],
+  ['latest', 'native-checkout', true, 200],
+] as const)('enforces the native managed-run directory: %s', async (name, folder, omitLane, status) => {
+  const id = `nativedirectory${name}`;
+  const cwd = join(directory, folder);
+  const response = await call('/api/panel/managed-runs', {
+    id, session: `cortex-run-${id}`, command: 'fixture', cwd, packetId: 'packet-a',
+    ...(omitLane ? {} : { laneId: seeded.own }),
+  });
+  expect(response.status).toBe(status);
+  const sqlite = new Database(join(directory, 'cortex-ide.db'), { readonly: true });
+  try {
+    const events = sqlite.prepare('SELECT event_type, repo_path FROM automation_source_events WHERE source_kind = ? AND source_id = ?').all('managed_run', id);
+    if (status === 403) {
+      expect(await response.json()).toMatchObject({ error: 'managed_run_directory_outside_checkout' });
+      expect(events).toEqual([]);
+      const runs = await call('/api/panel/managed-runs');
+      expect((await runs.json()).runs.some((run: { id: string }) => run.id === id)).toBe(false);
+    } else {
+      expect(await response.json()).toMatchObject({ run: { cwd, packetId: 'packet-a', laneId: seeded.own } });
+      expect(events).toContainEqual({ event_type: 'started', repo_path: directory });
+    }
+  } finally { sqlite.close(); }
+});
