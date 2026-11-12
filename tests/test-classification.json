@@ -8160,6 +8160,14 @@
       ]
     },
     {
+      "path": "tests/symon-brain-store-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-brain-without-node-sqlite-real-path.test.ts",
       "reasons": [
         "real-path"
