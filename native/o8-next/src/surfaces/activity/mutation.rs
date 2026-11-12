@@ -33,7 +33,7 @@ impl ActivityPane {
             "Applying decision…"
         }
         .into();
-        let merge = body["verb"] == "merge";
+        let merge = path == packet_merge::PATH || body["verb"] == "merge";
         let replay = body.clone();
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {

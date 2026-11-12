@@ -39,7 +39,7 @@ impl ActivityPane {
             .unwrap_or("")
             .trim();
         if !head.is_empty()
-            && (head.len() != 40 || !head.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            && (!(7..=40).contains(&head.len()) || !head.bytes().all(|byte| byte.is_ascii_hexdigit()))
         {
             self.notice_error = true;
             self.notice = "Saved review HEAD is invalid. Refresh the packet before merging.".into();
@@ -88,10 +88,12 @@ pub(super) fn request(client: &Client, body: &Value) -> Result<Value, ReadError>
     let status = response.status();
     let mut value: Value = Client::read(response).map_err(|_| ReadError::invalid())?;
     if value["error"]["code"] == "outcome_unknown" {
-        return Ok(
-            json!({"outcomeUnknown":true,"note":value["error"]["message"].as_str()
-            .unwrap_or("The packet merge outcome is unknown. Refresh to check it.")}),
-        );
+        // This key is quarantined server-side; replay cannot reconcile it.
+        return Err(error(
+            value["error"]["message"].as_str()
+                .unwrap_or("The packet merge outcome is unknown. Inspect its state before retrying."),
+            status,
+        ));
     }
     if status >= 400 {
         return Err(error(

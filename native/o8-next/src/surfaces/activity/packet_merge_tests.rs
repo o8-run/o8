@@ -104,6 +104,10 @@ impl Peer {
                                     409,
                                     json!({"ok":false,"error":{"code":"outcome_unknown","message":"Fixture merge outcome is quarantined."}}),
                                 ),
+                                6 => (
+                                    200,
+                                    json!({"ok":true,"result":{"merged":false,"note":"Fixture merge conflict."}}),
+                                ),
                                 3 if posts.len() == 1 => (
                                     202,
                                     json!({"ok":true,"result":{"inProgress":true,"merged":false}}),
@@ -183,28 +187,24 @@ fn native_packet_merge_unsettled_refresh_reuses_exact_body(cx: &mut TestAppConte
     let (view, cx) =
         cx.add_window_view(|_, cx| ActivityPane::new(peer.client(), "/fixture".into(), cx));
     cx.run_until_parked();
-    view.update(cx, |view, cx| view.act(Action::Lane(row(), "merge"), cx));
-    cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert!(view.unsettled.is_some());
-        assert!(
-            view.notice
-                .contains("Fixture merge outcome is quarantined.")
-        );
+    let saved = json!({"packetId":"packet-merge", "expectedHeadSha":"a".repeat(40),
+        "idempotencyKey":"fixture-lost-merge-response"});
+    // A lost response can leave the client waiting before it learns that the
+    // server quarantined the operation. The key stays quarantined forever.
+    view.update(cx, |view, cx| {
+        view.unsettled = Some(("POST", packet_merge::PATH, saved.clone()));
+        view.act(Action::Refresh, cx);
     });
-    peer.mode.store(1, Ordering::SeqCst);
-    view.update(cx, |view, cx| view.act(Action::Refresh, cx));
     cx.run_until_parked();
+    assert!(packet_merge::request(&peer.client(), &saved).is_err());
     let posts = peer.posts.lock().unwrap();
     assert_eq!(posts.len(), 2);
-    assert_eq!(
-        posts[0], posts[1],
-        "Refresh replays the exact saved packet merge"
-    );
+    assert_eq!(posts[0], (packet_merge::PATH.into(), saved));
+    assert_eq!(posts[0], posts[1], "Refresh preserves the exact saved merge body");
     view.read_with(cx, |view, _| {
         assert!(view.unsettled.is_none());
-        assert!(!view.notice_error);
-        assert_eq!(view.notice, "Fixture packet merged.");
+        assert!(view.notice_error);
+        assert_eq!(view.notice, "Fixture merge outcome is quarantined.");
     });
 }
 #[gpui::test]
@@ -260,12 +260,18 @@ fn native_packet_merge_refusal_retry_gets_fresh_identity(cx: &mut TestAppContext
 }
 #[gpui::test]
 fn native_packet_merge_replays_saved_head_before_reading_changed_row(cx: &mut TestAppContext) {
-    let peer = Peer::new(2);
+    let peer = Peer::new(3);
     let (view, cx) =
         cx.add_window_view(|_, cx| ActivityPane::new(peer.client(), "/fixture".into(), cx));
     cx.run_until_parked();
-    view.update(cx, |view, cx| view.act(Action::Lane(row(), "merge"), cx));
-    cx.run_until_parked();
+    let saved = json!({"packetId":"packet-merge", "expectedHeadSha":"a".repeat(40),
+        "idempotencyKey":"fixture-live-merge-receipt"});
+    let receipt = packet_merge::request(&peer.client(), &saved).unwrap();
+    assert_eq!(receipt["inProgress"], true);
+    // Unlike a quarantined key, a live receipt may complete after a client timeout.
+    view.update(cx, |view, _| {
+        view.unsettled = Some(("POST", packet_merge::PATH, saved));
+    });
     peer.mode.store(1, Ordering::SeqCst);
     let mut changed = row();
     changed.data["review"]["reviewedHeadSha"] = json!("b".repeat(40));
@@ -309,5 +315,61 @@ fn native_packet_merge_http_refusal_keeps_exact_message(cx: &mut TestAppContext)
         assert!(view.notice_error);
         assert!(view.unsettled.is_none());
         assert_eq!(view.notice, "Fixture reviewed HEAD moved.");
+    });
+}
+
+#[gpui::test]
+fn native_packet_merge_quarantined_outcome_does_not_block_stop(cx: &mut TestAppContext) {
+    let peer = Peer::new(2);
+    let (view, cx) =
+        cx.add_window_view(|_, cx| ActivityPane::new(peer.client(), "/fixture".into(), cx));
+    cx.run_until_parked();
+    view.update(cx, |view, cx| view.act(Action::Lane(row(), "merge"), cx));
+    cx.run_until_parked();
+    // The same quarantined key never acquires a receipt, even after Refresh.
+    view.update(cx, |view, cx| view.act(Action::Refresh, cx));
+    cx.run_until_parked();
+    view.update(cx, |view, cx| {
+        view.mission = json!({"missionId":"mission-after-crash"});
+        view.act(Action::StopMission, cx);
+        view.act(Action::StopMission, cx);
+        assert!(view.pending, "a quarantined merge must not block Stop mission");
+    });
+    cx.run_until_parked();
+    let posts = peer.posts.lock().unwrap();
+    assert_eq!(posts.iter().filter(|(path, _)| path == packet_merge::PATH).count(), 1);
+    assert_eq!(posts.iter().filter(|(path, body)| path == "/api/orchestrator/stop-mission"
+        && body["missionId"] == "mission-after-crash").count(), 1);
+}
+
+#[gpui::test]
+fn native_packet_merge_accepts_server_supported_abbreviated_heads(cx: &mut TestAppContext) {
+    let peer = Peer::new(1);
+    let (view, cx) =
+        cx.add_window_view(|_, cx| ActivityPane::new(peer.client(), "/fixture".into(), cx));
+    cx.run_until_parked();
+    for head in ["AbCdEf0".to_owned(), "a".repeat(12), "a".repeat(40)] {
+        let mut packet = row();
+        packet.data["review"]["reviewedHeadSha"] = json!(head);
+        view.update(cx, |view, cx| view.act(Action::Lane(packet, "merge"), cx));
+        cx.run_until_parked();
+        assert_eq!(peer.posts.lock().unwrap().last().unwrap().1["expectedHeadSha"], head);
+        view.read_with(cx, |view, _| assert!(!view.notice_error));
+    }
+    assert_eq!(peer.posts.lock().unwrap().len(), 3);
+}
+
+#[gpui::test]
+fn native_packet_merge_conflict_preserves_create_pr_hint(cx: &mut TestAppContext) {
+    let peer = Peer::new(6);
+    let (view, cx) =
+        cx.add_window_view(|_, cx| ActivityPane::new(peer.client(), "/fixture".into(), cx));
+    cx.run_until_parked();
+    view.update(cx, |view, cx| view.act(Action::Lane(row(), "merge"), cx));
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert!(view.notice_error);
+        assert!(view.unsettled.is_none());
+        assert_eq!(view.notice, "Fixture merge conflict. Try \"Create PR\" instead.");
     });
 }
