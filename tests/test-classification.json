@@ -5900,6 +5900,14 @@
       ]
     },
     {
+      "path": "tests/o8d-visualization-writes-native-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/o8d-window-owner-real-path.test.ts",
       "reasons": [
         "executable-fixture",

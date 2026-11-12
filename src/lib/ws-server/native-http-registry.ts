@@ -47,6 +47,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/resource-usage', 'GET', () => import('@/app/api/panel/resource-usage/route')),
     route('/api/panel/serve-image', 'GET', () => import('@/app/api/panel/serve-image/route')),
     route('/api/visualizations/[id]', 'GET', () => import('@/app/api/visualizations/[id]/route')),
+    route('/api/visualizations', 'POST', async () => {
+      const handlers = await import('@/lib/visualizations/publish-route');
+      return handlers;
+    }),
+    route('/api/visualizations/preview', 'POST', async () => {
+      const handlers = await import('@/lib/visualizations/preview-route');
+      return handlers;
+    }),
     route('/api/visualizations', 'GET', () => import('@/lib/visualizations/read')),
     // Workspace Notes writes. PUT is the editor autosave, POST the note actions. Principal comes
     // from the bearer (specCallerScope), never x-o8-client-addr or loopback, so the gate and

@@ -223,3 +223,6 @@ export const api_panel_browse_folder = { POST: api_panel_browse_folder_POST };
 export const api_repo_spec_asset = { POST: api_repo_spec_asset_POST };
 export const api_worktrees_retention_usage = { GET: api_worktrees_retention_usage_GET };
 export const api_review_commit = { POST: api_review_commit_POST };
+
+export * as api_visualizations_publish from '@/lib/visualizations/publish-route';
+export * as api_visualizations_preview from '@/lib/visualizations/preview-route';
