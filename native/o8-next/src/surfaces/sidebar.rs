@@ -15,7 +15,9 @@ pub(crate) use thread_list::repo_identity;
 mod thread_list_client;
 #[path = "sidebar/thread_mutations_client.rs"]
 mod thread_mutations_client;
-use thread_list::{Event as ThreadEvent, ThreadList};
+use thread_list::Event as ThreadEvent;
+pub(crate) use thread_list::ThreadList;
+pub(crate) use thread_list::pr_links::PrLink;
 pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {

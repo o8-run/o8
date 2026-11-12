@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 pub(super) struct PrStatus {
     thread: Option<String>,
     generation: u64,
+    target: Option<(String, u64)>,
     loading: bool,
     read_at: Option<Instant>,
     pub(super) detail: Option<Value>,
@@ -64,30 +65,14 @@ fn duration(check: &Value) -> Option<u64> {
     // Older panel servers omit timing; unknown is never displayed as zero.
     check["durationMs"].as_u64().map(|ms| ms / 1000)
 }
-fn linked_pr(body: &Value) -> Option<&Value> {
-    let links = body["result"]["links"].as_array()?;
+fn linked_pr(links: &[crate::shell::sidebar::PrLink]) -> Option<(String, u64)> {
     links
         .iter()
-        .find(|l| l["state"] == "open")
+        .find(|link| link.state.as_deref() == Some("open"))
         .or_else(|| links.first())
+        .map(|link| (link.repository_full_name.clone(), link.number))
 }
-fn read(client: &Client, thread: &str) -> Result<Option<Value>, String> {
-    let body = client
-        .get::<Value>(
-            "/api/orchestrator/pull-request-context",
-            &[("threadId", thread), ("limit", "100")],
-        )
-        .map_err(|e| e.to_string())?;
-    if body["result"]["links"].as_array().is_none() {
-        return Err("PR context unavailable".into());
-    }
-    let Some(link) = linked_pr(&body) else {
-        return Ok(None);
-    };
-    let repo = link["repositoryFullName"]
-        .as_str()
-        .ok_or("Missing repository")?;
-    let number = link["number"].as_u64().ok_or("Missing PR number")?;
+fn read(client: &Client, repo: &str, number: u64) -> Result<Option<Value>, String> {
     let body = client
         .get::<Value>(
             &format!("/api/panel/prs/{number}"),
@@ -125,6 +110,16 @@ fn read(client: &Client, thread: &str) -> Result<Option<Value>, String> {
 }
 
 impl Surface {
+    pub(crate) fn bind_pr_links(
+        &mut self,
+        source: gpui::Entity<crate::shell::sidebar::ThreadList>,
+        cx: &mut Context<Self>,
+    ) {
+        self.subscriptions
+            .push(cx.observe(&source, |_, _, cx| cx.notify()));
+        self.pr_link_source = Some(source);
+    }
+
     #[cfg(test)]
     pub(crate) fn fixture_pr_status(&mut self, detail: Value) {
         self.changes_pill.pr = PrStatus {
@@ -140,15 +135,20 @@ impl Surface {
             .selected
             .clone()
             .filter(|id| id.starts_with("thoughts-"));
+        // The sidebar already discovers explicit PR links. Rendering a thread
+        // without one must not start HTTP work or a refresh timer.
+        let Some(source) = &self.pr_link_source else { return };
+        let target = thread.as_ref().and_then(|id| linked_pr(source.read(cx).links_for(id)));
         let state = &mut self.changes_pill.pr;
-        if state.thread != thread {
+        if state.thread != thread || state.target != target {
             *state = PrStatus {
                 thread: thread.clone(),
+                target: target.clone(),
                 generation: state.generation + 1,
                 ..Default::default()
             };
         }
-        let Some(thread) = thread else { return };
+        let Some((repo, number)) = target else { return };
         if state.loading
             || state
                 .read_at
@@ -161,7 +161,7 @@ impl Surface {
         let client = self.client.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { read(&client, &thread) });
+            .spawn(async move { read(&client, &repo, number) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -413,11 +413,15 @@ mod tests {
         assert_eq!(duration(&json!({})), None);
         assert_eq!(duration(&json!({"durationMs":61000})), Some(61));
     }
+
     #[test]
     fn selects_open_context_and_detects_unlink() {
-        let body =
-            json!({"result":{"links":[{"number":1,"state":"merged"},{"number":2,"state":"open"}]}});
-        assert_eq!(linked_pr(&body).unwrap()["number"], 2);
-        assert!(linked_pr(&json!({"result":{"links":[]}})).is_none());
+        let links = serde_json::from_value::<Vec<crate::shell::sidebar::PrLink>>(json!([
+            {"repositoryFullName":"example/repo","number":1,"state":"merged"},
+            {"repositoryFullName":"example/repo","number":2,"state":"open"}
+        ]))
+        .unwrap();
+        assert_eq!(linked_pr(&links), Some(("example/repo".into(), 2)));
+        assert!(linked_pr(&[]).is_none());
     }
 }

@@ -71,7 +71,11 @@ fn create(
         sessions.push(session.clone());
     }
     Some(Content::Session(cx.new(|cx| {
-        Surface::shell_new(client, sessions, id, window, cx)
+        let mut surface = Surface::shell_new(client, sessions, id, window, cx);
+        if let Some(sidebar) = shell.surfaces.sidebar.view.clone() {
+            surface.bind_pr_links(sidebar, cx);
+        }
+        surface
     })))
 }
 impl Session {

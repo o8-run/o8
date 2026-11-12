@@ -182,6 +182,7 @@ pub(crate) struct Surface {
     queue: Value,
     queue_ready: bool,
     changes_pill: conversation::ChangesPill,
+    pr_link_source: Option<gpui::Entity<crate::shell::sidebar::ThreadList>>,
     project_bar: conversation::ProjectBar,
     /// Turns whose files card shows every file, by the id of the row the
     /// turn's answer ends on, so the choice follows that turn as rows shift.
@@ -279,6 +280,7 @@ impl Surface {
             queue: Value::Null,
             queue_ready: false,
             changes_pill: Default::default(),
+            pr_link_source: None,
             project_bar: Default::default(),
             turn_files_open: Default::default(),
             saving: false,
