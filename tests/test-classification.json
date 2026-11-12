@@ -5629,6 +5629,12 @@
       ]
     },
     {
+      "path": "tests/o8d-mobile-symon-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-more-reads-real-path.test.ts",
       "reasons": [
         "real-path"

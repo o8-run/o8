@@ -71,9 +71,7 @@ export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
 
 /** WS-process modules: the WS-to-Next helpers and plain fetches on the API base. */
 export const NEXT_ONLY_WS_PATHS: NextOnlyTable = {
-  '/api/mobile/symon': security('device grant'),
 
-  '/api/mobile/symon/confirm': security('Symon relay: operator credential only'),
 
   '/api/mobile/symon/text-turn': security('Symon relay: operator credential only'),
 
