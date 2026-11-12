@@ -1,9 +1,9 @@
-#[cfg(test)]
-#[path = "review_takeover_tests.rs"]
-mod review_takeover_tests;
 //! Workspace sidebar. Rebuild descriptors on data/search changes; GPUI only
 //! materializes visible rows. Global snapshots are invalidations, since the
 //! desktop socket's initial tail is smaller than the complete HTTP inventory.
+#[cfg(test)]
+#[path = "review_takeover_tests.rs"]
+mod review_takeover_tests;
 #[cfg(test)]
 #[path = "takeover_tests.rs"]
 mod takeover_tests;
