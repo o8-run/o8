@@ -54,6 +54,7 @@ use util::{ResultExt, measure};
 use uuid::Uuid;
 
 mod prompts;
+mod zoom;
 
 use crate::util::atomic_incr_if_not_zero;
 pub use prompts::*;
@@ -890,6 +891,7 @@ pub struct Window {
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
+    zoom: f32, // o8: see window/zoom.rs
     pub(crate) bounds_observers: SubscriberSet<(), AnyObserver>,
     appearance: WindowAppearance,
     pub(crate) appearance_observers: SubscriberSet<(), AnyObserver>,
@@ -1293,6 +1295,7 @@ impl Window {
             modifiers,
             capslock,
             scale_factor,
+            zoom: 1.,
             bounds_observers: SubscriberSet::new(),
             appearance,
             appearance_observers: SubscriberSet::new(),
@@ -1752,8 +1755,7 @@ impl Window {
     }
 
     fn bounds_changed(&mut self, cx: &mut App) {
-        self.scale_factor = self.platform_window.scale_factor();
-        self.viewport_size = self.platform_window.content_size();
+        self.read_platform_metrics();
         self.display_id = self.platform_window.display().map(|display| display.id());
 
         self.refresh();
@@ -3752,7 +3754,7 @@ impl Window {
         // Handlers may set this to true by calling `prevent_default`.
         self.default_prevented = false;
 
-        let event = match event {
+        let event = match self.input_from_platform(event) {
             // Track the mouse position with our own state, since accessing the platform
             // API for the mouse position can only occur on the main thread.
             PlatformInput::MouseMove(mouse_move) => {
@@ -3826,7 +3828,7 @@ impl Window {
                     PlatformInput::FileDrop(FileDropEvent::Exited)
                 }
             },
-            PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_) => event,
+            event @ (PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_)) => event,
         };
 
         if let Some(any_mouse_event) = event.mouse_event() {
