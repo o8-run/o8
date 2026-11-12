@@ -468,7 +468,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
     route('/api/worktrees/retention-usage', 'GET', () => import('@/app/api/worktrees/retention-usage/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
-    route('/api/setup/cli-updates', 'GET POST', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/cortex/sources', 'GET POST', () => import('@/lib/cortex/knowledge/sources-route')),
     route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/handler')),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('@/app/api/v2/keys/route')),
@@ -593,4 +592,10 @@ export function matchNativeHttpRoute(pathname: string, method?: string) {
   const matches = routes.map(route => ({ route, params: parameters(route.path, pathname) })).filter(entry => entry.params !== null);
   // Surfaces can share a path with different methods, so match on both.
   return method === undefined ? matches[0] : matches.find(entry => entry.route.methods.includes(method));
+}
+
+/** Every verb dispatch can resolve for this concrete path, including split registrations. */
+export function nativeHttpMethods(pathname: string): string[] {
+  return [...new Set(routes.filter(route => parameters(route.path, pathname) !== null)
+    .flatMap(route => route.methods))].sort();
 }
