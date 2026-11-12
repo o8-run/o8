@@ -401,13 +401,19 @@ fn delta_settings_close(cx: &mut TestAppContext, rail: bool) {
     let (_f, shell, mut v) = setup(cx);
     shell.update_in(&mut v, |s, w, cx| s.open_thread("thoughts-composer-first".into(), w, cx));
     ready(&shell, &mut v);
-    let (id, active) = shell.update_in(&mut v, |s, w, cx| {
+    let (id, active, shown) = shell.update_in(&mut v, |s, w, cx| {
         s.execute(Command::Settings, w, cx);
         let id = s.start_thread(true, cx).unwrap();
         let active = s.active();
-        if rail { s.close_rail_overlays(w, cx); }
+        let Content::Session(view) = s.content.get(&s.key(&active.clone().unwrap())).unwrap() else { panic!("chat") };
+        let shown = view.read(cx).shown_thread();
+        let generation = s.surfaces.sidebar.generation.get();
+        if rail {
+            s.close_rail_overlays(w, cx);
+            assert!(s.surfaces.sidebar.generation.get() > generation, "rail closure counts as navigation");
+        }
         else { s.surfaces.settings.view = None; s.surfaces.settings.subscription = None; }
-        (id, active)
+        (id, active, shown)
     });
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
@@ -416,8 +422,10 @@ fn delta_settings_close(cx: &mut TestAppContext, rail: bool) {
         assert!(Instant::now() < deadline, "created thread reaches catalog");
         std::thread::sleep(Duration::from_millis(10));
     }
-    shell.read_with(&v, |s, _| {
-        assert_eq!(s.active(), active, "closing Settings revokes takeover");
+    shell.read_with(&v, |s, cx| {
+        assert_eq!(s.active(), active, "closing Settings preserves the tab");
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        assert_eq!(view.read(cx).shown_thread(), shown, "closing Settings preserves the displayed thread");
         assert_eq!(displays(s, &id), 1);
     });
 }
