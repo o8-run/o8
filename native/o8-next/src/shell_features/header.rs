@@ -400,6 +400,7 @@ fn select_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context
         .get_mut(s.state.selected.as_deref().unwrap_or(""))
         .unwrap()
         .active = index;
+    crate::shell::sidebar::navigation(s, cx);
     s.ensure(window, cx);
     s.restore_focus(window, cx);
     s.persist();
@@ -459,6 +460,7 @@ pub(crate) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
     if was_active && let Some(previous) = previous {
         saved.active = saved.tabs.iter().position(|tab| tab == &previous).unwrap_or(saved.active);
     }
+    crate::shell::sidebar::navigation(s, cx);
     s.ensure(window, cx);
     s.restore_focus(window, cx);
     s.persist();

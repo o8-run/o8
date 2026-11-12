@@ -244,6 +244,7 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
                 }
             };
         }
+        crate::shell::sidebar::navigation(s, cx);
         s.ensure(window, cx);
         s.restore_focus(window, cx);
         s.persist();

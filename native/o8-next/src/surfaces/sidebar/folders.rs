@@ -401,7 +401,7 @@ impl ThreadList {
     /// is false (a split pane shows it); returns its id.
     pub(crate) fn start_thread(&mut self, repo: String, open: bool, cx: &mut Context<Self>) -> String {
         self.new_menu = false;
-        let navigation = self.navigation;
+        let navigation = self.navigation.get();
         // A new chat in the main pane reuses this repository's empty one, so
         // repeated New chat does not pile up untitled threads. A split pane
         // still gets its own.
@@ -526,21 +526,22 @@ impl ThreadList {
             .pending_open
             .take_if(|(id, _)| self.sessions.iter().any(|s| &s.id == id))
         {
-            let foreground = self.navigation == self.pending_navigation
+            let foreground = self.navigation.get() == self.pending_navigation
                 && since.elapsed() <= PENDING_OPEN_TTL;
-            if foreground {
-                self.selected = Some(id.clone());
-                self.follow_selection = true;
-                self.rebuild();
-            }
-            cx.emit(Event::Created(id, foreground));
+            cx.emit(Event::Created(id, foreground, self.pending_navigation));
         }
     }
     pub(crate) fn navigation_generation(&self) -> u64 {
-        self.navigation
+        self.navigation.get()
+    }
+    pub(crate) fn created_foreground(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.selected = Some(id.to_owned());
+        self.follow_selection = true;
+        self.rebuild();
+        cx.notify();
     }
     pub(crate) fn cancel_takeover(&mut self) {
-        self.navigation = self.navigation.wrapping_add(1);
+        self.navigation.set(self.navigation.get().wrapping_add(1));
     }
     /// A New thread whose POST has returned and whose load has not.
     #[cfg(test)]
@@ -549,7 +550,7 @@ impl ThreadList {
     }
     #[cfg(test)]
     pub(crate) fn expect_open_since(&mut self, id: &str, since: std::time::Instant) {
-        self.pending_navigation = self.navigation;
+        self.pending_navigation = self.navigation.get();
         self.pending_open = Some((id.to_owned(), since));
     }
     /// A menu's outside press closed it: remember the press for its trigger.

@@ -175,7 +175,6 @@ impl Shell {
     /// Opens a new chat on the lead and attaches the capture once its composer
     /// can take images, as New chat and the inbox handoff do.
     fn deliver_snapshot(&mut self, w: &mut Window, cx: &mut Context<Self>) {
-        crate::shell::sidebar::navigation(self, cx);
         let Some(mut pending) = self.features.get::<Hotkey>().pending.take() else {
             return;
         };

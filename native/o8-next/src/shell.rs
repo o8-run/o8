@@ -300,7 +300,6 @@ impl Shell {
     }
 
     fn ensure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        sidebar::navigation(self, cx);
         if !self.connected {
             return;
         }
@@ -369,6 +368,7 @@ impl Shell {
             (registration.after_tab)(self);
         }
         self.palette = false;
+        sidebar::navigation(self, cx);
         self.ensure(window, cx);
         self.restore_focus(window, cx);
         self.persist();
@@ -511,13 +511,10 @@ impl Shell {
         let saved = self.state.workspaces.entry(workspace.to_owned()).or_default();
         let index = Self::tab_index(saved, &tab);
         if index.is_none() && saved.tabs.len() >= 32 {
-            toasts::show(
-                toasts::Kind::Info,
-                "Close a surface before opening another.",
-                vec![],
-                Some(toasts::NOTICE_TIMEOUT),
-                cx,
-            );
+            if activate {
+                toasts::show(toasts::Kind::Info, "Close a surface before opening another.",
+                    vec![], Some(toasts::NOTICE_TIMEOUT), cx);
+            }
             return None;
         }
         let inserted = index.is_none();
@@ -581,6 +578,7 @@ impl Shell {
             self.state.workspaces.get_mut(&workspace).unwrap().composer = composer;
         }
         self.palette = false;
+        sidebar::navigation(self, cx);
         self.ensure(window, cx);
         self.restore_focus(window, cx);
         self.persist();
@@ -613,7 +611,6 @@ impl Shell {
         }
     }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
-        sidebar::navigation(self, cx);
         features::tick(self, refresh, window, cx);
     }
 }

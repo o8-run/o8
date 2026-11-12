@@ -25,6 +25,7 @@ pub(super) type Slice = EmptyState;
 struct Navigation {
     workspace: Option<String>,
     tab: Option<Tab>,
+    shown: Option<String>,
     settings_open: bool,
     projects_open: bool,
 }
@@ -43,6 +44,7 @@ pub(super) struct Runtime {
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
     navigation: Option<Navigation>,
+    pub(crate) generation: std::rc::Rc<std::cell::Cell<u64>>,
 }
 /// The sidebar column; the header lays its toggle and search over it.
 pub(super) const WIDTH: f32 = 280.;
@@ -370,6 +372,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let sidebar = cx.new(|cx| {
         let mut list = ThreadList::new(shell.client.clone(), cx);
         list.links = links;
+        list.navigation = shell.surfaces.sidebar.generation.clone();
         list
     });
     let scopes = shell.state.sidebar_scope.clone();
@@ -435,19 +438,23 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     }
                     None => shell.open_thread_in_tab(id.clone(), window, cx),
                 },
-                ThreadEvent::Created(id, foreground) => {
+                ThreadEvent::Created(id, foreground, started) => {
+                    let foreground = *foreground && *started == shell.surfaces.sidebar.generation.get();
                     if let Some(session) = shell.sessions.iter().find(|s| s.list_id() == *id) {
                         let list_id = session.list_id();
                         let workspace = session.workspace();
                         let tab = Tab::Session(session.id.clone());
-                        if *foreground {
+                        if foreground {
+                            if let Some(list) = &shell.surfaces.sidebar.view {
+                                list.update(cx, |list, cx| list.created_foreground(id, cx));
+                            }
                             shell.open_thread(list_id, window, cx);
                         } else if shell.insert_tab(&workspace, tab, false, cx) == Some(true) {
                             shell.persist();
                             shell.revision += 1;
                             cx.notify();
                         }
-                        shell.snapshot_created(id, *foreground, cx);
+                        shell.snapshot_created(id, foreground, cx);
                     }
                 }
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
@@ -691,13 +698,21 @@ pub(super) fn navigation(s: &mut Shell, cx: &mut Context<Shell>) {
     let next = Navigation {
         workspace: s.state.selected.clone(),
         tab: s.active(),
+        shown: s.active().and_then(|tab| {
+            match s.content.get(&s.key(&tab)) {
+                Some(Content::Session(view)) => view.read(cx).shown_thread(),
+                _ => match tab {
+                    Tab::Session(key) => s.current().map(|w| w.selections.get(&key).unwrap_or(&key).clone()),
+                    _ => None,
+                },
+            }
+        }),
         settings_open: s.surfaces.settings.view.is_some(),
         projects_open: s.surfaces.projects.open,
     };
     if s.surfaces.sidebar.navigation.as_ref() != Some(&next) {
         s.surfaces.sidebar.navigation = Some(next);
-        if let Some(view) = &s.surfaces.sidebar.view {
-            view.update(cx, |list, _| list.cancel_takeover());
-        }
+        let generation = &s.surfaces.sidebar.generation;
+        generation.set(generation.get().wrapping_add(1));
     }
 }

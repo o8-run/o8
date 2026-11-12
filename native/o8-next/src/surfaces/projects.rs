@@ -94,6 +94,7 @@ impl Shell {
                         }
                         None => {}
                     }
+                    super::sidebar::navigation(this, cx);
                     for registration in registrations() {
                         (registration.catalog_changed)(this, cx);
                     }

@@ -33,7 +33,7 @@ pub enum Event {
     Refreshed(Vec<Session>, Option<Ledger>),
     Selected(String),
     OpenInTab(String),
-    Created(String, bool),
+    Created(String, bool, u64),
     Error(String),
     Workspace(Option<String>, Ledger),
     /// A `ui-command` frame for the main window. Every socket receives the
@@ -135,7 +135,7 @@ pub struct ThreadList {
     /// A thread New thread created and when; the shell opens it once the list
     /// has it; foreground permission expires after `PENDING_OPEN_TTL`.
     pending_open: Option<(String, std::time::Instant)>,
-    navigation: u64,
+    pub(super) navigation: std::rc::Rc<std::cell::Cell<u64>>,
     pending_navigation: u64,
     /// Threads whose start failed, so a pane waiting on one can say so.
     pub failed_starts: HashSet<String>,
@@ -316,7 +316,7 @@ impl ThreadList {
             new_menu: false,
             menu_press: None,
             pending_open: None,
-            navigation: 0,
+            navigation: Default::default(),
             pending_navigation: 0,
             failed_starts: HashSet::new(),
             settling: None,

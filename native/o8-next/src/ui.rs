@@ -200,6 +200,7 @@ pub(crate) struct Surface {
     selected: Option<String>,
     /// Embedded side conversations must not follow main-history navigation.
     bound_session: Option<String>,
+    pub(crate) shell_navigation: Option<Rc<Cell<u64>>>,
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     images: images::Cache,
     peeks: crate::transcript_peek::Peeks,
@@ -294,6 +295,7 @@ impl Surface {
             overview_snoozes: Default::default(),
             selected: None,
             bound_session: None,
+            shell_navigation: None,
             rows: Rc::new(vec![]),
             images: Default::default(),
             peeks,
@@ -341,6 +343,9 @@ impl Surface {
             return;
         }
         if self.selected.as_ref() != Some(&id) {
+            if let Some(generation) = &self.shell_navigation {
+                generation.set(generation.get().wrapping_add(1));
+            }
             self.prompt_actions.selection_changed();
             if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id)) {
                 brain.update(cx, |brain, cx| {
