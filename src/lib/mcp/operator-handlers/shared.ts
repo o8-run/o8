@@ -198,7 +198,7 @@ async function apiFetchResponse(
       return res;
     } catch (err) {
       lastError = err instanceof O8ApiError ? err : apiError(path, null, '', err);
-      if (lastError.noRetry) {
+      if (lastError.noRetry || lastError.managedBrainUnavailable) {
         _apiHealthy = true; // backend responded; the request itself was rejected
         throw lastError;
       }
