@@ -420,6 +420,10 @@ impl Render for Pane {
                             move |bounds, _, window, cx| {
                                 #[cfg(test)]
                                 painted_bounds.set(bounds);
+                                #[cfg(any(test, feature = "driver"))]
+                                if focus.is_focused(window) {
+                                    crate::driver::terminal_has_focus();
+                                }
                                 window.handle_input(
                                     &focus,
                                     ElementInputHandler::new(bounds, view.clone()),

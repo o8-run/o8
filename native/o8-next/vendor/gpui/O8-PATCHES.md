@@ -69,6 +69,20 @@ Local changes:
   `native_anchor_cover` returns the visible quads the drawn frame placed above
   it; `on_drawn` runs a hook after each drawn frame, before presentation.
 
+- `src/window.rs`: `Window::debug_selector_bounds`, a read-only accessor for
+  the last frame's debug selector bounds, and `Window::dispatch_input_event`,
+  which forwards to `dispatch_event`. It also adds
+  `Window::topmost_hitbox_bounds`, so a press is refused when something else
+  is on top of the named control, and `Window::dispatch_text_input`, which
+  hands text to the focused input without a key event (the frame's press
+  areas and the platform input handler are both crate-private). All four
+  compile only in tests and with the `test-support` feature. The development driver (`src/driver.rs` in the parent
+  crate, behind its `driver` feature) presses controls by name through them.
+  Application code could not do this: the selector map is `pub(crate)` and a
+  second naming mechanism would have to be added at about 745 call sites, and
+  `dispatch_event` returns a crate-private type, so it cannot be called from
+  outside the toolkit.
+
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit
 probe live in the parent crate.
