@@ -1,3 +1,4 @@
+import { managedRunRepoPath } from './source-repo-path';
 import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
 import {
   killManagedRun,
@@ -48,7 +49,7 @@ const defaultDependencies: PacketManagedRunStopDependencies = {
       recordAutomationSourceEvent({
         sourceKind: 'managed_run',
         sourceId: record.id,
-        repoPath: record.cwd,
+        repoPath: managedRunRepoPath(record),
         eventType: 'killed',
         fingerprint: `managed-run:${record.id}:killed:${record.finishedAt ?? 'unknown'}`,
         payload: {

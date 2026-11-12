@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
@@ -92,4 +92,122 @@ it('stores the canonical managed run packet ID', async () => {
   expect(await accepted.json()).toMatchObject({ run: { packetId: 'packet-a' } });
   const { findManagedRun } = await import('@/lib/runtimes/managed-runs/registry');
   expect(findManagedRun('trimfixture')?.packetId).toBe('packet-a');
+});
+
+const checkout = join(directory, 'checkout');
+const foreignRepo = join(directory, 'checkout-other');
+mkdirSync(checkout);
+mkdirSync(foreignRepo);
+mkdirSync(join(foreignRepo, 'nested'));
+symlinkSync(foreignRepo, join(checkout, 'outside'));
+symlinkSync(join(foreignRepo, 'missing'), join(checkout, 'dangling'));
+it.each([
+  ['foreign', foreignRepo, false, 403],
+  ['foreignlatest', foreignRepo, true, 403],
+  ['repo', directory, false, 403],
+  ['symlink', join(checkout, 'outside', 'pending'), false, 403],
+  ['symlinkexisting', join(checkout, 'outside', 'nested'), false, 403],
+  ['dangling', join(checkout, 'dangling'), false, 403],
+  ['symlinkparent', checkout + '/outside/../x', false, 403],
+  ['relative', '.', false, 403],
+  ['parent', checkout + '/../checkout-other', false, 403],
+  ['own', join(checkout, 'pending', 'child'), false, 200],
+  ['latest', checkout, true, 200],
+  ['operator', foreignRepo, false, 200],
+])('keeps the managed run directory in its checkout: %s', async (name, cwd, omitLane, status) => {
+  const { updateLane } = await import('@/lib/lane/registry');
+  const { listAutomationSourceEvents } = await import('@/lib/automations/source-events');
+  updateLane(seeded.own, { worktreePath: name === 'relative' ? process.cwd() : checkout });
+  const id = 'directory' + name;
+  try {
+    const response = await call('/api/panel/managed-runs', {
+      id, session: 'cortex-run-' + id, command: 'fixture', cwd, packetId: 'packet-a',
+      ...(omitLane ? {} : { laneId: seeded.own }),
+    }, name === 'operator' ? operator : seeded.worker);
+    const events = listAutomationSourceEvents({ sourceKind: 'managed_run', afterSequence: 0, repoPath: foreignRepo });
+    expect(events.filter(event => event.sourceId === id)).toEqual([]);
+    expect(response.status).toBe(status);
+    const { findManagedRun } = await import('@/lib/runtimes/managed-runs/registry');
+    if (status === 403) {
+      expect(findManagedRun(id)).toBeNull();
+      expect(listAutomationSourceEvents({ sourceKind: 'managed_run', afterSequence: 0, sourceId: id })).toEqual([]);
+    }
+    else expect(await response.json()).toMatchObject({ run: { cwd, laneId: seeded.own } });
+  } finally {
+    updateLane(seeded.own, { worktreePath: null });
+  }
+});
+
+it('accepts the checkout with different letter case on a case-insensitive volume', async (context) => {
+  const variant = checkout.slice(0, -'checkout'.length) + 'CHECKOUT';
+  if (!existsSync(variant)) {
+    context.skip('Filesystem is case-sensitive; a case variant names a different directory.');
+    return;
+  }
+  const { updateLane } = await import('@/lib/lane/registry');
+  updateLane(seeded.own, { worktreePath: checkout });
+  try {
+    const response = await call('/api/panel/managed-runs', { id: 'casefixture', session: 'cortex-run-casefixture',
+      command: 'fixture', cwd: variant, packetId: 'packet-a', laneId: seeded.own });
+    expect(response.status).toBe(200);
+  } finally {
+    updateLane(seeded.own, { worktreePath: null });
+  }
+});
+
+it('registers and finishes an operator packet run without a lane and records both events', async () => {
+  const id = 'operatornolane';
+  const response = await call('/api/panel/managed-runs', { id, session: 'cortex-run-' + id,
+    command: 'fixture', cwd: foreignRepo, packetId: 'packet-a' }, operator);
+  expect(response.status).toBe(200);
+  expect((await call('/api/panel/managed-runs', { action: 'finish', id, exitCode: 0 }, operator)).status).toBe(200);
+  const { listAutomationSourceEvents } = await import('@/lib/automations/source-events');
+  expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0 }))
+    .toEqual(expect.arrayContaining([
+      expect.objectContaining({ eventType: 'started', repoPath: null }),
+      expect.objectContaining({ eventType: 'exit_clean', repoPath: null }),
+    ]));
+});
+
+it('finishes a deleted-lane run and records its event without throwing', async () => {
+  const { createLane, deleteLane } = await import('@/lib/lane/registry');
+  const lane = createLane({ repoPath: directory, branch: 'deleted', runtime: 'codex', packetId: 'packet-a' });
+  const id = 'deletedlanefixture';
+  expect((await call('/api/panel/managed-runs', { id, session: 'cortex-run-' + id, command: 'fixture',
+    cwd: directory, packetId: 'packet-a', laneId: lane.id }, operator)).status).toBe(200);
+  deleteLane(lane.id);
+  const response = await call('/api/panel/managed-runs', { action: 'finish', id, exitCode: 0 }, operator);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ run: { status: 'finished' } });
+  const { listAutomationSourceEvents } = await import('@/lib/automations/source-events');
+  expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0 }))
+    .toContainEqual(expect.objectContaining({ eventType: 'exit_clean', repoPath: null }));
+});
+
+it('does not attribute a pre-existing worker run without a lane to its foreign cwd', async () => {
+  const { registerManagedRun } = await import('@/lib/runtimes/managed-runs/registry');
+  const { listAutomationSourceEvents } = await import('@/lib/automations/source-events');
+  const id = 'legacyforeign';
+  registerManagedRun({ id, session: 'cortex-run-' + id, command: 'fixture', cwd: foreignRepo,
+    packetId: 'packet-a', laneId: null, mode: 'stream', startedAt: new Date().toISOString(), status: 'running' });
+  const response = await call('/api/panel/managed-runs', { action: 'output', id, outputChunk: 'fixture', outputSequence: 1 });
+  expect(response.status).toBe(200);
+  expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0 }))
+    .toContainEqual(expect.objectContaining({ eventType: 'output', repoPath: null }));
+  expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0, repoPath: foreignRepo })).toEqual([]);
+});
+
+it('keeps a deleted-lane operator run without a packet unattributed', async () => {
+  const { createLane, deleteLane } = await import('@/lib/lane/registry');
+  const { listAutomationSourceEvents } = await import('@/lib/automations/source-events');
+  const lane = createLane({ repoPath: directory, branch: 'deleted-unpacket', runtime: 'codex' });
+  const id = 'deletedunpacket';
+  expect((await call('/api/panel/managed-runs', { id, session: 'cortex-run-' + id,
+    command: 'fixture', cwd: foreignRepo, laneId: lane.id }, operator)).status).toBe(200);
+  deleteLane(lane.id);
+  const response = await call('/api/panel/managed-runs', { action: 'finish', id, exitCode: 0 }, operator);
+  expect(response.status).toBe(200);
+  expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0 }))
+    .toContainEqual(expect.objectContaining({ eventType: 'exit_clean', repoPath: null }));
+  expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0, repoPath: foreignRepo })).toEqual([]);
 });

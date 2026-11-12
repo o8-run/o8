@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { directoryInsideCheckout } from '@/lib/runtimes/managed-runs/checkout-containment';
+import { managedRunRepoPath } from '@/lib/runtimes/managed-runs/source-repo-path';
 import {
   registerManagedRun,
   finishManagedRun,
@@ -13,7 +15,7 @@ import { inspectOwnedManagedRun, terminateManagedRun } from '@/lib/runtimes/mana
 import { externalSettlementQuiet, parseSettlementBinding, settlementBindingDigest } from '@/lib/runtimes/managed-runs/settlement';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
-import { getLane } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
 import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
 import { inspectPacketManagedRunAdmission } from '@/lib/lane/packet-stop-hold';
 import { withPacketManagedRunLifecycleLock } from '@/lib/runtimes/managed-runs/packet-lifecycle';
@@ -90,10 +92,6 @@ type RegisterBody = {
   cancelledBeforeLaunch?: boolean;
   stopRequestId?: string | null;
 };
-
-function managedRunRepoPath(run: ManagedRunRecord): string {
-  return (run.laneId ? getLane(run.laneId)?.repoPath : null) ?? run.cwd;
-}
 
 /** POST — register a run (default), finish one (action:'finish'), or kill one (action:'kill'). */
 export async function POST(req: Request) {
@@ -265,6 +263,15 @@ async function post(req: Request) {
   }
   if (body.command.length > MAX_FIELD || body.cwd.length > MAX_FIELD || (body.title?.length ?? 0) > MAX_FIELD || (body.startedAt?.length ?? 0) > MAX_FIELD) {
     return NextResponse.json({ ok: false, error: 'field_too_long' }, { status: 400 });
+  }
+  if (principal.role === 'worker') {
+    const lane = body.laneId ? getLane(body.laneId) : findLatestLaneByPacket(principal.packetId!);
+    // Without a worktree, the lane's whole repository is its checkout.
+    if (!lane || lane.packetId !== principal.packetId
+      || !directoryInsideCheckout(body.cwd, lane.worktreePath ?? lane.repoPath)) {
+      return NextResponse.json({ ok: false, error: 'managed_run_directory_outside_checkout' }, { status: 403 });
+    }
+    body.laneId = lane.id;
   }
   const binding = body.settlementBinding === undefined ? null : parseSettlementBinding(body.settlementBinding);
   if (body.settlementBinding !== undefined && !binding) {
