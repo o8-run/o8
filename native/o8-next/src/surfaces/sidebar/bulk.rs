@@ -358,3 +358,7 @@ mod tests {
         assert_eq!(range(&ids, "gone", "c"), ["c"]);
     }
 }
+
+#[cfg(test)]
+#[path = "review_click_tests.rs"]
+mod review_click_tests;
