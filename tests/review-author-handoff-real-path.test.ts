@@ -421,3 +421,27 @@ it('keeps the task limits last and matches a replayed bounded operator note', as
   expect((await corrections.POST(request({ ...body, note: 'Different note' }))).status).toBe(409);
   expect(record(target.surfaceId).recentRuns).toHaveLength(count);
 }, 60000);
+
+it('distinguishes saved rejections from approved and pending reviews before offering author recovery', async () => {
+  const { target, review, lane } = await reviewedAuthor('availability-verdict');
+  const availability = async () => {
+    const response = await corrections.GET(new NextRequest(`http://localhost/api/orchestrator/worker-corrections?packetId=${packetId}`, {
+      headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` },
+    }));
+    expect(response.status).toBe(200);
+    return (await response.json()).reviewCorrection;
+  };
+  for (const saved of [{ ...review, approved: true }, null]) {
+    await control.withLockedState(state => { state.packets[0].review = saved; });
+    expect(await availability()).toMatchObject({ available: false, savedRejection: false, authorUnavailable: false });
+  }
+  await control.withLockedState(state => { state.packets[0].review = review; state.packets[0].queueState = 'held'; });
+  expect(await availability()).toMatchObject({ available: false, savedRejection: true, authorUnavailable: false });
+  await control.withLockedState(state => { state.packets[0].queueState = 'queued'; });
+  updateLane(lane.id, { sessionKey: 'codex-owned:retired-author' });
+  expect(await availability()).toMatchObject({ available: false, savedRejection: true, authorUnavailable: true,
+    reason: 'The original author run is retired or unavailable.' });
+  updateLane(lane.id, { sessionKey: target.surfaceId, worktreePath: join(root, 'gone-author-checkout') });
+  expect(await availability()).toMatchObject({ available: false, savedRejection: true, authorUnavailable: true,
+    reason: 'The original author checkout is unavailable.' });
+}, 60000);

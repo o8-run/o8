@@ -46,6 +46,19 @@ unresolved review evidence until independent verification.
 The classic banner's orchestrator-composer recovery prefill is deliberately not
 ported as a third control. Start over with feedback belongs to the reset controls.
 
+### Saved-rejection visibility and recovery
+
+Request changes appears only for a completed saved rejection. Approved and pending
+reviews show no author-correction control. Only a retired author or missing
+checkout gets the Start over with feedback pointer; policy refusals and read
+errors do not recommend discarding work.
+
+Availability and sending use the same runtime owner and existing worker-corrections
+route. After a failed send, Retry send keeps its exact review, run and note.
+Discard and re-check drops only that local retry body, retains the note and reads
+availability again. It does not discard the checkout or remove a durable receipt.
+An unavailable server keeps a fresh send disabled until that check succeeds.
+
 ## Extraction verification
 
 The real GPUI Hold/Release/Stop mission test failed before the discovered fixture

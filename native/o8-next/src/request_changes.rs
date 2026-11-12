@@ -8,11 +8,12 @@ pub(crate) struct RequestChanges {
     packet: String,
     availability: Value,
     input: Entity<Composer>,
-    focus: [FocusHandle; 4],
+    focus: [FocusHandle; 5],
     _submit: gpui::Subscription,
     _input_observer: gpui::Subscription,
     open: bool,
     loading: bool,
+    known_rejection: bool,
     busy: bool,
     notice: String,
     failed: bool,
@@ -42,10 +43,12 @@ impl RequestChanges {
                 cx.focus_handle(),
                 cx.focus_handle(),
                 cx.focus_handle(),
+                cx.focus_handle(),
             ],
             availability: Value::Null,
             open: false,
             loading: false,
+            known_rejection: false,
             busy: false,
             notice: String::new(),
             failed: false,
@@ -56,6 +59,7 @@ impl RequestChanges {
     }
     #[cfg(test)]
     pub(crate) fn open_note_for_test(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.known_rejection = true;
         self.open(window, cx);
     }
     pub(crate) fn editing(&self, window: &Window, cx: &gpui::App) -> bool {
@@ -83,6 +87,10 @@ impl RequestChanges {
                 match result {
                     Ok(value) => {
                         s.availability = value["reviewCorrection"].clone();
+                        s.known_rejection = s.availability["savedRejection"] == true;
+                        if !s.known_rejection {
+                            s.open = false;
+                        }
                         s.notice.clear();
                         s.failed = false;
                     }
@@ -97,6 +105,15 @@ impl RequestChanges {
         })
         .detach();
         cx.notify();
+    }
+    fn discard_and_recheck(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy || self.loading || self.pending.is_none() {
+            return;
+        }
+        // Drop only the local retry body. The durable delivery may already exist.
+        self.pending = None;
+        self.input.read(cx).focus.focus(window);
+        self.refresh(cx);
     }
     pub(super) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.busy {
@@ -116,15 +133,22 @@ impl RequestChanges {
         self.input.read(cx).text.trim().encode_utf16().count()
     }
     pub(crate) fn visible(&self) -> bool {
-        self.open || !self.notice.is_empty() || self.availability["reason"].is_string()
+        self.availability["savedRejection"]
+            .as_bool()
+            .unwrap_or(self.known_rejection)
+    }
+    pub(crate) fn details_visible(&self) -> bool {
+        self.visible() && (self.open || !self.outcome().is_empty())
     }
     fn enabled(&self) -> bool {
-        !self.loading
+        self.visible()
+            && !self.loading
             && !self.busy
             && (self.availability["available"] == true || self.pending.is_some())
     }
     fn send(&mut self, cx: &mut Context<Self>) {
-        if self.busy
+        if !self.visible()
+            || self.busy
             || self.loading
             || (self.pending.is_none() && self.availability["available"] != true)
         {
@@ -191,6 +215,8 @@ impl RequestChanges {
                         s.failed = !delivered;
                         s.availability = json!({
                             "available": false,
+                            "savedRejection": true,
+                            "authorUnavailable": false,
                             "reason": s.notice,
                             "receipt": value["receipt"],
                         });
@@ -209,8 +235,9 @@ impl RequestChanges {
                             s.availability = availability
                                 .map(|value| value["reviewCorrection"].clone())
                                 .unwrap_or_else(
-                                    || json!({"available": false, "reason": error.message}),
+                                    || json!({"available": false, "savedRejection": s.known_rejection, "reason": error.message}),
                                 );
+                            s.known_rejection = s.availability["savedRejection"] == true;
                             s.pending = None;
                         }
                     }
@@ -226,3 +253,8 @@ impl RequestChanges {
 #[cfg(test)]
 mod tests;
 mod view;
+
+#[cfg(test)]
+mod availability_tests;
+
+mod keyboard;

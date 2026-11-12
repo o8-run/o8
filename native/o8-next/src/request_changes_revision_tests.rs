@@ -22,7 +22,7 @@ fn request_changes_toolbar_dismissal_regression(cx: &mut TestAppContext) {
             }
             let header = String::from_utf8(header).unwrap();
             let value = if header.contains("worker-corrections") {
-                json!({"reviewCorrection":{"available":true,"maxNoteLength":80}})
+                json!({"reviewCorrection":{"savedRejection":true,"available":true,"maxNoteLength":80}})
             } else if header.contains("/diff?") {
                 json!({"headSha":"1111111111111111111111111111111111111111", "diff":
                     "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n"})

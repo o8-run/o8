@@ -2,6 +2,7 @@ import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
 import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { callSteerOwner } from '@/lib/orchestrator/operator-mission-service/steer-owner-client';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { getSqlite } from '@/lib/db';
 import { getApproval } from '@/lib/approvals/store';
 import { findLaneByPacket } from '@/lib/lane/registry';
@@ -110,26 +111,55 @@ function prepare(input: ReviewInput) {
 }
 
 /** Read-only availability for the saved rejection; POST repeats every check under its lock. */
-export async function inspectReviewAuthorCorrection(packetId: string) {
+async function inspectLocalReviewAuthorCorrection(packetId: string) {
+  let savedRejection = false;
+  let authorUnavailable = false;
   try {
     const packet = readOrchestratorControlPlaneState().packets.find(item => item.id === packetId)
       ?? findMissionRegistryEntryByPacketId(packetId)?.mission.packets.find(item => item.id === packetId);
-    if (!packet?.review || !packet.orchestratorThreadId || !packet.workspaceTargetPath) throw new Error('No saved review is available for this packet.');
+    if (!packet?.review) throw new Error('No saved review is available for this packet.');
+    const approval = packet.review.auditApprovalId ? getApproval(packet.review.auditApprovalId) : null;
+    savedRejection = packet.review.approved === false && approval?.status === 'rejected'
+      && approval.toolName === 'orchestrator_review' && approval.args?.packetId === packet.id
+      && approval.args.approved === false && approval.args.reviewSuperseded !== true
+      && approval.args.reviewTurnOutcome === 'completed' && !approval.args.parseWarning
+      && approval.args.reviewedHeadSha === packet.review.reviewedHeadSha;
+    if (!savedRejection) throw new Error('The saved review is not a rejection.');
+    if (!packet.orchestratorThreadId || !packet.workspaceTargetPath) throw new Error('The saved review has no author scope.');
     const lane = findLaneByPacket(packetId);
+    // Policy refusals are not evidence that the author or checkout is gone.
+    if (packet.operatorStopped || packet.queueState === 'held' || packet.archivedAt
+      || packet.releaseState === 'released' || packetSteerHoldReason(packet.id)
+      || (lane && (lane.ownership !== 'managed' || !['idle', 'reviewing', 'awaiting_input', 'awaiting_orchestrator'].includes(lane.status)))) {
+      throw new Error('The original editable author is stopped, busy, held, unavailable, or no longer owned. Inspect the worker.');
+    }
+    if (!lane || !existsSync(lane.worktreePath || lane.repoPath)) {
+      authorUnavailable = true;
+      throw new Error('The original author checkout is unavailable.');
+    }
     const target = { repoPath: packet.workspaceTargetPath, threadId: packet.orchestratorThreadId };
     const workers = await listCorrectableWorkers(target);
     const worker = workers.find(item => item.surfaceId === lane?.sessionKey);
-    if (!worker) throw new Error('The original author run is retired or unavailable.');
+    if (!worker) {
+      authorUnavailable = true;
+      throw new Error('The original author run is retired or unavailable.');
+    }
     const review = { packetId, approvalId: packet.review.auditApprovalId, reviewedHeadSha: packet.review.reviewedHeadSha,
       surfaceId: worker.surfaceId, runId: worker.runId };
     const prior = readWorkerCorrection(correctionIdentity(source(review)).id);
-    if (prior) return { available: false, reason: 'Findings already have a delivery receipt. Inspect the author before sending again.', receipt: prior };
+    if (prior) return { available: false, savedRejection, authorUnavailable, reason: 'Findings already have a delivery receipt. Inspect the author before sending again.', receipt: prior };
     const prepared = prepare({ ...target, review });
     prepared.checkCode();
-    return { available: true, reason: null, maxNoteLength: prepared.maxNoteLength, ...target, review };
+    return { available: true, savedRejection, authorUnavailable, reason: null, maxNoteLength: prepared.maxNoteLength, ...target, review };
   } catch (error) {
-    return { available: false, reason: error instanceof Error ? error.message : 'Cannot inspect the original author.' };
+    return { available: false, savedRejection, authorUnavailable, reason: error instanceof Error ? error.message : 'Cannot inspect the original author.' };
   }
+}
+
+/** Read in the same runtime owner that admits the eventual delivery. */
+export async function inspectReviewAuthorCorrection(packetId: string): Promise<Awaited<ReturnType<typeof inspectLocalReviewAuthorCorrection>>> {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) return callSteerOwner({ kind: 'review-inspect', packetId });
+  return inspectLocalReviewAuthorCorrection(packetId);
 }
 
 /** A deliberate handoff, never an automatic restart or a resolution receipt. */

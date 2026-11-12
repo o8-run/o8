@@ -376,9 +376,11 @@ fn cell(line: Option<&Line>, before: bool) -> gpui::Div {
 }
 impl Render for DiffSurface {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let saved_rejection = self.state["orchestratorReview"]["verdict"] == "rejected";
         let request_trigger = self
             .request_changes
             .as_ref()
+            .filter(|control| saved_rejection && control.read(cx).visible())
             .map(|control| control.update(cx, |control, cx| control.trigger(cx)));
         let doc = self.document.clone();
         let painted = self.painted.clone();
@@ -653,7 +655,7 @@ impl Render for DiffSurface {
             .when_some(
                 self.request_changes
                     .clone()
-                    .filter(|control| control.read(cx).visible()),
+                    .filter(|control| saved_rejection && control.read(cx).details_visible()),
                 |view, control| {
                     view.child(
                         div()
@@ -789,3 +791,7 @@ pub fn try_launch(args: &[String]) -> Result<bool, String> {
     launch(client, target, offscreen);
     Ok(true)
 }
+
+#[cfg(test)]
+#[path = "diff_request_changes_tests.rs"]
+mod request_changes_render_tests;

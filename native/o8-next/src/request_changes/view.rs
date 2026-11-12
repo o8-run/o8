@@ -58,6 +58,9 @@ impl RequestChanges {
         })
     }
     pub(super) fn outcome(&self) -> String {
+        if !self.visible() {
+            return String::new();
+        }
         let reason = self.availability["reason"].as_str().unwrap_or("");
         let text = if self.notice.is_empty() {
             reason
@@ -67,7 +70,9 @@ impl RequestChanges {
         if text.is_empty() {
             return String::new();
         }
-        if self.availability["available"] == false && !self.availability["receipt"].is_object() {
+        if self.availability["authorUnavailable"] == true
+            && !self.availability["receipt"].is_object()
+        {
             format!(
                 "{text} Use Start over with feedback to discard the current work and dispatch again."
             )
@@ -75,67 +80,12 @@ impl RequestChanges {
             text.to_string()
         }
     }
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.key == "escape" && self.open {
-            self.close(window, cx);
-            cx.stop_propagation();
-            return;
-        }
-        if event.keystroke.key == "enter" && event.keystroke.modifiers.platform && self.open {
-            self.send(cx);
-            cx.stop_propagation();
-            return;
-        }
-        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-            if self.focus[2].is_focused(window) {
-                self.send(cx);
-                cx.stop_propagation();
-            } else if self.focus[3].is_focused(window) {
-                self.close(window, cx);
-                cx.stop_propagation();
-            } else if self.focus[1].is_focused(window) {
-                self.refresh(cx);
-                cx.stop_propagation();
-            }
-            return;
-        }
-        if event.keystroke.key != "tab" {
-            return;
-        }
-        let mut stops = vec![self.focus[0].clone()];
-        if self.open && !self.busy {
-            if self.pending.is_none() {
-                stops.push(self.input.read(cx).focus.clone());
-            }
-            if self.enabled() {
-                stops.push(self.focus[2].clone());
-            }
-            stops.push(self.focus[3].clone());
-        }
-        if self.availability["available"] != true
-            && !self.busy
-            && !self.loading
-            && self.pending.is_none()
-        {
-            stops.push(self.focus[1].clone());
-        }
-        let current = stops.iter().position(|focus| focus.is_focused(window));
-        let Some(current) = current else {
-            return;
-        };
-        let next = if event.keystroke.modifiers.shift {
-            current.checked_sub(1)
-        } else {
-            (current + 1 < stops.len()).then_some(current + 1)
-        };
-        if let Some(next) = next {
-            stops[next].focus(window);
-            cx.stop_propagation();
-        }
-    }
 }
 impl Render for RequestChanges {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        if !self.visible() {
+            return div().into_any_element();
+        }
         let enabled = self.enabled();
         let length = self.note_length(cx);
         let limit = self.note_limit();
@@ -235,6 +185,20 @@ impl Render for RequestChanges {
                                 button.on_click(cx.listener(|s, _, _, cx| s.send(cx)))
                             }),
                         )
+                        .when(self.pending.is_some() && !self.busy && !self.loading, |row| {
+                            row.child(
+                                button("request-changes-discard", "Discard and re-check", true)
+                                    .track_focus(&self.focus[4])
+                                    .tab_stop(true)
+                                    .text_color(theme().text_muted)
+                                    .when(self.focus[4].is_focused(window), |button| {
+                                        button.border_1().border_color(theme().text)
+                                    })
+                                    .on_click(cx.listener(|s, _, window, cx| {
+                                        s.discard_and_recheck(window, cx)
+                                    })),
+                            )
+                        })
                         .child(
                             button("request-changes-cancel", "Cancel", !self.busy)
                                 .track_focus(&self.focus[3])
@@ -293,8 +257,9 @@ impl Render for RequestChanges {
                     div()
                         .text_size(px(11.))
                         .text_color(theme().text_muted)
-                        .child("Not sent. Retry sends the same note."),
+                        .child("Retry sends the same saved request. Discard and re-check keeps the note."),
                 )
             })
+            .into_any_element()
     }
 }

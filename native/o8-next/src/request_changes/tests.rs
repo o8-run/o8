@@ -25,7 +25,7 @@ fn request_changes_note_does_not_trigger_diff_shortcuts(cx: &mut TestAppContext)
             }
             let header = String::from_utf8(bytes).unwrap();
             let value = if header.contains("worker-corrections") {
-                json!({"reviewCorrection":{"available":true}})
+                json!({"reviewCorrection":{"savedRejection":true,"available":true}})
             } else if header.contains("/diff?") {
                 json!({"headSha":"1111111111111111111111111111111111111111","diff":"diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n"})
             } else {
@@ -95,7 +95,7 @@ fn request_changes_retains_note_and_retries_same_saved_review(cx: &mut TestAppCo
                 assert!(header.contains("packetId=packet-review"));
                 (
                     200,
-                    json!({"reviewCorrection":{"available":true,"repoPath":"/fixture","threadId":"parent","review":{"packetId":"packet-review","approvalId":"rejection","reviewedHeadSha":"1111111111111111111111111111111111111111","surfaceId":"author","runId":"run"}}}),
+                    json!({"reviewCorrection":{"savedRejection":true,"available":true,"repoPath":"/fixture","threadId":"parent","review":{"packetId":"packet-review","approvalId":"rejection","reviewedHeadSha":"1111111111111111111111111111111111111111","surfaceId":"author","runId":"run"}}}),
                 )
             } else {
                 let mut bodies = captured.lock().unwrap();
@@ -191,7 +191,7 @@ fn request_changes_enforces_remaining_note_room(cx: &mut TestAppContext) {
     let (view, cx) = cx.add_window_view(|_, cx| RequestChanges::new(client, "limit".into(), cx));
     cx.run_until_parked();
     view.update(cx, |s, cx| {
-        s.availability = json!({"available":true,"maxNoteLength":3});
+        s.availability = json!({"savedRejection":true,"available":true,"maxNoteLength":3});
         s.loading = false;
         s.notice.clear();
         cx.notify();
@@ -215,8 +215,9 @@ fn request_changes_send_renders_without_duplicate_hover(cx: &mut TestAppContext)
     let (view, cx) = cx.add_window_view(|_, cx| {
         let mut view = RequestChanges::new(client, "style-fixture".into(), cx);
         view.open = true;
+        view.known_rejection = true;
         view.loading = false;
-        view.availability = json!({"available":true});
+        view.availability = json!({"savedRejection":true,"available":true});
         view
     });
     cx.run_until_parked();
