@@ -1,3 +1,6 @@
+#[cfg(test)]
+#[path = "right_panel/restore_tests.rs"]
+mod restore_tests;
 use super::*;
 use crate::motion::Transition;
 use gpui::SharedString;
