@@ -63,13 +63,18 @@ impl ThreadList {
         if self.scroll_foot_row(ix, ScrollStrategy::Top) {
             return;
         }
+        // A list never laid out opens at its top (the shell restoring its
+        // last thread at launch); only a list on screen follows.
+        if !self.cards() && self.scroll.0.borrow().last_item_size.is_none() {
+            return;
+        }
         if !self.cards() {
             self.scroll.scroll_to_item(ix, ScrollStrategy::Top);
             return;
         }
         if self.view() == folders::View::Inbox {
-            // Cards vary in height; keep the plain scroll there.
-            self.scroll_row(ix, ScrollStrategy::Top, false);
+            // The Inbox keeps its own order and never followed an outside
+            // selection; pulling its cards would hide the list's controls.
             return;
         }
         let y = |n: usize| {
@@ -81,6 +86,11 @@ impl ThreadList {
         let top = self.detailed_list.logical_scroll_top();
         let view_top = y(top.item_ix) + top.offset_in_item;
         let view_height = self.detailed_list.viewport_bounds().size.height;
+        // Never laid out: its height is unknown, so every row would look out
+        // of view. Leave the list at its top, where it opens.
+        if view_height <= px(0.) {
+            return;
+        }
         let (row_top, row_height) = (y(ix), self.rows.get(ix).map_or(px(0.), detailed_height));
         if row_top < view_top || row_top + row_height > view_top + view_height {
             self.detailed_list.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(0.) });

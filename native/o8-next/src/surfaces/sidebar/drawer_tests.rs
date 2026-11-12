@@ -653,6 +653,8 @@ fn sidebar_selection_from_outside_reveals_a_folder_below_the_fold(cx: &mut TestA
     for (detailed, id) in [(true, "b-one"), (false, "b-two")] {
         list.update(cx, |list, _| {
             list.views.insert(String::new(), folders::View::Repo);
+            // A switch from a thread in view, not the launch's restore.
+            list.selected = Some("a00".into());
         });
         set_detailed(&list, cx, detailed);
         list.update(cx, |list, _| {
@@ -783,7 +785,10 @@ fn sidebar_selection_in_the_open_drawer_scrolls_the_drawer_only(cx: &mut TestApp
         draw(cx);
         scroll_down(&list, cx);
         let before = top_row(&list, cx);
-        list.update(cx, |list, cx| list.sync_selection(id.into(), cx));
+        list.update(cx, |list, cx| {
+            list.selected = Some("old-00".into());
+            list.sync_selection(id.into(), cx)
+        });
         draw(cx);
         assert_eq!(top_row(&list, cx), before, "detailed {detailed}: the main list stays");
         let ix = index_of(&list, cx, id);

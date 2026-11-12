@@ -218,10 +218,16 @@ pub struct ThreadList {
     choice: Option<String>,
     // A selection made before its thread is listed moves the choice once it arrives.
     follow_selection: bool,
+    /// Whether the followed selection is brought into view when its row
+    /// lands: a new thread or a switch, never the thread a launch restores.
+    follow_reveals: bool,
     /// Where the next rebuild puts the view instead of keeping it: a new
     /// search starts at the top; clearing it returns to `search_return`.
     scroll_next: Option<scroll_anchor::ScrollAnchor>,
     search_return: Option<(String, scroll_anchor::ScrollAnchor)>,
+    /// The project, view and scope of the last rebuild: the view is kept
+    /// only while they stay, as a new set of rows has no old place.
+    scroll_place: String,
     edit_generation: u64,
     loading: bool,
     saving: bool,
@@ -375,8 +381,10 @@ impl ThreadList {
             editing: false,
             choice: None,
             follow_selection: false,
+            follow_reveals: false,
             scroll_next: None,
             search_return: None,
+            scroll_place: String::new(),
             edit_generation: 0,
             loading: false,
             saving: false,
@@ -410,6 +418,8 @@ impl ThreadList {
     fn rebuild(&mut self) {
         self.track_working();
         let anchor = self.scroll_next.take().unwrap_or_else(|| self.scroll_anchor());
+        let place = self.scroll_place();
+        let same_list = std::mem::replace(&mut self.scroll_place, place.clone()) == place;
         let previous_choice = self
             .rows
             .iter()
@@ -495,9 +505,11 @@ impl ThreadList {
         // Rows that arrived or left above keep the view where it was
         // (#6021); a followed selection is then brought into view, and the
         // choice is followed only when the view lost its row.
-        let anchored = self.restore_scroll(anchor);
+        let anchored = same_list && self.restore_scroll(anchor);
         if let Some(index) = followed {
-            self.reveal_row(index);
+            if std::mem::take(&mut self.follow_reveals) {
+                self.reveal_row(index);
+            }
         } else if !anchored
             && let Some(index) = self
                 .rows
@@ -1106,7 +1118,9 @@ impl ThreadList {
         if self.rename.as_ref().is_some_and(|owner| owner != &id) {
             self.suspend_rename(cx);
         }
-        self.selected = Some(id.clone());
+        // A switch from another thread is brought into view; the thread a
+        // launch restores leaves the list at its top, where it opens.
+        let switch = self.selected.replace(id.clone()).is_some();
         if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
             session.unread = false;
         }
@@ -1114,9 +1128,12 @@ impl ThreadList {
         self.rebuild();
         if let Some(index) = self.rows.iter().position(|r| r.id.as_deref() == Some(&id)) {
             self.choice = Some(id);
-            self.reveal_row(index);
+            if switch {
+                self.reveal_row(index);
+            }
         } else {
             self.follow_selection = !self.selection_in_closed_drawer();
+            self.follow_reveals = switch;
         }
         cx.notify();
     }
