@@ -1,3 +1,9 @@
+#[cfg(test)]
+#[path = "header/review_tests.rs"]
+mod review_tests;
+#[cfg(test)]
+#[path = "header/thread_tab_tests.rs"]
+mod thread_tab_tests;
 use super::*;
 #[cfg(test)]
 #[path = "header/open_in_editor_tests.rs"]
@@ -321,6 +327,7 @@ pub(crate) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Contex
 struct Visits {
     scope: Option<String>,
     tabs: Vec<Tab>,
+    recent: std::collections::BTreeMap<Option<String>, Vec<Tab>>,
     index: usize,
 }
 
@@ -329,12 +336,17 @@ fn record_visit(s: &mut Shell) {
     let active = s.active();
     let visits = s.features.get::<Visits>();
     if visits.scope != scope {
-        *visits = Visits {
-            scope,
-            ..Default::default()
-        };
+        visits.scope = scope.clone();
+        visits.tabs.clear();
+        visits.index = 0;
     }
     let Some(tab) = active else { return };
+    let recent = visits.recent.entry(scope).or_default();
+    recent.retain(|visited| visited != &tab);
+    recent.push(tab.clone());
+    if recent.len() > 100 {
+        recent.remove(0);
+    }
     if visits.tabs.get(visits.index) == Some(&tab) {
         return;
     }
@@ -394,6 +406,7 @@ fn select_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context
         .get_mut(s.state.selected.as_deref().unwrap_or(""))
         .unwrap()
         .active = index;
+    crate::shell::sidebar::navigation(s, cx);
     s.ensure(window, cx);
     s.restore_focus(window, cx);
     s.persist();
@@ -420,10 +433,22 @@ pub(super) fn glyph(tab: &Tab) -> &'static str {
 }
 
 /// Closes one tab, as Cmd+W does for the active one.
-pub(super) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
+pub(crate) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
     let Some(tab) = s.current().and_then(|w| w.tabs.get(index).cloned()) else {
         return;
     };
+    record_visit(s);
+    let previous = s.features.read::<Visits>().and_then(|visits| {
+        visits.recent.get(&s.state.selected).and_then(|recent| {
+            recent
+                .iter()
+                .rev()
+                .find(|visited| {
+                    *visited != &tab && s.current().is_some_and(|w| w.tabs.contains(visited))
+                })
+                .cloned()
+        })
+    });
     s.content.remove(&s.key(&tab));
     s.state.tab_labels.remove(&s.key(&tab));
     let saved = s
@@ -432,11 +457,16 @@ pub(super) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
         .get_mut(s.state.selected.as_deref().unwrap_or(""))
         .unwrap();
     (tab.registration().remove)(saved, &tab);
+    let was_active = index == saved.active;
     saved.tabs.remove(index);
     if index < saved.active {
         saved.active -= 1;
     }
     saved.active = saved.active.min(saved.tabs.len().saturating_sub(1));
+    if was_active && let Some(previous) = previous {
+        saved.active = saved.tabs.iter().position(|tab| tab == &previous).unwrap_or(saved.active);
+    }
+    crate::shell::sidebar::navigation(s, cx);
     s.ensure(window, cx);
     s.restore_focus(window, cx);
     s.persist();
@@ -650,7 +680,7 @@ fn strip(
         ))
         .on_drop(
             cx.listener(|this, drag: &super::header_tabs::Dragged, window, cx| {
-                super::header_tabs::drop(this, drag.index, window, cx);
+                super::header_tabs::drop(this, drag, window, cx);
             }),
         )
         .children({
@@ -669,9 +699,10 @@ fn strip(
                     let group = gpui::SharedString::from(format!("surface-tab-{i}"));
                     let label = tab_label(s, &t);
                     let editing = super::header_tabs::editing(s, i);
-                    let insertion = super::header_tabs::insertion(s).filter(|(at, _)| *at == i);
+                    let insertion = super::header_tabs::insertion(s).filter(|(at, _)| at == &t);
                     let dragged = super::header_tabs::Dragged {
-                        index: i,
+                        tab: t.clone(),
+                        scope: s.state.selected.clone(),
                         label: label.clone().into(),
                         glyph: glyph(&t),
                     };
