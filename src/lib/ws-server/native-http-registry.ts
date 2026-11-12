@@ -48,7 +48,19 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/serve-image', 'GET', () => import('@/app/api/panel/serve-image/route')),
     route('/api/visualizations/[id]', 'GET', () => import('@/app/api/visualizations/[id]/route')),
     route('/api/visualizations', 'GET', () => import('@/lib/visualizations/read')),
-    route('/api/repo-spec', 'GET', () => import('@/app/api/repo-spec/route')),
+    // Workspace Notes writes. PUT is the editor autosave, POST the note actions. Principal comes
+    // from the bearer (specCallerScope), never x-o8-client-addr or loopback, so the gate and
+    // handler split holds as on Next: operator and enrolled device write; a worker is held to
+    // its own lane directory and to comment, reply, suggest and resolve, and its PUT is refused;
+    // no or wrong bearer gets 401. Writes go through writeWorkspaceFile, which refuses a
+    // symlinked or non-regular o8.md. (#5243)
+    route('/api/repo-spec', 'GET PUT POST', () => import('@/app/api/repo-spec/route')),
+    // The file card's save (PUT) and native file chooser (POST). /api/panel/file-io has no
+    // device, worker or spectator grant in panelGateMiddleware, so both are operator-bearer-only
+    // whatever the caller's address, as on Next; the handler also refuses any non-operator
+    // chooser call. PUT edits an existing regular file only, with the mtime guard, the knowledge
+    // source refusal and the masked-content refusal unchanged. GET stays with the viewer routes. (#5243)
+    route('/api/panel/file-io', 'PUT POST', () => import('@/app/api/panel/file-io/route')),
     route('/api/panel/browse-folder', 'POST', () => import('@/app/api/panel/browse-folder/route')),
     route('/api/repo-spec/asset', 'POST', () => import('@/app/api/repo-spec/asset/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
@@ -305,6 +317,19 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // encrypted in a separate credentials table); the POST writes go through
     // withProviderStoreLock + master-key encryption. (#5243)
     route('/api/runtime/provider-instances', 'GET POST', () => import('@/app/api/runtime/provider-instances/route')),
+    // Saved SSH machines (open in editor, remote terminals). Gated twice: no device, worker or
+    // spectator grant, so the gate admits only the operator bearer, and the handler then requires
+    // a local caller (isTrustedPanelRequest reads x-o8-client-addr, which native sets to the peer
+    // o8d attests, #5576). A relayed or remote operator gets 403 local_only, as on Next. The
+    // response lists machine labels and targets and, for POST, a control command for a terminal
+    // the machine itself reported; no key material. (#5243)
+    route('/api/panel/ssh-machines', 'GET POST', () => import('@/app/api/panel/ssh-machines/route')),
+    // Local ACP connection (Settings > Providers): the command o8 launches and its environment
+    // variables. No device, worker or spectator grant, so only the operator bearer passes the
+    // gate, whatever the caller's address; requirePanelAuth then accepts that bearer or the
+    // attested local peer, as on Next. Both stores are files under the data directory written
+    // under withProviderStoreLock, so the WS process and Next share one copy. (#5243)
+    route('/api/runtime/acp-connection', 'GET POST', () => import('@/app/api/runtime/acp-connection/route')),
     // Desktop shell reads (src-tauri o8_http). No device/worker/spectator grant in panelGateMiddleware, so only
     // the operator bearer passes. cli-usage reads the CLI usage files under this process's HOME and has no
     // handler auth. broadcast/why and broadcast/calendar check the principal from the bearer

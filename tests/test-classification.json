@@ -5661,6 +5661,14 @@
       ]
     },
     {
+      "path": "tests/o8d-operator-local-writes-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-operator-status-setup-native-real-path.test.ts",
       "reasons": [
         "real-path"

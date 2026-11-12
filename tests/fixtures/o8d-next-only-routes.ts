@@ -22,16 +22,11 @@ const security = (reason: string): NextOnlyEntry => ({ owner: 'security', reason
 const seek = (reason: string): NextOnlyEntry => ({ owner: 'seek', reason });
 
 export const NEXT_ONLY_NATIVE_PATHS: NextOnlyTable = {
-  '/api/panel/ssh-machines': security('local-only trust gate (isTrustedPanelRequest) and SSH commands on saved machines'),
-  '/api/runtime/acp-connection': seek('native inventory drift outside the A1 and A2 slices'),
   '/api/review/push': seek("review's push button: a POST outside the Phase A reads"),
 };
 // Registered paths that o8 next sends a method the native registration lacks, read from each Rust
 // request's call. Hidden while the scan checked paths alone.
 export const NEXT_ONLY_NATIVE_METHODS: NextOnlyTable = {
-  'POST /api/panel/file-io': security('local file write chosen by path: filesystem jail'),
-  'POST /api/repo-spec': security('device and worker grants'),
-  'PUT /api/repo-spec': security('device and worker grants'),
 };
 
 // The shell's /api/v1/* hits were a provider's own URL (openrouter.ai), not the API port.
