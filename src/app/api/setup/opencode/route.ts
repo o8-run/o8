@@ -57,17 +57,17 @@ export async function GET() {
     return NextResponse.json({
       path,
       fileExists,
-      proposed,
+      proposed: Object.fromEntries(managedNames.map(name => [name, { configured: true }])),
       managedNames,
       alreadyRegistered: managedNames.some((name) => name in existingServers),
       alreadyUpToDate: fileExists && upToDate,
       otherServers: Object.keys(existingServers).filter((k) => !managedNames.includes(k)),
       size: fileExists ? statSync(path).size : 0,
     });
-  } catch (error) {
-    console.error('[setup/opencode] GET error:', error);
+  } catch {
+    console.error('[setup/opencode] GET failed');
     return NextResponse.json(
-      { error: 'Failed to inspect OpenCode config', detail: error instanceof Error ? error.message : String(error) },
+      { error: 'Failed to inspect OpenCode config' },
       { status: 500 },
     );
   }
@@ -111,10 +111,10 @@ export async function POST(request: Request) {
       installed: managedNames,
       detail: 'Restart the OpenCode 2 CLI (or start a new session) to load the o8 tools.',
     });
-  } catch (error) {
-    console.error('[setup/opencode] POST error:', error);
+  } catch {
+    console.error('[setup/opencode] POST failed');
     return NextResponse.json(
-      { ok: false, error: 'Failed to write OpenCode config', detail: error instanceof Error ? error.message : String(error) },
+      { ok: false, error: 'Failed to write OpenCode config' },
       { status: 500 },
     );
   }

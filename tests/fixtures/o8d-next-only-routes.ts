@@ -58,7 +58,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
   '/api/task-artifacts/[id]/actions': seek('operator MCP tool'),
 };
 export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
-  'POST /api/setup/mcp-servers': security('stores MCP commands, env and OAuth tokens that workers receive'),
 };
 
 /** WS-process modules: the WS-to-Next helpers and plain fetches on the API base. */
@@ -98,7 +97,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
 
 
-  '/api/setup/opencode': security('writes the operator MCP entry, with its bearer, into the OpenCode config'),
 
 
   '/api/task-artifacts/[id]/actions': seek('operator task artifact actions'),

@@ -422,6 +422,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // the gate only ever lets the body reach a caller already holding that same operator token,
     // and the real-path forged-local-header negative pins that a non-operator cannot extract it. (#5243)
     route('/api/setup/mcp-config', 'GET', () => import('@/app/api/setup/mcp-config/route')),
+    route('/api/setup/opencode', 'GET POST', () => import('@/app/api/setup/opencode/route')),
     // Claude Desktop / Claude Code auto-register (Settings > MCP). GET previews the Claude config
     // (other servers by name only; the o8 entry carries the operator's own WS_TOKEN); POST merges the
     // o8 + codebase-memory entries into the user's config file. No handler-level auth — same
@@ -520,7 +521,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/customize/inventory', 'GET', () => import('@/app/api/customize/inventory/route')),
     route('/api/customize/actions', 'GET POST', () => import('@/app/api/customize/actions/route')),
     route('/api/cortex/directives', 'GET POST', () => import('@/app/api/cortex/directives/route')),
-    route('/api/setup/mcp-servers', 'GET', () => import('@/app/api/setup/mcp-servers/route')),
+    route('/api/setup/mcp-servers', 'GET POST', () => import('@/lib/mcp/setup-mcp-servers-route')),
     route('/api/prompt-library', 'GET POST', () => import('@/app/api/prompt-library/route')),
     route('/api/prompt-library/[id]', 'GET PATCH DELETE', () => import('@/app/api/prompt-library/[id]/route')),
   ],
