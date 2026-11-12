@@ -160,19 +160,20 @@ it('retains main local delivery with the native flag unset', async () => {
   expect(local.calls).toBe(1); vi.stubEnv('O8_NEXT_O8D', '1');
 }, 30000);
 
-async function stdioDispatch(data: string, port: number, taskId: string, steer = false) {
+async function stdioDispatch(data: string, port: number, taskId: string, steer = false, options: { required?: boolean; portFile?: boolean; refuse?: boolean; tool?: string } = {}) {
   const api = steer ? server.apiUrl : `http://127.0.0.1:${port}`;
   const receiptFile = join(data, steer ? 'steer-runtime.json' : 'task-runtime.json');
   const child = spawn(process.execPath, [steer ? '--require=./tests/fixtures/ws-parity-packet-steer.cjs' : '--require=./tests/fixtures/ws-parity-task-dispatch.cjs',
     '--require=./scripts/next/brain-runtime.cjs', 'tests/fixtures/stdio-runtime-owner-entry.mjs'], {
     cwd: process.cwd(), env: { ...process.env, HOME: data, USERPROFILE: data, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,
-      CORTEX_IDE_DB_PATH: join(data, 'cortex-ide.db'), O8_NEXT_O8D: '', O8_WS_PORT: String(port), O8_API_PORT: new URL(api).port,
-      PORT: new URL(api).port, O8_API_BASE: api, WS_TOKEN: server.token, O8_MCP_NO_ORPHAN_KILL: '1' },
+      CORTEX_IDE_DB_PATH: join(data, 'cortex-ide.db'), O8_NEXT_O8D: options.required ? '1' : '', O8_WS_PORT: options.portFile ? undefined : String(port),
+      WS_PORT: undefined, O8_API_PORT: options.portFile ? undefined : new URL(api).port,
+      CORTEX_IDE_PORT: undefined, O8_DEV_FRONTEND_URL: undefined, PORT: options.portFile ? undefined : new URL(api).port, O8_API_BASE: api, WS_TOKEN: server.token, O8_MCP_NO_ORPHAN_KILL: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
   try {
-    const response = await new Promise<{ result?: { isError?: boolean }; error?: unknown }>((resolve, reject) => {
+    const response = await new Promise<{ result?: { isError?: boolean }; error?: { message?: string } }>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`stdio timeout: ${stderr.slice(-2000)}`)), 30000);
       let pending = '';
       child.stdout.on('data', chunk => {
@@ -184,8 +185,17 @@ async function stdioDispatch(data: string, port: number, taskId: string, steer =
         }
       });
       child.once('exit', code => { clearTimeout(timer); reject(new Error(`stdio exited ${code}: ${stderr.slice(-2000)}`)); });
-      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 101, method: 'tools/call', params: steer ? { name: 'steer_packet', arguments: { packetId: taskId, message: 'stdio fixture' } } : { name: 'o8_task_dispatch', arguments: { taskId } } }) + '\n');
+      const tool = options.tool ?? (steer ? 'steer_packet' : 'o8_task_dispatch');
+      const args = tool === 'o8_task_dispatch' ? { taskId } : tool === 'steer_packet'
+        ? { packetId: taskId, message: 'stdio fixture' } : { sessionKey: 'codex-owned:refusal', message: 'stdio fixture' };
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 101, method: 'tools/call', params: { name: tool, arguments: args } }) + '\n');
     });
+    if (options.refuse) {
+      expect(response.error?.message, JSON.stringify(response)).toContain('Runtime owner could not be confirmed');
+      expect(existsSync(join(data, 'task-runtime.json'))).toBe(false);
+      expect(existsSync(join(data, 'steer-runtime.json'))).toBe(false);
+      return { pid: child.pid, receipt: JSON.parse('{}') };
+    }
     expect(response.result?.isError, JSON.stringify(response)).not.toBe(true);
     await vi.waitFor(() => {
       const receipt = JSON.parse(readFileSync(receiptFile, 'utf8'));
@@ -228,4 +238,77 @@ it('stdio packet steer uses WS while its Next API listener is stopped', async ()
   writeFileSync(join(server.directory, 'api-port'), new URL(server.apiUrl).port);
   const result = await stdioDispatch(server.directory, Number(new URL(origin).port), f.id, true);
   expect(result.receipt.pid).toBe(server.pid); expect(result.receipt.pid).not.toBe(result.pid);
+}, 60000);
+
+async function closedPort() {
+  const listener = createServer(); await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
+  const port = (listener.address() as { port: number }).port;
+  await new Promise<void>(resolve => listener.close(() => resolve())); return port;
+}
+async function refusalData(port: number) {
+  const data = mkdtempSync(join(tmpdir(), 'o8-stdio-refusal-'));
+  const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  writeFileSync(join(data, 'ws-token'), server.token);
+  writeFileSync(join(data, 'api-port'), String(port)); writeFileSync(join(data, 'ws-port'), String(port));
+  writeFileSync(join(data, 'orchestrator-state.json'), JSON.stringify({ version: 1,
+    mission: { ...createEmptyOrchestratorMissionState(), repoPath: repo, packets: [queuedPacket('stdio-refused-task')] } }));
+  return data;
+}
+it.each(['o8_task_dispatch', 'steer_packet', 'o8_send'].flatMap(tool =>
+  ['refused', 'stale-port', '404'].map(endpoint => ({ tool, endpoint }))))(
+  'required WS owner refuses $tool at $endpoint without local work', async ({ tool, endpoint }) => {
+    const listener = endpoint === '404' ? createServer((_, response) => response.writeHead(404).end()) : null;
+    if (listener) await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
+    const port = listener ? (listener.address() as { port: number }).port : await closedPort();
+    expect(port).not.toBe(Number(new URL(origin).port));
+    const data = await refusalData(port);
+    try { await stdioDispatch(data, port, 'stdio-refused-task', false,
+      { required: true, portFile: endpoint === 'stale-port', refuse: true, tool }); }
+    finally {
+      if (listener) await new Promise<void>(resolve => listener.close(() => resolve()));
+      rmSync(data, { recursive: true, force: true });
+    }
+  }, 60000);
+it.each([401, 403])('flag-unset stdio refuses a reachable unverifiable owner (%i)', async status => {
+  let probes = 0;
+  const listener = createServer((_, response) => { probes++; response.writeHead(status).end(); });
+  await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
+  const port = (listener.address() as { port: number }).port;
+  const data = await refusalData(port);
+  try {
+    await stdioDispatch(data, port, 'stdio-refused-task', false, { refuse: true });
+    expect(probes).toBe(1);
+  } finally { await new Promise<void>(resolve => listener.close(() => resolve())); rmSync(data, { recursive: true, force: true }); }
+}, 60000);
+it.each(['unchanged', 'head', 'dirty'])('review-correct rebuilds WS spawn admission: %s', async drift => {
+  const f = await fixture();
+  lanes.updateLane(f.lane.id, { status: 'reviewing' });
+  await control.withControlPlaneLock(() => {
+    const state = control.readOrchestratorControlPlaneState();
+    state.packets[0].status = 'awaiting_review';
+    state.packets[0].launchContext = { source: 'desktop', presentation: 'tab', repoContext: 'registered', workMode: 'edit' };
+    control.writeOrchestratorControlPlaneState(state);
+  });
+  const head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const reviewRoute = await import('@/app/api/orchestrator/review/route');
+  const response = await reviewRoute.POST(request('/api/orchestrator/review', { packetId: f.id, approved: false,
+    reviewedHeadSha: head, clientMutationId: `review-${f.id}`,
+    findings: [{ file: 'README.md', severity: 'bug', description: 'Preserve the request.', status: 'deferred', fixSuggestion: 'Keep the request.' }] }));
+  expect(response.status, await response.clone().text()).toBe(200);
+  const review = control.readOrchestratorControlPlaneState().packets[0].review!;
+  const dirty = join(repo, 'dirty-review-fixture'); flag('hold-steer');
+  try {
+    const { correctAuthorFromReview } = await import('@/lib/orchestrator/review-author-correction');
+    const delivery = correctAuthorFromReview({ repoPath: repo, threadId: 'thoughts-owner-parent',
+      review: { packetId: f.id, approvalId: review.auditApprovalId, reviewedHeadSha: head, surfaceId: f.surfaceId, runId: 'run-original' } });
+    await vi.waitFor(() => expect(read().calls.some(row => row.surfaceId === f.surfaceId)).toBe(true), { timeout: 15000 });
+    expect(read().pid).toBe(server.pid);
+    if (drift === 'head') execFileSync('git', ['-C', repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'changed review head']);
+    if (drift === 'dirty') writeFileSync(dirty, 'unreviewed change');
+    flag('hold-steer', false);
+    const receipt = await delivery;
+    expect(receipt.deliveries[0].status).toBe(drift === 'unchanged' ? 'delivered' : 'unknown');
+    if (drift !== 'unchanged') expect(receipt.deliveries[0].note).toContain(drift === 'head' ? 'code changed after review' : 'uncommitted changes');
+    expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(drift === 'unchanged' ? 1 : 0);
+  } finally { flag('hold-steer', false); if (existsSync(dirty)) unlinkSync(dirty); }
 }, 60000);
