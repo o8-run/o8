@@ -78,6 +78,13 @@ it.each([
   expect(listArtifacts({ packetId: 'packet-a' }).find(a => a.id === artifactId)).toMatchObject({ [field]: own });
   expect((await call('/api/panel/artifacts', { ...body, [field]: other }, operator)).status).toBe(200);
 });
+it('accepts an artifact for the packet\'s own PR after its opened note is replaced', async () => {
+  const body = { packetId: 'packet-merged', bytesBase64: 'eA==', kind: 'video', mimeType: 'video/mp4' };
+  expect((await call('/api/panel/artifacts', { ...body, prNumber: 33 }, seeded.mergedWorker)).status).toBe(200);
+  expect((await call('/api/panel/artifacts', { ...body, prNumber: 11 }, seeded.mergedWorker)).status).toBe(403);
+  // Mirroring posts outside o8 and still requires the recorded opened note.
+  expect((await call('/api/panel/artifacts/mirror', { packetId: 'packet-merged', repoSlug: 'fixture/own', prNumber: 33 }, seeded.mergedWorker)).status).toBe(403);
+});
 it('stores the canonical managed run packet ID', async () => {
   const accepted = await call('/api/panel/managed-runs', { id: 'trimfixture', session: 'cortex-run-trimfixture',
     command: 'fixture', cwd: directory, packetId: ' packet-a ', laneId: seeded.own });

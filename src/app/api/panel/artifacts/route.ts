@@ -17,7 +17,7 @@ import {
 } from '@/lib/artifacts/store';
 import { publishArtifactRecorded } from '@/lib/realtime/publisher';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
-import { packetHasRecordedPr } from '@/lib/artifacts/worker-binding';
+import { packetOwnsPrNumber } from '@/lib/artifacts/worker-binding';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { getLane } from '@/lib/lane/registry';
 
@@ -163,7 +163,7 @@ export async function POST(request: Request) {
   if (principal.role === 'worker') {
     const packet = readOrchestratorControlPlaneState().packets.find(p => p.id === principal.packetId);
     if (!packet
-      || (meta.prNumber !== null && !packetHasRecordedPr(packet.id, meta.prNumber))
+      || (meta.prNumber !== null && !packetOwnsPrNumber(packet.id, meta.prNumber))
       || (meta.threadId !== null && meta.threadId !== packet.orchestratorThreadId)
       || (meta.repoPath !== null && meta.repoPath !== packet.workspaceTargetPath)) {
       return NextResponse.json({ ok: false, error: { code: 'worker_packet_mismatch',
