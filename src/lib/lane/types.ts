@@ -593,6 +593,8 @@ export interface LanePolicy {
 // ── Command Result ──
 
 export interface LaneCommandResult {
+  /** A launch may still own a process; retain the held receipt. */
+  effectStarted?: boolean;
   ok: boolean;
   laneId: string;
   note: string;

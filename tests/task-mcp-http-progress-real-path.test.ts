@@ -413,3 +413,43 @@ it('resumes a modern persisted event cursor after restarting the standalone MCP 
     expect(next.nextSince).toBeGreaterThanOrEqual(first.nextSince);
   } finally { await stop(); }
 }, 60000);
+
+it('does not infer a timeout error code from worker note text', async () => {
+  const id = fixture();
+  h.launch.mockImplementationOnce(async () => ({ ok: false, surfaceId: '', note: 'worker wrote runtime_launch_timeout in a diagnostic' }));
+  const { dispatchTask } = await import('@/lib/tasks/actions');
+  await dispatchTask(id);
+  expect(lanes.findLatestLaneByPacket(id)?.status).not.toBe('failed');
+});
+it('preserves an orchestrator escalation owned by another launch observer', async () => {
+  const id = fixture();
+  h.launch.mockImplementationOnce(async (input) => {
+    lanes.setLaneStatus(input.existingLaneId, 'awaiting_orchestrator', 'system', 'launch_stalled');
+    return { ok: false, surfaceId: '', note: 'Launch observer already escalated' };
+  });
+  const { dispatchTask } = await import('@/lib/tasks/actions');
+  await dispatchTask(id);
+  expect(lanes.findLatestLaneByPacket(id)).toMatchObject({ status: 'awaiting_orchestrator', lastEventLabel: 'launch_stalled' });
+});
+it.each([false, true])('bounds a held post-spawn call and refuses retry with packet=%s', async packetBound => {
+  const id = packetBound ? fixture() : lanes.createLane({ repoPath: repo, branch: `held-${++sequence}`, runtime: 'codex' }).id;
+  const { dispatchTask } = await import('@/lib/tasks/actions');
+  const { runtimeLaunchStep, withRuntimeLaunchDeadline } = await import('@/lib/runtime/launch-deadline');
+  let processes = 0;
+  let now = 0;
+  let releaseProof!: () => void;
+  const proof = new Promise<void>(resolve => { releaseProof = resolve; });
+  h.launch.mockImplementationOnce(async input => withRuntimeLaunchDeadline({ runtime: 'codex', laneId: input.existingLaneId, postSpawnTimeoutMs: 30, clock: () => now }, () =>
+    runtimeLaunchStep({ laneId: input.existingLaneId, surfaceId: 'codex-owned:held-proof' }, 'process_spawn', async () => { processes++; if (packetBound) lanes.setLaneStatus(input.existingLaneId, 'awaiting_orchestrator', 'system', 'launch_stalled'); now = 50; await proof; return { ok: true, surfaceId: 'codex-owned:held-proof', note: 'Late proof' }; })));
+  const pending = dispatchTask(id);
+  try {
+  const outcome = await Promise.race([pending.then(() => 'held'), new Promise(resolve => setTimeout(() => resolve('unbounded'), 10_000))]);
+  expect(outcome).toBe('held');
+  const lane = packetBound ? lanes.findLatestLaneByPacket(id)! : lanes.getLane(id)!;
+  expect(lane).toMatchObject({ status: 'awaiting_orchestrator', sessionKey: 'codex-owned:held-proof' });
+  expect(lane.lastEventLabel).toContain('process_spawn');
+  const retry = dispatchTask(id).then(() => 'launched', error => error.message);
+  expect(await Promise.race([retry, new Promise(resolve => setTimeout(() => resolve('unbounded'), 5_000))])).toMatch(/held.*spawn/i);
+  expect(processes).toBe(1);
+  } finally { releaseProof(); await pending; }
+});

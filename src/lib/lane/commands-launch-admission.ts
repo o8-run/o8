@@ -1,3 +1,4 @@
+import { assertRuntimeSpawnDeadline } from '@/lib/runtime/launch-deadline';
 import { appendEvent } from '@/lib/lane/registry';
 import { assertOwnedActionGuard, withoutOwnedStartAdmission } from '@/lib/runtimes/shared/owned-session/action-admission';
 
@@ -5,7 +6,7 @@ import { assertOwnedActionGuard, withoutOwnedStartAdmission } from '@/lib/runtim
  * A cancelled admission may retire only the exact surface its launch returned.
  */
 export function assertLaunchAttachment(laneId: string, surfaceId?: string): Promise<never> | undefined {
-  try { assertOwnedActionGuard(); }
+  try { assertRuntimeSpawnDeadline(); assertOwnedActionGuard(); }
   catch (error) {
     return (async () => {
       if (surfaceId) {
