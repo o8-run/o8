@@ -499,7 +499,11 @@ export async function claimTask(taskId: string, input: TaskClaimInput = {}): Pro
 }
 
 export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}): Promise<TaskMutationResult> {
-  if (runtimeOwnerRequired() && !isNativeCortexReader()) return callTaskDispatchOwner(taskId, input);
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) {
+    try { validateRequestedRuntime(input.requestedRuntime); }
+    catch (error) { throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
+    return callTaskDispatchOwner(taskId, input);
+  }
   const actor = normalizeActor(input.actor);
   const task = await resolveTask(taskId, input);
   const workerRouting = await resolveTaskWorkerRouting({
