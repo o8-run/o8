@@ -266,3 +266,113 @@ fn correction_offscreen_geometry_is_clamped_before_the_window_opens(cx: &mut Tes
     let saved = State::load(&file).unwrap();
     assert!(saved.bounds[0] < 1920.);
 }
+
+/// Zooms the shell the way Cmd+= does: the saved level, applied.
+fn zoom_shell(visual: &mut VisualTestContext, percent: u16) {
+    visual.update(|window, cx| {
+        crate::theme::set_zoom_percent(percent);
+        crate::zoom::apply(window, cx);
+    });
+    draw(visual);
+}
+
+fn light_bounds(visual: &mut VisualTestContext) -> Vec<Bounds<gpui::Pixels>> {
+    crate::window_lights::Light::ALL
+        .iter()
+        .map(|light| {
+            visual
+                .debug_bounds(light.selector())
+                .unwrap_or_else(|| panic!("{} drawn", light.selector()))
+        })
+        .collect()
+}
+
+#[gpui::test]
+fn window_lights_scale_with_zoom_and_share_the_header_centre(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open_past_setup(
+        fixture.client.clone(),
+        fixture.root.join("lights.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    for (percent, zoom) in [(70, 0.7), (100, 1.0), (140, 1.4), (200, 2.0)] {
+        zoom_shell(&mut visual, percent);
+        assert_eq!(visual.update(|window, _| window.zoom()), zoom);
+        let lights = light_bounds(&mut visual);
+        let toggle = visual
+            .debug_bounds("header-sidebar")
+            .expect("sidebar toggle");
+        let back = visual.debug_bounds("header-back").expect("Back");
+        // Bounds snap to device pixels: within one (the test display is 2x).
+        let pixel = 1. / (2. * zoom) + 1e-3;
+        let near = |a: gpui::Pixels, b: f32| (f32::from(a) - b).abs() <= pixel;
+        for (i, light) in lights.iter().enumerate() {
+            // Window units: the same at every zoom, so `zoom` times larger on
+            // screen, as the header beside them (AppKit's stayed 12 points).
+            assert!(
+                near(light.size.width, 12.) && near(light.size.height, 12.),
+                "light {i} at {zoom}: {light:?}"
+            );
+            assert!(
+                near(light.origin.x, 14. + 20. * i as f32),
+                "light {i} at {zoom}: {light:?}"
+            );
+            for icon in [toggle, back] {
+                assert!(
+                    near(light.center().y, f32::from(icon.center().y)),
+                    "light {i} off the header centre at {zoom}: {light:?} {icon:?}"
+                );
+            }
+        }
+        assert!(
+            lights[2].right() < toggle.left(),
+            "lights clear the toggle at {zoom}"
+        );
+    }
+}
+
+#[gpui::test]
+fn window_lights_dim_when_inactive_and_hide_in_full_screen(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open_past_setup(
+        fixture.client.clone(),
+        fixture.root.join("lights-state.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    visual.update(|window, _| window.activate_window());
+    visual.run_until_parked();
+    draw(&mut visual);
+    let glyphs = |visual: &mut VisualTestContext| {
+        crate::window_lights::Light::ALL
+            .iter()
+            .filter(|light| visual.debug_bounds(light.glyph_selector()).is_some())
+            .count()
+    };
+    assert_eq!(
+        glyphs(&mut visual),
+        3,
+        "an active window carries the hover glyphs"
+    );
+    visual.deactivate_window();
+    draw(&mut visual);
+    assert_eq!(light_bounds(&mut visual).len(), 3, "still drawn, flat grey");
+    assert_eq!(glyphs(&mut visual), 0, "an inactive window shows no glyphs");
+
+    // The green light, pressed at 140% where it sits on screen, enters full
+    // screen; there the lights give way to the title bar AppKit reveals.
+    visual.update(|window, _| window.activate_window());
+    visual.run_until_parked();
+    zoom_shell(&mut visual, 140);
+    let green = visual.debug_bounds("window-light-zoom").unwrap().center();
+    visual.simulate_click(point(green.x * 1.4, green.y * 1.4), gpui::Modifiers::none());
+    draw(&mut visual);
+    assert!(visual.update(|window, _| window.is_fullscreen()));
+    assert!(visual.debug_bounds("window-lights").is_none());
+    visual.update(|window, _| window.toggle_fullscreen());
+    draw(&mut visual);
+    assert_eq!(light_bounds(&mut visual).len(), 3);
+}

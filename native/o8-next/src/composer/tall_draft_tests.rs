@@ -147,3 +147,22 @@ fn native_composer_tall_draft_60_lines_caps_and_reveals_cursor(cx: &mut TestAppC
     caret_inside_input(&surface, cx);
     last_row_above_composer(cx);
 }
+
+#[gpui::test]
+fn native_transcript_end_stays_above_the_composer_through_zoom(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_loaded(true);
+    let (surface, cx) = loaded(cx, &fixture);
+    reveal_tail(&surface, cx);
+    // Cmd+= at the end of a thread: the viewport shrinks in window units and
+    // rows rewrap taller, and the reader stays at the end (a list that kept
+    // its top left the last lines under the composer and the changes pill).
+    for zoom in [1.5, 2.0, 0.7, 1.0] {
+        cx.update(|window, cx| window.set_zoom(zoom, cx));
+        settle(cx);
+        last_row_above_composer(cx);
+        assert!(
+            surface.read_with(cx, |s, _| crate::retained::at_end(&s.list)),
+            "at the end at {zoom}"
+        );
+    }
+}

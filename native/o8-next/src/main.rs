@@ -71,6 +71,7 @@ mod transport;
 mod ui;
 mod visualizations;
 mod wake;
+mod window_lights;
 mod zoom;
 use crate::{
     client::Client,

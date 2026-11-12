@@ -261,7 +261,9 @@ pub(super) fn wrap(s: &Shell, panes: AnyElement, cx: &mut Context<Shell>) -> Any
             .relative()
             .child(panes)
             .child(
-                div().absolute().right(px(14.)).bottom(px(14.)).child(
+                // Top right: at the bottom it sat on the composer and its
+                // microphone once the pane was narrower than the composer.
+                div().absolute().right(px(14.)).top(px(10.)).child(
                     button(
                         "worker-preview-launch",
                         "Preview 4 / 10 workers",
