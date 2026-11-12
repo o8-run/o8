@@ -5993,6 +5993,12 @@
       ]
     },
     {
+      "path": "tests/o8d-worker-task-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-workspace-reads-native-real-path.test.ts",
       "reasons": [
         "child-process",
