@@ -1,3 +1,4 @@
+//! Activity decisions and replay of persisted receipts.
 use super::*;
 
 impl ActivityPane {
@@ -26,14 +27,23 @@ impl ActivityPane {
         self.unsettled = None;
         self.pending = true;
         self.notice_error = false;
-        self.notice = "Applying decision…".into();
-        let merge = body["verb"] == "merge";
+        self.notice = if path == packet_merge::PATH {
+            "Merging packet…"
+        } else {
+            "Applying decision…"
+        }
+        .into();
+        let merge = path == packet_merge::PATH || body["verb"] == "merge";
         let replay = body.clone();
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let deadline = Instant::now() + Duration::from_secs(300);
             loop {
-                let result = client.activity_request(method, path, &[], Some(&body));
+                let result = if path == packet_merge::PATH {
+                    packet_merge::request(&client, &body)
+                } else {
+                    client.activity_request(method, path, &[], Some(&body))
+                };
                 if !RECEIPTS.contains(&path) {
                     break result;
                 }
@@ -55,7 +65,7 @@ impl ActivityPane {
                     break Ok(json!({"outcomeUnknown":true}));
                 }
                 // The same exact body polls the persisted receipt; it cannot
-                // create another stop or close while the first is uncertain.
+                // create another operation while the first is uncertain.
                 std::thread::sleep(Duration::from_millis(750));
             }
         });
@@ -74,7 +84,11 @@ impl ActivityPane {
                         value["error"]["message"]
                             .as_str()
                             .or(value["note"].as_str())
-                            .unwrap_or("Decision is unsettled. Refresh to check it.")
+                            .unwrap_or(if path == packet_merge::PATH {
+                                "Packet merge is unsettled. Refresh to check it."
+                            } else {
+                                "Decision is unsettled. Refresh to check it."
+                            })
                             .into()
                     }
                     Ok(value) => {
@@ -105,11 +119,15 @@ impl ActivityPane {
                         this.closing = None;
                         this.close_stage = None;
                         // A created PR's note carries its URL.
-                        value["note"]
-                            .as_str()
+                        let (note, fallback) = if path == packet_merge::PATH {
+                            (&value["result"]["note"], "Packet merged.")
+                        } else {
+                            (&value["note"], "Decision applied.")
+                        };
+                        note.as_str()
                             .or(value["result"]["note"].as_str())
                             .filter(|note| !note.is_empty())
-                            .map_or_else(|| "Decision applied.".into(), String::from)
+                            .map_or_else(|| fallback.into(), String::from)
                     }
                     Err(error) => {
                         this.archive_after_stop = None;

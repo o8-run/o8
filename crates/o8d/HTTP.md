@@ -60,7 +60,7 @@ fetcher select routes from that same registry:
 | Brain | POST cortex/ask | Question/conversation/workspace body; original SSE event stream or validation refusal. |
 | Customize | GET inventory, directives, MCP servers and prompt library; GET/POST/PATCH/DELETE prompt entries | Existing inventories and saved-prompt revision checks; no new configuration writes. |
 | Diff | GET review-state, lane diff and worktree diff; POST review | Existing packet/workspace query and decision receipt. |
-| Activity | GET commits, CI/list/detail, PR details, issues and state; PATCH state; POST stop-mission, reset-packet and rerun-with-feedback | Existing activity projections, mission decisions and packet recovery receipts; uncertain recovery replays the exact original body. |
+| Activity | GET commits, CI/list/detail, PR details, issues and state; PATCH state; POST stop-mission, orchestrator/merge, reset-packet and rerun-with-feedback | Canonical packet merge gates, prerequisite ordering and cleanup; recovery receipts retain exact-body replay for live operations. Quarantined outcome_unknown errors are terminal. |
 | Pull Requests | GET PR list/detail, GitHub status and merge-preview; POST PR detail | Existing pagination, review/merge gates and action receipts. |
 | Terminal | GET mobile/terminal-sessions; existing WebSocket transport | Existing terminal picker inventory and live PTY transport. |
 | Palette | Local commands and workspace navigation | Reuses the selected surface's transport. |

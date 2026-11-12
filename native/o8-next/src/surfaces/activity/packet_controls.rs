@@ -64,6 +64,13 @@ impl ActivityPane {
                 Action::Lane(row.clone(), "merge"),
                 cx,
             ));
+            view = view.child(
+                div()
+                    .text_size(px(10.))
+                    .text_color(theme().text_faint)
+                    .child("May merge prerequisite packets.")
+                    .debug_selector(|| "activity-packet-merge-scope".into()),
+            );
         }
 
         if row.data["queueState"] == "held" || row.data["lane"].is_null() {

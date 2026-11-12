@@ -45,13 +45,6 @@ impl Client {
                     .chars()
                     .take(400)
                     .collect::<String>();
-                if matches!(path, "/api/orchestrator/reset-packet" | "/api/orchestrator/rerun-with-feedback")
-                    && payload.as_ref().is_some_and(|value| value["error"]["code"] == "outcome_unknown")
-                {
-                    let mut value = payload.unwrap();
-                    value["outcomeUnknown"] = Value::Bool(true);
-                    return Ok(value);
-                }
                 return Err(ReadError {
                     message: format!("{reason} (HTTP {status})"),
                     status: Some(status),

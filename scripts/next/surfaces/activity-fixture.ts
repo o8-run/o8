@@ -173,8 +173,12 @@ export async function installActivityFixture(repo: string) {
       slowed = true;
       return Response.json({ ok: true, result: { inProgress: true, status: 'in_progress' } }, { status: 202 });
     },
-    // Real lane verbs drive git and worker processes; the fixture records the
-    // packet card's command and answers like the lanes route does.
+    // Real merges and lane verbs drive git and worker processes. Record the
+    // packet card's command and return the corresponding production envelope.
+    'POST /api/orchestrator/merge': async request => {
+      mutations.push(await request.text());
+      return Response.json({ ok: true, result: { merged: false, note: 'Merge conflict in fixture.ts.' } });
+    },
     'POST /api/lanes': async request => {
       const body = await request.json() as { verb?: string };
       mutations.push(JSON.stringify(body));

@@ -66,11 +66,12 @@ pub(super) enum Action {
 
 /// Routes whose persisted receipt is replayed with the same body until terminal
 /// (classic fetchCorrelatedActionReceipt).
-const RECEIPTS: [&str; 4] = [
+const RECEIPTS: [&str; 5] = [
     "/api/orchestrator/stop-mission",
     "/api/orchestrator/discard-packet",
     "/api/orchestrator/reset-packet",
     "/api/orchestrator/rerun-with-feedback",
+    packet_merge::PATH,
 ];
 /// close-unmerged-shared.ts: each disposition and its label.
 pub(super) const CLOSE_REASONS: [(&str, &str); 4] = [
@@ -485,3 +486,13 @@ mod actions;
 
 #[path = "keyboard.rs"]
 mod keyboard;
+
+#[cfg(test)]
+#[path = "packet_merge_tests.rs"]
+mod packet_merge_tests;
+#[path = "packet_merge.rs"]
+mod packet_merge;
+
+#[cfg(test)]
+#[path = "recovery_scope_tests.rs"]
+mod recovery_scope_tests;

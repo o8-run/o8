@@ -75,20 +75,23 @@ fn activity_packet_recovery_retry_control(cx: &mut TestAppContext) {
         view.notice.contains("Fixture request is unsettled")
     }));
     assert_eq!(requests(&fixture).len(), 1);
-    click(&view, &mut visual, "activity-recovery-retry");
+    assert!(view.read_with(&visual, |view, _| view.notice_error));
+    activity_click(&mut visual, "activity-refresh");
+    settle(&view, &mut visual);
     assert_eq!(
         requests(&fixture).len(),
         1,
-        "unknown outcomes cannot submit a second retry"
+        "Refresh must not replay a quarantined key"
     );
     mode(&fixture, "ready");
-    activity_click(&mut visual, "activity-refresh");
+    click(&view, &mut visual, "activity-recovery-retry");
     settle(&view, &mut visual);
     let sent = requests(&fixture);
     assert_eq!(sent.len(), 2);
-    assert_eq!(
-        sent[0], sent[1],
-        "Refresh must inspect the original body and identity"
+    assert_ne!(
+        sent[0]["body"]["idempotencyKey"],
+        sent[1]["body"]["idempotencyKey"],
+        "an explicit new retry uses a new operation after the terminal refusal"
     );
     assert_eq!(sent[0]["body"]["clearWorktree"], false);
     assert_eq!(sent[0]["path"], "/api/orchestrator/reset-packet");

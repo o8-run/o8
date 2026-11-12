@@ -1,3 +1,4 @@
+//! Dispatch from the existing Activity controls.
 use super::*;
 
 impl ActivityPane {
@@ -25,6 +26,10 @@ impl ActivityPane {
                 self.remember_view(cx);
                 self.scope_menu = false;
                 self.stop_armed = None;
+                self.packet.recovery.ask = None;
+                self.closing = None;
+                self.archiving = None;
+                self.close_stage = None;
                 self.scope = scope;
                 self.restore_view();
                 if let Some(y)=self.restore_y {self.scroll.set_offset(gpui::point(gpui::px(0.),gpui::px(y)));} self.generation += 1; self.loading = false;
@@ -97,6 +102,10 @@ impl ActivityPane {
                 self.mutate("POST","/api/orchestrator/stop-mission",json!({"missionId":mission,"idempotencyKey":identity}),cx);
             }
             Action::Lane(row, verb) => {
+                if verb == "merge" && packet_merge::packet_id(&row).is_some() {
+                    self.merge_packet(&row, cx);
+                    return;
+                }
                 let lane = feed::text(&row.data["lane"], "laneId");
                 if lane.is_empty() { return; }
                 let mut body = json!({"verb": verb, "laneId": lane});
