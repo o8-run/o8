@@ -2961,6 +2961,12 @@
       ]
     },
     {
+      "path": "tests/cortex-managed-unavailable-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-observation-worker-authz-real-path.test.ts",
       "reasons": [
         "real-path"
