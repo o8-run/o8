@@ -137,8 +137,12 @@ impl Surface {
             .filter(|id| id.starts_with("thoughts-"));
         // The sidebar already discovers explicit PR links. Rendering a thread
         // without one must not start HTTP work or a refresh timer.
-        let Some(source) = &self.pr_link_source else { return };
-        let target = thread.as_ref().and_then(|id| linked_pr(source.read(cx).links_for(id)));
+        let Some(source) = &self.pr_link_source else {
+            return;
+        };
+        let target = thread
+            .as_ref()
+            .and_then(|id| linked_pr(source.read(cx).links_for(id)));
         let state = &mut self.changes_pill.pr;
         if state.thread != thread || state.target != target {
             *state = PrStatus {
@@ -363,7 +367,9 @@ impl Surface {
             .h(px(0.))
             .text_size(px(12.))
             .text_color(theme().text);
-        root.text_style().get_or_insert_with(Default::default).font_features = Some(gpui::FontFeatures(std::sync::Arc::new(vec![(
+        root.text_style()
+            .get_or_insert_with(Default::default)
+            .font_features = Some(gpui::FontFeatures(std::sync::Arc::new(vec![(
             "tnum".into(),
             1,
         )])));
