@@ -62,7 +62,6 @@ export const NEXT_ONLY_WS_PATHS: NextOnlyTable = {
   '/api/mobile/symon/confirm': security('Symon relay: operator credential only'),
   '/api/mobile/symon/text-turn': security('Symon relay: operator credential only'),
   '/api/mobile/symon/tool': security('Symon relay: operator credential only'),
-  '/api/worktrees/conflicts': seek('worktree conflict read'),
   '/api/v2/proxy/llm': security('o8 lane model calls: provider keys and spend'),
 };
 

@@ -29,6 +29,7 @@ const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
 // Each route loads its own implementation; unrelated surfaces stay cold.
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
+    route('/api/worktrees/conflicts', 'GET', () => import('@/app/api/worktrees/conflicts/route')),
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
