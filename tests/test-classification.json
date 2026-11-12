@@ -5849,6 +5849,12 @@
       ]
     },
     {
+      "path": "tests/o8d-setup-writes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-shell-reads-native-real-path.test.ts",
       "reasons": [
         "real-path"
