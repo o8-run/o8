@@ -1,3 +1,4 @@
+import { ARTIFACT_REQUEST_MAX_BYTES } from '@/lib/artifacts/limits';
 import { viewerHttpRoutes } from '@/lib/viewers/http-routes';
 
 /** Shared shell transport registrations; importing this module loads no handlers or middleware. */
@@ -5,8 +6,9 @@ interface Route {
   path: string;
   methods: string[];
   load: () => Promise<unknown>;
+  maxBodyBytes?: number;
 }
-const route = (path: string, methods: string, load: Route['load']): Route => ({ path, methods: methods.split(' '), load });
+const route = (path: string, methods: string, load: Route['load'], maxBodyBytes?: number): Route => ({ path, methods: methods.split(' '), load, maxBodyBytes });
 
 /** The public middleware still runs first; the private reader reuses its existing bearer gate. */
 const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
@@ -29,13 +31,33 @@ const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
 // Each route loads its own implementation; unrelated surfaces stay cold.
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
+    route('/api/worktrees/conflicts', 'GET', () => import('@/app/api/worktrees/conflicts/route')),
+    route('/api/orchestrator/workspace/maintenance', 'GET POST', () => import('@/app/api/orchestrator/workspace/maintenance/route')),
+    route('/api/orchestrator/workspace/preservation', 'GET POST', () => import('@/app/api/orchestrator/workspace/preservation/route')),
+    route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
+    route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
+    route('/api/harness', 'POST', () => import('@/lib/harness/route')),
+
+    route('/api/mobile/symon', 'GET POST', () => import('@/lib/mobile/symon-relay-route')),
+    route('/api/mobile/symon/confirm', 'POST', () => import('@/lib/mobile/symon-confirm-route')),
+    route('/api/mobile/symon/tool', 'POST DELETE', () => import('@/lib/mobile/symon-tool-route')),
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
     route('/api/tasks', 'GET POST', () => import('@/app/api/tasks/route')),
+    route('/api/tasks/worker-availability', 'GET', () => import('@/app/api/tasks/worker-availability/route')),
+    route('/api/tasks/[taskId]', 'GET', () => import('@/lib/tasks/detail-route')),
+    route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route'), ARTIFACT_REQUEST_MAX_BYTES),
+    route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
+    route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
+    route('/api/tasks/dispatch-owner', 'POST', () => import('@/lib/tasks/dispatch-owner-route')),
+    route('/api/runtime/owner', 'GET', () => import('@/lib/runtime/owner-status-route')),
+    route('/api/orchestrator/steer-owner', 'POST', () => import('@/lib/orchestrator/operator-mission-service/steer-owner-route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),
+    // Branch creation remains operator-only through panelGateMiddleware.
+    route('/api/panel/branches', 'POST', () => import('@/app/api/panel/branches/route')),
     route('/api/panel/files', 'GET', () => import('@/app/api/panel/files/route')),
     route('/api/panel/file-asset', 'GET', () => import('@/app/api/panel/file-asset/route')),
     route('/api/v2/files', 'GET', () => import('@/app/api/v2/files/route')),
@@ -45,13 +67,42 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/resource-usage', 'GET', () => import('@/app/api/panel/resource-usage/route')),
     route('/api/panel/serve-image', 'GET', () => import('@/app/api/panel/serve-image/route')),
     route('/api/visualizations/[id]', 'GET', () => import('@/app/api/visualizations/[id]/route')),
+    route('/api/visualizations', 'POST', async () => {
+      const handlers = await import('@/lib/visualizations/publish-route');
+      return handlers;
+    }),
+    route('/api/visualizations/preview', 'POST', async () => {
+      const handlers = await import('@/lib/visualizations/preview-route');
+      return handlers;
+    }),
     route('/api/visualizations', 'GET', () => import('@/lib/visualizations/read')),
-    route('/api/repo-spec', 'GET', () => import('@/app/api/repo-spec/route')),
+    // Workspace Notes writes. PUT is the editor autosave, POST the note actions. Principal comes
+    // from the bearer (specCallerScope), never x-o8-client-addr or loopback, so the gate and
+    // handler split holds as on Next: operator and enrolled device write; a worker is held to
+    // its own lane directory and to comment, reply, suggest and resolve, and its PUT is refused;
+    // no or wrong bearer gets 401. Writes go through writeWorkspaceFile, which refuses a
+    // symlinked or non-regular o8.md. (#5243)
+    route('/api/repo-spec', 'GET PUT POST', () => import('@/app/api/repo-spec/route')),
+    // The file card's save (PUT) and native file chooser (POST). /api/panel/file-io has no
+    // device, worker or spectator grant in panelGateMiddleware, so both are operator-bearer-only
+    // whatever the caller's address, as on Next; the handler also refuses any non-operator
+    // chooser call. PUT edits an existing regular file only, with the mtime guard, the knowledge
+    // source refusal and the masked-content refusal unchanged. GET stays with the viewer routes. (#5243)
+    route('/api/panel/file-io', 'PUT POST', () => import('@/app/api/panel/file-io/route')),
     route('/api/panel/browse-folder', 'POST', () => import('@/app/api/panel/browse-folder/route')),
     route('/api/repo-spec/asset', 'POST', () => import('@/app/api/repo-spec/asset/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
     route('/api/runtime/service-tiers', 'GET', () => import('@/app/api/runtime/service-tiers/route')),
     route('/api/runtime/telemetry', 'GET', () => import('@/app/api/runtime/telemetry/route')),
+    route('/api/orchestrator/history', 'GET', () => import('@/app/api/orchestrator/history/route')),
+    route('/api/orchestrator/workspace/retention', 'GET POST', () => import('@/app/api/orchestrator/workspace/retention/route')),
+    route('/api/panel/threads', 'GET', () => import('@/lib/threads/route')),
+    route('/api/orchestrator/create-mission', 'POST', () => import('@/lib/orchestrator/http/create-mission')),
+    route('/api/orchestrator/dispatch', 'POST', () => import('@/lib/orchestrator/http/dispatch')),
+    route('/api/orchestrator/propose-spec', 'POST', () => import('@/lib/orchestrator/http/propose-spec')),
+    route('/api/orchestrator/merge', 'POST', () => import('@/lib/orchestrator/http/merge')),
+    route('/api/orchestrator/reload', 'POST', () => import('@/lib/orchestrator/http/reload')),
+    route('/api/orchestrator/lead', 'GET POST', () => import('@/lib/orchestrator/http/lead')),
     route('/api/orchestrator/status', 'GET', () => import('@/app/api/orchestrator/status/route')),
     route('/api/orchestrator/archive', 'GET', () => import('@/app/api/orchestrator/archive/route')),
     route('/api/task-artifacts/[id]/decision', 'GET POST', () => import('@/app/api/task-artifacts/[id]/decision/route')),
@@ -79,6 +130,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/reset-packet', 'POST', () => import('@/app/api/orchestrator/reset-packet/route')),
     route('/api/orchestrator/spawn-prompt', 'POST', () => import('@/app/api/orchestrator/spawn-prompt/route')),
     route('/api/runtime/action', 'POST', () => import('@/app/api/runtime/action/route')),
+    // The WS process owns the device manager in native mode.
+    route('/api/panel/devices', 'GET POST', () => import('@/lib/devices/route')),
+    // Native only: Next's o8_device hand-off to the device owner (operator credential).
+    route('/api/devices/owner', 'POST', () => import('@/lib/devices/owner-route')),
+    // Native mode keeps preview servers in the WS process.
+    route('/api/tasks/[taskId]/preview', 'POST DELETE', () => import('@/lib/cloud/task-preview-route')),
     // Loads the handler, not the Next route: Next forwards here while this
     // transport is on, so the edge-tts installer has one owner (#5422).
     route('/api/tts', 'POST', () => import('@/lib/tts/route')),
@@ -115,8 +172,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
     route('/api/cortex/proposals', 'GET POST', () => import('@/app/api/cortex/proposals/route')),
-    route('/api/cortex/cross-repo-proposals', 'GET', () => import('@/app/api/cortex/cross-repo-proposals/route')),
-    route('/api/panel/problem-dossiers', 'GET', () => import('@/app/api/panel/problem-dossiers/route')),
+    route('/api/cortex/cross-repo-proposals', 'GET POST', () => import('@/app/api/cortex/cross-repo-proposals/route')),
+    route('/api/panel/problem-dossiers', 'GET POST', () => import('@/app/api/panel/problem-dossiers/route')),
     route('/api/panel/commits', 'GET', () => import('@/app/api/panel/commits/route')),
     route('/api/panel/ci', 'GET', () => import('@/app/api/panel/ci/route')),
     route('/api/panel/ci/[id]', 'GET', () => import('@/app/api/panel/ci/[id]/route')),
@@ -160,7 +217,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   bots: [
     route('/api/bots', 'GET', () => import('@/app/api/bots/route')),
-    route('/api/bots/[id]/thread', 'GET', () => import('@/app/api/bots/[id]/thread/route')),
+    route('/api/bots/[id]/thread', 'GET POST', () => import('@/app/api/bots/[id]/thread/route')),
     // Operator MCP host (the bots surface's mcp_url points here, surfaces/bots/client.rs). POST runs
     // the operator MCP tools over JSON-RPC; DELETE terminates a session (204); GET is 405. No
     // handler-level auth — gated by panelGateMiddleware, and /api/mcp is in no allowlist, so it is
@@ -297,12 +354,36 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // encrypted in a separate credentials table); the POST writes go through
     // withProviderStoreLock + master-key encryption. (#5243)
     route('/api/runtime/provider-instances', 'GET POST', () => import('@/app/api/runtime/provider-instances/route')),
+    // Saved SSH machines (open in editor, remote terminals). Gated twice: no device, worker or
+    // spectator grant, so the gate admits only the operator bearer, and the handler then requires
+    // a local caller (isTrustedPanelRequest reads x-o8-client-addr, which native sets to the peer
+    // o8d attests, #5576). A relayed or remote operator gets 403 local_only, as on Next. The
+    // response lists machine labels and targets and, for POST, a control command for a terminal
+    // the machine itself reported; no key material. (#5243)
+    route('/api/panel/ssh-machines', 'GET POST', () => import('@/app/api/panel/ssh-machines/route')),
+    // Local ACP connection (Settings > Providers): the command o8 launches and its environment
+    // variables. No device, worker or spectator grant, so only the operator bearer passes the
+    // gate, whatever the caller's address; requirePanelAuth then accepts that bearer or the
+    // attested local peer, as on Next. Both stores are files under the data directory written
+    // under withProviderStoreLock, so the WS process and Next share one copy. (#5243)
+    route('/api/runtime/acp-connection', 'GET POST', () => import('@/app/api/runtime/acp-connection/route')),
     // Desktop shell reads (src-tauri o8_http). No device/worker/spectator grant in panelGateMiddleware, so only
     // the operator bearer passes. cli-usage reads the CLI usage files under this process's HOME and has no
     // handler auth. broadcast/why and broadcast/calendar check the principal from the bearer
     // (resolveRequestPrincipalContext), never x-o8-client-addr or loopback, so they behave as on Next. Both read
     // and write SQLite only, and calendar ingest reads operator defaults from disk on every call. (#5422)
     route('/api/panel/cli-usage', 'GET', () => import('@/app/api/panel/cli-usage/route')),
+    // Truth reads admit the operator and active spectators through panelGateMiddleware. The
+    // handler rechecks the principal and scopes spectator queries to repository grants. No
+    // device or worker grant; projections read durable receipts without a process-local owner. (#5243)
+    route('/api/orchestrator/truth', 'GET HEAD', () => import('@/app/api/orchestrator/truth/route')),
+    // Preview reads retain the gate's attested-loopback/local-origin and signed resource grants,
+    // or the operator bearer. No device, worker or spectator capability is added. The handler
+    // validates the local target and rewrites resources; it holds no process-local state. (#5243)
+    route('/api/panel/proxy', 'GET HEAD', () => import('@/app/api/panel/proxy/route')),
+    // The browser alias uses the same preview handler and grants as panel/proxy above. Native
+    // stamps the peer before the gate; Origin checks and target restrictions stay unchanged. (#5243)
+    route('/api/browser/proxy', 'GET HEAD', () => import('@/app/api/browser/proxy/route')),
     route('/api/broadcast/why', 'GET', () => import('@/app/api/broadcast/why/route')),
     // Symon's commentary reader (lib/broadcast/speaker.ts) and broadcast spectators. GET only. The
     // middleware admits the operator ws-token and an active spectator token (SPECTATOR_CAPABILITIES,
@@ -316,6 +397,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // and its refresh=1 / refresh=missing reads call the GitHub broker's single-PR sync (ensureGitHubPullRequest),
     // which shares its token and request-budget caches with the open-PR sync the native /api/panel/prs uses. (#5422)
     route('/api/orchestrator/pull-request-context', 'GET POST DELETE', () => import('@/app/api/orchestrator/pull-request-context/route')),
+    route('/api/broadcast/automation-say', 'POST', () => import('@/lib/broadcast/automation-say-route')),
+    route('/api/broadcast/post', 'POST', () => import('@/lib/broadcast/post-route')),
+    route('/api/broadcast/tokens', 'POST', () => import('@/lib/broadcast/tokens-route')),
     route('/api/broadcast/say', 'POST', () => import('@/app/api/broadcast/say/route')),
     // Symon watches (src-tauri symon_watch.rs). No device/worker/spectator grant in panelGateMiddleware, so only the
     // operator bearer passes, and the handlers add no loopback or principal check of their own. Watches are rows
@@ -350,6 +434,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // the gate only ever lets the body reach a caller already holding that same operator token,
     // and the real-path forged-local-header negative pins that a non-operator cannot extract it. (#5243)
     route('/api/setup/mcp-config', 'GET', () => import('@/app/api/setup/mcp-config/route')),
+    // Operator-only under the unchanged panel gate; Next forwards to this config writer.
+    route('/api/setup/opencode', 'GET POST', () => import('@/lib/mcp/setup-opencode-route')),
     // Claude Desktop / Claude Code auto-register (Settings > MCP). GET previews the Claude config
     // (other servers by name only; the o8 entry carries the operator's own WS_TOKEN); POST merges the
     // o8 + codebase-memory entries into the user's config file. No handler-level auth — same
@@ -368,6 +454,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/cortex/codebase-memory', 'GET', () => import('@/app/api/cortex/codebase-memory/route')),
     route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/runtime/acp-registry', 'GET', () => import('@/app/api/runtime/acp-registry/route')),
+    route('/api/runtime/acp-registry/prepare', 'POST', () => import('@/app/api/runtime/acp-registry/prepare/route')),
     route('/api/panel/o8-update-summary', 'GET', () => import('@/app/api/panel/o8-update-summary/route')),
     // Updater state has one owner: these load the handlers, not the Next routes,
     // and Next forwards them here while this transport is on (#5422).
@@ -383,13 +470,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
     route('/api/worktrees/retention-usage', 'GET', () => import('@/app/api/worktrees/retention-usage/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
-    route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
-    route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/route')),
+    route('/api/cortex/sources', 'GET POST', () => import('@/lib/cortex/knowledge/sources-route')),
+    route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/handler')),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('@/app/api/v2/keys/route')),
     route('/api/cortex/reingest', 'POST', () => import('@/app/api/cortex/reingest/route')),
   ],
   setup: [
-    route('/api/setup/cli-updates', 'GET', () => import('@/app/api/setup/cli-updates/route')),
+    route('/api/setup/cli-updates', 'GET POST', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/setup/config', 'GET POST', () => import('@/app/api/setup/config/route')),
     // The o8 MCP server's operator status and agent setup: operator-only through the
     // middleware (no device, worker or spectator grant). Status reads SQLite and the
@@ -430,7 +517,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   inbox: [
     route('/api/panel/supervisor-inbox', 'GET', () => import('@/app/api/panel/supervisor-inbox/route')),
-    route('/api/panel/approvals', 'GET POST', () => import('@/app/api/panel/approvals/route')),
+    route('/api/panel/approvals', 'GET POST', () => import('@/lib/approvals/route')),
   ],
   diff: [
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
@@ -439,13 +526,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/lanes/[id]/diff', 'GET', () => import('@/app/api/lanes/[id]/diff/route')),
     route('/api/worktrees/diff', 'GET', () => import('@/app/api/worktrees/diff/route')),
     route('/api/review/last-turn', 'GET', () => import('@/app/api/review/last-turn/route')),
+    route('/api/review/push', 'POST', () => import('@/lib/review/push-route')),
     route('/api/review/commit', 'POST', () => import('@/app/api/review/commit/route')),
   ],
   customize: [
     route('/api/customize/inventory', 'GET', () => import('@/app/api/customize/inventory/route')),
     route('/api/customize/actions', 'GET POST', () => import('@/app/api/customize/actions/route')),
-    route('/api/cortex/directives', 'GET', () => import('@/app/api/cortex/directives/route')),
-    route('/api/setup/mcp-servers', 'GET', () => import('@/app/api/setup/mcp-servers/route')),
+    route('/api/cortex/directives', 'GET POST', () => import('@/app/api/cortex/directives/route')),
+    route('/api/setup/mcp-servers', 'GET POST PATCH DELETE', () => import('@/lib/mcp/setup-mcp-servers-route')),
     route('/api/prompt-library', 'GET POST', () => import('@/app/api/prompt-library/route')),
     route('/api/prompt-library/[id]', 'GET PATCH DELETE', () => import('@/app/api/prompt-library/[id]/route')),
   ],
@@ -453,6 +541,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
 
 // Authoritative producers requested by the existing WS checkpoint/command path.
 const producers = [
+  route('/api/tasks/[taskId]/claim', 'POST', () => import('@/lib/tasks/http/claim')),
+  route('/api/tasks/[taskId]/dispatch', 'POST', () => import('@/lib/tasks/http/dispatch')),
+  route('/api/tasks/[taskId]/archive', 'POST', () => import('@/lib/tasks/http/archive')),
+  route('/api/tasks/[taskId]/prune', 'POST', () => import('@/lib/tasks/http/prune')),
+  route('/api/tasks/[taskId]/report', 'POST', () => import('@/lib/tasks/report-route')),
+  route('/api/tasks/[taskId]/block', 'POST', () => import('@/lib/tasks/block-route')),
+  route('/api/devices/agent', 'POST', () => import('@/lib/devices/agent-route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
   // Worker-dispatch readiness: dispatch-readiness.ts probes it on the API base with the operator
@@ -481,7 +576,7 @@ const retired = [
   // Canvas intents drive the canvas page Next renders in the desktop webview (#5576).
   route('/api/canvas/intent', 'POST', () => import('@/lib/canvas/intent-unavailable-route')),
 ];
-const routes = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...retired, ...viewerHttpRoutes];
+const routes: Route[] = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...retired, ...viewerHttpRoutes];
 function parameters(pattern: string, pathname: string): Record<string, string> | null {
   const expected = pattern.split('/');
   const actual = pathname.split('/');
@@ -499,4 +594,10 @@ export function matchNativeHttpRoute(pathname: string, method?: string) {
   const matches = routes.map(route => ({ route, params: parameters(route.path, pathname) })).filter(entry => entry.params !== null);
   // Surfaces can share a path with different methods, so match on both.
   return method === undefined ? matches[0] : matches.find(entry => entry.route.methods.includes(method));
+}
+
+/** Every verb dispatch can resolve for this concrete path, including split registrations. */
+export function nativeHttpMethods(pathname: string): string[] {
+  return [...new Set(routes.filter(route => parameters(route.path, pathname) !== null)
+    .flatMap(route => route.methods))].sort();
 }

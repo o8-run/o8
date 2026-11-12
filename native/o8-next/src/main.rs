@@ -10,6 +10,8 @@ mod clock;
 mod composer;
 mod devices_panel;
 mod diff;
+#[cfg(any(test, feature = "driver"))]
+mod driver;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;
@@ -50,6 +52,8 @@ mod terminal;
 mod terminal_grid;
 mod terminal_transport;
 mod text;
+#[cfg(test)]
+mod text_ellipsis_tests;
 mod thread_messages;
 mod theme;
 mod theme_import;
@@ -67,6 +71,8 @@ mod transport;
 mod ui;
 mod visualizations;
 mod wake;
+mod window_lights;
+mod zoom;
 use crate::{
     client::Client,
     model::{History, render_tree},

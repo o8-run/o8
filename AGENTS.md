@@ -3,6 +3,10 @@
 These are the canonical operating rules for agents working in this repository. Read the sections
 that apply to the current task once. Load scoped references only when their trigger applies.
 
+Direction (2026-11-10): o8 is the review and merge layer for work from any coding tool. Its three
+top pillars are the review and merge loop, governance and security, and plugging into other tools.
+The top of `ROADMAP.md` explains it and lists what is parked. Weigh new work against it.
+
 ## Outcome ownership and authority
 
 - Turn the request into an observable outcome. Separate symptoms, established facts, hypotheses,

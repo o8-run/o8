@@ -43,9 +43,9 @@ restart. This requires the WS TypeScript process; it does not claim a Rust-only
 application backend.
 
 The transport inventory is maintained in
-[native-http-registry.ts](../../src/lib/ws-server/native-http-registry.ts) and its
-[named handlers](../../src/lib/ws-server/native-http-handlers.ts). Request and
-response contracts are the existing handlers linked there. The
+[native-http-registry.ts](../../src/lib/ws-server/native-http-registry.ts), where each
+entry loads its handler module directly. Request and response contracts are the
+existing handlers linked there. The
 [HTTP adapter](../../src/lib/ws-server/native-http-routes.ts) and WS producer
 fetcher select routes from that same registry:
 
@@ -331,3 +331,14 @@ The raw report is generated locally; no credentials or payloads are retained.
   GPUI TestAppContext and the HTTP adapter are not substitutes for those numbers.
 
 These gaps keep #4547 open. No 500 MB system-memory target is claimed.
+
+## Cortex decisions
+
+`POST /api/cortex/cross-repo-proposals` (Activity) and
+`POST /api/cortex/directives` (Customize) reuse their production handlers on
+native HTTP. `panelGateMiddleware` admits only the operator bearer for these
+methods; neither has a device, packet-worker, spectator or anonymous grant.
+The existing GET projections and unsupported-method refusals remain available.
+`tests/o8d-cortex-writes-real-path.test.ts` stops the fixture Next listener,
+writes a directive, accepts and dismisses a proposal, checks their persisted
+files, and checks non-operator refusals through the public o8d socket.

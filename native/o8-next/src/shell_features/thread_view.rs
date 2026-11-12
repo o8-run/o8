@@ -26,11 +26,6 @@ impl ShellFeature for ThreadView {
             order: 5,
             dispatch: |s, event, window, cx| {
                 let key = &event.keystroke;
-                if s.features.read::<Views>().is_some_and(|v| v.menu) && key.key == "escape" {
-                    s.features.get::<Views>().menu = false;
-                    cx.notify();
-                    return KeyResult::Handled;
-                }
                 // ⌃⌥V, as the tab menu shows it.
                 let m = key.modifiers;
                 if key.key != "v" || !m.control || !m.alt || m.shift || m.platform {
@@ -42,6 +37,12 @@ impl ShellFeature for ThreadView {
                     KeyResult::Unhandled
                 }
             },
+        }]
+    }
+    fn commands(&self) -> &'static [PaletteCommands] {
+        &[PaletteCommands {
+            order: 20,
+            collect: commands,
         }]
     }
 }
@@ -145,7 +146,10 @@ pub(super) struct Thread {
 pub(super) struct Views {
     /// By the thread tab's content key.
     pub threads: HashMap<String, Thread>,
-    pub menu: bool,
+    /// The palette's view switch for the active thread, as the last tick
+    /// found it: `None` when it has no terminal view, else whether the
+    /// terminal is shown. The palette reads it without the app context.
+    pub offered: Option<bool>,
     /// The shell, for the overlay's Reopen button.
     shell: Option<WeakEntity<Shell>>,
 }
@@ -187,7 +191,6 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
     let Some((key, session)) = active_thread(s, cx) else {
         return false;
     };
-    s.features.get::<Views>().menu = false;
     let views = s.features.get::<Views>();
     // Leaving always returns to chat; entering reuses a live shell.
     let reuse = views.threads.get(&key).is_some_and(|t| {
@@ -559,17 +562,15 @@ fn tick(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         toggle(s, window, cx);
     }
     if s.features.read::<Views>().is_none() {
+        offer(s, cx);
         return;
     }
     reopening(s, window, cx);
     let active = s.active().map(|tab| s.key(&tab));
     // The chat moved to another conversation, or the tab has no thread view:
-    // the view returns to chat and the menu closes.
+    // the view returns to chat.
     let shown = active_thread(s, cx);
     let views = s.features.get::<Views>();
-    if shown.is_none() {
-        views.menu = false;
-    }
     if let Some(thread) = active.as_ref().and_then(|key| views.threads.get_mut(key))
         && thread.terminal
         && shown
@@ -596,6 +597,15 @@ fn tick(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     // Hidden panes keep reading, so an exit is known when the view returns.
     for (pane, visible) in panes {
         pane.update(cx, |pane, cx| pane.poll_visible(visible, cx));
+    }
+    offer(s, cx);
+}
+
+/// Keeps the palette's view switch in step with the active thread.
+fn offer(s: &mut Shell, cx: &App) {
+    let offered = terminal_shown(s, cx);
+    if offered.is_some() || s.features.read::<Views>().is_some() {
+        s.features.get::<Views>().offered = offered;
     }
 }
 
@@ -671,75 +681,36 @@ fn notice(text: &str) -> AnyElement {
         .into_any_element()
 }
 
-/// The thread header's view menu, for runtimes with a terminal view.
-pub(super) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> Option<AnyElement> {
-    let terminal = terminal_shown(s, cx)?;
-    let open = s.features.get::<Views>().menu;
-    let label = if terminal {
-        "Switch to Chat View"
-    } else {
-        "Switch to Terminal View"
-    };
-    let toggle_button = super::header::icon_button(
-        "thread-view-menu",
-        MORE,
-        15.,
-        1.7,
-        if open { "" } else { "Thread view" },
-        true,
-    )
-    .on_click(cx.listener(|this, _, _, cx| {
-        let views = this.features.get::<Views>();
-        views.menu = !views.menu;
-        cx.notify();
-    }));
-    Some(
-        div()
-            .relative()
-            .flex_shrink_0()
-            .child(toggle_button)
-            .when(open, |anchor| {
-                anchor.child(
-                    gpui::deferred(
-                        div()
-                            .absolute()
-                            .top(px(30.))
-                            .right_0()
-                            .w(px(240.))
-                            .p(px(4.))
-                            .rounded(px(8.))
-                            .border_1()
-                            .border_color(theme().border)
-                            .bg(theme().background)
-                            .shadow_lg()
-                            .child(
-                                div()
-                                    .id("thread-view-toggle")
-                                    .debug_selector(|| "thread-view-toggle".into())
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .px(px(10.))
-                                    .py(px(6.))
-                                    .rounded(px(6.))
-                                    .cursor_pointer()
-                                    .hover(|row| row.bg(theme().hover))
-                                    .text_color(theme().text)
-                                    .child(label)
-                                    .child(div().text_color(theme().text_muted).child("⌃⌥V"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        toggle(this, window, cx);
-                                    })),
-                            ),
-                    )
-                    .with_priority(1),
-                )
-            })
-            .into_any_element(),
-    )
+/// The view switch, as a command: the thread header keeps no menu for it.
+pub(super) static TO_TERMINAL: PaletteCommand = PaletteCommand {
+    id: "thread-view-terminal",
+    label: "Switch to Terminal View",
+    run: switch,
+};
+pub(super) static TO_CHAT: PaletteCommand = PaletteCommand {
+    id: "thread-view-chat",
+    label: "Switch to Chat View",
+    run: switch,
+};
+
+fn switch(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    s.palette = false;
+    if !toggle(s, window, cx) {
+        s.restore_focus(window, cx);
+    }
+    offer(s, cx);
+    cx.notify();
 }
 
-const MORE: &str = "M5 12h.01 M12 12h.01 M19 12h.01";
+/// Offered only for a thread whose runtime has a terminal view.
+fn commands(s: &Shell) -> Vec<Command> {
+    match s.features.read::<Views>().and_then(|v| v.offered) {
+        Some(true) => vec![Command::Feature(&TO_CHAT)],
+        Some(false) => vec![Command::Feature(&TO_TERMINAL)],
+        None => vec![],
+    }
+}
+
 
 #[cfg(test)]
 pub(super) fn thread<'a>(s: &'a Shell, cx: &App) -> Option<&'a Thread> {
