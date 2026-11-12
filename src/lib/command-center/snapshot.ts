@@ -37,8 +37,12 @@ let browserGeneration = 0;
 const sharedInvalidation = snapshotCacheInvalidation('command-center');
 
 export function invalidateCommandCenterSnapshotCaches() {
-  sharedInvalidation.publish();
   clearSnapshotCaches();
+  try {
+    sharedInvalidation.publish();
+  } catch {
+    console.warn('[snapshot-cache] Could not publish cache invalidation.');
+  }
 }
 
 function clearSnapshotCaches() {

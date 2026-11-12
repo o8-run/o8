@@ -10,7 +10,8 @@ export function snapshotCacheInvalidation(scope: 'inbox' | 'command-center') {
   function read() {
     try { return readFileSync(path(), 'utf8'); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
-      throw error;
+      // An unreadable generation cannot validate a cached snapshot.
+      return undefined;
     }
   }
   return {
@@ -25,6 +26,7 @@ export function snapshotCacheInvalidation(scope: 'inbox' | 'command-center') {
     },
     changed() {
       const generation = read();
+      if (generation === undefined) return true;
       const changed = generation !== observed;
       observed = generation;
       return changed;

@@ -288,8 +288,12 @@ function finalizeMobileInboxSnapshot(snapshot: MobileInboxSnapshot, limit?: numb
 const sharedInvalidation = snapshotCacheInvalidation('inbox');
 
 export function invalidateInboxCache() {
-  sharedInvalidation.publish();
   clearSnapshotCaches();
+  try {
+    sharedInvalidation.publish();
+  } catch {
+    console.warn('[snapshot-cache] Could not publish cache invalidation.');
+  }
 }
 
 function clearSnapshotCaches() {
