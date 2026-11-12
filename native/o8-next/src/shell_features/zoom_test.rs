@@ -76,10 +76,20 @@ fn zoom_key_palette_settings_and_launch_apply_through_the_shell(cx: &mut TestApp
     click(&shell, cx, "setting-zoom-reset");
     assert_eq!(zoom(cx), (1., base, 100));
 
-    // The primary modifier with =, + and -, through the shell's key handler.
+    // The primary modifier with =, + and -, through the shell's key handler,
+    // from a window at the 600x400 floor: it grows to the zoomed floor.
+    let handle = cx.update(|window, _| window.window_handle());
+    cx.cx.simulate_window_resize(handle, gpui::size(gpui::px(600.), gpui::px(400.)));
+    settle(&shell, cx);
     cx.simulate_keystrokes("secondary-=");
     settle(&shell, cx);
     assert_eq!(zoom(cx), (1.1, base * 1.1, 110));
+    // The platform's size: the test platform does not report its own resize.
+    let content = cx.update(|window, _| window.bounds().size);
+    assert!(
+        content.width >= gpui::px(660.) && content.height >= gpui::px(440.),
+        "{content:?} is below the zoomed floor"
+    );
     cx.simulate_keystrokes("secondary-shift-=");
     settle(&shell, cx);
     assert_eq!(zoom(cx).2, 120);

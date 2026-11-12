@@ -67,23 +67,24 @@ Local changes:
   The zoom multiplies the scale factor and divides the layout viewport, so
   every primitive, glyph and image paints and rasterizes larger.
   - `src/window/zoom.rs` (new, the whole mechanism): `Window::zoom`,
-    `Window::set_zoom` (bounds observers are deferred until after the
+    `Window::set_zoom` (it rescales the stored mouse position into the new
+    window coordinates, and defers the bounds observers until after the
     caller's update, so a key handler inside an entity update can zoom),
-    `read_platform_metrics`, the conversions `to_platform`,
-    `point_to_platform` and `from_platform`, `input_from_platform` (pointer positions, pixel scroll
+    `read_platform_metrics`, the conversions `to_platform` and
+    `from_platform`, `input_from_platform` (pointer positions, pixel scroll
     deltas and file-drop positions), and the test-support
     `painted_quad_bounds`.
   - `src/window.rs`: `mod zoom;`, the `zoom` field and its `1.` initializer,
-    `bounds_changed` calls `read_platform_metrics`, `dispatch_event`
-    matches on `input_from_platform(event)`, `show_window_menu` passes
-    `point_to_platform(position)` and `set_client_inset` passes the inset
-    times the zoom (Wayland and X11 client-side decorations; `set_zoom`
-    re-sends a set inset).
+    `bounds_changed` calls `read_platform_metrics`, and `dispatch_event`
+    matches on `input_from_platform(event)`.
   - `src/platform.rs` (`PlatformInputHandler`): `bounds_for_range` and
     `selected_bounds` return `to_platform` bounds, and
     `character_index_for_point` reads a `from_platform` point, for IME.
-  The app converts the coordinates it hands AppKit itself (native web view
-  frames, `Window::resize`).
+  `Window::show_window_menu` and `Window::set_client_inset` (Wayland and X11
+  client-side decorations) still pass window coordinates unconverted; o8
+  never calls them, and they need `to_platform` if it ever does. The app
+  converts the coordinates it hands AppKit itself (native web view frames,
+  `Window::resize`, the minimum window size).
 
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit

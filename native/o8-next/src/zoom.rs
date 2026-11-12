@@ -2,34 +2,69 @@
 //! GPUI's per-window zoom lays the window out in a viewport divided by the
 //! level and paints it that much larger, so text, icons, spacing and every
 //! surface scale together (vendor/gpui/O8-PATCHES.md).
-use gpui::{App, Bounds, Keystroke, Pixels, Size, Window, px, size};
+use gpui::{App, Bounds, Context, Keystroke, Pixels, Size, Window, px, size};
 
 /// The shell window's smallest size in layout pixels (its design floor).
 pub(crate) const MIN_SIZE: (f32, f32) = (600., 400.);
 
-/// Applies the saved level to `window`; the shell window's minimum size
+/// Applies the saved level to `window`. The shell window's minimum size
 /// follows it.
 pub(crate) fn apply(window: &mut Window, cx: &mut App) {
+    let shell = window.root::<crate::shell::Shell>().flatten().is_some();
+    apply_to(window, shell, cx);
+}
+/// Applies the saved level to the shell window, whose root may not be set
+/// yet: its minimum follows the zoom and the display the window is on, and a
+/// window below that minimum grows to it.
+pub(crate) fn apply_shell(window: &mut Window, cx: &mut App) {
+    apply_to(window, true, cx);
+}
+fn apply_to(window: &mut Window, shell: bool, cx: &mut App) {
     window.set_zoom(crate::theme::zoom(), cx);
-    if window.root::<crate::shell::Shell>().flatten().is_some() {
-        let display = window.display(cx).map(|display| display.bounds().size);
-        set_min_size(window, min_size(window.zoom(), display));
+    if !shell {
+        return;
+    }
+    let min = min_size(window.zoom(), display_size(window, cx));
+    set_min_size(window, min);
+    let current = window.viewport_size().map(|v| v * window.zoom());
+    if let Some(grown) = grown(current, min) {
+        // Platform resizes run after the current dispatch, as GPUI's own do.
+        window.defer(cx, move |window, _| window.resize(grown));
     }
 }
-/// Zooms in (`steps` > 0) or out one step at a time, saves and applies it.
+/// The size a window of `current` content size grows to, when it is below
+/// `min`.
+pub(crate) fn grown(current: Size<Pixels>, min: Size<Pixels>) -> Option<Size<Pixels>> {
+    let grown = current.max(&min);
+    (grown != current).then_some(grown)
+}
+/// Re-reads the zoom and the rebound shortcuts saved by any o8 next process
+/// each time `window` is activated, and applies the zoom.
+pub(crate) fn follow<V: 'static>(window: &mut Window, shell: bool, cx: &mut Context<V>) {
+    cx.observe_window_activation(window, move |_, window, cx| {
+        if window.is_window_active() {
+            crate::theme::with_zoom(crate::theme::ZoomStore::reload);
+            reload_bindings();
+            apply_to(window, shell, cx);
+        }
+    })
+    .detach();
+}
+/// Zooms in (`steps` > 0) or out one step at a time from the saved level,
+/// saves and applies it.
 pub(crate) fn step(steps: i32, window: &mut Window, cx: &mut App) {
-    let percent = crate::theme::step_zoom(crate::theme::zoom_percent(), steps);
-    set(percent, window, cx);
+    crate::theme::with_zoom(|store| store.step(steps));
+    applied(window, cx);
 }
 /// Back to the designed size.
 pub(crate) fn reset(window: &mut Window, cx: &mut App) {
-    set(crate::theme::ZOOM_DEFAULT, window, cx);
+    crate::theme::set_zoom_percent(crate::theme::ZOOM_DEFAULT);
+    applied(window, cx);
 }
-fn set(percent: u16, window: &mut Window, cx: &mut App) {
-    crate::theme::set_zoom_percent(percent);
+fn applied(window: &mut Window, cx: &mut App) {
     apply(window, cx);
     window.refresh();
-    // The level is one preference: the app's other windows follow, after
+    // The level is one preference: the process's other windows follow, after
     // the caller's update, so none is updated while it is borrowed.
     cx.defer(|cx| {
         for handle in cx.windows() {
@@ -37,12 +72,15 @@ fn set(percent: u16, window: &mut Window, cx: &mut App) {
         }
     });
 }
-/// Which zoom command a key runs: 1 in, -1 out, 0 reset. The primary
-/// modifier is Cmd on macOS and Ctrl elsewhere, as the `secondary` defaults
-/// in the Shortcuts list.
+/// Which zoom command a key runs on the default chords: 1 in, -1 out, 0
+/// reset. The primary modifier is Cmd on macOS and Ctrl elsewhere, as the
+/// `secondary` defaults in the Shortcuts list.
 pub(crate) fn shortcut(keystroke: &Keystroke) -> Option<i32> {
+    shortcut_for(keystroke, cfg!(target_os = "macos"))
+}
+fn shortcut_for(keystroke: &Keystroke, mac: bool) -> Option<i32> {
     let m = keystroke.modifiers;
-    let primary = if cfg!(target_os = "macos") {
+    let primary = if mac {
         m.platform && !m.control
     } else {
         m.control && !m.platform
@@ -58,15 +96,84 @@ pub(crate) fn shortcut(keystroke: &Keystroke) -> Option<i32> {
         _ => None,
     }
 }
+
+/// Zoom in, out and reset chords rebound in the Shortcuts list (canonical
+/// chord text); None keeps the default chord.
+pub(crate) type Bindings = [Option<String>; 3];
+const STEPS: [i32; 3] = [1, -1, 0];
+#[cfg(not(test))]
+static BINDINGS: std::sync::Mutex<Bindings> = std::sync::Mutex::new([None, None, None]);
+#[cfg(test)]
+thread_local! {
+    static BINDINGS: std::cell::RefCell<Bindings> = const { std::cell::RefCell::new([None, None, None]) };
+}
+fn bindings() -> Bindings {
+    #[cfg(not(test))]
+    return BINDINGS.lock().map(|b| b.clone()).unwrap_or_default();
+    #[cfg(test)]
+    return BINDINGS.with(|b| b.borrow().clone());
+}
+fn keep_bindings(bindings: Bindings) {
+    #[cfg(not(test))]
+    if let Ok(mut b) = BINDINGS.lock() {
+        *b = bindings;
+    }
+    #[cfg(test)]
+    BINDINGS.with(|b| *b.borrow_mut() = bindings);
+}
+/// The shell saves its resolved zoom chords for the pop-out processes.
+pub(crate) fn save_bindings(next: Bindings) {
+    if bindings() == next {
+        return;
+    }
+    if let Some(path) = crate::theme::preference_path("next-zoom-keys") {
+        let _ = std::fs::write(path, next.clone().map(Option::unwrap_or_default).join("\n"));
+    }
+    keep_bindings(next);
+}
+fn reload_bindings() {
+    let Some(text) = crate::theme::preference_path("next-zoom-keys")
+        .and_then(|path| std::fs::read_to_string(path).ok())
+    else {
+        return;
+    };
+    let mut lines = text.lines().map(|line| {
+        crate::shell::shortcuts::keymap::parse(line).filter(|_| !line.trim().is_empty())
+    });
+    keep_bindings([lines.next().flatten(), lines.next().flatten(), lines.next().flatten()]);
+}
+/// The zoom command a pop-out window runs for a key: a rebound chord, else
+/// a default chord that was not rebound. A terminal keeps every key except
+/// the macOS Cmd chords, so programs still see Ctrl+-, Ctrl+0 and Ctrl+=.
+pub(crate) fn popout_command(
+    keystroke: &Keystroke,
+    bindings: &Bindings,
+    terminal: bool,
+    mac: bool,
+) -> Option<i32> {
+    if terminal && !(mac && keystroke.modifiers.platform) {
+        return None;
+    }
+    let pressed = crate::shell::shortcuts::keymap::chord(keystroke);
+    if let Some(index) = bindings.iter().position(|b| b.as_deref() == Some(&pressed)) {
+        return Some(STEPS[index]);
+    }
+    let steps = shortcut_for(keystroke, mac)?;
+    let index = STEPS.iter().position(|s| *s == steps)?;
+    bindings[index].is_none().then_some(steps)
+}
 /// The zoom shortcuts in every window but the shell's, whose own key handler
-/// runs them (and lets the Shortcuts list rebind them). Keystroke
-/// interceptors run before any view sees the key and outside every update.
-pub(crate) fn install(cx: &mut App) {
-    cx.intercept_keystrokes(|event, window, cx| {
+/// runs them. Keystroke interceptors run before any view sees the key and
+/// outside every update. `terminal` marks a process whose windows are
+/// terminals.
+pub(crate) fn install(terminal: bool, cx: &mut App) {
+    reload_bindings();
+    cx.intercept_keystrokes(move |event, window, cx| {
         if window.root::<crate::shell::Shell>().flatten().is_some() {
             return;
         }
-        if let Some(steps) = shortcut(&event.keystroke) {
+        let mac = cfg!(target_os = "macos");
+        if let Some(steps) = popout_command(&event.keystroke, &bindings(), terminal, mac) {
             match steps {
                 0 => reset(window, cx),
                 steps => step(steps, window, cx),
@@ -82,35 +189,68 @@ pub(crate) fn min_size(zoom: f32, display: Option<Size<Pixels>>) -> Size<Pixels>
     let floor = size(px(MIN_SIZE.0 * zoom), px(MIN_SIZE.1 * zoom));
     display.map_or(floor, |display| floor.min(&display))
 }
-#[cfg(target_os = "macos")]
-#[allow(unexpected_cfgs)] // objc's msg_send
-fn set_min_size(window: &Window, min: Size<Pixels>) {
-    use cocoa::{base::id, foundation::NSSize};
-    use objc::{msg_send, sel, sel_impl};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
-        return;
-    };
-    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
-        return;
-    };
-    let view = handle.ns_view.as_ptr() as id;
-    unsafe {
-        let native: id = msg_send![view, window];
-        if !native.is_null() {
-            let (width, height) = (f32::from(min.width), f32::from(min.height));
-            let min = NSSize::new(f64::from(width), f64::from(height));
-            let _: () = msg_send![native, setContentMinSize: min];
-        }
+/// The usable size of the display `window` is on: on macOS its screen's
+/// visible frame (without the menu bar and Dock), elsewhere its bounds.
+fn display_size(window: &Window, cx: &App) -> Option<Size<Pixels>> {
+    #[cfg(target_os = "macos")]
+    if let Some(visible) = mac::visible_frame(window) {
+        return Some(visible);
     }
+    window.display(cx).map(|display| display.bounds().size)
+}
+#[cfg(target_os = "macos")]
+fn set_min_size(window: &Window, min: Size<Pixels>) {
+    mac::set_min_size(window, min);
 }
 /// Other platforms keep the minimum the window opened with.
 #[cfg(not(target_os = "macos"))]
 fn set_min_size(_: &Window, _: Size<Pixels>) {}
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send
+mod mac {
+    use cocoa::{
+        base::id,
+        foundation::{NSRect, NSSize},
+    };
+    use gpui::{Pixels, Size, Window, px, size};
+    use objc::{msg_send, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    fn native(window: &Window) -> Option<id> {
+        let handle = HasWindowHandle::window_handle(window).ok()?;
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return None;
+        };
+        let view = handle.ns_view.as_ptr() as id;
+        let native: id = unsafe { msg_send![view, window] };
+        (!native.is_null()).then_some(native)
+    }
+    pub(super) fn visible_frame(window: &Window) -> Option<Size<Pixels>> {
+        let native = native(window)?;
+        unsafe {
+            let screen: id = msg_send![native, screen];
+            if screen.is_null() {
+                return None;
+            }
+            let frame: NSRect = msg_send![screen, visibleFrame];
+            Some(size(px(frame.size.width as f32), px(frame.size.height as f32)))
+        }
+    }
+    pub(super) fn set_min_size(window: &Window, min: Size<Pixels>) {
+        let Some(native) = native(window) else {
+            return;
+        };
+        let (width, height) = (f32::from(min.width), f32::from(min.height));
+        let min = NSSize::new(f64::from(width), f64::from(height));
+        unsafe {
+            let _: () = msg_send![native, setContentMinSize: min];
+        }
+    }
+}
 /// The page zoom a fixed-width device preview needs: its CSS viewport spans
-/// the web view's real frame, `width` layout pixels at this zoom.
+/// the web view's real frame, `width` layout pixels at this zoom. A zero
+/// width (mid-animation) keeps 1.
 pub(crate) fn preview_page_zoom(width: f32, viewport: f32, zoom: f32) -> f64 {
-    if viewport > 0. {
+    if viewport > 0. && width > 0. {
         f64::from(width * zoom) / f64::from(viewport)
     } else {
         1.
@@ -263,6 +403,8 @@ mod tests {
         assert_eq!(390. * 2. / super::preview_page_zoom(390., 390., 2.), 390.);
         assert_eq!(super::preview_page_zoom(195., 390., 2.), 1.);
         assert_eq!(super::preview_page_zoom(390., 0., 2.), 1.);
+        // Mid-animation the frame can be zero wide: never page zoom 0.
+        assert_eq!(super::preview_page_zoom(0., 390., 2.), 1.);
     }
 
     #[test]
@@ -289,7 +431,7 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         cx.update(|cx| {
-            super::install(cx);
+            super::install(false, cx);
             crate::theme::set_zoom_percent(120);
         });
         let (_, cx) = cx.add_window_view(|window, cx| {
@@ -306,5 +448,81 @@ mod tests {
         assert_eq!(zoom(cx), (1.2, 120));
         cx.simulate_keystrokes("secondary-0");
         assert_eq!(zoom(cx), (1., 100));
+    }
+
+    #[test]
+    fn zoom_store_steps_from_the_level_another_process_saved() {
+        use crate::theme::ZoomStore;
+        let path = crate::shell::test_support::scratch_path("zoom-store");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // The shell and a pop-out process, both at 100%.
+        let shell = ZoomStore::new(Some(path.clone()));
+        let popout = ZoomStore::new(Some(path.clone()));
+        assert_eq!((shell.percent(), popout.percent()), (100, 100));
+        // The pop-out zooms twice; the shell's next step starts from 120.
+        popout.step(1);
+        popout.step(1);
+        assert_eq!(shell.percent(), 100, "stale until it reads the file");
+        assert_eq!(shell.step(1), 130);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "130");
+        // Activation reloads a change made elsewhere.
+        popout.reload();
+        assert_eq!(popout.percent(), 130);
+        // A reset elsewhere is what the next step starts from.
+        popout.set(ZOOM_DEFAULT);
+        assert_eq!(shell.step(-1), 90);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn zoom_window_grows_to_the_new_minimum() {
+        use gpui::size;
+        let min = super::min_size(1.2, None);
+        assert_eq!(super::grown(size(px(600.), px(400.)), min), Some(min));
+        assert_eq!(
+            super::grown(size(px(900.), px(400.)), min),
+            Some(size(px(900.), min.height))
+        );
+        assert_eq!(super::grown(size(px(900.), px(700.)), min), None);
+    }
+
+    #[test]
+    fn zoom_terminal_keeps_ctrl_keys_on_linux_and_rebinds_apply() {
+        use gpui::Keystroke;
+        let key = |text: &str| Keystroke::parse(text).unwrap();
+        let none: super::Bindings = [None, None, None];
+        let run = |text: &str, bindings: &super::Bindings, terminal, mac| {
+            super::popout_command(&key(text), bindings, terminal, mac)
+        };
+        // Linux: Ctrl is primary; a terminal still receives Ctrl+-, Ctrl+0, Ctrl+=.
+        for text in ["ctrl--", "ctrl-0", "ctrl-="] {
+            assert_eq!(run(text, &none, true, false), None, "{text}");
+        }
+        assert_eq!(run("ctrl--", &none, false, false), Some(-1));
+        // macOS: Cmd chords zoom in a terminal, Ctrl chords stay with it.
+        assert_eq!(run("cmd--", &none, true, true), Some(-1));
+        assert_eq!(run("ctrl--", &none, true, true), None);
+        // A rebound zoom in runs on its chord; its default chord no longer does.
+        let rebound: super::Bindings = [Some("alt-z".into()), None, None];
+        assert_eq!(run("alt-z", &rebound, false, true), Some(1));
+        assert_eq!(run("cmd-=", &rebound, false, true), None);
+        assert_eq!(run("cmd--", &rebound, false, true), Some(-1));
+    }
+
+    #[gpui::test]
+    fn zoom_popout_runs_a_rebound_chord(cx: &mut TestAppContext) {
+        cx.update(|cx| super::install(false, cx));
+        super::keep_bindings([Some("alt-z".into()), None, None]);
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            super::apply(window, cx);
+            Popout
+        });
+        let percent = |cx: &mut gpui::VisualTestContext| cx.update(|_, _| crate::theme::zoom_percent());
+        cx.simulate_keystrokes("alt-z");
+        assert_eq!(percent(cx), 110);
+        cx.simulate_keystrokes("secondary-=");
+        assert_eq!(percent(cx), 110, "the default chord moved to alt-z");
+        cx.simulate_keystrokes("secondary-0");
+        assert_eq!(percent(cx), 100);
     }
 }

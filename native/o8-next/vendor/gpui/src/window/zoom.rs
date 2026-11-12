@@ -4,10 +4,9 @@
 //! paints with the platform scale factor multiplied by it, so every length,
 //! glyph and image grows or shrinks together at full sharpness. Window
 //! coordinates (layout, `viewport_size`, `mouse_position`, element bounds)
-//! are zoomed; platform coordinates are not. The conversions between them,
-//! `from_platform` for incoming input and `to_platform` and
-//! `point_to_platform` for outgoing text-input bounds, the window menu and the
-//! client-side decoration inset, live here so call sites stay one line.
+//! are zoomed; platform coordinates are not. The two conversions between
+//! them, `from_platform` for incoming input and `to_platform` for outgoing
+//! text-input bounds, live here so call sites stay one line.
 use crate::{
     App, Bounds, FileDropEvent, Pixels, PlatformInput, Point, ScrollDelta, Window,
 };
@@ -32,9 +31,6 @@ impl Window {
         self.zoom = zoom;
         self.mouse_position = self.mouse_position.map(|v| v * ratio);
         self.read_platform_metrics();
-        if let Some(inset) = self.client_inset {
-            self.platform_window.set_client_inset(inset * zoom);
-        }
         self.invalidator.wake();
         self.refresh();
         self.defer(cx, |window, cx| {
@@ -54,11 +50,6 @@ impl Window {
     /// Window bounds in platform coordinates.
     pub(crate) fn to_platform(&self, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
         bounds.map(|v| v * self.zoom)
-    }
-
-    /// A window point in platform coordinates.
-    pub(crate) fn point_to_platform(&self, point: Point<Pixels>) -> Point<Pixels> {
-        point.map(|v| v * self.zoom)
     }
 
     /// A platform point in window coordinates.

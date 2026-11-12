@@ -626,7 +626,7 @@ pub fn launch(client: Client, session: String, offscreen: bool) {
         Application::new()
     })
     .run(move |cx: &mut App| {
-        crate::zoom::install(cx);
+        crate::zoom::install(true, cx);
         let handle = cx
             .open_window(
                 WindowOptions {
@@ -644,7 +644,10 @@ pub fn launch(client: Client, session: String, offscreen: bool) {
                 },
                 |window, cx| {
                     crate::zoom::apply(window, cx);
-                    cx.new(|cx| Pane::new(client, session, window, cx))
+                    cx.new(|cx| {
+                        crate::zoom::follow(window, false, cx);
+                        Pane::new(client, session, window, cx)
+                    })
                 },
             )
             .expect("GPUI terminal window");

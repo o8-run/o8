@@ -336,7 +336,8 @@ struct Panel {
     resizing: bool,
     /// Where the press on the edge began and the width then (useColumnResize's
     /// startX and startWidth), so the drag threshold never shifts the edge.
-    drag_from: Option<(f32, f32)>,
+    /// The zoom it began at: a zoom change cancels the drag.
+    drag_from: Option<(f32, f32, f32)>,
     /// The edge takes focus when pressed, so Left and Right resize by 16 px.
     edge: Option<gpui::FocusHandle>,
     /// The composer `!` line still running, and the view whose card shows it.
@@ -633,9 +634,14 @@ impl gpui::Render for Resize {
 
 /// Moves the edge with the pointer from where the press began.
 pub(super) fn resize(s: &mut Shell, event: &gpui::DragMoveEvent<Resize>, window: &Window) {
-    let Some((from, start)) = s.features.read::<Panel>().and_then(|panel| panel.drag_from) else {
+    let Some((from, start, zoom)) = s.features.read::<Panel>().and_then(|panel| panel.drag_from)
+    else {
         return;
     };
+    if zoom != window.zoom() {
+        s.features.get::<Panel>().drag_from = None;
+        return;
+    }
     let width = start + from - f32::from(event.event.position.x);
     let (min, max) = width_bounds(s, f32::from(window.viewport_size().width));
     layout::set_width(s, width.clamp(min, max));
@@ -685,7 +691,8 @@ pub(super) fn edge(
             gpui::MouseButton::Left,
             cx.listener(|this, event: &gpui::MouseDownEvent, window, _| {
                 let width = full_width(this, f32::from(window.viewport_size().width));
-                this.features.get::<Panel>().drag_from = Some((f32::from(event.position.x), width));
+                this.features.get::<Panel>().drag_from =
+                    Some((f32::from(event.position.x), width, window.zoom()));
             }),
         )
         .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))

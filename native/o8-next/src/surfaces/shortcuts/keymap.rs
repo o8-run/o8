@@ -301,6 +301,14 @@ impl Keymap {
     pub(crate) fn row(&self, id: &str) -> Option<&Row> {
         self.rows.iter().find(|row| row.id == id)
     }
+    /// The zoom in, out and reset chords where they were rebound.
+    pub(crate) fn zoom_bindings(&self) -> crate::zoom::Bindings {
+        ["view.zoom_in", "view.zoom_out", "view.zoom_reset"].map(|id| {
+            self.row(id)
+                .filter(|row| row.source != Source::Default)
+                .and_then(|row| row.chord.clone())
+        })
+    }
     /// The command a chord runs. On a conflict the stronger source wins
     /// (this machine, then global, then default), then the earlier command.
     pub(crate) fn command_for(&self, chord: &str) -> Option<&Row> {
@@ -372,6 +380,7 @@ impl Model {
     }
     fn rebuild(&mut self) {
         self.keymap = Keymap::resolve(&self.commands, &self.overrides);
+        crate::zoom::save_bindings(self.keymap.zoom_bindings());
     }
     pub(crate) fn set_commands(&mut self, commands: Vec<Command>) {
         if self.commands != commands {

@@ -379,30 +379,65 @@ pub const ZOOM_MIN: u16 = 70;
 pub const ZOOM_MAX: u16 = 200;
 pub const ZOOM_STEP: u16 = 10;
 pub const ZOOM_DEFAULT: u16 = 100;
-static LAUNCH_ZOOM: LazyLock<u16> = LazyLock::new(|| {
-    zoom_path()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| parse_zoom(&text))
-        .unwrap_or(ZOOM_DEFAULT)
-});
+/// The zoom level backed by its file. Every o8 next process (the shell and
+/// its terminal, diff and grid windows) keeps one store on the same file, so
+/// a step re-reads it first and `reload` picks up a change made elsewhere.
+pub struct ZoomStore {
+    path: Option<std::path::PathBuf>,
+    percent: AtomicU16,
+}
+impl ZoomStore {
+    pub fn new(path: Option<std::path::PathBuf>) -> Self {
+        let store = Self {
+            path,
+            percent: AtomicU16::new(ZOOM_DEFAULT),
+        };
+        store.reload();
+        store
+    }
+    pub fn percent(&self) -> u16 {
+        self.percent.load(Ordering::Relaxed)
+    }
+    /// Reads the file again; a missing or unreadable file keeps the level.
+    pub fn reload(&self) {
+        if let Some(percent) = self
+            .path
+            .as_ref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| parse_zoom(&text))
+        {
+            self.percent.store(percent, Ordering::Relaxed);
+        }
+    }
+    /// Sets the level (clamped) and saves it. True when it changed.
+    pub fn set(&self, percent: u16) -> bool {
+        let percent = clamp_zoom(percent);
+        if let Some(path) = &self.path {
+            let _ = std::fs::write(path, percent.to_string());
+        }
+        self.percent.swap(percent, Ordering::Relaxed) != percent
+    }
+    /// Steps from the saved level, not this process's last one.
+    pub fn step(&self, steps: i32) -> u16 {
+        self.reload();
+        let percent = step_zoom(self.percent(), steps);
+        self.set(percent);
+        percent
+    }
+}
 #[cfg(not(test))]
-static CHOSEN_ZOOM: AtomicU16 = AtomicU16::new(u16::MAX);
+static ZOOM: LazyLock<ZoomStore> = LazyLock::new(|| ZoomStore::new(zoom_path()));
 // Tests run in parallel threads; each test's windows read its own zoom.
 #[cfg(test)]
 thread_local! {
-    static CHOSEN_ZOOM: AtomicU16 = const { AtomicU16::new(u16::MAX) };
+    static ZOOM: ZoomStore = ZoomStore::new(None);
 }
-fn chosen_zoom() -> u16 {
+/// The process's zoom store.
+pub fn with_zoom<R>(f: impl FnOnce(&ZoomStore) -> R) -> R {
     #[cfg(not(test))]
-    return CHOSEN_ZOOM.load(Ordering::Relaxed);
+    return f(&ZOOM);
     #[cfg(test)]
-    return CHOSEN_ZOOM.with(|chosen| chosen.load(Ordering::Relaxed));
-}
-fn choose_zoom(percent: u16) {
-    #[cfg(not(test))]
-    CHOSEN_ZOOM.store(percent, Ordering::Relaxed);
-    #[cfg(test)]
-    CHOSEN_ZOOM.with(|chosen| chosen.store(percent, Ordering::Relaxed));
+    return ZOOM.with(f);
 }
 /// A saved zoom, clamped to the range and rounded to a step; None when it is
 /// not a number.
@@ -422,10 +457,7 @@ pub fn step_zoom(percent: u16, steps: i32) -> u16 {
 }
 /// The interface zoom in percent.
 pub fn zoom_percent() -> u16 {
-    match chosen_zoom() {
-        u16::MAX => *LAUNCH_ZOOM,
-        percent => percent,
-    }
+    with_zoom(ZoomStore::percent)
 }
 /// The interface zoom as a scale, 1.0 at 100%.
 pub fn zoom() -> f32 {
@@ -433,16 +465,14 @@ pub fn zoom() -> f32 {
 }
 /// Sets the interface zoom (clamped) and saves it. True when it changed.
 pub fn set_zoom_percent(percent: u16) -> bool {
-    let percent = clamp_zoom(percent);
-    if let Some(path) = zoom_path() {
-        let _ = std::fs::write(path, percent.to_string());
-    }
-    let changed = percent != zoom_percent();
-    choose_zoom(percent);
-    changed
+    with_zoom(|store| store.set(percent))
 }
 fn zoom_path() -> Option<std::path::PathBuf> {
-    Some(saved_path()?.with_file_name("next-zoom"))
+    preference_path("next-zoom")
+}
+/// A small preference file beside the appearance file; None under test.
+pub fn preference_path(name: &str) -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name(name))
 }
 /// Changes with the appearance, for caches that keep painted colors.
 pub fn generation() -> u8 {

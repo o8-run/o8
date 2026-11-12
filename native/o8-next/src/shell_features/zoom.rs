@@ -26,7 +26,10 @@ impl ShellFeature for Zoom {
     fn observers(&self) -> &'static [PreferenceObserver] {
         &[PreferenceObserver {
             order: 0,
-            install: |_, w, cx| crate::zoom::apply(w, cx),
+            install: |_, w, cx| {
+                crate::zoom::apply_shell(w, cx);
+                crate::zoom::follow(w, true, cx);
+            },
         }]
     }
 }

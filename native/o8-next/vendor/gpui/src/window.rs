@@ -1826,7 +1826,7 @@ impl Window {
 
     /// Opens the native title bar context menu, useful when implementing client side decorations (Wayland and X11)
     pub fn show_window_menu(&self, position: Point<Pixels>) {
-        self.platform_window.show_window_menu(self.point_to_platform(position)) // o8: zoom
+        self.platform_window.show_window_menu(position)
     }
 
     /// Tells the compositor to take control of window movement (Wayland and X11)
@@ -1839,7 +1839,7 @@ impl Window {
     /// When using client side decorations, set this to the width of the invisible decorations (Wayland and X11)
     pub fn set_client_inset(&mut self, inset: Pixels) {
         self.client_inset = Some(inset);
-        self.platform_window.set_client_inset(inset * self.zoom); // o8: zoom
+        self.platform_window.set_client_inset(inset);
     }
 
     /// Returns the client_inset value by [`Self::set_client_inset`].
