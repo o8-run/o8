@@ -34,7 +34,8 @@ pub(super) struct Runtime {
 }
 /// The sidebar column; the header lays its toggle and search over it.
 pub(super) const WIDTH: f32 = 280.;
-const MIN_WIDTH: f32 = 160.;
+/// The narrowest the column drags to; below this, row titles and ages crowd.
+const MIN_WIDTH: f32 = 250.;
 const MAX_WIDTH: f32 = 500.;
 /// The edge's grab target reaches this far either side of the boundary.
 const EDGE_SLOP: f32 = 8.;
