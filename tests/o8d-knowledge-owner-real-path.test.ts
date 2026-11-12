@@ -19,6 +19,7 @@ function request(path: string, method = 'GET', token = server.token, body?: unkn
   return new NextRequest(`${origin}${path}`, { method, headers: { ...forged, ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 beforeAll(async () => {
+  vi.stubEnv('O8_NEXT_WINDOW_OWNER', 'ws');
   server = await startParityReference({ o8d: true, nativeHttp: true });
   await server.stopNext();
   origin = server.url.replace('ws:', 'http:').replace('/ws', '');

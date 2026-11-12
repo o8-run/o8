@@ -1,7 +1,6 @@
 import { parseUpdate as parseConversationDefaultsUpdate } from '@/lib/operator/conversation-defaults';
 import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { NextResponse } from 'next/server';
-import { nextWindowError } from '@/lib/next/app-window';
 
 import {
   CODEX_MODEL_IDS,
@@ -76,9 +75,10 @@ export function operatorDefaultsPayload(
   settingsToml: OperatorDefaultsTomlState,
   cliAuth: CliAuthSnapshot,
   dispatchableRuntimes: DispatchableRuntimeInventory,
+  windowError: string | null = null,
 ) {
   return {
-    ...operatorDefaultsValuesPayload(data, settingsToml),
+    ...operatorDefaultsValuesPayload(data, settingsToml, windowError),
     cliAuth,
     dispatchableRuntimes,
     roleRoutes: projectAgentRoleRoutes({
@@ -93,10 +93,11 @@ export function operatorDefaultsPayload(
 export function operatorDefaultsValuesPayload(
   data: OperatorDefaultsData,
   settingsToml: OperatorDefaultsTomlState,
+  windowError: string | null = null,
 ) {
   return {
     ...data,
-    nextWindowError: nextWindowError(),
+    nextWindowError: windowError,
     judgmentPath: resolveJudgmentPath(data.values.judgmentProvider),
     effectiveOverride: effectiveOverride(),
     settingsToml,
