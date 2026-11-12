@@ -1,3 +1,4 @@
+import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
 import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { createHash, randomUUID } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
@@ -28,7 +29,7 @@ export async function dispatchWithReceipt(input: {
   launch: (lane: Lane, dispatchId: string) => Promise<LaneCommandResult>;
   settle: (lane: Lane, result: LaneCommandResult, guard: () => void) => Promise<TaskMutationResult>;
 }): Promise<TaskMutationResult> {
-  if (process.env.O8_NEXT_O8D === '1' && !isNativeCortexReader()) {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) {
     throw input.conflict('Task dispatch admission requires the native owner.');
   }
   const key = input.packetId ?? input.laneId!;
