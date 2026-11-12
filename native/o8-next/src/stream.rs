@@ -250,10 +250,12 @@ impl Transcript {
     fn render(&mut self, entries: &[Entry]) -> Vec<Row> {
         // A stopped reply belongs under its own prompt; a newer prompt retires it.
         if let Some(live) = &self.live
-            && live
-                .extra
-                .get("receipt")
-                .is_some_and(|receipt| receipt["terminal"]["outcome"] == "interrupted")
+            && live.extra.get("receipt").is_some_and(|receipt| {
+                matches!(
+                    receipt["terminal"]["outcome"].as_str(),
+                    Some("interrupted" | "unreported" | "ended")
+                )
+            })
         {
             let anchor = live.id.strip_suffix(":stopped").unwrap_or(&live.id);
             let at = entries.iter().position(|entry| entry.id == anchor);
@@ -267,6 +269,8 @@ impl Transcript {
                 let tools = |entry: &Entry| entry.tools.as_ref().map_or(0, Vec::len);
                 entry.id == live.id
                     && (!entry.text.trim().is_empty() || tools(entry) > 0)
+                    // Saved prose alone cannot replace an attention/unknown terminal receipt.
+                    && (!live.extra.contains_key("terminalNote") || entry.extra.get("terminalNote") == live.extra.get("terminalNote"))
                     // A save during the turn lags the stream it came from.
                     && (!self.context_busy
                         || entry.text.len() >= live.text.len() && tools(entry) >= tools(live))
@@ -327,9 +331,18 @@ impl Transcript {
             return false;
         }
         let event = message["event"].as_str().unwrap_or("");
-        if data["snapshot"] == true {
-            let changed = self.context_busy != (data["status"] == "busy");
-            self.context_busy = data["status"] == "busy";
+        let status = data["status"].as_str().unwrap_or("");
+        // Active: busy, starting, queued, running, waiting_workers.
+        // Unknown statuses settle; the next output or tool event sets busy again.
+        let active = matches!(
+            status,
+            "busy" | "starting" | "queued" | "running" | "waiting_workers"
+        );
+        let unconfirmed =
+            event == "status" && !active && !matches!(status, "ready" | "dead" | "stopped");
+        if data["snapshot"] == true && !unconfirmed {
+            let changed = self.context_busy != active;
+            self.context_busy = active;
             // A subscribe snapshot reporting an idle session settles a stale reply.
             let settled = matches!(data["status"].as_str(), Some("ready" | "dead" | "stopped"))
                 && self.settle("completed");
@@ -341,15 +354,14 @@ impl Transcript {
             self.live_seq = 0;
             self.live_backend = Some(backend.into());
         }
-        if let Some(seq) = message["seq"].as_u64() {
+        if let Some(seq) = message["seq"].as_u64().filter(|_| data["snapshot"] != true) {
             if seq <= self.live_seq {
                 return false;
             }
             self.live_seq = seq;
         }
         let was_running = self.context_busy;
-        if matches!(event, "output" | "tool-use") || (event == "status" && data["status"] == "busy")
-        {
+        if matches!(event, "output" | "tool-use") || (event == "status" && active) {
             self.context_busy = true;
         }
         match event {
@@ -455,6 +467,28 @@ impl Transcript {
                     .into(),
                 );
                 tool["result"] = data["output"].clone();
+            }
+            "status" if unconfirmed => {
+                self.context_busy = false;
+                if self.live.is_none() {
+                    self.live = self
+                        .entries
+                        .last()
+                        .filter(|entry| entry.role == "assistant")
+                        .cloned();
+                }
+                let attention = status == "unreported";
+                let reason = data["reason"]
+                    .as_str()
+                    .unwrap_or("turn ended without an outcome report");
+                let changed = self.settle(if attention { "unreported" } else { "ended" });
+                if let Some(live) = &mut self.live {
+                    live.extra.insert("terminalNote".into(), serde_json::json!({
+                        "attention": attention,
+                        "text": if attention { format!("Needs attention: {reason}") } else { "Ended".into() }
+                    }));
+                }
+                return self.refresh() | changed || was_running;
             }
             // A stopped lead ends its turn too; without it a replayed "busy"
             // kept Stop showing on a finished chat.
@@ -615,7 +649,7 @@ impl Transcript {
     /// The turn ended: stop the marker, close open tools and record the outcome
     /// until saved history arrives.
     fn settle(&mut self, outcome: &str) -> bool {
-        if self.live.is_none() && outcome == "interrupted" {
+        if self.live.is_none() && matches!(outcome, "interrupted" | "unreported" | "ended") {
             self.stopped_before_output();
         }
         let Some(id) = self.live.as_ref().map(|live| live.id.clone()) else {
@@ -751,6 +785,102 @@ impl Transcript {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn native_terminal_fixture(output: bool) -> Transcript {
+        let mut transcript = Transcript::new(
+            serde_json::from_value(serde_json::json!({
+                "sessionKey":"llm-chat:terminal", "transcript":[
+                    {"id":"ask","role":"user","text":"Do the work","timestamp":1}
+                ]
+            }))
+            .unwrap(),
+        );
+        transcript.apply(
+            &serde_json::json!({"channel":"orchestrator","event":"status",
+            "data":{"threadId":"terminal","status":"busy"}}),
+        );
+        if output {
+            transcript.apply(&serde_json::json!({"channel":"orchestrator","event":"tool-use",
+                "data":{"threadId":"terminal","assistantMessageId":"reply","toolUseId":"tool","name":"Bash"}}));
+            transcript.apply(&serde_json::json!({"channel":"orchestrator","event":"output",
+                "data":{"threadId":"terminal","assistantMessageId":"reply","thinking":true,"text":"Checking"}}));
+            transcript.apply(&serde_json::json!({"channel":"orchestrator","event":"output",
+                "data":{"threadId":"terminal","assistantMessageId":"reply","text":"Build still running."}}));
+        }
+        transcript
+    }
+
+    #[test]
+    fn native_terminal_unreported_settles_with_attention_reason() {
+        for snapshot in [false, true] {
+            for output in [false, true] {
+                let mut transcript = native_terminal_fixture(output);
+                assert!(transcript.apply(&serde_json::json!({"channel":"orchestrator","event":"status","seq":if snapshot {0} else {1},
+                    "data":{"threadId":"terminal","status":"unreported","snapshot":snapshot,
+                        "reason":"turn ended without an outcome report"}})));
+                assert!(
+                    !transcript.context_snapshot().1,
+                    "the composer must be usable"
+                );
+                assert!(transcript.rows.iter().any(|row| matches!(row, Row::Activity { steps, trace, .. }
+                    if !trace.live && steps.iter().all(|step| step.status != "running")
+                    && crate::trace::title(steps, trace, 100.).0 == "Needs attention: turn ended without an outcome report")));
+                assert_eq!(
+                    transcript.live.as_ref().unwrap().extra["receipt"]["terminal"]["outcome"],
+                    "unreported"
+                );
+                if output {
+                    transcript.history(&serde_json::json!({"sessionKey":"llm-chat:terminal","replace":true,"entries":[
+                        {"id":"ask","role":"user","text":"Do the work","timestamp":1},
+                        {"id":"reply","role":"assistant","text":"Build still running.","timestamp":2,
+                         "toolCalls":[{"id":"tool","name":"Bash","status":"done"}],
+                         "receipt":{"terminal":{"outcome":"unconfirmed"}}}
+                    ]}));
+                    assert!(transcript.rows.iter().any(|row| matches!(row, Row::Activity { steps, trace, .. }
+                        if !trace.live && crate::trace::title(steps, trace, 100.).0.contains("turn ended without an outcome report"))));
+                }
+
+                transcript.apply(&serde_json::json!({"channel":"orchestrator","event":"tool-use",
+                    "data":{"threadId":"terminal","assistantMessageId":"next","toolUseId":"next-tool","name":"Read"}}));
+                assert!(transcript.context_snapshot().1, "new work runs again");
+            }
+        }
+    }
+
+    #[test]
+    fn native_terminal_unknown_status_settles_neutrally() {
+        for snapshot in [false, true] {
+            for output in [false, true] {
+                let mut transcript = native_terminal_fixture(output);
+                transcript.apply(&serde_json::json!({"channel":"orchestrator","event":"status","seq":if snapshot {0} else {1},
+                    "data":{"threadId":"terminal","status":"future-terminal-status","snapshot":snapshot}}));
+                assert!(!transcript.context_snapshot().1);
+                assert!(
+                    transcript
+                        .rows
+                        .iter()
+                        .any(|row| matches!(row, Row::Activity { steps, trace, .. }
+                    if !trace.live && crate::trace::title(steps, trace, 100.).0 == "Ended"))
+                );
+                assert_eq!(
+                    transcript.live.as_ref().unwrap().extra["receipt"]["terminal"]["outcome"],
+                    "ended"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_terminal_known_active_statuses_keep_working() {
+        for status in ["busy", "starting", "queued", "running", "waiting_workers"] {
+            let mut transcript = native_terminal_fixture(true);
+            transcript.apply(
+                &serde_json::json!({"channel":"orchestrator","event":"status",
+                "data":{"threadId":"terminal","status":status}}),
+            );
+            assert!(transcript.context_snapshot().1, "{status} is active");
+        }
+    }
+
     #[test]
     fn a_confirmed_stop_settles_the_running_turn() {
         let mut transcript = Transcript::new(

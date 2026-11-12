@@ -12,8 +12,9 @@ import { commandUsage } from './command-help.js';
  * Design principles (epic #926):
  *   - Agent-first I/O: JSON to stdout by default, --human for pretty fallback.
  *   - Exit codes that mean things: 0 ok, 1 invalid args, 2 connection refused,
- *     3 unauthorized, 4 not found, 5 conflict. Agents branch on these without
- *     parsing strings.
+ *     3 unauthorized, 4 not found, 5 conflict, 6 server timeout,
+ *     7 lead turn is unreported (send new work or stop the lead).
+ *     Agents branch on these without parsing strings.
  *   - Stable, schema-versioned output. Every payload carries `schema: o8/cli/<cmd>/v1`.
  *   - Command mode has no telemetry, auto-update, or prompts. Failures loud (stderr),
  *     successes silent unless --verbose.
@@ -382,6 +383,7 @@ exit codes:
   0 ok   1 invalid args   2 connection refused
   3 unauthorized   4 not found   5 conflict
   6 server timeout (ambiguous: the operation may have landed)
+  7 lead turn is unreported (send new work or stop the lead)
 
 error JSON:
   error.ambiguous is true when retry safety cannot be inferred from the result
