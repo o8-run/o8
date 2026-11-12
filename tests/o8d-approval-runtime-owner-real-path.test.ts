@@ -31,9 +31,9 @@ function approval(sessionKey: string) {
     title: 'Continue', description: 'Continue', summary: 'Continue', risk: 'low',
     continuation: { kind: 'runtime', runtimeId: 'codex', action: 'resume', sessionKey, message: 'Continue fixture' } });
 }
-function next(body: unknown, token = server.token) {
+function next(body: unknown, token = server.token, headers: Record<string, string> = {}) {
   return POST(new NextRequest('http://localhost/api/panel/approvals', { method: 'POST',
-    headers: { ...forged, authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+    headers: { ...forged, ...headers, authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) }));
 }
 beforeAll(async () => {
   server = await startParityReference({ o8d: true, nativeHttp: true, preload: './tests/fixtures/ws-parity-approval-runtime.cjs' });
@@ -69,13 +69,13 @@ it('continues the WS session through Next and stops it in that owner', async () 
   expect(stopped.status).toBe(200);
   expect(receipt().sessions[0][1].live).toBe(false);
 });
-it('refuses a stale reviewed terminal subject in WS', async () => {
+async function terminalFixture(name: string) {
   execFileSync('git', ['-C', server.directory, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture']);
   const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
-  const key = 'codex-owned:reviewed';
+  const key = `codex-owned:${name}`;
   const lane = createLane({ runtime: 'codex', repoPath: server.directory, branch: 'main', sessionKey: key });
   setLaneStatus(lane.id, 'awaiting_input', 'system', 'approval_required');
-  const dir = join(server.directory, 'owned-codex', 'reviewed');
+  const dir = join(server.directory, 'owned-codex', name);
   mkdirSync(dir, { recursive: true });
   const record = { surfaceId: key, sessionDir: dir, cwd: server.directory, repoPath: server.directory, laneId: lane.id,
     title: 'Fixture', threadId: 'fixture-thread', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -89,12 +89,76 @@ it('refuses a stale reviewed terminal subject in WS', async () => {
   });
   const { terminalAdapter } = await projection.json();
   expect(terminalAdapter).toMatchObject({ approvalId: card.id, runId: 'reviewed-run' });
+  return { card, terminalAdapter, record, dir, key };
+}
+it('steers the reviewed terminal once in WS through Next', async () => {
+  const { card, terminalAdapter, key } = await terminalFixture('terminal-success');
+  const before = receipt().launches;
+  const response = await next({ action: 'approve', id: card.id, terminalAdapter });
+  expect(response.status).toBe(200);
+  expect((await response.json()).note).toBe('Continued same owner session');
+  expect(receipt()).toMatchObject({ launches: before, claimedAtSteer: 'approved' });
+  expect(receipt().pid).not.toBe(process.pid);
+  expect(receipt().sessions.find(([id]: [string]) => id === key)[1].messages).toHaveLength(1);
+  expect(store.getApproval(card.id)?.resolution?.continuationStatus).toBe('completed');
+});
+it('refuses a run changed after claim at the WS steer fence', async () => {
+  const { card, terminalAdapter, dir, key } = await terminalFixture('terminal-race');
+  writeFileSync(join(dir, 'change-before-steer'), '1');
+  const before = receipt().fences;
+  const response = await next({ action: 'approve', id: card.id, terminalAdapter });
+  expect(response.status).toBe(200);
+  expect((await response.json()).note).toContain('reviewed terminal session, run or HEAD changed');
+  expect(receipt()).toMatchObject({ fences: before + 1, claimedAtSteer: 'approved' });
+  expect(receipt().pid).not.toBe(process.pid);
+  expect(receipt().sessions.some(([id]: [string]) => id === key)).toBe(false);
+  expect(store.getApproval(card.id)).toMatchObject({ status: 'approved', resolution: { continuationStatus: 'failed' } });
+});
+it('refuses a stale reviewed terminal subject in WS', async () => {
+  const { card, terminalAdapter, record, dir } = await terminalFixture('terminal-stale');
   record.recentRuns[0].id = 'replacement-run';
   writeFileSync(join(dir, 'session.json'), JSON.stringify(record));
   const response = await next({ action: 'approve', id: card.id, terminalAdapter });
   expect(response.status).toBe(409);
   expect((await response.json()).code).toBe('terminal_approval_changed');
   expect(store.getApproval(card.id)?.status).toBe('pending');
+});
+it('launches an inbox lane resume once in WS', async () => {
+  const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+  const lane = createLane({ runtime: 'codex', repoPath: server.directory, branch: 'main' });
+  setLaneStatus(lane.id, 'paused', 'system', 'fixture');
+  const card = store.createApproval({ source: 'runtime', runtime: 'codex', agent: 'Fixture', sessionKey: 'runtime:lane-launch',
+    title: 'Resume', description: 'Resume', summary: 'Resume', risk: 'low',
+    continuation: { kind: 'lane', laneId: lane.id, verb: 'resume' } });
+  const before = receipt().launches;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await next({ action: 'approve', id: card.id });
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.ok).toBe(true);
+    expect(result.note).toContain(attempt === 0 ? 'Resumed in' : 'already resolved');
+  }
+  expect(receipt().launches).toBe(before + 1);
+  expect(receipt().pid).not.toBe(process.pid);
+});
+it('preserves the agent-tool merge hold through Next to WS', async () => {
+  const localHold = vi.spyOn(await import('@/lib/lane/merge-hold'), 'isMergeApprovalHeld');
+  const card = store.createApproval({ source: 'runtime', runtime: 'codex', agent: 'Fixture', sessionKey: 'runtime:held',
+    title: 'Held', description: 'Held', summary: 'Held', risk: 'low', policyRuleId: 'mission-merge-hold',
+    continuation: { kind: 'lane', laneId: 'held-lane', verb: 'merge' } });
+  const response = await next({ action: 'approve', id: card.id }, server.token, { 'x-o8-agent-tool': '1' });
+  expect(response.status).toBe(403);
+  expect((await response.json()).error).toContain('mission holds merges');
+  expect(localHold).not.toHaveBeenCalled();
+  localHold.mockRestore();
+  expect(store.getApproval(card.id)?.status).toBe('pending');
+});
+it('refuses a worker through Next before reading the approval', async () => {
+  const lookup = vi.spyOn(store, 'getApproval');
+  const response = await next({ action: 'approve', id: 'missing' }, worker);
+  expect(response.status).toBe(403);
+  expect(lookup).not.toHaveBeenCalled();
+  lookup.mockRestore();
 });
 it('rechecks forged terminal evidence in WS without resolving the approval', async () => {
   const card = approval('codex-owned:forged');
@@ -109,13 +173,14 @@ it('keeps the bearer matrix and gives forged local headers no authority', async 
   }
 });
 it('launches an approved runtime in WS', async () => {
+  const before = receipt().launches;
   const card = store.createApproval({ source: 'runtime', runtime: 'codex', agent: 'Fixture', sessionKey: 'runtime:pending-launch',
     title: 'Launch', description: 'Launch', summary: 'Launch', risk: 'low',
     continuation: { kind: 'runtime', runtimeId: 'codex', action: 'launch', sessionKey: 'runtime:pending-launch', prompt: 'Fixture', cwd: server.directory } });
   const response = await next({ action: 'approve', id: card.id }, device);
   expect(response.status).toBe(200);
   expect((await response.json()).note).toBe('Fixture launched');
-  expect(receipt().launches).toBe(2);
+  expect(receipt().launches).toBe(before + 1);
 });
 it('keeps flag-off requests local', async () => {
   vi.stubEnv('O8_NEXT_O8D', '0');

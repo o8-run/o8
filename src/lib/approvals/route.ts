@@ -1,4 +1,4 @@
-import { RUNTIME_APPROVAL_OPERATION } from '@/lib/approvals/runtime-owner';
+import { isNativeApprovalContinuation, RUNTIME_APPROVAL_OPERATION } from '@/lib/approvals/runtime-owner';
 import { viewerJson } from '@/lib/viewers/response';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -264,7 +264,7 @@ export async function POST(request: NextRequest) {
   // Scope the operation using the exact record resolved below, after caller admission.
   // A changed continuation cannot fall through into LLM grant issuance.
   if (process.env.O8_NEXT_O8D === '1' && body[RUNTIME_APPROVAL_OPERATION] === true
-    && (body.terminalAdapter !== undefined ? current.continuation?.kind !== 'lane' : current.continuation?.kind !== 'runtime')) {
+    && (body.terminalAdapter !== undefined ? current.continuation?.kind !== 'lane' : !isNativeApprovalContinuation(current.continuation?.kind))) {
     return NextResponse.json({ ok: false, error: 'Approval continuation changed.' }, { status: 409 });
   }
   let terminalAdapter;
@@ -376,9 +376,9 @@ export async function POST(request: NextRequest) {
     }
     if (process.env.O8_NEXT_O8D === '1' && body[RUNTIME_APPROVAL_OPERATION] === true
       && resolutionClaim.claimed
-      && approval.continuation?.kind !== (terminalAdapter ? 'lane' : 'runtime')) {
+      && approval.continuation?.kind !== current.continuation?.kind) {
       if (resolutionClaim.claimId) finalizeApprovalContinuation(id, resolutionClaim.claimId, 'failed', 'Approval continuation changed.');
-      return NextResponse.json({ ok: false, error: 'Approval continuation changed.' }, { status: 409 });
+      return NextResponse.json({ ok: false, error: 'The approval decision was recorded, but its continuation changed and was not run.' }, { status: 409 });
     }
     if (!resolutionClaim.claimed) {
       const continuationPending = approval.resolution?.continuationStatus === 'pending'

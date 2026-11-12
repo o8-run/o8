@@ -4,6 +4,10 @@ import { ownedByNativeTransport } from '@/lib/ws-server/native-owner';
 
 export const RUNTIME_APPROVAL_OPERATION = 'runtimeApprovalOperation';
 
+export function isNativeApprovalContinuation(kind: unknown): boolean {
+  return kind === 'runtime' || kind === 'lane' || kind === 'plan';
+}
+
 /** Data-only intent. WS repeats this selection against its own durable record. */
 export function isRuntimeApprovalRequest(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== 'object') return false;
@@ -12,7 +16,7 @@ export function isRuntimeApprovalRequest(value: unknown): value is Record<string
   if (typeof body.id !== 'string') return false;
   const approval = getApproval(body.id.trim());
   if (body.terminalAdapter !== undefined) return approval?.continuation?.kind === 'lane';
-  return approval?.continuation?.kind === 'runtime';
+  return isNativeApprovalContinuation(approval?.continuation?.kind);
 }
 
 const forward = ownedByNativeTransport(
@@ -21,7 +25,7 @@ const forward = ownedByNativeTransport(
   { forwardHeaders: ['cookie', 'x-o8-agent-tool'] },
 );
 
-/** Forward only reviewed runtime decisions; LLM continuations stay beside their proxy. */
+/** Forward runtime, lane and plan decisions; LLM continuations stay beside their proxy. */
 export function forwardRuntimeApproval(request: NextRequest, body: Record<string, unknown>): Promise<Response> {
   return forward(new NextRequest(request.url, {
     method: request.method, headers: request.headers, signal: request.signal,
