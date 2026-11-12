@@ -348,9 +348,11 @@ const CLEAR_IN_PLACE: &[u8] = b"\x1b[H\x1b[J";
 /// tmux's client switches to a second screen when it attaches, then repaints
 /// the rows the snapshot already drew. That second screen has no scrollback,
 /// so obeying the switch hid the history the snapshot restored and left the
-/// wheel nothing to scroll. Programs inside tmux never send this switch to
-/// us: tmux keeps their second screens to itself. So on entry the screen is
-/// cleared in place for the repaint, and leaving is dropped.
+/// wheel nothing to scroll. Programs inside tmux do not send this switch to
+/// us unless passthrough is on: tmux keeps their second screens to itself,
+/// and sends its own again only when it suspends, locks or detaches. So on
+/// entry the screen is cleared in place for the repaint, and leaving is
+/// dropped, whichever of those sent it.
 ///
 /// `tail` holds a switch cut short by the end of a feed until the next one.
 pub(crate) fn keep_one_screen(tail: &mut Vec<u8>, bytes: &[u8]) -> Vec<u8> {
