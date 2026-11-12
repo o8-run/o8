@@ -92,8 +92,8 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
   '/api/task-artifacts': seek('operator task artifacts'),
   '/api/task-artifacts/[id]/actions': seek('operator task artifact actions'),
   '/api/tasks/[id]': security('worker grant: task read'),
-  // `/api/tasks/${id}/${action}`: the worker's report and block verbs.
-  '/api/tasks/[id]/[id]': security('worker grant: task report and block'),
+  // Only report/block still use the dynamic CLI URL; operator verbs have explicit paths.
+  '/api/tasks/[id]/[id]': security('remaining dynamic CLI calls: report and block; operator mutations registered separately'),
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
 };
