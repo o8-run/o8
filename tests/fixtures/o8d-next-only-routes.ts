@@ -25,7 +25,6 @@ const seek = (reason: string): NextOnlyEntry => ({ owner: 'seek', reason });
 // entries merge without conflicts. When you register a route, delete only its entry line (and
 // any comment line directly above it); leave the blank lines.
 export const NEXT_ONLY_NATIVE_PATHS: NextOnlyTable = {
-  '/api/review/push': seek("review's push button: a POST outside the Phase A reads"),
 };
 // Registered paths that o8 next sends a method the native registration lacks, read from each Rust
 // request's call. Hidden while the scan checked paths alone.

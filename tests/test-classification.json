@@ -5788,6 +5788,15 @@
       ]
     },
     {
+      "path": "tests/o8d-review-push-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-session-read-admission-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -7572,6 +7581,14 @@
       ]
     },
     {
+      "path": "tests/review-push-next-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-ready-coalescer-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -7814,14 +7831,14 @@
       "path": "tests/server-bundle-size-real-path.test.ts",
       "reasons": [
         "child-process",
-        "real-path",
-        "terminal-host"
+        "real-path"
       ]
     },
     {
       "path": "tests/server-bundles-packaged-layout-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "native-build",
         "network-listener",
         "process-signal",
