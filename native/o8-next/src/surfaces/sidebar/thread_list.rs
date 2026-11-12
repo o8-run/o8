@@ -388,6 +388,7 @@ impl ThreadList {
     }
     fn rebuild(&mut self) {
         self.track_working();
+        let anchor = self.scroll_anchor();
         let previous_choice = self
             .rows
             .iter()
@@ -464,10 +465,13 @@ impl ThreadList {
             self.choice = Some(id);
             self.follow_selection = false;
         }
-        if let Some(index) = self
-            .rows
-            .iter()
-            .position(|r| r.id.is_some() && r.id == self.choice)
+        // Rows that arrived or left above keep the view where it was
+        // (#6021); the choice is followed only when the view lost its row.
+        if !self.restore_scroll(anchor)
+            && let Some(index) = self
+                .rows
+                .iter()
+                .position(|r| r.id.is_some() && r.id == self.choice)
             && previous_choice.is_some_and(|previous| previous != index)
         {
             self.scroll_row(index, ScrollStrategy::Top, false);
@@ -1410,6 +1414,8 @@ pub(crate) mod detailed;
 pub(crate) mod pins;
 #[path = "drawer.rs"]
 mod drawer;
+#[path = "scroll_anchor.rs"]
+mod scroll_anchor;
 #[cfg(test)]
 #[path = "drawer_tests.rs"]
 mod drawer_tests;

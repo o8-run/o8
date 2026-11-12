@@ -463,3 +463,142 @@ fn sidebar_closed_drawer_shows_unread_news_inside(cx: &mut TestAppContext) {
     let unread = list.read_with(cx, |list, _| list.rows.last().unwrap().unread);
     assert!(unread, "the row keeps its unread state");
 }
+
+/// Thirty idle threads a month old under a run from today (#6021).
+fn long_list(run_status: &str) -> Vec<Session> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mut all = vec![session("run", run_status, &super::iso_timestamp(now - 60))];
+    all.extend((0..30).map(|n| {
+        session(&format!("old-{n:02}"), "idle", &format!("2026-10-01T10:{n:02}:00Z"))
+    }));
+    all
+}
+
+/// The top visible row's identity and how far into it the list starts.
+fn top_row(list: &Entity<ThreadList>, cx: &VisualTestContext) -> (String, gpui::Pixels) {
+    list.read_with(cx, |list, _| {
+        let (ix, within) = if list.detailed {
+            let top = list.detailed_list.logical_scroll_top();
+            (top.item_ix, top.offset_in_item)
+        } else {
+            let y = -list.scroll.0.borrow().base_handle.offset().y;
+            let ix = (y / gpui::px(28.)).floor() as usize;
+            (ix, y - gpui::px(28.) * ix as f32)
+        };
+        let row = &list.rows[ix];
+        (row.id.clone().unwrap_or_else(|| row.title.clone()), within)
+    })
+}
+
+fn set_detailed(list: &Entity<ThreadList>, cx: &mut VisualTestContext, detailed: bool) {
+    list.update(cx, |list, _| {
+        list.detailed = detailed;
+        // All thirty listed, so a scrolled view sits mid-list, not at its end.
+        list.expanded.insert("Older".into());
+        list.rebuild();
+    });
+    cx.simulate_resize(gpui::size(gpui::px(300.), gpui::px(420.)));
+    draw(cx);
+}
+
+fn scroll_down(list: &Entity<ThreadList>, cx: &mut VisualTestContext) {
+    list.update(cx, |list, _| {
+        if list.detailed {
+            list.detailed_list.scroll_to(gpui::ListOffset {
+                item_ix: 12,
+                offset_in_item: gpui::px(10.),
+            });
+        } else {
+            list.scroll.0.borrow().base_handle.set_offset(gpui::point(gpui::px(0.), gpui::px(-346.)));
+        }
+    });
+    draw(cx);
+}
+
+fn first_row_at_list_top(cx: &mut VisualTestContext) {
+    let list = cx.debug_bounds("thread-list").expect("the list");
+    let row = cx.debug_bounds("thread-row-0").expect("row 0 drawn");
+    assert!((row.top() - list.top()).abs() <= gpui::px(2.), "{row:?} vs {list:?}");
+}
+
+#[gpui::test]
+fn sidebar_list_at_top_stays_at_top_when_a_run_returns(cx: &mut TestAppContext) {
+    let (list, cx) = make(cx, long_list("running"));
+    for detailed in [true, false] {
+        set_detailed(&list, cx, detailed);
+        list.update(cx, |list, _| {
+            list.sessions[0].status = "running".into();
+            list.rebuild();
+        });
+        draw(cx);
+        first_row_at_list_top(cx);
+        // The run ends: the thread and its Today heading come back on top.
+        list.update(cx, |list, _| {
+            list.sessions[0].status = "idle".into();
+            list.rebuild();
+        });
+        draw(cx);
+        let heads = list.read_with(cx, |list, _| {
+            list.rows[..3].iter().map(|r| r.title.clone()).collect::<Vec<_>>()
+        });
+        assert_eq!(heads, ["Recents", "Today", "Thread run"], "detailed {detailed}");
+        first_row_at_list_top(cx);
+    }
+}
+
+#[gpui::test]
+fn sidebar_scrolled_list_keeps_its_rows_when_a_run_returns(cx: &mut TestAppContext) {
+    let (list, cx) = make(cx, long_list("running"));
+    for detailed in [true, false] {
+        set_detailed(&list, cx, detailed);
+        list.update(cx, |list, _| {
+            list.sessions[0].status = "running".into();
+            list.rebuild();
+        });
+        scroll_down(&list, cx);
+        let before = top_row(&list, cx);
+        list.update(cx, |list, _| {
+            list.sessions[0].status = "idle".into();
+            list.rebuild();
+        });
+        draw(cx);
+        assert_eq!(top_row(&list, cx), before, "detailed {detailed}");
+    }
+}
+
+#[gpui::test]
+fn sidebar_list_does_not_jump_when_a_top_thread_starts_running(cx: &mut TestAppContext) {
+    let (list, cx) = make(cx, long_list("idle"));
+    for detailed in [true, false] {
+        set_detailed(&list, cx, detailed);
+        list.update(cx, |list, _| {
+            list.sessions[0].status = "idle".into();
+            list.choice = Some("run".into());
+            list.rebuild();
+        });
+        draw(cx);
+        // At the top: the run leaves for the drawer and the list stays put.
+        list.update(cx, |list, _| {
+            list.sessions[0].status = "running".into();
+            list.rebuild();
+        });
+        draw(cx);
+        first_row_at_list_top(cx);
+        // Scrolled: the rows in view stay where they are.
+        list.update(cx, |list, _| {
+            list.sessions[0].status = "idle".into();
+            list.rebuild();
+        });
+        scroll_down(&list, cx);
+        let before = top_row(&list, cx);
+        list.update(cx, |list, _| {
+            list.sessions[0].status = "running".into();
+            list.rebuild();
+        });
+        draw(cx);
+        assert_eq!(top_row(&list, cx), before, "detailed {detailed}");
+    }
+}
