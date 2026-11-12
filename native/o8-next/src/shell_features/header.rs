@@ -1,4 +1,7 @@
 #[cfg(test)]
+#[path = "header/layout_review_tests.rs"]
+mod layout_review_tests;
+#[cfg(test)]
 #[path = "header/review_tests.rs"]
 mod review_tests;
 #[cfg(test)]

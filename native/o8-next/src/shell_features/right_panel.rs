@@ -1,4 +1,7 @@
 #[cfg(test)]
+#[path = "right_panel/review_tests.rs"]
+mod review_tests;
+#[cfg(test)]
 #[path = "right_panel/restore_tests.rs"]
 mod restore_tests;
 use super::*;

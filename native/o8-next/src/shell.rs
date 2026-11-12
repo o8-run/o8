@@ -82,6 +82,10 @@ pub struct Shell {
     client: Client,
     file: PathBuf,
     state: State,
+    #[cfg(test)]
+    review_persist_calls: usize,
+    #[cfg(test)]
+    review_title_visits: usize,
     sessions: Vec<Session>,
     workspaces: Vec<String>,
     /// Tunnels to saved machines, shared with the sidebar.
@@ -129,6 +133,10 @@ impl Shell {
             client,
             file,
             state,
+            #[cfg(test)]
+            review_persist_calls: 0,
+            #[cfg(test)]
+            review_title_visits: 0,
             sessions: vec![],
             workspaces: vec![],
             links: Default::default(),
@@ -153,6 +161,7 @@ impl Shell {
         shell
     }
     fn persist(&mut self) {
+        #[cfg(test)] { self.review_persist_calls += 1; }
         let open = self.state.workspaces.iter().flat_map(|(scope, saved)| {
             saved.tabs.iter().filter_map(move |tab| match tab {
                 Tab::Session(id) => Some(format!(
@@ -163,6 +172,7 @@ impl Shell {
         }).collect::<BTreeSet<_>>();
         self.state.thread_titles.retain(|key, _| open.contains(key));
         for session in &self.sessions {
+            #[cfg(test)] { self.review_title_visits += 1; }
             let key = format!("{}|{}", session.workspace(), session.id);
             if open.contains(&key) && !session.title.trim().is_empty() {
                 self.state.thread_titles.insert(

@@ -85,8 +85,7 @@ fn setup(cx: &mut TestAppContext, overflow: bool) -> (Fixture, Entity<Shell>, Vi
         cx,
     );
     ready(&shell, &mut visual);
-    // Fixed-width thread titles need enough space for the fitting case.
-    visual.simulate_resize(size(px(if overflow { 1200. } else { 1680. }), px(816.)));
+    visual.simulate_resize(size(px(1200.), px(816.)));
     if overflow {
         // Seed open tabs, then exercise only production mouse/key handlers.
         shell.update(&mut visual, |s, cx| {

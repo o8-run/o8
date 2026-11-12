@@ -507,7 +507,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     shell.surfaces.sidebar.view = Some(sidebar);
 }
 impl Shell {
-    fn install_sessions(
+    pub(super) fn install_sessions(
         &mut self,
         sessions: Vec<Session>,
         refreshed: bool,
