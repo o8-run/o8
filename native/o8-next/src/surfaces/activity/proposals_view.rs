@@ -3,7 +3,7 @@ use super::super::proposals;
 use super::*;
 /// A packet or lane id as a person reads it: the prefix and first block of a
 /// long id ("pkt-9f8d9dc6"), the whole of a short one.
-fn short_id(id: &str) -> &str {
+pub(super) fn short_id(id: &str) -> &str {
     match id.char_indices().filter(|(_, c)| *c == '-').nth(1) {
         Some((cut, _)) if id.len() > 16 => &id[..cut],
         _ => id,
@@ -189,7 +189,7 @@ impl ActivityPane {
                         // Quiet: a list of filled buttons all shout at once.
                         v.bg(theme().selection)
                             .border_color(tint(marks::ACCENT, 0.35))
-                            .text_color(theme().accent)
+                            .text_color(theme().text)
                     }),
             );
         }

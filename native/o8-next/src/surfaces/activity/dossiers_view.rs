@@ -255,7 +255,7 @@ impl ActivityPane {
                 history = history.child(format!(
                     "{} · {}",
                     text(evidence, "sourceKind").replace('_', " "),
-                    text(evidence, "packetId")
+                    super::proposals::short_id(&text(evidence, "packetId"))
                 ));
             }
             let mut events = div()
@@ -322,7 +322,7 @@ impl ActivityPane {
                         // Quiet: a list of filled buttons all shout at once.
                         v.bg(theme().selection)
                             .border_color(tint(marks::ACCENT, 0.35))
-                            .text_color(theme().accent)
+                            .text_color(theme().text)
                     }),
             );
         }
