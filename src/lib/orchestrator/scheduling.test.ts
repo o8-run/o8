@@ -1020,3 +1020,15 @@ describe('boot recovery launch guard (#1460)', () => {
     })).toBe('lane state does not expect a worker (awaiting_review)');
   });
 });
+it('continues scheduling other packets after loading an unknown saved runtime and retains substitution', async () => {
+  const repoPath = makeRepo();
+  const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  const state = normalizeOrchestratorMissionState(missionFixture(repoPath, [
+    packetFixture(repoPath, 'retired', { runtime: 'retired-runtime' as never }),
+    packetFixture(repoPath, 'healthy'),
+  ]));
+  const next = await runDispatchTick(state, { launchBudget: { maxLaunches: 2 }, storageAdmission: permissiveAdmission() });
+  expect(next.packets.find(p => p.id === 'retired')?.workerRouting?.runtimeSubstitution?.reason).toContain('retired-runtime');
+  expect(['launching', 'running']).toContain(next.packets.find(p => p.id === 'healthy')?.status);
+  await vi.waitFor(() => expect(launchMock.calls.some(call => call.packetId === 'healthy')).toBe(true));
+});

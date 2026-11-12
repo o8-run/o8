@@ -1,4 +1,5 @@
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { validateRequestedRuntime } from '@/lib/agents/routing';
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { RepoDispatchAdmissionError } from '@/lib/lane/repo-preflight';
@@ -13,7 +14,6 @@ import { PacketStorageAdmissionError } from '@/lib/orchestrator/storage-admissio
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { DispatchRegistryConflictError } from '@/lib/orchestrator/operator-mission-service/dispatch-registry-publication';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { formatDispatchableRuntimeChoices, isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import {
   bindIdempotencyClientMutation,
   deriveIdempotencyKey,
@@ -119,12 +119,8 @@ export async function POST(request: NextRequest) {
     ? record.missionId.trim()
     : undefined;
   let requestedRuntime: OrchestratorRuntime | undefined;
-  if (record.runtime !== undefined) {
-    if (!isDispatchableRuntime(record.runtime)) {
-      return operatorError('invalid_request', `runtime must be one of: ${formatDispatchableRuntimeChoices()}.`, 400);
-    }
-    requestedRuntime = record.runtime;
-  }
+  try { requestedRuntime = validateRequestedRuntime(record.runtime) ?? undefined; }
+  catch (error) { return operatorError('invalid_request', (error as Error).message, 400); }
   let targetMissionId: string;
   try {
     targetMissionId = resolveMissionDispatchTarget(missionId);

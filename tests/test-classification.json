@@ -7870,6 +7870,14 @@
       ]
     },
     {
+      "path": "tests/runtime-entrypoints-round2-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/runtime-launch-idempotency-real-path.test.ts",
       "reasons": [
         "real-path"
