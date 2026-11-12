@@ -1,6 +1,6 @@
-//! Detailed rows and the Working section, opt-in from the view menu.
+//! Detailed rows, opt-in from the view menu, and the Working drawer's setting.
 use super::recents_tests::native_rows;
-use super::thread_list::detailed::{Status, elapsed, fold_working, status};
+use super::thread_list::detailed::{Status, elapsed, status};
 use super::thread_list::pins;
 use super::thread_list::Row;
 use super::*;
@@ -54,28 +54,6 @@ fn detailed_status_uses_the_classic_names_and_idle_shows_only_age() {
     assert_eq!(status(&no_change, false, "4d").label, "Merged");
 }
 
-#[test]
-fn working_section_takes_running_threads_before_later_shelves() {
-    let rows = vec![
-        header("section", "Active", ""),
-        thread("a", false),
-        thread("b", true),
-        header("section", "Settled", ""),
-        thread("c", true),
-    ];
-    let titles = |rows: &[Row]| rows.iter().map(|r| r.title.clone()).collect::<Vec<_>>();
-    assert_eq!(
-        titles(&fold_working(rows.clone(), false)),
-        ["Working · 1", "b", "Active", "a", "Settled", "c"]
-    );
-    assert_eq!(
-        titles(&fold_working(rows.clone(), true)),
-        ["Working · 1", "Active", "a", "Settled", "c"]
-    );
-    let idle: Vec<_> = rows.into_iter().filter(|r| !r.running).collect();
-    assert_eq!(titles(&fold_working(idle, false)), ["Active", "a", "Settled"]);
-}
-
 #[gpui::test]
 fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestAppContext) {
     let fixture = Fixture::with_options(&["--sidebar", "--sidebar-markers"]);
@@ -100,9 +78,6 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     // Headings stay compact in detailed mode, so no tall gap sits above them.
     let heading = visual.debug_bounds("thread-row-0").expect("a heading").size.height;
     assert_eq!(heading, px(28.));
-    click(&mut visual, "sidebar-view");
-    click(&mut visual, "sidebar-view-working");
-    wait_for(&shell, &mut visual, |s, _| s.state.sidebar_working_section);
     draw(&mut visual);
     let first = shell.read_with(&visual, |s, cx| {
         let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
@@ -147,50 +122,45 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     draw(&mut visual);
     assert!(visual.debug_bounds("thread-branch-thoughts-sidebar-0019").is_some());
 
-    // Working: a running thread folds into a section that collapses.
-    // The fixture's running workers are drawn from the server's own status.
-    let running = native_rows(&shell, &visual).as_array().unwrap().iter()
-        .find(|r| r["running"] == true && r["kind"] == "thread")
-        .and_then(|r| r["id"].as_str().map(str::to_owned))
-        .expect("a running thread in the fixture");
-    shell.update(&mut visual, |s, cx| {
-        s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
-            l.scroll_row(0, ScrollStrategy::Top, false);
-            cx.notify();
-        })
+    // Working: on by default, a running thread waits in the closed drawer
+    // at the foot. The fixture's running workers come from the server's status.
+    let running = shell.read_with(&visual, |s, cx| {
+        let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+        list.sessions
+            .iter()
+            .find(|s| crate::sidebar::working(s) && s.parent_inbox_subject.is_none() && s.pinned_at.is_none())
+            .map(|s| s.id.clone())
+            .expect("a running thread in the fixture")
     });
-    draw(&mut visual);
     let rows = native_rows(&shell, &visual);
     let rows = rows.as_array().unwrap();
-    let header = rows.iter().position(|r| r["status"] == "working").expect("Working section");
-    let end = rows[header + 1..]
-        .iter()
-        .position(|r| r["kind"] == "section")
-        .map_or(rows.len(), |n| header + 1 + n);
-    let held: Vec<_> = rows[header + 1..end].iter().filter(|r| r["kind"] == "thread").collect();
-    assert_eq!(rows[header]["title"], format!("Working · {}", held.len()).as_str());
-    assert!(held.iter().all(|r| r["running"] == true));
-    assert!(held.iter().any(|r| r["id"] == running.as_str()), "the running thread is in Working");
-    assert_eq!(rows.iter().filter(|r| r["id"] == running.as_str()).count(), 1);
-    shell.update(&mut visual, |s, cx| {
-        s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
-            l.scroll_row(header, ScrollStrategy::Center, false);
-            cx.notify();
-        })
-    });
-    draw(&mut visual);
+    let foot = rows.last().unwrap();
+    assert_eq!((&foot["kind"], &foot["title"]), (&json!("drawer"), &json!("Working")));
+    assert!(!rows.iter().any(|r| r["id"] == running.as_str()), "the closed drawer hides its threads");
     click(&mut visual, "sidebar-working-header");
     draw(&mut visual);
     let rows = native_rows(&shell, &visual);
-    assert!(
-        !rows.as_array().unwrap().iter().any(|r| r["id"] == running.as_str()),
-        "a collapsed Working section hides its threads"
-    );
+    let rows = rows.as_array().unwrap();
+    let header = rows.iter().position(|r| r["kind"] == "drawer").expect("the Working drawer");
+    let held: Vec<_> = rows[header + 1..].iter().filter(|r| r["kind"] == "thread" && r["depth"] == 0).collect();
+    assert_eq!(rows[header]["age"], held.len().to_string().as_str());
+    assert!(held.iter().all(|r| r["running"] == true));
+    assert!(held.iter().any(|r| r["id"] == running.as_str()), "the running thread is in the drawer");
+    assert_eq!(rows.iter().filter(|r| r["id"] == running.as_str()).count(), 1);
+    // The setting turns the drawer off: runs stay in their groups.
+    click(&mut visual, "sidebar-view");
+    click(&mut visual, "sidebar-view-working");
+    wait_for(&shell, &mut visual, |s, _| s.state.sidebar_working_off);
+    draw(&mut visual);
+    let rows = native_rows(&shell, &visual);
+    let rows = rows.as_array().unwrap();
+    assert!(!rows.iter().any(|r| r["kind"] == "drawer"));
+    assert_eq!(rows.iter().filter(|r| r["id"] == running.as_str()).count(), 1);
     let saved: State = serde_json::from_str(
         &std::fs::read_to_string(fixture.root.join("detailed.json")).unwrap(),
     )
     .unwrap();
-    assert!(saved.sidebar_detailed_rows && saved.sidebar_working_section);
+    assert!(saved.sidebar_detailed_rows && saved.sidebar_working_off && saved.sidebar_working_open);
 }
 
 #[test]

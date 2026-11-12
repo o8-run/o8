@@ -41,7 +41,9 @@ pub enum Event {
     Snoozes(Vec<(String, u64)>),
     /// Detailed rows, and whether running threads fold into a Working section.
     /// Detailed rows, the Working section, and the Inbox's Working shelf.
-    RowMode(bool, bool, bool),
+    /// Detailed rows, the Working drawer, the Inbox's Working shelf, and
+    /// whether the drawer is open.
+    RowMode(bool, bool, bool, bool),
     /// The project menu's Switch workspace, with the focus to give back.
     WorkspacePicker(Option<gpui::FocusHandle>),
 }
@@ -165,7 +167,8 @@ pub struct ThreadList {
     pub(super) branch_names: HashMap<String, String>,
     /// Detailed three-line rows (T3 Code's), opt-in; compact otherwise.
     pub(super) detailed: bool,
-    /// Running threads fold into a Working section; `working_closed` collapses it.
+    /// Running threads leave the list for the Working drawer at its foot
+    /// (on by default); `working_closed` folds the drawer to one row.
     pub(super) working_section: bool,
     /// The Inbox folds running threads into its Working shelf.
     pub(super) inbox_working: bool,
@@ -181,6 +184,8 @@ pub struct ThreadList {
     /// Threads that stopped working inside the grace and still read as working.
     pub(super) lingering: HashSet<String>,
     pub(super) working_closed: bool,
+    /// The drawer's open or close animation: when it started, and whether it opens.
+    pub(super) drawer_motion: Option<(std::time::Instant, bool)>,
     /// A one-second repaint is queued for the Working timers.
     pub(super) second_tick: bool,
     archived_open: bool,
@@ -301,7 +306,7 @@ impl ThreadList {
             branch_ids: HashSet::new(),
             branch_names: HashMap::new(),
             detailed: false,
-            working_section: false,
+            working_section: true,
             inbox_working: true,
             snooze_custom: None,
             placed: None,
@@ -310,7 +315,8 @@ impl ThreadList {
             working_seen: HashMap::new(),
             lingering: HashSet::new(),
             second_tick: false,
-            working_closed: false,
+            working_closed: true,
+            drawer_motion: None,
             archived_open: false,
             #[cfg(test)]
             title_layouts: HashMap::new(),
@@ -421,10 +427,15 @@ impl ThreadList {
     pub(super) fn cards(&self) -> bool {
         self.detailed || self.view() == folders::View::Inbox
     }
-    /// Where the Inbox's foot shelves start; the scrolling list ends there.
+    /// Where the foot starts (the Inbox's shelves, else the Working
+    /// drawer); the scrolling list ends there.
     pub(super) fn top_len(&self) -> usize {
         if self.view() != folders::View::Inbox {
-            return self.rows.len();
+            return self
+                .rows
+                .iter()
+                .position(|r| r.kind == "drawer")
+                .unwrap_or(self.rows.len());
         }
         self.rows
             .iter()
@@ -469,7 +480,11 @@ impl ThreadList {
             rows.truncate(index + 1);
         }
         rows = self.nest_rows(rows, sessions);
-        if self.working_section && self.view() != folders::View::Inbox {
+        // A search lists running threads in place; the drawer waits.
+        if self.working_section
+            && self.view() != folders::View::Inbox
+            && self.query.trim().is_empty()
+        {
             // The Pinned shelf stays first and keeps its running threads.
             let shelf = if rows.first().is_some_and(|r| r.status == "pinned") {
                 1 + rows[1..].iter().take_while(|r| r.kind == "thread").count()
@@ -477,7 +492,10 @@ impl ThreadList {
                 0
             };
             let rest = rows.split_off(shelf);
-            rows.extend(detailed::fold_working(rest, self.working_closed));
+            let input = |id: &str| {
+                sessions.iter().any(|s| s.id == id && inbox::needs_input(s))
+            };
+            rows.extend(detailed::fold_working(rest, self.drawer_rows_shown(), input));
         }
         rows
     }
@@ -1207,6 +1225,7 @@ impl ThreadList {
                     self.expanded.insert(more.status.clone());
                     self.rebuild();
                 }
+                self.drawer_key(key, cx);
                 let ids: Vec<_> = self
                     .rows
                     .iter()
@@ -1298,16 +1317,24 @@ mod thread_hover;
 pub(crate) mod detailed;
 #[path = "pins.rs"]
 pub(crate) mod pins;
+#[path = "drawer.rs"]
+mod drawer;
+#[cfg(test)]
+#[path = "drawer_tests.rs"]
+mod drawer_tests;
 #[path = "status_mark.rs"]
 pub(crate) mod status_mark;
 
 impl ThreadList {
     /// Scroll either list to a row; detailed mode reveals it in its list.
     pub(crate) fn scroll_row(&self, index: usize, strategy: ScrollStrategy, strict: bool) {
-        if strict {
-            self.scroll.scroll_to_item_strict(index, strategy);
-        } else {
-            self.scroll.scroll_to_item(index, strategy);
+        // A foot row (shelf or drawer) sits below the scrolling list.
+        if index < self.top_len() {
+            if strict {
+                self.scroll.scroll_to_item_strict(index, strategy);
+            } else {
+                self.scroll.scroll_to_item(index, strategy);
+            }
         }
         // A shelf row sits below the scrolling list, always in view.
         if self.cards() && index < self.top_len() {

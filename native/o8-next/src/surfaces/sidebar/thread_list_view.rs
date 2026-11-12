@@ -1,3 +1,4 @@
+use super::inbox_card::tabular;
 use super::*;
 use crate::theme::current as theme;
 use gpui::{Render, Styled, canvas, div, px, uniform_list};
@@ -46,6 +47,7 @@ impl Render for ThreadList {
                 self.reveal = None;
             }
         }
+        let openness = self.drawer_openness(window, cx);
         self.tick_working(cx);
         self.tick_fade(cx);
         if !self.mark_pace {
@@ -153,7 +155,7 @@ impl Render for ThreadList {
                 } else {
                     uniform_list(
                         "native-threads",
-                        self.rows.len(),
+                        self.top_len(),
                         cx.processor(|this, range: std::ops::Range<usize>, window, cx| {
                             this.materialized.set(range.len());
                             let keyboard = this.focus.is_focused(window);
@@ -169,7 +171,7 @@ impl Render for ThreadList {
                 },
             ),
             )
-            .children(self.shelves(window, cx))
+            .children(self.shelves(openness, window, cx))
             .children(self.row_menu(cx))
             .children(self.pr_hover_list(cx))
     }
@@ -214,7 +216,7 @@ impl ThreadList {
             )
             .on_click(cx.listener(|this, _, window, cx| this.search(window, cx)))
     }
-    fn render_row(
+    pub(super) fn render_row(
         &mut self,
         i: usize,
         keyboard: bool,
@@ -396,7 +398,11 @@ impl ThreadList {
                                             .text_color(theme().text_faint)
                                             .children(row.id.as_deref().and_then(|id| this.pin_mark(id)))
                                             .children(row.id.as_deref().and_then(|id| this.auto_off_mark(id)))
-                                            .child(row.age.clone())
+                                            .map(|v| match this.drawer_age(i) {
+                                                // A running thread counts its run.
+                                                Some(run) => v.child(tabular(div()).child(run)),
+                                                None => v.child(row.age.clone()),
+                                            })
                                             .when(row.branch, |v| v.child("⑂")),
                                     )
                                     .children(row.id.as_deref().and_then(|id| {
@@ -441,13 +447,6 @@ impl ThreadList {
                                 ))
                             },
                         )
-                        .when(row.kind == "section" && row.status == "working", |view| {
-                            view.debug_selector(|| "sidebar-working-header".into())
-                                .cursor_pointer()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toggle_working_closed(cx);
-                                }))
-                        })
                         .when(
                             row.kind == "section" && row.title == "Archived",
                             |view| {
@@ -568,9 +567,18 @@ impl ThreadList {
                         )
     }
 
-    /// The Inbox's foot: the Working, Snoozed and Settled shelves under the
-    /// scrolling list, as T3 Code pins them to the bottom of its sidebar.
-    fn shelves(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+    /// The foot under the scrolling list: the Inbox's Snoozed, Settled and
+    /// Archived shelves, as T3 Code pins them to the bottom of its sidebar,
+    /// else the Working drawer.
+    fn shelves(
+        &mut self,
+        openness: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        if self.view() != folders::View::Inbox {
+            return self.drawer(openness, window, cx);
+        }
         let start = self.top_len();
         if start >= self.rows.len() {
             return None;

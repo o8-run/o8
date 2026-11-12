@@ -1,4 +1,5 @@
-//! Detailed thread rows and the Working section, opt-in from the view menu.
+//! Detailed thread rows, opt-in from the view menu, and the fold behind the
+//! Working drawer (drawer.rs), on unless turned off there.
 //!
 //! Modelled on T3 Code's sidebar rows (https://github.com/pingdotgg/t3code,
 //! apps/web/src/components/sidebar/SidebarThreadRow.tsx): repository and
@@ -7,7 +8,7 @@
 //! already has; a missing one is left out rather than guessed.
 //!
 //! Dev only: O8_DEV_SIDEBAR_WORKING may list thread ids (comma separated)
-//! drawn as running, to show the Working section without starting an agent.
+//! drawn as running, to show the Working drawer without starting an agent.
 use super::status_mark::{self, State};
 use super::*;
 use crate::theme::current as theme;
@@ -70,10 +71,18 @@ pub(super) fn mark_dev_working(rows: &mut [Row]) {
         }
     }
 }
-/// Running top-level threads leave their groups for a Working section before
-/// Merged, Snoozed, Settled and Archived. Nested children travel with their row;
-/// the caller keeps the pinned shelf outside this fold.
-pub(crate) fn fold_working(rows: Vec<Row>, closed: bool) -> Vec<Row> {
+/// Running top-level threads leave their groups for the Working drawer at
+/// the foot of the sidebar (T3 Code's sidebar idea, reimplemented). Nested
+/// children travel with their row; a thread that needs input stays where it
+/// is, and so do Merged, Snoozed, Settled and Archived threads. The drawer is
+/// a `drawer` row (its count in `age`, "open" in `status` when open) followed,
+/// when open, by its threads; it is absent when nothing runs. The caller
+/// keeps the pinned shelf outside this fold.
+pub(crate) fn fold_working(
+    rows: Vec<Row>,
+    open: bool,
+    needs_input: impl Fn(&str) -> bool,
+) -> Vec<Row> {
     let end = rows
         .iter()
         .position(|r| {
@@ -85,46 +94,85 @@ pub(crate) fn fold_working(rows: Vec<Row>, closed: bool) -> Vec<Row> {
     let tail = rows.split_off(end);
     let (mut working, mut rest) = (Vec::new(), Vec::new());
     let (mut moving, mut count) = (false, 0);
+    // Headings that gave up a thread, by their index in `rest`.
+    let (mut heading, mut emptied): (Option<usize>, HashSet<usize>) = (None, HashSet::new());
     for row in rows {
         if row.depth == 0 {
-            moving = row.kind == "thread" && row.running && row.marker != "input";
+            moving = row.kind == "thread"
+                && row.running
+                && row.marker != "input"
+                && !row.id.as_deref().is_some_and(&needs_input);
             if moving {
                 count += 1;
             }
         }
         if moving {
+            emptied.extend(heading);
             working.push(row);
         } else {
+            if matches!(row.kind.as_str(), "section" | "folder") {
+                heading = Some(rest.len());
+            }
             rest.push(row);
         }
     }
-    let mut out = Vec::new();
-    if !working.is_empty() {
-        out.push(recents::header(
-            "section",
-            &format!("Working · {count}"),
-            "working",
-        ));
-        if !closed {
-            out.extend(working);
-        }
+    if working.is_empty() {
+        rest.extend(tail);
+        return rest;
     }
-    out.extend(rest);
+    // A heading whose threads all left goes too; the first keeps the list's
+    // controls, and Recents and Archived always stay.
+    let first = rest.iter().position(|r| r.kind == "section");
+    let next_heading: Vec<bool> = (0..rest.len())
+        .map(|i| {
+            rest.get(i + 1)
+                .is_none_or(|r| matches!(r.kind.as_str(), "section" | "folder"))
+        })
+        .collect();
+    let mut out: Vec<Row> = rest
+        .into_iter()
+        .enumerate()
+        .filter(|(i, r)| {
+            !(emptied.contains(i)
+                && next_heading[*i]
+                && Some(*i) != first
+                && !matches!(r.title.as_str(), "Recents" | "Archived"))
+        })
+        .map(|(_, r)| r)
+        .collect();
     out.extend(tail);
+    let mut header = recents::header("drawer", "Working", if open { "open" } else { "" });
+    header.age = count.to_string();
+    out.push(header);
+    if open {
+        out.extend(working);
+    }
     out
 }
 
 impl ThreadList {
-    pub fn restore_row_mode(&mut self, detailed: bool, working: bool, inbox_working: bool) {
+    pub fn restore_row_mode(
+        &mut self,
+        detailed: bool,
+        working: bool,
+        inbox_working: bool,
+        working_open: bool,
+    ) {
         self.detailed = detailed;
         self.working_section = working;
         self.inbox_working = inbox_working;
+        self.working_closed = !working_open;
         self.rebuild();
     }
-    fn save_row_mode(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn save_row_mode(&mut self, cx: &mut Context<Self>) {
         self.view_menu = false;
         self.rebuild();
-        cx.emit(Event::RowMode(self.detailed, self.working_section, self.inbox_working));
+        cx.emit(Event::RowMode(
+            self.detailed,
+            self.working_section,
+            self.inbox_working,
+            !self.working_closed,
+        ));
         cx.notify();
     }
     pub(super) fn toggle_detailed(&mut self, cx: &mut Context<Self>) {
@@ -139,11 +187,6 @@ impl ThreadList {
             self.working_section = !self.working_section;
         }
         self.save_row_mode(cx);
-    }
-    pub(super) fn toggle_working_closed(&mut self, cx: &mut Context<Self>) {
-        self.working_closed = !self.working_closed;
-        self.rebuild();
-        cx.notify();
     }
     pub(super) fn branch_of(&self, s: &Session) -> Option<String> {
         self.branch_names

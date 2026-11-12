@@ -118,10 +118,10 @@ fn sidebar_nesting_groups_counts_and_keeps_orphans(cx: &mut TestAppContext) {
     list.update(cx, |list, _| {
         list.sessions = family("running");
         list.sessions[0].status = "running".into();
-        list.working_section = true;
+        list.working_closed = false;
         list.rebuild();
     });
-    assert_eq!(ids(&list, cx), ["parent", "new", "old", "orphan"]);
+    assert_eq!(ids(&list, cx), ["orphan", "parent", "new", "old"]);
     list.update(cx, |list, _| {
         list.working_closed = true;
         list.rebuild();
