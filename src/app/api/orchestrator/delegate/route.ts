@@ -599,7 +599,8 @@ async function postDelegate(request: NextRequest) {
   // Older persisted failures predate the typed refusal boundary. Replays must
   // follow the same disclosure policy as a fresh launch.
   if (body?.checkoutMode === 'shared' && outcome.result.payload.ok === false
-    && outcome.result.payload.code !== 'shared_checkout_refusal') {
+    && outcome.result.payload.code !== 'shared_checkout_refusal'
+    && !(outcome.result.status === 400 && outcome.result.payload.code === 'worker_not_enabled')) {
     console.warn('[orchestrator-delegate] Shared worker failure receipt:', outcome.result.payload);
     return NextResponse.json({ ok: false, error: SHARED_CHECKOUT_LAUNCH_FAILURE,
       replayed: outcome.replayed || undefined }, { status: outcome.result.status });

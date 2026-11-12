@@ -94,3 +94,49 @@ fn selecting_a_settled_thread_keeps_the_settled_shelf_capped(cx: &mut TestAppCon
         assert!(shelf.iter().any(|r| r.id.as_deref() == Some("done-03")));
     });
 }
+
+/// The ids listed under the Settled shelf heading.
+fn settled_rows(l: &ThreadList) -> Vec<String> {
+    let at = l
+        .rows
+        .iter()
+        .position(|r| r.kind == "shelf" && r.title == "Settled")
+        .unwrap();
+    l.rows[at + 1..]
+        .iter()
+        .take_while(|r| r.kind != "shelf")
+        .filter_map(|r| r.id.clone())
+        .collect()
+}
+
+#[gpui::test]
+fn a_shelf_folds_while_its_open_thread_sits_on_it(cx: &mut TestAppContext) {
+    let sessions: Vec<_> = (0..4)
+        .map(|i| session(&format!("done-{i}"), "idle", true))
+        .chain([session("live", "idle", false)])
+        .collect();
+    let (list, cx) = inbox(cx, sessions);
+    list.update(cx, |l, _| {
+        l.selected = Some("done-1".into());
+        l.rebuild();
+    });
+    list.read_with(cx, |l, _| {
+        // Opening a settled thread lists it alone; the shelf stays folded.
+        assert_eq!(settled_rows(l), ["done-1"]);
+    });
+    list.update(cx, |l, _| {
+        l.toggle_shelf("Settled");
+        l.choice = Some("done-2".into());
+        l.rebuild();
+    });
+    list.read_with(cx, |l, _| assert_eq!(settled_rows(l).len(), 4));
+    list.update(cx, |l, _| {
+        l.toggle_shelf("Settled");
+        // A later rebuild (a poll, a tick) must not unfold it again.
+        l.rebuild();
+    });
+    list.read_with(cx, |l, _| {
+        assert_eq!(settled_rows(l), ["done-1"]);
+        assert!(!l.expanded.contains(&inbox::open_key("Settled")));
+    });
+}

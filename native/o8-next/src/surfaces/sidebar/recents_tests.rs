@@ -71,7 +71,13 @@ fn sidebar_recents_groups_times_more_and_keyboard(cx: &mut TestAppContext) {
         .iter()
         .position(|r| r["kind"] == "more" && r["status"] == "Today")
         .expect("Today group must disclose its remaining rows");
-    assert_eq!(rows[more]["title"], "Show 5 more");
+    // The Working drawer (on by default) holds Today's one running thread,
+    // so the group discloses one fewer.
+    let groups = shell.read_with(&visual, |s, cx| {
+        s.surfaces.sidebar.view.as_ref().unwrap().read(cx).drawer_groups()
+    });
+    assert_eq!(groups.iter().filter(|g| **g == "Today").count(), 1, "{groups:?}");
+    assert_eq!(rows[more]["title"], "Show 4 more");
     click(
         &mut visual,
         Box::leak(format!("thread-row-{more}").into_boxed_str()),

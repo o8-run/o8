@@ -262,6 +262,25 @@ describe.sequential('local device helper route and processes', () => {
     expect((await route.POST(request({ action: 'start' }))).status).toBe(409);
   });
 
+  it('frames the viewer with the page origin Next forwards, never one the caller supplies', async () => {
+    // A caller never sets the page origin itself; only the native forwarder does.
+    expect((await route.POST(request({ action: 'start' }, { 'x-o8-page-origin': 'http://127.0.0.1:9' }))).status).toBe(400);
+    expect((await route.GET(request(undefined, { 'x-o8-page-origin': 'http://127.0.0.1:9' }))).status).toBe(400);
+    // The WS listener receives Next's forward on its own port, without the browser's Origin.
+    const handlers = await import('@/lib/devices/route');
+    const forwarded = (page: string) => new Request('http://127.0.0.1:3002/api/panel/devices', {
+      method: 'POST', headers: { authorization: `Bearer ${process.env.WS_TOKEN}`, host: '127.0.0.1:3002', 'x-o8-client-addr': '127.0.0.1', 'x-o8-page-origin': page },
+      body: JSON.stringify({ action: 'start' }),
+    });
+    for (const page of ['https://untrusted.example', 'http://evil.example:3001', 'http://127.0.0.1:3001/dashboard', 'null']) {
+      expect((await handlers.POST(forwarded(page))).status).toBe(403);
+    }
+    expect((await handlers.POST(forwarded('http://127.0.0.1:3001'))).status).toBe(202);
+    await waitState('running');
+    const args = records().filter((record) => record.kind === 'start').at(-1)?.args as string[];
+    expect(args[args.indexOf('--frame-ancestor') + 1]).toBe('http://127.0.0.1:3001');
+  });
+
   it('keeps ownership while refreshing singleton methods after a module reload', async () => {
     await route.POST(request({ action: 'start' }));
     const before = await waitState('running');

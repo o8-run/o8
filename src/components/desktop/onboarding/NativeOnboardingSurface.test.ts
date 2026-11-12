@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Onboarding } from '../Onboarding';
 import { ThemeProvider, useTheme } from '@/lib/theme/context';
-import { FirstRunPreview, createOnboardingPreviewRequest } from '@/app/preview/first-run/FirstRunPreview';
+import { FirstRunPreview, createOnboardingPreviewRequest } from '../../../../tests/fixtures/onboarding/FirstRunPreview';
 import { PickerMenu } from '@/components/desktop/settings/dispatch-shared';
 import { OnboardingSurface } from './OnboardingSurface';
 

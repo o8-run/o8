@@ -125,9 +125,13 @@ pub struct State {
     /// Detailed three-line chat rows (opt-in; compact when absent).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sidebar_detailed_rows: bool,
-    /// Running threads fold into a collapsible Working section.
+    /// Running threads stay in their groups instead of the Working drawer at
+    /// the foot of the sidebar (on unless turned off).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub sidebar_working_section: bool,
+    pub sidebar_working_off: bool,
+    /// The Working drawer is open (closed to one row when absent).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sidebar_working_open: bool,
     /// The Inbox keeps running threads in Active instead of folding them into
     /// its Working shelf (on unless turned off, as in T3 Code).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -207,7 +211,8 @@ impl Default for State {
             terminal_views: BTreeSet::new(),
             terminal_launched: BTreeMap::new(),
             sidebar_detailed_rows: false,
-            sidebar_working_section: false,
+            sidebar_working_off: false,
+            sidebar_working_open: false,
             sidebar_inbox_working_off: false,
             notes: Default::default(),
             keybindings: BTreeMap::new(),

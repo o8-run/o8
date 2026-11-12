@@ -41,7 +41,7 @@ const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { getSqlite } = await import('@/lib/db');
 const {
   getResourceLeaseStore,
-} = await import('@/lib/leases/resource-lease-service');
+} = await import('@/lib/leases/resource-lease-default-store');
 const { observeResourceLeaseParticipant } = await import('@/lib/leases/resource-lease-participant');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const lanesRoute = await import('@/app/api/lanes/route');

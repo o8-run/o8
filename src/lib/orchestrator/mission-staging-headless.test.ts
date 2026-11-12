@@ -318,3 +318,38 @@ describe('staged mission creation', () => {
     expect(launches.calls).toEqual([]);
   });
 });
+
+it.each([['operator', false], ['operator', true], ['worker', false]] as const)('real dispatch route forwards %s force=%s through the MCP client on a busy machine', async (role, force) => {
+  const repoPath = createTempRepo();
+  const lanes = await import('@/lib/lane/registry');
+  for (const lane of lanes.listActiveLanes()) lanes.archiveLane(lane.id);
+  stubMissionApiFetch();
+  const { handleCreateMission, handleDispatchMission } = await import('@/lib/mcp/operator-handlers/mission');
+  const staged = parseResult<{ missionId: string }>(await handleCreateMission({ repoPath, issues_inline: [{ title: 'forced route fixture' }], dispatch: false, runtime: 'codex' }));
+  const machine = await import('./machine-load');
+  const original = machine.machineLoadBlocker;
+  vi.spyOn(machine, 'machineLoadBlocker').mockImplementation(options => original({ ...options, runningWorkers: 1, readLoad: () => [99999, 99999, 99999] }));
+  const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+  const { getOrCreateLocalWorkerToken } = await import('@/lib/auth/worker-token');
+  const token = role === 'worker' ? getOrCreateLocalWorkerToken() : getOrCreateWsToken();
+  const { NextRequest } = await import('next/server');
+  const { POST } = await import('@/app/api/orchestrator/dispatch/route');
+  vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (!String(url).includes('/api/orchestrator/dispatch')) return new Response('{}');
+    return POST(new NextRequest(String(url), { method: 'POST', headers: { host: 'localhost', authorization: `Bearer ${token}` }, body: String(init?.body) }));
+  }));
+  const result = parseResult<{ dispatched: number; status: string }>(await handleDispatchMission({ missionId: staged.missionId, force }));
+  expect(result.dispatched).toBe(force ? 1 : 0);
+  expect(result.status).toBe(force ? 'dispatched' : 'queued');
+  expect(launches.calls).toHaveLength(force ? 1 : 0);
+}, 20_000);
+
+it('real dispatch route refuses worker force with a reason before dispatch', async () => {
+  const { NextRequest } = await import('next/server');
+  const { POST } = await import('@/app/api/orchestrator/dispatch/route');
+  const { getOrCreateLocalWorkerToken } = await import('@/lib/auth/worker-token');
+  const response = await POST(new NextRequest('http://localhost/api/orchestrator/dispatch', { method: 'POST', headers: { host: 'localhost', authorization: `Bearer ${getOrCreateLocalWorkerToken()}` }, body: JSON.stringify({ force: true }) }));
+  expect(response.status).toBe(403);
+  expect((await response.json()).error.message).toMatch(/operator.only/i);
+  expect(launches.calls).toHaveLength(0);
+});
