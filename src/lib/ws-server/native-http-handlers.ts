@@ -182,6 +182,8 @@ export const api_panel_resource_usage = { GET: api_panel_resource_usage_GET };
 export const api_panel_serve_image = { GET: api_panel_serve_image_GET };
 export const api_visualizations_id = { GET: api_visualizations_id_GET };
 export const api_visualizations = { GET: api_visualizations_GET };
+export * as api_visualizations_publish from '@/lib/visualizations/publish-route';
+export * as api_visualizations_preview from '@/lib/visualizations/preview-route';
 export const api_panel_file_asset = { GET: api_panel_file_asset_GET };
 export const api_v2_files = { GET: api_v2_files_GET };
 export const api_v2_files_quick_docs = { GET: api_v2_files_quick_docs_GET };
@@ -223,6 +225,3 @@ export const api_panel_browse_folder = { POST: api_panel_browse_folder_POST };
 export const api_repo_spec_asset = { POST: api_repo_spec_asset_POST };
 export const api_worktrees_retention_usage = { GET: api_worktrees_retention_usage_GET };
 export const api_review_commit = { POST: api_review_commit_POST };
-
-export * as api_visualizations_publish from '@/lib/visualizations/publish-route';
-export * as api_visualizations_preview from '@/lib/visualizations/preview-route';
