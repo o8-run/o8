@@ -40,7 +40,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
 
 
-  '/api/devices/agent': security('worker grant: packet-bound device authority'),
 
 
   '/api/orchestrator/create-mission': seek('operator mission mutation'),
