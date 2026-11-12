@@ -567,7 +567,7 @@ function isReturnedMissionState(value: unknown): value is OrchestratorMissionSta
  * Use this for any operation that needs exclusive access to orchestrator-state.json.
  *
  * The callback either mutates the state it is given, or returns a new mission
- * state (version 2 with a packets array). A returned mission state is the basis
+ * state (version 2, a packets array and a prompt string). A returned mission state is the basis
  * for reconcile + write instead of the pre-callback snapshot, so callers that
  * build a new state (e.g. a dispatch tick or an approved plan) persist it
  * without a second write that would clobber it. Any other return value is
