@@ -1,3 +1,12 @@
+#[cfg(test)]
+#[path = "header/layout_review_tests.rs"]
+mod layout_review_tests;
+#[cfg(test)]
+#[path = "header/review_tests.rs"]
+mod review_tests;
+#[cfg(test)]
+#[path = "header/thread_tab_tests.rs"]
+mod thread_tab_tests;
 use super::*;
 #[cfg(test)]
 #[path = "header/open_in_editor_tests.rs"]
@@ -29,9 +38,10 @@ fn render(
 ) -> Option<AnyElement> {
     // The desktop header, measured from WorkspaceHeaderStrip, LeftHeaderStrip
     // and PanelHeaderStrip. The sidebar toggle stays at x=78 (rail 52 + 26)
-    // whether the sidebar is open or not, with back and forward beside it, as
-    // T3 Code's sidebar header holds its history arrows (Q 2026-11-09). The
-    // tabs start the workspace header; search is the sidebar's own field.
+    // whether the sidebar is open or not, with the Ring beside it; Back and
+    // Forward end on the sidebar column's right padding when it is open and
+    // follow the Ring when it is folded. The tabs start the workspace header;
+    // search is the sidebar's own field.
     super::right_panel::sync(s, window, cx);
     // Settings is its own page with its own header, as in classic.
     if s.surfaces.settings.view.is_some() {
@@ -98,12 +108,14 @@ fn render(
         .pr(px(8.))
         .when(hidden && !moving, |row| row.child(nav(true, None, cx)))
         .child(tabs(s, cx))
+        .children(s.active().as_ref().and_then(|tab| thread_worktree_badge(s, tab)))
         .child(
             div()
                 .flex()
                 .flex_shrink_0()
                 .items_center()
                 .gap(px(4.))
+                .debug_selector(|| "thread-header-controls".into())
                 .mt(px(1.3))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {
@@ -152,8 +164,9 @@ fn render(
                 )
             })
             // In flight the column's slot travels with it, so the tabs move with
-            // the workspace, while toggle, Back and Forward hold their place. At
-            // either end every button sits where the resting header puts it.
+            // the workspace; toggle and Ring hold their place while Back and
+            // Forward slide with the column's edge. At either end every button
+            // sits where the resting header puts it.
             .when(moving, |row| {
                 let edge = super::super::sidebar::width(s) * open;
                 let top = (crate::theme::GEOMETRY.header - 26.) / 2.;
@@ -200,10 +213,10 @@ fn edge_mark() -> gpui::Div {
 /// The toggle's and an arrow's widths: 7px either side of a 14px and a 15px glyph.
 const TOGGLE_W: f32 = 28.;
 const ARROW_W: f32 = 29.;
-/// Past the traffic lights, so the toggle never crowds them. The lights keep
-/// their size when the window zooms out, so the inset keeps its screen width.
-fn toggle_inset(window: &Window) -> f32 {
-    crate::zoom::chrome_clearance(26. + super::super::rail::LIGHTS, window)
+/// Past the window buttons, so the toggle never crowds them. The app draws
+/// them in window units (window_lights), so the inset zooms with them.
+fn toggle_inset(_: &Window) -> f32 {
+    26. + super::super::rail::LIGHTS
 }
 /// The travelling slot's floor: the folded strip's inset, toggle, Ring, Back
 /// and Forward with their gaps and the 4px before the tabs, less the strip's
@@ -218,8 +231,9 @@ const ARROWS_GAP: f32 = 12.;
 
 /// The gap between the Ring and Back. With the sidebar's `column` width,
 /// Forward's right edge meets the column's right padding, the same edge the
-/// sidebar's own controls end on below; a column too narrow for that, or no
-/// column, keeps the 12-unit gap after the Ring.
+/// sidebar's own controls end on below; with no column the 12-unit gap
+/// follows the Ring. A resting column (250 units or more) always has room;
+/// the 12-unit floor applies to the travelling edge while it opens or closes.
 fn arrows_lead(column: Option<f32>, inset: f32) -> f32 {
     let cluster = TOGGLE_W + 4. + RING_W;
     let arrows = ARROW_W + 4. + ARROW_W;
@@ -359,6 +373,7 @@ pub(crate) fn toggle_sidebar(s: &mut Shell, window: &mut Window, cx: &mut Contex
 struct Visits {
     scope: Option<String>,
     tabs: Vec<Tab>,
+    recent: std::collections::BTreeMap<Option<String>, Vec<Tab>>,
     index: usize,
 }
 
@@ -367,12 +382,17 @@ fn record_visit(s: &mut Shell) {
     let active = s.active();
     let visits = s.features.get::<Visits>();
     if visits.scope != scope {
-        *visits = Visits {
-            scope,
-            ..Default::default()
-        };
+        visits.scope = scope.clone();
+        visits.tabs.clear();
+        visits.index = 0;
     }
     let Some(tab) = active else { return };
+    let recent = visits.recent.entry(scope).or_default();
+    recent.retain(|visited| visited != &tab);
+    recent.push(tab.clone());
+    if recent.len() > 100 {
+        recent.remove(0);
+    }
     if visits.tabs.get(visits.index) == Some(&tab) {
         return;
     }
@@ -432,6 +452,7 @@ fn select_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context
         .get_mut(s.state.selected.as_deref().unwrap_or(""))
         .unwrap()
         .active = index;
+    crate::shell::sidebar::navigation(s, cx);
     s.ensure(window, cx);
     s.restore_focus(window, cx);
     s.persist();
@@ -458,10 +479,22 @@ pub(super) fn glyph(tab: &Tab) -> &'static str {
 }
 
 /// Closes one tab, as Cmd+W does for the active one.
-pub(super) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
+pub(crate) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
     let Some(tab) = s.current().and_then(|w| w.tabs.get(index).cloned()) else {
         return;
     };
+    record_visit(s);
+    let previous = s.features.read::<Visits>().and_then(|visits| {
+        visits.recent.get(&s.state.selected).and_then(|recent| {
+            recent
+                .iter()
+                .rev()
+                .find(|visited| {
+                    *visited != &tab && s.current().is_some_and(|w| w.tabs.contains(visited))
+                })
+                .cloned()
+        })
+    });
     s.content.remove(&s.key(&tab));
     s.state.tab_labels.remove(&s.key(&tab));
     let saved = s
@@ -470,11 +503,16 @@ pub(super) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
         .get_mut(s.state.selected.as_deref().unwrap_or(""))
         .unwrap();
     (tab.registration().remove)(saved, &tab);
+    let was_active = index == saved.active;
     saved.tabs.remove(index);
     if index < saved.active {
         saved.active -= 1;
     }
     saved.active = saved.active.min(saved.tabs.len().saturating_sub(1));
+    if was_active && let Some(previous) = previous {
+        saved.active = saved.tabs.iter().position(|tab| tab == &previous).unwrap_or(saved.active);
+    }
+    crate::shell::sidebar::navigation(s, cx);
     s.ensure(window, cx);
     s.restore_focus(window, cx);
     s.persist();
@@ -512,7 +550,13 @@ pub(super) fn tab_label(s: &Shell, t: &Tab) -> String {
             s.sessions
                 .iter()
                 .find(|s| &s.id == selected)
+                .filter(|session| !session.title.trim().is_empty())
                 .map(|s| s.title.clone())
+                .or_else(|| {
+                    s.state.thread_titles.get(&format!(
+                        "{}|{}", s.state.selected.as_deref().unwrap_or(""), selected
+                    )).cloned()
+                })
                 .unwrap_or_else(|| "Chat".into())
         }
         _ => t.label().into(),
@@ -661,6 +705,11 @@ fn strip(
     cx: &mut Context<Shell>,
 ) -> gpui::Stateful<gpui::Div> {
     let active = s.active();
+    let tabs = s.current().map(|w| w.tabs.as_slice()).unwrap_or(&[]);
+    let chats = tabs.iter().filter(|tab| matches!(tab, Tab::Session(_))).count();
+    let fixed = tabs.iter().filter(|tab| !matches!(tab, Tab::Session(_)))
+        .map(|tab| (tab_label(s, tab).chars().count() as f32 * 7.).min(180.) + 40.).sum::<f32>();
+    let chat_width = ((scroll.viewport_width() - fixed - 24. - tabs.len().saturating_sub(1) as f32 * 2.) / chats.max(1) as f32 - 40.).clamp(120., 180.);
     let geometry = crate::theme::GEOMETRY;
     let motion = s.features.read::<pills::Pills>();
     div()
@@ -682,7 +731,7 @@ fn strip(
         ))
         .on_drop(
             cx.listener(|this, drag: &super::header_tabs::Dragged, window, cx| {
-                super::header_tabs::drop(this, drag.index, window, cx);
+                super::header_tabs::drop(this, drag, window, cx);
             }),
         )
         .children({
@@ -701,9 +750,10 @@ fn strip(
                     let group = gpui::SharedString::from(format!("surface-tab-{i}"));
                     let label = tab_label(s, &t);
                     let editing = super::header_tabs::editing(s, i);
-                    let insertion = super::header_tabs::insertion(s).filter(|(at, _)| *at == i);
+                    let insertion = super::header_tabs::insertion(s).filter(|(at, _)| at == &t);
                     let dragged = super::header_tabs::Dragged {
-                        index: i,
+                        tab: t.clone(),
+                        scope: s.state.selected.clone(),
                         label: label.clone().into(),
                         glyph: glyph(&t),
                     };
@@ -799,6 +849,10 @@ fn strip(
                                 pill.child(
                                     div()
                                         .max_w(px(180.))
+                                        .when(matches!(&t, Tab::Session(_)), |title| {
+                                            title.w(px(chat_width)).min_w(px(120.)).max_w(px(180.))
+                                        })
+                                        .debug_selector(move || format!("surface-tab-title-{i}"))
                                         .overflow_hidden()
                                         .whitespace_nowrap()
                                         .text_ellipsis()
@@ -864,11 +918,7 @@ fn strip(
                         .items_center()
                         .gap(px(2.))
                         .child(pill)
-                        .when(selected, |group| {
-                            group
-                                .child(scroll.probe())
-                                .children(thread_worktree_badge(s, &t))
-                        });
+                        .when(selected, |group| group.child(scroll.probe()));
                     match motion {
                         Some(m) => m.wrap(&key, pill).into_any_element(),
                         None => pill.into_any_element(),

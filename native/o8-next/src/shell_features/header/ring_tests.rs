@@ -36,12 +36,8 @@ fn header_ring_sits_between_the_toggle_and_back_at_every_zoom(cx: &mut TestAppCo
         for zoom in [0.7, 1.0, 1.4, 2.0] {
             visual.update(|window, cx| window.set_zoom(zoom, cx));
             draw(&mut visual);
-            let (inset, lights) = visual.update(|window, _| {
-                (
-                    toggle_inset(window),
-                    crate::zoom::chrome_clearance(super::super::super::rail::LIGHTS, window),
-                )
-            });
+            let (inset, lights) = visual
+                .update(|window, _| (toggle_inset(window), super::super::super::rail::LIGHTS));
             let mut bounds = |id: &'static str| {
                 visual
                     .debug_bounds(id)
@@ -68,24 +64,18 @@ fn header_ring_sits_between_the_toggle_and_back_at_every_zoom(cx: &mut TestAppCo
             assert!(back.left() >= ring.right() + px(ARROWS_GAP - 0.01), "{at}");
             match width {
                 Some(width) => {
-                    let room = width - pad - (ARROW_W + 4. + ARROW_W);
-                    let aligned = room >= f32::from(ring.right()) + ARROWS_GAP;
-                    if aligned {
-                        // Forward ends on the column's head padding...
-                        near(forward.right(), width - pad, &at);
-                        // ...over the right edge of the sidebar's last head control.
-                        let last = ["sidebar-new-thread", "sidebar-project-add"]
-                            .into_iter()
-                            .filter_map(|id| visual.debug_bounds(id))
-                            .map(|b| f32::from(b.right()))
-                            .fold(f32::MIN, f32::max);
-                        assert!(last > 0., "{at}: no head control in the sidebar");
-                        near(forward.right(), last, &at);
-                    } else {
-                        // Too narrow to align: the folded gap, still inside the column.
-                        near(back.left(), f32::from(ring.right()) + ARROWS_GAP, &at);
-                        assert!(forward.right() <= px(width - pad + 0.01), "{at}");
-                    }
+                    // Even the narrowest column leaves room to align (the
+                    // 12-unit floor only applies in flight; see arrows_lead).
+                    // Forward ends on the column's head padding...
+                    near(forward.right(), width - pad, &at);
+                    // ...over the right edge of the sidebar's last head control.
+                    let last = ["sidebar-new-thread", "sidebar-project-add"]
+                        .into_iter()
+                        .filter_map(|id| visual.debug_bounds(id))
+                        .map(|b| f32::from(b.right()))
+                        .fold(f32::MIN, f32::max);
+                    assert!(last > 0., "{at}: no head control in the sidebar");
+                    near(forward.right(), last, &at);
                 }
                 None => near(back.left(), f32::from(ring.right()) + ARROWS_GAP, &at),
             }

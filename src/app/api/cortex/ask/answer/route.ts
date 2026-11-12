@@ -199,10 +199,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: 'Unable to answer cortex question.',
-        ...(managedUnavailable ? { code: err.code } : {}),
+        error: managedUnavailable ? err.message : 'Unable to answer cortex question.',
+        ...(managedUnavailable ? { code: err.code, message: err.message, citations: err.citations, sourcesConsidered: err.sourcesConsidered } : {}),
       },
-      { status: 500, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },
+      { status: managedUnavailable ? 503 : 500, headers: { 'Cache-Control': 'no-store', 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },
     );
   }
 }
