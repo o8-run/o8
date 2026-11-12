@@ -38,7 +38,8 @@ pub(crate) struct Navigator {
     selected: Option<String>,
     aligned: bool,
     pending: bool,
-    dismissed: bool,
+    /// The rail's own preview follows keyboard selection, never focus alone.
+    keyed: bool,
     range: Option<usize>,
     current: Option<String>,
     preview: Option<CachedPreview>,
@@ -55,7 +56,7 @@ impl Default for Navigator {
             selected: None,
             aligned: false,
             pending: false,
-            dismissed: false,
+            keyed: false,
             range: None,
             current: None,
             preview: None,
@@ -328,8 +329,8 @@ pub(crate) fn overlay(
                     }
                     s.current = Some(prompts[current].id.clone());
                 }
-                if !focus.is_focused(window) && s.hovered.is_none() {
-                    s.dismissed = false;
+                if !focus.is_focused(window) {
+                    s.keyed = false;
                 }
                 let start = s
                     .range
@@ -339,7 +340,7 @@ pub(crate) fn overlay(
                     .hovered
                     .clone()
                     .or_else(|| {
-                        (focus.is_focused(window) && !s.dismissed).then(|| {
+                        (focus.is_focused(window) && s.keyed).then(|| {
                             s.selected
                                 .clone()
                                 .unwrap_or_else(|| prompts[current].id.clone())
@@ -389,7 +390,7 @@ pub(crate) fn overlay(
                     {
                         let mut s = wheel_state.borrow_mut();
                         s.hovered = None;
-                        s.dismissed = true;
+                        s.keyed = false;
                         s.range = None;
                     }
                     wheel(event, window, cx);
@@ -406,14 +407,16 @@ pub(crate) fn overlay(
                     if s.hovered != next {
                         if next.is_some() {
                             s.selected = next.clone();
-                            s.dismissed = false;
                         }
                         s.hovered = next;
+                        s.keyed = false;
                         window.refresh();
                     }
                 })
                 .on_hover(move |hovering, window, _| {
-                    if !*hovering && hover_state.borrow_mut().hovered.take().is_some() {
+                    let mut s = hover_state.borrow_mut();
+                    if !*hovering && (s.hovered.take().is_some() || s.keyed) {
+                        s.keyed = false;
                         window.refresh();
                     }
                 })
@@ -435,7 +438,7 @@ pub(crate) fn overlay(
                         let mut s = click_state.borrow_mut();
                         s.selected = Some(click_prompts[index].id.clone());
                         s.hovered = None;
-                        s.dismissed = true;
+                        s.keyed = false;
                     }
                     click_focus.focus(window);
                     jump(
@@ -460,16 +463,16 @@ pub(crate) fn overlay(
                         "down" => (index + 1).min(key_prompts.len() - 1),
                         "home" => 0,
                         "end" => key_prompts.len() - 1,
-                        "escape" if !s.dismissed || s.hovered.is_some() => {
+                        "escape" if s.keyed || s.hovered.is_some() => {
                             s.hovered = None;
-                            s.dismissed = true;
+                            s.keyed = false;
                             window.refresh();
                             cx.stop_propagation();
                             return;
                         }
                         "enter" | "space" => {
                             s.hovered = None;
-                            s.dismissed = true;
+                            s.keyed = false;
                             drop(s);
                             jump(
                                 &key_state,
@@ -491,7 +494,7 @@ pub(crate) fn overlay(
                     }
                     s.selected = Some(key_prompts[next].id.clone());
                     s.hovered = None;
-                    s.dismissed = false;
+                    s.keyed = true;
                     window.refresh();
                     cx.stop_propagation();
                 });
@@ -581,7 +584,7 @@ pub(crate) fn overlay(
                                 s.range = Some(to);
                                 s.selected = Some(page_selected.clone());
                                 s.hovered = None;
-                                s.dismissed = true;
+                                s.keyed = false;
                                 drop(s);
                                 page_focus.focus(window);
                                 window.refresh();
@@ -613,7 +616,7 @@ pub(crate) fn overlay(
                         {
                             let mut s = card_state.borrow_mut();
                             s.hovered = None;
-                            s.dismissed = true;
+                            s.keyed = false;
                             s.range = None;
                         }
                         card_wheel(event, window, cx);

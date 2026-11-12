@@ -328,6 +328,43 @@ fn clicking_and_escape_dismiss_the_preview(cx: &mut TestAppContext) {
     paint(cx);
     assert!(cx.debug_bounds("prompt-nav-preview").is_none());
 }
+#[gpui::test]
+fn focus_alone_never_holds_the_preview_open(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(|_, _| Reading(pane("focus", 3), None));
+    paint(cx);
+    cx.update(|window, cx| {
+        assert!(view.read(cx).0.navigator.borrow().focus(window));
+    });
+    paint(cx);
+    assert!(
+        cx.debug_bounds("prompt-nav-preview").is_none(),
+        "tabbing to the rail does not cover the transcript"
+    );
+    let tick = cx.debug_bounds("prompt-nav-tick-focus-p1").unwrap();
+    let away = point(px(300.), px(350.));
+    cx.simulate_click(tick.center(), Modifiers::default());
+    let other = cx.debug_bounds("prompt-nav-tick-focus-p2").unwrap();
+    cx.simulate_mouse_move(other.center(), None, Modifiers::default());
+    paint(cx);
+    assert!(cx.debug_bounds("prompt-nav-preview").is_some());
+    cx.simulate_mouse_move(away, None, Modifiers::default());
+    paint(cx);
+    assert!(
+        cx.update(|window, cx| view.read(cx).0.navigator.borrow().is_focused(window)),
+        "the rail keeps focus"
+    );
+    assert!(
+        cx.debug_bounds("prompt-nav-preview").is_none(),
+        "leaving the rail closes the preview while it keeps focus"
+    );
+    cx.simulate_keystrokes("up");
+    paint(cx);
+    assert!(cx.debug_bounds("prompt-nav-preview").is_some());
+    cx.simulate_mouse_move(other.center(), None, Modifiers::default());
+    cx.simulate_mouse_move(away, None, Modifiers::default());
+    paint(cx);
+    assert!(cx.debug_bounds("prompt-nav-preview").is_none());
+}
 
 #[gpui::test]
 fn a_dense_rail_pages_bounded_ticks_and_reaches_every_prompt(cx: &mut TestAppContext) {
