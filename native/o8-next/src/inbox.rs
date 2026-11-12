@@ -508,9 +508,10 @@ impl Inbox {
                 .collect(),
             vec![],
         ];
-        self.selected = self
-            .selected
-            .min(self.cards[self.lane].len().saturating_sub(1));
+        if self.lane != approval_audit::LANE {
+            self.selected = self.selected
+                .min(self.cards[self.lane].len().saturating_sub(1));
+        }
         self.reply_focus
             .retain(|id, _| self.cards.iter().flatten().any(|card| &card.id == id));
         for card in self

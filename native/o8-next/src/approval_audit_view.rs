@@ -31,30 +31,31 @@ impl Inbox {
         control: usize,
         cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
+        let enabled = control < 4 || !self.audit.loading;
         div()
             .id(id)
             .debug_selector(move || id.into())
-            .track_focus(&self.audit.focus[control])
-            .tab_index(control as isize)
             .p(px(6.))
             .rounded(px(7.))
             .text_size(px(11.))
-            .text_color(if control >= 4 && self.audit.loading {
-                palette().text_muted
-            } else {
-                palette().text
+            .max_w(px(180.))
+            .truncate()
+            .text_color(if enabled { palette().text } else { palette().text_muted })
+            .when(enabled, |v| {
+                v.track_focus(&self.audit.focus[control])
+                    .tab_index(control as isize)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(palette().hover))
+                    .active(|s| s.bg(palette().selection))
+                    .focus(|s| s.bg(palette().selection))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.audit.focus[control].focus(window);
+                        this.audit_control(control, cx);
+                    }))
             })
-            .when(control < 4 || !self.audit.loading, |v| {
-                v.cursor_pointer().hover(|s| s.bg(palette().hover))
-            })
-            .active(|s| s.bg(palette().selection))
-            .focus(|s| s.bg(palette().selection))
             .child(title)
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.audit.focus[control].focus(window);
-                this.audit_control(control, cx);
-            }))
     }
+
     pub(in crate::inbox) fn audit_controls(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
         let labels = [
             self.audit.session.clone().unwrap_or("All sessions".into()),
@@ -63,6 +64,8 @@ impl Inbox {
         ];
         div()
             .max_w(px(620.))
+            .min_w_0()
+            .flex_1()
             .flex()
             .flex_col()
             .gap(px(4.))
@@ -83,7 +86,9 @@ impl Inbox {
                             cx,
                         )
                     }))
-                    .child(self.audit_button("approval-audit-clear", "Clear filters".into(), 3, cx))
+                    .when(self.audit.has_filters(), |v| v.child(
+                        self.audit_button("approval-audit-clear", "Clear filters".into(), 3, cx)
+                    ))
                     .child(
                         self.audit_button(
                             "approval-audit-refresh",
@@ -127,6 +132,7 @@ impl Inbox {
                                     .child(title)
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.audit.choose(filter, index);
+                                        this.selected = 0;
                                         cx.notify();
                                     }))
                             },
@@ -160,15 +166,11 @@ impl Inbox {
             .overflow_y_scroll()
             .track_scroll(&self.audit.scroll)
             .p(px(12.))
-            .when(self.audit.loading, |v| {
+            .when(self.audit.loading && !self.audit.loaded, |v| {
                 v.child(
                     div()
                         .text_color(palette().text_muted)
-                        .child(if self.audit.loaded {
-                            "Refreshing approval audit log…"
-                        } else {
-                            "Loading approval audit log…"
-                        }),
+                        .child("Loading approval audit log…"),
                 )
             })
             .when_some(self.audit.error.clone(), |v, error| {
@@ -178,12 +180,14 @@ impl Inbox {
                         .flex()
                         .items_center()
                         .gap(px(8.))
-                        .child(div().text_color(palette().warning).child(error))
+                        .child(div().text_color(palette().warning)
+                            .child(format!("Unable to refresh the audit log. {error}")))
                         .child(self.audit_button("approval-audit-retry", "Retry".into(), 5, cx)),
                 )
             })
             .when(
-                self.audit.loaded && !self.audit.loading && rows.is_empty(),
+                self.audit.loaded && !self.audit.loading
+                    && self.audit.error.is_none() && rows.is_empty(),
                 |v| {
                     v.child(
                         div()
@@ -210,7 +214,7 @@ fn audit_row(row: Row, index: usize) -> impl IntoElement {
     let review = text(event, "type") == "orchestrator_review";
     let verdict = event["approved"]
         .as_bool()
-        .map(|approved| if approved { "Approved" } else { "Rejected" });
+        .map(|approved| if approved { "Approved" } else { "Changes Requested" });
     div()
         .id(("approval-audit-row", index))
         .flex()
@@ -246,6 +250,9 @@ fn audit_row(row: Row, index: usize) -> impl IntoElement {
         })
         .when(!text(event, "diffSha").is_empty(), |v| {
             v.child(div().child(format!("Diff SHA: {}", text(event, "diffSha"))))
+        })
+        .when(!text(event, "reviewedHeadSha").is_empty(), |v| {
+            v.child(div().child(format!("Reviewed HEAD: {}", text(event, "reviewedHeadSha"))))
         })
         .when(!text(event, "note").is_empty(), |v| {
             v.child(

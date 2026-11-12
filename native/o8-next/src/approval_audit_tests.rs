@@ -12,7 +12,7 @@ fn records() -> Vec<Value> {
         json!({"id":"one","title":"Change","sessionKey":"z","risk":"high","updatedAt":1000,
         "audit":[{"type":"created","actor":"system"},
         {"type":"orchestrator_review","timestamp":3000,"actor":"orchestrator","approved":false,
-        "reviewer":"review","diffSha":"abc","note":"Evidence",
+        "reviewer":"review","diffSha":"abc","reviewedHeadSha":"c".repeat(40),"note":"Evidence",
         "findings":[{"file":"file.rs","line":12,"severity":"bug","description":"Broken", "resolution":"deferred","fixSuggestion":"Repair"}]}]}),
         json!({"id":"two","sessionKey":"a","risk":"low","updatedAt":3000,"audit":[{"type":"updated"}]}),
     ]
@@ -31,6 +31,7 @@ fn approval_audit_flattens_fallback_stable_sort_and_structured_findings() {
     assert_eq!(event["reviewer"], "review");
     assert_eq!(event["approved"], false);
     assert_eq!(event["diffSha"], "abc");
+    assert_eq!(event["reviewedHeadSha"], "c".repeat(40));
     assert_eq!(
         event["findings"][0],
         json!({"file":"file.rs","line":12,"severity":"bug","description":"Broken","resolution":"deferred","fixSuggestion":"Repair"})
@@ -131,6 +132,10 @@ fn approval_audit_filters_clear_and_read_only_handlers(cx: &mut TestAppContext) 
     cx.run_until_parked();
     inbox.update(cx, |inbox, cx| inbox.select_lane(LANE, cx));
     cx.run_until_parked();
+    for selector in ["approval-audit-session", "approval-audit-risk", "approval-audit-range",
+        "approval-audit-refresh"] {
+        assert!(cx.debug_bounds(selector).is_some(), "{selector}");
+    }
     inbox.update(cx, |inbox, cx| {
         assert_eq!(inbox.audit.options(0), ["All sessions", "a", "z"]);
         inbox.audit.choose(0, 2);
@@ -139,7 +144,9 @@ fn approval_audit_filters_clear_and_read_only_handlers(cx: &mut TestAppContext) 
         assert_eq!(inbox.audit.visible(3602000.).len(), 1);
         inbox.audit.choose(1, 3);
         assert!(inbox.audit.visible(3602000.).is_empty());
+        inbox.selected = 2;
         inbox.audit_control(3, cx);
+        assert_eq!(inbox.selected, 0);
         assert_eq!(inbox.audit.visible(3602000.).len(), 3);
         let card = Card::approval(&json!({"id":"pending","status":"pending"}));
         assert!(!inbox.can_resolve(&card));
@@ -225,6 +232,20 @@ fn approval_audit_direct_shortcuts_menus_and_navigation_are_safe(cx: &mut TestAp
             inbox.key_down(&down(key), window, cx);
             assert_eq!(inbox.lane, LANE);
         }
+        inbox.audit.loading = true;
+        inbox.audit.focus[2].focus(window);
+        inbox.key_down(&down("tab"), window, cx);
+        assert!(inbox.audit.focus[0].is_focused(window));
+        inbox.audit.loading = false;
+        inbox.audit_control(0, cx);
+        inbox.key_down(&down("down"), window, cx);
+        inbox.key_down(&down("enter"), window, cx);
+        assert_eq!(inbox.audit.session.as_deref(), Some("a"));
+        inbox.audit_control(2, cx);
+        inbox.key_down(&down("down"), window, cx);
+        inbox.key_down(&down("enter"), window, cx);
+        assert_eq!(inbox.audit.range, 1);
+        inbox.audit_control(3, cx);
         inbox.audit_control(1, cx);
         inbox.key_down(&down("down"), window, cx);
         inbox.key_down(&down("enter"), window, cx);
@@ -274,4 +295,41 @@ fn approval_audit_all_time_ranges_include_the_boundary(cx: &mut TestAppContext) 
         inbox.audit.clear();
         assert_eq!(inbox.audit.visible(f64::MAX).len(), 3);
     });
+}
+
+#[gpui::test]
+fn approval_audit_empty_errors_and_long_filter_labels_are_readable(cx: &mut TestAppContext) {
+    let peer = Peer::new();
+    let (inbox, cx) = cx.add_window_view(|_, cx| Inbox::new(peer.client.clone(), String::new(), cx));
+    cx.run_until_parked();
+    inbox.update(cx, |inbox, cx| inbox.select_lane(LANE, cx));
+    cx.run_until_parked();
+    inbox.update(cx, |inbox, cx| {
+        inbox.audit.rows.clear();
+        inbox.audit.session = Some("long-session-".repeat(40));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("approval-audit-empty").is_some());
+    assert!(cx.debug_bounds("approval-audit-clear").is_some());
+    assert!(cx.debug_bounds("approval-audit-session").unwrap().size.width <= gpui::px(180.));
+    inbox.update(cx, |inbox, cx| {
+        inbox.audit.error = Some("HTTP 403".into());
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("approval-audit-error").is_some());
+    assert!(cx.debug_bounds("approval-audit-retry").is_some());
+    assert!(cx.debug_bounds("approval-audit-empty").is_none());
+    inbox.update(cx, |inbox, cx| {
+        inbox.audit.error = None;
+        inbox.audit.rows = flatten(&records());
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("approval-audit-empty").is_some());
+    inbox.update(cx, |inbox, cx| inbox.audit_control(3, cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("approval-audit-empty").is_none());
+    assert!(cx.debug_bounds("approval-audit-clear").is_none());
 }

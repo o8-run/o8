@@ -4,7 +4,9 @@ use gpui::KeyDownEvent;
 
 pub(super) const LANE: usize = 5;
 const RISKS: [&str; 4] = ["All risks", "High", "Medium", "Low"];
-const RANGES: [&str; 5] = ["All time", "1h", "24h", "7d", "30d"];
+const RANGES: [&str; 5] = [
+    "All time", "Last hour", "Last 24 hours", "Last 7 days", "Last 30 days",
+];
 
 #[derive(Clone, Debug)]
 pub(super) struct Row {
@@ -127,6 +129,18 @@ impl Audit {
         self.menu = None;
         self.scroll.scroll_to_item(0);
     }
+    fn has_filters(&self) -> bool {
+        self.session.is_some() || self.risk != 0 || self.range != 0
+    }
+    fn focusable_controls(&self) -> Vec<usize> {
+        let mut controls = vec![0, 1, 2];
+        if self.has_filters() { controls.push(3); }
+        if !self.loading {
+            controls.push(4);
+            if self.error.is_some() { controls.push(5); }
+        }
+        controls
+    }
     fn clear(&mut self) {
         self.session = None;
         self.risk = 0;
@@ -151,8 +165,7 @@ pub(super) fn now() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs_f64()
-        * 1000.
+        .as_millis() as f64
 }
 impl Inbox {
     pub(super) fn view_loading(&self) -> bool {
@@ -174,6 +187,11 @@ impl Inbox {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.audit.accept(result);
+                if this.lane == LANE {
+                    this.selected = this.selected.min(
+                        this.audit.visible(now()).len().saturating_sub(1)
+                    );
+                }
                 cx.notify();
             });
         })
@@ -191,7 +209,10 @@ impl Inbox {
                 self.audit.cursor = 0;
                 self.audit.menu_scroll.scroll_to_item(0);
             }
-            3 => self.audit.clear(),
+            3 => {
+                self.audit.clear();
+                self.selected = 0;
+            }
             _ => self.load_audit(cx),
         }
         cx.notify();
@@ -217,12 +238,16 @@ impl Inbox {
                         self.audit.menu = None;
                     } else {
                         self.audit.choose(filter, self.audit.cursor);
+                        self.selected = 0;
                     }
                 }
                 "tab" => {
                     self.audit.menu = None;
                 }
-                _ => return true,
+                _ => {
+                    cx.stop_propagation();
+                    return true;
+                }
             }
             self.audit.menu_scroll.scroll_to_item(self.audit.cursor);
             if key != "tab" {
@@ -233,8 +258,10 @@ impl Inbox {
         }
         match key {
             "tab" => {
-                let current = self.audit.focus.iter().position(|f| f.is_focused(window));
-                let count = if self.audit.error.is_some() { 6 } else { 5 };
+                let controls = self.audit.focusable_controls();
+                let count = controls.len();
+                let current = controls.iter()
+                    .position(|i| self.audit.focus[*i].is_focused(window));
                 let next = if event.keystroke.modifiers.shift {
                     current
                         .map(|i| (i + count - 1) % count)
@@ -242,7 +269,7 @@ impl Inbox {
                 } else {
                     current.map(|i| (i + 1) % count).unwrap_or(0)
                 };
-                self.audit.focus[next].focus(window);
+                self.audit.focus[controls[next]].focus(window);
             }
             "up" | "down" => {
                 self.selected = if key == "up" {
@@ -253,7 +280,8 @@ impl Inbox {
                 self.audit.scroll.scroll_to_item(self.selected);
             }
             "enter" | "space" => {
-                if let Some(i) = self.audit.focus.iter().position(|f| f.is_focused(window)) {
+                if let Some(i) = self.audit.focusable_controls().into_iter()
+                    .find(|i| self.audit.focus[*i].is_focused(window)) {
                     self.audit_control(i, cx);
                 }
             }

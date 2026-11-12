@@ -958,7 +958,7 @@ it('reads persisted approval audit history and findings over native HTTP with Ne
       description: 'Native audit fixture', summary: 'Audit fixture ' + name, risk: 'high' });
     const completed = create('completed'), pending = create('pending'), foreign = create('foreign', 'other-audit-project');
     recordApprovalAudit(completed.id, 'orchestrator_review', 'orchestrator', 'Fixture findings remain open.', {
-      reviewer: 'fixture-reviewer', approved: false, diffSha: 'b'.repeat(40), findings: [{
+      reviewer: 'fixture-reviewer', approved: false, diffSha: 'b'.repeat(40), reviewedHeadSha: 'c'.repeat(40), findings: [{
         file: 'src/fixture.rs', line: 7, severity: 'bug', description: 'Fixture review finding',
         resolution: 'deferred', fixSuggestion: 'Retain the intended scope.' }] });
     recordApprovalAudit(completed.id, 'rejected', 'desktop', 'Fixture rejection recorded.');
@@ -984,7 +984,7 @@ it('reads persisted approval audit history and findings over native HTTP with Ne
   const completed = approvals.find((row: { id: string }) => row.id === ids.completed);
   expect(completed).toMatchObject({ status: 'rejected', sessionKey: 'fixture-audit-completed', risk: 'high',
     audit: expect.arrayContaining([{ type: 'orchestrator_review', actor: 'orchestrator', timestamp: expect.any(Number),
-      note: 'Fixture findings remain open.', reviewer: 'fixture-reviewer', approved: false, diffSha: 'b'.repeat(40),
+      note: 'Fixture findings remain open.', reviewer: 'fixture-reviewer', approved: false, diffSha: 'b'.repeat(40), reviewedHeadSha: 'c'.repeat(40),
       findings: [{ file: 'src/fixture.rs', line: 7, severity: 'bug', description: 'Fixture review finding',
         resolution: 'deferred', fixSuggestion: 'Retain the intended scope.' }] }]) });
   expect(approvals.some((row: { id: string }) => row.id === ids.pending)).toBe(true);

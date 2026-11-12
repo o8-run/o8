@@ -242,7 +242,10 @@ impl Render for Inbox {
                             .flex_wrap()
                             .items_center()
                             .gap(px(8.))
-                            .child(div().flex_1().text_size(px(15.)).child("Inbox"))
+                            .child(div()
+                                .when(self.lane != approval_audit::LANE, |v| v.flex_1())
+                                .when(self.lane == approval_audit::LANE, |v| v.flex_shrink_0())
+                                .text_size(px(15.)).child("Inbox"))
                             .when(self.lane == approval_audit::LANE, |v| v.child(self.audit_controls(cx)))
                             .when(self.lane != approval_audit::LANE, |v| v.child(
                                 div()
