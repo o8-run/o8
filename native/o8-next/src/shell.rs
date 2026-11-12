@@ -82,7 +82,12 @@ pub struct Shell {
     client: Client,
     file: PathBuf,
     state: State,
+    #[cfg(test)]
+    review_persist_calls: usize,
+    #[cfg(test)]
+    review_title_visits: usize,
     sessions: Vec<Session>,
+    session_titles: std::collections::BTreeMap<String, String>,
     workspaces: Vec<String>,
     /// Tunnels to saved machines, shared with the sidebar.
     links: crate::shell::settings::machine_links::Links,
@@ -129,7 +134,12 @@ impl Shell {
             client,
             file,
             state,
+            #[cfg(test)]
+            review_persist_calls: 0,
+            #[cfg(test)]
+            review_title_visits: 0,
             sessions: vec![],
+            session_titles: Default::default(),
             workspaces: vec![],
             links: Default::default(),
             content: HashMap::new(),
@@ -153,6 +163,22 @@ impl Shell {
         shell
     }
     fn persist(&mut self) {
+        #[cfg(test)] { self.review_persist_calls += 1; }
+        let open = self.state.workspaces.iter().flat_map(|(scope, saved)| {
+            saved.tabs.iter().filter_map(move |tab| match tab {
+                Tab::Session(id) => Some(format!(
+                    "{scope}|{}", saved.selections.get(id).unwrap_or(id)
+                )),
+                _ => None,
+            })
+        }).collect::<BTreeSet<_>>();
+        self.state.thread_titles.retain(|key, _| open.contains(key));
+        for key in &open {
+            #[cfg(test)] { self.review_title_visits += 1; }
+            if let Some(title) = self.session_titles.get(key) {
+                self.state.thread_titles.insert(key.clone(), title.chars().take(256).collect());
+            }
+        }
         if let Some(local) = self
             .state
             .selected
@@ -368,6 +394,7 @@ impl Shell {
             (registration.after_tab)(self);
         }
         self.palette = false;
+        sidebar::navigation(self, cx);
         self.ensure(window, cx);
         self.restore_focus(window, cx);
         self.persist();
@@ -498,6 +525,50 @@ impl Shell {
             self.open_file_link(path.to_owned(), line, window, cx);
         }
     }
+    /// Insert or reuse a tab without creating its view. Only foreground opens activate it.
+    /// Some(true) is an insertion, Some(false) a reuse, and None is the capacity limit.
+    fn insert_tab(
+        &mut self,
+        workspace: &str,
+        tab: Tab,
+        activate: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
+        let saved = self.state.workspaces.entry(workspace.to_owned()).or_default();
+        let index = Self::tab_index(saved, &tab);
+        if index.is_none() && saved.tabs.len() >= 32 {
+            if activate {
+                toasts::show(toasts::Kind::Info, "Close a surface before opening another.",
+                    vec![], Some(toasts::NOTICE_TIMEOUT), cx);
+            }
+            return None;
+        }
+        let inserted = index.is_none();
+        let index = index.unwrap_or_else(|| {
+            let mut tab = tab;
+            if let Tab::Session(id) = &tab
+                && saved.tabs.contains(&tab)
+            {
+                let id = id.clone();
+                let mut suffix = 1;
+                let key = loop {
+                    let key = format!("chat-tab:{id}:{suffix}");
+                    if !saved.tabs.contains(&Tab::Session(key.clone())) {
+                        break key;
+                    }
+                    suffix += 1;
+                };
+                saved.selections.insert(key.clone(), id);
+                tab = Tab::Session(key);
+            }
+            saved.tabs.push(tab);
+            saved.tabs.len() - 1
+        });
+        if activate {
+            saved.active = index;
+        }
+        Some(inserted)
+    }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
             return;
@@ -527,41 +598,13 @@ impl Shell {
             .clone()
             .or_else(|| tab.registration().global.then(String::new))
         {
-            let saved = self.state.workspaces.entry(workspace).or_default();
-            let index = Self::tab_index(saved, &tab);
-            if index.is_none() && saved.tabs.len() >= 32 {
-                toasts::show(
-                    toasts::Kind::Info,
-                    "Close a surface before opening another.",
-                    vec![],
-                    Some(toasts::NOTICE_TIMEOUT),
-                    cx,
-                );
+            if self.insert_tab(&workspace, tab, true, cx).is_none() {
                 return;
             }
-            saved.active = index.unwrap_or_else(|| {
-                let mut tab = tab;
-                if let Tab::Session(id) = &tab
-                    && saved.tabs.contains(&tab)
-                {
-                    let id = id.clone();
-                    let mut suffix = 1;
-                    let key = loop {
-                        let key = format!("chat-tab:{id}:{suffix}");
-                        if !saved.tabs.contains(&Tab::Session(key.clone())) {
-                            break key;
-                        }
-                        suffix += 1;
-                    };
-                    saved.selections.insert(key.clone(), id);
-                    tab = Tab::Session(key);
-                }
-                saved.tabs.push(tab);
-                saved.tabs.len() - 1
-            });
-            saved.composer = composer;
+            self.state.workspaces.get_mut(&workspace).unwrap().composer = composer;
         }
         self.palette = false;
+        sidebar::navigation(self, cx);
         self.ensure(window, cx);
         self.restore_focus(window, cx);
         self.persist();

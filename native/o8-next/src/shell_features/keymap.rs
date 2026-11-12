@@ -86,6 +86,7 @@ fn dispatch(
                 (saved.active + 1) % saved.tabs.len()
             };
         }
+        crate::shell::sidebar::navigation(s, cx);
         s.ensure(window, cx);
         s.restore_focus(window, cx);
         s.persist();

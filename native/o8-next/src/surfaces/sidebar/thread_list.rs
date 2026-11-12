@@ -1,6 +1,12 @@
 //! Workspace sidebar. Rebuild descriptors on data/search changes; GPUI only
 //! materializes visible rows. Global snapshots are invalidations, since the
 //! desktop socket's initial tail is smaller than the complete HTTP inventory.
+#[cfg(test)]
+#[path = "review_takeover_tests.rs"]
+mod review_takeover_tests;
+#[cfg(test)]
+#[path = "takeover_tests.rs"]
+mod takeover_tests;
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
@@ -27,6 +33,8 @@ pub enum Event {
     Refreshed(Vec<Session>, Option<Ledger>),
     Selected(String),
     OpenInTab(String),
+    StartThread(String),
+    Created(String, bool, u64),
     Error(String),
     Workspace(Option<String>, Ledger),
     /// A `ui-command` frame for the main window. Every socket receives the
@@ -126,8 +134,10 @@ pub struct ThreadList {
     /// lands on the menu's trigger, its click must not reopen the menu.
     menu_press: Option<gpui::Point<gpui::Pixels>>,
     /// A thread New thread created and when; the shell opens it once the list
-    /// has it, unless that takes longer than `PENDING_OPEN_TTL`.
+    /// has it; foreground permission expires after `PENDING_OPEN_TTL`.
     pending_open: Option<(String, std::time::Instant)>,
+    pub(super) navigation: std::rc::Rc<std::cell::Cell<u64>>,
+    pending_navigation: u64,
     /// Threads whose start failed, so a pane waiting on one can say so.
     pub failed_starts: HashSet<String>,
     /// Closed By repo folders, by repository path.
@@ -332,6 +342,8 @@ impl ThreadList {
             new_menu: false,
             menu_press: None,
             pending_open: None,
+            navigation: Default::default(),
+            pending_navigation: 0,
             failed_starts: HashSet::new(),
             settling: None,
             undo: None,
@@ -1157,8 +1169,8 @@ impl ThreadList {
         self.choice = Some(id.clone());
         self.editing = false;
         self.selected = Some(id.clone());
-        // A choice made before the list carries a new thread cancels its open.
-        self.pending_open = None;
+        // A choice before the new thread arrives cancels its foreground takeover.
+        self.cancel_takeover();
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             s.unread = false;
         }

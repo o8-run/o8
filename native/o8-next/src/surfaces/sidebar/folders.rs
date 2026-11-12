@@ -14,8 +14,7 @@ use super::*;
 use crate::theme::current as theme;
 use gpui::{AnyElement, div, px};
 
-/// How long a created thread may take to reach the catalog before New
-/// gives up opening it: as long as a catalog load may take.
+/// How long New chat may retain foreground permission while awaiting the catalog.
 const PENDING_OPEN_TTL: std::time::Duration = crate::client::LOAD_REQUEST_TIMEOUT;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -392,7 +391,10 @@ impl ThreadList {
     /// runtime placeholder ("claude-code") as the model, and the first send
     /// would fail.
     pub(crate) fn new_thread(&mut self, repo: String, cx: &mut Context<Self>) {
-        self.start_thread(repo, true, cx);
+        self.new_menu = false;
+        // The shell refreshes the starting snapshot before capturing its counter.
+        cx.emit(Event::StartThread(repo));
+        cx.notify();
     }
     /// Whether `path` is a repository this machine has registered.
     pub(crate) fn knows_repo(&self, path: &str) -> bool {
@@ -402,6 +404,7 @@ impl ThreadList {
     /// is false (a split pane shows it); returns its id.
     pub(crate) fn start_thread(&mut self, repo: String, open: bool, cx: &mut Context<Self>) -> String {
         self.new_menu = false;
+        let navigation = self.navigation.get();
         // A new chat in the main pane reuses this repository's empty one, so
         // repeated New chat does not pile up untitled threads. A split pane
         // still gets its own.
@@ -493,6 +496,7 @@ impl ThreadList {
                         // Open once the catalog carries the saved thread,
                         // whether it arrives through a load or the live stream.
                         if open {
+                            this.pending_navigation = navigation;
                             this.pending_open = Some((id, std::time::Instant::now()));
                             this.open_pending(cx);
                         }
@@ -519,20 +523,30 @@ impl ThreadList {
         started
     }
     /// Publish selection only once the shell has been sent the created thread.
-    /// A thread that has not arrived within `PENDING_OPEN_TTL` is dropped, so a
+    /// A thread arriving after `PENDING_OPEN_TTL` opens in the background, so a
     /// failed load or later navigation cannot pull focus back to it.
     pub(super) fn open_pending(&mut self, cx: &mut Context<Self>) {
-        self.pending_open.take_if(|(_, since)| since.elapsed() > PENDING_OPEN_TTL);
-        if let Some((id, _)) = self
+        if let Some((id, since)) = self
             .pending_open
             .take_if(|(id, _)| self.sessions.iter().any(|s| &s.id == id))
         {
-            self.selected = Some(id.clone());
-            self.follow_selection = true;
-            self.follow_reveals = true;
-            self.rebuild();
-            cx.emit(Event::Selected(id));
+            let foreground = self.navigation.get() == self.pending_navigation
+                && since.elapsed() <= PENDING_OPEN_TTL;
+            cx.emit(Event::Created(id, foreground, self.pending_navigation));
         }
+    }
+    pub(crate) fn navigation_generation(&self) -> u64 {
+        self.navigation.get()
+    }
+    pub(crate) fn created_foreground(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.selected = Some(id.to_owned());
+        self.follow_selection = true;
+        self.follow_reveals = true;
+        self.rebuild();
+        cx.notify();
+    }
+    pub(crate) fn cancel_takeover(&mut self) {
+        self.navigation.set(self.navigation.get().wrapping_add(1));
     }
     /// A New thread whose POST has returned and whose load has not.
     #[cfg(test)]
@@ -541,6 +555,7 @@ impl ThreadList {
     }
     #[cfg(test)]
     pub(crate) fn expect_open_since(&mut self, id: &str, since: std::time::Instant) {
+        self.pending_navigation = self.navigation.get();
         self.pending_open = Some((id.to_owned(), since));
     }
     /// A menu's outside press closed it: remember the press for its trigger.

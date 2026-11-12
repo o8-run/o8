@@ -626,20 +626,32 @@ fn index_of(list: &Entity<ThreadList>, cx: &VisualTestContext, id: &str) -> usiz
 #[gpui::test]
 fn sidebar_new_thread_is_revealed_in_a_scrolled_list(cx: &mut TestAppContext) {
     let (list, cx) = make(cx, long_list("idle"));
+    let delivered = Rc::new(Cell::new(0));
+    let seen = delivered.clone();
+    // This isolated list has no Shell; model its Created handler's approval.
+    let _created = list.update(cx, |_, cx| cx.subscribe_self(move |list, event: &Event, cx| {
+        if let Event::Created(id, foreground, started) = event {
+            assert!(*foreground);
+            assert_eq!(*started, list.navigation_generation());
+            list.created_foreground(id, cx);
+            seen.set(seen.get() + 1);
+        }
+    }));
     for (detailed, id) in [(true, "new-a"), (false, "new-b")] {
         set_detailed(&list, cx, detailed);
         scroll_down(&list, cx);
-        // New thread: its load arrives and open_pending follows the selection.
+        // New thread: its load arrives, then the shell approves its reveal.
         list.update(cx, |list, cx| {
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
             list.sessions.push(session(id, "idle", &super::iso_timestamp(now)));
-            list.pending_open = Some((id.into(), std::time::Instant::now()));
+            list.expect_open(id);
             list.open_pending(cx);
         });
         draw(cx);
         let ix = index_of(&list, cx, id);
         assert!(drawn_in_view(cx, ix), "detailed {detailed}: the new row {ix} is in view");
     }
+    assert_eq!(delivered.get(), 2, "each new thread is approved exactly once");
 }
 
 #[gpui::test]

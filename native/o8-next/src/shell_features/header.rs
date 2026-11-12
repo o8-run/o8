@@ -1,4 +1,7 @@
 #[cfg(test)]
+#[path = "header/layout_review_tests.rs"]
+mod layout_review_tests;
+#[cfg(test)]
 #[path = "header/review_tests.rs"]
 mod review_tests;
 #[cfg(test)]
@@ -93,12 +96,14 @@ fn render(
         .pr(px(8.))
         .when(hidden && !moving, |row| row.child(nav(true, cx)))
         .child(tabs(s, cx))
+        .children(s.active().as_ref().and_then(|tab| thread_worktree_badge(s, tab)))
         .child(
             div()
                 .flex()
                 .flex_shrink_0()
                 .items_center()
                 .gap(px(4.))
+                .debug_selector(|| "thread-header-controls".into())
                 .mt(px(1.3))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {
@@ -400,6 +405,7 @@ fn select_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context
         .get_mut(s.state.selected.as_deref().unwrap_or(""))
         .unwrap()
         .active = index;
+    crate::shell::sidebar::navigation(s, cx);
     s.ensure(window, cx);
     s.restore_focus(window, cx);
     s.persist();
@@ -459,6 +465,7 @@ pub(crate) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
     if was_active && let Some(previous) = previous {
         saved.active = saved.tabs.iter().position(|tab| tab == &previous).unwrap_or(saved.active);
     }
+    crate::shell::sidebar::navigation(s, cx);
     s.ensure(window, cx);
     s.restore_focus(window, cx);
     s.persist();
@@ -496,7 +503,13 @@ pub(super) fn tab_label(s: &Shell, t: &Tab) -> String {
             s.sessions
                 .iter()
                 .find(|s| &s.id == selected)
+                .filter(|session| !session.title.trim().is_empty())
                 .map(|s| s.title.clone())
+                .or_else(|| {
+                    s.state.thread_titles.get(&format!(
+                        "{}|{}", s.state.selected.as_deref().unwrap_or(""), selected
+                    )).cloned()
+                })
                 .unwrap_or_else(|| "Chat".into())
         }
         _ => t.label().into(),
@@ -645,6 +658,11 @@ fn strip(
     cx: &mut Context<Shell>,
 ) -> gpui::Stateful<gpui::Div> {
     let active = s.active();
+    let tabs = s.current().map(|w| w.tabs.as_slice()).unwrap_or(&[]);
+    let chats = tabs.iter().filter(|tab| matches!(tab, Tab::Session(_))).count();
+    let fixed = tabs.iter().filter(|tab| !matches!(tab, Tab::Session(_)))
+        .map(|tab| (tab_label(s, tab).chars().count() as f32 * 7.).min(180.) + 40.).sum::<f32>();
+    let chat_width = ((scroll.viewport_width() - fixed - 24. - tabs.len().saturating_sub(1) as f32 * 2.) / chats.max(1) as f32 - 40.).clamp(120., 180.);
     let geometry = crate::theme::GEOMETRY;
     let motion = s.features.read::<pills::Pills>();
     div()
@@ -784,6 +802,10 @@ fn strip(
                                 pill.child(
                                     div()
                                         .max_w(px(180.))
+                                        .when(matches!(&t, Tab::Session(_)), |title| {
+                                            title.w(px(chat_width)).min_w(px(120.)).max_w(px(180.))
+                                        })
+                                        .debug_selector(move || format!("surface-tab-title-{i}"))
                                         .overflow_hidden()
                                         .whitespace_nowrap()
                                         .text_ellipsis()
@@ -849,11 +871,7 @@ fn strip(
                         .items_center()
                         .gap(px(2.))
                         .child(pill)
-                        .when(selected, |group| {
-                            group
-                                .child(scroll.probe())
-                                .children(thread_worktree_badge(s, &t))
-                        });
+                        .when(selected, |group| group.child(scroll.probe()));
                     match motion {
                         Some(m) => m.wrap(&key, pill).into_any_element(),
                         None => pill.into_any_element(),
