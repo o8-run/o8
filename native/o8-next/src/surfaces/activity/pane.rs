@@ -87,6 +87,8 @@ pub(super) struct Detail {
     pub retry_at: Option<Instant>,
     pub updated: Option<Instant>,
 }
+/// How long Stop mission waits for its second press.
+const STOP_ASKS_FOR: Duration = Duration::from_secs(4);
 pub struct ActivityPane {
     pub(crate) background: bool,
     pr_browser: Option<bool>,
@@ -122,6 +124,10 @@ pub struct ActivityPane {
     generation: u64,
     pub(super) loaded_at: Instant,
     stop_identity: Option<(String, String)>,
+    /// Set while Stop mission is asking for its second press; the number
+    /// tells one question from the next when the first lapses.
+    pub(super) stop_armed: Option<u64>,
+    stop_asked: u64,
     /// The packet whose close-unmerged confirmation is open, and its reason.
     pub(super) closing: Option<String>,
     /// The live packet whose stop-and-archive confirmation is open.
@@ -184,6 +190,8 @@ impl ActivityPane {
             generation: 0,
             loaded_at: Instant::now(),
             stop_identity: None,
+            stop_armed: None,
+            stop_asked: 0,
             closing: None,
             archiving: None,
             archive_after_stop: None,
@@ -604,6 +612,25 @@ impl ActivityPane {
             Action::StopMission => {
                 let mission = feed::text(&self.mission,"missionId");
                 if mission.is_empty() { return; }
+                // Stopping holds every packet and sits beside Refresh, so one
+                // press only asks. A second press while it asks stops (#5975).
+                if self.stop_armed.take().is_none() {
+                    self.stop_asked += 1;
+                    let asked = self.stop_asked;
+                    self.stop_armed = Some(asked);
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(STOP_ASKS_FOR).await;
+                        let _ = this.update(cx, |this, cx| {
+                            if this.stop_armed == Some(asked) {
+                                this.stop_armed = None;
+                                cx.notify();
+                            }
+                        });
+                    })
+                    .detach();
+                    cx.notify();
+                    return;
+                }
                 // Reuse the same identity after an unconfirmed transport result.
                 let (_,identity) = self.stop_identity.get_or_insert_with(|| (mission.clone(),format!("next-stop-{}-{}",std::process::id(),SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos())));
                 let identity = identity.clone();
