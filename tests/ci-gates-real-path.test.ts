@@ -75,7 +75,7 @@ function condition(source: string, github: object, needs: object = {}, isCancell
   const expression = source.replace(/^\$\{\{\s*|\s*\}\}$/g, '')
     .replaceAll('needs.test-shards', 'needs["test-shards"]');
   return Boolean(new Function('github', 'inputs', 'needs', 'always', 'cancelled', `return (${expression});`)(
-    github, { integration_base: '' }, { reuse: { result: 'success' }, typecheck: { result: 'success' }, ...needs },
+    github, { integration_base: '' }, { reuse: { result: 'success' }, typecheck: { result: 'success' }, classification: { result: 'success', outputs: {} }, ...needs },
     () => true, () => isCancelled,
   ));
 }
@@ -220,6 +220,21 @@ describe('required CI gates through workflow commands', () => {
     expect(select('push', { before: '0'.repeat(40), after: base })).toBe('changed=true');
     expect(select('pull_request', { pull_request: { base: { sha: 'missing' }, head: { sha: base } } }))
       .toBe('changed=true');
+  });
+
+  it('selects Rust inputs before compile jobs request runners and keeps unknown inputs enabled', () => {
+    const classifier = workflow.jobs.classification;
+    expect(classifier.outputs.rust_changed).toBe('${{ steps.rust-inputs.outputs.changed }}');
+    const selector = classifier.steps.find((step: { id?: string }) => step.id === 'rust-inputs');
+    expect(selector.run).toBe('node scripts/ci/native-changes.mjs');
+    expect(classifier.steps[0].with['fetch-depth']).toBe(0);
+    for (const id of ['rust-check-linux', 'rust-check-windows']) {
+      expect(workflow.jobs[id].needs).toEqual(['reuse', 'classification']);
+      for (const changed of ['false', 'true', '']) {
+        expect(condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
+          { classification: { result: 'success', outputs: { rust_changed: changed } } })).toBe(changed !== 'false');
+      }
+    }
   });
 
   it('guards all expensive native steps while leaving each required job enabled', () => {

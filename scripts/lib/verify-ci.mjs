@@ -76,6 +76,22 @@ function withoutReuseGate(jobs) {
       step.if = step.if.slice(prefix.length);
     }
   }
+  const classification = jobs.classification;
+  const selector = classification.steps.find(step => step.id === 'rust-inputs');
+  requireCondition(isDeepStrictEqual(classification.outputs, { rust_changed: '${{ steps.rust-inputs.outputs.changed }}' })
+    && isDeepStrictEqual(selector, { name: 'Select Rust inputs before runner admission', id: 'rust-inputs', run: 'node scripts/ci/native-changes.mjs' })
+    && isDeepStrictEqual(classification.steps[0].with, { 'fetch-depth': 0, filter: 'blob:none' }),
+  'Rust admission selection needs a verify:ci equivalent');
+  delete classification.outputs;
+  classification.steps = classification.steps.filter(step => step !== selector);
+  for (const id of ['rust-check-linux', 'rust-check-windows']) {
+    const job = jobs[id];
+    const suffix = ") && needs.classification.result == 'success' && needs.classification.outputs.rust_changed != 'false'";
+    requireCondition(isDeepStrictEqual(job.needs, 'classification') && job.if.startsWith('(') && job.if.endsWith(suffix),
+      `${id} Rust admission condition needs a verify:ci equivalent`);
+    delete job.needs;
+    job.if = job.if.slice(1, -suffix.length);
+  }
 }
 function usesTestProcess(command, scripts, seen = new Set()) {
   if (/\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs|native-test-shard\.mjs --cargo --phase=timed/.test(command)) return true;
