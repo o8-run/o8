@@ -17,6 +17,13 @@ mod thread_list_client;
 mod thread_mutations_client;
 use thread_list::{Event as ThreadEvent, ThreadList};
 pub(super) type Slice = EmptyState;
+#[derive(PartialEq)]
+struct Navigation {
+    workspace: Option<String>,
+    tab: Option<Tab>,
+    settings_open: bool,
+    projects_open: bool,
+}
 #[derive(Default)]
 pub(super) struct Runtime {
     pub view: Option<Entity<ThreadList>>,
@@ -31,7 +38,7 @@ pub(super) struct Runtime {
     pub press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
-    navigation: Option<(Option<String>, Option<Tab>)>,
+    navigation: Option<Navigation>,
 }
 /// The sidebar column; the header lays its toggle and search over it.
 pub(super) const WIDTH: f32 = 280.;
@@ -422,24 +429,15 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                 },
                 ThreadEvent::Created(id, foreground) => {
                     if let Some(session) = shell.sessions.iter().find(|s| s.list_id() == *id) {
+                        let list_id = session.list_id();
                         let workspace = session.workspace();
                         let tab = Tab::Session(session.id.clone());
-                        if *foreground && shell.state.selected.as_ref() == Some(&workspace) {
-                            shell.execute(Command::Session(session.id.clone()), window, cx);
-                        } else {
-                            let saved = shell.state.workspaces.entry(workspace).or_default();
-                            let already_open = saved.tabs.iter().any(|t| match (t, &tab) {
-                                (Tab::Session(original), Tab::Session(id)) => {
-                                    saved.selections.get(original).unwrap_or(original) == id
-                                }
-                                _ => t == &tab,
-                            });
-                            if saved.tabs.len() < 32 && !already_open {
-                                saved.tabs.push(tab);
-                                shell.persist();
-                                shell.revision += 1;
-                                cx.notify();
-                            }
+                        if *foreground {
+                            shell.open_thread(list_id, window, cx);
+                        } else if shell.insert_tab(&workspace, tab, false, cx) == Some(true) {
+                            shell.persist();
+                            shell.revision += 1;
+                            cx.notify();
                         }
                     }
                 }
@@ -572,6 +570,7 @@ impl Shell {
     /// sidebar's New thread does, opening it in the main pane when `open`;
     /// None when no repository is open.
     pub(crate) fn start_thread(&mut self, open: bool, cx: &mut Context<Self>) -> Option<String> {
+        navigation(self, cx);
         let repo = self.state.selected.clone().filter(|w| w != "Unassigned")?;
         let list = self.surfaces.sidebar.view.clone()?;
         Some(list.update(cx, |list, cx| list.start_thread(repo, open, cx)))
@@ -658,7 +657,12 @@ mod tests;
 
 /// Navigation invalidates focus permission, including a change away and back.
 pub(super) fn navigation(s: &mut Shell, cx: &mut Context<Shell>) {
-    let next = (s.state.selected.clone(), s.active());
+    let next = Navigation {
+        workspace: s.state.selected.clone(),
+        tab: s.active(),
+        settings_open: s.surfaces.settings.view.is_some(),
+        projects_open: s.surfaces.projects.open,
+    };
     if s.surfaces.sidebar.navigation.as_ref() != Some(&next) {
         s.surfaces.sidebar.navigation = Some(next);
         if let Some(view) = &s.surfaces.sidebar.view {

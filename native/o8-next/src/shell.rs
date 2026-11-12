@@ -499,6 +499,53 @@ impl Shell {
             self.open_file_link(path.to_owned(), line, window, cx);
         }
     }
+    /// Insert or reuse a tab without creating its view. Only foreground opens activate it.
+    /// Some(true) is an insertion, Some(false) a reuse, and None is the capacity limit.
+    fn insert_tab(
+        &mut self,
+        workspace: &str,
+        tab: Tab,
+        activate: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
+        let saved = self.state.workspaces.entry(workspace.to_owned()).or_default();
+        let index = Self::tab_index(saved, &tab);
+        if index.is_none() && saved.tabs.len() >= 32 {
+            toasts::show(
+                toasts::Kind::Info,
+                "Close a surface before opening another.",
+                vec![],
+                Some(toasts::NOTICE_TIMEOUT),
+                cx,
+            );
+            return None;
+        }
+        let inserted = index.is_none();
+        let index = index.unwrap_or_else(|| {
+            let mut tab = tab;
+            if let Tab::Session(id) = &tab
+                && saved.tabs.contains(&tab)
+            {
+                let id = id.clone();
+                let mut suffix = 1;
+                let key = loop {
+                    let key = format!("chat-tab:{id}:{suffix}");
+                    if !saved.tabs.contains(&Tab::Session(key.clone())) {
+                        break key;
+                    }
+                    suffix += 1;
+                };
+                saved.selections.insert(key.clone(), id);
+                tab = Tab::Session(key);
+            }
+            saved.tabs.push(tab);
+            saved.tabs.len() - 1
+        });
+        if activate {
+            saved.active = index;
+        }
+        Some(inserted)
+    }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
             return;
@@ -528,39 +575,10 @@ impl Shell {
             .clone()
             .or_else(|| tab.registration().global.then(String::new))
         {
-            let saved = self.state.workspaces.entry(workspace).or_default();
-            let index = Self::tab_index(saved, &tab);
-            if index.is_none() && saved.tabs.len() >= 32 {
-                toasts::show(
-                    toasts::Kind::Info,
-                    "Close a surface before opening another.",
-                    vec![],
-                    Some(toasts::NOTICE_TIMEOUT),
-                    cx,
-                );
+            if self.insert_tab(&workspace, tab, true, cx).is_none() {
                 return;
             }
-            saved.active = index.unwrap_or_else(|| {
-                let mut tab = tab;
-                if let Tab::Session(id) = &tab
-                    && saved.tabs.contains(&tab)
-                {
-                    let id = id.clone();
-                    let mut suffix = 1;
-                    let key = loop {
-                        let key = format!("chat-tab:{id}:{suffix}");
-                        if !saved.tabs.contains(&Tab::Session(key.clone())) {
-                            break key;
-                        }
-                        suffix += 1;
-                    };
-                    saved.selections.insert(key.clone(), id);
-                    tab = Tab::Session(key);
-                }
-                saved.tabs.push(tab);
-                saved.tabs.len() - 1
-            });
-            saved.composer = composer;
+            self.state.workspaces.get_mut(&workspace).unwrap().composer = composer;
         }
         self.palette = false;
         self.ensure(window, cx);
@@ -595,6 +613,7 @@ impl Shell {
         }
     }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
+        sidebar::navigation(self, cx);
         features::tick(self, refresh, window, cx);
     }
 }
