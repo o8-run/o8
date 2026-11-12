@@ -141,6 +141,19 @@
       "webEvent": "o8:open-inbox-tab"
     },
     {
+      "id": "scorecard",
+      "tab": "Scorecard",
+      "flags": [
+        "--scorecard"
+      ],
+      "webRoute": "/dashboard",
+      "nativeSelectors": [
+        "review-scorecard",
+        "scorecard-metric-without-person"
+      ],
+      "remaining": "Classic analytics has no equivalent review-outcome scorecard; paired scorecard geometry remains unmeasured"
+    },
+    {
       "id": "pull_requests",
       "tab": "PullRequests",
       "flags": [
