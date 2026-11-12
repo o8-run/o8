@@ -100,7 +100,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/orchestrator/dispatch': seek('operator mission mutation'),
 
-  '/api/orchestrator/history': seek('orchestrator history read'),
 
   '/api/orchestrator/lead': seek('lead session control'),
 
@@ -108,7 +107,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/orchestrator/truth': security('spectator grant'),
 
-  '/api/orchestrator/workspace/retention': seek('packet retention read'),
 
   '/api/panel/artifacts': security('worker grant: packet capture upload'),
 
@@ -116,7 +114,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/panel/managed-runs': security('worker grant'),
 
-  '/api/panel/threads': seek('thread listing'),
 
   '/api/setup/opencode': security('writes the operator MCP entry, with its bearer, into the OpenCode config'),
 
