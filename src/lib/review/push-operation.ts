@@ -1,39 +1,55 @@
-import { spawnSync } from '@/lib/providers/child-process';
+import { spawn, spawnReadOnly } from '@/lib/providers/child-process';
 
-function runGit(root: string, args: string[]) {
-  const result = spawnSync('git', args, {
-    windowsHide: true,
-    cwd: root,
-    encoding: 'utf-8',
-    timeout: 30_000,
-    maxBuffer: 1024 * 1024,
+function runGit(root: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // Reads need the same credential checks but no provider-store transaction.
+    // Push preparation holds that transaction only until spawn returns.
+    const launch = args[0] === 'push' ? spawn : spawnReadOnly;
+    const child = launch('git', args, {
+      windowsHide: true, cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000, killSignal: 'SIGKILL',
+    });
+    let stdout = '';
+    let stderr = '';
+    let bytes = 0;
+    let overflow = false;
+    const collect = (chunk: Buffer, error: boolean) => {
+      bytes += chunk.length;
+      if (bytes > 1024 * 1024) { overflow = true; child.kill('SIGKILL'); return; }
+      if (error) stderr += chunk.toString('utf8');
+      else stdout += chunk.toString('utf8');
+    };
+    child.stdout.on('data', (chunk: Buffer) => collect(chunk, false));
+    child.stderr.on('data', (chunk: Buffer) => collect(chunk, true));
+    child.once('error', reject);
+    child.once('close', code => {
+      if (overflow) reject(new Error('Git output too large'));
+      else if (code !== 0) reject(new Error((stderr || stdout || 'Git command failed').trim()));
+      else resolve(stdout.trim());
+    });
   });
-  if (result.status !== 0) {
-    throw new Error((result.stderr || result.stdout || 'Git command failed').trim());
-  }
-  return (result.stdout || '').trim();
 }
 
 function result(body: Record<string, unknown>, options = { status: 200 }) {
   return { body, status: options.status };
 }
 
-export function pushWorkspace(root: string) {
+export async function pushWorkspace(root: string) {
   try {
-    const branch = runGit(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const branch = await runGit(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
     if (!branch || branch === 'HEAD') {
       return result({ error: 'Cannot push from detached HEAD' }, { status: 400 });
     }
 
     let upstream = '';
     try {
-      upstream = runGit(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
+      upstream = await runGit(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
     } catch {
       upstream = '';
     }
 
     if (upstream) {
-      runGit(root, ['push']);
+      await runGit(root, ['push']);
       return result({
         ok: true,
         branch,
@@ -42,13 +58,13 @@ export function pushWorkspace(root: string) {
       });
     }
 
-    const remotes = runGit(root, ['remote']).split('\n').map((value) => value.trim()).filter(Boolean);
+    const remotes = (await runGit(root, ['remote'])).split('\n').map((value) => value.trim()).filter(Boolean);
     const remote = remotes.includes('origin') ? 'origin' : remotes[0];
     if (!remote) {
       return result({ error: 'No git remote configured for this workspace' }, { status: 400 });
     }
 
-    runGit(root, ['push', '-u', remote, branch]);
+    await runGit(root, ['push', '-u', remote, branch]);
     return result({
       ok: true,
       branch,

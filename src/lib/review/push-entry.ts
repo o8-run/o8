@@ -14,7 +14,7 @@ async function main() {
   const { retainObservedChildSecrets, childObservedSecrets } = await import('@/lib/providers/spawn-environment');
   retainObservedChildSecrets(request.observed);
   const { pushWorkspace } = await import('./push-operation');
-  const result = pushWorkspace(request.root);
+  const result = await pushWorkspace(request.root);
   process.stdout.write(JSON.stringify({ result, observed: childObservedSecrets() }));
 }
 main().catch(() => {

@@ -19,7 +19,7 @@ async function handlePost(request: Request) {
   const root = !workspace ? REPO_ROOT : workspace.startsWith('~') ? workspace.replace('~', homedir()) : workspace;
   // Next bundles cannot locate a Node helper relative to import.meta.url.
   // Keep the original in-process Git path when native ownership is disabled.
-  const result = pushWorkspace(root);
+  const result = await pushWorkspace(root);
   return NextResponse.json(result.body, { status: result.status });
 }
 
