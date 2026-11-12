@@ -150,6 +150,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/worker-corrections', 'GET POST', () => import('@/app/api/orchestrator/worker-corrections/route')),
     route('/api/panel/pr-stack', 'GET', () => import('@/app/api/panel/pr-stack/route')),
     route('/api/orchestrator/stop-mission', 'POST', () => import('@/app/api/orchestrator/stop-mission/route')),
+    route('/api/orchestrator/merge', 'POST', () => import('@/app/api/orchestrator/merge/route')),
     route('/api/orchestrator/discard-packet', 'POST', () => import('@/app/api/orchestrator/discard-packet/route')),
     // The operator MCP `digest` tool. In no middleware allowlist and the handler requires the
     // ws-token (requirePanelAuth), so over native only the operator reaches it. The read-only

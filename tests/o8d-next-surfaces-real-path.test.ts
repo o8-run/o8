@@ -400,10 +400,12 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   if (routePath === '/api/runtime/acp-registry') {
     expect(JSON.parse(body)).toMatchObject({ stale: false, agents: [{ id: 'fixture-agent', version: '1.0.0' }] });
   }
-  // Task creation and Cortex decisions reuse production POSTs; the remaining reads stay GET-only.
+  // These reads also register existing production writes; the remaining descriptors stay GET-only.
   const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
-  expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
-  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
+  expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals', '/api/setup/cli-updates', '/api/panel/problem-dossiers'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
+  const registeredMethods = new Set(nativeSurfaceRoutes[surface]
+    .filter(route => route.path === routePath).flatMap(route => route.methods));
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !registeredMethods.has(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
     expect(refused.headers.get('allow')).toBe(methods.join(', '));
@@ -906,6 +908,7 @@ it('keeps proposal writes bound to the worker packet through the native transpor
 
 it.each([
   ['POST', '/api/orchestrator/handoff', {}, 400, 'invalid_handoff_request'],
+  ['POST', '/api/orchestrator/merge', {}, 400, 'packetId is required'],
   ['POST', '/api/orchestrator/compact', { repoPath: '' }, 400, 'repoPath is required'],
   ['POST', '/api/orchestrator/delegate', {}, 400, 'clientMutationId is required'],
   ['POST', '/api/orchestrator/discard-packet', { packetId: 'fixture-missing' }, 400, 'client_mutation_id_required'],
@@ -931,4 +934,54 @@ it('resets an orchestrator session through the native transport', async () => {
     body: JSON.stringify({ repoPath: server.directory, threadId: 'thoughts-native-reset' }) });
   expect(response.status).toBe(200);
   expect((await response.json()).ok).toBe(true);
+});
+
+it('holds a rejected packet and replays its canonical merge receipt through native HTTP with Next stopped', async () => {
+  const port = new URL(origin).port;
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token,
+    CORTEX_REALTIME_INTERNAL_ORIGIN: origin, O8_API_PORT: port, O8_WS_PORT: port, PORT: port };
+  await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { createEmptyOrchestratorMissionState } = require('./src/lib/orchestrator/store.ts');
+    const { writeOrchestratorControlPlaneState } = require('./src/lib/orchestrator/control-plane.ts');
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'native-merge-mission',
+      repoPath: process.env.CORTEX_IDE_DATA_DIR, packets: [{ id: 'native-merge-rejected', referenceLabel: 'P1',
+        title: 'Rejected native merge fixture', summary: 'Preserve saved findings', runtime: 'codex',
+        status: 'awaiting_review', workspaceTargetPath: process.env.CORTEX_IDE_DATA_DIR, branchTarget: 'fixture',
+        dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
+        review: { approved: false, reviewedHeadSha: 'a'.repeat(40), note: 'Fixture findings remain open.' } }] });
+    require('./src/lib/db/index.ts').closeDb();
+  `], { env, encoding: 'utf8' });
+  const body = { packetId: 'native-merge-rejected', idempotencyKey: 'native-canonical-merge-fixture', expectedHeadSha: 'a'.repeat(40) };
+  const send = (value: unknown, bearer: string | null = server.token) => fetch(`${origin}/api/orchestrator/merge`, {
+    method: 'POST', headers: { ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), 'content-type': 'application/json' },
+    body: JSON.stringify(value),
+  });
+  for (const [bearer, status] of [[null, 401], ['fixture-invalid', 401], ['o8ro_fixture-read-only', 403]] as const) {
+    const response = await send(body, bearer); expect(response.status).toBe(status); await response.arrayBuffer();
+  }
+  const worker = await seedPacketWorker('native-other-packet');
+  const foreign = await send(body, worker.token);
+  expect(foreign.status).toBe(403); await foreign.arrayBuffer();
+  const first = await send(body);
+  expect(first.status).toBe(200);
+  expect(await first.json()).toMatchObject({ ok: true, result: { merged: false, note: 'Packet review is not approved. Resolve findings before merging.' } });
+  const replay = await send(body);
+  expect(replay.status).toBe(200);
+  expect(await replay.json()).toMatchObject({ ok: true, result: { merged: false, replayed: true } });
+  const conflict = await send({ ...body, expectedHeadSha: 'b'.repeat(40) });
+  expect(conflict.status).toBe(409);
+  expect(await conflict.json()).toMatchObject({ ok: false, error: { code: 'idempotency_key_conflict' } });
+  const persisted = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { getSqlite } = require('./src/lib/db/index.ts');
+    const rows = getSqlite().prepare("SELECT result_json FROM idempotency_keys WHERE verb = 'approve_and_merge' AND packet_id = ?").all('native-merge-rejected');
+    console.log(JSON.stringify(rows.map(row => JSON.parse(row.result_json))));
+    const { readOrchestratorControlPlaneState } = require('./src/lib/orchestrator/control-plane.ts');
+    console.log(JSON.stringify({ review: readOrchestratorControlPlaneState().packets.find(packet => packet.id === 'native-merge-rejected').review }));
+    require('./src/lib/db/index.ts').closeDb();
+  `], { env, encoding: 'utf8' });
+  const lines = persisted.stdout.split('\n');
+  expect(JSON.parse(lines.find(line => line.startsWith('[{'))!)).toMatchObject([{ merged: false }]);
+  const state = JSON.parse(lines.find(line => line.startsWith('{"review":'))!);
+  expect(state.review.approved).toBe(false);
 });

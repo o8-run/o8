@@ -60,7 +60,7 @@ fetcher select routes from that same registry:
 | Brain | POST cortex/ask | Question/conversation/workspace body; original SSE event stream or validation refusal. |
 | Customize | GET inventory, directives, MCP servers and prompt library; GET/POST/PATCH/DELETE prompt entries | Existing inventories and saved-prompt revision checks; no new configuration writes. |
 | Diff | GET review-state, lane diff and worktree diff; POST review | Existing packet/workspace query and decision receipt. |
-| Activity | GET commits, CI/list/detail, PR details, issues and state; PATCH state; POST stop-mission | Existing activity projections and mission mutation receipts. |
+| Activity | GET commits, CI/list/detail, PR details, issues and state; PATCH state; POST stop-mission and orchestrator/merge | Existing activity projections and mutation receipts. Packet-bound Merge uses canonical packet gates, prerequisite ordering and synchronous checkout cleanup; unbound lanes retain the lane verb. |
 | Pull Requests | GET PR list/detail, GitHub status and merge-preview; POST PR detail | Existing pagination, review/merge gates and action receipts. |
 | Terminal | GET mobile/terminal-sessions; existing WebSocket transport | Existing terminal picker inventory and live PTY transport. |
 | Palette | Local commands and workspace navigation | Reuses the selected surface's transport. |
