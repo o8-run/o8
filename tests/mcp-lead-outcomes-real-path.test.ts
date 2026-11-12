@@ -44,9 +44,10 @@ const missionHttp = await import('@/app/api/orchestrator/status/route');
 const operatorHttp = await import('@/app/api/operator/status/route');
 const mcpHttp = await import('@/app/api/mcp/route');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
-const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { writeOrchestratorControlPlaneState, readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { recordMission } = await import('@/lib/db/missions-store');
 let sequence = 0;
+let missionReads = 0;
 
 beforeAll(async () => {
   mkdirSync(repoPath, { recursive: true });
@@ -64,7 +65,11 @@ beforeAll(async () => {
     const request = new NextRequest(String(input), { ...init, signal: init?.signal ?? undefined });
     switch (request.nextUrl.pathname) {
       case '/api/orchestrator/lead': return leadHttp.GET(request);
-      case '/api/orchestrator/status': return missionHttp.GET(request);
+      case '/api/orchestrator/status': {
+        const response = await missionHttp.GET(request);
+        missionReads += 1;
+        return response;
+      }
       case '/api/operator/status': return operatorHttp.GET(request);
       case '/api/panel/operator-defaults': return Response.json({ dispatchableRuntimes: [] });
       case '/api/panel/status': return Response.json({ ok: true });
@@ -105,13 +110,13 @@ async function fixture(report: boolean) {
     .toBe(report ? 'completed' : 'unreported'), { timeout: 5_000 });
   const packet = { id: `packet-${sequence}`, referenceLabel: 'P1', title: 'Previously released work',
     summary: 'The lead still owns its own turn outcome.', workspaceTargetPath: repoPath, branchTarget: 'main',
-    runtime: 'codex', dependencyLabels: [], dependencyPacketIds: [], status: 'released', queueState: 'released',
+    runtime: 'codex', dependencyLabels: [], dependencyPacketIds: [], status: 'released', queueState: 'held',
     releaseState: 'released', orchestratorThreadId: started.lead.threadId } as OrchestratorPacket;
   const state = { ...createEmptyOrchestratorMissionState(), missionId: `mission-${sequence}`, repoPath, packets: [packet] };
   recordMission({ id: state.missionId, repoPath, runtime: 'codex', prompt: '', summary: '', constraints: '',
     packetMeta: [{ id: packet.id, title: packet.title, referenceLabel: packet.referenceLabel }], missionState: state, totalWaves: 1 });
   writeOrchestratorControlPlaneState(state);
-  return { leadId: started.lead.id, missionId: state.missionId };
+  return { leadId: started.lead.id, missionId: state.missionId, packetId: packet.id };
 }
 
 type LeadView = { id: string; status: string; reason: string | null; result: unknown;
@@ -132,6 +137,29 @@ const tools = ['get_mission_status', 'wait_for_mission_ready', 'o8_status'] as c
 function leads(result: Awaited<ReturnType<typeof call>>) { return result.data?.leads ?? result.leads ?? []; }
 
 describe('durable lead outcomes through the MCP HTTP entry point', () => {
+  it('does not wake a packet-scoped wait just because its lead changes state', async () => {
+    const { leadId, missionId, packetId } = await fixture(false);
+    const state = readOrchestratorControlPlaneState();
+    writeOrchestratorControlPlaneState({ ...state, packets: state.packets.map(packet => ({ ...packet,
+      status: 'draft', queueState: 'queued', releaseState: 'pending' })) });
+    let release!: () => void;
+    provider.hold = new Promise<void>(resolve => { release = resolve; });
+    const before = missionReads;
+    const pending = call('wait_for_mission_ready', { missionId, packetId, timeoutMs: 2000, pollIntervalMs: 1000 });
+    try {
+      await vi.waitFor(() => expect(missionReads).toBeGreaterThan(before));
+      await leadAction({ action: 'send', leadId, message: 'More work', idempotencyKey: 'packet-scoped-more' });
+      await vi.waitFor(() => expect(lifecycle.getLeadStatus(leadId).lead.status).toBe('running'));
+      expect((await pending).wakeReason).toBe('timeout');
+    } finally {
+      release();
+      provider.hold = null;
+      await pending;
+      await vi.waitFor(() => expect(lifecycle.getLeadStatus(leadId).lead.status).not.toBe('running'));
+      await leadAction({ action: 'stop', leadId });
+    }
+  });
+
   it.each(tools)('%s returns unreported with the canonical turn and reason', async name => {
     const { leadId, missionId } = await fixture(false);
     const canonical = lifecycle.getLeadStatus(leadId);
@@ -144,6 +172,11 @@ describe('durable lead outcomes through the MCP HTTP entry point', () => {
     if (name === 'wait_for_mission_ready') expect(result).toMatchObject({
       wakeReason: 'already-terminal', terminalLeadId: leadId,
     });
+    if (name === 'o8_status') {
+      const filtered = leads(await call(name, { sessionKey: leadId }));
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0]).toMatchObject({ id: leadId, status: 'unreported', reason: canonical.latestTurn!.reason });
+    }
   });
 
   it('hands back a recorded outcome and clears cached completion on new work', async () => {
