@@ -3227,6 +3227,12 @@
       ]
     },
     {
+      "path": "tests/device-owner-handoff-paging.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "tests/device-session-routes-real-path.test.ts",
       "reasons": [
         "network-listener",

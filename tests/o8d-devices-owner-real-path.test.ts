@@ -55,6 +55,14 @@ it.skipIf(process.platform === 'win32')('serves device controls with one WS mana
       expect(await response.json()).toMatchObject({ phase: 'idle', controllers: [] });
     }
     expect(localState.__o8DeviceManager).toBeUndefined();
+    // The owner's hand-off route accepts only the local operator credential.
+    const owner = (headers: Record<string, string>) => fetch(`${origin}/api/devices/owner`, { method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ args: { action: 'status' } }) });
+    for (const token of ['', 'wrong', device, worker]) {
+      expect((await owner({ ...forged, ...(token ? { authorization: `Bearer ${token}` } : {}) })).status).toBe(token === device || token === worker ? 403 : 401);
+    }
+    expect((await owner({ ...forged, 'x-o8-relay-forward': '1', authorization: `Bearer ${server.token}` })).status).toBe(403);
+    expect((await (await owner({ authorization: `Bearer ${server.token}` })).json()).result.content[0].type).toBe('text');
     // Operator MCP and the worker device endpoint run in Next; their device tool
     // must reach the WS owner too, never a second idle manager here.
     const { getDataDir } = await import('@/lib/data-dir-migration');
@@ -66,9 +74,8 @@ it.skipIf(process.platform === 'win32')('serves device controls with one WS mana
       const text = (result: Awaited<ReturnType<typeof handleDevice>>) => result.content.map(part => part.type === 'text' ? part.text : '').join('');
       const status = await handleDevice({ action: 'status' });
       expect(JSON.parse(text(status))).toMatchObject({ devices: [], controllers: [] });
-      const acquire = await handleDevice({ action: 'acquire', deviceId: 'fixture-device' }, { worker: 'fixture-worker', conversation: 'fixture-thread', pid: process.pid });
-      expect(acquire.isError).toBe(true);
-      expect(text(acquire)).toContain('Open the iOS simulator in Devices first');
+      await expect(handleDevice({ action: 'acquire', deviceId: 'fixture-device' }, { worker: 'fixture-worker', conversation: 'fixture-thread', pid: process.pid }))
+        .rejects.toMatchObject({ code: 'device_unavailable', status: 409 });
       expect(localState.__o8DeviceManager).toBeUndefined();
     } finally {
       if (previousToken === null) rmSync(tokenPath, { force: true }); else writeFileSync(tokenPath, previousToken);

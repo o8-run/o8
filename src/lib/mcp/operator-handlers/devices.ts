@@ -7,6 +7,9 @@ import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { getWsBase } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
+// Longer than the device helper's own 30-second command limit.
+const DEVICE_OWNER_DEADLINE_MS = 45_000;
+
 export const DEVICE_TOOLS: McpTool[] = [{
   name: 'o8_device',
   description: 'Control a shared iOS simulator already open in Devices. Session identity is assigned automatically to this conversation and worker. Inspect status, acquire, and use press/swipe/scroll/type/snapshot. Occupied devices require an explicit handoff to a waiting session; release cancels your ownership or wait. Never use a raw helper or separate daemon to bypass ownership. Viewing stays passive until the operator explicitly takes control.',
@@ -22,22 +25,26 @@ export const DEVICE_TOOLS: McpTool[] = [{
 /**
  * With the native transport on, the WS process owns the device manager (#5422)
  * and the panel starts the simulator there. Next serves operator MCP and the
- * worker device endpoint after their own checks, so it hands the tool call to
- * that owner instead of reading its own idle manager.
+ * worker device endpoint after their own checks, so it hands the action to that
+ * owner. The owner returns the whole result; Next's host pages it, so a later
+ * o8_result_page reaches the same cache.
  */
 async function callDeviceOwner(args: Record<string, unknown>, context?: DeviceControllerContext): Promise<McpToolResult> {
-  const headers: Record<string, string> = { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json' };
-  if (context) Object.assign(headers, { 'x-o8-device-worker': context.worker, 'x-o8-device-conversation': context.conversation, 'x-o8-device-pid': String(context.pid) });
-  let reply: { result?: McpToolResult; error?: { message?: string } };
+  let response: Response;
+  let reply: { result?: McpToolResult; error?: { code?: string; message?: string } };
   try {
-    const response = await fetch(`${getWsBase().replace(/^ws:/, 'http:')}/api/mcp`, { method: 'POST', headers, cache: 'no-store',
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'o8_device', arguments: args } }) });
+    response = await fetch(`${getWsBase().replace(/^ws:/, 'http:')}/api/devices/owner`, {
+      method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(DEVICE_OWNER_DEADLINE_MS),
+      headers: { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ args, context }),
+    });
     reply = await response.json();
   } catch {
-    throw new DeviceError('device_unavailable', 'Device controls are unavailable. Retry shortly.', 503);
+    // The owner may have run the input before the reply was lost.
+    throw new DeviceError('device_result_unconfirmed', 'The device action may or may not have run. Check status before retrying.', 504);
   }
-  if (!reply.result) throw new DeviceError('device_unavailable', reply.error?.message || 'Device controls are unavailable.', 503);
-  return reply.result;
+  if (response.ok && reply.result) return reply.result;
+  throw new DeviceError(reply.error?.code || 'device_request_failed', reply.error?.message || 'Device controls are unavailable. Retry from the panel.', response.ok ? 500 : response.status);
 }
 
 export async function handleDevice(args: Record<string, unknown>, context?: DeviceControllerContext): Promise<McpToolResult> {
