@@ -6,10 +6,8 @@
 //! The cut circle (r 7.4 + 3.4) crosses both edges of the ring, so the ring is
 //! one closed outline of four arcs: the outer edge the long way round, the cut
 //! inward, the inner edge back the long way, and the cut outward.
-use gpui::{
-    App, Bounds, Div, IntoElement, ParentElement, PathBuilder, Pixels, Rgba, Styled, Window,
-    canvas, div, point, prelude::FluentBuilder, px, rgb,
-};
+use gpui::{Div, IntoElement, ParentElement, Rgba, Styled, div, prelude::FluentBuilder, px, rgb};
+use std::sync::LazyLock;
 
 const CENTRE: f32 = 50.;
 pub(crate) const OUTER: f32 = 40.;
@@ -145,39 +143,52 @@ pub(crate) fn app_mark(size: f32) -> Div {
         .child(painted(size * TILE_RING, rgb(icon.ring), rgb(icon.point)))
 }
 
+/// The ring's outline and the point as path data on `icon.rs`'s 24-unit grid
+/// (the 100-unit box scaled by 0.24): the same four arcs and circle.
+pub(crate) fn glyph_paths() -> (String, String) {
+    let k = 24. / 100.;
+    let n = |v: f32| format!("{:.3}", v * k);
+    let (start, arcs) = outline();
+    let mut ring = format!("M{} {}", n(start.0), n(start.1));
+    for arc in arcs {
+        ring += &format!(
+            "A{r} {r} 0 {} {} {} {}",
+            u8::from(arc.large),
+            u8::from(arc.sweep),
+            n(arc.to.0),
+            n(arc.to.1),
+            r = n(arc.radius),
+        );
+    }
+    ring += "Z";
+    let (x, y) = point_centre();
+    let r = n(POINT_R);
+    let dot = format!(
+        "M{} {}A{r} {r} 0 0 1 {} {}A{r} {r} 0 0 1 {} {}Z",
+        n(x + POINT_R),
+        n(y),
+        n(x - POINT_R),
+        n(y),
+        n(x + POINT_R),
+        n(y),
+    );
+    (ring, dot)
+}
+
+static GLYPHS: LazyLock<(String, String)> = LazyLock::new(glyph_paths);
+
+/// The Ring as two tinted glyphs, the ring and the point, rasterised once per
+/// size into GPUI's shared sprite atlas like the app's icons. Painting it as a
+/// path instead makes every frame clear a window-sized multisampled path
+/// texture, which cost about 21 MiB of resident memory at rest on Linux.
 fn painted(size: f32, ring_color: Rgba, point_color: Rgba) -> impl IntoElement {
-    canvas(
-        |_, _, _| {},
-        move |bounds: Bounds<Pixels>, _, window: &mut Window, _: &mut App| {
-            let unit = size / 100.;
-            let at = |(x, y): (f32, f32)| {
-                point(bounds.left() + px(x * unit), bounds.top() + px(y * unit))
-            };
-            let (start, arcs) = outline();
-            let mut path = PathBuilder::fill();
-            path.move_to(at(start));
-            for arc in arcs {
-                let r = px(arc.radius * unit);
-                path.arc_to(point(r, r), px(0.), arc.large, arc.sweep, at(arc.to));
-            }
-            path.close();
-            if let Ok(path) = path.build() {
-                window.paint_path(path, ring_color);
-            }
-            let (x, y) = point_centre();
-            let r = px(POINT_R * unit);
-            let mut dot = PathBuilder::fill();
-            dot.move_to(at((x + POINT_R, y)));
-            dot.arc_to(point(r, r), px(0.), false, true, at((x - POINT_R, y)));
-            dot.arc_to(point(r, r), px(0.), false, true, at((x + POINT_R, y)));
-            dot.close();
-            if let Ok(dot) = dot.build() {
-                window.paint_path(dot, point_color);
-            }
-        },
-    )
-    .size(px(size))
-    .flex_shrink_0()
+    let (ring, dot) = &*GLYPHS;
+    div()
+        .relative()
+        .size(px(size))
+        .flex_shrink_0()
+        .child(crate::icon::fill(ring, ring_color, size).absolute())
+        .child(crate::icon::fill(dot, point_color, size).absolute())
 }
 
 #[cfg(test)]
@@ -254,6 +265,24 @@ mod tests {
         assert_eq!(
             (hex(PAPER), hex(INK), hex(ORANGE)),
             ("F4F2EC".into(), "17140F".into(), "FF5A1F".into())
+        );
+    }
+
+    #[test]
+    fn glyphs_are_the_outline_and_point_on_the_icon_grid() {
+        let (ring, dot) = glyph_paths();
+        // The outline's corners and arcs, scaled by 0.24 (outline() pins them).
+        assert_eq!(
+            ring,
+            "M19.837 6.456A9.600 9.600 0 1 1 17.544 4.163\
+             A2.592 2.592 0 0 0 14.788 7.516\
+             A5.280 5.280 0 1 0 16.484 9.212\
+             A2.592 2.592 0 0 0 19.837 6.456Z"
+        );
+        // The point: r 7.4 at (71.92, 28.08), as two half circles.
+        assert_eq!(
+            dot,
+            "M19.037 6.739A1.776 1.776 0 0 1 15.485 6.739A1.776 1.776 0 0 1 19.037 6.739Z"
         );
     }
 
