@@ -101,7 +101,9 @@ const report = prompt.match(/o8 lead report ([^ ]+) --turn ([^ ]+) --repo ([^ ]+
 if (report && !prompt.includes('[fixture:no-outcome]')) {
   const kind = prompt.includes('[fixture:dispatch-worker]')
     ? 'waiting_workers'
-    : prompt.includes('returned review') ? 'needs_approval' : 'completed';
+    : prompt.includes('returned review') ? 'needs_approval'
+      : ['completed', 'waiting_workers', 'needs_context', 'needs_approval', 'blocked']
+        .find(kind => prompt.includes('[fixture:outcome:' + kind + ']')) ?? 'completed';
   const reported = spawnSync(process.execPath, [
     process.env.O8_TEST_SOURCE_ROOT + '/cli/dist/o8.mjs',
     'lead', 'report', report[1], '--turn', report[2], '--repo', JSON.parse(report[3]),

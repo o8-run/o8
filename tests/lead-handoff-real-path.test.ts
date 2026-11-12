@@ -991,7 +991,7 @@ describe('persistent lead handoff real path', () => {
 
 
   it.each([
-    ['failed', 'blocked'], ['awaiting_human', 'needs_approval'], ['running', 'waiting_workers'], ['reviewing', 'waiting_workers'],
+    ['failed', 'blocked'], ['awaiting_human', 'needs_approval'], ['running', 'waiting_workers'], ['reviewing', 'blocked'],
   ] as const)('preserves %s worker obligations without a lead report', async (workerStatus, expected) => {
     const started = await runCli(startArgs(`obligation-${workerStatus}`));
     const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
@@ -1007,6 +1007,59 @@ describe('persistent lead handoff real path', () => {
     await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]',
       '--idempotency-key', `missing-${workerStatus}`]);
     await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe(expected), { timeout: 5_000 });
+    if (workerStatus === 'reviewing') {
+      const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
+      expect(waited.exitCode, waited.stderr).toBe(0);
+      expect(JSON.parse(waited.stdout).requestedTurn.status).toBe('blocked');
+    }
+    await runCli(['lead', 'stop', lead.id]);
+  }, 20_000);
+
+  it.each(['completed', 'waiting_workers', 'needs_context', 'needs_approval', 'blocked'].flatMap(kind => [
+    { kind, workers: ['reviewing'], expected: 'blocked', scenario: 'reviewing' },
+    { kind, workers: ['failed', 'running'], expected: 'waiting_workers', scenario: 'failed plus running' },
+    { kind, workers: ['failed', 'awaiting_human'], expected: 'needs_approval', scenario: 'failed plus approval' },
+  ]))('reported turns retain origin/main classification: $kind / $scenario', async ({ kind, workers, expected }) => {
+    const started = await runCli(startArgs(`main-parity-${kind}-${workers.join('-')}`));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    await settled(lead.id);
+    const mission = await createMission({
+      issues: workers.map((_, index) => ({ number: 60400 + index, title: 'Classification parity', body: 'Keep the recorded outcome.', url: '' })),
+      repoPath, runtime: 'codex', constraints: '', orchestratorThreadId: lead.threadId,
+    });
+    expect(mission.packets).toHaveLength(workers.length);
+    for (const [index, status] of workers.entries()) {
+      const lane = createLane({ repoPath, branch: `parity-${kind}-${index}`, runtime: 'codex',
+        packetId: mission.packets[index].id, sessionKey: `parity-${lead.id}-${index}`, label: 'Parity worker' });
+      updateLane(lane.id, { status: 'running' }, 'system');
+      if (status !== 'running') updateLane(lane.id, { status: status as 'failed' | 'reviewing' | 'awaiting_human' }, 'system');
+    }
+    await runCli(['lead', 'send', lead.id, '--message', `[fixture:outcome:${kind}]`, '--idempotency-key', 'reported-parity']);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe(expected), { timeout: 5_000 });
+    expect(getLeadStatus(lead.id).latestTurn?.outcome?.kind).toBe(kind);
+    const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
+    expect(waited.exitCode, waited.stderr).toBe(expected === 'waiting_workers' ? 6 : 0);
+    expect(JSON.parse(waited.stdout).requestedTurn.status).toBe(expected);
+    await runCli(['lead', 'stop', lead.id]);
+  }, 20_000);
+
+  it('only a no-outcome turn gives a failed worker precedence over a running worker', async () => {
+    const started = await runCli(startArgs('unreported-mixed-workers'));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    await settled(lead.id);
+    const mission = await createMission({ issues: [1, 2].map(number => ({ number, title: 'Mixed workers', body: 'Keep failure visible.', url: '' })),
+      repoPath, runtime: 'codex', constraints: '', orchestratorThreadId: lead.threadId });
+    for (const [index, packet] of mission.packets.entries()) {
+      const lane = createLane({ repoPath, branch: `mixed-${index}`, runtime: 'codex', packetId: packet.id,
+        sessionKey: `mixed-${lead.id}-${index}`, label: 'Mixed worker' });
+      updateLane(lane.id, { status: 'running' }, 'system');
+      if (index === 0) updateLane(lane.id, { status: 'failed' }, 'system');
+    }
+    await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]', '--idempotency-key', 'mixed-no-outcome']);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('blocked'), { timeout: 5_000 });
+    const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
+    expect(waited.exitCode, waited.stderr).toBe(0);
+    expect(JSON.parse(waited.stdout).requestedTurn.status).toBe('blocked');
     await runCli(['lead', 'stop', lead.id]);
   }, 20_000);
 
