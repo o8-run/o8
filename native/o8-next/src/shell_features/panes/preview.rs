@@ -257,20 +257,26 @@ pub(super) fn wrap(s: &Shell, panes: AnyElement, cx: &mut Context<Shell>) -> Any
             .child(bar(shown, target, cx))
             .child(panes)
             .into_any_element(),
+        // A row of its own above the panes, where the preview's bar goes:
+        // floating, it sat on the composer's microphone at the bottom and
+        // on a pane header's controls at the top.
         None if std::env::var_os(LAUNCH_ENV).is_some() => frame
-            .relative()
-            .child(panes)
             .child(
-                div().absolute().right(px(14.)).bottom(px(14.)).child(
-                    button(
+                div()
+                    .h(px(32.))
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .px(px(12.))
+                    .child(button(
                         "worker-preview-launch",
                         "Preview 4 / 10 workers",
                         cx,
                         |s, cx| start(s, 4, cx),
-                    )
-                    .shadow_md(),
-                ),
+                    )),
             )
+            .child(panes)
             .into_any_element(),
         None => panes,
     }

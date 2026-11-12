@@ -2203,6 +2203,15 @@
       ]
     },
     {
+      "path": "tests/ci-audit-tool-cache-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ci-gates-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2948,6 +2957,12 @@
         "git-cli",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cortex-managed-unavailable-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -5766,6 +5781,15 @@
       ]
     },
     {
+      "path": "tests/o8d-packet-steer-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-packet-transcript-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -7422,6 +7446,14 @@
       ]
     },
     {
+      "path": "tests/repo-default-branch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-inventory-realtime-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -7866,6 +7898,14 @@
     {
       "path": "tests/runtime-effort-matrix-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/runtime-entrypoints-round2-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },

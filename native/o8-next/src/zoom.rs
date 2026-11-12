@@ -275,12 +275,6 @@ pub(crate) fn native(bounds: Bounds<Pixels>, window: &Window) -> Bounds<Pixels> 
     let zoom = window.zoom();
     bounds.map(|v| v * zoom)
 }
-/// A clearance around fixed-size window chrome the platform draws itself
-/// (the macOS traffic lights): it keeps at least its designed size on screen
-/// when the window zooms out.
-pub(crate) fn chrome_clearance(logical: f32, window: &Window) -> f32 {
-    logical * (1. / window.zoom()).max(1.)
-}
 
 #[cfg(test)]
 mod tests {

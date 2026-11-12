@@ -1,3 +1,4 @@
+import { RuntimeSelectionError, validateRequestedRuntime } from '@/lib/agents/routing';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
       requestedEffort: readTaskEffortSelection(body),
       workerIntent: optionalString(body.workerIntent),
       requestedProvider: optionalString(body.requestedProvider),
-      requestedRuntime: optionalString(body.requestedRuntime),
+      requestedRuntime: validateRequestedRuntime(body.requestedRuntime),
       allowedFiles: optionalStringArray(body.allowedFiles),
       sourceIssue: optionalIssueSource(body.sourceIssue),
     });
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Task creation failed.';
-    const status = error instanceof TaskMutationError ? error.status : 500;
+    const status = error instanceof TaskMutationError || error instanceof RuntimeSelectionError ? error.status : 500;
     return NextResponse.json(
       { error: message },
       { status, headers: { 'Cache-Control': 'no-store, max-age=0' } },
