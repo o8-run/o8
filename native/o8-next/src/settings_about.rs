@@ -117,6 +117,13 @@ impl Settings {
             .flex_col()
             .flex_shrink_0()
             .gap(px(16.))
+            // The bare Ring above the page, at 48 (BRAND.md §3).
+            .child(
+                div()
+                    .debug_selector(|| "settings-about-ring".into())
+                    .size(px(48.))
+                    .child(crate::ring::ring(48.)),
+            )
             .child("Version")
             .child(panels::fact(
                 "settings-about-version",

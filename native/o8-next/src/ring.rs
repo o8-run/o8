@@ -7,7 +7,8 @@
 //! one closed outline of four arcs: the outer edge the long way round, the cut
 //! inward, the inner edge back the long way, and the cut outward.
 use gpui::{
-    App, Bounds, IntoElement, PathBuilder, Pixels, Rgba, Styled, Window, canvas, point, px, rgb,
+    App, Bounds, Div, IntoElement, ParentElement, PathBuilder, Pixels, Rgba, Styled, Window,
+    canvas, div, point, prelude::FluentBuilder, px, rgb,
 };
 
 const CENTRE: f32 = 50.;
@@ -95,6 +96,59 @@ pub(crate) fn colors(light: bool) -> (Rgba, Rgba) {
 /// The Ring at `size` layout units, coloured for the running theme.
 pub(crate) fn ring(size: f32) -> impl IntoElement {
     let (ring_color, point_color) = colors(crate::theme::light());
+    painted(size, ring_color, point_color)
+}
+
+/// The app icon's tile, from brand/app-icon/icon-light.svg's macOS grid: an
+/// 824-unit tile with corners of 185 and the Ring's 100-unit box scaled to 500,
+/// centred. As fractions of the tile's side.
+pub(crate) const TILE_CORNER: f32 = 185. / 824.;
+pub(crate) const TILE_RING: f32 = 500. / 824.;
+
+/// An app icon the product's small tiles can show: its tile, ring and point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct AppIcon {
+    pub tile: u32,
+    pub ring: u32,
+    pub point: u32,
+}
+
+/// Brand v1's app icon, the default: the ink Ring and orange point on a paper
+/// tile. It is the app's icon, so it does not follow the theme.
+pub(crate) const RING_ON_PAPER: AppIcon = AppIcon {
+    tile: PAPER,
+    ring: INK,
+    point: ORANGE,
+};
+
+/// The icon the small tiles show. Alternates (a Glance icon, dark variants)
+/// would be chosen here, so call sites never change.
+pub(crate) fn app_icon() -> AppIcon {
+    RING_ON_PAPER
+}
+
+/// The app's mark at `size` units wherever the product shows a small app tile
+/// (a project's default identity, and anything else that showed the retired
+/// glass tile): the default app icon, flat. At these sizes the real icon's
+/// soft edge would not show, so none is drawn; on a light theme the paper
+/// tile sits on paper, so it takes the theme's 1px hairline.
+pub(crate) fn app_mark(size: f32) -> Div {
+    let icon = app_icon();
+    div()
+        .size(px(size))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(size * TILE_CORNER))
+        .bg(rgb(icon.tile))
+        .when(crate::theme::light(), |tile| {
+            tile.border_1().border_color(crate::theme::current().border)
+        })
+        .child(painted(size * TILE_RING, rgb(icon.ring), rgb(icon.point)))
+}
+
+fn painted(size: f32, ring_color: Rgba, point_color: Rgba) -> impl IntoElement {
     canvas(
         |_, _, _| {},
         move |bounds: Bounds<Pixels>, _, window: &mut Window, _: &mut App| {
@@ -181,6 +235,22 @@ mod tests {
                 (22., true, false),
                 (10.8, false, false)
             ]
+        );
+    }
+
+    #[test]
+    fn app_mark_is_the_v1_app_icon_tile() {
+        // icon-light.svg: rx 185 on an 824 tile, the Ring's box scaled to 500.
+        assert!((TILE_CORNER * 824. - 185.).abs() < 1e-3);
+        assert!((TILE_RING * 824. - 500.).abs() < 1e-3);
+        // The default is the paper tile with the ink Ring, on every theme.
+        assert_eq!(
+            app_icon(),
+            AppIcon {
+                tile: 0xF4F2EC,
+                ring: 0x17140F,
+                point: 0xFF5A1F
+            }
         );
     }
 
