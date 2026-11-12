@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
-import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { startParityReference } from './fixtures/ws-parity-server';
 
@@ -51,7 +51,9 @@ async function fixture() {
   const packet = { id, referenceLabel: `P${seq}`, title: 'Owner task', summary: 'Fixture dispatch', runtime: 'codex',
     workspaceTargetPath: server.directory, branchTarget: `task/${id}`, dependencyLabels: [], dependencyPacketIds: [],
     status: 'queued', queueState: 'held', holdIntent: 'explicit-dispatch', releaseState: 'pending', lane: null } as OrchestratorPacket;
-  control.writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), repoPath: server.directory, packets: [packet] });
+  await control.withControlPlaneLock(() => {
+    control.writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), repoPath: server.directory, packets: [packet] });
+  });
   return id;
 }
 beforeAll(async () => {
@@ -73,6 +75,11 @@ beforeAll(async () => {
   taskRoute = await import('@/app/api/tasks/[taskId]/dispatch/route');
   await (await import('@/lib/repos/registry')).addRepo(server.directory);
 }, 120_000);
+afterEach(async () => {
+  release();
+  // Running lane status can precede the deferred continuation's final state write.
+  if (db) await vi.waitFor(() => expect(requireLeaseCount()).toBe(0), { timeout: 10000 });
+});
 afterAll(async () => { release(); (await import('@/lib/db')).closeDb(); vi.unstubAllEnvs(); await server?.stop(); });
 it('accepts through Next and owns admission, deferred launch and replay in WS', async () => {
   const id = await fixture(); gate();
