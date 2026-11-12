@@ -1,5 +1,6 @@
 import { getSqlite } from '@/lib/db';
 import {
+  UNREPORTED_LEAD_REASON,
   cleanLeadString,
   LeadLifecycleError,
   type LeadRow,
@@ -8,7 +9,7 @@ import {
 } from '@/lib/orchestrator/lead-contract';
 import { leadTurnOwnerState } from '@/lib/orchestrator/lead-turn-owner';
 
-const TERMINAL = new Set<LeadStatus>(['completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
+const TERMINAL = new Set<LeadStatus>(['unreported', 'completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
 
 export function appendLeadEvent(
   leadId: string,
@@ -99,17 +100,23 @@ export function getLeadStatus(leadIdRaw: string, afterCursor = 0, requestedTurnI
     FROM orchestrator_lead_events WHERE lead_id = ? AND cursor > ? ORDER BY cursor LIMIT 100
   `).all(leadId, Math.max(0, afterCursor)) as Array<Record<string, unknown>>;
   const cursor = events.length > 0 ? Number(events[events.length - 1].cursor) : Math.max(0, afterCursor);
+  const resultTurn = lead.result_turn_id
+    ? sqlite.prepare('SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? AND id = ?')
+      .get(leadId, lead.result_turn_id) as TurnRow | undefined
+    : undefined;
+  const outcome = (turn: TurnRow | undefined) => turn?.outcome_kind ? {
+    kind: turn.outcome_kind,
+    summary: turn.outcome_summary,
+    evidence: turn.outcome_evidence_json ? JSON.parse(turn.outcome_evidence_json) as unknown : [],
+  } : null;
   const turnReceipt = (turn: TurnRow) => ({
     id: turn.id,
     rootTurnId: turn.root_turn_id ?? turn.id,
     ordinal: turn.ordinal,
     kind: turn.kind,
     status: turn.status,
-    outcome: turn.outcome_kind ? {
-      kind: turn.outcome_kind,
-      summary: turn.outcome_summary,
-      evidence: turn.outcome_evidence_json ? JSON.parse(turn.outcome_evidence_json) as unknown : [],
-    } : null,
+    outcome: outcome(turn),
+    reason: turn.status === 'unreported' ? UNREPORTED_LEAD_REASON : null,
     resultText: turn.result_text?.slice(0, 2_000) ?? null,
     error: turn.error?.slice(0, 2_000) ?? null,
     errorTruncated: Boolean(turn.error && turn.error.length > 2_000),
@@ -129,6 +136,8 @@ export function getLeadStatus(leadIdRaw: string, afterCursor = 0, requestedTurnI
       result: lead.result_status ? {
         turnId: lead.result_turn_id,
         status: lead.result_status,
+        outcome: outcome(resultTurn),
+        reason: lead.result_status === 'unreported' ? UNREPORTED_LEAD_REASON : null,
         text: lead.result_text?.slice(0, 2_000) ?? null,
         textTruncated: Boolean(lead.result_text && lead.result_text.length > 2_000),
         error: lead.error?.slice(0, 2_000) ?? null,

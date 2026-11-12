@@ -746,6 +746,8 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
     if panes.is_empty() {
         return None;
     }
+    // Open in editor trails the tabs: an action, not a pane.
+    let editor = super::header::editor_target(s);
     let (open, opening) = dock.card.value();
     let (swap, swapping) = dock.swap.value();
     let live_tasks = turn.tasks.iter().any(|task| task.3.is_none());
@@ -759,7 +761,13 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
     } else {
         panes[0]
     };
-    let pill_w = panes.len() as f32 * (BUTTON_W + 4.) + 8.;
+    // The editor button, and the hairline before it.
+    let editor_w = if editor.is_some() {
+        BUTTON_W + 4. + 1. + 4.
+    } else {
+        0.
+    };
+    let pill_w = panes.len() as f32 * (BUTTON_W + 4.) + 8. + editor_w;
     let target = pane_height(pane, &dock.data, &turn);
     let body_h = if swap < 1. {
         dock.from_height + (target - dock.from_height) * swap
@@ -865,7 +873,35 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
                     this.capture(window, cx);
                     select(this, each, window, cx);
                 }))
-        }));
+        }))
+        .when(editor.is_some(), |row| {
+            row.child(div().w(px(1.)).h(px(16.)).bg(theme().border))
+        })
+        .when_some(editor, |row, (machine, path)| {
+            row.child(
+                div()
+                    .id("activity-open-in-editor")
+                    .debug_selector(|| "activity-open-in-editor".into())
+                    .w(px(BUTTON_W))
+                    .h(px(28.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(8.))
+                    .cursor_pointer()
+                    .hover(|button| button.bg(theme().hover))
+                    .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Open in editor".into())).into())
+                    .child(crate::icon::stroke(
+                        super::header::OPEN_IN_EDITOR,
+                        theme().text_secondary,
+                        14.,
+                        1.7,
+                    ))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        super::header::open_in_editor(this, machine.clone(), path.clone(), cx);
+                    })),
+            )
+        });
 
     let fade = ((open - 0.35) / 0.65).clamp(0., 1.) * if swap < 1. { swap } else { 1. };
     let body = (open > 0.).then(|| {

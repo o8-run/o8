@@ -27,7 +27,7 @@ vi.mock('@/lib/setup/runtime-activity', () => ({
 
 const route = await import('@/app/api/panel/operator-defaults/route');
 const { Onboarding } = await import('@/components/desktop/Onboarding');
-const { createOnboardingPreviewRequest, PREVIEW_PROJECT } = await import('@/app/preview/first-run/FirstRunPreview');
+const { createOnboardingPreviewRequest, PREVIEW_PROJECT } = await import('./fixtures/onboarding/FirstRunPreview');
 const { PROGRESS_KEY } = await import('@/components/desktop/onboarding/onboarding-progress');
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;

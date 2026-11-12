@@ -35,3 +35,6 @@ export async function GET(request: NextRequest) {
   }
   return proxyPreview(request);
 }
+
+// Preserve Next's implicit read-only HEAD behavior on the native listener.
+export const HEAD = GET;

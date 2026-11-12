@@ -18,6 +18,7 @@ import {
 import { resolveOrchestratorThreadProjectId } from '@/lib/mobile/orchestrator-thread-project';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import {
+  UNREPORTED_LEAD_REASON,
   cleanLeadString,
   digestLeadRequest,
   LeadLifecycleError,
@@ -86,6 +87,7 @@ function buildLeadPrompt(lead: LeadRow, turn: TurnRow, brief: LeadBrief | null):
     turn.kind !== 'operator'
       ? 'A worker reached review. Inspect its persisted packet/diff/evidence, then review, correct, or surface the appropriate terminal outcome.'
       : 'Continue this same lead conversation and retain the task routing and scope.',
+    'Do not end the turn while your own build or test is running. Wait for it, then finish with the outcome report.',
     'Before ending this turn, report exactly one structured outcome through the operator-authenticated CLI:',
     `o8 lead report ${lead.id} --turn ${turn.id} --repo ${JSON.stringify(lead.repo_path)} --thread-id ${lead.thread_id} --kind <completed|waiting_workers|needs_context|needs_approval|blocked> --summary <text> --evidence <json-array>`,
     'Use completed only when the objective is actually complete, evidence is supplied, and no worker/review/approval obligation remains. This receipt, not freeform prose or process exit, determines terminal state.',
@@ -143,6 +145,10 @@ async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: Lea
   const unresolvedPackets = packets.filter((packet) => !packetIsResolved(packet));
   const obligations = unresolvedPackets.map((packet) => ({ packet, lane: authoritativeLane(packet) }));
   const lanes = obligations.flatMap(({ lane }) => lane ? [lane] : []);
+  if (!turn.outcome_kind && (lanes.some((lane) => lane.status === 'failed')
+    || obligations.some(({ packet, lane }) => !lane && ['failed', 'blocked'].includes(packet.status)))) {
+    return { status: 'blocked', detail: 'A bound worker failed or is blocked.' };
+  }
   if (lanes.some((lane) => lane.status === 'awaiting_human')) {
     return { status: 'needs_approval', detail: 'A bound worker requires a distinct human approval.' };
   }
@@ -168,7 +174,7 @@ async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: Lea
     return { status: 'blocked', detail: 'A bound worker failure, context request, or review obligation remains unresolved.' };
   }
   if (!turn.outcome_kind) {
-    return { status: 'blocked', detail: 'The lead process exited without a structured terminal outcome.' };
+    return { status: 'unreported', detail: UNREPORTED_LEAD_REASON };
   }
   if (turn.outcome_kind === 'completed') {
     const evidence = turn.outcome_evidence_json
@@ -660,7 +666,7 @@ export function stopLead(leadIdRaw: string, reasonRaw?: string) {
     getSqlite().prepare(`
       UPDATE orchestrator_lead_turns
       SET status = 'stopped', error = ?, finished_at = ?
-      WHERE lead_id = ? AND status IN ('queued', 'running', 'waiting_workers')
+      WHERE lead_id = ? AND status IN ('queued', 'running', 'waiting_workers', 'unreported')
     `).run(reason, now, leadId);
     event(leadId, lead.current_turn_id, 'lead', 'stopped', reason);
   })();

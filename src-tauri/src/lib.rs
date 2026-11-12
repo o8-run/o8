@@ -61,6 +61,7 @@ mod no_window;
 mod native_test_instance;
 mod overlay_geometry;
 mod next_main;
+mod next_main_startup;
 mod paste;
 mod point_overlay;
 mod presentation;
@@ -2138,7 +2139,8 @@ fn capture_ws_server_stream<R>(
 
 fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
     std::thread::spawn(move || {
-        let url = format!("http://127.0.0.1:{}/dashboard", api_port);
+        let path = if next_main::enabled() { "/api/setup/identity" } else { "/dashboard" };
+        let url = format!("http://127.0.0.1:{api_port}{path}");
 
         let client = match reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_millis(1500))
@@ -3814,11 +3816,11 @@ fn show_desktop_window<R: tauri::Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Bring up the window the operator works in: o8 next in the packaged macOS
-/// app, the classic window everywhere else.
+/// Bring up the window the operator works in: o8 next on macOS,
+/// the classic window on Windows and Linux.
 fn show_main_ui(app: &AppHandle) {
     if next_main::enabled() {
-        next_main::show();
+        next_main::show(app);
     } else {
         show_desktop_window(app);
     }
@@ -7536,6 +7538,7 @@ impl BundledNextSpawn {
         if next_main::enabled() {
             command.env(next_main::SERVER_ENV, "1");
         }
+        next_main::configure_server(&mut command);
         if let Some(path) = self.codebase_memory_bin.as_ref() {
             command.env("O8_CODEBASE_MEMORY_BIN", path);
         }
@@ -8508,7 +8511,7 @@ pub fn run() {
     } else {
         boot_trace("orphan reap joined + mcp socket cleaned (pre-builder)");
     }
-    if let Some(dev_frontend) = dev_frontend.as_ref() {
+    if let Some(dev_frontend) = dev_frontend.as_ref().filter(|_| !next_main::enabled()) {
         if !dev_frontend::apply_to_main_window_config(context.config_mut(), dev_frontend) {
             eprintln!(
                 "[dev-frontend] main window config not found for {}",
@@ -9547,6 +9550,7 @@ pub fn run() {
             // host takes the `main` label and runs Live and dictation audio
             // for o8 next.
             if next_main::enabled() {
+                next_main::start(app.handle().clone(), Some((api_port, boot_identity.boot_id.clone())));
                 log::info!("[main-window] o8 next is the main window; the classic window is not built");
                 voice_host::start(app.handle().clone(), api_port, boot_identity.boot_id.clone());
             } else if app.get_webview_window("main").is_none() {

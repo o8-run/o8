@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OnboardingDispatchStep } from './OnboardingDispatchStep';
-import { previewBuiltInAgent } from '@/app/preview/first-run/built-in-agent-fixture';
+import { previewBuiltInAgent } from '../../../../tests/fixtures/onboarding/built-in-agent-fixture';
 import { recommendRuntimeSetup, type SetupRuntime } from '@/lib/setup/runtime-recommendation';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

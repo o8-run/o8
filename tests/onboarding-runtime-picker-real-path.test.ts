@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { MODEL_IDS } from '@/lib/models';
 import type { SetupRuntime } from '@/lib/setup/runtime-recommendation';
-import { previewBuiltInAgent } from '@/app/preview/first-run/built-in-agent-fixture';
+import { previewBuiltInAgent } from './fixtures/onboarding/built-in-agent-fixture';
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-onboarding-runtime-picker-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;

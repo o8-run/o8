@@ -1,3 +1,4 @@
+import { snapshotCacheInvalidation } from '@/lib/snapshot-cache-invalidation';
 import { execFile } from '@/lib/providers/child-process';
 import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
@@ -567,8 +568,11 @@ function reviewSnapshotCacheKey(options: WorkspaceReviewSnapshotOptions) {
   ].join('::');
 }
 
+const sharedInvalidation = snapshotCacheInvalidation('command-center');
+
 export async function getWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOptions = {}): Promise<WorkflowReviewSnapshot> {
   const fresh = options.fresh ?? false;
+  if (sharedInvalidation.changed()) invalidateReviewSnapshotCache();
   const cacheKey = reviewSnapshotCacheKey(options);
   const now = Date.now();
   const cached = _reviewSnapshotCache.get(cacheKey);
