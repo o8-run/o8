@@ -668,3 +668,7 @@ fn github_url(value: &str) -> Option<String> {
 
 #[path = "inbox_questions.rs"]
 mod questions;
+
+#[cfg(test)]
+#[path = "approval_audit_port_tests.rs"]
+mod approval_audit_port_tests;

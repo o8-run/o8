@@ -402,8 +402,18 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   }
   // Task creation and Cortex decisions reuse production POSTs; the remaining reads stay GET-only.
   const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
-  expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
-  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
+  const readWriteMethods: Record<string, string[]> = {
+    '/api/tasks': ['GET', 'POST'],
+    '/api/cortex/proposals': ['GET', 'POST'],
+    '/api/cortex/cross-repo-proposals': ['GET', 'POST'],
+    '/api/setup/cli-updates': ['GET', 'POST'],
+    '/api/panel/problem-dossiers': ['GET', 'POST'],
+    '/api/repo-spec': ['GET', 'PUT', 'POST'],
+  };
+  expect(methods).toEqual(readWriteMethods[routePath] ?? ['GET']);
+  const registeredMethods = new Set(nativeSurfaceRoutes[surface]
+    .filter(route => route.path === routePath).flatMap(route => route.methods));
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !registeredMethods.has(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
     expect(refused.headers.get('allow')).toBe(methods.join(', '));
@@ -931,4 +941,61 @@ it('resets an orchestrator session through the native transport', async () => {
     body: JSON.stringify({ repoPath: server.directory, threadId: 'thoughts-native-reset' }) });
   expect(response.status).toBe(200);
   expect((await response.json()).ok).toBe(true);
+});
+
+it('reads persisted approval audit history and findings over native HTTP with Next stopped', async () => {
+  const port = new URL(origin).port;
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token,
+    CORTEX_REALTIME_INTERNAL_ORIGIN: origin, O8_API_PORT: port, O8_WS_PORT: port, PORT: port };
+  const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const fs = require('node:fs'), path = require('node:path');
+    const { createApproval, recordApprovalAudit } = require('./src/lib/approvals/store.ts');
+    const { getSqlite, closeDb } = require('./src/lib/db/index.ts');
+    const projectId = JSON.parse(fs.readFileSync(path.join(process.env.O8_DATA_DIR, 'projects.json'), 'utf8')).activeProjectId;
+    const create = (name, project = projectId) => createApproval({ projectId: project, source: 'test', runtime: 'codex',
+      agent: 'fixture', sessionKey: 'fixture-audit-' + name, title: 'Audit fixture ' + name,
+      description: 'Native audit fixture', summary: 'Audit fixture ' + name, risk: 'high' });
+    const completed = create('completed'), pending = create('pending'), foreign = create('foreign', 'other-audit-project');
+    recordApprovalAudit(completed.id, 'orchestrator_review', 'orchestrator', 'Fixture findings remain open.', {
+      reviewer: 'fixture-reviewer', approved: false, diffSha: 'b'.repeat(40), findings: [{
+        file: 'src/fixture.rs', line: 7, severity: 'bug', description: 'Fixture review finding',
+        resolution: 'deferred', fixSuggestion: 'Retain the intended scope.' }] });
+    recordApprovalAudit(completed.id, 'rejected', 'desktop', 'Fixture rejection recorded.');
+    getSqlite().prepare("UPDATE approvals SET status = 'rejected' WHERE id = ?").run(completed.id);
+    const before = getSqlite().prepare('SELECT status, audit_json, updated_at FROM approvals WHERE id = ?').get(completed.id);
+    console.log('audit-fixture:' + JSON.stringify({ completed: completed.id, pending: pending.id, foreign: foreign.id, before }));
+    closeDb();
+  `], { env, encoding: 'utf8' });
+  const ids = JSON.parse(seeded.stdout.split('\n').find(line => line.startsWith('audit-fixture:'))!.slice('audit-fixture:'.length));
+  const read = (query: string, bearer: string | null = server.token) => fetch(`${origin}/api/panel/approvals?${query}`, {
+    headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+  });
+  for (const bearer of [null, 'fixture-invalid']) {
+    const denied = await read('status=all', bearer);
+    expect(denied.status).toBe(401); await denied.arrayBuffer();
+  }
+  const worker = await seedPacketWorker('fixture-audit-worker');
+  const unbound = await read('status=all', worker.token);
+  expect(unbound.status).toBe(403); await unbound.arrayBuffer();
+  const all = await read('status=all');
+  expect(all.status).toBe(200);
+  const approvals = (await all.json()).approvals;
+  const completed = approvals.find((row: { id: string }) => row.id === ids.completed);
+  expect(completed).toMatchObject({ status: 'rejected', sessionKey: 'fixture-audit-completed', risk: 'high',
+    audit: expect.arrayContaining([{ type: 'orchestrator_review', actor: 'orchestrator', timestamp: expect.any(Number),
+      note: 'Fixture findings remain open.', reviewer: 'fixture-reviewer', approved: false, diffSha: 'b'.repeat(40),
+      findings: [{ file: 'src/fixture.rs', line: 7, severity: 'bug', description: 'Fixture review finding',
+        resolution: 'deferred', fixSuggestion: 'Retain the intended scope.' }] }]) });
+  expect(approvals.some((row: { id: string }) => row.id === ids.pending)).toBe(true);
+  expect(approvals.some((row: { id: string }) => row.id === ids.foreign)).toBe(false);
+  const current = await read('status=pending');
+  expect(current.status).toBe(200);
+  expect((await current.json()).approvals.some((row: { id: string }) => row.id === ids.completed)).toBe(false);
+  const persisted = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { getSqlite, closeDb } = require('./src/lib/db/index.ts');
+    console.log('audit-record:' + JSON.stringify(getSqlite().prepare('SELECT status, audit_json, updated_at FROM approvals WHERE id = ?').get(process.argv[1])));
+    closeDb();
+  `, ids.completed], { env, encoding: 'utf8' });
+  expect(JSON.parse(persisted.stdout.split('\n').find(line => line.startsWith('audit-record:'))!.slice('audit-record:'.length))).toEqual(ids.before);
 });
