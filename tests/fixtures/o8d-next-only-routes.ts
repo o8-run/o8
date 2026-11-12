@@ -47,7 +47,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
   '/api/devices/agent': security('worker grant: packet-bound device authority'),
 
-  '/api/harness': seek('operator MCP tool'),
 
   '/api/orchestrator/create-mission': seek('operator mission mutation'),
 
@@ -61,7 +60,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
   '/api/orchestrator/truth': security('spectator grant'),
 
-  '/api/task-artifacts': seek('operator MCP tool'),
 
   '/api/task-artifacts/[id]/actions': seek('operator MCP tool'),
 };
@@ -94,7 +92,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/cortex/sources': seek('Brain source listing'),
 
-  '/api/harness': seek('harness bundle and measure'),
 
   '/api/orchestrator/create-mission': seek('operator mission mutation'),
 
@@ -120,7 +117,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/setup/opencode': security('writes the operator MCP entry, with its bearer, into the OpenCode config'),
 
-  '/api/task-artifacts': seek('operator task artifacts'),
 
   '/api/task-artifacts/[id]/actions': seek('operator task artifact actions'),
 
