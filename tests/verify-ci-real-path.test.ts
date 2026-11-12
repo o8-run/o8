@@ -633,7 +633,7 @@ describe('local CI verification through its command entry point', () => {
   });
 
   it.each(['architecture', 'missing install', 'cache dependencies only', 'cache without source key',
-    'registration without headless gate', 'registration without dependency key',
+    'registration without headless gate', 'registration without dependency key', 'registration prefix restore',
     'registration restored before native'])('rejects uncovered native prerequisite changes: %s', setupChange => {
     const result = executeFixture('tests/fixture.test.ts', false, { setupChange });
     expect(result.error).toBeUndefined();
