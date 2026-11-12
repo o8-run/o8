@@ -121,19 +121,20 @@ it.skipIf(process.platform !== 'linux' || process.arch !== 'x64')('assigns weigh
   expect(assign()).toEqual(assign());
 }, 60_000);
 
-it.skipIf(process.platform !== 'linux')('derives registration cache keys from the native configuration and dependency segments', () => {
+it.skipIf(process.platform !== 'linux')('derives the exact registration cache key from the native configuration, dependency and source segments', () => {
   const result = spawnSync(process.execPath, ['scripts/ci/native-test-cache.mjs', 'key'], {
     encoding: 'utf8', timeout: 30_000, env: { ...process.env, GITHUB_OUTPUT: '' },
   });
   expect(result.status, result.stderr + result.stdout).toBe(0);
   const outputs = Object.fromEntries([...result.stdout.matchAll(/^\[native-cache\] ([\w-]+)=(.+)$/gm)]
     .map(([, name, value]) => [name, value]));
-  const native = outputs.key.match(/^native-tests-v1-([a-f0-9]{64})-([a-f0-9]{64})-[a-f0-9]{64}$/);
+  const native = outputs.key.match(/^native-tests-v1-([a-f0-9]{64})-([a-f0-9]{64})-([a-f0-9]{64})$/);
   expect(native).not.toBeNull();
-  const [, configuration, dependency] = native!;
-  expect(outputs['registration-key']).toBe(`native-registration-v1-${configuration}-${dependency}`);
-  expect(outputs['registration-restore-key']).toBe(`native-registration-v1-${configuration}-`);
-  expect(outputs['registration-key'].startsWith(outputs['registration-restore-key'])).toBe(true);
+  const [, configuration, dependency, source] = native!;
+  // The nested check compiles the app and vendored path dependencies, so its target is keyed by
+  // the same source digest and restored by exact key only.
+  expect(outputs['registration-key']).toBe(`native-registration-v2-${configuration}-${dependency}-${source}`);
+  expect(outputs['registration-restore-key']).toBeUndefined();
 }, 30_000);
 
 it.skipIf(process.platform !== 'linux')('backdates only unchanged sources and safe directories on a prefix cache hit, and every source on an exact hit', () => {
