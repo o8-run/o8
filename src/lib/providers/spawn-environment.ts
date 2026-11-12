@@ -38,6 +38,11 @@ export interface ChildMetadataRedaction { names: readonly string[]; redact(value
 type Context = SpawnOptions & { metadataRedaction?: ChildMetadataRedaction; deniedValues?: readonly string[]; policy?: string; transport?: Record<string, string>; brokerKey?: string };
 const contexts = new WeakMap<object, Context>();
 const observedSecrets = new Set<string>();
+// Trusted isolated policy helpers retain the parent's remembered revoked materials.
+export function childObservedSecrets(): string[] { return [...observedSecrets]; }
+export function retainObservedChildSecrets(values: string[]): void {
+  for (const value of values) observedSecrets.add(value);
+}
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 function credentialMaterials(input: Record<string, string | undefined>, allowed: ReadonlySet<string> = new Set()): ProviderCredentialMaterials {
   const saved = providerCredentialMaterials();

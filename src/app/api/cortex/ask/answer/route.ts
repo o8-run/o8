@@ -126,6 +126,14 @@ export async function POST(request: NextRequest) {
   if (ownershipRefusal) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
+  if (principal.role === 'worker' && !principal.brainRepoPath) {
+    const packetProject = packetId ? findLatestLaneByPacket(packetId)?.projectId : null;
+    if (!packetProject || (projectId && projectId !== packetProject)) {
+      return NextResponse.json({ ok: false, error: { code: 'worker_packet_mismatch',
+        message: 'Worker reads are scoped to the caller packet project.' } }, { status: 403 });
+    }
+    projectId = packetProject;
+  }
   if (principal.role === 'worker' && !principal.brainRepoPath && repoPath) {
     // A packet worker asks only about its own lane's repository or worktree.
     const lane = packetId ? findLatestLaneByPacket(packetId) : null;

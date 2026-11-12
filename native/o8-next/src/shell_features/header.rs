@@ -45,6 +45,7 @@ fn render(
     let back = adjacent(s, -1);
     let forward = adjacent(s, 1);
     let hidden = s.surfaces.sidebar.hidden;
+    let inset = toggle_inset(window);
     // Redraw each frame while the sidebar column opens or closes.
     let (open, moving) = super::super::sidebar::travel(s);
     if moving {
@@ -88,7 +89,7 @@ fn render(
         .gap(px(4.))
         // 4px workspace inset, plus the strip's 10px collapsed padding, or its
         // 8px padding after the 4px sidebar resize edge.
-        .pl(px(if hidden && !moving { TOGGLE_INSET } else { 16. }))
+        .pl(px(if hidden && !moving { inset } else { 16. }))
         .pr(px(8.))
         .when(hidden && !moving, |row| row.child(nav(true, cx)))
         .child(tabs(s, cx))
@@ -99,8 +100,6 @@ fn render(
                 .items_center()
                 .gap(px(4.))
                 .mt(px(1.3))
-                .children(open_in_editor_button(s, cx))
-                .children(super::thread_view::button(s, cx))
                 .child(super::activity_dock::toggle_button(s, cx))
                 .when(!panel_open, |row| {
                     row.child(super::right_panel::toggle_button(s, false, cx))
@@ -142,7 +141,7 @@ fn render(
                         .flex()
                         .items_center()
                         .gap(px(4.))
-                        .pl(px(TOGGLE_INSET))
+                        .pl(px(inset))
                         .pr(px(8.))
                         .child(nav(false, cx)),
                 )
@@ -153,11 +152,11 @@ fn render(
             .when(moving, |row| {
                 let edge = super::super::sidebar::width(s) * open;
                 let top = (crate::theme::GEOMETRY.header - 26.) / 2.;
-                row.child(div().w(px(edge.max(FOLDED))).h_full().flex_shrink_0())
+                row.child(div().w(px(edge.max(folded(inset)))).h_full().flex_shrink_0())
                     .child(
                         div()
                             .absolute()
-                            .left(px(TOGGLE_INSET))
+                            .left(px(inset))
                             .top(px(top))
                             .child(nav(hidden, cx)),
                     )
@@ -196,12 +195,17 @@ fn edge_mark() -> gpui::Div {
 /// The toggle's and an arrow's widths: 7px either side of a 14px and a 15px glyph.
 const TOGGLE_W: f32 = 28.;
 const ARROW_W: f32 = 29.;
-/// Past the traffic lights, so the toggle never crowds them.
-const TOGGLE_INSET: f32 = 26. + super::super::rail::LIGHTS;
+/// Past the traffic lights, so the toggle never crowds them. The lights keep
+/// their size when the window zooms out, so the inset keeps its screen width.
+fn toggle_inset(window: &Window) -> f32 {
+    crate::zoom::chrome_clearance(26. + super::super::rail::LIGHTS, window)
+}
 /// The travelling slot's floor: the folded strip's inset, toggle, Back and
 /// Forward with their gaps and the 4px before the tabs, less the strip's 16px
 /// padding in flight, so the tabs land where the folded header puts them.
-const FOLDED: f32 = TOGGLE_INSET + TOGGLE_W + 4. + ARROW_W + 4. + ARROW_W + 4. - 16.;
+fn folded(inset: f32) -> f32 {
+    inset + TOGGLE_W + 4. + ARROW_W + 4. + ARROW_W + 4. - 16.
+}
 
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
     pill(
@@ -500,11 +504,11 @@ pub(super) fn tab_label(s: &Shell, t: &Tab) -> String {
 }
 
 /// Lucide external-link.
-const OPEN_IN_EDITOR: &str =
+pub(super) const OPEN_IN_EDITOR: &str =
     "M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6";
 
 /// The open thread's project folder and the saved machine it lives on.
-fn editor_target(s: &Shell) -> Option<(Option<String>, String)> {
+pub(super) fn editor_target(s: &Shell) ->Option<(Option<String>, String)> {
     let Some(Tab::Session(id)) = s.active() else {
         return None;
     };
@@ -521,40 +525,32 @@ fn editor_target(s: &Shell) -> Option<(Option<String>, String)> {
 }
 
 /// Open in editor: the thread's project in the saved editor, over SSH when the
-/// thread lives on another machine. A failure shows as an error toast.
-fn open_in_editor_button(s: &Shell, cx: &mut Context<Shell>) -> Option<gpui::Stateful<gpui::Div>> {
-    let (machine, path) = editor_target(s)?;
-    Some(
-        icon_button(
-            "thread-header-open-in-editor",
-            OPEN_IN_EDITOR,
-            14.,
-            1.7,
-            "Open in editor",
-            true,
-        )
-        .on_click(cx.listener(move |this, _, _, cx| {
-            let client = this.client.clone();
-            let (machine, path) = (machine.clone(), path.clone());
-            let task = cx.background_executor().spawn(async move {
-                crate::editor_command::open(&client, machine.as_deref(), &path)
+/// thread lives on another machine. A failure shows as an error toast. The
+/// Activity dock offers it while the thread has a folder.
+pub(super) fn open_in_editor(
+    s: &Shell,
+    machine: Option<String>,
+    path: String,
+    cx: &mut Context<Shell>,
+) {
+    let client = s.client.clone();
+    let task = cx.background_executor().spawn(async move {
+        crate::editor_command::open(&client, machine.as_deref(), &path)
+    });
+    cx.spawn(async move |_, cx| {
+        if let Err(error) = task.await {
+            let _ = cx.update(|cx| {
+                crate::shell::toasts::show(
+                    crate::shell::toasts::Kind::Error { detail: "".into() },
+                    error,
+                    vec![],
+                    Some(crate::shell::toasts::ERROR_TIMEOUT),
+                    cx,
+                );
             });
-            cx.spawn(async move |_, cx| {
-                if let Err(error) = task.await {
-                    let _ = cx.update(|cx| {
-                        crate::shell::toasts::show(
-                            crate::shell::toasts::Kind::Error { detail: "".into() },
-                            error,
-                            vec![],
-                            Some(crate::shell::toasts::ERROR_TIMEOUT),
-                            cx,
-                        );
-                    });
-                }
-            })
-            .detach();
-        })),
-    )
+        }
+    })
+    .detach();
 }
 
 fn thread_worktree_badge(s: &Shell, tab: &Tab) -> Option<gpui::Stateful<gpui::Div>> {

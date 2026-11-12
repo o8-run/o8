@@ -432,7 +432,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
       return { state: fanOutComparisonPackets(registryBefore), result: beforeDispatch };
     });
     const { result, state: finalState } = await withMissionRegistryState(requestedMissionId, async (durableReady) => {
-      const afterDispatch = await runDispatchTick(durableReady, { launchBudget: buildRemainingLaunchBudget() });
+      const afterDispatch = await runDispatchTick(durableReady, { launchBudget: buildRemainingLaunchBudget(), force: input.force });
       return { state: afterDispatch, result: summarizeDispatchMission(beforeDispatch, afterDispatch) };
     });
     const packetIds = new Set(finalState.packets.map((packet) => packet.id));
@@ -462,7 +462,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
     // Workers can register managed runs as soon as their process starts. Publish
     // explicit re-arming before launch, including when comparison fan-out is a no-op.
     writeOrchestratorControlPlaneState(dispatchReady);
-    const afterDispatch = await runDispatchTick(dispatchReady, { launchBudget: buildRemainingLaunchBudget() });
+    const afterDispatch = await runDispatchTick(dispatchReady, { launchBudget: buildRemainingLaunchBudget(), force: input.force });
     // #1293 — make withLockedState's end-of-lock reconcile+write use the
     // post-dispatch state, not the unmutated pre-callback `current`. Without this
     // a best-of-N seed survives the dispatch (its candidate lanes don't map back

@@ -1,7 +1,7 @@
 //! Native counterparts of src/app/globals.css. Keep appearance selection here;
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
 use std::sync::{LazyLock, Mutex, RwLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -373,6 +373,117 @@ fn glass_path() -> Option<std::path::PathBuf> {
 /// Whether All Glass sits on a plain blur instead of the system material.
 pub fn glass_vivid() -> bool {
     glass() && glass_settings().vivid
+}
+/// The interface zoom range and step, in percent. 100 is the designed size.
+pub const ZOOM_MIN: u16 = 70;
+pub const ZOOM_MAX: u16 = 200;
+pub const ZOOM_STEP: u16 = 10;
+pub const ZOOM_DEFAULT: u16 = 100;
+/// The zoom level backed by its file. Every o8 next process (the shell and
+/// its terminal, diff and grid windows) keeps one store on the same file, so
+/// a step re-reads it first and `reload` picks up a change made elsewhere.
+pub struct ZoomStore {
+    path: Option<std::path::PathBuf>,
+    percent: AtomicU16,
+}
+impl ZoomStore {
+    pub fn new(path: Option<std::path::PathBuf>) -> Self {
+        let store = Self {
+            path,
+            percent: AtomicU16::new(ZOOM_DEFAULT),
+        };
+        store.reload();
+        store
+    }
+    pub fn percent(&self) -> u16 {
+        self.percent.load(Ordering::Relaxed)
+    }
+    /// Reads the file again; a missing or unreadable file keeps the level.
+    pub fn reload(&self) {
+        if let Some(percent) = self
+            .path
+            .as_ref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| parse_zoom(&text))
+        {
+            self.percent.store(percent, Ordering::Relaxed);
+        }
+    }
+    /// Sets the level (clamped) and saves it. True when it changed.
+    pub fn set(&self, percent: u16) -> bool {
+        let percent = clamp_zoom(percent);
+        if let Some(path) = &self.path {
+            let _ = write_replacing(path, &percent.to_string());
+        }
+        self.percent.swap(percent, Ordering::Relaxed) != percent
+    }
+    /// Steps from the saved level, not this process's last one.
+    pub fn step(&self, steps: i32) -> u16 {
+        self.reload();
+        let percent = step_zoom(self.percent(), steps);
+        self.set(percent);
+        percent
+    }
+}
+#[cfg(not(test))]
+static ZOOM: LazyLock<ZoomStore> = LazyLock::new(|| ZoomStore::new(zoom_path()));
+// Tests run in parallel threads; each test's windows read its own zoom.
+#[cfg(test)]
+thread_local! {
+    static ZOOM: ZoomStore = ZoomStore::new(None);
+}
+/// The process's zoom store.
+pub fn with_zoom<R>(f: impl FnOnce(&ZoomStore) -> R) -> R {
+    #[cfg(not(test))]
+    return f(&ZOOM);
+    #[cfg(test)]
+    return ZOOM.with(f);
+}
+/// A saved zoom, clamped to the range and rounded to a step; None when it is
+/// not a number.
+pub fn parse_zoom(text: &str) -> Option<u16> {
+    let percent = text.trim().parse::<f32>().ok().filter(|p| p.is_finite())?;
+    let steps = (percent / f32::from(ZOOM_STEP)).round();
+    Some(clamp_zoom((steps.max(0.) as u16).saturating_mul(ZOOM_STEP)))
+}
+fn clamp_zoom(percent: u16) -> u16 {
+    percent.clamp(ZOOM_MIN, ZOOM_MAX)
+}
+/// The zoom one step in or out of `percent` (`steps` may be negative),
+/// kept in range.
+pub fn step_zoom(percent: u16, steps: i32) -> u16 {
+    let next = i32::from(percent) + steps * i32::from(ZOOM_STEP);
+    clamp_zoom(next.clamp(0, i32::from(u16::MAX)) as u16)
+}
+/// The interface zoom in percent.
+pub fn zoom_percent() -> u16 {
+    with_zoom(ZoomStore::percent)
+}
+/// The interface zoom as a scale, 1.0 at 100%.
+pub fn zoom() -> f32 {
+    f32::from(zoom_percent()) / 100.
+}
+/// Sets the interface zoom (clamped) and saves it. True when it changed.
+pub fn set_zoom_percent(percent: u16) -> bool {
+    with_zoom(|store| store.set(percent))
+}
+fn zoom_path() -> Option<std::path::PathBuf> {
+    preference_path("next-zoom")
+}
+/// Writes a small preference file whole: a temporary file in the same
+/// directory renamed over it, so a reader in another process never sees it
+/// empty or half written.
+pub fn write_replacing(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, text)?;
+    std::fs::rename(&temporary, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temporary);
+    })
+}
+/// A small preference file beside the appearance file; None under test.
+pub fn preference_path(name: &str) -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name(name))
 }
 /// Changes with the appearance, for caches that keep painted colors.
 pub fn generation() -> u8 {

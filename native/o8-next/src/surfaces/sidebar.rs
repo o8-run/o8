@@ -11,6 +11,10 @@ pub(crate) use thread_list::recents::calendar::{
 };
 /// A repository's icon override or monogram, for the Projects page.
 pub(crate) use thread_list::repo_identity;
+/// Tabular figures, for an empty thread's overview counts.
+pub(crate) use thread_list::inbox_card::tabular;
+/// A thread waiting on the user, so the overview agrees with the Inbox.
+pub(crate) use thread_list::needs_input;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
 #[path = "sidebar/thread_mutations_client.rs"]
@@ -366,16 +370,17 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         shell.state.sidebar_closed_folders.clone(),
     );
     let snoozes = shell.state.sidebar_snoozes.clone();
-    let (detailed, working, inbox_working) = (
+    let (detailed, working, inbox_working, working_open) = (
         shell.state.sidebar_detailed_rows,
-        shell.state.sidebar_working_section,
+        !shell.state.sidebar_working_off,
         !shell.state.sidebar_inbox_working_off,
+        shell.state.sidebar_working_open,
     );
     sidebar.update(cx, |sidebar, _| {
         sidebar.restore_scopes(scopes);
         sidebar.restore_views(&views, &closed);
         sidebar.restore_snoozes(&snoozes);
-        sidebar.restore_row_mode(detailed, working, inbox_working);
+        sidebar.restore_row_mode(detailed, working, inbox_working, working_open);
     });
     shell.subscriptions.push(
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
@@ -436,14 +441,16 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     shell.state.sidebar_closed_folders = closed.iter().cloned().collect();
                     shell.persist();
                 }
-                ThreadEvent::RowMode(detailed, working, inbox_working) => {
+                ThreadEvent::RowMode(detailed, working, inbox_working, working_open) => {
                     shell.state.sidebar_detailed_rows = *detailed;
-                    shell.state.sidebar_working_section = *working;
+                    shell.state.sidebar_working_off = !*working;
+                    shell.state.sidebar_working_open = *working_open;
                     shell.state.sidebar_inbox_working_off = !*inbox_working;
                     shell.persist();
                 }
                 ThreadEvent::Snoozes(snoozes) => {
                     shell.state.sidebar_snoozes = snoozes.iter().cloned().collect();
+                    shell.share_overview(cx);
                     shell.persist();
                 }
                 ThreadEvent::Error(error) => {
@@ -538,11 +545,24 @@ impl Shell {
             self.notice.clear();
         }
         for content in self.content.values() {
-            if let Content::Grid(grid) = content {
-                grid.update(cx, |g, cx| g.load(cx));
+            match content {
+                Content::Grid(grid) => grid.update(cx, |g, cx| g.load(cx)),
+                _ => {}
             }
         }
+        self.share_overview(cx);
         self.persist();
+    }
+    /// An empty thread's overview lists threads from every project, less the
+    /// ones snoozed in the sidebar.
+    fn share_overview(&self, cx: &mut Context<Self>) {
+        for content in self.content.values() {
+            if let Content::Session(surface) = content {
+                surface.update(cx, |s, cx| {
+                    s.shell_overview(&self.sessions, &self.state.sidebar_snoozes, cx)
+                });
+            }
+        }
     }
     /// Starts a thread on the operator's lead in the open repository, as the
     /// sidebar's New thread does, opening it in the main pane when `open`;

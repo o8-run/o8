@@ -8,6 +8,8 @@ import { join } from 'node:path';
 const shell = 'native/o8-next/src/shell.rs';
 const checker = 'scripts/next/check-surface-boundary.mjs';
 const workflow = '.github/workflows/next-surface-boundary.yml';
+const vendor = 'native/o8-next/vendor/gpui/';
+const patchLog = `${vendor}O8-PATCHES.md`;
 const isScoped = path => path.startsWith('native/o8-next/') || path.startsWith('scripts/next/') || path === workflow;
 // These two existing fixtures belong to the already-reviewed pull-request port.
 // Everything else outside a surface module is shared unless listed here.
@@ -93,6 +95,15 @@ function main() {
     const [added, deleted, ...path] = record.split('\t');
     return { path: path.join('\t'), added: Number(added), deleted: Number(deleted) };
   });
+  // An edit to the vendored toolkit is listed in its patch log in the same
+  // pull request; an unlisted one is found again only at the next toolkit
+  // upgrade. No label lifts this.
+  const vendored = stats.map(({ path }) => path).filter(path => path.startsWith(vendor) && path !== patchLog);
+  if (vendored.length && !stats.some(({ path }) => path === patchLog)) {
+    const named = vendored.slice(0, 3).map(path => path.replace(/[\r\n]/g, char => JSON.stringify(char).slice(1, -1))).join(', ');
+    const more = vendored.length > 3 ? ` and ${vendored.length - 3} more` : '';
+    throw new Error(`vendored toolkit changed without its patch log: ${named}${more}; add the edit to ${patchLog} with the reason it cannot live in application code`);
+  }
   const relevant = stats.some(({ path }) => isScoped(path));
   const eventPath = args.includes('--event') ? value('--event') : process.env.GITHUB_EVENT_PATH;
   const event = eventPath ? JSON.parse(readFileSync(eventPath, 'utf8')) : {};

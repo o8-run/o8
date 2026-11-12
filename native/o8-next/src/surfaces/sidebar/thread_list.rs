@@ -42,7 +42,9 @@ pub enum Event {
     Snoozes(Vec<(String, u64)>),
     /// Detailed rows, and whether running threads fold into a Working section.
     /// Detailed rows, the Working section, and the Inbox's Working shelf.
-    RowMode(bool, bool, bool),
+    /// Detailed rows, the Working drawer, the Inbox's Working shelf, and
+    /// whether the drawer is open.
+    RowMode(bool, bool, bool, bool),
     /// The project menu's Switch workspace, with the focus to give back.
     WorkspacePicker(Option<gpui::FocusHandle>),
 }
@@ -154,6 +156,8 @@ pub struct ThreadList {
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
     pub scroll: UniformListScrollHandle,
+    /// The Working drawer's own virtual list.
+    pub(super) drawer_scroll: UniformListScrollHandle,
     /// Detailed mode's variable-height list (threads 66px, headings 28px).
     pub detailed_list: gpui::ListState,
     focus: FocusHandle,
@@ -166,7 +170,8 @@ pub struct ThreadList {
     pub(super) branch_names: HashMap<String, String>,
     /// Detailed three-line rows (T3 Code's), opt-in; compact otherwise.
     pub(super) detailed: bool,
-    /// Running threads fold into a Working section; `working_closed` collapses it.
+    /// Running threads leave the list for the Working drawer at its foot
+    /// (on by default); `working_closed` folds the drawer to one row.
     pub(super) working_section: bool,
     /// The Inbox folds running threads into its Working shelf.
     pub(super) inbox_working: bool,
@@ -182,6 +187,19 @@ pub struct ThreadList {
     /// Threads that stopped working inside the grace and still read as working.
     pub(super) lingering: HashSet<String>,
     pub(super) working_closed: bool,
+    /// The drawer's open or close animation: when it started, and whether it opens.
+    pub(super) drawer_motion: Option<(std::time::Instant, bool)>,
+    /// The drawer header's place in `rows` and the drawer's threads with
+    /// their run start (Unix seconds), set once per rebuild so painting
+    /// never scans the rows or the sessions.
+    pub(super) drawer_index: Option<usize>,
+    pub(super) drawer_threads: HashMap<String, Option<u64>>,
+    /// A thread in the drawer has unread news, for the closed header's dot.
+    pub(super) drawer_unread: bool,
+    /// Full scans of the rows or sessions made for the drawer, so a test
+    /// can prove painting makes none.
+    #[cfg(test)]
+    pub(crate) drawer_scans: Cell<usize>,
     /// A one-second repaint is queued for the Working timers.
     pub(super) second_tick: bool,
     archived_open: bool,
@@ -205,6 +223,9 @@ pub struct ThreadList {
     loading: bool,
     saving: bool,
     pending_archives: HashMap<String, String>,
+    /// Archives and restores in flight, any thread kind: true archives.
+    /// Cleared, with a rebuild, when the request succeeds or fails.
+    pub(super) archiving: HashMap<String, bool>,
     pending_workspace_restores: HashMap<String, String>,
     dirty: Option<Instant>,
     /// The next dirty reload skips the stream gap: the user just changed the list.
@@ -224,6 +245,8 @@ pub struct ThreadList {
     /// below a shelf that ends the list can drop last.
     pub(super) pin_bounds: HashMap<String, gpui::Bounds<gpui::Pixels>>,
     pub painted: Rc<Cell<usize>>,
+    /// The last drawer row painted, a probe as `painted` is for the list.
+    pub drawer_painted: Rc<Cell<usize>>,
     pub materialized: Rc<Cell<usize>>,
     /// When the column last opened; rows fade in top-down from here.
     reveal: Option<std::time::Instant>,
@@ -293,6 +316,7 @@ impl ThreadList {
             rows: Rc::new(vec![]),
             selected: None,
             scroll: UniformListScrollHandle::new(),
+            drawer_scroll: UniformListScrollHandle::new(),
             detailed_list: gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(200.)),
             focus: cx.focus_handle(),
             archived_focus: cx.focus_handle().tab_stop(true),
@@ -302,7 +326,7 @@ impl ThreadList {
             branch_ids: HashSet::new(),
             branch_names: HashMap::new(),
             detailed: false,
-            working_section: false,
+            working_section: true,
             inbox_working: true,
             snooze_custom: None,
             placed: None,
@@ -311,7 +335,13 @@ impl ThreadList {
             working_seen: HashMap::new(),
             lingering: HashSet::new(),
             second_tick: false,
-            working_closed: false,
+            working_closed: true,
+            drawer_motion: None,
+            drawer_index: None,
+            drawer_threads: HashMap::new(),
+            drawer_unread: false,
+            #[cfg(test)]
+            drawer_scans: Cell::new(0),
             archived_open: false,
             #[cfg(test)]
             title_layouts: HashMap::new(),
@@ -331,6 +361,7 @@ impl ThreadList {
             loading: false,
             saving: false,
             pending_archives: HashMap::new(),
+            archiving: HashMap::new(),
             pending_workspace_restores: HashMap::new(),
             dirty: None,
             urgent: false,
@@ -345,6 +376,7 @@ impl ThreadList {
             pin_drop: None,
             pin_bounds: HashMap::new(),
             painted: Rc::new(Cell::new(usize::MAX)),
+            drawer_painted: Rc::new(Cell::new(usize::MAX)),
             materialized: Rc::new(Cell::new(0)),
             reveal: None,
         }
@@ -361,10 +393,13 @@ impl ThreadList {
             .rows
             .iter()
             .position(|r| r.id.is_some() && r.id == self.choice);
+        let pinned = pins::pinned_order(&self.sessions);
+        // A thread in the Working drawer does not unfold the group it left.
         if let Some(session) = self
             .sessions
             .iter()
             .find(|s| self.selected.as_ref() == Some(&s.id))
+            .filter(|s| !self.drawer_run(s, &pinned))
         {
             // A folded Inbox shelf still lists the open thread (T3 Code's
             // routeThreadOnly), so the open thread never unfolds its shelf
@@ -374,21 +409,42 @@ impl ThreadList {
                 self.expanded.insert(key);
             }
         }
-        let sessions = self.scoped_sessions();
-        let mut rows = self.view_rows(&sessions);
+        let mut sessions = self.scoped_sessions();
+        let runs = self.drawer_runs(&mut sessions);
+        let (mut rows, mut drawer) = self.view_rows(&sessions, runs);
         // An incoming message can push the keyboard choice past Show more.
         // Disclosure must follow that thread's identity before choosing a fallback.
-        if self.query.trim().is_empty()
-            && !rows.iter().any(|r| r.id.is_some() && r.id == self.choice)
-            && let Some(session) = self
-                .sessions
+        let hidden = (self.query.trim().is_empty()
+            && !rows.iter().any(|r| r.id.is_some() && r.id == self.choice))
+        .then(|| {
+            self.sessions
                 .iter()
                 .find(|s| self.choice.as_ref() == Some(&s.id))
-        {
-            self.expanded.insert(self.reveal_key(session));
-            rows = self.view_rows(&sessions);
+                .map(|s| (self.reveal_key(s), self.drawer_run(s, &pinned)))
+        })
+        .flatten();
+        match hidden {
+            // A choice that ran into the closed drawer moves to the nearest
+            // list row, as when the drawer closes; its group stays folded.
+            Some((_, true)) => {
+                let near = previous_choice.unwrap_or(0).min(rows.len());
+                self.choice = rows[..near]
+                    .iter()
+                    .rev()
+                    .chain(rows[near..].iter())
+                    .find_map(|r| r.id.clone());
+            }
+            Some((key, false)) => {
+                self.expanded.insert(key);
+                (rows, drawer) = self.view_rows(&sessions, runs);
+            }
+            None => {}
         }
         self.note_arrivals(&rows);
+        self.drawer_index = self.find_drawer(&rows);
+        self.drawer_unread = !drawer.is_empty()
+            && self.sessions.iter().any(|s| s.unread && drawer.contains_key(&s.id));
+        self.drawer_threads = drawer;
         self.rows = Rc::new(rows);
         // Remeasure detailed rows; keep the reader's place.
         let top = self.detailed_list.logical_scroll_top();
@@ -422,10 +478,11 @@ impl ThreadList {
     pub(super) fn cards(&self) -> bool {
         self.detailed || self.view() == folders::View::Inbox
     }
-    /// Where the Inbox's foot shelves start; the scrolling list ends there.
+    /// Where the foot starts (the Inbox's shelves, else the Working
+    /// drawer); the scrolling list ends there.
     pub(super) fn top_len(&self) -> usize {
         if self.view() != folders::View::Inbox {
-            return self.rows.len();
+            return self.drawer_index.unwrap_or(self.rows.len());
         }
         self.rows
             .iter()
@@ -456,8 +513,17 @@ impl ThreadList {
             group.into()
         }
     }
-    fn view_rows(&self, sessions: &[Session]) -> Vec<Row> {
-        let mut rows = self.view_rows_base(sessions);
+    /// The view's rows. The last `runs` sessions are bound for the Working
+    /// drawer (drawer_runs): they take no place under a group's cap and come
+    /// back after the list for nesting and the fold.
+    /// Also returns the drawer's threads with their run start, open or not.
+    fn view_rows(
+        &self,
+        sessions: &[Session],
+        runs: usize,
+    ) -> (Vec<Row>, HashMap<String, Option<u64>>) {
+        let (listed, running) = sessions.split_at(sessions.len() - runs);
+        let mut rows = self.view_rows_base(listed);
         detailed::mark_dev_working(&mut rows);
         rows = pins::fold_pinned(rows, &pins::pinned_order(sessions));
         if !self.archived_open
@@ -469,8 +535,17 @@ impl ThreadList {
             // Hidden archived parents cannot take active children off this page.
             rows.truncate(index + 1);
         }
+        let now = recents::now();
+        // Newest first, as the groups sort.
+        let running = recents::visible(running, "", &HashSet::new());
+        rows.extend(running.into_iter().map(|s| {
+            let mut row = recents::thread_row(s, now, &self.branch_ids);
+            row.marker = detailed::DRAWER_RUN;
+            row
+        }));
         rows = self.nest_rows(rows, sessions);
-        if self.working_section && self.view() != folders::View::Inbox {
+        let mut drawer = HashMap::new();
+        if self.drawer_on() {
             // The Pinned shelf stays first and keeps its running threads.
             let shelf = if rows.first().is_some_and(|r| r.status == "pinned") {
                 1 + rows[1..].iter().take_while(|r| r.kind == "thread").count()
@@ -478,9 +553,36 @@ impl ThreadList {
                 0
             };
             let rest = rows.split_off(shelf);
-            rows.extend(detailed::fold_working(rest, self.working_closed));
+            let asks: HashSet<&str> = sessions
+                .iter()
+                .filter(|s| inbox::needs_input(s))
+                .map(|s| s.id.as_str())
+                .collect();
+            // A run that asks for input, or whose archive is in flight, stays
+            // put. Folded open, so the drawer's threads are known while closed.
+            let stays = |id: &str| asks.contains(id) || self.archiving.contains_key(id);
+            rows.extend(detailed::fold_working(rest, true, stays));
+            if let Some(at) = rows.iter().position(|r| r.kind == "drawer") {
+                let by_id: HashMap<&str, &Session> =
+                    sessions.iter().map(|s| (s.id.as_str(), s)).collect();
+                drawer = rows[at + 1..]
+                    .iter()
+                    .filter_map(|r| r.id.clone())
+                    .map(|id| {
+                        let start = by_id
+                            .get(id.as_str())
+                            .and_then(|s| s.run_started_at.as_deref())
+                            .and_then(recents::timestamp);
+                        (id, start)
+                    })
+                    .collect();
+                if !self.drawer_rows_shown() {
+                    rows.truncate(at + 1);
+                    rows[at].status.clear();
+                }
+            }
         }
-        rows
+        (rows, drawer)
     }
     fn view_rows_base(&self, sessions: &[Session]) -> Vec<Row> {
         let (query, matches) = (&self.query, &self.search_matches);
@@ -1063,6 +1165,9 @@ impl ThreadList {
             return;
         };
         let archived = session.status == "archived";
+        // In flight until the request answers, either way (archive_done).
+        self.archiving.insert(id.clone(), !archived);
+        self.rebuild();
         if id.contains(':') {
             let mutation = self
                 .pending_archives
@@ -1103,6 +1208,7 @@ impl ThreadList {
         let draft_owner = self.rename.clone();
         let renaming = draft_owner.as_ref() == Some(&id) && patch["title"].is_string();
         let (client, thread) = self.owner(&id);
+        let done_id = id.clone();
         let workspace = self
             .sessions
             .iter()
@@ -1125,6 +1231,7 @@ impl ThreadList {
                 let current_draft = this.edit_generation == edit_generation
                     && this.editor.read(cx).revision == editor_revision
                     && this.rename == draft_owner;
+                this.archive_done(&done_id, result.is_ok());
                 match result {
                     Ok(()) => {
                         if let Some(message) = archive_notice {
@@ -1215,6 +1322,7 @@ impl ThreadList {
                     self.expanded.insert(more.status.clone());
                     self.rebuild();
                 }
+                self.drawer_key(key, cx);
                 let ids: Vec<_> = self
                     .rows
                     .iter()
@@ -1288,8 +1396,10 @@ mod archive_controls;
 
 #[path = "inbox.rs"]
 mod inbox;
+/// A thread waiting on the user, for an empty thread's overview.
+pub(crate) use inbox::needs_input;
 #[path = "inbox_card.rs"]
-mod inbox_card;
+pub(crate) mod inbox_card;
 #[path = "auto_settle_toggle.rs"]
 mod auto_settle_toggle;
 #[path = "snooze.rs"]
@@ -1306,16 +1416,26 @@ mod thread_hover;
 pub(crate) mod detailed;
 #[path = "pins.rs"]
 pub(crate) mod pins;
+#[path = "drawer.rs"]
+mod drawer;
+#[cfg(test)]
+#[path = "drawer_tests.rs"]
+mod drawer_tests;
 #[path = "status_mark.rs"]
 pub(crate) mod status_mark;
 
 impl ThreadList {
     /// Scroll either list to a row; detailed mode reveals it in its list.
     pub(crate) fn scroll_row(&self, index: usize, strategy: ScrollStrategy, strict: bool) {
-        if strict {
-            self.scroll.scroll_to_item_strict(index, strategy);
-        } else {
-            self.scroll.scroll_to_item(index, strategy);
+        // A foot row sits below the scrolling list; the drawer scrolls its own.
+        if index < self.top_len() {
+            if strict {
+                self.scroll.scroll_to_item_strict(index, strategy);
+            } else {
+                self.scroll.scroll_to_item(index, strategy);
+            }
+        } else if let Some(at) = self.drawer_at().filter(|at| index > *at) {
+            self.drawer_scroll.scroll_to_item(index - at - 1, strategy);
         }
         // A shelf row sits below the scrolling list, always in view.
         if self.cards() && index < self.top_len() {

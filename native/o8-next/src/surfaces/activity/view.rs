@@ -98,7 +98,10 @@ impl ActivityPane {
     /// Recurring problems and Proposed directives behind one summary row, so
     /// the feed comes first. The row keeps its height while they load; a click
     /// opens both sections in a bounded area above the feed.
-    fn attention(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn attention(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> (gpui::AnyElement, Option<gpui::AnyElement>) {
         let scope = self.scope.clone();
         let problems = self
             .decisions
@@ -207,23 +210,27 @@ impl ActivityPane {
             .flex()
             .flex_col()
             .child(row);
-        if open {
+        // The open sections sit at the top of the feed and scroll with it. A
+        // bounded box of their own cut rows off mid-height and nested a
+        // second scroll inside the first.
+        let body = open.then(|| {
             let mut body = div()
-                .id("activity-attention-body")
                 .debug_selector(|| "activity-attention-body".into())
-                .max_h(px(280.))
-                .overflow_y_scroll()
+                .flex_shrink_0()
                 .flex()
-                .flex_col();
+                .flex_col()
+                .pb(px(4.))
+                .border_b_1()
+                .border_color(theme().border);
             if let Some(dossiers) = self.dossiers(cx) {
                 body = body.child(dossiers);
             }
             if let Some(proposals) = self.proposal_drawer(cx) {
                 body = body.child(proposals);
             }
-            section = section.child(body);
-        }
-        section.into_any_element()
+            body.into_any_element()
+        });
+        (section.into_any_element(), body)
     }
     /// O8ActivityMissionControls' compact button: 24px, hairline, 10px medium.
     fn compact(
@@ -1226,17 +1233,28 @@ impl Render for ActivityPane {
             .is_some_and(|s| !s.trim().is_empty())
         {
             let pending = self.pending;
+            let asking = self.stop_armed.is_some();
+            let stop = self.compact(
+                "activity-stop-mission",
+                if asking { "Stop every packet?" } else { "Stop mission" },
+                Action::StopMission,
+                pending,
+                cx,
+            );
+            let stop = if asking {
+                stop.text_color(tint(marks::DELETE, 1.))
+                    .border_color(tint(marks::DELETE, 0.5))
+            } else {
+                stop
+            };
             top = top.child(
-                self.compact(
-                    "activity-stop-mission",
-                    "Stop mission",
-                    Action::StopMission,
-                    pending,
-                    cx,
-                )
-                .tooltip(|_, cx| {
-                    cx.new(|_| icon::Tip("Stop and hold every packet in this mission".into()))
-                        .into()
+                stop.tooltip(move |_, cx| {
+                    let tip = if asking {
+                        "Press again to stop and hold every packet"
+                    } else {
+                        "Stop and hold every packet in this mission"
+                    };
+                    cx.new(|_| icon::Tip(tip.into())).into()
                 }),
             );
         }
@@ -1308,7 +1326,7 @@ impl Render for ActivityPane {
                     }),
             );
         }
-        let attention = self.attention(cx);
+        let (attention, attention_body) = self.attention(cx);
         let header = div()
             .flex()
             .flex_col()
@@ -1338,7 +1356,8 @@ impl Render for ActivityPane {
             .min_h_0()
             .overflow_y_scroll()
             .flex()
-            .flex_col();
+            .flex_col()
+            .children(attention_body);
         let status = || {
             div()
                 .flex()
@@ -1403,7 +1422,9 @@ impl Render for ActivityPane {
                 .line_height(relative(1.45))
                 .text_color(theme().text_faint)
         };
-        if self.loading {
+        // A refresh of a feed that has rows is quiet: the line says there is
+        // nothing to show yet, not that a request is in flight.
+        if self.loading && rows.is_empty() {
             list = list.child(
                 quiet()
                     .debug_selector(|| "activity-loading".into())
@@ -1477,12 +1498,6 @@ impl Render for ActivityPane {
             };
             // Classic's `nowrap` folds a commit body onto the subject's line.
             let title = row.title.split_whitespace().collect::<Vec<_>>().join(" ");
-            let title = match row.kind {
-                "commit" if !row.id.is_empty() => {
-                    format!("{title} · {}", row.id.get(..7).unwrap_or(&row.id))
-                }
-                _ => title,
-            };
             let destination = row.clone();
             let summary = self
                 .control(row.selector(), Action::Expand(row.clone()), cx)

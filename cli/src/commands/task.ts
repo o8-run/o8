@@ -248,15 +248,27 @@ function printHumanMutation(result: TaskMutation): void {
 
 async function runTaskMutation(
   mode: OutputMode,
-  action: TaskMutation['action'],
+  action: Exclude<TaskMutation['action'], 'create'>,
   rest: string[],
   body: Record<string, unknown>,
 ): Promise<number> {
   const id = taskIdFromRest(rest, action);
   const cfg = resolveConfig();
+  // Each verb has its own route, so name it explicitly instead of building the path from
+  // the action: route inventories and the native transport see exactly which routes the CLI uses.
+  const task = encodeURIComponent(id);
+  const paths: Record<typeof action, string> = {
+    claim: `/api/tasks/${task}/claim`,
+    dispatch: `/api/tasks/${task}/dispatch`,
+    block: `/api/tasks/${task}/block`,
+    report: `/api/tasks/${task}/report`,
+    archive: `/api/tasks/${task}/archive`,
+    prune: `/api/tasks/${task}/prune`,
+  };
+  const path = paths[action];
   const res = await apiFetch<TaskMutation>(
     cfg,
-    `/api/tasks/${encodeURIComponent(id)}/${action}`,
+    path,
     { method: 'POST', body },
   );
   if (!res.data) {
