@@ -816,7 +816,7 @@ fn leaf(
         // as classic's header tabs do.
         .on_drag_move(cx.listener(
             move |s, event: &DragMoveEvent<super::header_tabs::Dragged>, _, cx| {
-                if thread_tab(s, event.drag(cx).index, cx).is_some() {
+                if thread_tab(s, event.drag(cx), cx).is_some() {
                     track(s, &over, event.event.position, event.bounds, cx)
                 }
             },
@@ -839,7 +839,7 @@ fn leaf(
             let dropped = id.to_owned();
             cx.listener(move |s, tab: &super::header_tabs::Dragged, window, cx| {
                 let zone = s.features.get::<State>().hover.take();
-                let Some(thread) = thread_tab(s, tab.index, cx) else {
+                let Some(thread) = thread_tab(s, tab, cx) else {
                     return;
                 };
                 let zone = zone
@@ -918,11 +918,13 @@ fn shown(s: &Shell, tab: &Tab, cx: &gpui::App) -> Option<String> {
     }
 }
 
-/// The conversation behind header tab `index`, when it is a chat the main
+/// The conversation behind the dragged header tab, when it is a chat the main
 /// pane isn't showing.
-fn thread_tab(s: &Shell, index: usize, cx: &gpui::App) -> Option<super::RailPane> {
-    let tab = s.current()?.tabs.get(index)?.clone();
-    let id = shown(s, &tab, cx)?;
+fn thread_tab(s: &Shell, drag: &super::header_tabs::Dragged, cx: &gpui::App) -> Option<super::RailPane> {
+    if drag.scope != s.state.selected || !s.current()?.tabs.contains(&drag.tab) {
+        return None;
+    }
+    let id = shown(s, &drag.tab, cx)?;
     if main_thread(s, cx).as_ref() == Some(&id) {
         return None;
     }
