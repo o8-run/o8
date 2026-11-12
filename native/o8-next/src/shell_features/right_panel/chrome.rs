@@ -294,8 +294,10 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
         return div().into_any_element();
     };
     let selected = p.selected;
+    // Glass has no fill to fade into: a veil-coloured strip over the veiled
+    // backdrop paints a darker block, plainest on the Vivid backdrop.
     let fade = if s.system_glass {
-        crate::theme::veil(crate::theme::GLASS_VEIL[0].1)
+        crate::theme::CLEAR
     } else {
         theme().background
     };

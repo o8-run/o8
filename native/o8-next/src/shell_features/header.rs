@@ -437,8 +437,10 @@ pub(super) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
 /// are quiet labels that fill on hover. Each pill leads with its kind's glyph,
 /// which turns into a close mark while the pill is hovered.
 fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
+    // Glass has no fill to fade into: a veil-coloured strip over the veiled
+    // backdrop paints a darker block, plainest on the Vivid backdrop.
     let fade = if s.system_glass {
-        crate::theme::veil(crate::theme::GLASS_VEIL[0].1)
+        crate::theme::CLEAR
     } else {
         theme().background
     };
