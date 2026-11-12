@@ -743,14 +743,12 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
     }
     let turn = turn(s, cx);
     let panes = panes(s, &turn);
-    // Open in editor trails the tabs: an action, not a pane.
-    let editor = super::header::editor_target(s);
-    if panes.is_empty() && editor.is_none() {
+    if panes.is_empty() {
         return None;
     }
+    // Open in editor trails the tabs: an action, not a pane.
+    let editor = super::header::editor_target(s);
     let (open, opening) = dock.card.value();
-    // With no pane to show, the dock stays a toolbar.
-    let open = if panes.is_empty() { 0. } else { open };
     let (swap, swapping) = dock.swap.value();
     let live_tasks = turn.tasks.iter().any(|task| task.3.is_none());
     let plan_running = turn.todos.iter().any(|(_, status)| status == "in_progress");
@@ -761,13 +759,13 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
     let pane = if panes.contains(&dock.pane) {
         dock.pane
     } else {
-        panes.first().copied().unwrap_or(dock.pane)
+        panes[0]
     };
-    // The editor button, and the hairline before it when tabs precede it.
-    let editor_w = match (&editor, panes.is_empty()) {
-        (None, _) => 0.,
-        (Some(_), true) => BUTTON_W + 4.,
-        (Some(_), false) => BUTTON_W + 4. + 1. + 4.,
+    // The editor button, and the hairline before it.
+    let editor_w = if editor.is_some() {
+        BUTTON_W + 4. + 1. + 4.
+    } else {
+        0.
     };
     let pill_w = panes.len() as f32 * (BUTTON_W + 4.) + 8. + editor_w;
     let target = pane_height(pane, &dock.data, &turn);
@@ -876,7 +874,7 @@ pub(super) fn element(s: &Shell, window: &Window, cx: &mut Context<Shell>) -> Op
                     select(this, each, window, cx);
                 }))
         }))
-        .when(editor.is_some() && !panes.is_empty(), |row| {
+        .when(editor.is_some(), |row| {
             row.child(div().w(px(1.)).h(px(16.)).bg(theme().border))
         })
         .when_some(editor, |row, (machine, path)| {

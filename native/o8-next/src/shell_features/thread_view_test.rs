@@ -203,9 +203,10 @@ fn thread_view_switches_to_the_resumed_cli_in_the_workspace_terminal_and_back(
     });
 
     // Back to chat: the same transcript view, and the shell stays attached.
-    // The command now offers the way back, and only that.
+    // The command now offers the way back, and only that. The palette's last
+    // query still filters its list until it opens again, so read every command.
     let labels = s.read_with(&v, |s, _| {
-        s.surface_commands()
+        crate::shell::features::commands(s)
             .iter()
             .map(|command| command.label(&s.sessions))
             .collect::<Vec<_>>()
