@@ -134,8 +134,7 @@ impl Host {
                         200,
                         json!({"sessionKey":"codex-owned:reviewer","transcript":[{"id":"prompt","role":"user","text":"Review the patch."},{"id":"legacy","role":"assistant","text":"Saved legacy answer"}]}),
                     )
-                } else {
-                    assert!(request.contains("/api/orchestrator/packet-transcript"));
+                } else if request.contains("/api/orchestrator/packet-transcript") {
                     let cursor = request
                         .split("cursor=")
                         .nth(1)
@@ -155,6 +154,10 @@ impl Host {
                         status,
                         json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":page.last().map(|e|e["seq"].clone()),"events":page}),
                     )
+                } else {
+                    // Host port discovery may probe this temporary listener.
+                    // Reject unrelated routes without interrupting readback.
+                    (404, json!({"error":"Not found"}))
                 };
                 let body = body.to_string();
                 let reason = if code == 200 { "OK" } else { "Refused" };
