@@ -307,55 +307,72 @@ fn chat_width_path() -> Option<std::path::PathBuf> {
 fn saved_chat_width() -> Option<String> {
     std::fs::read_to_string(chat_width_path()?).ok()
 }
-/// How much of the dark veil All Glass keeps: saved name, label and the share
-/// of each veil stop's alpha. Less veil lets more of the desktop's colour through.
-pub const GLASS_LEVELS: [(&str, &str, f32); 4] = [
-    ("deep", "Deep", 1.),
-    ("balanced", "Balanced", 0.6),
-    ("clear", "Clear", 0.3),
-    // A plain blur with no system tint, so the desktop keeps its colour.
-    ("vivid", "Vivid", 0.45),
-];
+/// All Glass as tuned in Settings: which backdrop sits behind the window and
+/// how much of the dark veil is painted over it.
+#[derive(Clone, Copy, PartialEq)]
+pub struct Glass {
+    /// A plain blur that keeps the desktop's colour, instead of the system
+    /// material, which darkens and desaturates it.
+    pub vivid: bool,
+    /// The share of each veil stop's alpha, 0 to 1. 1 is the designed veil.
+    pub veil: f32,
+}
+/// Starting points for the veil slider: label and veil share.
+pub const GLASS_PRESETS: [(&str, f32); 3] = [("Deep", 1.), ("Balanced", 0.6), ("Clear", 0.3)];
+const DEFAULT_GLASS: Glass = Glass {
+    vivid: false,
+    veil: 1.,
+};
+static GLASS: LazyLock<RwLock<Glass>> = LazyLock::new(|| {
+    RwLock::new(
+        glass_path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|saved| parse_glass(&saved))
+            .unwrap_or(DEFAULT_GLASS),
+    )
+});
+/// "vivid 0.6" or "frosted 1": the backdrop, then the veil share.
+fn parse_glass(saved: &str) -> Option<Glass> {
+    let mut parts = saved.split_whitespace();
+    let vivid = match parts.next()? {
+        "vivid" => true,
+        "frosted" => false,
+        _ => return None,
+    };
+    let veil = parts.next()?.parse::<f32>().ok().filter(|veil| veil.is_finite())?;
+    Some(Glass {
+        vivid,
+        veil: veil.clamp(0., 1.),
+    })
+}
+pub fn glass_settings() -> Glass {
+    *GLASS.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+/// Saves the tuned glass and repaints with it. True when the backdrop kind
+/// changed, so the caller applies the window material again.
+pub fn set_glass(next: Glass) -> bool {
+    let next = Glass {
+        veil: next.veil.clamp(0., 1.),
+        ..next
+    };
+    let mut glass = GLASS.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let backdrop = glass.vivid != next.vivid;
+    if *glass != next {
+        *glass = next;
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+        if let Some(path) = glass_path() {
+            let backdrop = if next.vivid { "vivid" } else { "frosted" };
+            let _ = std::fs::write(path, format!("{backdrop} {:.2}", next.veil));
+        }
+    }
+    backdrop
+}
+fn glass_path() -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name("next-glass"))
+}
 /// Whether All Glass sits on a plain blur instead of the system material.
 pub fn glass_vivid() -> bool {
-    glass() && glass_level_name() == "vivid"
-}
-static LAUNCH_GLASS_LEVEL: LazyLock<usize> = LazyLock::new(|| {
-    glass_level_path()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|name| glass_level_index(name.trim()))
-        .unwrap_or(0)
-});
-static CHOSEN_GLASS_LEVEL: AtomicU8 = AtomicU8::new(u8::MAX);
-fn glass_level_index(name: &str) -> Option<usize> {
-    GLASS_LEVELS.iter().position(|(id, _, _)| *id == name)
-}
-fn selected_glass_level() -> usize {
-    match CHOSEN_GLASS_LEVEL.load(Ordering::Relaxed) {
-        u8::MAX => *LAUNCH_GLASS_LEVEL,
-        index => index as usize,
-    }
-}
-pub fn glass_level_name() -> &'static str {
-    GLASS_LEVELS[selected_glass_level()].0
-}
-/// Switches the glass veil's strength and saves it. True when it changed.
-pub fn set_glass_level(name: &str) -> bool {
-    let Some(index) = glass_level_index(name) else {
-        return false;
-    };
-    if let Some(path) = glass_level_path() {
-        let _ = std::fs::write(path, name);
-    }
-    let changed = index != selected_glass_level();
-    CHOSEN_GLASS_LEVEL.store(index as u8, Ordering::Relaxed);
-    if changed {
-        GENERATION.fetch_add(1, Ordering::Relaxed);
-    }
-    changed
-}
-fn glass_level_path() -> Option<std::path::PathBuf> {
-    Some(saved_path()?.with_file_name("next-glass-level"))
+    glass() && glass_settings().vivid
 }
 /// Changes with the appearance, for caches that keep painted colors.
 pub fn generation() -> u8 {
@@ -930,7 +947,7 @@ pub fn veil_color(alpha: f32) -> Rgba {
 }
 /// The veil as painted: a stop's alpha at the chosen glass level.
 pub fn veil(alpha: f32) -> Rgba {
-    veil_color(alpha * GLASS_LEVELS[selected_glass_level()].2)
+    veil_color(alpha * glass_settings().veil)
 }
 
 // Locked chrome roles from docs/design/hurttlocker.md. GPUI's text API does

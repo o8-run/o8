@@ -482,10 +482,27 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Shell>,
     ) {
-        // Settings sends a glass clarity change the same way: the backdrop
-        // may change kind, so the material is applied again.
-        let changed = match mode.strip_prefix("glass-level:") {
-            Some(level) => crate::theme::set_glass_level(level),
+        // Settings tunes All Glass the same way. A new backdrop kind applies
+        // the material again; a veil change only repaints.
+        let glass = crate::theme::glass_settings();
+        let tuned = if let Some(kind) = mode.strip_prefix("glass-backdrop:") {
+            Some(crate::theme::Glass {
+                vivid: kind == "vivid",
+                ..glass
+            })
+        } else {
+            mode.strip_prefix("glass-veil:")
+                .and_then(|veil| veil.parse::<f32>().ok())
+                .map(|veil| crate::theme::Glass { veil, ..glass })
+        };
+        let changed = match tuned {
+            Some(tuned) => {
+                let backdrop = crate::theme::set_glass(tuned);
+                if !backdrop {
+                    window.refresh();
+                }
+                backdrop
+            }
             None => crate::theme::set_appearance(mode),
         };
         if changed {
