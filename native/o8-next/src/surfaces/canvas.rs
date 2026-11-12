@@ -83,12 +83,15 @@ pub(super) const REGISTRATION: Registration = Registration {
             .insert(project_key(s, &workspace), view.clone());
         Some(Content::Canvas(view))
     },
+    // Read the preference once; the canvas_mode toggle applies its own change.
+    // Only an open Canvas polls, so a change made elsewhere still closes it.
     initialize: |s, _, cx| refresh_setting(s, cx),
     tick: |s, _, cx| {
-        if s.surfaces
-            .canvas
-            .checked
-            .is_none_or(|t| t.elapsed() >= Duration::from_secs(2))
+        if matches!(s.active(), Some(Tab::Canvas))
+            && s.surfaces
+                .canvas
+                .checked
+                .is_none_or(|t| t.elapsed() >= Duration::from_secs(2))
         {
             refresh_setting(s, cx);
         }
@@ -99,6 +102,11 @@ pub(super) const REGISTRATION: Registration = Registration {
 };
 pub(super) fn enabled(s: &Shell) -> bool {
     s.surfaces.canvas.enabled
+}
+/// Whether the start-up preference read has answered.
+#[cfg(test)]
+pub(super) fn setting_read(s: &Shell) -> bool {
+    s.surfaces.canvas.checked.is_some() && !s.surfaces.canvas.loading
 }
 fn project_key(s: &Shell, workspace: &str) -> String {
     let project = match s.sidebar_project_id() {

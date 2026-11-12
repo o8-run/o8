@@ -14,8 +14,8 @@ use block::ConcreteBlock;
 use cocoa::{
     appkit::{
         NSAppKitVersionNumber, NSAppKitVersionNumber12_0, NSApplication, NSBackingStoreBuffered,
-        NSColor, NSEvent, NSEventModifierFlags, NSEventType, NSFilenamesPboardType, NSPasteboard,
-        NSScreen, NSView, NSViewHeightSizable, NSViewWidthSizable, NSVisualEffectMaterial,
+        NSColor, NSEvent, NSEventModifierFlags, NSEventType, NSFilenamesPboardType, NSPasteboard, NSScreen,
+        NSView, NSViewHeightSizable, NSViewWidthSizable, NSVisualEffectMaterial,
         NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowButton,
         NSWindowCollectionBehavior, NSWindowOcclusionState, NSWindowOrderingMode,
         NSWindowStyleMask, NSWindowTitleVisibility,

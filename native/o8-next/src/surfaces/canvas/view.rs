@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{client::Client, diff::Target, diff_ui::DiffSurface, theme::current as theme};
 use gpui::{prelude::*, *};
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 #[derive(Clone)]
 pub(super) struct Saved(pub Layout);
@@ -20,6 +20,7 @@ pub(crate) struct View {
     generation: u64,
     choosing: bool,
     notice: String,
+    save: Option<Task<()>>,
 }
 #[derive(Clone)]
 enum Drag {
@@ -49,6 +50,7 @@ impl View {
             generation: 0,
             choosing: false,
             notice: String::new(),
+            save: None,
         };
         view.load(cx);
         view
@@ -99,9 +101,33 @@ impl View {
         .detach();
     }
     fn changed(&mut self, cx: &mut Context<Self>) {
-        self.layout.camera = self.layout.camera.bounded();
+        self.moved(cx);
         cx.emit(Saved(self.layout.clone()));
+    }
+    /// Redraws without saving; a drag saves once on release.
+    fn moved(&mut self, cx: &mut Context<Self>) {
+        self.layout.camera = self.layout.camera.bounded();
         cx.notify();
+    }
+    /// Wheel and pinch input arrive as a stream, so they save once it pauses.
+    fn settle(&mut self, cx: &mut Context<Self>) {
+        self.moved(cx);
+        self.save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(300))
+                .await;
+            let _ = this.update(cx, |this, cx| cx.emit(Saved(this.layout.clone())));
+        }));
+    }
+    /// Whether a card's window rectangle meets the stage. Off-screen cards keep
+    /// their frame but neither load nor paint a diff.
+    fn visible(&self, card: &Card) -> bool {
+        let p = self.layout.camera.to_window([card.rect.x, card.rect.y]);
+        let zoom = self.layout.camera.zoom;
+        p[0] < f32::from(self.bounds.size.width)
+            && p[1] < f32::from(self.bounds.size.height)
+            && p[0] + card.rect.w * zoom > 0.
+            && p[1] + card.rect.h * zoom > 0.
     }
     pub fn reset(&mut self, cx: &mut Context<Self>) {
         self.drag = None;
@@ -182,7 +208,7 @@ impl View {
                 }
             }
         }
-        self.changed(cx);
+        self.moved(cx);
     }
     fn begin(&mut self, id: String, p: Point<Pixels>, resize: bool, cx: &mut Context<Self>) {
         if let Some(c) = self.layout.diff.iter().find(|c| c.lane_id == id) {
@@ -203,6 +229,9 @@ impl View {
         let move_id = id.clone();
         let p = self.layout.camera.to_window([card.rect.x, card.rect.y]);
         let zoom = self.layout.camera.zoom;
+        // Header and resize corner shrink with the card below 100%, and the
+        // header's title and close button hide once they would not fit.
+        let chrome = zoom.min(1.);
         div()
             .id(SharedString::from(format!("canvas-card-{id}")))
             .debug_selector({
@@ -217,7 +246,7 @@ impl View {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .rounded(px(10.))
+            .rounded(px(10. * chrome))
             .border_1()
             .border_color(theme().border)
             .bg(theme().surface)
@@ -236,12 +265,12 @@ impl View {
                         let id = id.clone();
                         move || format!("canvas-header-{id}")
                     })
-                    .h(px(28.))
+                    .h(px(28. * chrome))
                     .flex_shrink_0()
-                    .px(px(10.))
+                    .px(px(10. * chrome))
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(px(8. * chrome))
                     .cursor(gpui::CursorStyle::OpenHand)
                     .text_size(px(12.))
                     .font_weight(FontWeight::LIGHT)
@@ -252,35 +281,40 @@ impl View {
                             this.begin(move_id.clone(), e.position, false, cx)
                         }),
                     )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(card.title.clone()),
-                    )
-                    .child(
-                        control(format!("canvas-close-{id}"), "×")
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.layout.diff.retain(|c| c.lane_id != close);
-                                this.diffs.remove(&close);
-                                if let Some(diff) = this
-                                    .layout
-                                    .diff
-                                    .last()
-                                    .and_then(|c| this.diffs.get(&c.lane_id))
-                                {
-                                    diff.read(cx).focus(window);
-                                } else {
-                                    this.focus.focus(window);
-                                }
-                                this.changed(cx);
-                                cx.stop_propagation();
-                            })),
-                    ),
+                    .when(chrome >= 0.5, |header| {
+                        header
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(card.title.clone()),
+                            )
+                            .child(
+                                control(format!("canvas-close-{id}"), "×")
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.layout.diff.retain(|c| c.lane_id != close);
+                                        this.diffs.remove(&close);
+                                        if let Some(diff) = this
+                                            .layout
+                                            .diff
+                                            .last()
+                                            .and_then(|c| this.diffs.get(&c.lane_id))
+                                        {
+                                            diff.read(cx).focus(window);
+                                        } else {
+                                            this.focus.focus(window);
+                                        }
+                                        this.changed(cx);
+                                        cx.stop_propagation();
+                                    })),
+                            )
+                    }),
             )
             // Reuse the native diff entity. Its virtualized rows reflow to the card's
             // current viewport; the canvas owns geometry, never diff parsing/painting.
@@ -289,7 +323,9 @@ impl View {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .children(self.diffs.get(&id).cloned()),
+                    .when(self.visible(card), |body| {
+                        body.children(self.diffs.get(&id).cloned())
+                    }),
             )
             .child(
                 div()
@@ -298,7 +334,7 @@ impl View {
                     .absolute()
                     .bottom_0()
                     .right_0()
-                    .size(px(16.))
+                    .size(px(16. * chrome))
                     .cursor(CursorStyle::ResizeUpLeftDownRight)
                     .on_mouse_down(
                         MouseButton::Left,
@@ -329,8 +365,9 @@ fn control(id: impl Into<SharedString>, label: impl Into<SharedString>) -> State
 }
 impl Render for View {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A diff loads once its card first reaches the stage, not all 32 at open.
         for card in &self.layout.diff {
-            if !self.diffs.contains_key(&card.lane_id) {
+            if self.visible(card) && !self.diffs.contains_key(&card.lane_id) {
                 let client = self.client.clone();
                 let target = Target::Packet(card.lane_id.clone());
                 self.diffs.insert(
@@ -358,15 +395,21 @@ impl Render for View {
                     canvas(
                         move |bounds, _, _| bounds,
                         move |bounds, _, window, cx| {
-                            entity.update(cx, |this, _| this.bounds = bounds);
+                            entity.update(cx, |this, cx| {
+                                if this.bounds != bounds {
+                                    this.bounds = bounds;
+                                    cx.notify();
+                                }
+                            });
                             let view = entity.clone();
                             window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
                                 if phase == DispatchPhase::Capture {
                                     view.update(cx, |this, cx| {
                                         if e.pressed_button == Some(MouseButton::Left) {
                                             this.move_pointer(e.position, cx);
-                                        } else {
-                                            this.drag = None;
+                                        } else if this.drag.take().is_some() {
+                                            // Released outside the window.
+                                            this.changed(cx);
                                         }
                                     });
                                 }
@@ -379,32 +422,7 @@ impl Render for View {
                                         if this.drag.is_some() {
                                             this.move_pointer(e.position, cx);
                                             this.drag = None;
-                                        }
-                                    });
-                                }
-                            });
-                            let view = entity.clone();
-                            window.on_mouse_event(move |e: &ScrollWheelEvent, phase, _, cx| {
-                                if phase == DispatchPhase::Capture
-                                    && bounds.contains(&e.position)
-                                    && (e.modifiers.control
-                                        || e.modifiers.platform
-                                        || matches!(e.delta, ScrollDelta::Magnification(_)))
-                                {
-                                    view.update(cx, |this, cx| {
-                                        if this.drag.is_none() {
-                                            let dy = match e.delta {
-                                                ScrollDelta::Magnification(delta) => delta,
-                                                _ => f32::from(e.delta.pixel_delta(px(20.)).y),
-                                            };
-                                            let pointer = this.local(e.position);
-                                            this.layout.camera.zoom_at(
-                                                this.layout.camera.zoom
-                                                    * (dy * 0.01).clamp(-10., 10.).exp(),
-                                                pointer,
-                                            );
                                             this.changed(cx);
-                                            cx.stop_propagation();
                                         }
                                     });
                                 }
@@ -436,7 +454,7 @@ impl Render for View {
                             let d = e.delta.pixel_delta(px(20.));
                             this.layout.camera.pan[0] += f32::from(d.x);
                             this.layout.camera.pan[1] += f32::from(d.y);
-                            this.changed(cx);
+                            this.settle(cx);
                             cx.stop_propagation();
                         }
                     })),
@@ -452,7 +470,44 @@ impl Render for View {
                         .child("Add a packet diff to begin."),
                 )
             })
-            .children(cards);
+            .children(cards)
+            // Zoom input above the cards. This hitbox blocks nothing, and an overlay
+            // above the stage (palette, popover) hides it from scroll input.
+            .child({
+                let view = cx.entity();
+                canvas(
+                    |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+                    move |_, hitbox, window, _| {
+                        window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
+                            if phase == DispatchPhase::Capture
+                                && hitbox.should_handle_scroll(window)
+                                && (e.modifiers.control
+                                    || e.modifiers.platform
+                                    || matches!(e.delta, ScrollDelta::Magnification(_)))
+                            {
+                                view.update(cx, |this, cx| {
+                                    if this.drag.is_none() {
+                                        let dy = match e.delta {
+                                            ScrollDelta::Magnification(delta) => delta,
+                                            _ => f32::from(e.delta.pixel_delta(px(20.)).y),
+                                        };
+                                        let pointer = this.local(e.position);
+                                        this.layout.camera.zoom_at(
+                                            this.layout.camera.zoom
+                                                * (dy * 0.01).clamp(-10., 10.).exp(),
+                                            pointer,
+                                        );
+                                        this.settle(cx);
+                                        cx.stop_propagation();
+                                    }
+                                });
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full()
+            });
         div()
             .size_full()
             .flex()

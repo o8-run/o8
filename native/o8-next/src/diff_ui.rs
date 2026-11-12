@@ -146,9 +146,7 @@ impl DiffSurface {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.generation != generation {
-                    return;
-                }
+                if this.generation != generation { return; }
                 match result {
                     Ok((document, state)) => {
                         this.document = Rc::new(document);
@@ -179,8 +177,7 @@ impl DiffSurface {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }).detach();
         cx.notify();
     }
     fn state_label(&self) -> String {

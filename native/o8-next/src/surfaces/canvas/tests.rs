@@ -61,6 +61,22 @@ fn open_canvas(
         .expect("canvas opened by command");
     (s, v, view)
 }
+/// The canvas_mode toggle, through Symon's o8_ui_set frame.
+fn toggle(s: &Entity<Shell>, v: &mut VisualTestContext, on: bool) {
+    let frame = json!({"kind":"symon-ui","payload":{"data":{
+        "surface":"set","key":"canvas_mode","value":if on { "on" } else { "off" }
+    }}});
+    s.update_in(v, |s, w, cx| s.ui_command(&frame, w, cx));
+}
+/// Wheel and pinch saves wait for the input to pause.
+fn settle_saves(v: &mut VisualTestContext) {
+    v.executor().advance_clock(Duration::from_millis(400));
+    v.run_until_parked();
+    draw(v);
+}
+fn saved(file: &std::path::Path, key: &str) -> model::Layout {
+    State::load(file).unwrap().canvas_layouts[key].clone()
+}
 fn enable(f: &Fixture, on: bool) {
     f.client
         .project_request(
@@ -103,8 +119,29 @@ fn canvas_input_moves_resizes_raises_closes_and_round_trips(cx: &mut TestAppCont
         )
     });
     let first = layout(&view, &v).diff[0].rect;
-    drag(&mut v, "canvas-header-next-review-approve", [100., 40.]);
+    let key = s.read_with(&v, |s, _| {
+        project_key(s, s.state.selected.as_deref().unwrap())
+    });
+    // Each move redraws; only the release saves.
+    let header = v
+        .debug_bounds("canvas-header-next-review-approve")
+        .unwrap()
+        .center();
+    v.simulate_mouse_down(header, MouseButton::Left, Modifiers::default());
+    for step in 1..=10 {
+        let to = header + point(px(10. * step as f32), px(4. * step as f32));
+        v.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::default());
+        draw(&mut v);
+    }
     assert_eq!(layout(&view, &v).diff[0].rect, first.moved([100., 40.]));
+    assert_eq!(saved(&file, &key).diff[0].rect, first, "no save mid-drag");
+    v.simulate_mouse_up(
+        header + point(px(100.), px(40.)),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    draw(&mut v);
+    assert_eq!(saved(&file, &key).diff[0].rect, first.moved([100., 40.]));
     drag(&mut v, "canvas-resize-next-review-approve", [80., 60.]);
     assert_eq!(
         layout(&view, &v).diff[0].rect,
@@ -171,12 +208,11 @@ fn canvas_input_moves_resizes_raises_closes_and_round_trips(cx: &mut TestAppCont
     );
     let before = layout(&view, &v);
     assert_ne!(before.camera, geometry::Camera::default());
-    let saved = State::load(&file).unwrap();
-    let key = s.read_with(&v, |s, _| {
-        project_key(s, s.state.selected.as_deref().unwrap())
-    });
+    assert_ne!(saved(&file, &key).camera, before.camera, "pinch saves once it pauses");
+    settle_saves(&mut v);
     assert_eq!(
-        saved.canvas_layouts[&key], before,
+        saved(&file, &key),
+        before,
         "writer persisted geometry and stacking order"
     );
     // Close the real window, then reopen from disk, without any in-memory canvas entity.
@@ -295,7 +331,17 @@ fn canvas_setting_off_removes_commands_surface_and_restored_entry(cx: &mut TestA
             !c.label(&s.sessions).contains("Canvas") && !c.label(&s.sessions).contains("canvas")
         })
     }));
+    // A closed Canvas never polls the preference; the toggle applies its own change.
     enable(&f, true);
+    let reads = s.read_with(&v, |s, _| s.surfaces.canvas.generation);
+    s.update_in(&mut v, |s, w, cx| {
+        s.surfaces.canvas.checked = Some(Instant::now() - Duration::from_secs(5));
+        s.tick(false, w, cx);
+    });
+    v.run_until_parked();
+    assert_eq!(s.read_with(&v, |s, _| s.surfaces.canvas.generation), reads);
+    assert!(!s.read_with(&v, |s, _| enabled(s)));
+    toggle(&s, &mut v, true);
     pump(&mut v, |v| s.read_with(v, |s, _| enabled(s)));
     s.update_in(&mut v, |s, w, cx| s.execute(Command::Canvas, w, cx));
     draw(&mut v);
@@ -418,4 +464,109 @@ fn canvas_layout_follows_persisted_project_switches_for_a_shared_repository(
     });
     assert_eq!(s.read_with(&v, |s, _| active(s)).unwrap(), first);
     assert_eq!(layout(&first, &v).camera.pan, [42., 21.]);
+}
+
+#[gpui::test]
+fn canvas_loads_only_visible_diffs_and_shrinks_chrome(cx: &mut TestAppContext) {
+    let f = Fixture::start_mode(false, "--onboarding --review");
+    enable(&f, true);
+    let (_s, mut v, view) = open_canvas(&f, cx, f.root.join("many.json"), State::default());
+    // The 32-card ceiling: four cards in a grid on the stage, the rest far to its right.
+    let cards = (0..32)
+        .map(|i| model::Card {
+            lane_id: format!("lane-{i}"),
+            title: format!("Lane {i}"),
+            rect: geometry::Rect {
+                x: if i < 4 { 330. * (i % 2) as f32 } else { 4000. },
+                y: if i < 4 { 210. * (i / 2) as f32 } else { 0. },
+                w: 320.,
+                h: 200.,
+            },
+        })
+        .collect::<Vec<_>>();
+    view.update(&mut v, |p, cx| {
+        p.layout.diff = cards;
+        cx.notify();
+    });
+    draw(&mut v);
+    view.read_with(&v, |p, _| {
+        let mut loaded = p.diffs.keys().cloned().collect::<Vec<_>>();
+        loaded.sort();
+        assert_eq!(loaded, ["lane-0", "lane-1", "lane-2", "lane-3"]);
+    });
+    // Near 1% the header and resize corner stay inside the card.
+    view.update(&mut v, |p, cx| {
+        p.layout.camera = geometry::Camera {
+            pan: [0., 0.],
+            zoom: geometry::MIN_ZOOM,
+        };
+        cx.notify();
+    });
+    draw(&mut v);
+    let card = v.debug_bounds("canvas-card-lane-0").unwrap();
+    let header = v.debug_bounds("canvas-header-lane-0").unwrap();
+    let corner = v.debug_bounds("canvas-resize-lane-0").unwrap();
+    assert!(header.size.height <= card.size.height && corner.size.width <= card.size.width);
+    assert!(v.debug_bounds("canvas-close-lane-0").is_none());
+    // Zoomed out, every card reaches the stage and loads.
+    assert_eq!(view.read_with(&v, |p, _| p.diffs.len()), 32);
+}
+
+#[gpui::test]
+fn canvas_zoom_leaves_the_wheel_to_an_open_palette(cx: &mut TestAppContext) {
+    let f = Fixture::start_mode(false, "--onboarding --review");
+    enable(&f, true);
+    let (s, mut v, view) = open_canvas(&f, cx, f.root.join("palette.json"), State::default());
+    v.simulate_keystrokes("ctrl-shift-p");
+    draw(&mut v);
+    assert!(s.read_with(&v, |s, _| s.palette));
+    let stage = v.debug_bounds("canvas-surface").unwrap();
+    v.simulate_event(ScrollWheelEvent {
+        position: stage.center(),
+        delta: ScrollDelta::Pixels(point(px(0.), px(-50.))),
+        modifiers: Modifiers {
+            control: true,
+            ..Default::default()
+        },
+        touch_phase: TouchPhase::Moved,
+    });
+    draw(&mut v);
+    assert_eq!(layout(&view, &v).camera.zoom, 1., "the palette above keeps its wheel");
+}
+
+#[test]
+fn a_malformed_saved_card_is_dropped_without_resetting_shell_state() {
+    let file = std::env::temp_dir().join(format!("o8-canvas-bad-card-{}.json", std::process::id()));
+    let mut state = State::default();
+    state.tab_labels.insert("tab".into(), "Kept".into());
+    state.canvas_layouts.insert(
+        "workspace:a".into(),
+        model::Layout {
+            diff: vec![model::Card {
+                lane_id: "good".into(),
+                title: "Good".into(),
+                rect: geometry::Rect {
+                    x: 0.,
+                    y: 0.,
+                    w: 320.,
+                    h: 200.,
+                },
+            }],
+            ..Default::default()
+        },
+    );
+    let mut value = serde_json::to_value(&state).unwrap();
+    value["canvas_layouts"]["workspace:a"]["diff"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"laneId": 7, "x": "left"}));
+    value["canvas_layouts"]["workspace:b"] = json!({"camera": "far"});
+    std::fs::write(&file, serde_json::to_vec(&value).unwrap()).unwrap();
+    let loaded = State::load(&file).unwrap();
+    std::fs::remove_file(&file).ok();
+    assert_eq!(loaded.tab_labels["tab"], "Kept", "the rest of the shell state survives");
+    assert_eq!(loaded.canvas_layouts.len(), 1);
+    let cards = &loaded.canvas_layouts["workspace:a"].diff;
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].lane_id, "good");
 }

@@ -1,5 +1,6 @@
 use super::geometry::{Camera, Rect};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::BTreeMap;
 
 /// Diff geometry retains classic's x/y/w/h and laneId/title vocabulary. Classic's
 /// v1 localStorage snapshot has no project isolation, order, pan or zoom to reuse.
@@ -17,6 +18,7 @@ pub struct Layout {
     pub v: u32,
     pub camera: Camera,
     /// Back to front. Raising moves the card to the end, without growing a z index.
+    #[serde(deserialize_with = "cards")]
     pub diff: Vec<Card>,
 }
 impl Default for Layout {
@@ -27,6 +29,26 @@ impl Default for Layout {
             diff: vec![],
         }
     }
+}
+/// A malformed saved card is dropped, never failing the shell state that holds it.
+fn cards<'de, D: Deserializer<'de>>(input: D) -> Result<Vec<Card>, D::Error> {
+    let value = serde_json::Value::deserialize(input)?;
+    Ok(serde_json::from_value::<Vec<serde_json::Value>>(value)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|card| serde_json::from_value(card).ok())
+        .collect())
+}
+/// Saved layouts by key; a malformed layout is dropped and the others are kept.
+pub fn layouts<'de, D: Deserializer<'de>>(input: D) -> Result<BTreeMap<String, Layout>, D::Error> {
+    let value = serde_json::Value::deserialize(input)?;
+    Ok(
+        serde_json::from_value::<BTreeMap<String, serde_json::Value>>(value)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(key, layout)| Some((key, serde_json::from_value(layout).ok()?)))
+            .collect(),
+    )
 }
 impl Layout {
     pub fn restored(mut self) -> Self {

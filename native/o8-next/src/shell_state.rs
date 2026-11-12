@@ -97,7 +97,11 @@ pub struct State {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub quick_doc_pins: BTreeMap<String, Vec<String>>,
     /// Canvas layouts by project id, with a workspace fallback outside projects.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "crate::shell::canvas::model::layouts"
+    )]
     pub canvas_layouts: BTreeMap<String, crate::shell::canvas::model::Layout>,
     /// Browser page metadata, scoped by the selected workspace. Website data is never stored here.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
