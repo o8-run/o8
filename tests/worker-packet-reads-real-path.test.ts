@@ -132,6 +132,12 @@ it('Next: a single task read is packet scoped', async () => {
   expect((await read('packet-A', legacy)).status).toBe(403);
   expect((await read('packet-B', worker)).status).toBe(403);
   expect((await read(lanes[1].id, worker)).status).toBe(403);
+  // Another packet's task and an unknown id are refused alike, without naming the other packet.
+  const foreign = await read(lanes[1].id, worker);
+  const unknown = await read('no-such-task', worker);
+  expect(unknown.status).toBe(403);
+  expect(JSON.stringify(await foreign.json())).not.toContain('packet-B');
+  expect(Object.keys(await unknown.json()).sort()).toEqual(['error', 'ok']);
   const own = await read('packet-A', worker);
   expect(own.status).toBe(200);
   expect((await own.json()).task.packetId).toBe('packet-A');
