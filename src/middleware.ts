@@ -412,6 +412,10 @@ function localRequestRefusal(req: NextRequest): NextResponse | null {
     return NextResponse.json({ error: 'Misdirected Request' }, { status: 421 });
   }
   if (!browserWriteAllowed(req.method, name => req.headers.get(name), req.nextUrl.protocol)) {
+    if (req.headers.get('origin') === 'null' && !req.headers.get('authorization')
+      && /^\/api\/(browser|panel)\/proxy\/?$/.test(req.nextUrl.pathname)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     return NextResponse.json({ error: 'Origin is not allowed' }, { status: 403 });
   }
 
