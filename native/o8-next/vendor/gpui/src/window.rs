@@ -11,8 +11,7 @@ use crate::{
     MouseMoveEvent, MouseUpEvent, Path, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
     PlatformInputHandler, PlatformWindow, Point, PolychromeSprite, PromptButton, PromptLevel, Quad,
     Render, RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge,
-    SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene,
-    ScrollDelta, Shadow,
+    SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow,
     SharedString, Size, StrikethroughStyle, Style, SubscriberSet, Subscription, SystemWindowTab,
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextStyle, TextStyleRefinement,
     TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
@@ -55,6 +54,7 @@ use util::{ResultExt, measure};
 use uuid::Uuid;
 
 mod prompts;
+mod zoom;
 
 use crate::util::atomic_incr_if_not_zero;
 pub use prompts::*;
@@ -891,9 +891,7 @@ pub struct Window {
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
-    /// o8: the interface zoom. Layout runs in a viewport divided by it and
-    /// paint scales by it, so every element grows or shrinks together.
-    zoom: f32,
+    zoom: f32, // o8: see window/zoom.rs
     pub(crate) bounds_observers: SubscriberSet<(), AnyObserver>,
     appearance: WindowAppearance,
     pub(crate) appearance_observers: SubscriberSet<(), AnyObserver>,
@@ -1757,8 +1755,7 @@ impl Window {
     }
 
     fn bounds_changed(&mut self, cx: &mut App) {
-        self.scale_factor = self.platform_window.scale_factor() * self.zoom;
-        self.viewport_size = self.platform_window.content_size().map(|v| v / self.zoom);
+        self.read_platform_metrics();
         self.display_id = self.platform_window.display().map(|display| display.id());
 
         self.refresh();
@@ -1829,8 +1826,7 @@ impl Window {
 
     /// Opens the native title bar context menu, useful when implementing client side decorations (Wayland and X11)
     pub fn show_window_menu(&self, position: Point<Pixels>) {
-        self.platform_window
-            .show_window_menu(position.map(|v| v * self.zoom))
+        self.platform_window.show_window_menu(position)
     }
 
     /// Tells the compositor to take control of window movement (Wayland and X11)
@@ -1900,91 +1896,6 @@ impl Window {
     /// be rendered as two pixels on screen.
     pub fn scale_factor(&self) -> f32 {
         self.scale_factor
-    }
-
-    /// o8: the interface zoom, 1.0 by default. Window coordinates (layout,
-    /// [`Self::viewport_size`], [`Self::mouse_position`], element bounds) are
-    /// divided by it; the platform's coordinates are not.
-    pub fn zoom(&self) -> f32 {
-        self.zoom
-    }
-
-    /// o8: zoom the whole window, as a browser zooms a page. Layout runs in a
-    /// viewport divided by `zoom` and the scale factor is multiplied by it, so
-    /// every length, including text and its rasterization, paints `zoom` times
-    /// larger at full sharpness. Input positions are divided by it. Values
-    /// that are not finite and positive are ignored.
-    pub fn set_zoom(&mut self, zoom: f32, cx: &mut App) {
-        if !zoom.is_finite() || zoom <= 0. || zoom == self.zoom {
-            return;
-        }
-        let ratio = self.zoom / zoom;
-        self.zoom = zoom;
-        self.mouse_position = self.mouse_position.map(|v| v * ratio);
-        self.invalidator.wake();
-        self.bounds_changed(cx);
-    }
-
-    /// o8: a platform input event in window coordinates at the current zoom.
-    fn unzoom(&self, event: PlatformInput) -> PlatformInput {
-        let zoom = self.zoom;
-        if zoom == 1. {
-            return event;
-        }
-        let at = |position: Point<Pixels>| position.map(|v| v / zoom);
-        match event {
-            PlatformInput::MouseMove(mut e) => {
-                e.position = at(e.position);
-                PlatformInput::MouseMove(e)
-            }
-            PlatformInput::MouseDown(mut e) => {
-                e.position = at(e.position);
-                PlatformInput::MouseDown(e)
-            }
-            PlatformInput::MouseUp(mut e) => {
-                e.position = at(e.position);
-                PlatformInput::MouseUp(e)
-            }
-            PlatformInput::MouseExited(mut e) => {
-                e.position = at(e.position);
-                PlatformInput::MouseExited(e)
-            }
-            PlatformInput::ScrollWheel(mut e) => {
-                e.position = at(e.position);
-                if let ScrollDelta::Pixels(delta) = e.delta {
-                    e.delta = ScrollDelta::Pixels(at(delta));
-                }
-                PlatformInput::ScrollWheel(e)
-            }
-            PlatformInput::FileDrop(FileDropEvent::Entered { position, paths }) => {
-                PlatformInput::FileDrop(FileDropEvent::Entered {
-                    position: at(position),
-                    paths,
-                })
-            }
-            PlatformInput::FileDrop(FileDropEvent::Pending { position }) => {
-                PlatformInput::FileDrop(FileDropEvent::Pending {
-                    position: at(position),
-                })
-            }
-            PlatformInput::FileDrop(FileDropEvent::Submit { position }) => {
-                PlatformInput::FileDrop(FileDropEvent::Submit {
-                    position: at(position),
-                })
-            }
-            event => event,
-        }
-    }
-
-    /// o8: the bounds of every quad the last drawn frame painted, in device pixels.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn painted_quad_bounds(&self) -> Vec<Bounds<ScaledPixels>> {
-        self.rendered_frame
-            .scene
-            .quads
-            .iter()
-            .map(|quad| quad.bounds)
-            .collect()
     }
 
     /// The size of an em for the base font of the application. Adjusting this value allows the
@@ -3793,7 +3704,7 @@ impl Window {
         // Handlers may set this to true by calling `prevent_default`.
         self.default_prevented = false;
 
-        let event = match self.unzoom(event) {
+        let event = match self.input_from_platform(event) {
             // Track the mouse position with our own state, since accessing the platform
             // API for the mouse position can only occur on the main thread.
             PlatformInput::MouseMove(mouse_move) => {

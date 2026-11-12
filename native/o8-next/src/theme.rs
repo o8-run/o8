@@ -385,7 +385,25 @@ static LAUNCH_ZOOM: LazyLock<u16> = LazyLock::new(|| {
         .and_then(|text| parse_zoom(&text))
         .unwrap_or(ZOOM_DEFAULT)
 });
+#[cfg(not(test))]
 static CHOSEN_ZOOM: AtomicU16 = AtomicU16::new(u16::MAX);
+// Tests run in parallel threads; each test's windows read its own zoom.
+#[cfg(test)]
+thread_local! {
+    static CHOSEN_ZOOM: AtomicU16 = const { AtomicU16::new(u16::MAX) };
+}
+fn chosen_zoom() -> u16 {
+    #[cfg(not(test))]
+    return CHOSEN_ZOOM.load(Ordering::Relaxed);
+    #[cfg(test)]
+    return CHOSEN_ZOOM.with(|chosen| chosen.load(Ordering::Relaxed));
+}
+fn choose_zoom(percent: u16) {
+    #[cfg(not(test))]
+    CHOSEN_ZOOM.store(percent, Ordering::Relaxed);
+    #[cfg(test)]
+    CHOSEN_ZOOM.with(|chosen| chosen.store(percent, Ordering::Relaxed));
+}
 /// A saved zoom, clamped to the range and rounded to a step; None when it is
 /// not a number.
 pub fn parse_zoom(text: &str) -> Option<u16> {
@@ -404,7 +422,7 @@ pub fn step_zoom(percent: u16, steps: i32) -> u16 {
 }
 /// The interface zoom in percent.
 pub fn zoom_percent() -> u16 {
-    match CHOSEN_ZOOM.load(Ordering::Relaxed) {
+    match chosen_zoom() {
         u16::MAX => *LAUNCH_ZOOM,
         percent => percent,
     }
@@ -420,7 +438,7 @@ pub fn set_zoom_percent(percent: u16) -> bool {
         let _ = std::fs::write(path, percent.to_string());
     }
     let changed = percent != zoom_percent();
-    CHOSEN_ZOOM.store(percent, Ordering::Relaxed);
+    choose_zoom(percent);
     changed
 }
 fn zoom_path() -> Option<std::path::PathBuf> {
