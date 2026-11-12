@@ -6677,6 +6677,12 @@
       ]
     },
     {
+      "path": "tests/plan-approval-persist-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/plugin-account-transition-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -538,6 +538,7 @@ export async function POST(request: NextRequest) {
       try {
         const { dispatchApprovedPlan } = await import('@/lib/intake/plan-dispatch');
         const result = await dispatchApprovedPlan(continuation);
+        if (!result.ok) continuationOutcome = 'failed';
         decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
       } catch (error) {
         continuationOutcome = 'outcome_unknown';
