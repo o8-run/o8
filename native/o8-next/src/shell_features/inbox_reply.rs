@@ -138,7 +138,7 @@ fn finish(
         s.switch(workspace, w, cx);
     }
     s.execute(Command::Session(id.clone()), w, cx);
-    let surface = match s.content.get(&s.key(&Tab::Session(id.clone()))) {
+    let surface = match s.thread_content(&id) {
         Some(Content::Session(surface)) => surface.clone(),
         _ => {
             toasts::info(

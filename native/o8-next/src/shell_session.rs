@@ -119,6 +119,19 @@ impl Surface {
         surface.select(id, cx);
         surface
     }
+    /// Attach a retained conversation without moving keyboard focus.
+    pub(crate) fn shell_restore(
+        client: Client,
+        sessions: Vec<Session>,
+        id: String,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut surface = Self::new_with_focus(client, None, cx);
+        surface.embedded = true;
+        surface.sessions = sessions;
+        surface.select(id, cx);
+        surface
+    }
     pub(crate) fn shell_select(
         &mut self,
         sessions: Vec<Session>,

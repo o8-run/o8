@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
         if (conversationRoute) await withComposerBrainRoute(conversationRoute, answer); else await answer();
       } catch (err) {
         console.error('[qa][ask-route] pipeline error:', err);
-        emit('error', { message: conversationRoute?.runtime ? `The connected ${conversationRoute.runtime === 'codex' ? 'Codex' : 'Claude'} runtime could not answer. Check its connection and try again.` : 'Unable to answer cortex question.', ...(err instanceof ManagedBrainUnavailableError ? { code: err.code } : {}) });
+        emit('error', { message: err instanceof ManagedBrainUnavailableError ? err.message : conversationRoute?.runtime ? `The connected ${conversationRoute.runtime === 'codex' ? 'Codex' : 'Claude'} runtime could not answer. Check its connection and try again.` : 'Unable to answer cortex question.', ...(err instanceof ManagedBrainUnavailableError ? { code: err.code } : {}) });
         emit('done', {});
       } finally {
         try {

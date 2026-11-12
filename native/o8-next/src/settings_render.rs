@@ -341,8 +341,8 @@ impl Render for Settings {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    // Clears the traffic lights (their 52 px corner, then the old 28).
-                    .pl(px(crate::zoom::chrome_clearance(28. + 52., window)))
+                    // Clears the window buttons (their 52 px corner, then the old 28).
+                    .pl(px(28. + crate::shell::rail::LIGHTS))
                     .pr(px(10.))
                     .text_size(px(12.))
                     .window_control_area(gpui::WindowControlArea::Drag)

@@ -47,12 +47,17 @@ impl Render for Shell {
                     .absolute()
                     .top_0()
                     .left_0()
-                    .w(px(crate::zoom::chrome_clearance(rail::LIGHTS, window)))
+                    .w(px(rail::LIGHTS))
                     .h(px(crate::theme::GEOMETRY.header))
                     .window_control_area(gpui::WindowControlArea::Drag),
             )
             // Painted after the veil so the dock sits on the same glass as the sidebar.
             .child(rail)
+            // The window buttons, over the corner, so a press on one is not a drag.
+            .children(crate::window_lights::render(
+                crate::theme::GEOMETRY.header,
+                window,
+            ))
     }
 }
 
@@ -261,23 +266,34 @@ pub(super) fn open_window(
             // The 100% floor; zoom::apply_shell sets it for the opening zoom
             // and the window's display, and again on each change.
             window_min_size: Some(crate::zoom::min_size(1., None)),
-            // On macOS the traffic lights sit in the header band above the rail, as in
-            // the desktop shell: first light centred at x=20, all three on y=20 (the
-            // position is the close button's frame origin, measured from a capture).
-            // Elsewhere a transparent title bar needs a compositor, and bare X servers
-            // would show nothing.
+            // On macOS the title bar is transparent and the app draws the window
+            // buttons in the header band (window_lights), so they follow the zoom;
+            // AppKit's own are hidden. Elsewhere a transparent title bar needs a
+            // compositor, and bare X servers would show nothing.
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("o8 next".into()),
                 appears_transparent: cfg!(target_os = "macos"),
-                traffic_light_position: cfg!(target_os = "macos")
-                    .then(|| point(px(13.25), px(12.25))),
+                traffic_light_position: None,
             }),
             ..Default::default()
         },
         |window, cx| {
             let system_glass = material::apply(window, offscreen);
             geometry::restore_size(window, bounds.size);
+            crate::window_lights::sync_native(window);
             cx.new(|cx| {
+                // AppKit can bring its buttons back after full screen and
+                // style changes; this only touches AppKit, never app state.
+                // The style flags can lag the last resize of a full-screen
+                // transition, so match them again once the next frame is drawn.
+                let resync = |window: &mut Window| {
+                    crate::window_lights::sync_native(window);
+                    window.on_next_frame(|window, _| crate::window_lights::sync_native(window));
+                };
+                cx.observe_window_bounds(window, move |_, window, _| resync(window))
+                    .detach();
+                cx.observe_window_activation(window, move |_, window, _| resync(window))
+                    .detach();
                 let mut shell = Shell::new(client, file, state, window, cx);
                 shell.system_glass = system_glass;
                 shell.offscreen = offscreen;

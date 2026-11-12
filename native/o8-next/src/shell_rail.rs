@@ -899,6 +899,7 @@ impl Shell {
             self.surfaces.setup.view = None;
             self.revision += 1;
         }
+        crate::shell::sidebar::navigation(self, cx);
     }
     pub(super) fn render_rail(
         &mut self,
