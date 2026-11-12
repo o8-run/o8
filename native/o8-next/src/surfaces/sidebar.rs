@@ -441,6 +441,9 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     }
                     None => shell.open_thread_in_tab(id.clone(), window, cx),
                 },
+                ThreadEvent::StartThread(repo) => {
+                    let _ = shell.start_thread_in(repo.clone(), true, cx);
+                }
                 ThreadEvent::Created(id, foreground, started) => {
                     navigation(shell, cx);
                     let foreground = *foreground && *started == shell.surfaces.sidebar.generation.get();
@@ -607,8 +610,11 @@ impl Shell {
     /// sidebar's New thread does, opening it in the main pane when `open`;
     /// None when no repository is open.
     pub(crate) fn start_thread(&mut self, open: bool, cx: &mut Context<Self>) -> Option<String> {
-        navigation(self, cx);
         let repo = self.state.selected.clone().filter(|w| w != "Unassigned")?;
+        self.start_thread_in(repo, open, cx)
+    }
+    fn start_thread_in(&mut self, repo: String, open: bool, cx: &mut Context<Self>) -> Option<String> {
+        navigation(self, cx);
         let list = self.surfaces.sidebar.view.clone()?;
         Some(list.update(cx, |list, cx| list.start_thread(repo, open, cx)))
     }

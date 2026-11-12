@@ -33,6 +33,7 @@ pub enum Event {
     Refreshed(Vec<Session>, Option<Ledger>),
     Selected(String),
     OpenInTab(String),
+    StartThread(String),
     Created(String, bool, u64),
     Error(String),
     Workspace(Option<String>, Ledger),

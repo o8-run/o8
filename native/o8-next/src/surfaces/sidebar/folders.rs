@@ -391,7 +391,10 @@ impl ThreadList {
     /// runtime placeholder ("claude-code") as the model, and the first send
     /// would fail.
     pub(crate) fn new_thread(&mut self, repo: String, cx: &mut Context<Self>) {
-        self.start_thread(repo, true, cx);
+        self.new_menu = false;
+        // The shell refreshes the starting snapshot before capturing its counter.
+        cx.emit(Event::StartThread(repo));
+        cx.notify();
     }
     /// Whether `path` is a repository this machine has registered.
     pub(crate) fn knows_repo(&self, path: &str) -> bool {
