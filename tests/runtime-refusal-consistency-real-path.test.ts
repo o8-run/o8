@@ -32,7 +32,6 @@ it.each(routes)('%s refuses an undispatchable runtime consistently', async (name
 
 it('the CLI task dispatch command and MCP tool preserve the route message', async () => {
   const { createServer } = await import('node:http');
-  const { once } = await import('node:events');
   const { vi } = await import('vitest');
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
@@ -43,8 +42,7 @@ it('the CLI task dispatch command and MCP tool preserve the route message', asyn
     res.writeHead(response.status, { 'content-type': 'application/json' });
     res.end(await response.text());
   });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Missing fixture port');
   vi.stubEnv('O8_API_PORT', String(address.port));
