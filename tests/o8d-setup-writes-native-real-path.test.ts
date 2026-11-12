@@ -6,6 +6,9 @@ import { startParityReference } from './fixtures/ws-parity-server';
 
 it('permits only the operator to persist MCP and OpenCode setup without returning credentials', async () => {
   const saved = { ...process.env };
+  // The server writes OpenCode config under XDG_CONFIG_HOME when it is set (as on
+  // Linux runners). Clear it so the write lands in the fixture's HOME, never the host's.
+  delete process.env.XDG_CONFIG_HOME;
   const server = await startParityReference({ o8d: true, nativeHttp: true });
   try {
     await server.stopNext();
