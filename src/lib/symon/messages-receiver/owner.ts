@@ -30,3 +30,13 @@ export function claimMessagesReceiver(): boolean {
 export function ownsMessagesReceiver(): boolean {
   return Boolean(runtime.__o8MessagesOwner);
 }
+
+/**
+ * A live older brain owner may run its own unclaimed receiver loop, so its
+ * refusal keeps this one stopped. Any other brain failure (an unsupported Node
+ * release, a missing store) leaves the receiver free: it answers through the
+ * native planner and uses the brain only when it is available (#3486).
+ */
+export function brainRefusalBlocksReceiver(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith('symon_brain_owned:');
+}

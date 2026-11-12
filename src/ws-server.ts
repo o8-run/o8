@@ -9680,17 +9680,21 @@ async function bootstrapWsServer() {
   // Bind the listener before resuming turns so their tools can reach it. Stateful
   // requests await this bootstrap; resume schedules work without awaiting a turn.
   // An older Next holding the store claim refuses this open before any resume.
-  let symonBrainReady = false;
+  let receiverBlocked = false;
   try {
     const { getSymonBrain } = await import('./lib/symon/durable/brain');
     await getSymonBrain();
-    symonBrainReady = true;
   } catch (error) {
     console.warn('[symon] Brain startup refused:', error instanceof Error ? error.message : 'unavailable');
+    // If the owner module cannot load, the receiver could not claim either.
+    receiverBlocked = await import('./lib/symon/messages-receiver/owner')
+      .then(({ brainRefusalBlocksReceiver }) => brainRefusalBlocksReceiver(error))
+      .catch(() => true);
   }
   // A competing brain owner also keeps this receiver stopped. Restart after
   // retiring the old process; never run its Messages loop alongside a new one.
-  if (symonBrainReady && process.platform === 'darwin') {
+  // Other brain failures leave the receiver running on the native planner.
+  if (!receiverBlocked && process.platform === 'darwin') {
     try {
       const { startMessagesReceiver } = await import('./lib/symon/messages-receiver/loop');
       if (!startMessagesReceiver()) console.warn('[symon] Messages receiver claim refused; another owner is active');
