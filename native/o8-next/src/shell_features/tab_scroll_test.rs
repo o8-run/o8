@@ -262,12 +262,24 @@ fn tab_wheel_horizontal_trackpad_keeps_its_axis(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn tab_wheel_activating_offscreen_tabs_reveals_with_classic_inset(cx: &mut TestAppContext) {
-    let (_fixture, _shell, mut visual) = setup(cx, true);
+    let (_fixture, shell, mut visual) = setup(cx, true);
     let viewport = bounds(&mut visual, "surface-tabs");
-    assert!(bounds(&mut visual, "surface-tab-1").right() > viewport.right());
-    visual.simulate_keystrokes("ctrl-tab");
-    settle(&mut visual);
-    let tab = bounds(&mut visual, "surface-tab-1");
+    let count = shell.read_with(&visual, |s, _| s.current().unwrap().tabs.len());
+    // Capped titles can leave tab 1 visible. Keep a trailing tab so the
+    // classic inset is not clamped by the end of the strip.
+    let target = (1..count - 1).rev().find(|i| {
+        visual.debug_bounds(Box::leak(format!("surface-tab-{i}").into_boxed_str()))
+            .is_some_and(|tab| tab.right() > viewport.right())
+    }).expect("the fixture must contain an offscreen tab before its last tab");
+    let selector = format!("surface-tab-{target}");
+    assert!(bounds(&mut visual, &selector).right() > viewport.right());
+    for _ in 0..target {
+        visual.simulate_keystrokes("ctrl-tab");
+        settle(&mut visual);
+    }
+    assert_eq!(shell.read_with(&visual, |s, _| s.current().unwrap().active), target);
+    let viewport = bounds(&mut visual, "surface-tabs");
+    let tab = bounds(&mut visual, &selector);
     let gap = f32::from(viewport.right() - tab.right());
     let inset = (f32::from(viewport.size.width - tab.size.width) / 2.).clamp(0., 22.);
     assert!(
