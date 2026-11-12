@@ -11,7 +11,6 @@ import type { PacketContextTelemetry } from '@/lib/orchestrator/packet-context-t
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
-
 export type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 export type OrchestratorExecutionMode = 'fleet' | 'single' | 'fusion';
 export type OrchestrationMode = OrchestratorExecutionMode | 'chat';
@@ -47,6 +46,7 @@ export interface WorkerLaunchContext {
 }
 
 export interface WorkerRouting {
+  runtimeSubstitution?: { requestedRuntime: string; reason: string };
   workerIntent: WorkerIntent;
   requestedProvider: WorkerProvider | null;
   requestedRuntime: OrchestratorRuntime | null;
@@ -64,7 +64,7 @@ export interface WorkerRouting {
   enforcement: 'dispatchable_runtimes';
   confidence: WorkerRoutingConfidence;
   reason: string;
-  decidedAt: string;
+  decidedAt?: string;
 }
 
 export type OrchestratorPacketStatus =

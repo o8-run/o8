@@ -1,3 +1,5 @@
+import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
@@ -24,7 +26,7 @@ import {
 } from '@/lib/lane/agent-report';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import type { AgentReportReason, Lane, LaneEventActor } from '@/lib/lane/types';
-import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { resolveEffortAliases, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -140,7 +142,11 @@ export function readTaskEffortSelection(body: Record<string, unknown>): Thinking
 }
 
 async function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof resolveWorkerRouting>[0]>, cwd: string | null, packetId?: string): Promise<WorkerRouting> {
-  const routing = resolveWorkerRouting(input);
+  let routing: WorkerRouting;
+  try {
+    const requestedRuntime = validateRequestedRuntime(input.requestedRuntime, resolveDefaultDispatchRuntimeSync());
+    routing = resolveWorkerRouting({ ...input, requestedRuntime });
+  } catch (error) { throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
   const pin = await resolveRuntimeEffortPin({
     requestedEffort: input.requestedEffort,
     runtime: routing.selectedRuntime,
@@ -493,7 +499,11 @@ export async function claimTask(taskId: string, input: TaskClaimInput = {}): Pro
 }
 
 export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}): Promise<TaskMutationResult> {
-  if (process.env.O8_NEXT_O8D === '1' && !isNativeCortexReader()) return callTaskDispatchOwner(taskId, input);
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) {
+    try { validateRequestedRuntime(input.requestedRuntime); }
+    catch (error) { throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
+    return callTaskDispatchOwner(taskId, input);
+  }
   const actor = normalizeActor(input.actor);
   const task = await resolveTask(taskId, input);
   const workerRouting = await resolveTaskWorkerRouting({

@@ -51,6 +51,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
     route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
     route('/api/tasks/dispatch-owner', 'POST', () => import('@/lib/tasks/dispatch-owner-route')),
+    route('/api/runtime/owner', 'GET', () => import('@/lib/runtime/owner-status-route')),
+    route('/api/orchestrator/steer-owner', 'POST', () => import('@/lib/orchestrator/operator-mission-service/steer-owner-route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),
@@ -468,7 +470,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
     route('/api/worktrees/retention-usage', 'GET', () => import('@/app/api/worktrees/retention-usage/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
-    route('/api/setup/cli-updates', 'GET POST', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/cortex/sources', 'GET POST', () => import('@/lib/cortex/knowledge/sources-route')),
     route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/handler')),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('@/app/api/v2/keys/route')),
@@ -593,4 +594,10 @@ export function matchNativeHttpRoute(pathname: string, method?: string) {
   const matches = routes.map(route => ({ route, params: parameters(route.path, pathname) })).filter(entry => entry.params !== null);
   // Surfaces can share a path with different methods, so match on both.
   return method === undefined ? matches[0] : matches.find(entry => entry.route.methods.includes(method));
+}
+
+/** Every verb dispatch can resolve for this concrete path, including split registrations. */
+export function nativeHttpMethods(pathname: string): string[] {
+  return [...new Set(routes.filter(route => parameters(route.path, pathname) !== null)
+    .flatMap(route => route.methods))].sort();
 }

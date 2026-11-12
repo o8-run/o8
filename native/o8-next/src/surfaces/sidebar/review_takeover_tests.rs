@@ -1,0 +1,481 @@
+use super::ThreadList;
+use crate::shell::test_support::*;
+use crate::shell::{Command, Content, Shell, Tab};
+use gpui::{Entity, FocusHandle};
+use std::collections::BTreeSet;
+use std::time::Duration;
+
+fn setup(cx: &mut TestAppContext) -> (Fixture, Entity<Shell>, VisualTestContext) {
+    let fixture = Fixture::start_mode(true, "--shell --composer --sidebar --settings");
+    let (shell, mut visual) = open_past_setup(
+        fixture.client.clone(),
+        fixture.root.join("review-takeover.json"),
+        crate::shell_state::State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    (fixture, shell, visual)
+}
+
+struct Retained {
+    workspace: Option<String>,
+    active: Option<Tab>,
+    selected: Option<String>,
+    follow: bool,
+    focus: Option<FocusHandle>,
+}
+fn retained(s: &Entity<Shell>, list: &Entity<ThreadList>, v: &mut VisualTestContext) -> Retained {
+    let (workspace, active) = s.read_with(v, |s, _| (s.state.selected.clone(), s.active()));
+    let (selected, follow) =
+        list.read_with(v, |list, _| (list.selected.clone(), list.follow_selection));
+    let focus = v.update(|window, cx| window.focused(cx));
+    Retained {
+        workspace,
+        active,
+        selected,
+        follow,
+        focus,
+    }
+}
+fn assert_retained(
+    s: &Entity<Shell>,
+    list: &Entity<ThreadList>,
+    v: &mut VisualTestContext,
+    before: &Retained,
+) {
+    let after = retained(s, list, v);
+    assert_eq!(after.workspace, before.workspace, "background project");
+    assert_eq!(after.active, before.active, "background active tab");
+    assert_eq!(
+        after.selected, before.selected,
+        "background sidebar selection"
+    );
+    assert_eq!(after.follow, before.follow, "background follow_selection");
+    assert_eq!(after.focus, before.focus, "background keyboard focus");
+}
+fn list(s: &Entity<Shell>, v: &VisualTestContext) -> Entity<ThreadList> {
+    s.read_with(v, |s, _| s.surfaces.sidebar.view.clone().unwrap())
+}
+fn pending(
+    s: &Entity<Shell>,
+    list: &Entity<ThreadList>,
+    v: &mut VisualTestContext,
+    expired: bool,
+) -> String {
+    let created = s.update(v, |s, _| {
+        let scope = s.state.selected.as_ref().unwrap();
+        let mut thread = s
+            .sessions
+            .iter()
+            .find(|t| &t.workspace() == scope)
+            .unwrap()
+            .clone();
+        thread.id = "review-delayed-created".into();
+        s.sessions.push(thread.clone());
+        thread
+    });
+    let id = created.id.clone();
+    list.update(v, |list, _| {
+        list.sessions.push(created);
+        if expired {
+            list.expect_open_since(&id, Instant::now() - Duration::from_secs(46));
+        } else {
+            list.expect_open(&id);
+        }
+    });
+    id
+}
+fn deliver(list: &Entity<ThreadList>, v: &mut VisualTestContext) {
+    list.update(v, |list, cx| list.open_pending(cx));
+    v.run_until_parked();
+}
+fn displays(s: &Shell, id: &str) -> usize {
+    let saved = s.current().unwrap();
+    saved
+        .tabs
+        .iter()
+        .filter(|tab| match tab {
+            Tab::Session(key) => saved.selections.get(key).unwrap_or(key) == id,
+            _ => false,
+        })
+        .count()
+}
+
+#[gpui::test]
+fn review_takeover_new_thread_menu_in_other_repo_comes_to_front(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(
+        true,
+        "--shell --composer --sidebar --settings --sidebar-two-repo-create",
+    );
+    let first: Value = fixture
+        .client
+        .get(
+            "/api/v2/chat-history",
+            &[("tabId", "thoughts-composer-first")],
+        )
+        .unwrap();
+    let a = first["repoPath"].as_str().unwrap().to_owned();
+    let b = fixture.folders[0].clone();
+    let project: Value = fixture
+        .client
+        .project_request(
+            "POST",
+            "/api/projects",
+            &json!({"name":"Review project","slug":"review-project"}),
+        )
+        .unwrap();
+    let project = project["project"]["id"].as_str().unwrap();
+    for path in [&a, &b] {
+        let repo: Value = fixture
+            .client
+            .project_request(
+                "POST",
+                "/api/panel/repos",
+                &json!({"action":"add","localPath":path}),
+            )
+            .unwrap();
+        fixture
+            .client
+            .project_request(
+                "POST",
+                &format!("/api/projects/{project}/repos"),
+                &json!({"repoId":repo["repo"]["id"]}),
+            )
+            .unwrap();
+    }
+    fixture
+        .client
+        .project_request(
+            "POST",
+            "/api/panel/projects/active",
+            &json!({"projectId":project}),
+        )
+        .unwrap();
+    let (shell, mut visual) = open_past_setup(
+        fixture.client.clone(),
+        fixture.root.join("other-repo.json"),
+        crate::shell_state::State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.switch(a.clone(), window, cx);
+        s.execute(
+            Command::Session("thoughts-composer-first".into()),
+            window,
+            cx,
+        );
+        assert_eq!(s.state.selected.as_ref(), Some(&a));
+    });
+    ready(&shell, &mut visual);
+    let list = list(&shell, &visual);
+    list.update(&mut visual, |list, cx| {
+        assert!(list.knows_repo(&a) && list.knows_repo(&b));
+        list.new_menu = true;
+        // The exact action shared by header New thread -> repo B and folder New thread.
+        list.new_thread(b.clone(), cx);
+        assert!(!list.new_menu);
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let created = loop {
+        visual.run_until_parked();
+        draw(&mut visual);
+        if let Some(id) = shell.read_with(&visual, |s, _| {
+            s.sessions
+                .iter()
+                .find(|t| t.id.starts_with("thoughts-next-") && t.workspace() == b)
+                .map(|t| t.id.clone())
+        }) {
+            break id;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "new thread must reach the catalog"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    shell.read_with(&visual, |s, _| {
+        assert_eq!(
+            s.state.selected.as_ref(),
+            Some(&b),
+            "uncancelled repo B creation is foreground"
+        );
+        let saved = s.current().unwrap();
+        let Tab::Session(key) = &saved.tabs[saved.active] else {
+            panic!("chat")
+        };
+        assert_eq!(saved.selections.get(key).unwrap_or(key), &created);
+    });
+}
+
+fn overlay_navigation(cx: &mut TestAppContext, settings: bool) {
+    let (_fixture, shell, mut visual) = setup(cx);
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.open_thread("thoughts-composer-first".into(), window, cx);
+    });
+    ready(&shell, &mut visual);
+    let list = list(&shell, &visual);
+    let id = shell.update_in(&mut visual, |s, window, cx| {
+        // Start the actual POST and open the overlay before its completion is drained.
+        let id = s.start_thread(true, cx).unwrap();
+        let command = if settings {
+            Command::Settings
+        } else {
+            Command::Projects
+        };
+        // Registration calls the shared opener directly, as non-command callers do.
+        let registration = command.registration();
+        (registration.open)(s, command, window, cx);
+        id
+    });
+    let before = retained(&shell, &list, &mut visual);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        visual.run_until_parked();
+        draw(&mut visual);
+        if shell.read_with(&visual, |s, _| {
+            s.sessions.iter().any(|thread| thread.id == id)
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "new thread must reach the catalog"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_retained(&shell, &list, &mut visual, &before);
+    shell.read_with(&visual, |s, _| {
+        assert_eq!(displays(s, &id), 1);
+        if settings {
+            assert!(s.surfaces.settings.view.is_some());
+        } else {
+            assert!(s.surfaces.projects.open);
+        }
+    });
+}
+#[gpui::test]
+fn review_takeover_settings_open_revokes_foreground_permission(cx: &mut TestAppContext) {
+    overlay_navigation(cx, true);
+}
+#[gpui::test]
+fn review_takeover_projects_open_revokes_foreground_permission(cx: &mut TestAppContext) {
+    overlay_navigation(cx, false);
+}
+
+#[gpui::test]
+fn review_takeover_background_collision_allocates_a_unique_tab(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual) = setup(cx);
+    let list = list(&shell, &visual);
+    let target = shell.update_in(&mut visual, |s, window, cx| {
+        let Tab::Session(target) = s.active().unwrap() else {
+            panic!("chat")
+        };
+        let mut other = s.sessions.iter().find(|t| t.id == target).unwrap().clone();
+        other.id = "review-different-shown-thread".into();
+        s.sessions.push(other.clone());
+        s.open_thread(other.id, window, cx);
+        target
+    });
+    list.update(&mut visual, |list, _| {
+        list.expect_open_since(&target, Instant::now() - Duration::from_secs(46))
+    });
+    let before = retained(&shell, &list, &mut visual);
+    deliver(&list, &mut visual);
+    assert_retained(&shell, &list, &mut visual, &before);
+    shell.read_with(&visual, |s, _| {
+        let tabs = &s.current().unwrap().tabs;
+        assert_eq!(tabs.len(), 2);
+        let identities: BTreeSet<_> = tabs.iter().map(|t| format!("{t:?}")).collect();
+        assert_eq!(
+            identities.len(),
+            2,
+            "background insert never duplicates stable identity"
+        );
+        assert_eq!(displays(s, &target), 1);
+    });
+}
+
+#[gpui::test]
+fn review_takeover_existing_background_tab_is_reused_even_at_capacity(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual) = setup(cx);
+    let list = list(&shell, &visual);
+    let target = pending(&shell, &list, &mut visual, true);
+    shell.update(&mut visual, |s, _| {
+        let saved = s
+            .state
+            .workspaces
+            .get_mut(s.state.selected.as_ref().unwrap())
+            .unwrap();
+        let active = saved.tabs[saved.active].clone();
+        saved.tabs = vec![active, Tab::Session(target.clone())];
+        for i in 2..32 {
+            saved.tabs.push(Tab::Session(format!("review-cap-{i}")));
+        }
+        saved.active = 0;
+    });
+    let before = retained(&shell, &list, &mut visual);
+    deliver(&list, &mut visual);
+    assert_retained(&shell, &list, &mut visual, &before);
+    shell.read_with(&visual, |s, _| {
+        assert_eq!(s.current().unwrap().tabs.len(), 32);
+        assert_eq!(displays(s, &target), 1);
+    });
+}
+
+#[gpui::test]
+fn review_takeover_background_capacity_is_quiet_without_focus_change(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual) = setup(cx);
+    let list = list(&shell, &visual);
+    let id = pending(&shell, &list, &mut visual, true);
+    shell.update(&mut visual, |s, _| {
+        let saved = s
+            .state
+            .workspaces
+            .get_mut(s.state.selected.as_ref().unwrap())
+            .unwrap();
+        let active = saved.tabs[saved.active].clone();
+        saved.tabs = vec![active];
+        for i in 1..32 {
+            saved.tabs.push(Tab::Session(format!("review-full-{i}")));
+        }
+        saved.active = 0;
+    });
+    draw(&mut visual);
+    assert!(visual.debug_bounds("toast-stack-0").is_none());
+    let before = retained(&shell, &list, &mut visual);
+    list.update(&mut visual, |list, cx| list.open_pending(cx));
+    draw(&mut visual);
+    assert!(
+        visual.debug_bounds("toast-stack-0").is_none(),
+        "background creation must not report an unsolicited tab-limit action"
+    );
+    assert_retained(&shell, &list, &mut visual, &before);
+    shell.read_with(&visual, |s, _| {
+        assert_eq!(s.current().unwrap().tabs.len(), 32);
+        assert_eq!(displays(s, &id), 0);
+    });
+}
+
+#[gpui::test]
+fn review_takeover_expired_creation_preserves_sidebar_and_focus(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual) = setup(cx);
+    let list = list(&shell, &visual);
+    let id = pending(&shell, &list, &mut visual, true);
+    let before = retained(&shell, &list, &mut visual);
+    deliver(&list, &mut visual);
+    assert_retained(&shell, &list, &mut visual, &before);
+    shell.read_with(&visual, |s, _| assert_eq!(displays(s, &id), 1));
+}
+
+#[gpui::test]
+fn review_takeover_draw_has_no_navigation_check_or_allocation(cx: &mut TestAppContext) {
+    let (_f, shell, mut visual) = setup(cx);
+    let before = crate::shell::sidebar::navigation_checks();
+    let generation = list(&shell, &visual).read_with(&visual, |list, _| list.navigation_generation());
+    draw(&mut visual);
+    assert_eq!(crate::shell::sidebar::navigation_checks(), before, "zero checks means zero allocations or writes by the check during draw");
+    assert_eq!(list(&shell, &visual).read_with(&visual, |list, _| list.navigation_generation()), generation);
+}
+#[gpui::test]
+fn review_takeover_in_pane_thread_change_revokes_creation(cx: &mut TestAppContext) {
+    let (_f, shell, mut visual) = setup(cx);
+    shell.update_in(&mut visual, |s, w, cx| s.open_thread("thoughts-composer-first".into(), w, cx));
+    ready(&shell, &mut visual);
+    let list = list(&shell, &visual);
+    let id = pending(&shell, &list, &mut visual, false);
+    shell.update(&mut visual, |s, cx| {
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        let sessions = s.sessions.clone();
+        view.update(cx, |view, cx| view.shell_select(sessions, "thoughts-composer-second".into(), cx));
+    });
+    deliver(&list, &mut visual);
+    shell.read_with(&visual, |s, cx| {
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        assert_eq!(view.read(cx).shown_thread().as_deref(), Some("thoughts-composer-second"));
+        assert_eq!(displays(s, &id), 1);
+    });
+}
+
+fn delta_settings_close(cx: &mut TestAppContext, rail: bool) {
+    let (_f, shell, mut v) = setup(cx);
+    shell.update_in(&mut v, |s, w, cx| s.open_thread("thoughts-composer-first".into(), w, cx));
+    ready(&shell, &mut v);
+    let (id, active, shown) = shell.update_in(&mut v, |s, w, cx| {
+        s.execute(Command::Settings, w, cx);
+        let id = s.start_thread(true, cx).unwrap();
+        let active = s.active();
+        let Content::Session(view) = s.content.get(&s.key(&active.clone().unwrap())).unwrap() else { panic!("chat") };
+        let shown = view.read(cx).shown_thread();
+        let generation = s.surfaces.sidebar.generation.get();
+        if rail {
+            s.close_rail_overlays(w, cx);
+            assert!(s.surfaces.sidebar.generation.get() > generation, "rail closure counts as navigation");
+        }
+        else { s.surfaces.settings.view = None; s.surfaces.settings.subscription = None; }
+        (id, active, shown)
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        v.run_until_parked(); draw(&mut v);
+        if shell.read_with(&v, |s, _| s.sessions.iter().any(|t| t.id == id)) { break; }
+        assert!(Instant::now() < deadline, "created thread reaches catalog");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    shell.read_with(&v, |s, cx| {
+        assert_eq!(s.active(), active, "closing Settings preserves the tab");
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        assert_eq!(view.read(cx).shown_thread(), shown, "closing Settings preserves the displayed thread");
+        assert_eq!(displays(s, &id), 1);
+    });
+}
+#[gpui::test]
+fn delta_settings_rail_close_cancels(cx: &mut TestAppContext) { delta_settings_close(cx, true); }
+#[gpui::test]
+fn delta_created_snapshot_backstop_cancels(cx: &mut TestAppContext) { delta_settings_close(cx, false); }
+#[gpui::test]
+fn delta_workspace_none_cancels(cx: &mut TestAppContext) {
+    let (_f, shell, mut v) = setup(cx);
+    let list = list(&shell, &v);
+    let id = pending(&shell, &list, &mut v, false);
+    list.update(&mut v, |_, cx| cx.emit(super::Event::Workspace(None, Default::default())));
+    v.run_until_parked();
+    deliver(&list, &mut v);
+    shell.read_with(&v, |s, _| {
+        assert_eq!(s.state.selected, None);
+        assert!(s.state.workspaces.values().any(|w| Shell::tab_index(w, &Tab::Session(id.clone())).is_some()));
+    });
+}
+#[gpui::test]
+fn delta_refresh_fallback_keeps_creation_foreground(cx: &mut TestAppContext) {
+    let (_f, shell, mut v) = setup(cx);
+    shell.update_in(&mut v, |s, w, cx| s.open_thread("thoughts-composer-first".into(), w, cx));
+    ready(&shell, &mut v);
+    let view = shell.update(&mut v, |s, cx| {
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        let view = view.clone();
+        let mut sessions = s.sessions.clone();
+        let mut stale = sessions[0].clone(); stale.id = "delta-removed-selection".into();
+        sessions.push(stale.clone());
+        view.update(cx, |view, cx| view.shell_select(sessions, stale.id, cx));
+        view
+    });
+    shell.update(&mut v, |s, cx| crate::shell::sidebar::navigation(s, cx));
+    let list = list(&shell, &v);
+    let id = pending(&shell, &list, &mut v, false);
+    let generation = list.read_with(&v, |l, _| l.navigation_generation());
+    view.update(&mut v, |view, cx| view.shell_refresh(cx));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        v.run_until_parked(); draw(&mut v);
+        if view.read_with(&v, |view, _| view.shown_thread().as_deref() != Some("delta-removed-selection")) { break; }
+        assert!(Instant::now() < deadline, "refresh falls back to a real session");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(list.read_with(&v, |l, _| l.navigation_generation()), generation, "refresh is not user navigation");
+    deliver(&list, &mut v);
+    shell.read_with(&v, |s, _| {
+        let saved = s.current().unwrap();
+        assert_eq!(Shell::tab_index(saved, &Tab::Session(id)), Some(saved.active));
+    });
+}

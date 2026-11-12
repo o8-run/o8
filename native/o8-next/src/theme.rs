@@ -791,6 +791,31 @@ pub fn popover_background() -> Rgba {
     }
 }
 // --t-brand-orange in src/lib/theme/registry.ts.
+/// The macOS window buttons (window_lights), as AppKit and the classic shell
+/// (TrafficLights.tsx) draw them in every theme: close, minimize and full
+/// screen fills, the hairline rim inside each, and the hover glyph ink.
+/// macOS's own colours, so no theme changes them.
+pub fn window_light(index: usize) -> Rgba {
+    rgb([0xff5f57, 0xfebc2e, 0x28c840][index.min(2)])
+}
+pub const WINDOW_LIGHT_RIM: Rgba = Rgba {
+    r: 0.,
+    g: 0.,
+    b: 0.,
+    a: 0.18,
+};
+pub const WINDOW_LIGHT_GLYPH: Rgba = Rgba {
+    r: 0.,
+    g: 0.,
+    b: 0.,
+    a: 0.55,
+};
+/// The inactive window's flat grey: the theme's ink at 22%.
+pub fn window_light_inactive() -> Rgba {
+    let mut grey = current().text;
+    grey.a *= 0.22;
+    grey
+}
 pub fn brand_orange() -> Rgba {
     rgb(0xff5a1f)
 }

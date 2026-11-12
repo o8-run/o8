@@ -1,7 +1,8 @@
 import { DISPATCH_MISSION_TOOL } from './mission-dispatch-tool';
+import { validateRequestedRuntime } from '@/lib/agents/routing';
 export { handleCreateMission } from './mission-create';
 export { handleResetPacket, handleRetryPacket } from './packet-reset';
-import { lifecycleErrorResult } from './lifecycle-error';
+export { handleTaskDispatch } from './task-dispatch';
 import {
   isAgentReportReason,
   normalizeAgentReportEvent,
@@ -20,7 +21,6 @@ import {
   blockTask,
   claimTask,
   createTask,
-  dispatchTask,
   pruneTask,
   reportTask,
 } from '@/lib/tasks/actions';
@@ -37,7 +37,6 @@ import {
   optionalString,
   parseDirectivesApplied,
   parseDirectivesViolated,
-  parseMissionRuntime,
   parseReviewFindings,
   requiredString,
   textResult,
@@ -169,7 +168,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: listDispatchableRuntimes(),
+          enum: [...listDispatchableRuntimes(), 'claude'],
           description: 'Worker runtime for this task. When omitted, the operator default applies.',
         },
         model: {
@@ -266,7 +265,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: listDispatchableRuntimes(),
+          enum: [...listDispatchableRuntimes(), 'claude'],
           description: 'Worker runtime for this task. When omitted, the operator default applies.',
         },
         projectId: {
@@ -648,13 +647,12 @@ export const MISSION_TOOLS: McpTool[] = [
     },
   },
 ];
-
 export async function handleDispatchMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const result = await dispatchMission({
       force: args.force === true,
       missionId: optionalString(args, 'missionId') || undefined,
-      runtime: args.runtime === undefined ? undefined : parseMissionRuntime(args.runtime),
+      runtime: validateRequestedRuntime(args.runtime) ?? undefined,
     });
     return jsonResult(result, 'error' in result);
   } catch (error) {
@@ -730,7 +728,7 @@ export async function handleTaskCreate(args: Record<string, unknown>): Promise<M
       model: optionalString(args, 'model') || null,
       workerIntent: optionalString(args, 'workerIntent') || null,
       requestedProvider: optionalString(args, 'requestedProvider') || null,
-      requestedRuntime: optionalString(args, 'requestedRuntime') || null,
+      requestedRuntime: validateRequestedRuntime(args.requestedRuntime),
       allowedFiles,
     });
     return jsonResult(result);
@@ -771,26 +769,6 @@ export async function handleTaskClaim(args: Record<string, unknown>): Promise<Mc
   } catch (error) {
     console.error(`${'[mcp-operator]'} o8_task_claim failed: ${errorText(error)}`);
     return textResult(`Failed to claim task: ${errorText(error)}`, true);
-  }
-}
-
-export async function handleTaskDispatch(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const result = await dispatchTask(requiredString(args, 'taskId'), {
-      waitForLaunch: false,
-      actor: 'orchestrator',
-      message: optionalString(args, 'message') || null,
-      model: optionalString(args, 'model') || null,
-      workerIntent: optionalString(args, 'workerIntent') || null,
-      requestedProvider: optionalString(args, 'requestedProvider') || null,
-      requestedRuntime: optionalString(args, 'requestedRuntime') || null,
-      projectId: optionalString(args, 'projectId') || null,
-      repoPath: optionalString(args, 'repoPath') || null,
-    });
-    if (!result.ok) return lifecycleErrorResult('o8_task_dispatch', { code: 'task_dispatch_failed', note: result.note }, result.packetId ?? args.taskId);
-    return jsonResult(result);
-  } catch (error) {
-    return lifecycleErrorResult('o8_task_dispatch', error, args.taskId);
   }
 }
 

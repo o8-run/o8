@@ -1,9 +1,7 @@
-import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { EffortPinRejectionError, isHonoredEffortPin, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import {
-  formatDispatchableRuntimeChoices,
   getRuntimeCapability,
-  isDispatchableRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorMissionState, OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { rearmHeldPacketsForExplicitDispatch } from './dispatch-result';
@@ -31,13 +29,12 @@ export function preparePacketsForExplicitDispatch(
   state: OrchestratorMissionState,
   runtime?: OrchestratorRuntime,
 ): void {
-  if (runtime === undefined) {
+  const requestedRuntime = validateRequestedRuntime(runtime);
+  if (requestedRuntime === null) {
     rearmHeldPacketsForExplicitDispatch(state);
     return;
   }
-  if (!isDispatchableRuntime(runtime)) {
-    throw new Error(`runtime must be one of ${formatDispatchableRuntimeChoices()}`);
-  }
+  runtime = requestedRuntime;
 
   // Project the post-rearm state on a clone so an unhonorable destination cannot
   // leave a half-rewritten mission behind.
