@@ -17,6 +17,7 @@ mod diff_tests;
 mod diff_ui;
 mod editor_command;
 mod files_panel;
+mod glance;
 mod grid_sessions;
 mod icon;
 mod inbox;

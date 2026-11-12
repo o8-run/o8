@@ -182,6 +182,12 @@ impl Surface {
         }
         let (label, add, del) = summary(&pill.files);
         let open = pill.over_pill || pill.over_list;
+        // The working strip floats in the same place; the pill rides above it.
+        let lift = if self.working_strip_shown() {
+            super::working_strip::STRIP_HEIGHT
+        } else {
+            0.
+        };
         let counts = |add: u64, del: u64| {
             div()
                 .flex()
@@ -198,7 +204,7 @@ impl Surface {
                     .left_0()
                     .right_0()
                     // Above the floating pill and its 8px of air.
-                    .bottom(px(PILL_HEIGHT + 8.))
+                    .bottom(px(PILL_HEIGHT + 8. + lift))
                     .flex()
                     .justify_center()
                     .child(
@@ -281,7 +287,7 @@ impl Surface {
                         .absolute()
                         .left_0()
                         .right_0()
-                        .bottom(px(8.))
+                        .bottom(px(8. + lift))
                         .flex()
                         .justify_center()
                         .items_center()
