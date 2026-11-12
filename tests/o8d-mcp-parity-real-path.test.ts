@@ -343,6 +343,37 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     }
   });
 
+  nativeReadTest('rechecks inspected spec content and live credential files before native reuse', async () => {
+    const path = join(directory, 'repo', 'o8.md');
+    const original = existsSync(path) ? readFileSync(path) : null;
+    const credentialsPath = join(directory, 'mobile-device-tokens');
+    const credentials = readFileSync(credentialsPath);
+    const candidate = 'e'.repeat(64);
+    try {
+      writeFileSync(path, `# Inspected fixture\n\n${candidate}\n`);
+      const inspected = await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') });
+      seen.length = 0;
+      compareMcpExchanges(inspected, await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') }));
+      expect(seen).toHaveLength(0);
+
+      writeFileSync(credentialsPath, `${credentials.toString()}${createHash('sha256').update(candidate).digest('hex')}\n`);
+      seen.length = 0;
+      const rotated = await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') });
+      expect(seen.some(entry => entry.path === '/api/mcp')).toBe(true);
+      expect(toolPayload(rotated).content).not.toContain(candidate);
+      compareMcpExchanges(await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') }), rotated);
+
+      writeFileSync(path, '# Changed source\n');
+      seen.length = 0;
+      const changed = await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') });
+      expect(seen.some(entry => entry.path === '/api/mcp')).toBe(true);
+      compareMcpExchanges(await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') }), changed);
+    } finally {
+      writeFileSync(credentialsPath, credentials);
+      if (original) writeFileSync(path, original); else unlinkSync(path);
+    }
+  });
+
   nativeReadTest.each([
     '0009', '000A', '000B', '000C', '000D', '0020', '00A0', '1680',
     '2000', '2001', '2002', '2003', '2004', '2005', '2006', '2007',
