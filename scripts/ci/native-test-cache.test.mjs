@@ -55,10 +55,41 @@ function run(mode, hit = '') {
   })) : {};
 }
 
-test('source, manifest, vendored and test changes miss the exact key but retain the lockfile fallback', () => {
+test('vendor edits, additions and deletions invalidate both native and registration restore domains', () => {
+  const vendor = join(crate, 'vendor/gpui/src/lib.rs');
+  const original = readFileSync(vendor, 'utf8');
+  const added = join(crate, 'vendor/gpui/src/zoom.rs');
+  const initial = run('key');
+  const invalidates = () => {
+    const changed = run('key');
+    for (const key of ['key', 'restore-key', 'registration-key', 'registration-restore-key']) {
+      assert.notEqual(changed[key], initial[key], key);
+    }
+  };
+  try {
+    write(vendor, `${original} vendor edit`);
+    invalidates();
+    write(vendor, original);
+    write(added, 'pub fn zoom() {}');
+    git(['add', 'native/o8-next/vendor/gpui/src/zoom.rs']);
+    invalidates();
+    rmSync(added);
+    git(['rm', '--cached', '-q', 'native/o8-next/vendor/gpui/src/zoom.rs']);
+    rmSync(vendor);
+    git(['rm', '--cached', '-q', 'native/o8-next/vendor/gpui/src/lib.rs']);
+    invalidates();
+  } finally {
+    write(vendor, original);
+    rmSync(added, { force: true });
+    git(['add', '-A', 'native/o8-next/vendor/gpui']);
+  }
+  assert.deepEqual(run('key'), initial);
+});
+
+test('application and test changes miss the exact key but retain the vendor-bound fallback', () => {
   const initial = run('key');
   assert.equal(run('key').key, initial.key);
-  for (const file of ['src/main.rs', 'Cargo.toml', 'vendor/gpui/src/lib.rs', 'tests/terminal.rs']) {
+  for (const file of ['src/main.rs', 'Cargo.toml', 'tests/terminal.rs']) {
     const original = readFileSync(join(crate, file), 'utf8');
     write(join(crate, file), `${original} changed`);
     const changed = run('key');

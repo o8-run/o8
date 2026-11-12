@@ -25,7 +25,14 @@ function cacheIdentity() {
   const configuration = [process.platform, process.arch, compiler,
     process.env.CARGO_PROFILE_DEV_DEBUG, process.env.CARGO_INCREMENTAL,
     process.env.RUSTFLAGS, process.env.CARGO_ENCODED_RUSTFLAGS];
-  return { configuration: hash(JSON.stringify(configuration)), lockfile: hash(readFileSync(`${crate}/Cargo.lock`)) };
+  // Path dependencies do not change Cargo.lock when their source changes.
+  // Bind fallback restores (including the separate registration target) to
+  // the complete vendor tree before any source freshness is restored.
+  const vendor = createHash('sha256');
+  const files = command('git', ['ls-files', '-z', '--', `${crate}/vendor`]).split('\0').filter(Boolean).sort();
+  for (const file of files) vendor.update(file).update('\0').update(readFileSync(file)).update('\0');
+  return { configuration: hash(JSON.stringify(configuration)), lockfile: hash(readFileSync(`${crate}/Cargo.lock`)),
+    vendor: vendor.digest('hex') };
 }
 // All tracked crate inputs include src/**, Cargo.toml, tests, build scripts,
 // fixtures and vendored path dependencies. No target artifacts enter the key.
@@ -47,14 +54,14 @@ function sources() {
 }
 switch (process.argv[2]) {
   case 'key': {
-    const { configuration, lockfile } = cacheIdentity();
+    const { configuration, lockfile, vendor } = cacheIdentity();
     const source = createHash('sha256');
     for (const file of sources()) source.update(file).update('\0').update(readFileSync(file)).update('\0');
-    const prefix = `native-tests-v1-${configuration}-${lockfile}-`;
+    const prefix = `native-tests-v2-${configuration}-${lockfile}-${vendor}-`;
     output('key', `${prefix}${source.digest('hex')}`);
     output('restore-key', prefix);
-    output('registration-key', `native-registration-v1-${configuration}-${lockfile}`);
-    output('registration-restore-key', `native-registration-v1-${configuration}-`);
+    output('registration-key', `native-registration-v2-${configuration}-${lockfile}-${vendor}`);
+    output('registration-restore-key', `native-registration-v2-${configuration}-${lockfile}-${vendor}`);
     break;
   }
   case 'restore': {
@@ -69,8 +76,8 @@ switch (process.argv[2]) {
       }
       manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
       const identity = cacheIdentity();
-      if (manifest.configuration !== identity.configuration || manifest.lockfile !== identity.lockfile) {
-        console.log('[native-cache] source manifest configuration or lockfile mismatch: leaving checkout freshness unchanged');
+      if (manifest.configuration !== identity.configuration || manifest.lockfile !== identity.lockfile || manifest.vendor !== identity.vendor) {
+        console.log('[native-cache] source manifest configuration, lockfile or vendor mismatch: leaving checkout freshness unchanged');
         break;
       }
     }
