@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { startParityReference } from './fixtures/ws-parity-server';
@@ -19,14 +20,21 @@ function call(method: string, path: string, token: string, relay = false) {
     ...(relay ? { 'x-o8-relay-forward': '1' } : {}), 'content-type': 'application/json' },
   ...(method === 'GET' ? {} : { body: '{}' }) });
 }
+const savedSocket = process.env.O8_TAURI_MCP_SOCKET;
 beforeAll(async () => {
+  // The fixture inherits this: a desktop WebView socket that is not there, so
+  // confirm reports desktop_unavailable instead of refusing the fixture data dir.
+  process.env.O8_TAURI_MCP_SOCKET = join(tmpdir(), `o8-symon-fixture-${process.pid}.sock`);
   server = await startParityReference({ o8d: true, nativeHttp: true });
   await server.stopNext();
   origin = server.url.replace('ws:', 'http:').replace('/ws', '');
   writeFileSync(join(server.directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
   writeFileSync(join(server.directory, 'worker-token'), worker);
 }, 120_000);
-afterAll(async () => { await server?.stop(); });
+afterAll(async () => {
+  await server?.stop();
+  if (savedSocket === undefined) delete process.env.O8_TAURI_MCP_SOCKET; else process.env.O8_TAURI_MCP_SOCKET = savedSocket;
+});
 
 it.each(routes)('%s %s keeps its credential gate with Next stopped', async (method, path) => {
   for (const relay of [false, true]) {
@@ -38,9 +46,11 @@ it.each(routes)('%s %s keeps its credential gate with Next stopped', async (meth
   expect(result.status).toBe(200);
   expect(await result.json()).toMatchObject({ ok: false, error: expect.any(String) });
   if (path === '/api/mobile/symon') {
-    const phone = await call(method, path, device, true);
-    expect(phone.status).toBe(200);
-    expect(await phone.json()).toMatchObject({ ok: false, error: expect.any(String) });
+    for (const relay of [true, false]) {
+      const phone = await call(method, path, device, relay);
+      expect(phone.status).toBe(200);
+      expect(await phone.json()).toMatchObject({ ok: false, error: expect.any(String) });
+    }
   }
 }, 30_000);
 
@@ -64,8 +74,12 @@ it('forwards every Next entry point to the WS owner without local bridge state',
       const handler = method === 'GET' ? relay.GET : path.endsWith('/confirm') ? confirm.POST : relay.POST;
       const response = await handler(new Request(`${origin}${path}`, { method,
         headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json', host: new URL(origin).host },
-        ...(method === 'GET' ? {} : { body: '{}' }) }));
+        // A well-formed confirm body proves the hop keeps it: a dropped body reads as bad_request.
+        ...(method === 'GET' ? {} : { body: path.endsWith('/confirm')
+          ? JSON.stringify({ sessionId: 'fixture-session', callId: 'fixture-call', confirmationId: 'fixture-confirmation', allow: false })
+          : '{}' }) }));
       expect(response.status).toBe(200);
+      if (path.endsWith('/confirm')) expect(await response.json()).toMatchObject({ ok: false, error: 'desktop_unavailable' });
     }
     expect(local.__o8BrowserAgentClient).toBeUndefined();
   } finally {
