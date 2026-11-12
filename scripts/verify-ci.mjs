@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-import './register-server-only-stub.mjs';
-import { register } from 'tsx/cjs/api';
 import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -82,6 +80,7 @@ async function runStep(step, onQueueWait = () => {}) {
 }
 
 async function verify() {
+  if (process.env.O8_VERIFY_CI_FIXTURE_STOP === '1') throw new Error('Fixture stopped before checks');
 try {
   const branch = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
     cwd: root, encoding: 'utf8', env: environment(),
@@ -160,11 +159,15 @@ try {
 }
 
 }
-register();
-const { withMachineLease } = createRequire(import.meta.url)('../src/lib/leases/machine-heavy.ts');
 try {
   if (process.argv.includes('--allow-concurrent')) await verify();
-  else await withMachineLease('verify-ci', verify, false);
+  else {
+    await import('./register-server-only-stub.mjs');
+    const { register } = await import('tsx/cjs/api');
+    register();
+    const { withMachineLease } = createRequire(import.meta.url)('../src/lib/leases/machine-heavy.ts');
+    await withMachineLease('verify-ci', verify, false);
+  }
 } catch (error) {
   console.error(`[verify:ci] ${error.message}`);
   process.exitCode = 1;

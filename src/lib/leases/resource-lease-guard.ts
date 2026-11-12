@@ -54,6 +54,7 @@ export async function withResourceLease<T>(input: {
   actor: string;
   ttlMs?: number;
   maxWaitMs?: number;
+  pollIntervalMs?: number;
   store?: ResourceLeaseStore;
   signal?: AbortSignal;
   onWaiting?: (position: number | null, holder: ResourceLeaseHolder | null) => void;
@@ -118,7 +119,7 @@ export async function withResourceLease<T>(input: {
           },
         };
       }
-      await waitBriefly(Math.min(INTERNAL_WAIT_INTERVAL_MS, remainingMs));
+      await waitBriefly(Math.min(input.pollIntervalMs ?? INTERNAL_WAIT_INTERVAL_MS, remainingMs));
     }
 
   } catch (error) {

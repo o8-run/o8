@@ -13,13 +13,15 @@ export async function withMachineLease<T>(resource: string, action: () => Promis
   sqlite.pragma('busy_timeout = 5000');
   try {
     const store = new ResourceLeaseStore(sqlite);
+    let lastReport = 0;
     let lastPosition: number | null | undefined;
     const result = await withResourceLease({
-      resource, store, signal, actor: 'worker',
+      resource, store, signal, pollIntervalMs: 1000, actor: 'worker',
       owner: { id: `heavy-${process.pid}`, label: resource, pid: ownerPid },
       maxWaitMs: wait ? 24 * 60 * 60_000 : 0,
       onWaiting(position, holder) {
-        if (lastPosition === position) return;
+        if (lastPosition === position && Date.now() - lastReport < 30_000) return;
+        lastReport = Date.now();
         lastPosition = position;
         console.error(`Waiting for ${resource}, position ${position ?? 'unknown'}; holder ${holder?.owner.label ?? 'unknown'} (pid ${holder?.owner.pid ?? 'unknown'}).`);
       },

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -15,12 +15,23 @@ afterAll(() => rmSync(bundleDir, { recursive: true, force: true }));
 const children: ChildProcess[] = [];
 const dirs: string[] = [];
 afterEach(() => {
-  for (const child of children) { try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* settled */ } }
-  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs) {
+    const file = path.join(dir, 'leases.db');
+    if (!existsSync(file)) continue;
+    const sqlite = new Database(file);
+    const owners = sqlite.prepare('SELECT owner_pid FROM resource_leases').all() as { owner_pid: number }[];
+    sqlite.close();
+    for (const owner of owners) {
+      try { process.kill(-owner.owner_pid, 'SIGKILL'); } catch { /* settled */ }
+    }
+  }
+
+  for (const child of children.splice(0)) { try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* settled */ } }
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 function runner(dir: string, args: string[]) {
   const child = spawn(process.execPath, [bundle, 'run-heavy', ...args], {
-    detached: true, env: { ...process.env, NODE_PATH: path.resolve('node_modules'), O8_MACHINE_LEASE_DIR: dir }, stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true, env: { ...process.env, NODE_PATH: path.resolve('node_modules'), O8_MACHINE_LEASE_DIR: dir }, stdio: ['pipe', 'pipe', 'pipe'],
   });
   children.push(child);
   let output = '';
@@ -72,7 +83,7 @@ it.skipIf(process.platform === 'win32')('verify:ci refuses a second copy and nam
   const dir = directory();
   const first = runner(dir, ['--resource', 'verify-ci', ...command(dir)]);
   await until(() => first.output().includes('entered'), first.output);
-  const second = spawn(process.execPath, ['scripts/verify-ci.mjs'], { detached: true, env: { ...process.env, NODE_PATH: path.resolve('node_modules'), O8_MACHINE_LEASE_DIR: dir }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const second = spawn(process.execPath, ['scripts/verify-ci.mjs'], { detached: true, env: { ...process.env, NODE_PATH: path.resolve('node_modules'), O8_MACHINE_LEASE_DIR: dir, O8_VERIFY_CI_FIXTURE_STOP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(second);
   let output = '';
   second.stderr!.on('data', chunk => { output += chunk; });
@@ -81,3 +92,58 @@ it.skipIf(process.platform === 'win32')('verify:ci refuses a second copy and nam
   expect(output).toContain(first.output().match(/holder pid \d+/)![0].replace('holder ', ''));
   expect(output).toContain('--allow-concurrent');
 });
+
+it('nested run-heavy executes without waiting on its own lease', async () => {
+  const run = runner(directory(), ['--', process.execPath, bundle, 'run-heavy', '--', process.execPath, '-e', 'console.log("nested complete")']);
+  expect(await run.done).toBe(0);
+  expect(run.output()).toContain('nested complete');
+}, 15_000);
+it('passes operator stdin to the command', async () => {
+  const run = runner(directory(), ['--', process.execPath, '-e', 'process.stdin.once("data", chunk => console.log("input:" + chunk))']);
+  run.child.stdin!.end('operator input');
+  expect(await run.done).toBe(0);
+  expect(run.output()).toContain('input:operator input');
+}, 15_000);
+it.each([['SIGINT', 130], ['SIGTERM', 143]] as const)('returns signal status and forwards %s once', async (signal, code) => {
+  const run = runner(directory(), ['--', process.execPath, '-e', 'let count = 0; for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { console.log("signal:" + ++count); setTimeout(() => process.exit(0), 100); }); console.log("ready"); setInterval(() => {}, 1000)']);
+  await until(() => run.output().includes('ready'), run.output);
+  process.kill(-run.child.pid!, signal);
+  expect(await run.done).toBe(code);
+  expect(run.output().match(/signal:/g)).toHaveLength(1);
+}, 15_000);
+it('prints a heartbeat while queue position remains unchanged', async () => {
+  const dir = directory();
+  const first = runner(dir, command(dir));
+  await until(() => first.output().includes('entered'), first.output);
+  const second = runner(dir, command(dir));
+  await until(() => second.output().includes('Waiting'), second.output);
+  const sqlite = new Database(path.join(dir, 'leases.db'));
+  sqlite.exec('CREATE TABLE poll_receipt (at INTEGER); CREATE TRIGGER count_waiter_poll AFTER UPDATE ON resource_lease_waiters BEGIN INSERT INTO poll_receipt VALUES (1); END');
+  await new Promise(resolve => setTimeout(resolve, 31_100));
+  const polls = (sqlite.prepare('SELECT count(*) AS n FROM poll_receipt').get() as { n: number }).n;
+  sqlite.close();
+  expect(polls).toBeLessThan(50);
+
+  expect(second.output().match(/Waiting for/g)!.length).toBeGreaterThanOrEqual(2);
+  writeFileSync(path.join(dir, 'release'), '');
+  expect(await first.done).toBe(0);
+  expect(await second.done).toBe(0);
+}, 45_000);
+
+it('cancels a queued command with signal status before it starts', async () => {
+  const dir = directory();
+  const first = runner(dir, command(dir));
+  await until(() => first.output().includes('entered'), first.output);
+  const queued = runner(dir, ['--', process.execPath, '-e', 'console.log("should not enter")']);
+  await until(() => queued.output().includes('Waiting'), queued.output);
+  process.kill(-queued.child.pid!, 'SIGINT');
+  expect(await queued.done).toBe(130);
+  expect(queued.output()).not.toContain('should not enter');
+  writeFileSync(path.join(dir, 'release'), '');
+  expect(await first.done).toBe(0);
+}, 15_000);
+
+it('returns 128 plus the signal when the command terminates itself', async () => {
+  const run = runner(directory(), ['--', process.execPath, '-e', 'process.kill(process.pid, "SIGTERM")']);
+  expect(await run.done).toBe(143);
+}, 15_000);

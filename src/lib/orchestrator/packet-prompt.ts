@@ -519,7 +519,7 @@ async function assemblePacketPrompt(
     captureProofSection,
     brainSection,
     learnedRuleSection,
-    'Heavy steps: run native builds and full test suites through `o8 run-heavy -- <command> [args...]`. For operator-visible output use `o8 run -- o8 run-heavy -- <command> [args...]`. All worktrees share one queue. Wait for admission; do not bypass it or start a second build while queued.',
+    readOnlyPacket ? null : 'Heavy steps: run native builds and full test suites through `o8 run-heavy -- <command> [args...]`. For operator-visible output use `o8 run -- o8 run-heavy -- <command> [args...]`. Run heavy steps detached so waiting does not exhaust shell timeouts. All worktrees share one queue. Wait for admission; do not bypass it or start a second build while queued.',
     projectVerificationSection,
     ...buildPacketCompletionInstructions(readOnlyPacket, baseBranch),
     readOnlyPacket ? null : 'If the task requires a path outside the packet allowlist, request a bounded audited expansion with `o8 packet expand-scope --paths <path[,path]> --reason "<why the task requires it>"` before editing that path.',

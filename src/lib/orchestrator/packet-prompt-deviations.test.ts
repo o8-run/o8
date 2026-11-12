@@ -42,3 +42,9 @@ describe('buildPacketPrompt deviations clause', () => {
     expect(prompt).not.toContain('implementation-notes.md file at the worktree root');
   });
 });
+
+it('teaches detached heavy steps only to writable packets', async () => {
+  expect(await buildPacketPrompt(minimalPacket(), [])).toContain('Run heavy steps detached');
+  const packet = minimalPacket({ launchContext: { workMode: 'read-only' } as OrchestratorPacket['launchContext'] });
+  expect(await buildPacketPrompt(packet, [])).not.toContain('Heavy steps:');
+});

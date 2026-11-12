@@ -21,7 +21,7 @@ import {
 } from './subscription-profile';
 import { resolveWorkerEffortDefault } from './worker-effort-default';
 import { isWorkerStartMode, type WorkerStartMode } from './worker-start-mode';
-import { parseStoredJson } from './stored-json';
+import { parseStoredDefaults, type StoredOperatorDefaults, type FileOperatorDefaults } from './defaults-file-types';
 import { assertExecutionCarrierRoutingCompatibility, assertRoutingCompatibility, routingUpdateTouchesCompatibility } from './routing-compatibility';
 import {
   coerceStoredTier,
@@ -135,6 +135,7 @@ export function isRequireApproval(value: unknown): value is RequireApproval { re
 
 export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults, conversationDefaults.ConversationDefaults {
   subscriptionProfile: SubscriptionProfile;
+  dispatchLoadPerCore: number;
   parallelCap: number;
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
@@ -338,6 +339,7 @@ export interface OperatorDefaultsWithSources {
 export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   knowledgeSources: [],
   subscriptionProfile: 'both',
+  dispatchLoadPerCore: 1.5,
   parallelCap: 5,
   overlapGate: 'strict',
   healBotEnabled: true,
@@ -413,17 +415,6 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxTotalGb: 20,
   ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK, ...SYMON_VOICE_FALLBACK, ...JUDGMENT_PROVIDER_FALLBACK, ...JUDGMENT_ALLOWANCE_FALLBACK,
 };
-type StoredOperatorDefaults = Partial<OperatorDefaults> & {
-  defaultDispatchRuntimeExplicit?: boolean;
-  autoApplyUpdates?: 'off' | 'when-idle';
-};
-
-type FileOperatorDefaults = Partial<OperatorDefaults> & {
-  defaultDispatchRuntimeExplicit?: boolean;
-};
-
-const parseStoredDefaults = (raw: string): StoredOperatorDefaults => parseStoredJson<StoredOperatorDefaults>(raw);
-
 function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   const result: FileOperatorDefaults = {};
   if (stored.knowledgeSources !== undefined) {
@@ -434,6 +425,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isSubscriptionProfile(stored.subscriptionProfile)) {
     result.subscriptionProfile = stored.subscriptionProfile;
   }
+  if (typeof stored.dispatchLoadPerCore === 'number' && Number.isFinite(stored.dispatchLoadPerCore) && stored.dispatchLoadPerCore >= 0) result.dispatchLoadPerCore = stored.dispatchLoadPerCore;
   if (isParallelCap(stored.parallelCap)) {
     result.parallelCap = stored.parallelCap;
   }
@@ -662,9 +654,12 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   });
   const defaultDispatchRuntime = profileDefaults?.defaultDispatchRuntime ?? baseDefaultDispatchRuntime;
 
+  const loadOverride = process.env.O8_DISPATCH_LOAD_PER_CORE;
+  const envLoad = loadOverride !== undefined && Number.isFinite(Number(loadOverride)) && Number(loadOverride) >= 0 ? Number(loadOverride) : undefined;
   const resolved: OperatorDefaults = {
     knowledgeSources: fileValues.knowledgeSources ?? [],
     subscriptionProfile,
+    dispatchLoadPerCore: envLoad ?? fileValues.dispatchLoadPerCore ?? OPERATOR_DEFAULTS_FALLBACK.dispatchLoadPerCore,
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
     overlapGate: envGate ?? fileValues.overlapGate ?? OPERATOR_DEFAULTS_FALLBACK.overlapGate,
     healBotEnabled: envHeal ?? fileValues.healBotEnabled ?? OPERATOR_DEFAULTS_FALLBACK.healBotEnabled,
@@ -748,6 +743,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
     knowledgeSources: fileValues.knowledgeSources !== undefined ? 'file' : 'default',
     subscriptionProfile: envProfile !== null ? 'env' : fileValues.subscriptionProfile !== undefined ? 'file' : 'default',
+    dispatchLoadPerCore: envLoad !== undefined ? 'env' : fileValues.dispatchLoadPerCore !== undefined ? 'file' : 'default',
     parallelCap: envCap !== null ? 'env' : fileValues.parallelCap !== undefined ? 'file' : 'default',
     overlapGate: envGate !== null ? 'env' : fileValues.overlapGate !== undefined ? 'file' : 'default',
     healBotEnabled: envHeal !== null ? 'env' : fileValues.healBotEnabled !== undefined ? 'file' : 'default',
@@ -859,6 +855,10 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
     }
   }
 
+  if (update.dispatchLoadPerCore !== undefined) {
+    if (!Number.isFinite(update.dispatchLoadPerCore) || update.dispatchLoadPerCore < 0) throw new Error('dispatchLoadPerCore must be a non-negative number.');
+    stored.dispatchLoadPerCore = update.dispatchLoadPerCore;
+  }
   if (update.parallelCap !== undefined) {
     if (!isParallelCap(update.parallelCap)) {
       throw new Error('parallelCap must be a positive safe integer.');

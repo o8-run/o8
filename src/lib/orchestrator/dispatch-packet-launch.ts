@@ -201,12 +201,14 @@ function appendTurnWorkerSafely(
 }
 
 export async function launchPacketWithStorageAdmission(input: {
+  force?: boolean;
+  readLoad?: () => number[];
   packet: OrchestratorPacket;
   allPackets: OrchestratorPacket[];
   workerRouting: WorkerRouting;
   storageAdmission: PacketStorageAdmissionCoordinator;
 }): Promise<LaunchPacketResult> {
-  const busy = machineLoadBlocker();
+  const busy = machineLoadBlocker(input);
   if (busy) throw new MachineLoadDeferredError(busy);
   const { packet, allPackets, storageAdmission } = input;
   const workerRouting = resolveLaunchWorkerRouting(input.workerRouting);

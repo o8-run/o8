@@ -377,3 +377,8 @@ it('keeps stored TOML credentials out of native error responses and recovery log
     log.mockRestore();
   }
 });
+
+it('parses the dispatch load operator setting including zero', () => {
+  expect(parseOperatorDefaultsToml('[operator]\ndispatch_load_per_core = 0\n').dispatchLoadPerCore).toBe(0);
+  expect(parseOperatorDefaultsToml('[operator]\ndispatch_load_per_core = 1.5\n').dispatchLoadPerCore).toBe(1.5);
+});

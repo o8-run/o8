@@ -1,9 +1,11 @@
 # Machine budget
 
-Dispatch reads the OS one-minute load average on macOS and Linux, including work
-started outside o8. `O8_DISPATCH_LOAD_PER_CORE` defaults to **0.5** per logical
-core. Above this limit workers stay queued with a plain-language reason; the
-scheduler retries on later ticks. Invalid settings fall back to 0.5. Windows
+Dispatch reads the OS five-minute load average on macOS and Linux, including work
+started outside o8. `operator.dispatch_load_per_core` in settings.toml defaults to **1.5** per core
+reported by `os.availableParallelism()`. `O8_DISPATCH_LOAD_PER_CORE` overrides it.
+Zero disables load admission. Idle machines with no o8 workers always admit;
+per-dispatch `force` bypasses load admission. Above this limit workers stay queued with a plain-language reason; the
+scheduler retries on later ticks. Invalid settings fall back to 1.5. Windows
 load is unknown and admits. Load is a sampled guard, not a CPU reservation.
 
 Workers must wrap native builds and full suites with
@@ -26,3 +28,11 @@ or running checks. A second copy refuses and names its holder. An operator can
 explicitly override with `npm run verify:ci -- --allow-concurrent`. When started
 by a worker, wrap this command in `o8 run-heavy -- npm run verify:ci` as well.
 This does not manage Cargo cache size or remove build outputs.
+
+Machine waiters poll once per second and print their queue status at least every
+30 seconds. Run heavy steps detached to avoid shell wait timeouts. Nested
+`run-heavy` commands inherit the outer admission and execute directly.
+
+Confined workers cannot currently write the machine lease database. Host
+brokering is deferred to #6009; sandbox write permissions are unchanged. Until
+that follow-up lands, host-side execution is required for queued heavy steps.

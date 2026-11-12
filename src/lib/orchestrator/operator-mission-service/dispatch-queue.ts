@@ -1,3 +1,4 @@
+import { machineLoadBlocker } from '@/lib/orchestrator/machine-load';
 import { listActiveLanes } from '@/lib/lane/registry';
 import { resolveParallelCapSync } from '@/lib/operator/defaults';
 import { getDispatchableWave } from '@/lib/orchestrator/dag';
@@ -45,7 +46,7 @@ export function missionDispatchQueue(state: OrchestratorMissionState): DispatchQ
         return { ...base, limit: runtimeLimit, running: runtimeRunning, reason: 'runtime-concurrency-limit',
           detail: `Queued behind the ${runtime} concurrency limit (${runtimeRunning}/${runtimeLimit}); mission queue position ${index + 1}.` };
       }
-      return { ...base, reason: 'scheduler-deferred', detail: packet.blockedReason
+      return { ...base, reason: 'scheduler-deferred', detail: machineLoadBlocker() ?? packet.blockedReason
         ?? `Queued for a scheduler launch; mission queue position ${index + 1}.` };
     });
 }
