@@ -1,7 +1,7 @@
 import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -27,7 +27,7 @@ interface LeadCliReceipt {
   latestTurn: { id: string; status: string } | null;
   cursor: number;
 }
-const testHome = mkdtempSync(path.join(os.tmpdir(), 'o8-lead-handoff-home-'));
+const testHome = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-lead-handoff-home-')));
 const dataDir = path.join(testHome, '.o8');
 const repoPath = path.join(testHome, 'repo');
 const remotePath = path.join(testHome, 'remote.git');
@@ -43,6 +43,7 @@ const token = 'lead-handoff-operator-token-0123456789abcdef';
 const workerToken = 'lead-handoff-worker-token-0123456789abcdef';
 const originalEnv = {
   HOME: process.env.HOME,
+  O8_WORKER_ENV_ALLOW: process.env.O8_WORKER_ENV_ALLOW,
   O8_DATA_DIR: process.env.O8_DATA_DIR,
   CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR,
   CORTEX_IDE_OWNED_CODEX_ROOT: process.env.CORTEX_IDE_OWNED_CODEX_ROOT,
@@ -272,15 +273,12 @@ beforeAll(async () => {
   process.env.O8_API_PORT = String(apiPort);
   wsPort = await freePort();
   process.env.O8_WS_PORT = String(wsPort);
-  // The runtime intentionally filters private fixture variables from child env.
-  // Bake this isolated provider's configuration into its executable instead.
-  const fixtureEnv = Object.fromEntries(Object.entries(process.env)
-    .filter(([key]) => key.startsWith('O8_TEST_')));
-  writeFileSync(fakeCodex, fakeCodexScript.replace("const args = process.argv.slice(2);",
-    `Object.assign(process.env, ${JSON.stringify({ ...fixtureEnv,
-      O8_API_PORT: String(apiPort), O8_API_TOKEN: token, O8_DATA_DIR: dataDir,
-      CORTEX_IDE_DATA_DIR: dataDir })});\nconst args = process.argv.slice(2);`));
-
+  // Exercise the runtime's explicit environment allowlist for this isolated fake provider.
+  // Keep filtering enabled and keep fixture credentials out of the executable.
+  process.env.O8_WORKER_ENV_ALLOW = [
+    ...Object.keys(originalEnv).filter(key => key.startsWith('O8_TEST_')),
+    'O8_WORKER_ENV_ALLOW',
+  ].join(',');
   wsProcess = execFile(process.execPath, [
     '--import=./scripts/register-server-only-stub.mjs',
     '--import=tsx',
@@ -928,6 +926,7 @@ describe('persistent lead handoff real path', () => {
     const started = await runCli(startArgs('outcome-receipt'));
     const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
     const completed = await settled(lead.id);
+    expect(readFileSync(fakeCodex, 'utf8')).toBe(fakeCodexScript);
     expect(completed.lead.result).toMatchObject({
       outcome: { kind: 'completed', summary: expect.any(String), evidence: expect.any(Array) },
     });
@@ -954,6 +953,16 @@ describe('persistent lead handoff real path', () => {
       id: JSON.parse(sent.stdout).admittedTurnId, status: 'unreported', error: null,
       reason: 'turn ended without an outcome report',
     });
+    const terminalWait = await leadRoute.GET(new NextRequest(
+      `http://localhost/api/orchestrator/lead?leadId=${lead.id}&afterCursor=${JSON.parse(status.stdout).cursor}&waitMs=30000`,
+      { headers: { authorization: `Bearer ${token}` } },
+    ));
+    expect(await terminalWait.json()).toMatchObject({ requestedTurn: { status: 'unreported', error: null } });
+    const late = await runCli(['lead', 'report', lead.id, '--turn', JSON.parse(sent.stdout).admittedTurnId,
+      '--repo', repoPath, '--thread-id', lead.threadId, '--kind', 'completed', '--summary', 'Late',
+      '--evidence', '["late evidence"]']);
+    expect(late.exitCode).toBe(5);
+    expect(late.stderr).toContain('Only the active lead turn');
     const more = await runCli(['lead', 'send', lead.id, '--message', '[fixture:hang]',
       '--idempotency-key', 'more-work']);
     expect(more.exitCode, more.stderr).toBe(0);
@@ -964,7 +973,7 @@ describe('persistent lead handoff real path', () => {
 
 
   it.each([
-    ['failed', 'blocked'], ['awaiting_human', 'needs_approval'], ['running', 'waiting_workers'],
+    ['failed', 'blocked'], ['awaiting_human', 'needs_approval'], ['running', 'waiting_workers'], ['reviewing', 'waiting_workers'],
   ] as const)('preserves %s worker obligations without a lead report', async (workerStatus, expected) => {
     const started = await runCli(startArgs(`obligation-${workerStatus}`));
     const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
