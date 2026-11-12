@@ -1797,6 +1797,25 @@ impl Window {
         self.viewport_size
     }
 
+    /// The bounds of every element that has a debug selector, as of the last
+    /// frame. o8: read by the development driver (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn debug_selector_bounds(&self) -> Vec<(String, Bounds<Pixels>)> {
+        self.rendered_frame
+            .debug_bounds
+            .iter()
+            .map(|(selector, bounds)| (selector.clone(), *bounds))
+            .collect()
+    }
+
+    /// Dispatches a mouse, scroll or key event as the platform would.
+    /// `dispatch_event` returns a crate-private type, so it cannot be called
+    /// from outside. o8: used by the development driver (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn dispatch_input_event(&mut self, event: PlatformInput, cx: &mut App) {
+        self.dispatch_event(event, cx);
+    }
+
     /// Returns whether this window is focused by the operating system (receiving key events).
     pub fn is_window_active(&self) -> bool {
         self.active.get()
