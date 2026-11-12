@@ -36,9 +36,7 @@ export const NEXT_ONLY_SHELL_PATHS: NextOnlyTable = {};
 export const NEXT_ONLY_SHELL_METHODS: NextOnlyTable = {};
 
 export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
-  '/api/broadcast/post': security('worker grant'),
 
-  '/api/broadcast/tokens': security('mints broadcast tokens'),
 
   '/api/browser/proxy': security('loopback read grant'),
 
@@ -82,11 +80,8 @@ export const NEXT_ONLY_WS_PATHS: NextOnlyTable = {
 
 // The o8 CLI that packet workers and the operator run. Uncounted until the scan read cli/src.
 export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
-  '/api/broadcast/automation-say': security('worker grant: automation lanes speak'),
 
-  '/api/broadcast/post': security('worker grant'),
 
-  '/api/broadcast/tokens': security('mints broadcast tokens'),
 
   '/api/browser/engine/capture': security('headless browser loads any URL; the handler relies on loopback plus token'),
 

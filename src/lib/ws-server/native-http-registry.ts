@@ -369,6 +369,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // and its refresh=1 / refresh=missing reads call the GitHub broker's single-PR sync (ensureGitHubPullRequest),
     // which shares its token and request-budget caches with the open-PR sync the native /api/panel/prs uses. (#5422)
     route('/api/orchestrator/pull-request-context', 'GET POST DELETE', () => import('@/app/api/orchestrator/pull-request-context/route')),
+    route('/api/broadcast/automation-say', 'POST', () => import('@/lib/broadcast/automation-say-route')),
+    route('/api/broadcast/post', 'POST', () => import('@/lib/broadcast/post-route')),
+    route('/api/broadcast/tokens', 'POST', () => import('@/lib/broadcast/tokens-route')),
     route('/api/broadcast/say', 'POST', () => import('@/app/api/broadcast/say/route')),
     // Symon watches (src-tauri symon_watch.rs). No device/worker/spectator grant in panelGateMiddleware, so only the
     // operator bearer passes, and the handlers add no loopback or principal check of their own. Watches are rows
