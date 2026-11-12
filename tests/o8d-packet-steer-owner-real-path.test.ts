@@ -28,7 +28,7 @@ async function fixture(originTag?: 'design-mode') {
   lanes.setLaneStatus(lane.id, 'running', 'system', 'session_launched');
   const packet = { id, runtime: 'codex', referenceLabel: `P${seq}`, title: 'Fixture', summary: 'Fixture', origin: originTag,
     workspaceTargetPath: repo, branchTarget: lane.branch, status: 'running', queueState: 'queued', releaseState: 'pending',
-    orchestratorThreadId: 'thoughts-owner-parent', dependencyLabels: [], dependencyPacketIds: [], lane: { laneId: lane.id, sessionKey: surfaceId } } as OrchestratorPacket;
+    orchestratorThreadId: 'thoughts-owner-parent', dependencyLabels: [], dependencyPacketIds: [], lane: { laneId: lane.id, sessionKey: surfaceId, tileId: id, tabId: id, repoPath: repo, runtime: 'codex' } } as OrchestratorPacket;
   await control.withControlPlaneLock(async () => {
     const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
     control.writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), repoPath: repo, packets: [packet] });
