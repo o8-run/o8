@@ -10,5 +10,5 @@ export function managedRunRepoPath(run: ManagedRunRecord): string | null {
     // Missing lane storage leaves the event unattributed.
     return null;
   }
-  return run.packetId ? null : run.cwd;
+  return run.laneId || run.packetId ? null : run.cwd;
 }

@@ -98,6 +98,7 @@ const checkout = join(directory, 'checkout');
 const foreignRepo = join(directory, 'checkout-other');
 mkdirSync(checkout);
 mkdirSync(foreignRepo);
+mkdirSync(join(foreignRepo, 'nested'));
 symlinkSync(foreignRepo, join(checkout, 'outside'));
 symlinkSync(join(foreignRepo, 'missing'), join(checkout, 'dangling'));
 it.each([
@@ -105,6 +106,7 @@ it.each([
   ['foreignlatest', foreignRepo, true, 403],
   ['repo', directory, false, 403],
   ['symlink', join(checkout, 'outside', 'pending'), false, 403],
+  ['symlinkexisting', join(checkout, 'outside', 'nested'), false, 403],
   ['dangling', join(checkout, 'dangling'), false, 403],
   ['symlinkparent', checkout + '/outside/../x', false, 403],
   ['relative', '.', false, 403],
@@ -192,5 +194,20 @@ it('does not attribute a pre-existing worker run without a lane to its foreign c
   expect(response.status).toBe(200);
   expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0 }))
     .toContainEqual(expect.objectContaining({ eventType: 'output', repoPath: null }));
+  expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0, repoPath: foreignRepo })).toEqual([]);
+});
+
+it('keeps a deleted-lane operator run without a packet unattributed', async () => {
+  const { createLane, deleteLane } = await import('@/lib/lane/registry');
+  const { listAutomationSourceEvents } = await import('@/lib/automations/source-events');
+  const lane = createLane({ repoPath: directory, branch: 'deleted-unpacket', runtime: 'codex' });
+  const id = 'deletedunpacket';
+  expect((await call('/api/panel/managed-runs', { id, session: 'cortex-run-' + id,
+    command: 'fixture', cwd: foreignRepo, laneId: lane.id }, operator)).status).toBe(200);
+  deleteLane(lane.id);
+  const response = await call('/api/panel/managed-runs', { action: 'finish', id, exitCode: 0 }, operator);
+  expect(response.status).toBe(200);
+  expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0 }))
+    .toContainEqual(expect.objectContaining({ eventType: 'exit_clean', repoPath: null }));
   expect(listAutomationSourceEvents({ sourceKind: 'managed_run', sourceId: id, afterSequence: 0, repoPath: foreignRepo })).toEqual([]);
 });
