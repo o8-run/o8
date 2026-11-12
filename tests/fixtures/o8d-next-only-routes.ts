@@ -51,9 +51,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 };
 export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
   'POST /api/setup/mcp-servers': security('stores MCP commands, env and OAuth tokens that workers receive'),
-  'POST /api/visualizations': security('worker grant'),
-  // Also matched the GET-only /api/visualizations/[id] path, so a path-only check counted it as served.
-  'POST /api/visualizations/preview': security('worker grant'),
 };
 
 /** WS-process modules: the WS-to-Next helpers and plain fetches on the API base. */
