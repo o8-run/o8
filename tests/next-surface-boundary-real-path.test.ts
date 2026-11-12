@@ -62,6 +62,9 @@ function fixture() {
     put(root, `native/o8-next/src/${path}`, '// shared baseline\n');
   }
   put(root, 'scripts/next/dev-server.ts', '// shared routes\n');
+  // The workflow installs build prerequisites with a script from the base
+  // checkout (#5596); the fixture's cargo check needs none.
+  put(root, 'scripts/ci/install-native-linux-deps.sh', 'exit 0\n');
   put(root, checkerPath, readFileSync(check, 'utf8'));
   put(root, workflowPath, readFileSync(join(process.cwd(), workflowPath), 'utf8'));
   commit(root);
