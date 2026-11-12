@@ -536,6 +536,9 @@ impl ThreadList {
             cx.emit(Event::Created(id, foreground));
         }
     }
+    pub(crate) fn navigation_generation(&self) -> u64 {
+        self.navigation
+    }
     pub(crate) fn cancel_takeover(&mut self) {
         self.navigation = self.navigation.wrapping_add(1);
     }

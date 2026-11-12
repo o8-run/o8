@@ -419,7 +419,10 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     Some(machine) => {
                         toasts::info(format!("{machine} can't be reached right now."), cx);
                     }
-                    None => shell.open_thread(id.clone(), window, cx),
+                    None => {
+                        shell.open_thread(id.clone(), window, cx);
+                        shell.snapshot_created(id, true, cx);
+                    },
                 },
                 ThreadEvent::OpenInTab(id) => match shell.unreachable_machine(id) {
                     Some(machine) => {
@@ -439,6 +442,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                             shell.revision += 1;
                             cx.notify();
                         }
+                        shell.snapshot_created(id, *foreground, cx);
                     }
                 }
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),

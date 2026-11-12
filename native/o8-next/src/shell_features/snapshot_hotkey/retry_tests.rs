@@ -18,6 +18,7 @@ fn cancelled_retry(cx: &mut TestAppContext, settings: bool) {
         let id = s.start_thread(true, cx).unwrap();
         s.features.get::<Hotkey>().pending = Some(Pending {
             path: path.clone(), id: Some(id.clone()),
+            resolved: false, navigation: None,
             deadline: Instant::now() + Duration::from_secs(30),
         });
         s.execute(if settings { Command::Settings } else { Command::Projects }, w, cx);

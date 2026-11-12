@@ -52,6 +52,8 @@ struct Pending {
     path: PathBuf,
     id: Option<String>,
     deadline: Instant,
+    resolved: bool,
+    navigation: Option<u64>,
 }
 
 struct SnapshotHotkey;
@@ -145,6 +147,8 @@ impl Shell {
                         state.pending = Some(Pending {
                             path,
                             id: None,
+                            resolved: false,
+                            navigation: None,
                             deadline: Instant::now() + Duration::from_secs(30),
                         });
                         s.deliver_snapshot(w, cx);
@@ -157,9 +161,21 @@ impl Shell {
         })
         .detach();
     }
+    /// The shared opener owns activation. Remember its decision for attachment retries.
+    pub(crate) fn snapshot_created(&mut self, id: &str, foreground: bool, cx: &App) {
+        let generation = self.surfaces.sidebar.view.as_ref()
+            .map(|view| view.read(cx).navigation_generation());
+        if let Some(pending) = &mut self.features.get::<Hotkey>().pending
+            && pending.id.as_deref() == Some(id) && !pending.resolved
+        {
+            pending.resolved = true;
+            pending.navigation = foreground.then_some(generation).flatten();
+        }
+    }
     /// Opens a new chat on the lead and attaches the capture once its composer
     /// can take images, as New chat and the inbox handoff do.
     fn deliver_snapshot(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        crate::shell::sidebar::navigation(self, cx);
         let Some(mut pending) = self.features.get::<Hotkey>().pending.take() else {
             return;
         };
@@ -186,11 +202,15 @@ impl Shell {
                 id
             }
         };
-        if self.sessions.iter().any(|session| session.id == id) {
-            let tab = Tab::Session(id.clone());
-            if self.active().as_ref() != Some(&tab) {
-                self.execute(Command::Session(id.clone()), w, cx);
-            }
+        let generation = self.surfaces.sidebar.view.as_ref()
+            .map(|view| view.read(cx).navigation_generation());
+        if pending.resolved && pending.navigation != generation {
+            toasts::info(format!("Snapshot delivery cancelled. The capture was saved as {name}."), cx);
+            return;
+        }
+        if pending.resolved && pending.navigation.is_some()
+            && self.sessions.iter().any(|session| session.id == id)
+        {
             let surface = match self.thread_content(&id) {
                 Some(Content::Session(surface)) => Some(surface.clone()),
                 _ => None,
