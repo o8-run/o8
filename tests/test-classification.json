@@ -5451,6 +5451,14 @@
       ]
     },
     {
+      "path": "tests/o8d-approval-runtime-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-artifacts-harness-native-real-path.test.ts",
       "reasons": [
         "child-process",
