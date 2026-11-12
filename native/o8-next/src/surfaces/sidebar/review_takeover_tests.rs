@@ -324,7 +324,7 @@ fn review_takeover_existing_background_tab_is_reused_even_at_capacity(cx: &mut T
 }
 
 #[gpui::test]
-fn review_takeover_background_capacity_has_feedback_without_focus_change(cx: &mut TestAppContext) {
+fn review_takeover_background_capacity_is_quiet_without_focus_change(cx: &mut TestAppContext) {
     let (_fixture, shell, mut visual) = setup(cx);
     let list = list(&shell, &visual);
     let id = pending(&shell, &list, &mut visual, true);
@@ -347,8 +347,8 @@ fn review_takeover_background_capacity_has_feedback_without_focus_change(cx: &mu
     list.update(&mut visual, |list, cx| list.open_pending(cx));
     draw(&mut visual);
     assert!(
-        visual.debug_bounds("toast-stack-0").is_some(),
-        "capacity must never fail silently"
+        visual.debug_bounds("toast-stack-0").is_none(),
+        "background creation must not report an unsolicited tab-limit action"
     );
     assert_retained(&shell, &list, &mut visual, &before);
     shell.read_with(&visual, |s, _| {
@@ -366,4 +366,33 @@ fn review_takeover_expired_creation_preserves_sidebar_and_focus(cx: &mut TestApp
     deliver(&list, &mut visual);
     assert_retained(&shell, &list, &mut visual, &before);
     shell.read_with(&visual, |s, _| assert_eq!(displays(s, &id), 1));
+}
+
+#[gpui::test]
+fn review_takeover_draw_has_no_navigation_check_or_allocation(cx: &mut TestAppContext) {
+    let (_f, shell, mut visual) = setup(cx);
+    let before = crate::shell::sidebar::navigation_checks();
+    let generation = list(&shell, &visual).read_with(&visual, |list, _| list.navigation_generation());
+    draw(&mut visual);
+    assert_eq!(crate::shell::sidebar::navigation_checks(), before, "zero checks means zero allocations or writes by the check during draw");
+    assert_eq!(list(&shell, &visual).read_with(&visual, |list, _| list.navigation_generation()), generation);
+}
+#[gpui::test]
+fn review_takeover_in_pane_thread_change_revokes_creation(cx: &mut TestAppContext) {
+    let (_f, shell, mut visual) = setup(cx);
+    shell.update_in(&mut visual, |s, w, cx| s.open_thread("thoughts-composer-first".into(), w, cx));
+    ready(&shell, &mut visual);
+    let list = list(&shell, &visual);
+    let id = pending(&shell, &list, &mut visual, false);
+    shell.update(&mut visual, |s, cx| {
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        let sessions = s.sessions.clone();
+        view.update(cx, |view, cx| view.shell_select(sessions, "thoughts-composer-second".into(), cx));
+    });
+    deliver(&list, &mut visual);
+    shell.read_with(&visual, |s, cx| {
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        assert_eq!(view.read(cx).shown_thread().as_deref(), Some("thoughts-composer-second"));
+        assert_eq!(displays(s, &id), 1);
+    });
 }

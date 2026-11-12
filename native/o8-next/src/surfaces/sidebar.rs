@@ -680,7 +680,14 @@ impl Shell {
 mod tests;
 
 /// Navigation invalidates focus permission, including a change away and back.
+#[cfg(test)]
+thread_local! { static NAVIGATION_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+pub(super) fn navigation_checks() -> usize { NAVIGATION_CHECKS.with(|n| n.get()) }
+
 pub(super) fn navigation(s: &mut Shell, cx: &mut Context<Shell>) {
+    #[cfg(test)]
+    NAVIGATION_CHECKS.with(|n| n.set(n.get() + 1));
     let next = Navigation {
         workspace: s.state.selected.clone(),
         tab: s.active(),
