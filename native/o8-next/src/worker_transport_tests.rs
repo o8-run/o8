@@ -7,7 +7,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::{
-    io::{Read, Write},
+    io::{BufRead, BufReader, Write},
     net::TcpListener,
     sync::{
         Arc, Mutex,
@@ -59,7 +59,7 @@ impl Host {
         let socket_ready = connected.clone();
         let server = std::thread::spawn(move || {
             let mut sockets = Vec::new();
-            while !stopped.load(Ordering::Acquire) {
+            'requests: while !stopped.load(Ordering::Acquire) {
                 let mut stream = match listener.accept() {
                     Ok((s, _)) => s,
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -73,7 +73,20 @@ impl Host {
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
                 let mut buf = [0; 8192];
-                let n = stream.peek(&mut buf).unwrap();
+                // TCP may split a request line across reads, or a canceled
+                // client may close before sending one. Peek without consuming
+                // the WebSocket handshake, then read complete HTTP headers.
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let n = loop {
+                    if stopped.load(Ordering::Acquire) || Instant::now() >= deadline {
+                        continue 'requests;
+                    }
+                    match stream.peek(&mut buf) {
+                        Ok(0) | Err(_) => continue 'requests,
+                        Ok(n) if buf[..n].contains(&b'\n') => break n,
+                        Ok(_) => std::thread::park_timeout(Duration::from_millis(1)),
+                    }
+                };
                 let request = String::from_utf8_lossy(&buf[..n]);
                 log.lock()
                     .unwrap()
@@ -83,7 +96,8 @@ impl Host {
                     let wake = waking.clone();
                     let ready = socket_ready.clone();
                     sockets.push(std::thread::spawn(move || {
-                        let mut socket=tungstenite::accept(stream).unwrap();let _=socket.read().unwrap();
+                        let Ok(mut socket) = tungstenite::accept(stream) else {return;};
+                        if socket.read().is_err() {return;}
                         socket.get_mut().set_read_timeout(Some(Duration::from_millis(50))).unwrap();
                         let frame=json!({"channel":"history","event":"update","data":{"sessionKey":"codex-owned:reviewer","entries":[{"id":"live","role":"assistant","text":"Live legacy answer"}]}}).to_string();
                         socket.send(tungstenite::Message::Text(frame.clone().into())).unwrap();ready.store(true,Ordering::Release);
@@ -98,8 +112,21 @@ impl Host {
                     }));
                     continue;
                 }
-                let n = stream.read(&mut buf).unwrap();
-                let request = String::from_utf8_lossy(&buf[..n]);
+                let mut request = String::new();
+                let mut reader = BufReader::new(&mut stream);
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) | Err(_) => continue 'requests,
+                        Ok(_) => {
+                            request.push_str(&line);
+                            if line == "\r\n" {
+                                break;
+                            }
+                        }
+                    }
+                }
+                drop(reader);
                 let (code, body) = if request.contains("/api/panel/ws-info") {
                     (200, json!({"wsPort":port,"wsToken":"fixture-token"}))
                 } else if request.contains("/api/mobile/history") {
