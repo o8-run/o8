@@ -7,8 +7,6 @@ import AccountTab from '@/app/voice-settings/tabs/AccountTab';
 import { AccountTab as DesktopAccountTab } from '@/components/desktop/settings/AccountTab';
 import { AccountBlock } from '@/components/desktop/account-block/AccountBlock';
 import { GeneralTab } from '@/components/desktop/settings/GeneralTab';
-import ScenePreview from '@/app/preview/scene-card/page';
-import PortalPreview from '@/app/preview/portal-card/page';
 import { SettingsPage } from '@/components/desktop/SettingsPage';
 import type { Plan } from '@/lib/entitlement/types';
 
@@ -25,8 +23,6 @@ vi.mock('@/components/auth/O8AuthProvider', () => ({
     user: authState.signedIn ? { id: 'user_fixture', name: 'Account' } : null,
   }),
 }));
-vi.mock('@/app/preview/scene-card/SceneCard', () => ({ SceneCard: ({ children }: { children: React.ReactNode }) => children }));
-vi.mock('@/app/preview/portal-card/PortalCard', () => ({ PortalCard: ({ children }: { children: React.ReactNode }) => children }));
 vi.mock('@/lib/theme/context', () => ({
   useTheme: () => ({ paletteId: 'light', surface: {}, workspaceGlass: false }),
 }));
@@ -72,8 +68,6 @@ describe('free edition through rendered app entry points', () => {
     { name: 'sidebar Account', Component: AccountBlock },
     { name: 'General', Component: GeneralTab },
     { name: 'Settings shell', Component: SettingsPage },
-    { name: 'scene preview', Component: ScenePreview },
-    { name: 'portal preview', Component: PortalPreview },
   ];
   it.each(surfaces)('renders $name without commercial copy or links', async ({ Component }) => {
     authState.signedIn = true;

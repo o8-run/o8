@@ -1,7 +1,7 @@
 //! Native counterparts of src/app/globals.css. Keep appearance selection here;
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
 use std::sync::{LazyLock, Mutex, RwLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +71,8 @@ fn named(mode: &str) -> Option<Appearance> {
 /// are imported themes by their place in IMPORTED.
 const SYSTEM: u8 = 3;
 const FIRST_IMPORTED: u8 = 4;
+/// o8's own themes take the choices from here up, in BESPOKE's order.
+const FIRST_BESPOKE: u8 = 200;
 /// A saved or menu name: "light", "dark", "glass", "system" or "theme:<id>".
 fn choice_id(mode: &str) -> Option<u8> {
     if let Some(appearance) = named(mode) {
@@ -80,6 +82,9 @@ fn choice_id(mode: &str) -> Option<u8> {
         return Some(SYSTEM);
     }
     let id = mode.strip_prefix("theme:")?;
+    if let Some(index) = BESPOKE.iter().position(|theme| theme.id == id) {
+        return u8::try_from(index).ok()?.checked_add(FIRST_BESPOKE);
+    }
     let themes = IMPORTED.read().unwrap();
     let index = themes.iter().position(|theme| theme.id == id)?;
     u8::try_from(index).ok()?.checked_add(FIRST_IMPORTED)
@@ -97,6 +102,9 @@ fn choice() -> u8 {
     }
 }
 fn imported(choice: u8) -> Option<&'static ImportedTheme> {
+    if let Some(index) = choice.checked_sub(FIRST_BESPOKE) {
+        return BESPOKE.get(usize::from(index));
+    }
     let index = usize::from(choice.checked_sub(FIRST_IMPORTED)?);
     IMPORTED.read().unwrap().get(index).copied()
 }
@@ -172,6 +180,34 @@ static IMPORTED: LazyLock<RwLock<Vec<&'static ImportedTheme>>> = LazyLock::new(|
             .collect(),
     )
 });
+/// o8's own themes, built once. Each is a full token set on a dark or light
+/// base, chosen like an imported theme ("theme:<id>").
+static BESPOKE: LazyLock<Vec<ImportedTheme>> = LazyLock::new(bespoke::themes);
+/// o8's themes as Settings lists them: choice name, label and one line on it.
+pub fn bespoke_themes() -> Vec<(String, String, &'static str)> {
+    BESPOKE
+        .iter()
+        .zip(bespoke::DESCRIPTIONS)
+        .map(|(theme, description)| (format!("theme:{}", theme.id), theme.name.clone(), description))
+        .collect()
+}
+/// Four swatches for a choice's card in Settings: background, raised surface,
+/// accent and text. None for System, which has no one palette.
+pub fn swatches(mode: &str) -> Option<[Rgba; 4]> {
+    let of = |theme: &Theme, background: Rgba| [background, theme.surface_raised, theme.accent, theme.text];
+    match choice_id(mode)? {
+        SYSTEM => None,
+        choice => match imported(choice) {
+            Some(theme) => Some(of(&theme.theme, theme.theme.background)),
+            None => {
+                let theme = Theme::for_appearance(named(mode)?);
+                // Glass has no fill of its own; show the veil it sits under.
+                let background = if mode == "glass" { veil_color(0.9) } else { theme.background };
+                Some(of(&theme, background))
+            }
+        },
+    }
+}
 /// Imported themes as Settings lists them: choice name and label.
 pub fn imported_themes() -> Vec<(String, String)> {
     IMPORTED
@@ -219,7 +255,7 @@ pub(crate) fn selection_test_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 /// Imported themes fit the choice ids below the unset sentinel.
-const MAX_IMPORTED: usize = (u8::MAX - 1 - FIRST_IMPORTED) as usize;
+const MAX_IMPORTED: usize = (FIRST_BESPOKE - FIRST_IMPORTED) as usize;
 fn themes_path() -> Option<std::path::PathBuf> {
     Some(saved_path()?.with_file_name("next-themes.json"))
 }
@@ -270,6 +306,184 @@ fn chat_width_path() -> Option<std::path::PathBuf> {
 }
 fn saved_chat_width() -> Option<String> {
     std::fs::read_to_string(chat_width_path()?).ok()
+}
+/// All Glass as tuned in Settings: which backdrop sits behind the window and
+/// how much of the dark veil is painted over it.
+#[derive(Clone, Copy, PartialEq)]
+pub struct Glass {
+    /// A plain blur that keeps the desktop's colour, instead of the system
+    /// material, which darkens and desaturates it.
+    pub vivid: bool,
+    /// The share of each veil stop's alpha, 0 to 1. 1 is the designed veil.
+    pub veil: f32,
+}
+/// Starting points for the veil slider: label and veil share.
+pub const GLASS_PRESETS: [(&str, f32); 3] = [("Deep", 1.), ("Balanced", 0.6), ("Clear", 0.3)];
+const DEFAULT_GLASS: Glass = Glass {
+    vivid: false,
+    veil: 1.,
+};
+static GLASS: LazyLock<RwLock<Glass>> = LazyLock::new(|| {
+    RwLock::new(
+        glass_path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|saved| parse_glass(&saved))
+            .unwrap_or(DEFAULT_GLASS),
+    )
+});
+/// "vivid 0.6" or "frosted 1": the backdrop, then the veil share.
+fn parse_glass(saved: &str) -> Option<Glass> {
+    let mut parts = saved.split_whitespace();
+    let vivid = match parts.next()? {
+        "vivid" => true,
+        "frosted" => false,
+        _ => return None,
+    };
+    let veil = parts.next()?.parse::<f32>().ok().filter(|veil| veil.is_finite())?;
+    Some(Glass {
+        vivid,
+        veil: veil.clamp(0., 1.),
+    })
+}
+pub fn glass_settings() -> Glass {
+    *GLASS.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+/// Saves the tuned glass and repaints with it. True when the backdrop kind
+/// changed, so the caller applies the window material again.
+pub fn set_glass(next: Glass) -> bool {
+    let next = Glass {
+        veil: next.veil.clamp(0., 1.),
+        ..next
+    };
+    let mut glass = GLASS.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let backdrop = glass.vivid != next.vivid;
+    if *glass != next {
+        *glass = next;
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+        if let Some(path) = glass_path() {
+            let backdrop = if next.vivid { "vivid" } else { "frosted" };
+            let _ = std::fs::write(path, format!("{backdrop} {:.2}", next.veil));
+        }
+    }
+    backdrop
+}
+fn glass_path() -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name("next-glass"))
+}
+/// Whether All Glass sits on a plain blur instead of the system material.
+pub fn glass_vivid() -> bool {
+    glass() && glass_settings().vivid
+}
+/// The interface zoom range and step, in percent. 100 is the designed size.
+pub const ZOOM_MIN: u16 = 70;
+pub const ZOOM_MAX: u16 = 200;
+pub const ZOOM_STEP: u16 = 10;
+pub const ZOOM_DEFAULT: u16 = 100;
+/// The zoom level backed by its file. Every o8 next process (the shell and
+/// its terminal, diff and grid windows) keeps one store on the same file, so
+/// a step re-reads it first and `reload` picks up a change made elsewhere.
+pub struct ZoomStore {
+    path: Option<std::path::PathBuf>,
+    percent: AtomicU16,
+}
+impl ZoomStore {
+    pub fn new(path: Option<std::path::PathBuf>) -> Self {
+        let store = Self {
+            path,
+            percent: AtomicU16::new(ZOOM_DEFAULT),
+        };
+        store.reload();
+        store
+    }
+    pub fn percent(&self) -> u16 {
+        self.percent.load(Ordering::Relaxed)
+    }
+    /// Reads the file again; a missing or unreadable file keeps the level.
+    pub fn reload(&self) {
+        if let Some(percent) = self
+            .path
+            .as_ref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| parse_zoom(&text))
+        {
+            self.percent.store(percent, Ordering::Relaxed);
+        }
+    }
+    /// Sets the level (clamped) and saves it. True when it changed.
+    pub fn set(&self, percent: u16) -> bool {
+        let percent = clamp_zoom(percent);
+        if let Some(path) = &self.path {
+            let _ = write_replacing(path, &percent.to_string());
+        }
+        self.percent.swap(percent, Ordering::Relaxed) != percent
+    }
+    /// Steps from the saved level, not this process's last one.
+    pub fn step(&self, steps: i32) -> u16 {
+        self.reload();
+        let percent = step_zoom(self.percent(), steps);
+        self.set(percent);
+        percent
+    }
+}
+#[cfg(not(test))]
+static ZOOM: LazyLock<ZoomStore> = LazyLock::new(|| ZoomStore::new(zoom_path()));
+// Tests run in parallel threads; each test's windows read its own zoom.
+#[cfg(test)]
+thread_local! {
+    static ZOOM: ZoomStore = ZoomStore::new(None);
+}
+/// The process's zoom store.
+pub fn with_zoom<R>(f: impl FnOnce(&ZoomStore) -> R) -> R {
+    #[cfg(not(test))]
+    return f(&ZOOM);
+    #[cfg(test)]
+    return ZOOM.with(f);
+}
+/// A saved zoom, clamped to the range and rounded to a step; None when it is
+/// not a number.
+pub fn parse_zoom(text: &str) -> Option<u16> {
+    let percent = text.trim().parse::<f32>().ok().filter(|p| p.is_finite())?;
+    let steps = (percent / f32::from(ZOOM_STEP)).round();
+    Some(clamp_zoom((steps.max(0.) as u16).saturating_mul(ZOOM_STEP)))
+}
+fn clamp_zoom(percent: u16) -> u16 {
+    percent.clamp(ZOOM_MIN, ZOOM_MAX)
+}
+/// The zoom one step in or out of `percent` (`steps` may be negative),
+/// kept in range.
+pub fn step_zoom(percent: u16, steps: i32) -> u16 {
+    let next = i32::from(percent) + steps * i32::from(ZOOM_STEP);
+    clamp_zoom(next.clamp(0, i32::from(u16::MAX)) as u16)
+}
+/// The interface zoom in percent.
+pub fn zoom_percent() -> u16 {
+    with_zoom(ZoomStore::percent)
+}
+/// The interface zoom as a scale, 1.0 at 100%.
+pub fn zoom() -> f32 {
+    f32::from(zoom_percent()) / 100.
+}
+/// Sets the interface zoom (clamped) and saves it. True when it changed.
+pub fn set_zoom_percent(percent: u16) -> bool {
+    with_zoom(|store| store.set(percent))
+}
+fn zoom_path() -> Option<std::path::PathBuf> {
+    preference_path("next-zoom")
+}
+/// Writes a small preference file whole: a temporary file in the same
+/// directory renamed over it, so a reader in another process never sees it
+/// empty or half written.
+pub fn write_replacing(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, text)?;
+    std::fs::rename(&temporary, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temporary);
+    })
+}
+/// A small preference file beside the appearance file; None under test.
+pub fn preference_path(name: &str) -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name(name))
 }
 /// Changes with the appearance, for caches that keep painted colors.
 pub fn generation() -> u8 {
@@ -842,6 +1056,10 @@ pub fn light() -> bool {
 pub fn veil_color(alpha: f32) -> Rgba {
     translucent(0x0a0c12, alpha)
 }
+/// The veil as painted: a stop's alpha at the chosen glass level.
+pub fn veil(alpha: f32) -> Rgba {
+    veil_color(alpha * glass_settings().veil)
+}
 
 // Locked chrome roles from docs/design/hurttlocker.md. GPUI's text API does
 // not expose CSS letter spacing; native tracking remains a verification gap.
@@ -1050,5 +1268,171 @@ mod chat_width_tests {
         assert_eq!(chat_width_index("wide"), Some(2));
         assert_eq!(chat_width_index("huge"), None);
         assert!(!set_chat_width("huge"));
+    }
+}
+
+/// o8's own themes. Each starts from the Dark or Light token set and replaces
+/// the colours that give it its character, so a token added later still has
+/// a sensible value here.
+/// They live in this file because every palette does (theme_tests).
+mod bespoke {
+    use super::{Appearance, ImportedTheme, Theme};
+    use gpui::{Rgba, rgb};
+
+    fn wash(hex: u32, alpha: f32) -> Rgba {
+        Rgba { a: alpha, ..rgb(hex) }
+    }
+
+    /// One line on each theme for its card in Settings, in `themes` order.
+    pub(crate) const DESCRIPTIONS: [&str; 5] = [
+        "True black. For OLED and late nights.",
+        "Warm charcoal with o8 orange.",
+        "Deep sea blue-green.",
+        "Violet dusk, after the o8 mark.",
+        "Warm paper, ink text.",
+    ];
+
+    struct Colors {
+        background: u32,
+        raised: u32,
+        hover: u32,
+        code: u32,
+        text: u32,
+        secondary: u32,
+        faint: u32,
+        accent: u32,
+        /// The colour borders and washes are mixed from: white on dark, ink on light.
+        ink: u32,
+    }
+
+    fn build(id: &str, name: &str, base: Appearance, c: Colors) -> ImportedTheme {
+        let mut theme = Theme::for_appearance(base);
+        theme.background = rgb(c.background);
+        theme.surface = rgb(c.background);
+        theme.surface_raised = rgb(c.raised);
+        theme.hover = rgb(c.hover);
+        theme.code_background = rgb(c.code);
+        theme.text = rgb(c.text);
+        theme.text_secondary = rgb(c.secondary);
+        theme.text_muted = rgb(c.secondary);
+        theme.text_faint = rgb(c.faint);
+        theme.border = wash(c.ink, 0.09);
+        theme.accent = rgb(c.accent);
+        theme.selection = wash(c.accent, 0.16);
+        theme.terminal_cursor = wash(c.accent, 0.5);
+        ImportedTheme {
+            id: id.into(),
+            name: name.into(),
+            base,
+            theme,
+        }
+    }
+
+    pub(crate) fn themes() -> Vec<ImportedTheme> {
+        vec![
+            build(
+                "o8-blackout",
+                "Blackout",
+                Appearance::Dark,
+                Colors {
+                    background: 0x000000,
+                    raised: 0x0c0c0d,
+                    hover: 0x18181a,
+                    code: 0x070708,
+                    text: 0xf5f5f7,
+                    secondary: 0x8e8e93,
+                    faint: 0x5a5a5f,
+                    accent: 0x3b82f6,
+                    ink: 0xffffff,
+                },
+            ),
+            build(
+                "o8-ember",
+                "Ember",
+                Appearance::Dark,
+                Colors {
+                    background: 0x181412,
+                    raised: 0x221c19,
+                    hover: 0x2e2622,
+                    code: 0x13100e,
+                    text: 0xf6efe9,
+                    secondary: 0xa8998e,
+                    faint: 0x6f635a,
+                    accent: 0xff6a2b,
+                    ink: 0xfff1e6,
+                },
+            ),
+            build(
+                "o8-tidewater",
+                "Tidewater",
+                Appearance::Dark,
+                Colors {
+                    background: 0x0d1a1f,
+                    raised: 0x13242b,
+                    hover: 0x1b323b,
+                    code: 0x0a1519,
+                    text: 0xe8f3f5,
+                    secondary: 0x8fa9b2,
+                    faint: 0x5c7680,
+                    accent: 0x2dd4bf,
+                    ink: 0xe6fbff,
+                },
+            ),
+            build(
+                "o8-aurora",
+                "Aurora",
+                Appearance::Dark,
+                Colors {
+                    background: 0x13121e,
+                    raised: 0x1b1a2b,
+                    hover: 0x27253c,
+                    code: 0x0f0e18,
+                    text: 0xefedf9,
+                    secondary: 0x9d99b8,
+                    faint: 0x69668a,
+                    accent: 0xa78bfa,
+                    ink: 0xf0ecff,
+                },
+            ),
+            build(
+                "o8-paper",
+                "Paper",
+                Appearance::Light,
+                Colors {
+                    background: 0xf6f1e7,
+                    raised: 0xfffdf8,
+                    hover: 0xece5d6,
+                    code: 0xeee7d8,
+                    text: 0x2a2520,
+                    secondary: 0x6f665a,
+                    faint: 0x9a9082,
+                    accent: 0xc2410c,
+                    ink: 0x2a2520,
+                },
+            ),
+        ]
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{DESCRIPTIONS, themes};
+
+        #[test]
+        fn every_bespoke_theme_has_a_unique_id_and_a_description() {
+            let themes = themes();
+            assert_eq!(themes.len(), DESCRIPTIONS.len());
+            let mut ids: Vec<_> = themes.iter().map(|theme| theme.id.clone()).collect();
+            ids.sort();
+            ids.dedup();
+            assert_eq!(ids.len(), themes.len());
+            assert!(themes.iter().all(|theme| theme.id.starts_with("o8-")));
+        }
+
+        #[test]
+        fn blackout_is_true_black_and_readable() {
+            let blackout = &themes()[0].theme;
+            assert_eq!((blackout.background.r, blackout.background.g, blackout.background.b), (0., 0., 0.));
+            assert!(blackout.text.r > 0.9 && blackout.background.a == 1.);
+        }
     }
 }

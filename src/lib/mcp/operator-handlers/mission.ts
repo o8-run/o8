@@ -1,3 +1,5 @@
+import { DISPATCH_MISSION_TOOL } from './mission-dispatch-tool';
+import { RuntimeSelectionError, validateRequestedRuntime } from '@/lib/agents/routing';
 export { handleCreateMission } from './mission-create';
 export { handleResetPacket, handleRetryPacket } from './packet-reset';
 import { lifecycleErrorResult } from './lifecycle-error';
@@ -36,7 +38,6 @@ import {
   optionalString,
   parseDirectivesApplied,
   parseDirectivesViolated,
-  parseMissionRuntime,
   parseReviewFindings,
   requiredString,
   textResult,
@@ -51,18 +52,7 @@ import { WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
 import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
 export const MISSION_TOOLS: McpTool[] = [
   CREATE_MISSION_TOOL,
-  {
-    name: 'dispatch_mission',
-    description:
-      'Dispatch the existing packets of a prepared mission created with dispatch:false. Pass the exact missionId returned by create_mission: dispatch_mission({missionId: "mission-abc123"}). This starts that mission without creating a new mission or generic delegate packet. Also use after reset_packet or retry_packet when a relaunch is needed, or for explicit redispatch. Omit runtime to preserve the prepared routing and contract. create_mission dispatches by default; do not dispatch it again unless it was prepared or needs relaunch. Omitted missionId selects the current stored mission.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        missionId: { type: 'string', description: 'Optional mission ID. If omitted, dispatches the current stored mission.' },
-        runtime: { type: 'string', enum: listDispatchableRuntimes(), description: 'Optional per-dispatch worker runtime. When set, it overrides the runtime stamped on every not-yet-launched packet admitted by this dispatch.' },
-      },
-    },
-  },
+  DISPATCH_MISSION_TOOL,
   {
     name: 'get_mission_status',
     description:
@@ -179,7 +169,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: listDispatchableRuntimes(),
+          enum: [...listDispatchableRuntimes(), 'claude'],
           description: 'Worker runtime for this task. When omitted, the operator default applies.',
         },
         model: {
@@ -276,7 +266,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: listDispatchableRuntimes(),
+          enum: [...listDispatchableRuntimes(), 'claude'],
           description: 'Worker runtime for this task. When omitted, the operator default applies.',
         },
         projectId: {
@@ -658,12 +648,12 @@ export const MISSION_TOOLS: McpTool[] = [
     },
   },
 ];
-
 export async function handleDispatchMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const result = await dispatchMission({
+      force: args.force === true,
       missionId: optionalString(args, 'missionId') || undefined,
-      runtime: args.runtime === undefined ? undefined : parseMissionRuntime(args.runtime),
+      runtime: validateRequestedRuntime(args.runtime) ?? undefined,
     });
     return jsonResult(result, 'error' in result);
   } catch (error) {
@@ -739,7 +729,7 @@ export async function handleTaskCreate(args: Record<string, unknown>): Promise<M
       model: optionalString(args, 'model') || null,
       workerIntent: optionalString(args, 'workerIntent') || null,
       requestedProvider: optionalString(args, 'requestedProvider') || null,
-      requestedRuntime: optionalString(args, 'requestedRuntime') || null,
+      requestedRuntime: validateRequestedRuntime(args.requestedRuntime),
       allowedFiles,
     });
     return jsonResult(result);
@@ -792,14 +782,14 @@ export async function handleTaskDispatch(args: Record<string, unknown>): Promise
       model: optionalString(args, 'model') || null,
       workerIntent: optionalString(args, 'workerIntent') || null,
       requestedProvider: optionalString(args, 'requestedProvider') || null,
-      requestedRuntime: optionalString(args, 'requestedRuntime') || null,
+      requestedRuntime: validateRequestedRuntime(args.requestedRuntime),
       projectId: optionalString(args, 'projectId') || null,
       repoPath: optionalString(args, 'repoPath') || null,
     });
     if (!result.ok) return lifecycleErrorResult('o8_task_dispatch', { code: 'task_dispatch_failed', note: result.note }, result.packetId ?? args.taskId);
     return jsonResult(result);
   } catch (error) {
-    return lifecycleErrorResult('o8_task_dispatch', error, args.taskId);
+    return lifecycleErrorResult('o8_task_dispatch', error instanceof RuntimeSelectionError ? new McpInputError(error.message) : error, args.taskId);
   }
 }
 

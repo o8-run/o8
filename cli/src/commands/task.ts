@@ -55,6 +55,7 @@ interface TaskPoolTask {
   status: string;
   runtime: string;
   workerIntent: string | null;
+  runtimeSubstitution?: string | null;
   workerRouting: {
     requestedProvider: string | null;
     requestedRuntime: string | null;
@@ -178,6 +179,7 @@ function printTaskLine(task: TaskPoolTask): void {
   const repo = task.repoName ?? 'no repo';
   const project = task.project?.name ?? 'no project';
   process.stdout.write(`  ${id}  ${task.status}  ${repo}  ${project}\n`);
+  if (task.runtimeSubstitution) process.stdout.write(`    runtime substitution=${task.runtimeSubstitution}\n`);
   if (task.workerIntent || task.workerRouting) {
     process.stdout.write(`    worker=${task.workerIntent ?? 'unknown'} selected=${task.workerRouting?.selectedRuntime ?? task.runtime}\n`);
   }
@@ -218,6 +220,7 @@ function printHumanTaskDetail(detail: TaskDetail): void {
     ['runtime', task.runtime],
     ['worker', task.workerIntent ?? '(none)'],
     ['selected runtime', task.workerRouting?.selectedRuntime ?? '(none)'],
+    ['runtime substitution', task.runtimeSubstitution ?? '(none)'],
     ['repo', task.repoName ?? '(none)'],
     ['project', task.project?.name ?? '(none)'],
     ['branch', task.branch ?? '(none)'],
@@ -239,6 +242,7 @@ function printHumanMutation(result: TaskMutation): void {
     ['lane', result.laneId ?? '(none)'],
     ['note', result.note],
     ['selected runtime', result.workerRouting?.selectedRuntime ?? result.task?.workerRouting?.selectedRuntime ?? '(none)'],
+    ['runtime substitution', result.task?.runtimeSubstitution ?? '(none)'],
   ]);
   if (result.task) {
     process.stdout.write(`\n${result.task.title}\n`);
@@ -248,15 +252,27 @@ function printHumanMutation(result: TaskMutation): void {
 
 async function runTaskMutation(
   mode: OutputMode,
-  action: TaskMutation['action'],
+  action: Exclude<TaskMutation['action'], 'create'>,
   rest: string[],
   body: Record<string, unknown>,
 ): Promise<number> {
   const id = taskIdFromRest(rest, action);
   const cfg = resolveConfig();
+  // Each verb has its own route, so name it explicitly instead of building the path from
+  // the action: route inventories and the native transport see exactly which routes the CLI uses.
+  const task = encodeURIComponent(id);
+  const paths: Record<typeof action, string> = {
+    claim: `/api/tasks/${task}/claim`,
+    dispatch: `/api/tasks/${task}/dispatch`,
+    block: `/api/tasks/${task}/block`,
+    report: `/api/tasks/${task}/report`,
+    archive: `/api/tasks/${task}/archive`,
+    prune: `/api/tasks/${task}/prune`,
+  };
+  const path = paths[action];
   const res = await apiFetch<TaskMutation>(
     cfg,
-    `/api/tasks/${encodeURIComponent(id)}/${action}`,
+    path,
     { method: 'POST', body },
   );
   if (!res.data) {

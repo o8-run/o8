@@ -8,7 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Onboarding } from '@/components/desktop/Onboarding';
 import { createOnboardingCompletionHandler } from '@/app/dashboard/hooks/onboarding-completion';
 import { useSetupWizard } from '@/app/dashboard/hooks/useSetupWizard';
-import { createOnboardingPreviewRequest } from '@/app/preview/first-run/FirstRunPreview';
+import { createOnboardingPreviewRequest } from './fixtures/onboarding/FirstRunPreview';
 import type { OnboardingRequest } from '@/components/desktop/onboarding/request';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

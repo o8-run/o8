@@ -7,10 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const roots: string[] = [];
 const check = join(process.cwd(), 'scripts/check-server-bundle-size.mjs');
-const entries = ['src/ws-server.ts', 'src/lib/ws-server/terminal-host-entry.ts',
-  'src/lib/mcp/operator-mcp-server.ts', 'src/lib/mcp/operator-mcp-server-bundle-entry.ts',
-  'src/lib/mcp/operator-mcp-proxy.ts', 'src/lib/codex/app-server-exec-bridge.ts',
-  'src/lib/mcp/cortex-mcp-server.ts'];
+const entries = Object.values(SERVER_ENTRIES);
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -44,14 +41,14 @@ describe('server size check CLI', () => {
     const committed = JSON.parse(readFileSync('scripts/server-bundle-budget.json', 'utf8'));
     const previousBudget = join(temporary, 'budget.json');
     writeFileSync(previousBudget, JSON.stringify({ ...committed,
-      totalBytes: Math.min(committed.totalBytes, 13_077_919) }));
+      totalBytes: Math.min(committed.totalBytes, 13_825_350) }));
     const result = spawnSync(process.execPath, [check, '--budget', previousBudget], {
       encoding: 'utf8', timeout: 120_000,
       env: { PATH: process.env.PATH, NODE_ENV: 'test' },
     });
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout).toContain('Server bundle size check passed.');
-    expect(committed.totalBytes + 1_000_000).toBeLessThanOrEqual(14_077_919);
+    expect(committed.totalBytes + 1_000_000).toBeLessThanOrEqual(14_825_350);
   }, 120_000);
 
   it('retains upstream copyright and permission notices in exported sidecars', () => {

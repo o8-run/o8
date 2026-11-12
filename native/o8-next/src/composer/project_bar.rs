@@ -53,20 +53,12 @@ impl Surface {
     /// The selected chat's project while it has nothing in it yet: a chat New
     /// chat made, with no messages, no turn running and no send on its way.
     pub(crate) fn empty_chat_project(&self) -> Option<String> {
-        let id = self.selected.as_ref()?;
-        if !id.starts_with("thoughts-next-")
-            || !self.rows.is_empty()
-            || self.turn_running()
-            || self.saving
-            || self.pending.contains_key(id)
-            || !self.queued_items().is_empty()
-        {
+        if !self.empty_chat() {
             return None;
         }
+        let id = self.selected.as_ref()?;
         let session = self.sessions.iter().find(|s| &s.id == id)?;
-        (session.message_count == 0)
-            .then(|| session.repo_path.clone())
-            .flatten()
+        session.repo_path.clone()
     }
 
     fn load_project_bar(&mut self, cx: &mut Context<Self>) {

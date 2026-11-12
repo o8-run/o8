@@ -156,7 +156,15 @@ pub fn connect(client: Client, session: String, initial: Size, grid: Arc<Mutex<G
                                     .decode(data["data"].as_str().ok_or(())?)
                                     .map_err(|_| ())?;
                                 if resync {
-                                    grid.lock().unwrap().reset();
+                                    let mut grid = grid.lock().unwrap();
+                                    grid.reset();
+                                    // A snapshot can fall back to the raw stream
+                                    // while the shell is still inside tmux, so
+                                    // the server says so; one that predates the
+                                    // field is trusted by its snapshot's source.
+                                    grid.set_multiplexed(
+                                        data["multiplexed"] == true || data["source"] == "tmux",
+                                    );
                                 }
                                 let historical = resync || data["historical"] == true;
                                 // Parse off the UI thread, releasing the grid between

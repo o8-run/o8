@@ -19,6 +19,10 @@ pub(super) fn background(offscreen: bool) -> WindowBackgroundAppearance {
 
 pub(super) fn background_for(offscreen: bool, reduced: bool) -> WindowBackgroundAppearance {
     if cfg!(target_os = "macos") && theme::glass() && !offscreen && !reduced {
+        if theme::glass_vivid() {
+            // GPUI's own backdrop: blur only, with no material tint over it.
+            return WindowBackgroundAppearance::Blurred;
+        }
         WindowBackgroundAppearance::Transparent
     } else {
         WindowBackgroundAppearance::Opaque
@@ -38,6 +42,9 @@ pub(super) fn apply_for(window: &mut Window, offscreen: bool, reduced: bool) -> 
     window.set_background_appearance(background);
     if background == WindowBackgroundAppearance::Opaque {
         return false;
+    }
+    if background == WindowBackgroundAppearance::Blurred {
+        return true;
     }
     #[cfg(target_os = "macos")]
     if macos::install(window) {
@@ -82,8 +89,8 @@ pub(super) fn veil() -> gpui::AnyElement {
                             quad,
                             linear_gradient(
                                 180.,
-                                linear_color_stop(theme::veil_color(*from), 0.),
-                                linear_color_stop(theme::veil_color(*to), 1.),
+                                linear_color_stop(theme::veil(*from), 0.),
+                                linear_color_stop(theme::veil(*to), 1.),
                             ),
                         ));
                     }

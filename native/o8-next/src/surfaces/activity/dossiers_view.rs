@@ -255,7 +255,7 @@ impl ActivityPane {
                 history = history.child(format!(
                     "{} · {}",
                     text(evidence, "sourceKind").replace('_', " "),
-                    text(evidence, "packetId")
+                    super::proposals::short_id(&text(evidence, "packetId"))
                 ));
             }
             let mut events = div()
@@ -319,7 +319,10 @@ impl ActivityPane {
                     .rounded(px(7.))
                     .text_size(px(10.5))
                     .when(*action == "accept", |v| {
-                        v.bg(theme().accent).text_color(crate::theme::on_accent())
+                        // Quiet: a list of filled buttons all shout at once.
+                        v.bg(theme().selection)
+                            .border_color(tint(marks::ACCENT, 0.35))
+                            .text_color(theme().text)
                     }),
             );
         }
