@@ -71,11 +71,12 @@ function select(eventName: string, event: object): string {
   return outputs[0];
 }
 
-function condition(source: string, github: object, needs: object = {}): boolean {
+function condition(source: string, github: object, needs: object = {}, isCancelled = false): boolean {
   const expression = source.replace(/^\$\{\{\s*|\s*\}\}$/g, '')
     .replaceAll('needs.test-shards', 'needs["test-shards"]');
-  return Boolean(new Function('github', 'inputs', 'needs', 'always', `return (${expression});`)(
-    github, { integration_base: '' }, needs, () => true,
+  return Boolean(new Function('github', 'inputs', 'needs', 'always', 'cancelled', `return (${expression});`)(
+    github, { integration_base: '' }, { reuse: { result: 'success' }, typecheck: { result: 'success' }, ...needs },
+    () => true, () => isCancelled,
   ));
 }
 
@@ -154,9 +155,13 @@ describe('required CI gates through workflow commands', () => {
     for (const [id, name] of Object.entries(required)) {
       expect(workflow.jobs[id].name).toBe(name);
       for (const event_name of ['pull_request', 'merge_group']) {
-        expect(condition(workflow.jobs[id].if, { event_name, event: {} }, {
-          'test-shards': { result: 'success' },
-        }), `${id} must report on ${event_name}`).toBe(true);
+        for (const cancelled of [false, true]) {
+          expect(condition(workflow.jobs[id].if, { event_name, event: {} }, {
+            reuse: { result: event_name === 'merge_group' ? 'success' : 'skipped' },
+            typecheck: { result: 'success' },
+            'test-shards': { result: 'success' },
+          }, cancelled), `${id} on ${event_name}, cancelled=${cancelled}`).toBe(id === 'test' || !cancelled);
+        }
       }
     }
   });
@@ -234,8 +239,15 @@ describe('required CI gates through workflow commands', () => {
     const shards = workflow.jobs['test-shards'];
     expect(shards.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
     expect(workflow.jobs.test.needs).toEqual(['test-shards', 'o8-next-tests', 'classification']);
+    for (const cancelled of [false, true]) {
+      expect(condition(shards.if, { event_name: 'pull_request', event: {} }, {
+        reuse: { result: 'skipped' },
+      }, cancelled)).toBe(!cancelled);
+    }
     for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
-      expect(condition(workflow.jobs.test.if, { event: {} }, { 'test-shards': { result } })).toBe(true);
+      for (const cancelled of [false, true]) {
+        expect(condition(workflow.jobs.test.if, { event: {} }, { 'test-shards': { result } }, cancelled)).toBe(true);
+      }
       const step = workflow.jobs.test.steps[0];
       const run = spawnSync(step.run, {
         shell: true, encoding: 'utf8',

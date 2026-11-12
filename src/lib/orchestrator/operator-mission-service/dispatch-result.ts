@@ -61,6 +61,7 @@ function classifyKnownBlocker(
   blocker: string,
 ): DispatchMissionSkippedPacket {
   const base = { packetId: packet.id, referenceLabel: packet.referenceLabel, detail: blocker };
+  if (blocker.startsWith('Machine busy:')) return { ...base, reason: 'scheduler-deferred', suggestedAction: 'wait' };
   if (blocker === 'Operator stopped') {
     return { ...base, reason: 'operator-stopped', suggestedAction: 'reset_packet' };
   }
@@ -168,7 +169,7 @@ export function summarizeDispatchMission(
 
   return {
     dispatched, skipped, queued,
-    status: dispatched > 0 ? 'dispatched' : queued.length > 0 ? 'queued' : 'not-dispatched',
+    status: dispatched > 0 ? 'dispatched' : queued.length > 0 || skipped.some(skip => skip.reason === 'scheduler-deferred') ? 'queued' : 'not-dispatched',
     ...(queued.length > 0 ? { note: `Dispatch returned with ${queued.length} packet(s) still queued. ${queued[0].detail}` } : {}),
   };
 }

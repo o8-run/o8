@@ -1,3 +1,4 @@
+import { runHeavy } from './commands/run-heavy.js';
 import { runPrStack } from './commands/pr-stack.js';
 import { runBrainSources } from './commands/brain-sources.js';
 import { runThreads } from './commands/threads.js';
@@ -202,6 +203,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       rest.push(tok);
     } else if (command.length < 2 && !tok.startsWith('-')) {
       command.push(tok);
+      if (command.length === 1 && tok === 'run-heavy') {
+        rest.push(...argv.slice(i + 1));
+        break;
+      }
       if (command.length === 2) secondaryIndex = i;
     } else {
       if (firstRestIndex === null) firstRestIndex = i;
@@ -241,6 +246,7 @@ commands:
   lead stop            durably stop the lead; recovery cannot auto-resume it
   connect [--status]   register this signed-in machine, or list connected machines
   disconnect           remove this machine from the operator's connected devices
+  run-heavy -- <cmd>   queue a native build or full suite on this machine
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
   run --last           show the latest command, start, exit receipt, and retained log
@@ -511,6 +517,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
       throw unknownSubcommandError('lane', secondary);
     }
+    case 'run-heavy':
+      return runHeavy(args.rest);
     case 'lease':
       return runLease(args.mode, secondary, args.rest);
     case 'mission':

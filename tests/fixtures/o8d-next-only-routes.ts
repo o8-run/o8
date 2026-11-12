@@ -21,8 +21,10 @@ export type NextOnlyTable = Readonly<Record<string, NextOnlyEntry>>;
 const security = (reason: string): NextOnlyEntry => ({ owner: 'security', reason });
 const seek = (reason: string): NextOnlyEntry => ({ owner: 'seek', reason });
 
+// Entries in these tables are separated by blank lines so that PRs removing neighbouring
+// entries merge without conflicts. When you register a route, delete only its entry line (and
+// any comment line directly above it); leave the blank lines.
 export const NEXT_ONLY_NATIVE_PATHS: NextOnlyTable = {
-  '/api/review/push': seek("review's push button: a POST outside the Phase A reads"),
 };
 // Registered paths that o8 next sends a method the native registration lacks, read from each Rust
 // request's call. Hidden while the scan checked paths alone.
@@ -34,66 +36,62 @@ export const NEXT_ONLY_SHELL_PATHS: NextOnlyTable = {};
 export const NEXT_ONLY_SHELL_METHODS: NextOnlyTable = {};
 
 export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
-  '/api/broadcast/post': security('worker grant'),
-  '/api/broadcast/tokens': security('mints broadcast tokens'),
-  '/api/browser/proxy': security('loopback read grant'),
-  '/api/cortex/sources': seek('operator MCP tool read'),
-  '/api/devices/agent': security('worker grant: packet-bound device authority'),
-  '/api/harness': seek('operator MCP tool'),
-  '/api/orchestrator/create-mission': seek('operator mission mutation'),
-  '/api/orchestrator/dispatch': seek('operator mission mutation'),
-  '/api/orchestrator/merge': seek('operator merge mutation'),
-  '/api/orchestrator/propose-spec': seek('operator mission mutation'),
-  '/api/orchestrator/reload': seek('operator reload'),
-  '/api/orchestrator/truth': security('spectator grant'),
-  '/api/task-artifacts': seek('operator MCP tool'),
+
+
+
+
+
+
+
+
+
+
+
+
+
   '/api/task-artifacts/[id]/actions': seek('operator MCP tool'),
 };
 export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
-  'POST /api/setup/mcp-servers': security('stores MCP commands, env and OAuth tokens that workers receive'),
-  'POST /api/visualizations': security('worker grant'),
-  // Also matched the GET-only /api/visualizations/[id] path, so a path-only check counted it as served.
-  'POST /api/visualizations/preview': security('worker grant'),
 };
 
 /** WS-process modules: the WS-to-Next helpers and plain fetches on the API base. */
 export const NEXT_ONLY_WS_PATHS: NextOnlyTable = {
-  '/api/mobile/symon': security('device grant'),
-  '/api/mobile/symon/confirm': security('Symon relay: operator credential only'),
+
+
   '/api/mobile/symon/text-turn': security('Symon relay: operator credential only'),
-  '/api/mobile/symon/tool': security('Symon relay: operator credential only'),
-  '/api/worktrees/conflicts': seek('worktree conflict read'),
+
+
   '/api/v2/proxy/llm': security('o8 lane model calls: provider keys and spend'),
 };
 
 // The o8 CLI that packet workers and the operator run. Uncounted until the scan read cli/src.
 export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
-  '/api/broadcast/automation-say': security('worker grant: automation lanes speak'),
-  '/api/broadcast/post': security('worker grant'),
-  '/api/broadcast/tokens': security('mints broadcast tokens'),
+
+
+
   '/api/browser/engine/capture': security('headless browser loads any URL; the handler relies on loopback plus token'),
-  '/api/cortex/sources': seek('Brain source listing'),
-  '/api/harness': seek('harness bundle and measure'),
-  '/api/orchestrator/create-mission': seek('operator mission mutation'),
-  '/api/orchestrator/dispatch': seek('operator mission mutation'),
-  '/api/orchestrator/history': seek('orchestrator history read'),
-  '/api/orchestrator/lead': seek('lead session control'),
-  '/api/orchestrator/merge': seek('operator merge mutation'),
-  '/api/orchestrator/truth': security('spectator grant'),
-  '/api/orchestrator/workspace/maintenance': seek('workspace cleanup plan and execute'),
-  '/api/orchestrator/workspace/preservation': seek('packet artifact recovery'),
-  '/api/orchestrator/workspace/retention': seek('packet retention read'),
-  '/api/panel/artifacts': security('worker grant: packet capture upload'),
-  '/api/panel/artifacts/mirror': security('worker grant: packet proof mirror'),
-  '/api/panel/managed-runs': security('worker grant'),
-  '/api/panel/threads': seek('thread listing'),
-  '/api/runtime/session-transform': seek('session fork and compaction'),
-  '/api/setup/opencode': security('writes the operator MCP entry, with its bearer, into the OpenCode config'),
-  '/api/task-artifacts': seek('operator task artifacts'),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   '/api/task-artifacts/[id]/actions': seek('operator task artifact actions'),
-  '/api/tasks/[id]': security('worker grant: task read'),
-  // `/api/tasks/${id}/${action}`: the worker's report and block verbs.
-  '/api/tasks/[id]/[id]': security('worker grant: task report and block'),
+
+
+  // The CLI builds `/api/tasks/${id}/${action}`, which this inventory cannot resolve to the
+  // explicit report, block and operator-verb registrations.
+  '/api/tasks/[id]/[id]': seek('dynamic CLI task URL; every verb is registered at its explicit path'),
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
 };

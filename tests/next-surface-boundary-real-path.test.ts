@@ -62,6 +62,9 @@ function fixture() {
     put(root, `native/o8-next/src/${path}`, '// shared baseline\n');
   }
   put(root, 'scripts/next/dev-server.ts', '// shared routes\n');
+  // The workflow installs build prerequisites with a script from the base
+  // checkout (#5596); the fixture's cargo check needs none.
+  put(root, 'scripts/ci/install-native-linux-deps.sh', 'exit 0\n');
   put(root, checkerPath, readFileSync(check, 'utf8'));
   put(root, workflowPath, readFileSync(join(process.cwd(), workflowPath), 'utf8'));
   commit(root);
@@ -165,6 +168,20 @@ describe('o8 next surface boundary CLI', () => {
     commit(root);
     expect(run(root, ['shell-work']).status).toBe(0);
     expect(run(root, ['not-shell-work']).status).toBe(1);
+  });
+
+  it('rejects a vendored toolkit edit that leaves its patch log untouched, whatever the label', () => {
+    const root = fixture();
+    put(root, 'native/o8-next/vendor/gpui/src/window.rs', '// local edit\n');
+    commit(root);
+    for (const labels of [[], ['shell-work']]) {
+      const result = run(root, labels, ['--select-only']);
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr.split('\n')).toContain('vendored toolkit changed without its patch log: native/o8-next/vendor/gpui/src/window.rs; add the edit to native/o8-next/vendor/gpui/O8-PATCHES.md with the reason it cannot live in application code');
+    }
+    put(root, 'native/o8-next/vendor/gpui/O8-PATCHES.md', '- `src/window.rs`: why application code could not do it.\n');
+    commit(root);
+    expect(run(root, ['shell-work'], ['--select-only']).status).toBe(0);
   });
 
   it('rejects a second registration line', () => {

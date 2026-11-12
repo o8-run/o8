@@ -78,19 +78,31 @@ export async function GET(request: NextRequest) {
   const statusParam = request.nextUrl.searchParams.get('status')?.trim() || 'pending';
   const status = statusParam === 'all' ? 'all' : 'pending';
   // The shared Inbox explicitly spans projects; other callers retain active-project scoping.
-  const projectId = request.nextUrl.searchParams.get('scope') === 'all' ? null : undefined;
+  let projectId = request.nextUrl.searchParams.get('scope') === 'all' ? null : undefined;
   const isContextQuery = Boolean(packetId || laneId);
   const includeDiff = request.nextUrl.searchParams.get('include')?.trim() === 'diff';
   const terminalSession = request.nextUrl.searchParams.get('terminalSession');
-  const ownershipRefusal = workerPacketRefusal(
-    resolveRequestPrincipalContext(request),
-    packetId || (laneId ? getLane(laneId)?.packetId : null) || (sessionKey ? findLaneBySession(sessionKey)?.packetId : null),
-  );
+  const principal = resolveRequestPrincipalContext(request);
+  if (principal.role === 'worker') projectId = null;
+  const targets = [
+    ...(packetId ? [packetId] : []),
+    ...(laneId ? [getLane(laneId)?.packetId] : []),
+    ...(sessionKey ? [findLaneBySession(sessionKey)?.packetId] : []),
+  ];
+  const ownershipRefusal = (targets.length ? targets : [null])
+    .map(target => workerPacketRefusal(principal, target)).find(Boolean);
   if (ownershipRefusal) {
     return viewerJson({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
+  const terminalAdapter = terminalSession !== null && sessionKey
+    ? await readTerminalApprovalAdapter(sessionKey, terminalSession) : null;
+  if (principal.role === 'worker' && terminalSession !== null
+    && (!terminalAdapter || workerPacketRefusal(principal, getLane(terminalAdapter.laneId)?.packetId))) {
+    return viewerJson({ ok: false, error: 'Terminal session must belong to the caller packet.' }, { status: 403 });
+  }
   const approvals = isContextQuery
-    ? listApprovalsForContext({ packetId, laneId, sessionKey })
+    ? listApprovalsForContext({ packetId, laneId, sessionKey,
+      ...(principal.role === 'worker' ? { projectId: null } : {}) })
       .filter((approval) => status === 'all' || approval.status === status)
     : status === 'pending'
       ? [
@@ -102,7 +114,7 @@ export async function GET(request: NextRequest) {
   return viewerJson({
     approvals: (isContextQuery || includeDiff) ? approvals : stripDiffPreviews(approvals),
     ...(terminalSession !== null ? {
-      terminalAdapter: sessionKey ? await readTerminalApprovalAdapter(sessionKey, terminalSession) : null,
+      terminalAdapter,
     } : {}),
   }, {
     headers: { 'Cache-Control': 'no-store, max-age=0' },
@@ -538,6 +550,7 @@ export async function POST(request: NextRequest) {
       try {
         const { dispatchApprovedPlan } = await import('@/lib/intake/plan-dispatch');
         const result = await dispatchApprovedPlan(continuation);
+        if (!result.ok) continuationOutcome = 'failed';
         decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
       } catch (error) {
         continuationOutcome = 'outcome_unknown';

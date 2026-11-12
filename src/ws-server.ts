@@ -7013,6 +7013,9 @@ async function sendTerminalResync(
     epoch,
     source: snapshotSource,
     historyTruncated,
+    // The shell runs inside tmux, whichever way this snapshot was made. A
+    // viewer then keeps one screen: tmux's own second screen has no history.
+    multiplexed: attachment.snapshotSource === 'tmux',
   });
   view.needsResync = false;
   view.lastGoodOffset = snapshotEndOffset;
@@ -9806,7 +9809,7 @@ async function bootstrapWsServer() {
   if (shuttingDown) return;
   try {
     const { reconcileResourceLeasesAtStartup } = await import(
-      '@/lib/leases/resource-lease-service'
+      '@/lib/leases/resource-lease-default-store'
     );
     const result = await reconcileResourceLeasesAtStartup();
     if (result.inspected > 0) {

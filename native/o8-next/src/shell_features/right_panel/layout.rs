@@ -26,6 +26,7 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
     let scope = s.state.selected.clone().unwrap_or_default();
     let viewport = f32::from(window.viewport_size().width);
     let fresh = s.features.get::<Panel>().scope.as_deref() != Some(scope.as_str());
+    let fits = super::fits(s, viewport);
     let p = s.features.get::<Panel>();
     p.viewport = viewport;
     let ids = [
@@ -60,10 +61,10 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         p.split_drag = false;
     }
     if !fresh {
-        if viewport < 1180. && (p.selected == Tool::Subagents || p.lower == Some(Tool::Subagents)) {
+        if !fits && (p.selected == Tool::Subagents || p.lower == Some(Tool::Subagents)) {
             p.maximized = true;
         }
-        if viewport < 1180.
+        if !fits
             && p.motion.is_open()
             && p.selected != Tool::Subagents
             && p.lower != Some(Tool::Subagents)
@@ -73,7 +74,7 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
             p.maximized = false;
             cx.notify();
         }
-        if (viewport >= 1180. || subagents::in_panel(s))
+        if (fits || subagents::in_panel(s))
             && s.state.right_panel.visible
             && !s.features.get::<Panel>().motion.is_open()
         {
@@ -128,8 +129,8 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
                 t
             }
         });
-    p.motion = Transition::settled(260, saved.visible && viewport >= 1180.);
-    p.morph = Transition::settled(200, saved.visible && viewport >= 1180.);
+    p.motion = Transition::settled(260, saved.visible && fits);
+    p.morph = Transition::settled(200, saved.visible && fits);
     p.content = Transition::settled(200, true);
     p.lower_tabs = saved
         .secondary_tabs
@@ -150,7 +151,7 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         saved.pr_tabs.get(&scope).map_or(&[][..], |v| &v[..]),
         saved.pr_selected.get(&scope),
     );
-    if saved.visible && viewport >= 1180. {
+    if saved.visible && fits {
         match contextual::unopened(s).filter(|_| upper == Tool::Prs) {
             Some((repo, n)) => contextual::open_pr(s, repo, n, window, cx),
             None => show(s, upper, window, cx),
