@@ -41,14 +41,14 @@ describe('server size check CLI', () => {
     const committed = JSON.parse(readFileSync('scripts/server-bundle-budget.json', 'utf8'));
     const previousBudget = join(temporary, 'budget.json');
     writeFileSync(previousBudget, JSON.stringify({ ...committed,
-      totalBytes: Math.min(committed.totalBytes, 13_077_919) }));
+      totalBytes: Math.min(committed.totalBytes, 13_825_350) }));
     const result = spawnSync(process.execPath, [check, '--budget', previousBudget], {
       encoding: 'utf8', timeout: 120_000,
       env: { PATH: process.env.PATH, NODE_ENV: 'test' },
     });
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout).toContain('Server bundle size check passed.');
-    expect(committed.totalBytes + 1_000_000).toBeLessThanOrEqual(14_077_919);
+    expect(committed.totalBytes + 1_000_000).toBeLessThanOrEqual(14_825_350);
   }, 120_000);
 
   it('retains upstream copyright and permission notices in exported sidecars', () => {

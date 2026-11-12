@@ -40,36 +40,26 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
 
 
-  '/api/devices/agent': security('worker grant: packet-bound device authority'),
 
 
-  '/api/orchestrator/create-mission': seek('operator mission mutation'),
 
-  '/api/orchestrator/dispatch': seek('operator mission mutation'),
 
-  '/api/orchestrator/merge': seek('operator merge mutation'),
 
-  '/api/orchestrator/propose-spec': seek('operator mission mutation'),
 
-  '/api/orchestrator/reload': seek('operator reload'),
 
 
 
   '/api/task-artifacts/[id]/actions': seek('operator MCP tool'),
 };
 export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
-  'POST /api/setup/mcp-servers': security('stores MCP commands, env and OAuth tokens that workers receive'),
 };
 
 /** WS-process modules: the WS-to-Next helpers and plain fetches on the API base. */
 export const NEXT_ONLY_WS_PATHS: NextOnlyTable = {
-  '/api/mobile/symon': security('device grant'),
 
-  '/api/mobile/symon/confirm': security('Symon relay: operator credential only'),
 
   '/api/mobile/symon/text-turn': security('Symon relay: operator credential only'),
 
-  '/api/mobile/symon/tool': security('Symon relay: operator credential only'),
 
   '/api/v2/proxy/llm': security('o8 lane model calls: provider keys and spend'),
 };
@@ -83,14 +73,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
 
 
-  '/api/orchestrator/create-mission': seek('operator mission mutation'),
-
-  '/api/orchestrator/dispatch': seek('operator mission mutation'),
-
-
-  '/api/orchestrator/lead': seek('lead session control'),
-
-  '/api/orchestrator/merge': seek('operator merge mutation'),
 
 
 
@@ -98,14 +80,18 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
 
 
-  '/api/setup/opencode': security('writes the operator MCP entry, with its bearer, into the OpenCode config'),
+
+
+
+
 
 
   '/api/task-artifacts/[id]/actions': seek('operator task artifact actions'),
 
 
-  // Only report/block still use the dynamic CLI URL; operator verbs have explicit paths.
-  '/api/tasks/[id]/[id]': security('remaining dynamic CLI calls: report and block; operator mutations registered separately'),
+  // The CLI builds `/api/tasks/${id}/${action}`, which this inventory cannot resolve to the
+  // explicit report, block and operator-verb registrations.
+  '/api/tasks/[id]/[id]': seek('dynamic CLI task URL; every verb is registered at its explicit path'),
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
 };

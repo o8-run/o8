@@ -38,6 +38,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
     route('/api/harness', 'POST', () => import('@/lib/harness/route')),
 
+    route('/api/mobile/symon', 'GET POST', () => import('@/lib/mobile/symon-relay-route')),
+    route('/api/mobile/symon/confirm', 'POST', () => import('@/lib/mobile/symon-confirm-route')),
+    route('/api/mobile/symon/tool', 'POST DELETE', () => import('@/lib/mobile/symon-tool-route')),
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
@@ -47,6 +50,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route'), ARTIFACT_REQUEST_MAX_BYTES),
     route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
     route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
+    route('/api/tasks/dispatch-owner', 'POST', () => import('@/lib/tasks/dispatch-owner-route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),
@@ -91,6 +95,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/history', 'GET', () => import('@/app/api/orchestrator/history/route')),
     route('/api/orchestrator/workspace/retention', 'GET POST', () => import('@/app/api/orchestrator/workspace/retention/route')),
     route('/api/panel/threads', 'GET', () => import('@/lib/threads/route')),
+    route('/api/orchestrator/create-mission', 'POST', () => import('@/lib/orchestrator/http/create-mission')),
+    route('/api/orchestrator/dispatch', 'POST', () => import('@/lib/orchestrator/http/dispatch')),
+    route('/api/orchestrator/propose-spec', 'POST', () => import('@/lib/orchestrator/http/propose-spec')),
+    route('/api/orchestrator/merge', 'POST', () => import('@/lib/orchestrator/http/merge')),
+    route('/api/orchestrator/reload', 'POST', () => import('@/lib/orchestrator/http/reload')),
+    route('/api/orchestrator/lead', 'GET POST', () => import('@/lib/orchestrator/http/lead')),
     route('/api/orchestrator/status', 'GET', () => import('@/app/api/orchestrator/status/route')),
     route('/api/orchestrator/archive', 'GET', () => import('@/app/api/orchestrator/archive/route')),
     route('/api/task-artifacts/[id]/decision', 'GET POST', () => import('@/app/api/task-artifacts/[id]/decision/route')),
@@ -422,6 +432,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // the gate only ever lets the body reach a caller already holding that same operator token,
     // and the real-path forged-local-header negative pins that a non-operator cannot extract it. (#5243)
     route('/api/setup/mcp-config', 'GET', () => import('@/app/api/setup/mcp-config/route')),
+    // Operator-only under the unchanged panel gate; Next forwards to this config writer.
+    route('/api/setup/opencode', 'GET POST', () => import('@/lib/mcp/setup-opencode-route')),
     // Claude Desktop / Claude Code auto-register (Settings > MCP). GET previews the Claude config
     // (other servers by name only; the o8 entry carries the operator's own WS_TOKEN); POST merges the
     // o8 + codebase-memory entries into the user's config file. No handler-level auth — same
@@ -520,7 +532,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/customize/inventory', 'GET', () => import('@/app/api/customize/inventory/route')),
     route('/api/customize/actions', 'GET POST', () => import('@/app/api/customize/actions/route')),
     route('/api/cortex/directives', 'GET POST', () => import('@/app/api/cortex/directives/route')),
-    route('/api/setup/mcp-servers', 'GET', () => import('@/app/api/setup/mcp-servers/route')),
+    route('/api/setup/mcp-servers', 'GET POST PATCH DELETE', () => import('@/lib/mcp/setup-mcp-servers-route')),
     route('/api/prompt-library', 'GET POST', () => import('@/app/api/prompt-library/route')),
     route('/api/prompt-library/[id]', 'GET PATCH DELETE', () => import('@/app/api/prompt-library/[id]/route')),
   ],
@@ -532,6 +544,9 @@ const producers = [
   route('/api/tasks/[taskId]/dispatch', 'POST', () => import('@/lib/tasks/http/dispatch')),
   route('/api/tasks/[taskId]/archive', 'POST', () => import('@/lib/tasks/http/archive')),
   route('/api/tasks/[taskId]/prune', 'POST', () => import('@/lib/tasks/http/prune')),
+  route('/api/tasks/[taskId]/report', 'POST', () => import('@/lib/tasks/report-route')),
+  route('/api/tasks/[taskId]/block', 'POST', () => import('@/lib/tasks/block-route')),
+  route('/api/devices/agent', 'POST', () => import('@/lib/devices/agent-route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
   // Worker-dispatch readiness: dispatch-readiness.ts probes it on the API base with the operator
