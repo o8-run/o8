@@ -14,6 +14,9 @@ impl Settings {
         let imported = theme::imported_themes()
             .into_iter()
             .map(|(mode, label)| (mode, label, "Imported VS Code theme.".to_string()));
+        let bespoke = theme::bespoke_themes()
+            .into_iter()
+            .map(|(mode, label, description)| (mode, label, description.to_string()));
         for (mode, label, description) in [
             ("light", "Light Solid", "Opaque panels and workspace."),
             ("dark", "Dark Solid", "Opaque panels and workspace."),
@@ -26,9 +29,20 @@ impl Settings {
         ]
         .map(|(mode, label, description)| (mode.into(), label.into(), description.into()))
         .into_iter()
+        .chain(bespoke)
         .chain(imported)
         {
             let active = current == mode;
+            let swatches = theme::swatches(&mode).map(|colors| {
+                div().flex().gap(px(4.)).children(colors.map(|color| {
+                    div()
+                        .size(px(14.))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(theme().border)
+                        .bg(color)
+                }))
+            });
             let action = mode.clone();
             choices = choices.child(
                 self.button(
@@ -61,7 +75,34 @@ impl Settings {
                         .text_size(px(11.))
                         .text_color(theme().text_muted)
                         .child(description),
-                ),
+                )
+                .children(swatches),
+            );
+        }
+        let mut glass = div().flex().flex_wrap().gap(px(12.));
+        for (name, label, _) in theme::GLASS_LEVELS {
+            let active = theme::glass_level_name() == name;
+            glass = glass.child(
+                self.button(
+                    format!("setting-glass-level-{name}"),
+                    label.into(),
+                    true,
+                    active,
+                    window,
+                    cx,
+                    move |this, _, cx| {
+                        if theme::set_glass_level(name) {
+                            cx.refresh_windows();
+                        }
+                        this.changed(cx);
+                    },
+                )
+                .border_1()
+                .border_color(if active {
+                    theme().accent
+                } else {
+                    theme().border
+                }),
             );
         }
         let import = self.button(
@@ -159,6 +200,12 @@ impl Settings {
             .child(choices)
             .child(import)
             .children(import_error)
+            .child(
+                div()
+                    .text_color(theme().text_muted)
+                    .child("Glass clarity (All Glass only)"),
+            )
+            .child(glass)
             .child(div().text_color(theme().text_muted).child("Chat width"))
             .child(widths)
             .child(fonts)

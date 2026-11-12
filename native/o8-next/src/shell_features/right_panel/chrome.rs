@@ -295,7 +295,7 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
     };
     let selected = p.selected;
     let fade = if s.system_glass {
-        crate::theme::veil_color(crate::theme::GLASS_VEIL[0].1)
+        crate::theme::veil(crate::theme::GLASS_VEIL[0].1)
     } else {
         theme().background
     };

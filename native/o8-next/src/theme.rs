@@ -71,6 +71,8 @@ fn named(mode: &str) -> Option<Appearance> {
 /// are imported themes by their place in IMPORTED.
 const SYSTEM: u8 = 3;
 const FIRST_IMPORTED: u8 = 4;
+/// o8's own themes take the choices from here up, in BESPOKE's order.
+const FIRST_BESPOKE: u8 = 200;
 /// A saved or menu name: "light", "dark", "glass", "system" or "theme:<id>".
 fn choice_id(mode: &str) -> Option<u8> {
     if let Some(appearance) = named(mode) {
@@ -80,6 +82,9 @@ fn choice_id(mode: &str) -> Option<u8> {
         return Some(SYSTEM);
     }
     let id = mode.strip_prefix("theme:")?;
+    if let Some(index) = BESPOKE.iter().position(|theme| theme.id == id) {
+        return u8::try_from(index).ok()?.checked_add(FIRST_BESPOKE);
+    }
     let themes = IMPORTED.read().unwrap();
     let index = themes.iter().position(|theme| theme.id == id)?;
     u8::try_from(index).ok()?.checked_add(FIRST_IMPORTED)
@@ -97,6 +102,9 @@ fn choice() -> u8 {
     }
 }
 fn imported(choice: u8) -> Option<&'static ImportedTheme> {
+    if let Some(index) = choice.checked_sub(FIRST_BESPOKE) {
+        return BESPOKE.get(usize::from(index));
+    }
     let index = usize::from(choice.checked_sub(FIRST_IMPORTED)?);
     IMPORTED.read().unwrap().get(index).copied()
 }
@@ -172,6 +180,34 @@ static IMPORTED: LazyLock<RwLock<Vec<&'static ImportedTheme>>> = LazyLock::new(|
             .collect(),
     )
 });
+/// o8's own themes, built once. Each is a full token set on a dark or light
+/// base, chosen like an imported theme ("theme:<id>").
+static BESPOKE: LazyLock<Vec<ImportedTheme>> = LazyLock::new(crate::theme_bespoke::themes);
+/// o8's themes as Settings lists them: choice name, label and one line on it.
+pub fn bespoke_themes() -> Vec<(String, String, &'static str)> {
+    BESPOKE
+        .iter()
+        .zip(crate::theme_bespoke::DESCRIPTIONS)
+        .map(|(theme, description)| (format!("theme:{}", theme.id), theme.name.clone(), description))
+        .collect()
+}
+/// Four swatches for a choice's card in Settings: background, raised surface,
+/// accent and text. None for System, which has no one palette.
+pub fn swatches(mode: &str) -> Option<[Rgba; 4]> {
+    let of = |theme: &Theme, background: Rgba| [background, theme.surface_raised, theme.accent, theme.text];
+    match choice_id(mode)? {
+        SYSTEM => None,
+        choice => match imported(choice) {
+            Some(theme) => Some(of(&theme.theme, theme.theme.background)),
+            None => {
+                let theme = Theme::for_appearance(named(mode)?);
+                // Glass has no fill of its own; show the veil it sits under.
+                let background = if mode == "glass" { veil_color(0.9) } else { theme.background };
+                Some(of(&theme, background))
+            }
+        },
+    }
+}
 /// Imported themes as Settings lists them: choice name and label.
 pub fn imported_themes() -> Vec<(String, String)> {
     IMPORTED
@@ -219,7 +255,7 @@ pub(crate) fn selection_test_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 /// Imported themes fit the choice ids below the unset sentinel.
-const MAX_IMPORTED: usize = (u8::MAX - 1 - FIRST_IMPORTED) as usize;
+const MAX_IMPORTED: usize = (FIRST_BESPOKE - FIRST_IMPORTED) as usize;
 fn themes_path() -> Option<std::path::PathBuf> {
     Some(saved_path()?.with_file_name("next-themes.json"))
 }
@@ -270,6 +306,50 @@ fn chat_width_path() -> Option<std::path::PathBuf> {
 }
 fn saved_chat_width() -> Option<String> {
     std::fs::read_to_string(chat_width_path()?).ok()
+}
+/// How much of the dark veil All Glass keeps: saved name, label and the share
+/// of each veil stop's alpha. Less veil lets more of the desktop's colour through.
+pub const GLASS_LEVELS: [(&str, &str, f32); 3] = [
+    ("deep", "Deep", 1.),
+    ("balanced", "Balanced", 0.6),
+    ("clear", "Clear", 0.3),
+];
+static LAUNCH_GLASS_LEVEL: LazyLock<usize> = LazyLock::new(|| {
+    glass_level_path()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|name| glass_level_index(name.trim()))
+        .unwrap_or(0)
+});
+static CHOSEN_GLASS_LEVEL: AtomicU8 = AtomicU8::new(u8::MAX);
+fn glass_level_index(name: &str) -> Option<usize> {
+    GLASS_LEVELS.iter().position(|(id, _, _)| *id == name)
+}
+fn selected_glass_level() -> usize {
+    match CHOSEN_GLASS_LEVEL.load(Ordering::Relaxed) {
+        u8::MAX => *LAUNCH_GLASS_LEVEL,
+        index => index as usize,
+    }
+}
+pub fn glass_level_name() -> &'static str {
+    GLASS_LEVELS[selected_glass_level()].0
+}
+/// Switches the glass veil's strength and saves it. True when it changed.
+pub fn set_glass_level(name: &str) -> bool {
+    let Some(index) = glass_level_index(name) else {
+        return false;
+    };
+    if let Some(path) = glass_level_path() {
+        let _ = std::fs::write(path, name);
+    }
+    let changed = index != selected_glass_level();
+    CHOSEN_GLASS_LEVEL.store(index as u8, Ordering::Relaxed);
+    if changed {
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+    }
+    changed
+}
+fn glass_level_path() -> Option<std::path::PathBuf> {
+    Some(saved_path()?.with_file_name("next-glass-level"))
 }
 /// Changes with the appearance, for caches that keep painted colors.
 pub fn generation() -> u8 {
@@ -841,6 +921,10 @@ pub fn light() -> bool {
 }
 pub fn veil_color(alpha: f32) -> Rgba {
     translucent(0x0a0c12, alpha)
+}
+/// The veil as painted: a stop's alpha at the chosen glass level.
+pub fn veil(alpha: f32) -> Rgba {
+    veil_color(alpha * GLASS_LEVELS[selected_glass_level()].2)
 }
 
 // Locked chrome roles from docs/design/hurttlocker.md. GPUI's text API does

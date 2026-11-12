@@ -82,8 +82,8 @@ pub(super) fn veil() -> gpui::AnyElement {
                             quad,
                             linear_gradient(
                                 180.,
-                                linear_color_stop(theme::veil_color(*from), 0.),
-                                linear_color_stop(theme::veil_color(*to), 1.),
+                                linear_color_stop(theme::veil(*from), 0.),
+                                linear_color_stop(theme::veil(*to), 1.),
                             ),
                         ));
                     }

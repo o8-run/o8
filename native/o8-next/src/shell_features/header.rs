@@ -438,7 +438,7 @@ pub(super) fn close_tab(s: &mut Shell, index: usize, window: &mut Window, cx: &m
 /// which turns into a close mark while the pill is hovered.
 fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
     let fade = if s.system_glass {
-        crate::theme::veil_color(crate::theme::GLASS_VEIL[0].1)
+        crate::theme::veil(crate::theme::GLASS_VEIL[0].1)
     } else {
         theme().background
     };
