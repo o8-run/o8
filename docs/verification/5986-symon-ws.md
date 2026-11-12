@@ -162,3 +162,10 @@ remain the timing reference; this follow-up does not claim a new CI deadline fai
 The full local gate was skipped on the master seat's instruction. Packaged behavior,
 real providers, actual Messages access, the separate 20-second text/voice startup
 suite and complete CI remain unverified. No merge or release.
+
+Messages receiver real-path verification on the rebased source passed 6/6,
+including the denied-token matrix and flag-unset controls. The verification job
+finished and removed its target and temporary directories. GitHub reports the
+rebased PR mergeable and draft. CI was still running at handback; its optional
+Secret Findings job failed with 18 matches requiring review, not attributed to
+this change. The change is not review-ready.
