@@ -988,7 +988,7 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
     assert_eq!(commands.last().unwrap()["packetId"], "activity-packet");
     assert!(commands.last().unwrap()["idempotencyKey"].is_string());
     let notice = view.read_with(cx, |v, _| v.notice.clone());
-    assert_eq!(notice, "Merge conflict in fixture.ts.");
+    assert_eq!(notice, "Merge conflict in fixture.ts. Try \"Create PR\" instead.");
 
     // The first close answer is still running: the same body replays until its
     // receipt settles, and the busy confirm cannot send a second close.
