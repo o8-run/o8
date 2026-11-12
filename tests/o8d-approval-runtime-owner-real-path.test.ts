@@ -15,6 +15,10 @@ vi.mock('@/lib/runtime/actions', () => ({
   performRuntimeAction: () => { throw new Error('Next must not mutate a runtime'); },
 }));
 
+vi.mock('@/lib/intake/plan-dispatch', () => ({
+  dispatchApprovedPlan: () => { throw new Error('Next must not dispatch an approved plan'); },
+}));
+
 let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
 let POST: typeof import('@/app/api/panel/approvals/route').POST;
@@ -189,4 +193,14 @@ it('keeps flag-off requests local', async () => {
   expect(response.status).toBe(200);
   expect(store.getApproval(card.id)?.status).toBe('rejected');
   vi.stubEnv('O8_NEXT_O8D', '1');
+});
+it('dispatches an approved plan in WS through Next', async () => {
+  const card = store.createApproval({ source: 'runtime', runtime: 'codex', agent: 'Fixture', sessionKey: 'runtime:plan',
+    title: 'Plan', description: 'Plan', summary: 'Plan', risk: 'low',
+    continuation: { kind: 'plan', repoPath: server.directory, issueNumber: 4242, issueTitle: 'Fixture plan',
+      issueUrl: 'https://example.invalid/issues/4242', runtime: 'codex', tasks: [{ title: 'Fixture task', body: 'Do the fixture task' }] } });
+  const response = await next({ action: 'approve', id: card.id });
+  expect(response.status).toBe(200);
+  expect((await response.json()).note).toContain('Dispatched 1 packet for issue #4242.');
+  expect(store.getApproval(card.id)?.resolution?.continuationStatus).not.toBe('outcome_unknown');
 });
