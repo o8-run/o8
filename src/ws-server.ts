@@ -7013,6 +7013,9 @@ async function sendTerminalResync(
     epoch,
     source: snapshotSource,
     historyTruncated,
+    // The shell runs inside tmux, whichever way this snapshot was made. A
+    // viewer then keeps one screen: tmux's own second screen has no history.
+    multiplexed: attachment.snapshotSource === 'tmux',
   });
   view.needsResync = false;
   view.lastGoodOffset = snapshotEndOffset;

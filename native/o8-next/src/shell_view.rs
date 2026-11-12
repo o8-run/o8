@@ -196,6 +196,9 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
         let client = client.with_wakeup(sender);
         let handle = open_window(client, file, state, offscreen, cx);
         start_pump(handle, receiver, cx);
+        // Development builds only: answer the driver socket, when one is named.
+        #[cfg(all(feature = "driver", unix))]
+        crate::driver::listen(handle.into(), cx);
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();

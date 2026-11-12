@@ -10,6 +10,8 @@ mod clock;
 mod composer;
 mod devices_panel;
 mod diff;
+#[cfg(any(test, feature = "driver"))]
+mod driver;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;

@@ -582,6 +582,13 @@ const COLUMN_CHROME: f32 = 8.;
 /// The edge's grab target reaches this far either side of the boundary.
 const EDGE_SLOP: f32 = 8.;
 
+/// Whether the panel fits beside the workspace in this window: its narrowest
+/// width plus the workspace's reserve, in what the sidebar leaves. A hidden or
+/// narrow sidebar leaves room in a window a fixed width would have refused.
+pub(super) fn fits(s: &Shell, viewport: f32) -> bool {
+    width_bounds(s, viewport).1 >= MIN_WIDTH
+}
+
 /// The narrowest and widest the panel may be in this window.
 fn width_bounds(s: &Shell, viewport: f32) -> (f32, f32) {
     let sidebar = if s.surfaces.sidebar.hidden {
@@ -785,7 +792,7 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     if tool == Tool::Subagents {
         subagents::focus(s, window, cx);
     }
-    if tool == Tool::Subagents && f32::from(window.viewport_size().width) < 1180. {
+    if tool == Tool::Subagents && !fits(s, f32::from(window.viewport_size().width)) {
         let panel = s.features.get::<Panel>();
         panel.maximized = true;
         panel.motion.set(true);
@@ -1052,7 +1059,7 @@ pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>
         s.restore_focus(window, cx);
         cx.notify();
     } else {
-        if f32::from(window.viewport_size().width) < 1180. {
+        if !fits(s, f32::from(window.viewport_size().width)) {
             return;
         }
         let tool = s
