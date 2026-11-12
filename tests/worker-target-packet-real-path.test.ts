@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
@@ -92,4 +92,44 @@ it('stores the canonical managed run packet ID', async () => {
   expect(await accepted.json()).toMatchObject({ run: { packetId: 'packet-a' } });
   const { findManagedRun } = await import('@/lib/runtimes/managed-runs/registry');
   expect(findManagedRun('trimfixture')?.packetId).toBe('packet-a');
+});
+
+const checkout = join(directory, 'checkout');
+const foreignRepo = join(directory, 'checkout-other');
+mkdirSync(checkout);
+mkdirSync(foreignRepo);
+symlinkSync(foreignRepo, join(checkout, 'outside'));
+symlinkSync(join(foreignRepo, 'missing'), join(checkout, 'dangling'));
+it.each([
+  ['foreign', foreignRepo, false, 403],
+  ['foreignlatest', foreignRepo, true, 403],
+  ['repo', directory, false, 403],
+  ['symlink', join(checkout, 'outside', 'pending'), false, 403],
+  ['dangling', join(checkout, 'dangling'), false, 403],
+  ['parent', checkout + '/../checkout-other', false, 403],
+  ['own', join(checkout, 'pending', 'child'), false, 200],
+  ['latest', checkout, true, 200],
+  ['operator', foreignRepo, false, 200],
+])('keeps the managed run directory in its checkout: %s', async (name, cwd, omitLane, status) => {
+  const { updateLane } = await import('@/lib/lane/registry');
+  const { listAutomationSourceEvents } = await import('@/lib/automations/source-events');
+  updateLane(seeded.own, { worktreePath: checkout });
+  const id = 'directory' + name;
+  try {
+    const response = await call('/api/panel/managed-runs', {
+      id, session: 'cortex-run-' + id, command: 'fixture', cwd, packetId: 'packet-a',
+      ...(omitLane ? {} : { laneId: seeded.own }),
+    }, name === 'operator' ? operator : seeded.worker);
+    const events = listAutomationSourceEvents({ sourceKind: 'managed_run', afterSequence: 0, repoPath: foreignRepo });
+    expect(events.filter(event => event.sourceId === id)).toEqual([]);
+    expect(response.status).toBe(status);
+    const { findManagedRun } = await import('@/lib/runtimes/managed-runs/registry');
+    if (status === 403) {
+      expect(findManagedRun(id)).toBeNull();
+      expect(listAutomationSourceEvents({ sourceKind: 'managed_run', afterSequence: 0, sourceId: id })).toEqual([]);
+    }
+    else expect(await response.json()).toMatchObject({ run: { cwd, laneId: seeded.own } });
+  } finally {
+    updateLane(seeded.own, { worktreePath: null });
+  }
 });

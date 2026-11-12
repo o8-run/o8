@@ -1,3 +1,4 @@
+import { getLane } from '@/lib/lane/registry';
 /**
  * Registry for `o8 run` managed sessions.
  *
@@ -375,7 +376,7 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
         recordAutomationSourceEvent({
           sourceKind: 'managed_run',
           sourceId: rec.id,
-          repoPath: rec.cwd,
+          repoPath: rec.laneId ? getLane(rec.laneId)?.repoPath ?? null : rec.cwd,
           eventType,
           fingerprint: rec.status === 'killed' ? `managed-run:${rec.id}:killed:${rec.finishedAt ?? 'unknown'}` : rec.status === 'gone'
             ? `managed-run:${rec.id}:lost:${rec.finishedAt ?? 'unknown'}`

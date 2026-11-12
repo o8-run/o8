@@ -1,3 +1,5 @@
+import { lstatSync, realpathSync } from 'node:fs';
+import { dirname, basename, isAbsolute, join, sep } from 'node:path';
 import { NextResponse } from 'next/server';
 import {
   registerManagedRun,
@@ -13,7 +15,7 @@ import { inspectOwnedManagedRun, terminateManagedRun } from '@/lib/runtimes/mana
 import { externalSettlementQuiet, parseSettlementBinding, settlementBindingDigest } from '@/lib/runtimes/managed-runs/settlement';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
-import { getLane } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
 import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
 import { inspectPacketManagedRunAdmission } from '@/lib/lane/packet-stop-hold';
 import { withPacketManagedRunLifecycleLock } from '@/lib/runtimes/managed-runs/packet-lifecycle';
@@ -91,8 +93,45 @@ type RegisterBody = {
   stopRequestId?: string | null;
 };
 
+/** Resolve existing ancestors before appending a not-yet-created directory. */
+function realRunDirectory(directory: string): string {
+  try {
+    return realpathSync(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    // A dangling symlink is not a directory that can safely be created here.
+    try {
+      if (lstatSync(directory).isSymbolicLink()) throw error;
+    } catch (statError) {
+      if (statError === error || (statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError;
+    }
+    const parent = dirname(directory);
+    if (parent === directory) throw error;
+    return join(realRunDirectory(parent), basename(directory));
+  }
+}
+
+function directoryInsideCheckout(cwd: string, checkout: string): boolean {
+  try {
+    const root = realpathSync(checkout);
+    const directory = realRunDirectory(isAbsolute(cwd) ? cwd : process.cwd() + sep + cwd);
+    return directory === root || directory.startsWith(root.endsWith(sep) ? root : root + sep);
+  } catch {
+    return false;
+  }
+}
+
 function managedRunRepoPath(run: ManagedRunRecord): string {
-  return (run.laneId ? getLane(run.laneId)?.repoPath : null) ?? run.cwd;
+  const lane = run.laneId ? getLane(run.laneId) : null;
+  if (lane) return lane.repoPath;
+  if (run.packetId) {
+    const latest = findLatestLaneByPacket(run.packetId);
+    if (!latest || !directoryInsideCheckout(run.cwd, latest.worktreePath ?? latest.repoPath)) {
+      throw new Error('managed_run_directory_outside_checkout');
+    }
+    return latest.repoPath;
+  }
+  return run.cwd;
 }
 
 /** POST — register a run (default), finish one (action:'finish'), or kill one (action:'kill'). */
@@ -265,6 +304,14 @@ async function post(req: Request) {
   }
   if (body.command.length > MAX_FIELD || body.cwd.length > MAX_FIELD || (body.title?.length ?? 0) > MAX_FIELD || (body.startedAt?.length ?? 0) > MAX_FIELD) {
     return NextResponse.json({ ok: false, error: 'field_too_long' }, { status: 400 });
+  }
+  if (principal.role === 'worker') {
+    const lane = body.laneId ? getLane(body.laneId) : findLatestLaneByPacket(principal.packetId!);
+    if (!lane || lane.packetId !== principal.packetId
+      || !directoryInsideCheckout(body.cwd, lane.worktreePath ?? lane.repoPath)) {
+      return NextResponse.json({ ok: false, error: 'managed_run_directory_outside_checkout' }, { status: 403 });
+    }
+    body.laneId = lane.id;
   }
   const binding = body.settlementBinding === undefined ? null : parseSettlementBinding(body.settlementBinding);
   if (body.settlementBinding !== undefined && !binding) {
