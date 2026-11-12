@@ -23,6 +23,34 @@ const CHEVRON_UP: &str = "M18 15l-6-6-6 6";
 const CHEVRON_DOWN: &str = "M6 9l6 6 6-6";
 
 impl ThreadList {
+    /// Whether running threads fold into the drawer: it is on, outside the
+    /// Inbox, and no search lists them in place.
+    pub(super) fn drawer_on(&self) -> bool {
+        self.working_section
+            && self.view() != folders::View::Inbox
+            && self.query.trim().is_empty()
+    }
+
+    /// Moves the sessions bound for the drawer (running, not asking for
+    /// input, not pinned) to the end, keeping both parts' order, and counts
+    /// them. The list's groups are built without them, so a run never takes
+    /// a place under a group's cap. A stable sort of the owned copy: no
+    /// extra clone per rebuild.
+    pub(super) fn drawer_runs(&self, sessions: &mut [Session]) -> usize {
+        if !self.drawer_on() {
+            return 0;
+        }
+        let pinned = pins::pinned_order(sessions);
+        let run = |s: &Session| {
+            sidebar::working(s) && !inbox::needs_input(s) && !pinned.contains(&s.id)
+        };
+        let count = sessions.iter().filter(|s| run(s)).count();
+        if count > 0 {
+            sessions.sort_by_key(|s| run(s));
+        }
+        count
+    }
+
     /// Whether the drawer lists its threads: open, or still closing on screen.
     pub(super) fn drawer_rows_shown(&self) -> bool {
         !self.working_closed || self.drawer_motion.is_some_and(|(_, opening)| !opening)

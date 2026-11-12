@@ -145,8 +145,9 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
                         .as_ref()
                         .unwrap()
                         .read(cx)
-                        .rows
-                        .len()
+                        // The last row of the scrolling list; the Working
+                        // drawer under it is not part of the virtual list.
+                        .top_len()
                         - 1,
                     ScrollStrategy::Top,
                 )

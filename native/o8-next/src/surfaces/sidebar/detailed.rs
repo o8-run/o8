@@ -17,6 +17,8 @@ use std::sync::OnceLock;
 
 pub(crate) const ROW_HEIGHT: f32 = 66.;
 pub(super) const DEV_WORKING_ENV: &str = "O8_DEV_SIDEBAR_WORKING";
+/// Marks a running thread held out of the list's groups for the drawer.
+pub(crate) const DRAWER_RUN: &str = "drawer-run";
 /// Lucide icons.
 const REPO: &str = "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z";
 const BRANCH: &str = "M6 3v12 M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 9a9 9 0 0 1-9 9";
@@ -83,31 +85,33 @@ pub(crate) fn fold_working(
     open: bool,
     needs_input: impl Fn(&str) -> bool,
 ) -> Vec<Row> {
-    let end = rows
-        .iter()
-        .position(|r| {
-            r.kind == "section"
-                && matches!(r.title.as_str(), "Merged" | "Snoozed" | "Settled" | "Archived")
-        })
-        .unwrap_or(rows.len());
-    let mut rows = rows;
-    let tail = rows.split_off(end);
     let (mut working, mut rest) = (Vec::new(), Vec::new());
-    let (mut moving, mut count) = (false, 0);
+    let (mut moving, mut count, mut tail) = (false, 0, false);
     // Headings that gave up a thread, by their index in `rest`.
     let (mut heading, mut emptied): (Option<usize>, HashSet<usize>) = (None, HashSet::new());
     for row in rows {
+        if row.kind == "section"
+            && matches!(row.title.as_str(), "Merged" | "Snoozed" | "Settled" | "Archived")
+        {
+            tail = true;
+        }
+        let run = row.marker == DRAWER_RUN;
         if row.depth == 0 {
+            // Runs held out of the groups (DRAWER_RUN) follow the list, past
+            // any later shelf; a running row in a shelf stays there.
             moving = row.kind == "thread"
                 && row.running
                 && row.marker != "input"
+                && (!tail || run)
                 && !row.id.as_deref().is_some_and(&needs_input);
             if moving {
                 count += 1;
             }
         }
         if moving {
-            emptied.extend(heading);
+            if !run {
+                emptied.extend(heading);
+            }
             working.push(row);
         } else {
             if matches!(row.kind.as_str(), "section" | "folder") {
@@ -117,7 +121,6 @@ pub(crate) fn fold_working(
         }
     }
     if working.is_empty() {
-        rest.extend(tail);
         return rest;
     }
     // A heading whose threads all left goes too; the first keeps the list's
@@ -140,7 +143,6 @@ pub(crate) fn fold_working(
         })
         .map(|(_, r)| r)
         .collect();
-    out.extend(tail);
     let mut header = recents::header("drawer", "Working", if open { "open" } else { "" });
     header.age = count.to_string();
     out.push(header);

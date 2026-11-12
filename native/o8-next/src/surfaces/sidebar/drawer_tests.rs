@@ -274,3 +274,23 @@ fn sidebar_drawer_fits_the_narrowest_sidebar(cx: &mut TestAppContext) {
     let drawer = cx.debug_bounds("sidebar-working-drawer").unwrap();
     assert!(drawer.size.height <= side.size.height * 0.4 + gpui::px(1.), "{drawer:?}");
 }
+
+#[gpui::test]
+fn sidebar_drawer_runs_take_no_place_under_a_group_cap(cx: &mut TestAppContext) {
+    // Twelve idle threads and a newer run in one date group: the run goes to
+    // the drawer and all twelve idle threads still show before Show more.
+    let mut all: Vec<_> = (0..13)
+        .map(|n| session(&format!("idle-{n:02}"), "idle", &format!("2026-10-01T10:{n:02}:00Z")))
+        .collect();
+    all.push(session("run", "running", "2026-10-02T10:00:00Z"));
+    let (list, cx) = make(cx, all);
+    let main = ids(&list, cx);
+    assert_eq!(main.len(), 12, "{main:?}");
+    assert!(!main.contains(&"run".into()));
+    list.read_with(cx, |list, _| {
+        let more = list.rows.iter().position(|r| r.kind == "more").expect("Show more");
+        assert_eq!(list.rows[more].title, "Show 1 more");
+        assert_eq!(list.rows[more + 1].kind, "drawer");
+        assert_eq!(list.rows[more + 1].age, "1");
+    });
+}

@@ -379,8 +379,9 @@ impl ThreadList {
                 self.expanded.insert(key);
             }
         }
-        let sessions = self.scoped_sessions();
-        let mut rows = self.view_rows(&sessions);
+        let mut sessions = self.scoped_sessions();
+        let runs = self.drawer_runs(&mut sessions);
+        let mut rows = self.view_rows(&sessions, runs);
         // An incoming message can push the keyboard choice past Show more.
         // Disclosure must follow that thread's identity before choosing a fallback.
         if self.query.trim().is_empty()
@@ -391,7 +392,7 @@ impl ThreadList {
                 .find(|s| self.choice.as_ref() == Some(&s.id))
         {
             self.expanded.insert(self.reveal_key(session));
-            rows = self.view_rows(&sessions);
+            rows = self.view_rows(&sessions, runs);
         }
         self.note_arrivals(&rows);
         self.rows = Rc::new(rows);
@@ -466,8 +467,12 @@ impl ThreadList {
             group.into()
         }
     }
-    fn view_rows(&self, sessions: &[Session]) -> Vec<Row> {
-        let mut rows = self.view_rows_base(sessions);
+    /// The view's rows. The last `runs` sessions are bound for the Working
+    /// drawer (drawer_runs): they take no place under a group's cap and come
+    /// back after the list for nesting and the fold.
+    fn view_rows(&self, sessions: &[Session], runs: usize) -> Vec<Row> {
+        let (listed, running) = sessions.split_at(sessions.len() - runs);
+        let mut rows = self.view_rows_base(listed);
         detailed::mark_dev_working(&mut rows);
         rows = pins::fold_pinned(rows, &pins::pinned_order(sessions));
         if !self.archived_open
@@ -479,12 +484,16 @@ impl ThreadList {
             // Hidden archived parents cannot take active children off this page.
             rows.truncate(index + 1);
         }
+        let now = recents::now();
+        // Newest first, as the groups sort.
+        let running = recents::visible(running, "", &HashSet::new());
+        rows.extend(running.into_iter().map(|s| {
+            let mut row = recents::thread_row(s, now, &self.branch_ids);
+            row.marker = detailed::DRAWER_RUN;
+            row
+        }));
         rows = self.nest_rows(rows, sessions);
-        // A search lists running threads in place; the drawer waits.
-        if self.working_section
-            && self.view() != folders::View::Inbox
-            && self.query.trim().is_empty()
-        {
+        if self.drawer_on() {
             // The Pinned shelf stays first and keeps its running threads.
             let shelf = if rows.first().is_some_and(|r| r.status == "pinned") {
                 1 + rows[1..].iter().take_while(|r| r.kind == "thread").count()
