@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { resolveRequestPrincipal, resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import {
   bindIdempotencyClientMutation,
   deriveIdempotencyKey,
@@ -46,7 +47,15 @@ function projectDossiers(projectId: string | null, includeSuppressed: boolean) {
 export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
-  const projectId = optionalString(request.nextUrl.searchParams.get('projectId'));
+  let projectId = optionalString(request.nextUrl.searchParams.get('projectId'));
+  const principal = resolveRequestPrincipalContext(request);
+  if (principal.role === 'worker') {
+    const packetProject = principal.packetId ? findLatestLaneByPacket(principal.packetId)?.projectId : null;
+    if (!packetProject || (projectId && projectId !== packetProject)) {
+      return NextResponse.json({ error: 'Worker reads are scoped to the caller packet project.' }, { status: 403 });
+    }
+    projectId = packetProject;
+  }
   const includeSuppressed = request.nextUrl.searchParams.get('includeSuppressed') === 'true';
 
   try {
