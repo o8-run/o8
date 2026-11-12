@@ -14,6 +14,12 @@ export const O8_PAGE_ORIGIN_HEADER = 'x-o8-page-origin';
 type Options = {
   /** Checks the caller's page on the Next side: its origin to forward, or a refusal. */
   pageOrigin?: (request: Request) => string | Response;
+  /**
+   * Request headers the handler reads beyond the credential and body type, such
+   * as MCP's mirrored routing headers. Never a header that conveys identity or
+   * locality: the WS listener stamps the caller itself.
+   */
+  forwardHeaders?: readonly string[];
 };
 
 /**
@@ -37,7 +43,7 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
       if (page instanceof Response) return page;
       headers.set(O8_PAGE_ORIGIN_HEADER, page);
     }
-    for (const name of ['authorization', 'content-type', 'x-clerk-session-token']) {
+    for (const name of ['authorization', 'content-type', 'x-clerk-session-token', ...(options.forwardHeaders ?? [])]) {
       const value = request.headers.get(name);
       if (value !== null) headers.set(name, value);
     }

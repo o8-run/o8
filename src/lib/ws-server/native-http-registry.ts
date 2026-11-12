@@ -536,6 +536,9 @@ const producers = [
   route('/api/tasks/[taskId]/dispatch', 'POST', () => import('@/lib/tasks/http/dispatch')),
   route('/api/tasks/[taskId]/archive', 'POST', () => import('@/lib/tasks/http/archive')),
   route('/api/tasks/[taskId]/prune', 'POST', () => import('@/lib/tasks/http/prune')),
+  route('/api/tasks/[taskId]/report', 'POST', () => import('@/lib/tasks/report-route')),
+  route('/api/tasks/[taskId]/block', 'POST', () => import('@/lib/tasks/block-route')),
+  route('/api/devices/agent', 'POST', () => import('@/lib/devices/agent-route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
   // Worker-dispatch readiness: dispatch-readiness.ts probes it on the API base with the operator
