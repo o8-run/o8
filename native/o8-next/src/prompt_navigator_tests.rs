@@ -377,6 +377,24 @@ fn a_dense_rail_pages_bounded_ticks_and_reaches_every_prompt(cx: &mut TestAppCon
         "Short prompt dense-p25",
         "keyboard selection continues from the displayed page"
     );
+    view.update(cx, |v, cx| {
+        let entries = (0..5).flat_map(|i| [
+            json!({"id":format!("older-p{i}"),"role":"user","text":"An earlier prompt"}),
+            json!({"id":format!("older-a{i}"),"role":"assistant","text":"An earlier answer"}),
+        ]).map(|e|serde_json::from_value(e).unwrap()).collect();
+        v.0.prepend(crate::model::History {
+            session_key: "codex-owned:dense".into(),
+            transcript: entries,
+            page: None,
+        });
+        cx.notify();
+    });
+    paint(cx);
+    assert!(cx.debug_bounds("prompt-nav-tick-dense-p24").is_some());
+    assert!(
+        cx.debug_bounds("prompt-nav-tick-dense-p23").is_none(),
+        "backfill preserves the displayed page by prompt identity"
+    );
     let earlier = cx.debug_bounds("prompt-nav-earlier").unwrap();
     cx.simulate_click(earlier.center(), Modifiers::default());
     paint(cx);
