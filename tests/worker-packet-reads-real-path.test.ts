@@ -25,6 +25,8 @@ const { listProblemDossiers } = await import('@/lib/problems/dossiers');
 const { panelGateMiddleware } = await import('@/middleware');
 const approvals = await import('@/app/api/panel/approvals/route');
 const tasks = await import('@/app/api/tasks/route');
+const task = await import('@/app/api/tasks/[taskId]/route');
+const availability = await import('@/app/api/tasks/worker-availability/route');
 const touches = await import('@/app/api/lanes/touches/route');
 const dossiers = await import('@/app/api/panel/problem-dossiers/route');
 const brain = await import('@/app/api/cortex/ask/answer/route');
@@ -120,6 +122,31 @@ for (const transport of ['Next', 'native'] as const) {
     expect((await other.json()).answer).toBe('project-B');
   });
 }
+it('Next: a single task read is packet scoped', async () => {
+  const read = (id: string, token: string) => {
+    const req = new NextRequest(`http://localhost:3001/api/tasks/${id}`, { headers: { host: 'localhost:3001',
+      'x-o8-client-addr': '127.0.0.1', authorization: `Bearer ${token}` } });
+    const gate = panelGateMiddleware(req);
+    return gate.headers.get('x-middleware-next') !== '1' ? gate : task.GET(req, { params: Promise.resolve({ taskId: id }) });
+  };
+  expect((await read('packet-A', legacy)).status).toBe(403);
+  expect((await read('packet-B', worker)).status).toBe(403);
+  expect((await read(lanes[1].id, worker)).status).toBe(403);
+  const own = await read('packet-A', worker);
+  expect(own.status).toBe(200);
+  expect((await own.json()).task.packetId).toBe('packet-A');
+  expect((await read('packet-B', operator)).status).toBe(200);
+});
+it('Next: remote worker availability is not a worker read', async () => {
+  const read = (token: string) => {
+    const req = new NextRequest('http://localhost:3001/api/tasks/worker-availability', { headers: { host: 'localhost:3001',
+      'x-o8-client-addr': '127.0.0.1', authorization: `Bearer ${token}` } });
+    const gate = panelGateMiddleware(req);
+    return gate.headers.get('x-middleware-next') !== '1' ? gate : availability.GET(req);
+  };
+  expect((await read(worker)).status).toBe(403);
+  expect((await read(operator)).status).not.toBe(403);
+});
 it('Next: lane touches are packet scoped', async () => {
   expect((await direct('lanes/touches?packet=packet-A', legacy)).status).toBe(403);
   expect((await direct('lanes/touches?packet=packet-B', worker)).status).toBe(403);
