@@ -300,6 +300,7 @@ impl Shell {
     }
 
     fn ensure(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        sidebar::navigation(self, cx);
         if !self.connected {
             return;
         }

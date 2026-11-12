@@ -246,7 +246,7 @@ fn new_thread_view(cx: &mut TestAppContext, archive: bool, shift: bool) {
     let Tab::Session(original) = &workspace.tabs[workspace.active] else {
         panic!("session tab")
     };
-    assert_eq!(workspace.selections.get(original), Some(&created));
+    assert_eq!(workspace.selections.get(original).unwrap_or(original), &created);
 }
 
 #[gpui::test]

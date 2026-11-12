@@ -31,6 +31,7 @@ pub(super) struct Runtime {
     pub press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
+    navigation: Option<(Option<String>, Option<Tab>)>,
 }
 /// The sidebar column; the header lays its toggle and search over it.
 pub(super) const WIDTH: f32 = 280.;
@@ -419,6 +420,29 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     }
                     None => shell.open_thread_in_tab(id.clone(), window, cx),
                 },
+                ThreadEvent::Created(id, foreground) => {
+                    if let Some(session) = shell.sessions.iter().find(|s| s.list_id() == *id) {
+                        let workspace = session.workspace();
+                        let tab = Tab::Session(session.id.clone());
+                        if *foreground && shell.state.selected.as_ref() == Some(&workspace) {
+                            shell.execute(Command::Session(session.id.clone()), window, cx);
+                        } else {
+                            let saved = shell.state.workspaces.entry(workspace).or_default();
+                            let already_open = saved.tabs.iter().any(|t| match (t, &tab) {
+                                (Tab::Session(original), Tab::Session(id)) => {
+                                    saved.selections.get(original).unwrap_or(original) == id
+                                }
+                                _ => t == &tab,
+                            });
+                            if saved.tabs.len() < 32 && !already_open {
+                                saved.tabs.push(tab);
+                                shell.persist();
+                                shell.revision += 1;
+                                cx.notify();
+                            }
+                        }
+                    }
+                }
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
                 ThreadEvent::Scope(project, keys) => {
                     if keys.is_empty() {
@@ -631,3 +655,14 @@ impl Shell {
 #[cfg(test)]
 #[path = "sidebar/sidebar_tests.rs"]
 mod tests;
+
+/// Navigation invalidates focus permission, including a change away and back.
+pub(super) fn navigation(s: &mut Shell, cx: &mut Context<Shell>) {
+    let next = (s.state.selected.clone(), s.active());
+    if s.surfaces.sidebar.navigation.as_ref() != Some(&next) {
+        s.surfaces.sidebar.navigation = Some(next);
+        if let Some(view) = &s.surfaces.sidebar.view {
+            view.update(cx, |list, _| list.cancel_takeover());
+        }
+    }
+}

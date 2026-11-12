@@ -36,12 +36,19 @@ fn late_new_chat_after_navigation(cx: &mut TestAppContext, navigation: &str) {
     let list = shell.read_with(&visual, |s, _| s.surfaces.sidebar.view.clone().unwrap());
     list.update(&mut visual, |list, _| {
         list.sessions.push(created);
-        list.expect_open(&id);
+        if navigation == "expired" {
+            list.expect_open_since(
+                &id,
+                std::time::Instant::now() - std::time::Duration::from_secs(46),
+            );
+        } else {
+            list.expect_open(&id);
+        }
     });
     shell.update_in(&mut visual, |s, window, cx| {
         if navigation == "tab" {
             s.execute(Command::Session("navigation-tab".into()), window, cx);
-        } else {
+        } else if navigation != "expired" {
             s.switch(other.clone(), window, cx);
             if navigation == "back" {
                 s.switch(original_workspace.clone(), window, cx);
@@ -79,4 +86,9 @@ fn late_new_chat_after_tab_change_stays_in_background(cx: &mut TestAppContext) {
 #[gpui::test]
 fn late_new_chat_after_project_change_back_stays_in_background(cx: &mut TestAppContext) {
     late_new_chat_after_navigation(cx, "back");
+}
+
+#[gpui::test]
+fn late_new_chat_after_focus_deadline_stays_in_background(cx: &mut TestAppContext) {
+    late_new_chat_after_navigation(cx, "expired");
 }
