@@ -400,8 +400,9 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   if (routePath === '/api/runtime/acp-registry') {
     expect(JSON.parse(body)).toMatchObject({ stale: false, agents: [{ id: 'fixture-agent', version: '1.0.0' }] });
   }
-  // Task creation and Cortex decisions reuse production POSTs; the remaining reads stay GET-only.
-  const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
+  // A separate write registration may precede the read registration for the same path.
+  const routes = nativeSurfaceRoutes[surface].filter(route => route.path === routePath);
+  const methods = routes.find(route => route.methods.includes('GET'))?.methods ?? [];
   const readWriteMethods: Record<string, string[]> = {
     '/api/tasks': ['GET', 'POST'],
     '/api/cortex/proposals': ['GET', 'POST'],
@@ -411,12 +412,12 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
     '/api/repo-spec': ['GET', 'PUT', 'POST'],
   };
   expect(methods).toEqual(readWriteMethods[routePath] ?? ['GET']);
-  const registeredMethods = new Set(nativeSurfaceRoutes[surface]
-    .filter(route => route.path === routePath).flatMap(route => route.methods));
+  const registeredMethods = new Set(routes.flatMap(route => route.methods));
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !registeredMethods.has(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
-    expect(refused.headers.get('allow')).toBe(methods.join(', '));
+    // Unsupported verbs use the transport's first path registration for its Allow header.
+    expect(refused.headers.get('allow')).toBe(routes[0].methods.join(', '));
     await refused.arrayBuffer();
   }
 });
