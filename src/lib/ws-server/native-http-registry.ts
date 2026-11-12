@@ -349,6 +349,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // (resolveRequestPrincipalContext), never x-o8-client-addr or loopback, so they behave as on Next. Both read
     // and write SQLite only, and calendar ingest reads operator defaults from disk on every call. (#5422)
     route('/api/panel/cli-usage', 'GET', () => import('@/app/api/panel/cli-usage/route')),
+    route('/api/orchestrator/truth', 'GET HEAD', () => import('@/app/api/orchestrator/truth/route')),
+    route('/api/browser/proxy', 'GET HEAD', () => import('@/app/api/browser/proxy/route')),
     route('/api/broadcast/why', 'GET', () => import('@/app/api/broadcast/why/route')),
     // Symon's commentary reader (lib/broadcast/speaker.ts) and broadcast spectators. GET only. The
     // middleware admits the operator ws-token and an active spectator token (SPECTATOR_CAPABILITIES,

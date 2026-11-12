@@ -41,7 +41,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
   '/api/broadcast/tokens': security('mints broadcast tokens'),
 
-  '/api/browser/proxy': security('loopback read grant'),
 
   '/api/cortex/sources': seek('operator MCP tool read'),
 
@@ -59,7 +58,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
   '/api/orchestrator/reload': seek('operator reload'),
 
-  '/api/orchestrator/truth': security('spectator grant'),
 
   '/api/task-artifacts': seek('operator MCP tool'),
 
@@ -106,7 +104,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/orchestrator/merge': seek('operator merge mutation'),
 
-  '/api/orchestrator/truth': security('spectator grant'),
 
   '/api/orchestrator/workspace/retention': seek('packet retention read'),
 
