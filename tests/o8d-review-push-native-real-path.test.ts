@@ -1,11 +1,12 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { startParityReference } from './fixtures/ws-parity-server';
 
 let server: Awaited<ReturnType<typeof startParityReference>>;
@@ -43,6 +44,9 @@ beforeAll(async () => {
   writeFileSync(join(server.directory, 'broadcast-spectator-tokens'), createHash('sha256').update(spectator).digest('hex'));
 }, 120_000);
 afterAll(async () => { await server?.stop(); });
+afterEach(({ task }) => {
+  if (task.result?.state === 'fail') console.error('WS diagnostics:', server?.diagnostics());
+});
 
 it('keeps push operator-only despite forged local headers and relay markers', async () => {
   for (const relay of [false, true]) {
@@ -98,7 +102,7 @@ it.each([false, true])('keeps another native API request below 750 ms during a d
     expect(elapsed).toBeLessThan(750);
     expect(finished).toBe(false);
   } finally {
-    holder?.stdin.end('release');
+    if (holder && !holder.stdin.writableEnded) holder.stdin.end('release');
     if (closed) await closed;
     const response = await pushing;
     expect([response.status, await response.json()]).toEqual([200, {
@@ -246,3 +250,44 @@ it('kills the helper, Git and hook at a configurable push deadline without movin
     expect(git(remote, 'rev-parse', 'refs/heads/main')).toBe(previous);
   } finally { await rejected; }
 }, 15_000);
+
+it('keeps the fallback listener open across missing-daemon retries during an accepted request', async () => {
+  const { O8dBridge } = await import('@/lib/ws-server/o8d-bridge');
+  let accepted!: () => void;
+  const started = new Promise<void>(resolve => { accepted = resolve; });
+  let finish!: () => void;
+  const listener = createServer((req, res) => {
+    if (req.url === '/delayed') { finish = () => res.end('pushed'); accepted(); }
+    else res.end('ready');
+  });
+  await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
+  const port = (listener.address() as { port: number }).port;
+  await new Promise<void>(resolve => listener.close(() => resolve()));
+  vi.stubEnv('O8D_BINARY', join(server.directory, 'missing-o8d'));
+  const bridge = new O8dBridge(listener, port, 'fallback-push-fixture');
+  const url = `http://127.0.0.1:${port}`;
+  let pushing: Promise<string> | undefined;
+  const { getDataDir } = await import('@/lib/data-dir-migration');
+  const Database = createRequire(import.meta.url)('better-sqlite3');
+  const lock = new Database(join(getDataDir(), '.provider-keys.lock'));
+  try {
+    await bridge.start();
+    lock.exec('BEGIN EXCLUSIVE');
+    pushing = fetch(`${url}/delayed`).then(response => response.text());
+    await started;
+    await delay(2200); // Cross the production daemon retry while ingress is active.
+    const before = performance.now();
+    expect(await fetch(url).then(response => response.text())).toBe('ready');
+    expect(performance.now() - before).toBeLessThan(750);
+    finish();
+    expect(await pushing).toBe('pushed');
+    expect(await fetch(url).then(response => response.text())).toBe('ready');
+  } finally {
+    lock.close();
+    finish?.();
+    await pushing?.catch(() => {});
+    bridge.stop();
+    await new Promise<void>(resolve => listener.close(() => resolve()));
+    vi.unstubAllEnvs();
+  }
+});

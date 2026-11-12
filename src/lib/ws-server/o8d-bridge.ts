@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { isIP } from 'node:net';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
+import { access, constants } from 'node:fs/promises';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
@@ -92,19 +93,38 @@ export class O8dBridge {
     child.stdin.write(line);
   }
 
+  private resumeFallback() {
+    this.transport = 'typescript';
+    if (!this.stopped && !this.fallback.listening) this.fallback.listen(this.port, this.host);
+    if (!this.stopped) this.retry = setTimeout(() => { void this.launch(); }, 2_000);
+  }
+
   private async launch() {
     if (this.stopped) return;
-    if (this.fallback.listening) this.fallback.close();
     const binary = process.env.O8D_BINARY ?? join(process.cwd(), 'crates/o8d/target/release',
       process.platform === 'win32' ? 'o8d.exe' : 'o8d');
-    const child = spawn(binary, ['--experimental-ws', '--listen', `${this.host}:${this.port}`,
-      '--app-upstream', this.upstream], {
-      env: childEnvironment({ inherit: false, env: {
-        O8D_BRIDGE_KEY: this.key, O8D_EPOCH: this.epoch,
-        O8D_NATIVE_SESSION_READS: process.env.O8_NEXT_O8D === '1' && nativeSessionReadsEnabled() ? '1' : undefined,
-        O8D_SESSION_DATA_DIR: getDataDir(), O8D_SESSION_DB_PATH: process.env.CORTEX_IDE_DB_PATH, TZ: process.env.TZ,
-      } }), stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    // A missing daemon must not interrupt requests on the fallback listener.
+    try { await access(binary, constants.X_OK); } catch {
+      this.resumeFallback();
+      return;
+    }
+    if (this.stopped) return;
+    if (this.fallback.listening) this.fallback.close();
+    let child: ChildProcess;
+    try {
+      child = spawn(binary, ['--experimental-ws', '--listen', `${this.host}:${this.port}`,
+        '--app-upstream', this.upstream], {
+        env: childEnvironment({ inherit: false, env: {
+          O8D_BRIDGE_KEY: this.key, O8D_EPOCH: this.epoch,
+          O8D_NATIVE_SESSION_READS: process.env.O8_NEXT_O8D === '1' && nativeSessionReadsEnabled() ? '1' : undefined,
+          O8D_SESSION_DATA_DIR: getDataDir(), O8D_SESSION_DB_PATH: process.env.CORTEX_IDE_DB_PATH, TZ: process.env.TZ,
+        } }), stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch {
+      // Policy preparation can throw before spawn emits an error (e.g. a busy store).
+      this.resumeFallback();
+      return;
+    }
     this.child = child;
     child.stderr?.resume();
     child.stdin?.on('error', () => child.kill());
@@ -117,9 +137,7 @@ export class O8dBridge {
         output.close();
         if (this.child !== child) return;
         this.child = null;
-        this.transport = 'typescript';
-        if (!this.stopped && !this.fallback.listening) this.fallback.listen(this.port, this.host);
-        if (!this.stopped) this.retry = setTimeout(() => { void this.launch(); }, 2_000);
+        this.resumeFallback();
         if (!ready) resolve();
       };
       child.once('error', failed);
