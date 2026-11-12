@@ -1040,3 +1040,41 @@ fn activity_scope_menu_picks_and_closes(cx: &mut TestAppContext) {
         (false, Some("activity-scope".into()))
     );
 }
+
+#[gpui::test]
+fn activity_loading_line_shows_only_while_the_feed_is_empty(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    let row = "activity-row-pr-example/activity-7";
+    draw(cx);
+    assert!(cx.debug_bounds(row).is_some(), "the loaded feed lists its rows");
+    // A refresh of a feed that already has rows is quiet.
+    view.update(cx, |v, cx| {
+        v.loading = true;
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds(row).is_some());
+    assert!(
+        cx.debug_bounds("activity-loading").is_none(),
+        "no loading line above rows that are already drawn"
+    );
+    // Nothing to show and a request in flight: the line.
+    view.update(cx, |v, cx| {
+        v.rows.clear();
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("activity-loading").is_some());
+    assert!(cx.debug_bounds("activity-empty").is_none());
+    // Nothing to show and nothing in flight: the empty state.
+    view.update(cx, |v, cx| {
+        v.loading = false;
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("activity-loading").is_none());
+    assert!(cx.debug_bounds("activity-empty").is_some());
+}
