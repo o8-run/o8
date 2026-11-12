@@ -166,3 +166,37 @@ it('orders concurrent source writes behind a Next window save without blocking i
     expect(sources.sources.map((entry: { path: string }) => entry.path).sort()).toEqual([...folders].sort());
   } finally { release(); vi.unstubAllGlobals(); folders.forEach(folder => rmdirSync(folder)); }
 });
+
+it('serves the plain settings save from Next and keeps it when index reconciliation fails', async () => {
+  const dummy = join(directory, 'stub-window');
+  vi.stubEnv('O8_NEXT_BIN', dummy);
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'o8-window-plain-notes-')));
+  const originalFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (typeof input === 'string' && input.endsWith('/api/cortex/sources') && typeof init?.body === 'string'
+      && JSON.parse(init.body).action === 'reconcile') return new Response('{}', { status: 503 });
+    return originalFetch(input, init);
+  });
+  try {
+    const spawned = fixture.spawn.mock.calls.length;
+    const before = await (await call()).json();
+    const source = { id: crypto.randomUUID(), path: folder, name: 'Plain notes', include: ['**/*.md'], exclude: [] };
+    // The Settings UI posts without include=native and expects the full payload back.
+    const enabled = await call({ experimentalNext: true, knowledgeSources: [source], settingsTomlRevision: before.settingsToml.revision },
+      '/api/panel/operator-defaults');
+    expect(enabled.status, await enabled.clone().text()).toBe(200);
+    const payload = await enabled.json();
+    expect(payload.values.experimentalNext).toBe(true);
+    expect(payload.cliAuth).toBeTypeOf('object');
+    expect(payload.roleRoutes).toBeTruthy();
+    expect(fixture.spawn).toHaveBeenCalledTimes(spawned + 1);
+    const runtime = globalThis as typeof globalThis & { __o8NativeWindow?: { child?: unknown } };
+    expect(runtime.__o8NativeWindow?.child).toBe(child);
+    const current = await (await call()).json();
+    const disabled = await call({ experimentalNext: false, knowledgeSources: [], settingsTomlRevision: current.settingsToml.revision },
+      '/api/panel/operator-defaults');
+    expect(disabled.status).toBe(200);
+    expect(runtime.__o8NativeWindow?.child).toBeUndefined();
+    expect(existsSync(join(directory, 'ws-window-actions'))).toBe(false);
+  } finally { vi.unstubAllGlobals(); rmdirSync(folder); }
+});
