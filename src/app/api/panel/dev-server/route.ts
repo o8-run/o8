@@ -44,11 +44,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Starting a dev server is operator-only.' }, { status: 403 });
   }
   try {
-    const body = await req.json() as {
+    const body = await req.json().catch(() => null) as {
       repoPath: string;
       command: string;
       port?: number;
     };
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
 
     const { repoPath, command, port } = body;
     if (!repoPath || !command) {
@@ -144,7 +147,10 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Stopping a dev server is operator-only.' }, { status: 403 });
   }
   try {
-    const body = await req.json() as { repoPath: string };
+    const body = await req.json().catch(() => null) as { repoPath: string };
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
     const id = `dev-${body.repoPath}`;
     const server = activeServers.get(id);
 
