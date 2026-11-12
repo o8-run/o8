@@ -28,3 +28,25 @@ it('forwards worker routes before importing their stateful implementations', asy
     expect(new Headers(options.headers).has('x-o8-client-addr')).toBe(false);
   }
 });
+
+it('carries the device endpoint\'s MCP routing headers to the owner, and nothing that conveys identity', async () => {
+  vi.stubEnv('O8_NEXT_O8D', '1');
+  const calls = vi.fn(async () => Response.json({ ok: true }));
+  vi.stubGlobal('fetch', calls);
+  const devices = await import('@/app/api/devices/agent/route');
+  const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-06-18' } } });
+  const response = await devices.POST(new NextRequest('http://localhost/api/devices/agent', { method: 'POST', body, headers: {
+    authorization: 'Bearer fixture', 'content-type': 'application/json', accept: 'application/json, text/event-stream',
+    'mcp-protocol-version': '2026-06-18', 'mcp-method': 'tools/list', 'mcp-name': 'o8_device',
+    'x-o8-client-addr': '127.0.0.1', 'x-o8-device-worker': 'forged', 'x-o8-device-conversation': 'forged', origin: 'http://localhost',
+  } }));
+  expect(response.status).toBe(200);
+  const [, options] = calls.mock.calls.at(-1)! as unknown as [string, RequestInit];
+  const forwarded = new Headers(options.headers);
+  expect(forwarded.get('mcp-protocol-version')).toBe('2026-06-18');
+  expect(forwarded.get('mcp-method')).toBe('tools/list');
+  expect(forwarded.get('mcp-name')).toBe('o8_device');
+  expect(forwarded.get('accept')).toBe('application/json, text/event-stream');
+  for (const name of ['x-o8-client-addr', 'x-o8-device-worker', 'x-o8-device-conversation', 'origin']) expect(forwarded.has(name)).toBe(false);
+  expect(new TextDecoder().decode(options.body as ArrayBuffer)).toBe(body);
+});
