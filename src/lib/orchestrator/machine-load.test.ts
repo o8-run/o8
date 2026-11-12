@@ -6,7 +6,7 @@ it('ignores high real load unless a test explicitly supplies a reader', () => {
   vi.spyOn(os, 'loadavg').mockReturnValue([999, 999, 999]);
   expect(machineLoadBlocker({ runningWorkers: 1 })).toBeNull();
 });
-it('uses five-minute load, available parallelism and 1.5 per core', () => {
+it('uses five-minute load, available parallelism and an explicit ratio', () => {
   vi.spyOn(os, 'availableParallelism').mockReturnValue(4);
   expect(machineLoadBlocker({ runningWorkers: 1, readLoad: () => [999, 5, 999], ratio: 1.5 })).toBeNull();
   expect(machineLoadBlocker({ runningWorkers: 1, readLoad: () => [0, 7, 0], ratio: 1.5 })).toContain('Machine busy');

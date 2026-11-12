@@ -1,7 +1,7 @@
 # Machine budget
 
 Dispatch reads the OS five-minute load average on macOS and Linux, including work
-started outside o8. `operator.dispatch_load_per_core` in settings.toml defaults to **1.5** per core
+started outside o8. `operator.dispatch_load_per_core` in settings.toml defaults to **6** per core
 reported by `os.availableParallelism()`. `O8_DISPATCH_LOAD_PER_CORE` overrides it.
 Zero disables load admission. Idle machines with no o8 workers always admit;
 Operator-only per-dispatch `force` bypasses load admission. Above this limit workers stay queued with a plain-language reason; the

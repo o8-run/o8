@@ -339,7 +339,7 @@ export interface OperatorDefaultsWithSources {
 export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   knowledgeSources: [],
   subscriptionProfile: 'both',
-  dispatchLoadPerCore: 1.5,
+  dispatchLoadPerCore: 6,
   parallelCap: 5,
   overlapGate: 'strict',
   healBotEnabled: true,

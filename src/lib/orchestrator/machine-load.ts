@@ -16,7 +16,7 @@ export function machineLoadBlocker(options: MachineLoadOptions = {}): string | n
   const running = options.runningWorkers ?? listActiveLanes().filter(lane => lane.status === 'running' || lane.status === 'launching').length;
   if (running === 0) return null;
   const configured = Number(options.ratio ?? getOperatorDefaultsSync().values.dispatchLoadPerCore);
-  const ratio = Number.isFinite(configured) && configured >= 0 ? configured : 1.5;
+  const ratio = Number.isFinite(configured) && configured >= 0 ? configured : 6;
   if (ratio === 0) return null;
   const cores = Math.max(1, os.availableParallelism());
   const load = readLoad()[1];
