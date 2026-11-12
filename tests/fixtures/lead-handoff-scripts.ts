@@ -65,7 +65,7 @@ if (process.env.O8_WORKER_PACKET_ID) {
   ], { cwd: process.cwd(), encoding: 'utf8' });
   if (saved.status !== 0) { console.error(saved.stderr); process.exit(saved.status || 1); }
   mark('worker_committed');
-  // Hold the worker active until the lead has reported waiting_workers.
+  // Hold the worker active until the lead is classified waiting_workers.
   const returnDeadline = Date.now() + 20_000;
   while (!existsSync(process.env.O8_TEST_WORKER_RETURN_READY_FILE)) {
     if (Date.now() >= returnDeadline) throw new Error('Timed out waiting for the lead waiting_workers receipt.');

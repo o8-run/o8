@@ -35,12 +35,10 @@ it.each(['repo', 'thread'])('shows unreported attention and reason through the %
   vi.stubGlobal('WebSocket', Socket);
   const onStatus = vi.fn();
   const onEvent = vi.fn();
-  let status = '';
   function Harness() {
     const repo = useCanvasOrchestrator(mode === 'repo' ? '/repo' : null, { onStatus });
     const thread = useThreadOrchestrator(mode === 'thread' ? '/repo' : null, 'thread', onEvent);
-    status = mode === 'repo' ? repo.status : thread.status;
-    return null;
+    return createElement('output', null, mode === 'repo' ? repo.status : thread.status);
   }
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -50,10 +48,10 @@ it.each(['repo', 'thread'])('shows unreported attention and reason through the %
     const socket = Socket.instances[0];
     act(() => socket.onopen?.());
     act(() => socket.status('busy', 1));
-    expect(status).toBe('busy');
+    expect(host.textContent).toBe('busy');
     const reason = 'turn ended without an outcome report';
     act(() => socket.status('unreported', 2, reason));
-    expect(status).toBe('unreported');
+    expect(host.textContent).toBe('unreported');
     if (mode === 'repo') expect(onStatus).toHaveBeenLastCalledWith('/repo', 'unreported', reason);
     else expect(onEvent).toHaveBeenLastCalledWith({ type: 'status', status: 'unreported', reason });
   } finally {

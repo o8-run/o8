@@ -760,7 +760,7 @@ describe('persistent lead handoff real path', () => {
     expect(missing.exitCode, missing.stderr).toBe(0);
     const missingDone = await runCli(['lead', 'wait', lead.id, '--turn',
       (JSON.parse(missing.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '1s']);
-    expect(missingDone.exitCode).not.toBe(0);
+    expect(missingDone.exitCode).toBe(7);
     expect((JSON.parse(missingDone.stdout) as LeadCliReceipt).lead.status).toBe('unreported');
     const errored = await runCli([
       'lead', 'send', lead.id, '--message', '[fixture:event-error]', '--idempotency-key', 'event-error',
