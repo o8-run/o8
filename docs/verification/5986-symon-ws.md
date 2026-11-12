@@ -109,3 +109,56 @@ harness.resume restored:
   old owner alive: false  PASS
   Tests: 5 passed | 1 failed (native auth listener refusal, #6002)
 ```
+
+## Rebase follow-up
+
+Rebased onto `a2384dc76425312e02bda42db4a2cb6941f26da1`. Registry
+conflicts retain both main's routes and the Symon routes. The forwarding wrapper
+retains main's long-response, page-origin and header-forwarding behavior alongside
+`alwaysForward`. Classification was regenerated (1344 hermetic, 1249 resource-owning).
+The WS runtime owner context from main is retained.
+
+Receiver controls now skip `markNativeCortexReader`, with a real-path assertion
+before the authorization sweep. Startup logs a refused receiver claim once. The
+brain recovery cases kill the old owner with SIGKILL and check resumption before
+resubmission. The second-WS comment distinguishes port collision before receiver
+startup from the shared claim used by a process on another port.
+
+### Listener investigation limit
+
+The first diagnostic attempt used a copied dependency tree and failed before the
+auth sweep: Pi Durable was missing (2 failed, 4 skipped). After a clean lockfile
+install and a fresh experimental-WS daemon build, the original PR head passed the
+complete brain-owner file (6/6). Thus #6002 did not reproduce in that run. This is
+not causal proof of a fix. No product fix for #6002 or separate PR is claimed.
+
+A test-only `O8_TEST_DAEMON_TRACE=1` hook captures daemon stderr, stdout lifecycle
+messages and spawn/exit events. It synchronizes builtin ESM exports so the real
+spawn boundary sees the hook. A focused process smoke check confirmed spawn,
+stdout and normal exit capture. The production bridge and startup order are unchanged.
+
+The diagnostic attempts reached the two-round limit without a failing listener
+control and passing causal repair. The PR remains draft WIP. The next investigation
+needs a reproducing daemon lifecycle receipt before choosing a product remedy.
+
+The fixture startup deadlines are unchanged. The #6016 cold-start measurements
+remain the timing reference; this follow-up does not claim a new CI deadline failure.
+
+### Rebased verification
+
+- Fast typecheck passed on both supported verification hosts after aligning the
+  copied dependencies with the lockfile.
+- Receiver owner lifecycle: 3/3 passed. Native route inventory: 9/9 passed.
+- Rebased default-mode brain matrix and forwarding: 2/2 passed independently.
+- Rebased complete brain-owner file: 4 passed, 2 skipped; the o8d=true suite failed
+  before the sweep at `tests/fixtures/ws-parity-server.ts:161`:
+  `reference WS health timed out` with zero stdout/stderr bytes, no child exit,
+  signal or process error. This is the unchanged 60-second parity-fixture readiness
+  deadline, not the separate 20-second text/voice startup deadline and not a CI log.
+  Both killed-owner recovery cases passed. No timeout was raised.
+- Touched-file ESLint, diff whitespace checks and rule-check passed (24 files,
+  zero violations). Diagnostic ESM spawn/stdout/exit smoke passed.
+
+The full local gate was skipped on the master seat's instruction. Packaged behavior,
+real providers, actual Messages access, the separate 20-second text/voice startup
+suite and complete CI remain unverified. No merge or release.

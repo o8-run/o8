@@ -32,8 +32,10 @@ if (process.env.O8_TEST_DAEMON_TRACE === '1') {
     if (args[1]?.includes('--app-upstream')) {
       console.error('[daemon] spawn', child.pid);
       child.stderr?.on('data', chunk => process.stderr.write(chunk));
+      child.stdout?.on('data', chunk => console.error('[daemon] event', chunk.toString().trim()));
       child.on('exit', (code, signal) => console.error('[daemon] exit', child.pid, code, signal));
     }
     return child;
   };
+  Module.syncBuiltinESMExports();
 }
