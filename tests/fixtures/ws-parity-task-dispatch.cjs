@@ -2,25 +2,31 @@
 const Module = require('node:module');
 const fs = require('node:fs');
 const path = require('node:path');
-const { setTimeout: delay } = require('node:timers/promises');
 const load = Module._load;
 const root = process.env.CORTEX_IDE_DATA_DIR;
 const calls = [];
 const spawns = [];
 const accepted = [];
-const receipt = () => fs.writeFileSync(path.join(root, 'task-runtime.json'), JSON.stringify({ pid: process.pid, calls, spawns, accepted }));
-globalThis.__o8TaskRuntimeStub = {
-    launchRuntimeSurface: async input => {
-      calls.push({ laneId: input.existingLaneId, mutationId: input.clientMutationId }); receipt();
-      while (fs.existsSync(path.join(root, 'hold-task-launch'))) await delay(10);
-      require('../../src/lib/runtimes/shared/owned-session/action-admission').assertOwnedActionAdmission(null);
-      spawns.push(input.existingLaneId); receipt();
-      return { ok: true, surfaceId: `fixture:${input.existingLaneId}`, note: 'Fixture started' };
+const receipt = () => fs.writeFileSync(path.join(root, 'task-runtime.json'), JSON.stringify({ pid: process.pid, node: process.versions.node, launchCount: spawns.length, calls, spawns, accepted, sessions: [...(globalThis.__o8TaskDispatchFixture?.sessions ?? [])] }));
+const { pathToFileURL } = require('node:url');
+const stubPath = path.join(__dirname, 'task-dispatch-runtime-stub.cjs');
+const stubUrl = pathToFileURL(stubPath).href;
+globalThis.__o8TaskDispatchFixture = { root, calls, spawns, accepted, sessions: new Map(), receipt };
+if (typeof Module.registerHooks === 'function') {
+  Module.registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (/\/runtime\/actions(?:\.ts)?$/.test(specifier)) return { url: stubUrl, shortCircuit: true };
+      return nextResolve(specifier, context);
     },
-    performRuntimeAction: async input => ({ ok: true, surfaceId: input.surfaceId, action: input.action, status: 'completed' }),
-    };
+    load(url, context, nextLoad) {
+      if (url === stubUrl) return { format: 'commonjs', source: fs.readFileSync(stubPath, 'utf8'), shortCircuit: true };
+      return nextLoad(url, context);
+    },
+  });
+} else {
+  Module.register(pathToFileURL(path.join(__dirname, 'task-dispatch-runtime-loader.mjs')).href);
+}
 Module._load = function (request, parent, isMain) {
-  if (/\/runtime\/actions(?:\.ts)?$/.test(request)) return globalThis.__o8TaskRuntimeStub;
   if (/\/runtimes\/shared\/auth-detect(?:\.ts)?$/.test(request)) {
     return new Proxy(load.call(this, request, parent, isMain), { get: (target, key) => key === 'assertRuntimeDispatchable' ? async () => {} : Reflect.get(target, key) });
   }
