@@ -45,7 +45,8 @@ describe('resolveDefaultBranch', () => {
     writeFileSync(join(directory, '.git'), `gitdir: ${join(root, 'missing-git-dir')}\n`);
     const result = resolveDefaultBranch(directory);
     await expect(result).rejects.toBeInstanceOf(GitProbeError);
-    await expect(resolveDefaultBranch(directory)).rejects.toThrow(/not a git repository/);
+    // Git's wording varies by version; the error names the probe and carries git's own fatal message.
+    await expect(resolveDefaultBranch(directory)).rejects.toThrow(/git symbolic-ref --quiet refs\/remotes\/origin\/HEAD failed: fatal: /);
   });
 
   it('surfaces a git binary that cannot be started instead of answering main', async () => {
