@@ -1,3 +1,4 @@
+import { validateRequestedRuntime } from '@/lib/agents/routing';
 import type { NextRequest } from 'next/server';
 
 import { dispatchTask, readTaskEffortSelection } from '@/lib/tasks/actions';
@@ -29,6 +30,6 @@ export async function POST(
     requestedEffort: readTaskEffortSelection(body),
     workerIntent: optionalString(body.workerIntent),
     requestedProvider: optionalString(body.requestedProvider),
-    requestedRuntime: optionalString(body.requestedRuntime),
+    requestedRuntime: validateRequestedRuntime(body.requestedRuntime),
   }));
 }
