@@ -504,15 +504,17 @@ jobs:
         run: node scripts/ci/audit-tool-cache.mjs "$(rustc -Vv)"
       - uses: actions/cache@v4
         id: audit-tool-cache
-        if: needs.reuse.outputs.reuse != 'true'
+        if: needs.reuse.outputs.reuse != 'true' && steps.audit-tool.outputs.cacheable == 'true'
         with:
           path: ~/.cargo/bin/cargo-audit
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-audit-v2-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.source }}-${{ steps.audit-tool.outputs.toolchain }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-audit-v2-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.source }}-${{ steps.audit-tool.outputs.toolchain }}-${{ steps.audit-tool.outputs.image }}-${{ steps.audit-tool.outputs.recipe }}
       - name: Install cargo-audit
-        if: needs.reuse.outputs.reuse != 'true' && steps.audit-tool-cache.outputs.cache-hit != 'true'
+        if: needs.reuse.outputs.reuse != 'true'
         env:
           AUDIT_TOOL_VERSION: ${{ steps.audit-tool.outputs.version }}
-        run: cargo install cargo-audit --version "$AUDIT_TOOL_VERSION" --locked
+          AUDIT_TOOL_CACHEABLE: ${{ steps.audit-tool.outputs.cacheable }}
+          AUDIT_TOOL_CACHE_HIT: ${{ steps.audit-tool-cache.outputs.cache-hit }}
+        run: bash scripts/ci/install-audit-tool.sh
       - name: Audit Rust dependencies
         if: needs.reuse.outputs.reuse != 'true'
         working-directory: src-tauri

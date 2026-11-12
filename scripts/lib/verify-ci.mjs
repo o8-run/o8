@@ -87,14 +87,15 @@ function withoutAuditToolCache(security) {
     name: 'Resolve current audit tool identity', id: 'audit-tool',
     run: 'node scripts/ci/audit-tool-cache.mjs "$(rustc -Vv)"',
   }) && isDeepStrictEqual(cache, {
-    uses: 'actions/cache@v4', id: 'audit-tool-cache', with: {
+    uses: 'actions/cache@v4', id: 'audit-tool-cache', if: "steps.audit-tool.outputs.cacheable == 'true'", with: {
       path: '~/.cargo/bin/cargo-audit',
-      key: '${{ runner.os }}-${{ runner.arch }}-cargo-audit-v2-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.source }}-${{ steps.audit-tool.outputs.toolchain }}',
+      key: '${{ runner.os }}-${{ runner.arch }}-cargo-audit-v2-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.source }}-${{ steps.audit-tool.outputs.toolchain }}-${{ steps.audit-tool.outputs.image }}-${{ steps.audit-tool.outputs.recipe }}',
     },
   }) && isDeepStrictEqual(install, {
-    name: 'Install cargo-audit', if: "steps.audit-tool-cache.outputs.cache-hit != 'true'",
-    env: { AUDIT_TOOL_VERSION: '${{ steps.audit-tool.outputs.version }}' },
-    run: 'cargo install cargo-audit --version "$AUDIT_TOOL_VERSION" --locked',
+    name: 'Install cargo-audit',
+    env: { AUDIT_TOOL_VERSION: '${{ steps.audit-tool.outputs.version }}', AUDIT_TOOL_CACHEABLE: '${{ steps.audit-tool.outputs.cacheable }}',
+      AUDIT_TOOL_CACHE_HIT: '${{ steps.audit-tool-cache.outputs.cache-hit }}' },
+    run: 'bash scripts/ci/install-audit-tool.sh',
   }) && ['Audit root dependencies', 'Audit Rust dependencies', 'Review dependency changes'].every(name => {
     const audit = security.steps.find(step => step.name === name);
     return audit && !audit.if && !audit['continue-on-error'];
