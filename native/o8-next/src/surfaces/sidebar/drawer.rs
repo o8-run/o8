@@ -49,6 +49,13 @@ impl ThreadList {
         self.save_row_mode(cx);
     }
 
+    /// Opens the drawer, for tests that follow a running thread into it.
+    #[cfg(test)]
+    pub(crate) fn open_drawer(&mut self) {
+        self.working_closed = false;
+        self.rebuild();
+    }
+
     /// Down from the list's last thread, or End, opens a closed drawer at
     /// once, so its threads follow the list in the keyboard order.
     pub(super) fn drawer_key(&mut self, key: &str, cx: &mut Context<Self>) {

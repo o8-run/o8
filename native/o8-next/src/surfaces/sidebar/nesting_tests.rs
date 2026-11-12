@@ -88,9 +88,11 @@ fn sidebar_nesting_groups_counts_and_keeps_orphans(cx: &mut TestAppContext) {
     });
     list.update(cx, |list, _| {
         list.sessions[0].status = "archived".into();
+        // The running child, now top level, follows the list in the drawer.
+        list.working_closed = false;
         list.rebuild();
     });
-    assert_eq!(ids(&list, cx), ["new", "old", "orphan"]);
+    assert_eq!(ids(&list, cx), ["old", "orphan", "new"]);
     assert_eq!(row(&list, cx, "new")["depth"], 0);
     // A parent behind Show more cannot take its children off this page.
     list.update(cx, |list, _| {
@@ -244,11 +246,13 @@ fn sidebar_nesting_search_stays_flat_and_restores_toggle(cx: &mut TestAppContext
             "activeProjectId": "fixture", "projects": [{"id": "fixture", "repoPaths": ["/fixture/repo"]}]
         })).unwrap();
         list.scopes.insert("fixture".into(), vec!["/fixture/repo".into()]);
+        // The running child, flat in a scope, follows the list in the drawer.
+        list.working_closed = false;
         list.rebuild();
     });
     assert_eq!(
         ids(&list, cx),
-        ["new", "old", "parent", "orphan"],
+        ["old", "parent", "orphan", "new"],
         "repository filters stay flat"
     );
     assert_eq!(row(&list, cx, "parent")["child_count"], 0);

@@ -260,6 +260,9 @@ impl ThreadList {
                     }
                     let selected = row.id.as_ref() == this.selected.as_ref() && thread;
                     let painted = this.painted.clone();
+                    // The paint probe follows the scrolling list; the drawer
+                    // under it paints on every frame.
+                    let probe = thread && this.drawer_at().is_none_or(|at| i < at);
                     let identity = row
                         .id
                         .as_ref()
@@ -558,7 +561,7 @@ impl ThreadList {
                             canvas(
                                 |_, _, _| (),
                                 move |_, _, _, _| {
-                                    if thread {
+                                    if probe {
                                         painted.set(i);
                                     }
                                 },

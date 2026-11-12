@@ -148,6 +148,13 @@ fn sidebar_detailed_rows_and_working_section_toggle_and_persist(cx: &mut TestApp
     assert!(held.iter().any(|r| r["id"] == running.as_str()), "the running thread is in the drawer");
     assert_eq!(rows.iter().filter(|r| r["id"] == running.as_str()).count(), 1);
     // The setting turns the drawer off: runs stay in their groups.
+    shell.update(&mut visual, |s, cx| {
+        s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
+            l.scroll_row(0, ScrollStrategy::Top, false);
+            cx.notify();
+        })
+    });
+    draw(&mut visual);
     click(&mut visual, "sidebar-view");
     click(&mut visual, "sidebar-view-working");
     wait_for(&shell, &mut visual, |s, _| s.state.sidebar_working_off);
