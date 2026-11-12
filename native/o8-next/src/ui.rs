@@ -193,6 +193,8 @@ pub(crate) struct Surface {
     send_next: bool,
     subscriptions: Vec<gpui::Subscription>,
     sessions: Vec<Session>,
+    /// The shell's whole thread list, for an empty thread's overview.
+    overview_sessions: Vec<Session>,
     selected: Option<String>,
     /// Embedded side conversations must not follow main-history navigation.
     bound_session: Option<String>,
@@ -286,6 +288,7 @@ impl Surface {
             send_next: false,
             subscriptions: vec![],
             sessions: vec![],
+            overview_sessions: vec![],
             selected: None,
             bound_session: None,
             rows: Rc::new(vec![]),
@@ -839,6 +842,9 @@ impl Render for Surface {
         let sidebar_width = (viewport * 0.25).min(geometry.sidebar_width);
         let right_width = (viewport * 0.30).min(geometry.right_width);
         let empty = self.transcript.is_some() && self.rows.is_empty();
+        // An empty new chat shows its overview under the composer, even
+        // before its (empty) history has been read.
+        let overview = self.empty_overview(cx);
         let header = self.regions.view(
             "header",
             composer_regions::header_style(),
@@ -987,7 +993,7 @@ impl Render for Surface {
                             })
                             // The transcript fades out at its edges, as classic's
                             // did into the composer below it.
-                            .when(!empty, |view| {
+                            .when(!empty && overview.is_none(), |view| {
                                 view.child(
                                     div()
                                         .relative()
@@ -1008,8 +1014,33 @@ impl Render for Surface {
                                         )),
                                 )
                             })
-                            .child(
-                                div()
+                            .child(match overview {
+                                // The composer centred in the upper half, the
+                                // overview's cards below it.
+                                Some(overview) => div()
+                                    .debug_selector(|| "composer-space".into())
+                                    .flex()
+                                    .flex_col()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .px(px(geometry.content_inset))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .flex()
+                                            .flex_col()
+                                            .justify_center()
+                                            .child(self.composer_panel(window, cx)),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("empty-overview-scroll")
+                                            .flex_1()
+                                            .min_h_0()
+                                            .overflow_y_scroll()
+                                            .child(overview),
+                                    ),
+                                None => div()
                                     .debug_selector(|| "composer-space".into())
                                     .flex()
                                     .flex_col()
@@ -1018,7 +1049,7 @@ impl Render for Surface {
                                     .px(px(geometry.content_inset))
                                     .pb(px(if empty { 0. } else { geometry.gap * 2. }))
                                     .child(self.composer_panel(window, cx)),
-                            ),
+                            }),
                     )
                     .child(self.brain_panel(px(right_width), cx))
                     .when(!self.embedded, |row| {

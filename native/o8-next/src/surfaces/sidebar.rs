@@ -11,6 +11,8 @@ pub(crate) use thread_list::recents::calendar::{
 };
 /// A repository's icon override or monogram, for the Projects page.
 pub(crate) use thread_list::repo_identity;
+/// Tabular figures, for an empty thread's overview counts.
+pub(crate) use thread_list::inbox_card::tabular;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
 #[path = "sidebar/thread_mutations_client.rs"]
@@ -532,8 +534,13 @@ impl Shell {
             self.notice.clear();
         }
         for content in self.content.values() {
-            if let Content::Grid(grid) = content {
-                grid.update(cx, |g, cx| g.load(cx));
+            match content {
+                Content::Grid(grid) => grid.update(cx, |g, cx| g.load(cx)),
+                // An empty thread's overview lists threads from every project.
+                Content::Session(surface) => {
+                    surface.update(cx, |s, cx| s.shell_overview(&self.sessions, cx))
+                }
+                _ => {}
             }
         }
         self.persist();

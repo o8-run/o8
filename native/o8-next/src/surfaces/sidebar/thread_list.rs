@@ -1281,7 +1281,7 @@ mod archive_controls;
 #[path = "inbox.rs"]
 mod inbox;
 #[path = "inbox_card.rs"]
-mod inbox_card;
+pub(crate) mod inbox_card;
 #[path = "auto_settle_toggle.rs"]
 mod auto_settle_toggle;
 #[path = "snooze.rs"]
