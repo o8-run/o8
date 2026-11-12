@@ -241,7 +241,12 @@ fn chat_keyboard_jump_cancels_following_the_live_turn(cx: &mut TestAppContext) {
         assert!(s.following.is_some());
         assert!(s.pinned);
     });
-    cx.simulate_keystrokes("tab end enter");
+    cx.simulate_keystrokes("tab");
+    assert!(cx.update(|w, cx| view.read(cx).composer.read(cx).focus.is_focused(w)));
+    view.update_in(cx, |s, w, _| s.focus.focus(w));
+    cx.simulate_keystrokes("shift-tab");
+    assert!(cx.update(|w, cx| view.read(cx).navigator.borrow().is_focused(w)));
+    cx.simulate_keystrokes("end enter");
     paint(cx);
     view.read_with(cx, |s, _| {
         assert!(s.following.is_none());
@@ -255,6 +260,10 @@ fn chat_keyboard_jump_cancels_following_the_live_turn(cx: &mut TestAppContext) {
         );
         assert_eq!(s.list.logical_scroll_top().offset_in_item, px(0.));
     });
+    cx.simulate_keystrokes("shift-tab");
+    assert!(cx.update(|w, cx| view.read(cx).focus.is_focused(w)));
+    cx.simulate_keystrokes("tab");
+    assert!(cx.update(|w, cx| view.read(cx).composer.read(cx).focus.is_focused(w)));
 }
 
 #[gpui::test]
