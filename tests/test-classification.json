@@ -5924,6 +5924,13 @@
       ]
     },
     {
+      "path": "tests/o8d-worker-targets-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-workspace-reads-native-real-path.test.ts",
       "reasons": [
         "child-process",

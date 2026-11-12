@@ -38,6 +38,10 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
     route('/api/tasks', 'GET POST', () => import('@/app/api/tasks/route')),
+    route('/api/tasks/[taskId]', 'GET', () => import('@/lib/tasks/detail-route')),
+    route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route')),
+    route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
+    route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),

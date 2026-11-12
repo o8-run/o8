@@ -110,11 +110,8 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/orchestrator/workspace/retention': seek('packet retention read'),
 
-  '/api/panel/artifacts': security('worker grant: packet capture upload'),
 
-  '/api/panel/artifacts/mirror': security('worker grant: packet proof mirror'),
 
-  '/api/panel/managed-runs': security('worker grant'),
 
   '/api/panel/threads': seek('thread listing'),
 
@@ -124,7 +121,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/task-artifacts/[id]/actions': seek('operator task artifact actions'),
 
-  '/api/tasks/[id]': security('worker grant: task read'),
 
   // Only report/block still use the dynamic CLI URL; operator verbs have explicit paths.
   '/api/tasks/[id]/[id]': security('remaining dynamic CLI calls: report and block; operator mutations registered separately'),
