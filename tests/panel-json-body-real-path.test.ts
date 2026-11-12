@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { expect, it } from 'vitest';
 
 import * as route0 from '@/app/api/panel/branches/route';
@@ -29,7 +30,7 @@ const routes = [
 it.each(routes)('%s rejects missing, malformed and non-object JSON', async (_name, handler) => {
   for (const body of ['', '{', 'null', '[]', '"text"', '42', 'true']) {
     const response = await handler(new NextRequest('http://localhost/api/panel/test', {
-      method: 'POST', headers: { host: 'localhost' }, body,
+      method: 'POST', headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` }, body,
     }));
     expect(response.status, body).toBe(400);
     expect(await response.json()).toEqual({ error: 'Request body must be a JSON object.' });

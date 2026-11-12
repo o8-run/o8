@@ -6588,6 +6588,12 @@
       ]
     },
     {
+      "path": "tests/panel-json-body-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/panel-raster-image-serving-real-path.test.ts",
       "reasons": [
         "real-path"
