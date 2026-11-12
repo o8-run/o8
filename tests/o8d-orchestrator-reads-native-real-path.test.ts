@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
@@ -14,23 +15,31 @@ const worker = 'orchestrator-reads-worker';
 const forged = { 'x-forwarded-for': '127.0.0.1', 'x-real-ip': '127.0.0.1', 'x-o8-client-addr': '127.0.0.1' };
 const paths = ['/api/orchestrator/history?threadId=thoughts-fixture', '/api/orchestrator/workspace/retention?packetId=fixture-packet', '/api/panel/threads?model=invalid'];
 
+let directory: string;
 beforeAll(async () => {
-  server = await startParityReference({ o8d: true, nativeHttp: true, startupTimeoutMs: 120_000 });
+  // Seed the repository, lane and history before the server starts, so its
+  // registry and lane reads never race the fixture's writes.
+  directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-orchestrator-reads-')));
+  vi.stubEnv('O8_DATA_DIR', directory);
+  vi.stubEnv('CORTEX_IDE_DATA_DIR', directory);
+  vi.stubEnv('CORTEX_IDE_DB_PATH', join(directory, 'cortex-ide.db'));
+  const { addRepo } = await import('@/lib/repos/registry');
+  await addRepo(directory);
+  const { createLane } = await import('@/lib/lane/registry');
+  createLane({ packetId: 'fixture-packet', repoPath: directory, runtime: 'codex', branch: 'main', baseBranch: 'main' });
+  mkdirSync(join(directory, 'chat-history'), { recursive: true });
+  writeFileSync(join(directory, 'chat-history', 'thoughts-fixture.json'), JSON.stringify({ title: 'Native history', messages: [{ id: 'm1', role: 'user', content: 'Saved on disk', timestamp: 1 }] }));
+  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+  writeFileSync(join(directory, 'worker-token'), worker);
+  server = await startParityReference({ o8d: true, nativeHttp: true, startupTimeoutMs: 120_000, directory });
   await server.stopNext();
   origin = server.url.replace('ws:', 'http:').replace('/ws', '');
-  writeFileSync(join(server.directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
-  writeFileSync(join(server.directory, 'worker-token'), worker);
-  vi.stubEnv('O8_DATA_DIR', server.directory);
-  vi.stubEnv('CORTEX_IDE_DATA_DIR', server.directory);
-  vi.stubEnv('CORTEX_IDE_DB_PATH', join(server.directory, 'cortex-ide.db'));
-  const { addRepo } = await import('@/lib/repos/registry');
-  await addRepo(server.directory);
-  const { createLane } = await import('@/lib/lane/registry');
-  createLane({ packetId: 'fixture-packet', repoPath: server.directory, runtime: 'codex', branch: 'main', baseBranch: 'main' });
-  mkdirSync(join(server.directory, 'chat-history'), { recursive: true });
-  writeFileSync(join(server.directory, 'chat-history', 'thoughts-fixture.json'), JSON.stringify({ title: 'Native history', messages: [{ id: 'm1', role: 'user', content: 'Saved on disk', timestamp: 1 }] }));
 }, 180_000);
-afterAll(async () => { await server?.stop(); vi.unstubAllEnvs(); });
+afterAll(async () => {
+  await server?.stop();
+  vi.unstubAllEnvs();
+  rmSync(directory, { recursive: true, force: true });
+});
 
 it.each(paths)('keeps bearer grants unchanged for %s with Next stopped', async path => {
   for (const relay of [false, true]) {
