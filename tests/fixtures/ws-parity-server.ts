@@ -26,6 +26,8 @@ export async function startParityReference(options: {
   logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean | 'default'; nativeRepositoryReads?: boolean; ttsPython?: string;
   /** WS_TOKEN for the WS process when it should differ from the stored ws-token. */
   envToken?: string;
+  /** An owned HTTP fixture that executes the Next route in a separate process context. */
+  nextOrigin?: string;
   /** The WS process's API base is its own listener, as the Next-stopped switch will bind it. */
   apiOnListener?: boolean;
   inbox?: () => typeof fixtureInbox;
@@ -97,7 +99,7 @@ export async function startParityReference(options: {
       O8D_NATIVE_SESSION_READS: options.nativeSessionReads === 'default' ? undefined : options.nativeSessionReads ? '1' : '0',
       O8D_NATIVE_REPOSITORY_READS: options.nativeRepositoryReads ? '1' : '0',
       O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,
-      O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: apiUrl },
+      O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: options.nextOrigin ?? apiUrl },
   });
   // spawn drains a long-lived process without execFile's cumulative maxBuffer.
   let stopRequested = false;
