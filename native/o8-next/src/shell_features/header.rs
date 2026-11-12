@@ -1,3 +1,6 @@
+#[cfg(test)]
+#[path = "header/thread_tab_tests.rs"]
+mod thread_tab_tests;
 use super::*;
 #[cfg(test)]
 #[path = "header/open_in_editor_tests.rs"]
