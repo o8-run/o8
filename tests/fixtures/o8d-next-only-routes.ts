@@ -38,7 +38,6 @@ export const NEXT_ONLY_SHELL_METHODS: NextOnlyTable = {};
 export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
 
-  '/api/browser/proxy': security('loopback read grant'),
 
 
   '/api/devices/agent': security('worker grant: packet-bound device authority'),
@@ -54,7 +53,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
   '/api/orchestrator/reload': seek('operator reload'),
 
-  '/api/orchestrator/truth': security('spectator grant'),
 
 
   '/api/task-artifacts/[id]/actions': seek('operator MCP tool'),
@@ -94,7 +92,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
   '/api/orchestrator/merge': seek('operator merge mutation'),
 
-  '/api/orchestrator/truth': security('spectator grant'),
 
 
 
