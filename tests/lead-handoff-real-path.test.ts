@@ -1008,7 +1008,7 @@ describe('persistent lead handoff real path', () => {
     });
     const lane = createLane({ repoPath, branch: `obligation-${workerStatus}`, runtime: 'codex',
       packetId: mission.packets[0].id, sessionKey: `obligation-${workerStatus}`, label: 'Obligation' });
-    updateLane(lane.id, { status: 'running' }, 'system');
+    updateLane(lane.id, { status: 'running', lastEventAt: new Date().toISOString() }, 'system');
     if (workerStatus !== 'running') updateLane(lane.id, { status: workerStatus }, 'system');
     await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]',
       '--idempotency-key', `missing-${workerStatus}`]);
@@ -1037,7 +1037,8 @@ describe('persistent lead handoff real path', () => {
     for (const [index, status] of workers.entries()) {
       const lane = createLane({ repoPath, branch: `parity-${kind}-${index}`, runtime: 'codex',
         packetId: mission.packets[index].id, sessionKey: `parity-${lead.id}-${index}`, label: 'Parity worker' });
-      updateLane(lane.id, { status: 'running' }, 'system');
+      // Model fresh worker activity so the real silent-exit detector preserves this fixture.
+      updateLane(lane.id, { status: 'running', lastEventAt: new Date().toISOString() }, 'system');
       if (status !== 'running') updateLane(lane.id, { status: status as 'failed' | 'reviewing' | 'awaiting_human' }, 'system');
     }
     if (kind === 'completed' && workers.includes('running')) {
@@ -1063,7 +1064,7 @@ describe('persistent lead handoff real path', () => {
     for (const [index, packet] of mission.packets.entries()) {
       const lane = createLane({ repoPath, branch: `mixed-${index}`, runtime: 'codex', packetId: packet.id,
         sessionKey: `mixed-${lead.id}-${index}`, label: 'Mixed worker' });
-      updateLane(lane.id, { status: 'running' }, 'system');
+      updateLane(lane.id, { status: 'running', lastEventAt: new Date().toISOString() }, 'system');
       if (index === 0) updateLane(lane.id, { status: 'failed' }, 'system');
     }
     await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]', '--idempotency-key', 'mixed-no-outcome']);
