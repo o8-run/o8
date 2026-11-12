@@ -11,6 +11,7 @@ struct Probe {
     ok: usize,
     stop: usize,
     covered: usize,
+    under: usize,
     scrolled: f32,
     keys: Vec<String>,
 }
@@ -50,6 +51,19 @@ impl Render for Probe {
                     .child(button("probe-merge-over")),
             )
             .child(button("probe-far").absolute().top(px(5000.)))
+            .child(button("probe-under").on_click(cx.listener(|probe, _, _, _| probe.under += 1)))
+            .child(
+                // Nothing names this, and it takes the press meant for
+                // "probe-under" (the fourth row).
+                div()
+                    .id("unnamed")
+                    .absolute()
+                    .top(px(80.))
+                    .left(px(0.))
+                    .w(px(400.))
+                    .h(px(60.))
+                    .on_click(|_, _, _| {}),
+            )
     }
 }
 
@@ -62,6 +76,7 @@ fn probe(cx: &mut TestAppContext) -> (gpui::Entity<Probe>, &mut VisualTestContex
             ok: 0,
             stop: 0,
             covered: 0,
+            under: 0,
             scrolled: 0.,
             keys: vec![],
         }
@@ -78,8 +93,9 @@ fn draw(cx: &mut VisualTestContext) {
 }
 
 fn ask(cx: &mut VisualTestContext, request: Value) -> Value {
-    let answer = cx.update(|window, cx| handle(&request, window, cx));
-    draw(cx);
+    // As the socket loop does: the request, then the frame that follows it.
+    let answer = cx.update(|window, cx| answer(&request, window, cx));
+    cx.update(|window, cx| settle(window, cx));
     answer
 }
 
@@ -130,6 +146,15 @@ fn a_control_that_changes_real_state_must_be_named(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_press_is_refused_when_something_unnamed_is_on_top(cx: &mut TestAppContext) {
+    let (probe, cx) = probe(cx);
+    let answer = ask(cx, json!({"command": "press", "selector": "probe-under"}));
+    assert_eq!(answer["ok"], false, "{answer}");
+    assert!(answer["error"].as_str().unwrap().contains("would reach"));
+    assert_eq!(probe.read_with(cx, |probe, _| probe.under), 0);
+}
+
+#[gpui::test]
 fn the_snapshot_lists_named_controls_and_marks_guarded_ones(cx: &mut TestAppContext) {
     let (_probe, cx) = probe(cx);
     let answer = ask(cx, json!({"command": "snapshot", "prefix": "probe-"}));
@@ -145,7 +170,8 @@ fn the_snapshot_lists_named_controls_and_marks_guarded_ones(cx: &mut TestAppCont
             "probe-far",
             "probe-merge-over",
             "probe-ok",
-            "probe-stop-mission"
+            "probe-stop-mission",
+            "probe-under"
         ]
     );
     let ok = &controls[3];
@@ -156,27 +182,31 @@ fn the_snapshot_lists_named_controls_and_marks_guarded_ones(cx: &mut TestAppCont
 }
 
 #[gpui::test]
-fn keys_text_and_the_wheel_reach_the_window(cx: &mut TestAppContext) {
+fn keys_and_the_wheel_reach_the_window(cx: &mut TestAppContext) {
     let (probe, cx) = probe(cx);
     let answer = ask(cx, json!({"command": "key", "keys": "escape cmd-k"}));
     assert_eq!(answer["ok"], true, "{answer}");
-    let answer = ask(cx, json!({"command": "type", "text": "a b"}));
-    assert_eq!(answer["ok"], true, "{answer}");
-    assert_eq!(
-        probe.read_with(cx, |probe, _| probe.keys.clone()),
-        ["escape", "k", "a", "space", "b"]
-    );
-    // Enter sends and confirms, so it must be named; text never carries one.
-    let answer = ask(cx, json!({"command": "key", "keys": "enter"}));
-    assert_eq!(answer["ok"], false);
-    let answer = ask(cx, json!({"command": "type", "text": "a\nb"}));
-    assert_eq!(answer["ok"], false);
+    assert_eq!(probe.read_with(cx, |probe, _| probe.keys.clone()), ["escape", "k"]);
+    // Keys that confirm, send or run something must each be named.
+    for (keys, name) in [
+        ("enter", "key:enter"),
+        ("tab space", "key:space"),
+        ("ctrl-m", "key:ctrl-m"),
+        ("ctrl-j", "key:ctrl-j"),
+    ] {
+        let answer = ask(cx, json!({"command": "key", "keys": keys}));
+        assert_eq!(answer["ok"], false, "{keys}");
+        let answer = ask(cx, json!({"command": "key", "keys": keys, "allow": ["key:escape"]}));
+        assert_eq!(answer["ok"], false, "{keys}");
+        assert!(answer["error"].as_str().unwrap().contains(name), "{answer}");
+    }
+    assert_eq!(probe.read_with(cx, |probe, _| probe.keys.len()), 2);
     let answer = ask(
         cx,
         json!({"command": "key", "keys": "enter", "allow": ["key:enter"]}),
     );
     assert_eq!(answer["ok"], true, "{answer}");
-    assert_eq!(probe.read_with(cx, |probe, _| probe.keys.len()), 6);
+    assert_eq!(probe.read_with(cx, |probe, _| probe.keys.len()), 3);
     let answer = ask(
         cx,
         json!({"command": "scroll", "selector": "probe-ok", "dy": 36}),
@@ -185,6 +215,19 @@ fn keys_text_and_the_wheel_reach_the_window(cx: &mut TestAppContext) {
     assert_eq!(probe.read_with(cx, |probe, _| probe.scrolled), 36.);
     let answer = ask(cx, json!({"command": "dance"}));
     assert!(answer["error"].as_str().unwrap().contains("unknown command"));
+}
+
+#[gpui::test]
+fn typed_text_never_reaches_a_key_listener(cx: &mut TestAppContext) {
+    let (probe, cx) = probe(cx);
+    // Nothing here takes text, so it is refused rather than sent as keys:
+    // a space would otherwise act on a focused button.
+    let answer = ask(cx, json!({"command": "type", "text": "a b"}));
+    assert_eq!(answer["ok"], false);
+    assert!(answer["error"].as_str().unwrap().contains("takes text"));
+    let answer = ask(cx, json!({"command": "type", "text": "a\nb"}));
+    assert!(answer["error"].as_str().unwrap().contains("printable"));
+    assert!(probe.read_with(cx, |probe, _| probe.keys.is_empty()));
 }
 
 #[test]
@@ -196,6 +239,18 @@ fn names_that_change_real_state_are_guarded() {
         "packet-close-unmerged",
         "sidebar-row-settle",
         "pr-Merge",
+        // The buttons that carry out a merge, close, pick or reply.
+        "pr-confirm",
+        "pr-close-with-comment",
+        "pr-retry-close",
+        "pr-ready-button",
+        "comparison-confirm",
+        "comparison-pick",
+        "sidebar-snooze-custom-confirm",
+        "thread-auto-off-abc",
+        "worker-pane-steer-7",
+        "pane-close-7",
+        "inbox-respond-4",
     ] {
         assert!(guarded(name), "{name}");
     }

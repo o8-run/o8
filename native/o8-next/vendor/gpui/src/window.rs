@@ -1816,6 +1816,37 @@ impl Window {
         self.dispatch_event(event, cx);
     }
 
+    /// The bounds of the topmost press area at a point in the last frame,
+    /// before clipping. o8: the development driver checks a press reaches
+    /// the control it named (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn topmost_hitbox_bounds(&self, position: Point<Pixels>) -> Option<Bounds<Pixels>> {
+        self.rendered_frame
+            .hitboxes
+            .iter()
+            .rev()
+            .find(|hitbox| {
+                hitbox
+                    .bounds
+                    .intersect(&hitbox.content_mask.bounds)
+                    .contains(&position)
+            })
+            .map(|hitbox| hitbox.bounds)
+    }
+
+    /// Gives text to the focused text input without a key event, so no key
+    /// listener sees it. False when nothing that takes text has focus. o8:
+    /// used by the development driver (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn dispatch_text_input(&mut self, text: &str, cx: &mut App) -> bool {
+        let Some(mut input_handler) = self.platform_window.take_input_handler() else {
+            return false;
+        };
+        input_handler.dispatch_input(text, self, cx);
+        self.platform_window.set_input_handler(input_handler);
+        true
+    }
+
     /// Returns whether this window is focused by the operating system (receiving key events).
     pub fn is_window_active(&self) -> bool {
         self.active.get()
