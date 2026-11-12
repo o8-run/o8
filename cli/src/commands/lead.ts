@@ -14,7 +14,8 @@ interface LeadResponse {
     repoPath: string;
     routing: { backend: string; model: string; effort: string };
     status: string;
-    result: { turnId: string | null; status: string; text: string | null; error: string | null } | null;
+    result: { turnId: string | null; status: string; text: string | null; error: string | null;
+      reason?: string | null; outcome?: { kind: string; summary: string | null; evidence: unknown } | null } | null;
     stopReason: string | null;
   };
   latestTurn: { id: string; ordinal: number; kind: string; status: string; error: string | null } | null;
@@ -68,6 +69,8 @@ function printLead(mode: OutputMode, response: LeadResponse): void {
     ['routing', `${response.lead.routing.backend}/${response.lead.routing.model}/${response.lead.routing.effort}`],
     ['queued', String(response.queueDepth)],
     ['cursor', String(response.cursor)],
+    ['reason', response.lead.result?.reason ?? ''],
+    ['outcome', response.lead.result?.outcome ? JSON.stringify(response.lead.result.outcome) : ''],
   ]);
 }
 

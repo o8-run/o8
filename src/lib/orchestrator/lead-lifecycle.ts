@@ -86,6 +86,7 @@ function buildLeadPrompt(lead: LeadRow, turn: TurnRow, brief: LeadBrief | null):
     turn.kind !== 'operator'
       ? 'A worker reached review. Inspect its persisted packet/diff/evidence, then review, correct, or surface the appropriate terminal outcome.'
       : 'Continue this same lead conversation and retain the task routing and scope.',
+    'Do not end the turn while your own build or test is running. Wait for it, then finish with the outcome report.',
     'Before ending this turn, report exactly one structured outcome through the operator-authenticated CLI:',
     `o8 lead report ${lead.id} --turn ${turn.id} --repo ${JSON.stringify(lead.repo_path)} --thread-id ${lead.thread_id} --kind <completed|waiting_workers|needs_context|needs_approval|blocked> --summary <text> --evidence <json-array>`,
     'Use completed only when the objective is actually complete, evidence is supplied, and no worker/review/approval obligation remains. This receipt, not freeform prose or process exit, determines terminal state.',
@@ -139,6 +140,9 @@ function authoritativeLane(packet: ReturnType<typeof threadPackets>[number]) {
 }
 
 async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: LeadStatus; detail: string }> {
+  if (!turn.outcome_kind) {
+    return { status: 'waiting', detail: 'Turn ended without an outcome report.' };
+  }
   const packets = threadPackets(lead.thread_id);
   const unresolvedPackets = packets.filter((packet) => !packetIsResolved(packet));
   const obligations = unresolvedPackets.map((packet) => ({ packet, lane: authoritativeLane(packet) }));
@@ -166,9 +170,6 @@ async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: Lea
     && ['failed', 'blocked'].includes(packet.status));
   if (unresolvedReview || unresolvedPacket) {
     return { status: 'blocked', detail: 'A bound worker failure, context request, or review obligation remains unresolved.' };
-  }
-  if (!turn.outcome_kind) {
-    return { status: 'blocked', detail: 'The lead process exited without a structured terminal outcome.' };
   }
   if (turn.outcome_kind === 'completed') {
     const evidence = turn.outcome_evidence_json
@@ -296,9 +297,10 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
     const now = Date.now();
     getSqlite().transaction(() => {
       const settled = getSqlite().prepare(`
-        UPDATE orchestrator_lead_turns SET status = ?, result_text = ?, session_id = ?, finished_at = ?
+        UPDATE orchestrator_lead_turns SET status = ?, result_text = ?, session_id = ?, finished_at = ?, error = ?
         WHERE id = ? AND status = 'running' AND lease_token = ?
-      `).run(classification.status, text || null, sessionId, now, turn.id, turn.lease_token);
+      `).run(classification.status, text || null, sessionId, now,
+        classification.status === 'waiting' ? classification.detail : null, turn.id, turn.lease_token);
       if (settled.changes !== 1) return;
       const queued = (getSqlite().prepare(`
         SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ? AND status = 'queued'

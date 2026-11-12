@@ -325,40 +325,6 @@ afterAll(async () => {
 });
 
 describe('persistent lead handoff real path', () => {
-  it('includes the structured outcome in the caller handback receipt', async () => {
-    const started = await runCli(startArgs('outcome-receipt'));
-    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
-    const completed = await settled(lead.id);
-    expect(completed.lead.result).toMatchObject({
-      outcome: { kind: 'completed', summary: expect.any(String), evidence: expect.any(Array) },
-    });
-  });
-
-  it('requires a turn outcome before handback and clears it on more work', async () => {
-    const started = await runCli(startArgs('turn-outcome-required'));
-    expect(started.exitCode, started.stderr).toBe(0);
-    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
-    const completed = await settled(lead.id);
-    expect(completed.lead.status).toBe('completed');
-    const sent = await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]',
-      '--idempotency-key', 'missing-report']);
-    expect(sent.exitCode, sent.stderr).toBe(0);
-    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('waiting'), { timeout: 5_000 });
-    const status = await runCli(['lead', 'status', lead.id]);
-    expect(JSON.parse(status.stdout)).toMatchObject({ lead: { status: 'waiting', result: {
-      outcome: null, reason: 'Turn ended without an outcome report.',
-    } } });
-    const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
-    expect(waited.exitCode).not.toBe(0);
-    expect(waited.stderr).toContain('lead_wait_timeout');
-    const more = await runCli(['lead', 'send', lead.id, '--message', '[fixture:hang]',
-      '--idempotency-key', 'more-work']);
-    expect(more.exitCode, more.stderr).toBe(0);
-    await vi.waitFor(() => expect(getLeadStatus(lead.id).lead.status).toBe('running'));
-    expect(getLeadStatus(lead.id).lead.result).toBeNull();
-    await runCli(['lead', 'stop', lead.id]);
-  }, 20_000);
-
   it('drives actual CLI, authenticated route, provider process, and persisted resume pins', async () => {
     const started = await runCli(startArgs('lead-start-main'));
     expect(started.exitCode, started.stderr).toBe(0);
@@ -958,4 +924,39 @@ describe('persistent lead handoff real path', () => {
         (SELECT COUNT(*) FROM orchestrator_lead_events) AS events
     `).get()).toEqual(countsBefore);
   });
+  it('includes the structured outcome in the caller handback receipt', async () => {
+    const started = await runCli(startArgs('outcome-receipt'));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    const completed = await settled(lead.id);
+    expect(completed.lead.result).toMatchObject({
+      outcome: { kind: 'completed', summary: expect.any(String), evidence: expect.any(Array) },
+    });
+  });
+
+  it('requires a turn outcome before handback and clears it on more work', async () => {
+    const started = await runCli(startArgs('turn-outcome-required'));
+    expect(started.exitCode, started.stderr).toBe(0);
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    const completed = await settled(lead.id);
+    expect(completed.lead.status).toBe('completed');
+    const sent = await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]',
+      '--idempotency-key', 'missing-report']);
+    expect(sent.exitCode, sent.stderr).toBe(0);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('waiting'), { timeout: 5_000 });
+    const status = await runCli(['lead', 'status', lead.id]);
+    expect(JSON.parse(status.stdout)).toMatchObject({ lead: { status: 'waiting', result: {
+      outcome: null, reason: 'Turn ended without an outcome report.',
+    } } });
+    const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
+    expect(waited.exitCode).not.toBe(0);
+    expect(waited.stderr).toContain('lead_wait_timeout');
+    const more = await runCli(['lead', 'send', lead.id, '--message', '[fixture:hang]',
+      '--idempotency-key', 'more-work']);
+    expect(more.exitCode, more.stderr).toBe(0);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).lead.status).toBe('running'));
+    expect(getLeadStatus(lead.id).lead.result).toBeNull();
+    await runCli(['lead', 'stop', lead.id]);
+  }, 20_000);
+
+
 });
