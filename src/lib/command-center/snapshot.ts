@@ -1,3 +1,4 @@
+import { snapshotCacheInvalidation } from '@/lib/snapshot-cache-invalidation';
 import type { BrowserAttachmentSummary, BrowserInventorySnapshot } from '@/lib/browser/types';
 import { getAttachedBrowserSummary } from '@/lib/browser/attachment-state';
 import { getBrowserInventorySnapshot } from '@/lib/browser/inventory';
@@ -33,7 +34,14 @@ let browserInflight: { generation: number; promise: Promise<{ value: BrowserInve
 let reviewGeneration = 0;
 let browserGeneration = 0;
 
+const sharedInvalidation = snapshotCacheInvalidation('command-center');
+
 export function invalidateCommandCenterSnapshotCaches() {
+  sharedInvalidation.publish();
+  clearSnapshotCaches();
+}
+
+function clearSnapshotCaches() {
   invalidateOwnedCodexFleetCache();
   invalidateCodexDiscoveredFleetCache();
   invalidateRuntimeInventoryCache();
@@ -105,6 +113,10 @@ async function getCachedBrowserInventory(fresh = false) {
   });
 }
 
+function syncCommandCenterSnapshotCaches() {
+  if (sharedInvalidation.changed()) clearSnapshotCaches();
+}
+
 export async function getCommandCenterSnapshot(): Promise<CommandCenterSnapshot> {
   return getCommandCenterSnapshotWithOptions();
 }
@@ -112,6 +124,7 @@ export async function getCommandCenterSnapshot(): Promise<CommandCenterSnapshot>
 export async function getCommandCenterSnapshotWithOptions(
   options: { fresh?: boolean } = {},
 ): Promise<CommandCenterSnapshot> {
+  syncCommandCenterSnapshotCaches();
   const fresh = options.fresh ?? false;
   const [fleet, reviewResult, browserResult] = await Promise.all([
     getRuntimeInventorySnapshot({ fresh }),

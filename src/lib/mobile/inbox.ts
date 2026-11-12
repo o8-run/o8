@@ -1,3 +1,4 @@
+import { snapshotCacheInvalidation } from '@/lib/snapshot-cache-invalidation';
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
 import {
   approvalSeverity,
@@ -284,7 +285,14 @@ function finalizeMobileInboxSnapshot(snapshot: MobileInboxSnapshot, limit?: numb
   return applyInboxUrgency(applyInboxRefereeChips(limitMobileInboxSessions(snapshot, limit)));
 }
 
+const sharedInvalidation = snapshotCacheInvalidation('inbox');
+
 export function invalidateInboxCache() {
+  sharedInvalidation.publish();
+  clearSnapshotCaches();
+}
+
+function clearSnapshotCaches() {
   inboxGeneration += 1;
   inboxCache.clear();
   inboxInflight.clear();
@@ -296,6 +304,7 @@ export async function getMobileInboxSnapshot(options: {
   limit?: number;
   includeWorkspaceReview?: boolean;
 } = {}): Promise<MobileInboxSnapshot> {
+  if (sharedInvalidation.changed()) clearSnapshotCaches();
   const fresh = options.fresh ?? false;
   const includeWorkspaceReview = options.includeWorkspaceReview !== false;
   const cacheLane: InboxCacheLane = includeWorkspaceReview ? 'full' : 'sessions';

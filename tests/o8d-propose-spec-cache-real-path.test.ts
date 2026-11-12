@@ -1,0 +1,43 @@
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { NextRequest } from 'next/server';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { startParityReference } from './fixtures/ws-parity-server';
+const review = vi.hoisted(() => ({ read: vi.fn(async () => null) }));
+vi.mock('@/lib/review/workspace', () => ({ getWorkspaceReviewSnapshot: review.read, invalidateReviewSnapshotCache: vi.fn() }));
+vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: async () => ({ agents: [], events: [], meta: {} }), invalidateRuntimeInventoryCache: vi.fn() }));
+vi.mock('@/lib/browser/inventory', () => ({ getBrowserInventorySnapshot: async () => ({ surfaces: [] }) }));
+vi.mock('@/lib/runtime/ide-llm-chat-registry', () => ({ listIdeLlmChatSessions: () => [] }));
+let server: Awaited<ReturnType<typeof startParityReference>>;
+beforeAll(async () => {
+  server = await startParityReference({ o8d: true, nativeHttp: true, startupTimeoutMs: 120_000 });
+  await server.stopNext();
+  vi.stubEnv('O8_DATA_DIR', server.directory);
+  vi.stubEnv('CORTEX_IDE_DATA_DIR', server.directory);
+  vi.stubEnv('CORTEX_IDE_DB_PATH', join(server.directory, 'cortex-ide.db'));
+  execFileSync(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { withLockedState } = require('./src/lib/orchestrator/control-plane.ts');
+    withLockedState(state => { state.packets.push({ id: 'cache-packet', title: 'Cache packet', status: 'running' }); return state; });
+  `], { env: { ...process.env, WS_TOKEN: server.token } });
+}, 180_000);
+afterAll(async () => { vi.unstubAllEnvs(); await server?.stop(); });
+it('refreshes warm Next inbox and command-center caches immediately after a native spec proposal', async () => {
+  const inbox = await import('@/app/api/mobile/inbox/route');
+  const { getCommandCenterSnapshot } = await import('@/lib/command-center/snapshot');
+  const request = () => new NextRequest('http://127.0.0.1/api/mobile/inbox');
+  const initial = await inbox.GET(request());
+  expect(initial.status).toBe(200);
+  expect(JSON.stringify(await initial.json())).not.toContain('Cache coherence test');
+  await getCommandCenterSnapshot();
+  const reads = review.read.mock.calls.length;
+  await getCommandCenterSnapshot();
+  expect(review.read).toHaveBeenCalledTimes(reads);
+  const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
+  const proposed = await fetch(`${origin}/api/orchestrator/propose-spec`, { method: 'POST', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ packetId: 'cache-packet', proposedSpec: '# Updated spec', rationale: 'Cache coherence test' }) });
+  expect(proposed.status, await proposed.text()).toBe(200);
+  const updated = await inbox.GET(request());
+  expect(updated.status).toBe(200);
+  expect(JSON.stringify(await updated.json())).toContain('Cache coherence test');
+  await getCommandCenterSnapshot();
+  expect(review.read.mock.calls.length).toBeGreaterThan(reads);
+}, 120_000);

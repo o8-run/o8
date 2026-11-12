@@ -8,5 +8,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   return ownedByNativeTransport(
     async local => (await import('@/lib/orchestrator/http/dispatch')).POST(local as NextRequest),
     () => Response.json({ error: 'Orchestrator owner unavailable.' }, { status: 503 }),
+    { longResponse: true },
   )(request);
 }

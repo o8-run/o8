@@ -100,9 +100,8 @@ function normalizeQualitySearch(value: unknown) {
 
 function resolveDispatcher(request: NextRequest, record: Record<string, unknown>): PacketDispatcherAttribution {
   const principal = resolveRequestPrincipalContext(request);
-  const workerPacketId = request.headers.get('x-o8-worker-packet-id')?.trim() ?? '';
   if (principal.role === 'worker') {
-    return { surface: 'agent', id: principal.packetId || workerPacketId || 'unknown-worker' };
+    return { surface: 'agent', id: principal.packetId || 'unknown-worker' };
   }
 
   const threadId = typeof record.orchestratorThreadId === 'string' ? record.orchestratorThreadId.trim() : '';
