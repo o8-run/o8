@@ -29,7 +29,7 @@ let mcp: typeof import('@/app/api/mcp/route');
 let taskRoute: typeof import('@/app/api/tasks/[taskId]/dispatch/route');
 let seq = 0;
 const read = () => JSON.parse(readFileSync(join(server.directory, 'task-runtime.json'), 'utf8')) as {
-  pid: number; calls: Array<{ laneId: string }>; spawns: string[]; accepted: Array<{ laneId: string; dispatchId: string }>;
+  pid: number; node: string; launchCount: number; sessions: Array<[string, { laneId: string; live: boolean }]>; calls: Array<{ laneId: string }>; spawns: string[]; accepted: Array<{ laneId: string; dispatchId: string }>;
 };
 const gate = () => writeFileSync(join(server.directory, 'hold-task-launch'), 'hold');
 const release = () => { if (!server) return; const file = join(server.directory, 'hold-task-launch'); if (existsSync(file)) unlinkSync(file); };
@@ -55,7 +55,7 @@ async function fixture() {
   return id;
 }
 beforeAll(async () => {
-  server = await startParityReference({ o8d: true, nativeHttp: true, preload: './tests/fixtures/ws-parity-task-dispatch.cjs' });
+  server = await startParityReference({ o8d: true, nativeHttp: true, preload: './tests/fixtures/ws-parity-task-dispatch.cjs', entry: './tests/fixtures/ws-parity-task-dispatch-entry.mjs' });
   await server.stopNext();
   origin = server.url.replace('ws:', 'http:').replace('/ws', '');
   vi.stubEnv('CORTEX_IDE_DATA_DIR', server.directory);
@@ -90,6 +90,8 @@ it('accepts through Next and owns admission, deferred launch and replay in WS', 
     release();
     await vi.waitFor(() => expect(lanes.findLaneByPacket(id)?.status).toBe('running'), { timeout: 10000 });
     expect(read().spawns.filter(laneId => laneId === receipt.laneId)).toHaveLength(1);
+    expect(read().launchCount).toBe(1);
+    expect(read().sessions).toEqual([[`fixture:${receipt.laneId}`, { laneId: receipt.laneId, live: true }]]);
   } finally { release(); }
 }, 30000);
 it('honours cancellation before spawn in WS', async () => {
