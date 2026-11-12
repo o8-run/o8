@@ -1,4 +1,5 @@
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
@@ -498,7 +499,11 @@ export async function claimTask(taskId: string, input: TaskClaimInput = {}): Pro
 }
 
 export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}): Promise<TaskMutationResult> {
-  if (process.env.O8_NEXT_O8D === '1' && !isNativeCortexReader()) return callTaskDispatchOwner(taskId, input);
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) {
+    try { validateRequestedRuntime(input.requestedRuntime); }
+    catch (error) { throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
+    return callTaskDispatchOwner(taskId, input);
+  }
   const actor = normalizeActor(input.actor);
   const task = await resolveTask(taskId, input);
   const workerRouting = await resolveTaskWorkerRouting({
