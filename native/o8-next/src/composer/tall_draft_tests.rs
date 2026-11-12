@@ -160,9 +160,14 @@ fn native_transcript_end_stays_above_the_composer_through_zoom(cx: &mut TestAppC
         cx.update(|window, cx| window.set_zoom(zoom, cx));
         settle(cx);
         last_row_above_composer(cx);
-        assert!(
-            surface.read_with(cx, |s, _| crate::retained::at_end(&s.list)),
-            "at the end at {zoom}"
-        );
+        // Exactly at the end: at_end allows 48 px, which a list that kept
+        // its top could still meet.
+        let below = surface.read_with(cx, |s, _| {
+            f32::from(
+                s.list.max_offset_for_scrollbar().height
+                    + s.list.scroll_px_offset_for_scrollbar().y,
+            )
+        });
+        assert!(below.abs() < 1., "{below} px below the view at {zoom}");
     }
 }

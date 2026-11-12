@@ -284,14 +284,16 @@ pub(super) fn open_window(
             cx.new(|cx| {
                 // AppKit can bring its buttons back after full screen and
                 // style changes; this only touches AppKit, never app state.
-                cx.observe_window_bounds(window, |_, window, _| {
-                    crate::window_lights::sync_native(window)
-                })
-                .detach();
-                cx.observe_window_activation(window, |_, window, _| {
-                    crate::window_lights::sync_native(window)
-                })
-                .detach();
+                // The style flags can lag the last resize of a full-screen
+                // transition, so match them again once the next frame is drawn.
+                let resync = |window: &mut Window| {
+                    crate::window_lights::sync_native(window);
+                    window.on_next_frame(|window, _| crate::window_lights::sync_native(window));
+                };
+                cx.observe_window_bounds(window, move |_, window, _| resync(window))
+                    .detach();
+                cx.observe_window_activation(window, move |_, window, _| resync(window))
+                    .detach();
                 let mut shell = Shell::new(client, file, state, window, cx);
                 shell.system_glass = system_glass;
                 shell.offscreen = offscreen;

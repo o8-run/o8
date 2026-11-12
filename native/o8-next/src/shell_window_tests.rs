@@ -276,13 +276,14 @@ fn zoom_shell(visual: &mut VisualTestContext, percent: u16) {
     draw(visual);
 }
 
+/// The painted dots.
 fn light_bounds(visual: &mut VisualTestContext) -> Vec<Bounds<gpui::Pixels>> {
     crate::window_lights::Light::ALL
         .iter()
         .map(|light| {
             visual
-                .debug_bounds(light.selector())
-                .unwrap_or_else(|| panic!("{} drawn", light.selector()))
+                .debug_bounds(light.dot_selector())
+                .unwrap_or_else(|| panic!("{} drawn", light.dot_selector()))
         })
         .collect()
 }
@@ -319,6 +320,16 @@ fn window_lights_scale_with_zoom_and_share_the_header_centre(cx: &mut TestAppCon
                 near(light.origin.x, 14. + 20. * i as f32),
                 "light {i} at {zoom}: {light:?}"
             );
+            // The press area pads the dot by 2 units on every side.
+            let hit = visual
+                .debug_bounds(crate::window_lights::Light::ALL[i].selector())
+                .unwrap();
+            assert!(
+                near(hit.size.width, 16.) && near(hit.size.height, 16.),
+                "press area {i} at {zoom}: {hit:?}"
+            );
+            assert!(near(hit.center().x, f32::from(light.center().x)));
+            assert!(near(hit.center().y, f32::from(light.center().y)));
             for icon in [toggle, back] {
                 assert!(
                     near(light.center().y, f32::from(icon.center().y)),
@@ -375,4 +386,37 @@ fn window_lights_dim_when_inactive_and_hide_in_full_screen(cx: &mut TestAppConte
     visual.update(|window, _| window.toggle_fullscreen());
     draw(&mut visual);
     assert_eq!(light_bounds(&mut visual).len(), 3);
+}
+
+#[gpui::test]
+fn window_lights_take_the_press_where_they_sit_at_140(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open_past_setup(
+        fixture.client.clone(),
+        fixture.root.join("lights-press.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    zoom_shell(&mut visual, 140);
+    // Each light's press area is its own and sits on top: no drag region or
+    // neighbour under its centre (macOS drags only from a topmost drag area).
+    for light in crate::window_lights::Light::ALL {
+        let hit = visual.debug_bounds(light.selector()).unwrap();
+        let top = visual.update(|window, _| window.topmost_hitbox_bounds(hit.center()));
+        assert_eq!(top, Some(hit), "{} owns its press", light.selector());
+    }
+    // The development driver's press, as the hand check sent it: the green
+    // light enters full screen (a minimize panics on the test platform).
+    let answer = visual.update(|window, cx| {
+        crate::driver::answer(
+            &serde_json::json!({"command": "press", "selector": "window-light-zoom",
+                "allow": ["window-light-zoom"]}),
+            window,
+            cx,
+        )
+    });
+    assert_eq!(answer["ok"], true, "{answer}");
+    visual.run_until_parked();
+    assert!(visual.update(|window, _| window.is_fullscreen()));
 }

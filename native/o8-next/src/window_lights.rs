@@ -24,6 +24,9 @@ pub(crate) const SIZE: f32 = 12.;
 pub(crate) const GAP: f32 = 8.;
 /// The close button's left edge (its centre at x=20, where AppKit put it).
 pub(crate) const LEFT: f32 = 14.;
+/// Each button's press area: the dot and 2 units around it, so at 70% it is
+/// still 11 points. The areas meet halfway between the dots.
+pub(crate) const HIT: f32 = SIZE + 4.;
 /// Whether the app draws the buttons: macOS, and every test platform, so the
 /// geometry is checked on CI's Linux runners too.
 pub(crate) const DRAWN: bool = cfg!(any(test, target_os = "macos"));
@@ -50,6 +53,14 @@ impl Light {
             Light::Close => "window-light-close",
             Light::Minimize => "window-light-minimize",
             Light::Zoom => "window-light-zoom",
+        }
+    }
+    /// The painted dot, inside the press area `selector` names.
+    pub(crate) fn dot_selector(self) -> &'static str {
+        match self {
+            Light::Close => "window-light-close-dot",
+            Light::Minimize => "window-light-minimize-dot",
+            Light::Zoom => "window-light-zoom-dot",
         }
     }
     pub(crate) fn glyph_selector(self) -> &'static str {
@@ -83,6 +94,21 @@ impl Light {
     }
 }
 
+/// What a press asks of AppKit: the action message of the standard button the
+/// light stands for (NSWindow's own close, miniaturize and zoom buttons send
+/// these), so a light can only do what its native counterpart does.
+pub(crate) fn action(light: Light, alt: bool) -> &'static str {
+    match (light, alt) {
+        // `performClose:` keeps the window's should-close path, where the
+        // shell saves and asks.
+        (Light::Close, _) => "performClose:",
+        (Light::Minimize, _) => "miniaturize:",
+        // Option turns the green button into Zoom (maximize).
+        (Light::Zoom, true) => "zoom:",
+        (Light::Zoom, false) => "toggleFullScreen:",
+    }
+}
+
 /// The buttons' top edge in a header `header` units tall: centred on it, as
 /// the sidebar toggle and the history arrows are.
 pub(crate) fn top(header: f32) -> f32 {
@@ -93,93 +119,114 @@ pub(crate) fn top(header: f32) -> f32 {
 /// `header`-tall title band, or None where the platform draws its own or the
 /// window is in full screen.
 pub(crate) fn render(header: f32, window: &Window) -> Option<AnyElement> {
-    if !DRAWN || window.is_fullscreen() {
+    if !DRAWN {
+        return None;
+    }
+    let fullscreen = window.is_fullscreen();
+    // Full screen changes reach AppKit's style flags after the last resize
+    // of the transition; hide or show its buttons once this frame is drawn,
+    // so neither set sticks beside the other.
+    if SYNCED.replace(Some(fullscreen)) != Some(fullscreen) {
+        window.on_next_frame(|window, _| sync_native(window));
+    }
+    if fullscreen {
         return None;
     }
     let active = window.is_window_active();
+    let pad = (HIT - SIZE) / 2.;
     Some(
         div()
             .id(GROUP)
             .debug_selector(|| GROUP.into())
             .group(GROUP)
             .absolute()
-            .left(px(LEFT))
-            .top(px(top(header)))
+            .left(px(LEFT - pad))
+            .top(px(top(header) - pad))
             .flex()
-            .gap(px(GAP))
+            .gap(px(GAP - 2. * pad))
             .children(Light::ALL.map(|light| button(light, active)))
             .into_any_element(),
     )
 }
 
+thread_local! {
+    /// The full-screen state AppKit's buttons were last matched to.
+    static SYNCED: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
 fn button(light: Light, active: bool) -> impl IntoElement {
     let id = light.selector();
-    div()
-        .id(id)
-        .debug_selector(move || id.into())
+    let dot = div()
+        .debug_selector(move || light.dot_selector().into())
         .size(px(SIZE))
-        .flex_shrink_0()
         .rounded_full()
         .flex()
         .items_center()
         .justify_center()
-        .map(|button| {
+        .map(|dot| {
             if active {
                 // The native hairline rim, inside the circle.
-                button
-                    .bg(light.color())
+                dot.bg(light.color())
                     .border(px(0.5))
                     .border_color(rgba(0x0000002e))
             } else {
                 let mut grey = crate::theme::current().text;
                 grey.a *= 0.22;
-                button.bg(grey)
+                dot.bg(grey)
             }
         })
-        // Glyphs only on an active window, on all three while the group is hovered.
-        .when(active, |button| {
-            button.child(
+        // Glyphs only on an active window, on all three while the group is
+        // hovered. (macOS sends no hover to an inactive GPUI window.)
+        .when(active, |dot| {
+            dot.child(
                 div()
                     .debug_selector(move || light.glyph_selector().into())
                     .opacity(0.)
                     .group_hover(GROUP, |glyph| glyph.opacity(1.))
                     .child(light.glyph()),
             )
-        })
-        // A press here is not a press on the header below.
+        });
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .size(px(HIT))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(dot)
+        // The press area is the topmost hitbox here, so no drag region below
+        // it moves the window (macOS drags only from a topmost drag area).
         .occlude()
         .on_click(move |event, window, cx| {
             cx.stop_propagation();
-            press(light, event.modifiers().alt, window, cx);
+            press(action(light, event.modifiers().alt), window, cx);
         })
 }
 
-/// What a press does. Close and minimize go to AppKit after the current
-/// event, outside every update, because AppKit answers both by calling back
-/// into the window (should-close, resize) and a callback inside this update
-/// would find the app borrowed.
-fn press(light: Light, alt: bool, window: &mut Window, cx: &mut App) {
-    match light {
-        Light::Zoom if alt => window.zoom_window(),
-        Light::Zoom => window.toggle_fullscreen(),
-        Light::Close | Light::Minimize => {
-            let handle = window.window_handle();
-            cx.spawn(async move |cx| {
-                let native = handle.update(cx, |_, window, _| {
-                    let native = mac::native(window);
-                    // No AppKit window (tests, other platforms): close here.
-                    if native.is_none() && light == Light::Close {
-                        window.remove_window();
-                    }
-                    native
-                });
-                if let Ok(Some(native)) = native {
-                    mac::perform(native, light == Light::Close);
+/// Sends `action` to the window's NSWindow after the current event, outside
+/// every update: AppKit answers by calling back into the window
+/// (should-close, resize), which would find the app borrowed in here.
+fn press(action: &'static str, window: &mut Window, cx: &mut App) {
+    let handle = window.window_handle();
+    cx.spawn(async move |cx| {
+        let native = handle.update(cx, |_, window, _| {
+            let native = mac::native(window);
+            if native.is_none() {
+                // No AppKit window (tests, other platforms).
+                match action {
+                    "performClose:" => window.remove_window(),
+                    "toggleFullScreen:" => window.toggle_fullscreen(),
+                    _ => {}
                 }
-            })
-            .detach();
+            }
+            native
+        });
+        if let Ok(Some(native)) = native {
+            mac::perform(native, action);
         }
-    }
+    })
+    .detach();
 }
 
 /// Hides AppKit's buttons while the app draws its own, and shows them in full
@@ -231,16 +278,12 @@ mod mac {
             }
         }
     }
-    /// `performClose:` keeps the window's should-close path (the shell saves
-    /// and asks there); `miniaturize:` is the yellow button's own action.
-    pub(super) fn perform(native: usize, close: bool) {
+    /// Sends `action`, one of `super::action`'s selectors, to the window.
+    pub(super) fn perform(native: usize, action: &str) {
         let native = native as id;
+        let selector = objc::runtime::Sel::register(action);
         unsafe {
-            if close {
-                let _: () = msg_send![native, performClose: nil];
-            } else {
-                let _: () = msg_send![native, miniaturize: nil];
-            }
+            let _: id = msg_send![native, performSelector: selector withObject: nil];
         }
     }
 }
@@ -252,5 +295,31 @@ mod mac {
         None
     }
     pub(super) fn hide_buttons(_: &Window, _: bool) {}
-    pub(super) fn perform(_: usize, _: bool) {}
+    pub(super) fn perform(_: usize, _: &str) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Light, action};
+
+    #[test]
+    fn window_lights_send_the_appkit_action_of_their_button() {
+        // Each light sends what its native button sends, and Option changes
+        // only the green one; a crossed mapping minimizes on green.
+        let sent: Vec<_> = Light::ALL
+            .iter()
+            .flat_map(|light| [action(*light, false), action(*light, true)])
+            .collect();
+        assert_eq!(
+            sent,
+            [
+                "performClose:",
+                "performClose:",
+                "miniaturize:",
+                "miniaturize:",
+                "toggleFullScreen:",
+                "zoom:",
+            ]
+        );
+    }
 }
