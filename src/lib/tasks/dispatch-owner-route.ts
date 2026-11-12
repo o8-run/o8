@@ -1,5 +1,6 @@
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
+import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { dispatchTask, readTaskEffortSelection, TaskMutationError, type TaskDispatchInput } from './actions';
 
@@ -33,7 +34,14 @@ export async function POST(request: Request): Promise<Response> {
     };
     return Response.json(await dispatchTask(body.taskId, input), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : 'Task dispatch failed.' }, {
+    const lockTimeout = error instanceof ControlPlaneLockTimeoutError;
+    const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+    return Response.json({
+      error: error instanceof Error ? error.message : 'Task dispatch failed.',
+      errorClass: lockTimeout ? 'ControlPlaneLockTimeoutError' : error instanceof TaskMutationError ? 'TaskMutationError' : 'Error',
+      code: lockTimeout ? 'mission_store_busy' : code,
+      ...(lockTimeout ? { waitTimeoutMs: error.waitTimeoutMs, retryAfterMs: 1000 } : {}),
+    }, {
       status: error instanceof TaskMutationError ? error.status : 500, headers: { 'Cache-Control': 'no-store' },
     });
   }

@@ -18,6 +18,20 @@ Module._load = function (request, parent, isMain) {
   if (/\/runtimes\/shared\/auth-detect(?:\.ts)?$/.test(request)) {
     return new Proxy(load.call(this, request, parent, isMain), { get: (target, key) => key === 'assertRuntimeDispatchable' ? async () => {} : Reflect.get(target, key) });
   }
+  if (/\/orchestrator\/control-plane(?:\.ts)?$/.test(request)) {
+    const actual = load.call(this, request, parent, isMain);
+    return new Proxy(actual, { get(target, key) {
+      if (key !== 'withLockedState') return Reflect.get(target, key);
+      return (...args) => {
+        const fault = path.join(root, 'task-owner-fault');
+        if (fs.existsSync(fault)) {
+          if (fs.readFileSync(fault, 'utf8') === 'lock-timeout') throw new target.ControlPlaneLockTimeoutError(37);
+          throw Object.assign(new Error('Fixture dispatch refusal'), { code: 'fixture_dispatch_refused' });
+        }
+        return target.withLockedState(...args);
+      };
+    } });
+  }
   if (/\/lane\/registry(?:\.ts)?$/.test(request)) {
     const actual = load.call(this, request, parent, isMain);
     return new Proxy(actual, { get(target, key) {

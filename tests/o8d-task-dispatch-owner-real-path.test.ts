@@ -80,6 +80,7 @@ it('accepts through Next and owns admission, deferred launch and replay in WS', 
     const receipt = await throughNext(id);
     expect(receipt).toMatchObject({ ok: true, packetId: id, status: 'launching', dispatchId: expect.any(String) });
     await vi.waitFor(() => expect(read().calls.some(call => call.laneId === receipt.laneId)).toBe(true), { timeout: 10000 });
+    expect(read().pid).toBe(server.pid);
     expect(read().pid).not.toBe(process.pid);
     expect(read().accepted).toContainEqual({ laneId: receipt.laneId, dispatchId: receipt.dispatchId });
     const replay = await throughNext(id);
@@ -128,6 +129,9 @@ it('serves the task HTTP dispatch entry natively and through Next', async () => 
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body, JSON.stringify(body)).toMatchObject({ ok: true, packetId: id });
+  expect(read().pid).toBe(server.pid);
+  expect(read().pid).not.toBe(process.pid);
+  expect(read().spawns.filter(laneId => laneId === body.laneId)).toHaveLength(1);
   const missing = await fetch(`${origin}/api/tasks/missing/dispatch`, { method: 'POST', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' }, body: '{}' });
   expect(missing.status).toBe(404);
   expect(local.spawns).toBe(0);
@@ -158,4 +162,45 @@ it('preserves local dispatch when the flag is off', async () => {
   expect(result.ok).toBe(true);
   expect(local.spawns).toBe(1);
   vi.stubEnv('O8_NEXT_O8D', '1');
+}, 30000);
+
+it('preserves a WS control-plane lock timeout in the Next MCP result', async () => {
+  const id = await fixture();
+  const fault = join(server.directory, 'task-owner-fault');
+  writeFileSync(fault, 'lock-timeout');
+  try {
+    const result = await throughNext(id);
+    expect(result).toMatchObject({ ok: false, isError: true, code: 'mission_store_busy', retryAfterMs: 1000 });
+    expect(result.next).not.toContain('Correct the arguments');
+  } finally { unlinkSync(fault); }
+}, 30000);
+
+it('preserves a WS error code in the Next MCP result', async () => {
+  const id = await fixture();
+  const fault = join(server.directory, 'task-owner-fault');
+  writeFileSync(fault, 'coded-error');
+  try {
+    const result = await throughNext(id);
+    expect(result).toMatchObject({ ok: false, isError: true, code: 'fixture_dispatch_refused' });
+    expect(result.next).not.toContain('Correct the arguments');
+  } finally { unlinkSync(fault); }
+}, 30000);
+
+it.each([
+  ['disconnected', 'outcome_unknown'],
+  ['invalid-receipt', 'task_dispatch_owner_invalid_receipt'],
+])('keeps %s owner failures out of argument-error guidance', async (fault, code) => {
+  const id = await fixture();
+  const original = globalThis.fetch;
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+    if (String(input).endsWith('/api/tasks/dispatch-owner')) {
+      return fault === 'disconnected' ? Promise.reject(new Error('Fixture owner disconnected')) : Promise.resolve(Response.json({ schema: 'invalid' }));
+    }
+    return original(input, init);
+  });
+  try {
+    const result = await throughNext(id);
+    expect(result).toMatchObject({ ok: false, isError: true, code });
+    expect(result.next).not.toContain('Correct the arguments');
+  } finally { fetch.mockRestore(); }
 }, 30000);
