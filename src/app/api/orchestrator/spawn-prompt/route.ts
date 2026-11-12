@@ -1,7 +1,7 @@
 import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import {
   buildInlineIssuesFromPrompt,
   resolveSpawnCount,
@@ -17,7 +17,6 @@ import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   formatDispatchableRuntimeChoices,
   getRuntimeCapability,
-  isDispatchableRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { assertExecutionCarrierDispatchable, ExecutionCarrierPreflightError } from '@/lib/runtimes/shared/execution-carrier-preflight';
@@ -32,9 +31,6 @@ import { asRecord, operatorError, operatorSuccess, parseJsonBody, unresolvedIdem
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
-  return isDispatchableRuntime(value) ? value : null;
-}
 
 /**
  * Voice / canvas spawn seam — "spawn N agents on <task>" → a gateless worktree
@@ -101,17 +97,16 @@ export async function POST(request: NextRequest) {
     return operatorError(effortAliases.code, effortAliases.message, 400);
   }
   const requestedEffort = effortAliases.requestedEffort;
-  const explicitRuntimeRequested = !(requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === '');
-  const requestedRuntime = !explicitRuntimeRequested
-    ? resolveDefaultDispatchRuntimeSync()
-    : normalizeRuntime(requestedRuntimeRaw);
+  let requestedRuntime: OrchestratorRuntime | null;
+  try { requestedRuntime = validateRequestedRuntime(requestedRuntimeRaw, resolveDefaultDispatchRuntimeSync()); }
+  catch (error) { return operatorError('invalid_runtime', (error as Error).message, 400); }
   if (!requestedRuntime) {
     return operatorError('invalid_request', `runtime must be one of: ${formatDispatchableRuntimeChoices()}.`, 400);
   }
   const defaults = getOperatorDefaultsSync().values;
   const profileRouting = resolveSubscriptionProfileRouting({
     profile: defaults.subscriptionProfile,
-    requestedRuntime: explicitRuntimeRequested || defaults.subscriptionProfile === 'both' ? requestedRuntime : null,
+    requestedRuntime,
     requestedModel: typeof requestedModel === 'string' ? requestedModel : null,
     defaultDispatchModel: defaults.defaultDispatchModel,
   });

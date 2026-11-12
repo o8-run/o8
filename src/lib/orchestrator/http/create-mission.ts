@@ -2,7 +2,7 @@ import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-con
 import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { findMissionByCreationMutationId } from '@/lib/orchestrator/create-mission-receipt';
 import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/lib/orchestrator/operator-mission-service';
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
@@ -19,7 +19,6 @@ import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   formatDispatchableRuntimeChoices,
   getRuntimeCapability,
-  isOrchestratorRuntime,
   resolveRuntimePreset,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
@@ -44,9 +43,6 @@ export const dynamic = 'force-dynamic';
 
 const VALID_EXISTING_BRANCH_POLICIES = new Set<ExistingBranchPolicy>(['auto', 'reset', 'continue', 'error']);
 
-function normalizeRuntime(value: unknown): OrchestratorRuntime | null {
-  return isOrchestratorRuntime(value) ? value : null;
-}
 
 function normalizeIssues(value: unknown): LoadedIssue[] | null {
   if (!Array.isArray(value) || value.length === 0) {
@@ -55,7 +51,7 @@ function normalizeIssues(value: unknown): LoadedIssue[] | null {
 
   return value.map((issue) => {
     const record = asRecord(issue);
-    const perIssueRuntime = normalizeRuntime(record?.runtime);
+    const perIssueRuntime = validateRequestedRuntime(record?.runtime);
     return {
       number: typeof record?.number === 'number' ? record.number : Number.NaN,
       title: typeof record?.title === 'string' ? record.title : '',
@@ -145,7 +141,9 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'launchContext must name a valid source, presentation, and repoContext.', 400);
   }
 
-  const issues = normalizeIssues(record.issues);
+  let issues: LoadedIssue[] | null;
+  try { issues = normalizeIssues(record.issues); }
+  catch (error) { return operatorError('invalid_runtime', (error as Error).message, 400); }
   if (!issues) {
     return operatorError('invalid_request', 'issues must be a non-empty array.', 400);
   }
@@ -171,9 +169,9 @@ export async function POST(request: NextRequest) {
   const requestedEffort = effortAliases.requestedEffort;
   const requestedEffortRaw = requestedEffort;
   const explicitRuntimeRequested = !(requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === '');
-  const requestedRuntime = !explicitRuntimeRequested
-    ? resolveDefaultDispatchRuntimeSync()
-    : normalizeRuntime(requestedRuntimeRaw);
+  let requestedRuntime: OrchestratorRuntime | null;
+  try { requestedRuntime = validateRequestedRuntime(requestedRuntimeRaw, resolveDefaultDispatchRuntimeSync()); }
+  catch (error) { return operatorError('invalid_runtime', (error as Error).message, 400); }
   if (!requestedRuntime) {
     return operatorError('invalid_request', `runtime must be one of: ${formatDispatchableRuntimeChoices()}.`, 400);
   }
@@ -184,7 +182,7 @@ export async function POST(request: NextRequest) {
   const defaults = getOperatorDefaultsSync().values;
   const profileRouting = resolveSubscriptionProfileRouting({
     profile: defaults.subscriptionProfile,
-    requestedRuntime: explicitRuntimeRequested || defaults.subscriptionProfile === 'both' ? requestedRuntime : null,
+    requestedRuntime,
     requestedModel: claudeCodeCarrier ? null : requestedModelText,
     defaultDispatchModel: defaults.defaultDispatchModel,
   });

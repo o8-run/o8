@@ -224,7 +224,7 @@ async function dispatchOrRecoverPacket(
   const workerRouting = resolveWorkerRouting({
     workerIntent: launchPacket.workerIntent,
     requestedProvider: launchPacket.workerRouting?.requestedProvider,
-    requestedRuntime: launchPacket.workerRouting?.requestedRuntime ?? launchPacket.runtime,
+    requestedRuntime: launchPacket.workerRouting?.runtimeSubstitution?.requestedRuntime ?? launchPacket.workerRouting?.requestedRuntime ?? launchPacket.runtime,
     requestedModel: launchPacket.workerRouting?.requestedModel ?? launchPacket.assignedModel, requestedEffort: launchPacket.workerRouting?.requestedEffort,
     source: 'scheduler-dispatch',
   });
@@ -442,7 +442,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
       const routing = resolveWorkerRouting({
         workerIntent: packet.workerIntent,
         requestedProvider: packet.workerRouting?.requestedProvider,
-        requestedRuntime: packet.workerRouting?.requestedRuntime ?? packet.runtime,
+        requestedRuntime: packet.workerRouting?.runtimeSubstitution?.requestedRuntime ?? packet.workerRouting?.requestedRuntime ?? packet.runtime,
         requestedModel: packet.workerRouting?.requestedModel ?? packet.assignedModel, requestedEffort: packet.workerRouting?.requestedEffort,
         source: 'scheduler-enrichment',
       });
@@ -558,7 +558,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
       const runtime = resolveWorkerRouting({
         workerIntent: candidate.packet.workerIntent,
         requestedProvider: candidate.packet.workerRouting?.requestedProvider,
-        requestedRuntime: candidate.packet.workerRouting?.requestedRuntime ?? candidate.packet.runtime,
+        requestedRuntime: candidate.packet.workerRouting?.runtimeSubstitution?.requestedRuntime ?? candidate.packet.workerRouting?.requestedRuntime ?? candidate.packet.runtime,
         requestedModel: candidate.packet.workerRouting?.requestedModel ?? candidate.packet.assignedModel,
         source: 'scheduler-budget',
       }).selectedRuntime;

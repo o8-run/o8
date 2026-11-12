@@ -24,3 +24,11 @@ it.each([['claim', claim], ['dispatch', dispatch], ['archive', archive], ['prune
     expect(new TextDecoder().decode(fetcher.mock.calls[0][1].body as ArrayBuffer)).toBe('{"note":"fixture"}');
   },
 );
+it.each([400, 409])('preserves the dispatch refusal status %s through native forwarding', async status => {
+  vi.stubEnv('O8_NEXT_O8D', '1');
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'Runtime refused' }, { status })));
+  const response = await dispatch(new NextRequest('http://localhost/api/tasks/task/dispatch', { method: 'POST', body: '{}' }), { params: Promise.resolve({ taskId: 'task' }) });
+  expect(response.status).toBe(status);
+  expect(await response.json()).toEqual({ error: 'Runtime refused' });
+  expect(local).not.toHaveBeenCalled();
+});
