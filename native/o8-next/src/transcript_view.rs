@@ -3,7 +3,7 @@
 //! go through the same RetainedRow, trace disclosure and end-of-turn boundary.
 use crate::theme::current as theme;
 use crate::{
-    prompt_navigator::{self, Jump, Navigator},
+    prompt_navigator::{self, Jump, Navigator, Wheel},
     retained::{RetainedRow, RowState},
 };
 use gpui::{AnyElement, App, ListState, SharedString, Window, canvas, div, list, prelude::*, px};
@@ -18,10 +18,16 @@ pub(crate) fn list_view(
     ends: BTreeSet<usize>,
     navigator: Rc<RefCell<Navigator>>,
     on_jump: Jump,
+    on_wheel: Wheel,
     mut decorate: impl FnMut(usize, AnyElement, &mut Window, &mut App) -> AnyElement + 'static,
 ) -> AnyElement {
-    let navigation =
-        prompt_navigator::overlay(navigator.clone(), rows.clone(), state.clone(), on_jump);
+    let navigation = prompt_navigator::overlay(
+        navigator.clone(),
+        rows.clone(),
+        state.clone(),
+        on_jump,
+        on_wheel,
+    );
     let body = canvas(
         move |bounds, window, cx| {
             let clip = bounds.intersect(&window.content_mask().bounds);
@@ -145,6 +151,7 @@ pub(crate) fn state(text: &str, attention: bool) -> AnyElement {
         Default::default(),
         Default::default(),
         Rc::new(|_, _| {}),
+        Rc::new(|_, _, _| {}),
         |_, row, _, _| row,
     )
 }

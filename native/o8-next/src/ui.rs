@@ -1405,4 +1405,4 @@ mod enter_default_tests {
 
 #[cfg(test)]
 #[path = "prompt_navigator_tests.rs"]
-pub(crate) mod prompt_navigator_tests;
+mod prompt_navigator_tests;
