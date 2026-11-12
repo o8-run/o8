@@ -396,3 +396,77 @@ fn review_takeover_in_pane_thread_change_revokes_creation(cx: &mut TestAppContex
         assert_eq!(displays(s, &id), 1);
     });
 }
+
+fn delta_settings_close(cx: &mut TestAppContext, rail: bool) {
+    let (_f, shell, mut v) = setup(cx);
+    shell.update_in(&mut v, |s, w, cx| s.open_thread("thoughts-composer-first".into(), w, cx));
+    ready(&shell, &mut v);
+    let (id, active) = shell.update_in(&mut v, |s, w, cx| {
+        s.execute(Command::Settings, w, cx);
+        let id = s.start_thread(true, cx).unwrap();
+        let active = s.active();
+        if rail { s.close_rail_overlays(w, cx); }
+        else { s.surfaces.settings.view = None; s.surfaces.settings.subscription = None; }
+        (id, active)
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        v.run_until_parked(); draw(&mut v);
+        if shell.read_with(&v, |s, _| s.sessions.iter().any(|t| t.id == id)) { break; }
+        assert!(Instant::now() < deadline, "created thread reaches catalog");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    shell.read_with(&v, |s, _| {
+        assert_eq!(s.active(), active, "closing Settings revokes takeover");
+        assert_eq!(displays(s, &id), 1);
+    });
+}
+#[gpui::test]
+fn delta_settings_rail_close_cancels(cx: &mut TestAppContext) { delta_settings_close(cx, true); }
+#[gpui::test]
+fn delta_created_snapshot_backstop_cancels(cx: &mut TestAppContext) { delta_settings_close(cx, false); }
+#[gpui::test]
+fn delta_workspace_none_cancels(cx: &mut TestAppContext) {
+    let (_f, shell, mut v) = setup(cx);
+    let list = list(&shell, &v);
+    let id = pending(&shell, &list, &mut v, false);
+    list.update(&mut v, |_, cx| cx.emit(super::Event::Workspace(None, Default::default())));
+    v.run_until_parked();
+    deliver(&list, &mut v);
+    shell.read_with(&v, |s, _| {
+        assert_eq!(s.state.selected, None);
+        assert!(s.state.workspaces.values().any(|w| Shell::tab_index(w, &Tab::Session(id.clone())).is_some()));
+    });
+}
+#[gpui::test]
+fn delta_refresh_fallback_keeps_creation_foreground(cx: &mut TestAppContext) {
+    let (_f, shell, mut v) = setup(cx);
+    shell.update_in(&mut v, |s, w, cx| s.open_thread("thoughts-composer-first".into(), w, cx));
+    ready(&shell, &mut v);
+    let view = shell.update(&mut v, |s, cx| {
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else { panic!("chat") };
+        let view = view.clone();
+        let mut sessions = s.sessions.clone();
+        let mut stale = sessions[0].clone(); stale.id = "delta-removed-selection".into();
+        sessions.push(stale.clone());
+        view.update(cx, |view, cx| view.shell_select(sessions, stale.id, cx));
+        view
+    });
+    let list = list(&shell, &v);
+    let id = pending(&shell, &list, &mut v, false);
+    let generation = list.read_with(&v, |l, _| l.navigation_generation());
+    view.update(&mut v, |view, cx| view.shell_refresh(cx));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        v.run_until_parked(); draw(&mut v);
+        if view.read_with(&v, |view, _| view.shown_thread().as_deref() != Some("delta-removed-selection")) { break; }
+        assert!(Instant::now() < deadline, "refresh falls back to a real session");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(list.read_with(&v, |l, _| l.navigation_generation()), generation, "refresh is not user navigation");
+    deliver(&list, &mut v);
+    shell.read_with(&v, |s, _| {
+        let saved = s.current().unwrap();
+        assert_eq!(Shell::tab_index(saved, &Tab::Session(id)), Some(saved.active));
+    });
+}
