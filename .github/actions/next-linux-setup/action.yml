@@ -21,7 +21,7 @@ outputs:
     description: Whether all native build inputs matched the restored cache.
     value: ${{ steps.native-cache.outputs.cache-hit }}
   registration-cache-key:
-    description: Compiler and native lockfile key for the registration check target.
+    description: Exact compiler, native lockfile and source key for the registration check target.
     value: ${{ steps.native-cache-key.outputs.registration-key }}
   registration-cache-hit:
     description: Whether the registration check target matched the restored cache.
@@ -66,7 +66,6 @@ runs:
       with:
         path: native/o8-next/target/pull-request-registration-target
         key: ${{ steps.native-cache-key.outputs.registration-key }}
-        restore-keys: ${{ steps.native-cache-key.outputs.registration-restore-key }}
     - if: inputs.headless-tests == 'true'
       shell: bash
       env:
