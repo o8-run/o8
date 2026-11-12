@@ -219,7 +219,7 @@ it('forwards no cookie, and a cookie changes no WS principal', async () => {
   } finally { spy.mockRestore(); }
   // WS resolves the caller from the bearer alone: an operator cookie neither adds nor removes authority.
   for (const [token, status] of [[worker, 403], [device, 404], ['wrong', 401]] as const) {
-    for (const extra of [{}, { cookie }]) {
+    for (const extra of [{}, { cookie }] as Record<string, string>[]) {
       const response = await fetch(origin + '/api/panel/approvals', { method: 'POST', body: JSON.stringify({ action: 'approve', id: 'missing', runtimeApprovalOperation: true }),
         headers: { ...forged, ...extra, 'content-type': 'application/json', authorization: `Bearer ${token}` } });
       expect(response.status).toBe(status);
