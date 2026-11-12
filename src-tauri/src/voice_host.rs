@@ -158,7 +158,7 @@ mod tests {
         }
     }
     #[test]
-    fn classic_window_remains_available_without_next_mode() {
+    fn classic_window_remains_available_only_off_macos() {
         let app = tauri::test::mock_builder()
             .build(crate::app_context())
             .unwrap();
@@ -167,6 +167,6 @@ mod tests {
                 .build()
                 .unwrap();
         }
-        assert!(classic_window(app.handle()).is_some());
+        assert_eq!(classic_window(app.handle()).is_some(), !cfg!(target_os = "macos"));
     }
 }

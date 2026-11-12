@@ -697,6 +697,7 @@ pub fn launch(client: Client, target: Target, offscreen: bool) {
         Application::new()
     })
     .run(move |cx: &mut App| {
+        crate::zoom::install(false, cx);
         cx.open_window(
             WindowOptions {
                 focus: false,
@@ -711,7 +712,13 @@ pub fn launch(client: Client, target: Target, offscreen: bool) {
                 }),
                 ..Default::default()
             },
-            |window, cx| cx.new(|cx| DiffSurface::new(client, target, window, cx)),
+            |window, cx| {
+                crate::zoom::apply(window, cx);
+                cx.new(|cx| {
+                    crate::zoom::follow(window, false, cx);
+                    DiffSurface::new(client, target, window, cx)
+                })
+            },
         )
         .expect("GPUI diff window");
         cx.on_window_closed(|cx| {

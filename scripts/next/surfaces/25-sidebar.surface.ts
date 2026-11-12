@@ -12,6 +12,8 @@ export async function prepare({ dataDir }: SurfaceContext): Promise<SurfaceRoute
 export default async function register({ dataDir, root, repo, seeds, fixtureToken, transcriptFixtures }: SurfaceContext): Promise<SurfaceRoutes> {
   const enabled = process.argv.includes('--sidebar');
   const auditKeyboard = process.argv.includes('--sidebar-keyboard-audit');
+  const newThreadRepos = process.argv.includes('--sidebar-two-repo-create')
+    ? [repo, join(root, 'project-one')] : [repo];
   const archives: Array<{ method: string; path: string; tabId?: string }> = [];
   const workspaceRestores: Array<Record<string, unknown>> = [];
   const parkingFixture = process.argv.includes('--sidebar-parked');
@@ -116,8 +118,9 @@ export default async function register({ dataDir, root, repo, seeds, fixtureToke
       const target = JSON.parse(body);
       return (route === runtimeArchive.POST ? target.sessionKey === 'pi-builtin-owned:grid-runtime'
         : (route === patchHistory || route === saveHistory) && seeds.some(seed => seed.id === target.tabId)
-          // New thread creates a conversation in the owned fixture repository.
-          || route === saveHistory && /^thoughts-next-\d+$/.test(target.tabId) && realpathSync(target.repoPath) === realpathSync(repo)) ? 200 : 400;
+          // New thread stays in the explicitly owned fixture repositories.
+          || route === saveHistory && /^thoughts-next-\d+$/.test(target.tabId)
+            && newThreadRepos.some(path => realpathSync(target.repoPath) === realpathSync(path))) ? 200 : 400;
     },
     run: async (route, request) => {
       if (autoSettle && route === patchHistory) {

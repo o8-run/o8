@@ -1,0 +1,759 @@
+import { parseUpdate as parseConversationDefaultsUpdate } from '@/lib/operator/conversation-defaults';
+import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
+import { NextResponse } from 'next/server';
+
+import {
+  CODEX_MODEL_IDS,
+  isCodexModelId,
+  isSupportedModelId,
+  SUPPORTED_MODEL_IDS,
+} from '@/lib/models';
+import {
+  getOperatorDefaults,
+  getOperatorDefaultsTomlState,
+  isCollideAggregator,
+  isBrainRoutingMode,
+  isOrchestratorBackendSetting,
+  isPrLinkDestination,
+  isRequireApproval,
+  isReviewerBackendSetting,
+  isSubscriptionProfile,
+  isWorkspaceManifestPolicy,
+  type OperatorDefaults,
+  type OverlapGateMode,
+} from '@/lib/operator/defaults';
+import {
+  isBroadcastCommentaryMode,
+  isBroadcastVoiceClockTime,
+  isBroadcastVoiceQuietHoursMode,
+} from '@/lib/operator/broadcast-commentary-defaults';
+import { botRailUpdate, isNativeKeybindings, isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
+import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
+import { isJudgmentAllowance, isJudgmentBetaEndDate, JUDGMENT_ALLOWANCE_EXPECTED, JUDGMENT_BETA_END_DATE_EXPECTED } from '@/lib/operator/judgment-allowance-default';
+import { resolveJudgmentPath } from '@/lib/judgment/route';
+import { getEntitlementSync } from '@/lib/entitlement/store';
+import { isDispatchRuntime, isParallelCap } from '@/lib/operator/defaults-env';
+import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
+import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
+import { projectAgentRoleRoutes } from '@/lib/operator/role-routing';
+import { listRoleRoutingReceipts } from '@/lib/operator/role-routing-ledger';
+import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
+import { isSettingsLayerId } from '@/lib/settings/scopes';
+import { updateNativeScopedSetting } from '@/lib/settings/native-settings';
+import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
+import { resolveApfsDependencyImagesOverride } from '@/lib/workspace/dependency-image-policy';
+import {
+  getDispatchableRuntimeAvailability,
+  getRuntimeAuthSnapshot,
+} from '@/lib/runtimes/shared/auth-detect';
+import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
+
+
+
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
+function effectiveOverride() {
+  return {
+    apfsDependencyImages: resolveApfsDependencyImagesOverride(),
+  };
+}
+
+export function response(payload: unknown, status = 200) {
+  return NextResponse.json(payload, {
+    status,
+    headers: NO_STORE_HEADERS,
+  });
+}
+
+type OperatorDefaultsData = Awaited<ReturnType<typeof getOperatorDefaults>>;
+type OperatorDefaultsTomlState = Awaited<ReturnType<typeof getOperatorDefaultsTomlState>>;
+type CliAuthSnapshot = Awaited<ReturnType<typeof getRuntimeAuthSnapshot>>;
+type DispatchableRuntimeInventory = Awaited<ReturnType<typeof getDispatchableRuntimeAvailability>>;
+
+export function operatorDefaultsPayload(
+  data: OperatorDefaultsData,
+  settingsToml: OperatorDefaultsTomlState,
+  cliAuth: CliAuthSnapshot,
+  dispatchableRuntimes: DispatchableRuntimeInventory,
+  windowError: string | null = null,
+) {
+  return {
+    ...operatorDefaultsValuesPayload(data, settingsToml, windowError),
+    cliAuth,
+    dispatchableRuntimes,
+    roleRoutes: projectAgentRoleRoutes({
+      values: data.values,
+      sources: data.sources,
+      dispatchableRuntimes,
+      managedBrainEligible: getEntitlementSync().flags['proxy.inference'] === true,
+    }),
+  };
+}
+
+export function operatorDefaultsValuesPayload(
+  data: OperatorDefaultsData,
+  settingsToml: OperatorDefaultsTomlState,
+  windowError: string | null = null,
+) {
+  return {
+    ...data,
+    nextWindowError: windowError,
+    judgmentPath: resolveJudgmentPath(data.values.judgmentProvider),
+    effectiveOverride: effectiveOverride(),
+    settingsToml,
+    recentRoleReceipts: listRoleRoutingReceipts({ limit: 60 }),
+  };
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function isWorkerRuntimeList(value: unknown): value is OperatorDefaults['workerRuntimes'] {
+  return Array.isArray(value) && value.length > 0 && value.every(isDispatchRuntime);
+}
+
+function parseStorageReserveRatio(value: unknown): number {
+  if (typeof value === 'number') return value;
+  return typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+}
+
+export function workspaceStorageValidationError(body: Record<string, unknown>): string | null {
+  if (body.storageReserveRatio !== undefined) {
+    const parsed = parseStorageReserveRatio(body.storageReserveRatio);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+      return 'storageReserveRatio must be between 0 and 1.';
+    }
+  }
+  if (body.storageReserveFloorGb !== undefined) {
+    const parsed = typeof body.storageReserveFloorGb === 'number'
+      ? body.storageReserveFloorGb
+      : Number(body.storageReserveFloorGb);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 10000) {
+      return 'storageReserveFloorGb must be greater than 0 and no more than 10000.';
+    }
+  }
+  if (body.workspaceParkingMode !== undefined
+    && body.workspaceParkingMode !== 'manual'
+    && body.workspaceParkingMode !== 'pressure'
+    && body.workspaceParkingMode !== 'settled') {
+    return 'workspaceParkingMode must be "manual", "pressure" or "settled".';
+  }
+  return null;
+}
+
+export function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefaults> {
+  const update: Partial<OperatorDefaults> = botRailUpdate(body);
+
+  if (body.subscriptionProfile !== undefined) {
+    if (!isSubscriptionProfile(body.subscriptionProfile)) {
+      throw new Error('subscriptionProfile must be one of "both", "claude-only", "codex-only".');
+    }
+    update.subscriptionProfile = body.subscriptionProfile;
+  }
+
+  if (body.parallelCap !== undefined) {
+    const raw = body.parallelCap;
+    const parsed = typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string'
+        ? Number(raw)
+        : Number.NaN;
+    if (!isParallelCap(parsed)) {
+      throw new Error('parallelCap must be a positive safe integer.');
+    }
+    update.parallelCap = parsed;
+  }
+
+  for (const field of ['meteredPacketCostCapUsd', 'meteredPacketInputTokenCap'] as const) {
+    if (body[field] === undefined) continue;
+    const parsed = typeof body[field] === 'number' ? body[field] : Number(body[field]);
+    if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${field} must be greater than 0.`);
+    update[field] = field === 'meteredPacketInputTokenCap' ? Math.round(parsed) : parsed;
+  }
+
+  for (const field of [
+    'uiLoopMaxIterations',
+    'uiLoopMaxMinutes',
+    'uiLoopMaxDiffBytes',
+    'uiLoopMaxDiffFiles',
+    'uiLoopPreviewTimeoutMs',
+  ] as const) {
+    if (body[field] === undefined) continue;
+    const parsed = typeof body[field] === 'number' ? body[field] : Number(body[field]);
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+      throw new Error(`${field} must be a positive integer.`);
+    }
+    update[field] = parsed;
+  }
+
+  if (body.overlapGate !== undefined) {
+    if (body.overlapGate !== 'advisory' && body.overlapGate !== 'strict') {
+      throw new Error('overlapGate must be "advisory" or "strict".');
+    }
+    update.overlapGate = body.overlapGate as OverlapGateMode;
+  }
+
+  if (body.healBotEnabled !== undefined) {
+    if (typeof body.healBotEnabled !== 'boolean') {
+      throw new Error('healBotEnabled must be boolean.');
+    }
+    update.healBotEnabled = body.healBotEnabled;
+  }
+
+  if (body.supervisorAutoEscalate !== undefined) {
+    if (typeof body.supervisorAutoEscalate !== 'boolean') {
+      throw new Error('supervisorAutoEscalate must be boolean.');
+    }
+    update.supervisorAutoEscalate = body.supervisorAutoEscalate;
+  }
+
+  if (body.codexAppThreads !== undefined) {
+    if (typeof body.codexAppThreads !== 'boolean') {
+      throw new Error('codexAppThreads must be boolean.');
+    }
+    update.codexAppThreads = body.codexAppThreads;
+  }
+  if (body.reviewContinuation !== undefined) {
+    if (typeof body.reviewContinuation !== 'boolean') {
+      throw new Error('reviewContinuation must be boolean.');
+    }
+    update.reviewContinuation = body.reviewContinuation;
+  }
+
+  if (body.broadcastCommentary !== undefined) {
+    if (!isBroadcastCommentaryMode(body.broadcastCommentary)) {
+      throw new Error('broadcastCommentary must be "off" or "interval".');
+    }
+    update.broadcastCommentary = body.broadcastCommentary;
+  }
+
+  if (body.broadcastVoice !== undefined) {
+    if (body.broadcastVoice !== 'off' && body.broadcastVoice !== 'on') {
+      throw new Error('broadcastVoice must be "off" or "on".');
+    }
+    update.broadcastVoice = body.broadcastVoice;
+  }
+
+  if (body.broadcastVoiceQuietHours !== undefined) {
+    if (!isBroadcastVoiceQuietHoursMode(body.broadcastVoiceQuietHours)) {
+      throw new Error('broadcastVoiceQuietHours must be "off" or "on".');
+    }
+    update.broadcastVoiceQuietHours = body.broadcastVoiceQuietHours;
+  }
+
+  for (const field of ['broadcastVoiceQuietStart', 'broadcastVoiceQuietEnd'] as const) {
+    if (body[field] === undefined) continue;
+    if (!isBroadcastVoiceClockTime(body[field])) {
+      throw new Error(`${field} must be a local time in HH:MM format.`);
+    }
+    update[field] = body[field];
+  }
+
+  for (const field of [
+    'broadcastVoiceAttention',
+    'broadcastVoiceApprovals',
+    'broadcastVoiceReviews',
+    'broadcastVoiceFailures',
+    'broadcastVoiceCompletions',
+    'broadcastVoiceCalendar',
+    'broadcastVoiceTimeCheckins',
+  ] as const) {
+    if (body[field] === undefined) continue;
+    if (typeof body[field] !== 'boolean') throw new Error(`${field} must be boolean.`);
+    update[field] = body[field];
+  }
+
+  for (const [field, maximum] of [
+    ['broadcastCommentaryIntervalMinutes', 1_440],
+    ['broadcastCommentaryMinNewEvents', 100],
+    ['broadcastCommentaryMaxPerHour', 60],
+    ['broadcastVoiceLullMinutes', 1_440],
+    ['broadcastVoiceCalendarLeadMinutes', 1_440],
+  ] as const) {
+    if (body[field] === undefined) continue;
+    const value = body[field];
+    if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > maximum) {
+      throw new Error(`${field} must be an integer from 1 through ${maximum}.`);
+    }
+    update[field] = Number(value);
+  }
+
+  if (body.composerEnterQueues !== undefined) {
+    if (typeof body.composerEnterQueues !== 'boolean') {
+      throw new Error('composerEnterQueues must be boolean.');
+    }
+    update.composerEnterQueues = body.composerEnterQueues;
+  }
+  if (body.nativeKeybindings !== undefined) {
+    if (!isNativeKeybindings(body.nativeKeybindings)) {
+      throw new Error('nativeKeybindings must be a list of unique "command=chord" entries.');
+    }
+    update.nativeKeybindings = [...body.nativeKeybindings];
+  }
+  if (body.presentationQuietMode !== undefined) {
+    if (typeof body.presentationQuietMode !== 'boolean') {
+      throw new Error('presentationQuietMode must be boolean.');
+    }
+    update.presentationQuietMode = body.presentationQuietMode;
+  }
+
+  if (body.notificationsReviewReady !== undefined) {
+    if (!isReviewReadyNotifications(body.notificationsReviewReady)) {
+      throw new Error('notificationsReviewReady must be "off" or "on".');
+    }
+    update.notificationsReviewReady = body.notificationsReviewReady;
+  }
+
+  if (body.apfsDependencyImages !== undefined) {
+    if (typeof body.apfsDependencyImages !== 'boolean') {
+      throw new Error('apfsDependencyImages must be boolean.');
+    }
+    update.apfsDependencyImages = body.apfsDependencyImages;
+  }
+
+  if (body.thinkingEffort !== undefined) {
+    if (!isThinkingEffort(body.thinkingEffort)) {
+      throw new Error('thinkingEffort must be a valid effort level.');
+    }
+    update.thinkingEffort = body.thinkingEffort;
+  }
+
+  if (body.promptCachingEnabled !== undefined) {
+    if (typeof body.promptCachingEnabled !== 'boolean') {
+      throw new Error('promptCachingEnabled must be boolean.');
+    }
+    update.promptCachingEnabled = body.promptCachingEnabled;
+  }
+  Object.assign(update, parseConversationDefaultsUpdate(body));
+
+  if (body.requireApproval !== undefined) {
+    if (!isRequireApproval(body.requireApproval)) {
+      throw new Error('requireApproval must be one of "high-risk", "surface", "always", "never".');
+    }
+    update.requireApproval = body.requireApproval;
+  }
+
+  if (body.orchestratorModel !== undefined) {
+    const model = typeof body.orchestratorModel === 'string' ? body.orchestratorModel.trim() : '';
+    if (!isSupportedModelId(model)) {
+      throw new Error(`orchestratorModel ${JSON.stringify(model)} is unsupported; valid values are ${SUPPORTED_MODEL_IDS.map((value) => JSON.stringify(value)).join(', ')}.`);
+    }
+    update.orchestratorModel = model;
+  }
+
+  // ACP model pins. Forwarded as-is — updateOperatorDefaults owns the real
+  // validation (isPlausibleAcpModelId, null = clear the pin). These were
+  // missing from this normalizer at first, so the Settings pickers' field-level
+  // save 400'd with "No supported fields" while the TOML path worked — the
+  // reachability trap: the setting existed everywhere except the path the UI
+  // actually posts through (live-hit on the shipped build, 2026-08-05).
+  for (const key of ['opencodeOrchestratorModel', 'opencodeWorkerModel', 'threecodeWorkerModel'] as const) {
+    if (body[key] === undefined) continue;
+    if (body[key] !== null && typeof body[key] !== 'string') {
+      throw new Error(`${key} must be a model id string or null.`);
+    }
+    update[key] = body[key] as string | null;
+  }
+
+  if (body.defaultDispatchRuntime !== undefined) {
+    // Single-source guard (mirrors the orchestratorBackend pattern below): a
+    // hand-rolled list here silently rejected cursor/grok/pi even though the
+    // dispatch layer + tier validator accept them (2026-07-09).
+    if (!isDispatchRuntime(body.defaultDispatchRuntime)) {
+      throw new Error('defaultDispatchRuntime must name a dispatchable runtime.');
+    }
+    update.defaultDispatchRuntime = body.defaultDispatchRuntime;
+  }
+
+  if (body.workerExecutionCarrier !== undefined) {
+    if (body.workerExecutionCarrier !== null && !isExecutionCarrierId(body.workerExecutionCarrier)) {
+      throw new Error('workerExecutionCarrier must be "ori" or null.');
+    }
+    update.workerExecutionCarrier = body.workerExecutionCarrier;
+  }
+
+  if (body.workerStartMode !== undefined) {
+    if (!isWorkerStartMode(body.workerStartMode)) {
+      throw new Error('workerStartMode must be one of "autonomous", "huddle", or "adaptive".');
+    }
+    update.workerStartMode = body.workerStartMode;
+  }
+
+  if (isWorkerRuntimeList(body.workerRuntimes)) {
+    update.workerRuntimes = [...new Set(body.workerRuntimes)];
+  }
+
+  if (body.disabledRuntimes !== undefined) {
+    if (!Array.isArray(body.disabledRuntimes) || !body.disabledRuntimes.every(isDispatchRuntime)) {
+      throw new Error('disabledRuntimes must contain only dispatchable runtimes.');
+    }
+    update.disabledRuntimes = [...new Set(body.disabledRuntimes)];
+  }
+
+  if (body.codexWorkerEffort !== undefined) {
+    if (!isThinkingEffort(body.codexWorkerEffort)) {
+      throw new Error('codexWorkerEffort must be a valid effort level.');
+    }
+    update.codexWorkerEffort = body.codexWorkerEffort;
+  }
+
+  if (body.claudeWorkerEffort !== undefined) {
+    if (!isThinkingEffort(body.claudeWorkerEffort)) {
+      throw new Error('claudeWorkerEffort must be a valid effort level.');
+    }
+    update.claudeWorkerEffort = body.claudeWorkerEffort;
+  }
+
+  if (body.brainCodexModel !== undefined) {
+    const model = typeof body.brainCodexModel === 'string' ? body.brainCodexModel.trim() : '';
+    if (!isCodexModelId(model)) {
+      throw new Error(`brainCodexModel ${JSON.stringify(model)} is unsupported; valid values are ${CODEX_MODEL_IDS.map((value) => JSON.stringify(value)).join(', ')}.`);
+    }
+    update.brainCodexModel = model;
+  }
+
+  if (body.brainCodexEffort !== undefined) {
+    if (!isThinkingEffort(body.brainCodexEffort)) {
+      throw new Error('brainCodexEffort must be a valid effort level.');
+    }
+    update.brainCodexEffort = body.brainCodexEffort;
+  }
+
+  if (body.brainRoutingMode !== undefined) {
+    if (!isBrainRoutingMode(body.brainRoutingMode)) {
+      throw new Error('brainRoutingMode must be "auto" or "subscription".');
+    }
+    update.brainRoutingMode = body.brainRoutingMode;
+  }
+
+  if (body.defaultDispatchModel !== undefined) {
+    // Any string is valid; '' clears it back to the runtime default. Use the
+    // `ollama:<model>` / `lmstudio:<model>` convention to dispatch local.
+    if (typeof body.defaultDispatchModel !== 'string') {
+      throw new Error('defaultDispatchModel must be a string.');
+    }
+    update.defaultDispatchModel = body.defaultDispatchModel.trim();
+  }
+
+  if (body.localInferenceBaseUrl !== undefined) {
+    if (typeof body.localInferenceBaseUrl !== 'string') {
+      throw new Error('localInferenceBaseUrl must be a string.');
+    }
+    update.localInferenceBaseUrl = validateCredentialSafeUrl(body.localInferenceBaseUrl, 'localInferenceBaseUrl');
+  }
+
+  if (body.localEmbedModel !== undefined) {
+    if (typeof body.localEmbedModel !== 'string') {
+      throw new Error('localEmbedModel must be a string.');
+    }
+    update.localEmbedModel = body.localEmbedModel.trim();
+  }
+
+  if (body.localChatModel !== undefined) {
+    if (typeof body.localChatModel !== 'string') {
+      throw new Error('localChatModel must be a string.');
+    }
+    update.localChatModel = body.localChatModel.trim();
+  }
+
+  if (body.textGenerationTitleModel !== undefined) {
+    if (typeof body.textGenerationTitleModel !== 'string') {
+      throw new Error('textGenerationTitleModel must be a string.');
+    }
+    update.textGenerationTitleModel = body.textGenerationTitleModel.trim();
+  }
+
+  if (body.editorCommand !== undefined) {
+    if (typeof body.editorCommand !== 'string') {
+      throw new Error('editorCommand must be a string.');
+    }
+    update.editorCommand = body.editorCommand.trim();
+  }
+
+  for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'experimentalNext', 'nativeBrowserView'] as const) {
+    const value = body[field];
+    if (value === undefined) continue;
+    if (typeof value !== 'boolean') throw new Error(`${field} must be boolean.`);
+    update[field] = value;
+  }
+
+  if (body.classAComposer !== undefined) {
+    const raw = body.classAComposer;
+    if (raw !== 'auto' && raw !== 'haiku-cli' && raw !== 'sonnet-cli' && raw !== 'fastest') {
+      throw new Error('classAComposer must be one of "auto", "haiku-cli", "sonnet-cli", "fastest".');
+    }
+    update.classAComposer = raw;
+  }
+
+  if (body.inAppOrchestratorEnabled !== undefined) {
+    if (typeof body.inAppOrchestratorEnabled !== 'boolean') {
+      throw new Error('inAppOrchestratorEnabled must be boolean.');
+    }
+    update.inAppOrchestratorEnabled = body.inAppOrchestratorEnabled;
+  }
+  if (body.knowledgeSources !== undefined) update.knowledgeSources = parseKnowledgeSources(body.knowledgeSources);
+  if (body.brainUseClaudeCli !== undefined) {
+    if (typeof body.brainUseClaudeCli !== 'boolean') {
+      throw new Error('brainUseClaudeCli must be boolean.');
+    }
+    update.brainUseClaudeCli = body.brainUseClaudeCli;
+  }
+
+  if (body.brainWarmupEnabled !== undefined) {
+    if (typeof body.brainWarmupEnabled !== 'boolean') {
+      throw new Error('brainWarmupEnabled must be boolean.');
+    }
+    update.brainWarmupEnabled = body.brainWarmupEnabled;
+  }
+
+  if (body.workersUseBrain !== undefined) {
+    const raw = body.workersUseBrain;
+    if (raw !== 'off' && raw !== 'auto' && raw !== 'all') {
+      throw new Error('workersUseBrain must be one of "off", "auto", "all".');
+    }
+    update.workersUseBrain = raw;
+  }
+
+  if (body.judgmentProvider !== undefined) {
+    if (!isJudgmentProvider(body.judgmentProvider)) {
+      throw new Error(`judgmentProvider must be ${JUDGMENT_PROVIDER_VALUES_MESSAGE}.`);
+    }
+    update.judgmentProvider = body.judgmentProvider;
+  }
+
+  if (body.judgmentManagedDailyAllowance !== undefined) {
+    if (body.judgmentManagedDailyAllowance !== null && !isJudgmentAllowance(body.judgmentManagedDailyAllowance)) {
+      throw new Error(`judgmentManagedDailyAllowance must be ${JUDGMENT_ALLOWANCE_EXPECTED}.`);
+    }
+    update.judgmentManagedDailyAllowance = body.judgmentManagedDailyAllowance;
+  }
+
+  if (body.judgmentBetaEndDate !== undefined) {
+    if (body.judgmentBetaEndDate !== null && !isJudgmentBetaEndDate(body.judgmentBetaEndDate)) {
+      throw new Error(`judgmentBetaEndDate must be ${JUDGMENT_BETA_END_DATE_EXPECTED}.`);
+    }
+    update.judgmentBetaEndDate = body.judgmentBetaEndDate;
+  }
+
+  if (body.judgmentManagedOptionVisible !== undefined) {
+    if (typeof body.judgmentManagedOptionVisible !== 'boolean') {
+      throw new Error('judgmentManagedOptionVisible must be boolean.');
+    }
+    update.judgmentManagedOptionVisible = body.judgmentManagedOptionVisible;
+  }
+
+  if (body.workspaceManifestPolicy !== undefined) {
+    if (!isWorkspaceManifestPolicy(body.workspaceManifestPolicy)) {
+      throw new Error('workspaceManifestPolicy must be one of "disabled", "one-approval", "auto".');
+    }
+    update.workspaceManifestPolicy = body.workspaceManifestPolicy;
+  }
+
+  if (body.crossHouseWorkerFallback !== undefined) {
+    if (typeof body.crossHouseWorkerFallback !== 'boolean') {
+      throw new Error('crossHouseWorkerFallback must be boolean.');
+    }
+    update.crossHouseWorkerFallback = body.crossHouseWorkerFallback;
+  }
+
+  if (body.orchestratorBackend !== undefined) {
+    const raw = body.orchestratorBackend;
+    // Single-source guard from defaults.ts — a hand-rolled list here silently
+    // rejected the fable backend when Slice 1 widened the union (dogfood 2026-07-02).
+    if (!isOrchestratorBackendSetting(raw)) {
+      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide", "fable", "o8".');
+    }
+    update.orchestratorBackend = raw;
+  }
+
+  if (body.reviewerBackend !== undefined) {
+    const raw = body.reviewerBackend;
+    if (!isReviewerBackendSetting(raw)) {
+      throw new Error('reviewerBackend must be one of "follow", "codex", "claude".');
+    }
+    update.reviewerBackend = raw;
+  }
+
+  if (body.packetExplainerEnabled !== undefined) {
+    if (typeof body.packetExplainerEnabled !== 'boolean') {
+      throw new Error('packetExplainerEnabled must be boolean.');
+    }
+    update.packetExplainerEnabled = body.packetExplainerEnabled;
+  }
+
+  if (body.quizGateEnabled !== undefined) {
+    if (typeof body.quizGateEnabled !== 'boolean') {
+      throw new Error('quizGateEnabled must be boolean.');
+    }
+    update.quizGateEnabled = body.quizGateEnabled;
+  }
+
+  if (body.buyinDocEnabled !== undefined) {
+    if (typeof body.buyinDocEnabled !== 'boolean') {
+      throw new Error('buyinDocEnabled must be boolean.');
+    }
+    update.buyinDocEnabled = body.buyinDocEnabled;
+  }
+
+  if (body.updateAutoApply !== undefined) {
+    const raw = body.updateAutoApply;
+    if (raw !== 'off' && raw !== 'idle') {
+      throw new Error('updateAutoApply must be one of "off", "idle".');
+    }
+    update.updateAutoApply = raw;
+  }
+
+  if (body.collideAggregator !== undefined) {
+    const raw = body.collideAggregator;
+    if (!isCollideAggregator(raw)) {
+      throw new Error('collideAggregator must be one of "auto", "claude", "codex".');
+    }
+    update.collideAggregator = raw;
+  }
+
+  if (body.productTelemetryEnabled !== undefined) {
+    if (body.productTelemetryEnabled !== null && typeof body.productTelemetryEnabled !== 'boolean') {
+      throw new Error('productTelemetryEnabled must be boolean or null.');
+    }
+    update.productTelemetryEnabled = body.productTelemetryEnabled;
+  }
+
+  if (body.telemetryConsentAnswered !== undefined) {
+    if (typeof body.telemetryConsentAnswered !== 'boolean') {
+      throw new Error('telemetryConsentAnswered must be boolean.');
+    }
+    if (
+      body.telemetryConsentAnswered
+      && ((body.productTelemetryEnabled !== null && typeof body.productTelemetryEnabled !== 'boolean') || typeof body.crashReportsEnabled !== 'boolean')
+    ) {
+      throw new Error('Answering telemetry consent requires both productTelemetryEnabled and crashReportsEnabled.');
+    }
+    update.telemetryConsentAnswered = body.telemetryConsentAnswered;
+  }
+
+  if (body.telemetryOptIn !== undefined) {
+    if (typeof body.telemetryOptIn !== 'boolean') {
+      throw new Error('telemetryOptIn must be boolean.');
+    }
+    update.telemetryOptIn = body.telemetryOptIn;
+  }
+
+  if (body.telemetryIngestUrl !== undefined) {
+    if (typeof body.telemetryIngestUrl !== 'string') {
+      throw new Error('telemetryIngestUrl must be a string.');
+    }
+    update.telemetryIngestUrl = validateCredentialSafeUrl(body.telemetryIngestUrl, 'telemetryIngestUrl');
+  }
+
+  if (body.crashReportsEnabled !== undefined) {
+    if (typeof body.crashReportsEnabled !== 'boolean') {
+      throw new Error('crashReportsEnabled must be boolean.');
+    }
+    update.crashReportsEnabled = body.crashReportsEnabled;
+  }
+
+  if (body.branchPrefix !== undefined) {
+    // Any string is accepted; the store sanitizes it to a branch-safe segment
+    // and rejects a value that cleans to empty.
+    if (typeof body.branchPrefix !== 'string') {
+      throw new Error('branchPrefix must be a string.');
+    }
+    update.branchPrefix = body.branchPrefix;
+  }
+
+  if (body.commitAttributionEnabled !== undefined) {
+    if (typeof body.commitAttributionEnabled !== 'boolean') {
+      throw new Error('commitAttributionEnabled must be boolean.');
+    }
+    update.commitAttributionEnabled = body.commitAttributionEnabled;
+  }
+
+  if (body.prLinkDestination !== undefined) {
+    if (!isPrLinkDestination(body.prLinkDestination)) {
+      throw new Error('prLinkDestination must be "in-app" or "browser".');
+    }
+    update.prLinkDestination = body.prLinkDestination;
+  }
+
+  if (body.worktreeMaxCount !== undefined) {
+    const raw = body.worktreeMaxCount;
+    const parsed = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error('worktreeMaxCount must be a non-negative number (0 = unbounded).');
+    }
+    update.worktreeMaxCount = Math.floor(parsed);
+  }
+
+  if (body.worktreeMaxTotalGb !== undefined) {
+    const raw = body.worktreeMaxTotalGb;
+    const parsed = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error('worktreeMaxTotalGb must be a non-negative number (0 = unbounded).');
+    }
+    update.worktreeMaxTotalGb = parsed;
+  }
+
+  if (body.storageReserveRatio !== undefined) {
+    const parsed = parseStorageReserveRatio(body.storageReserveRatio);
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) update.storageReserveRatio = parsed;
+  }
+
+  if (body.storageReserveFloorGb !== undefined) {
+    const parsed = typeof body.storageReserveFloorGb === 'number'
+      ? body.storageReserveFloorGb
+      : Number(body.storageReserveFloorGb);
+    if (Number.isFinite(parsed) && parsed > 0 && parsed <= 10000) update.storageReserveFloorGb = parsed;
+  }
+
+  if (body.workspaceParkingMode === 'manual' || body.workspaceParkingMode === 'pressure'
+    || body.workspaceParkingMode === 'settled') {
+    update.workspaceParkingMode = body.workspaceParkingMode;
+  }
+
+  const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {
+    if (!raw || typeof raw !== 'object') throw new Error(`${name} must be an object { runtime, model, effort }.`);
+    const o = raw as Record<string, unknown>;
+    if (!isDispatchRuntime(o.runtime)) {
+      throw new Error(`${name}.runtime must name a dispatchable runtime.`);
+    }
+    if (typeof o.model !== 'string') throw new Error(`${name}.model must be a string ('' = runtime default).`);
+    if (!isThinkingEffort(o.effort)) throw new Error(`${name}.effort must be a valid thinking effort.`);
+    return { runtime: o.runtime, model: o.model, effort: o.effort };
+  };
+  if (body.targetingTriage !== undefined) update.targetingTriage = validateTier(body.targetingTriage, 'targetingTriage');
+  if (body.targetingAction !== undefined) update.targetingAction = validateTier(body.targetingAction, 'targetingAction');
+
+  return update;
+}
+
+/** `project` names the project layer a native read or write resolves against. */
+export function projectParam(query: URLSearchParams): string | null {
+  const project = query.get('project')?.trim();
+  return project && isSettingsLayerId(project) ? project : null;
+}
+
+/** One key per scoped write; `null` clears the layer value so it falls through. */
+export async function postNativeScoped(query: URLSearchParams, body: Record<string, unknown>) {
+  const scope = query.get('scope');
+  if (scope !== 'project' && scope !== 'machine') return response({ error: 'scope must be global, project or machine.' }, 400);
+  const keys = Object.keys(body).filter((key) => key !== 'settingsTomlRevision');
+  if (keys.length !== 1) return response({ error: 'A scoped write changes exactly one setting.' }, 400);
+  const [key] = keys;
+  let value: unknown = null;
+  if (body[key] !== null) {
+    // Same field validation as a global write.
+    if (key === 'workerRuntimes' && !isWorkerRuntimeList(body[key])) {
+      return response({ error: 'workerRuntimes must contain at least one dispatchable runtime.' }, 400);
+    }
+    const storageValidationError = workspaceStorageValidationError({ [key]: body[key] });
+    if (storageValidationError) return response({ error: storageValidationError }, 400);
+    const update = normalizeUpdate({ [key]: body[key] });
+    if (!Object.hasOwn(update, key)) return response({ error: 'No supported fields in request body.' }, 400);
+    if (update.threecodeWorkerModel) await assertThreecodeWorkerModelAvailable(update.threecodeWorkerModel);
+    value = (update as Record<string, unknown>)[key];
+  }
+  await withStoragePressurePolicyLock(() => updateNativeScopedSetting(scope, projectParam(query), key, value, body.settingsTomlRevision));
+  return response({ ok: true });
+}
+

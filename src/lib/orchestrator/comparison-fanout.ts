@@ -103,7 +103,7 @@ export function fanOutComparisonPackets(state: OrchestratorMissionState): Orches
       const workerRouting = resolveWorkerRouting({
         workerIntent: packet.workerIntent,
         requestedProvider: packet.workerRouting?.requestedProvider,
-        requestedRuntime: target.runtime,
+        requestedRuntime: target.runtime === packet.runtime ? packet.workerRouting?.runtimeSubstitution?.requestedRuntime ?? target.runtime : target.runtime,
         requestedModel: target.model,
         requestedEffort: packet.workerRouting?.requestedEffort,
         confidence: packet.workerRouting?.confidence,

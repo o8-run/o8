@@ -14,6 +14,9 @@ impl Settings {
         let imported = theme::imported_themes()
             .into_iter()
             .map(|(mode, label)| (mode, label, "Imported VS Code theme.".to_string()));
+        let bespoke = theme::bespoke_themes()
+            .into_iter()
+            .map(|(mode, label, description)| (mode, label, description.to_string()));
         for (mode, label, description) in [
             ("light", "Light Solid", "Opaque panels and workspace."),
             ("dark", "Dark Solid", "Opaque panels and workspace."),
@@ -26,9 +29,20 @@ impl Settings {
         ]
         .map(|(mode, label, description)| (mode.into(), label.into(), description.into()))
         .into_iter()
+        .chain(bespoke)
         .chain(imported)
         {
             let active = current == mode;
+            let swatches = theme::swatches(&mode).map(|colors| {
+                div().flex().gap(px(4.)).children(colors.map(|color| {
+                    div()
+                        .size(px(14.))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(theme().border)
+                        .bg(color)
+                }))
+            });
             let action = mode.clone();
             choices = choices.child(
                 self.button(
@@ -61,9 +75,146 @@ impl Settings {
                         .text_size(px(11.))
                         .text_color(theme().text_muted)
                         .child(description),
-                ),
+                )
+                .children(swatches),
             );
         }
+        let tuned = theme::glass_settings();
+        let mut backdrops = div().flex().flex_wrap().gap(px(12.));
+        for (kind, label, vivid) in [("frosted", "Frosted", false), ("vivid", "Vivid", true)] {
+            let active = tuned.vivid == vivid;
+            backdrops = backdrops.child(
+                self.button(
+                    format!("setting-glass-backdrop-{kind}"),
+                    label.into(),
+                    true,
+                    active,
+                    window,
+                    cx,
+                    move |this, _, cx| {
+                        cx.emit(Action::Appearance(format!("glass-backdrop:{kind}")));
+                        this.changed(cx);
+                    },
+                )
+                .border_1()
+                .border_color(if active {
+                    theme().accent
+                } else {
+                    theme().border
+                }),
+            );
+        }
+        for (label, veil) in theme::GLASS_PRESETS {
+            backdrops = backdrops.child(self.button(
+                format!("setting-glass-preset-{}", label.to_lowercase()),
+                label.into(),
+                true,
+                false,
+                window,
+                cx,
+                move |this, _, cx| {
+                    cx.emit(Action::Appearance(format!("glass-veil:{veil}")));
+                    this.changed(cx);
+                },
+            ));
+        }
+        // The veil slider: a press or a drag along the track sets the share.
+        let track = std::rc::Rc::new(std::cell::Cell::new(gpui::Bounds::<gpui::Pixels>::default()));
+        let share_at = {
+            let track = track.clone();
+            move |x: gpui::Pixels| {
+                let bounds = track.get();
+                let width = f32::from(bounds.size.width).max(1.);
+                ((f32::from(x) - f32::from(bounds.origin.x)) / width).clamp(0., 1.)
+            }
+        };
+        let pressed = share_at.clone();
+        let veil_slider = div()
+            .flex()
+            .items_center()
+            .gap(px(12.))
+            .child(
+                div()
+                    .w(px(56.))
+                    .text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child("Veil"),
+            )
+            .child(
+                div()
+                    .id("setting-glass-veil")
+                    .debug_selector(|| "setting-glass-veil".into())
+                    .relative()
+                    .w(px(260.))
+                    .h(px(22.))
+                    .flex()
+                    .items_center()
+                    .cursor_pointer()
+                    .child(
+                        gpui::canvas(
+                            {
+                                let track = track.clone();
+                                move |bounds, _, _| track.set(bounds)
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(4.))
+                            .rounded(px(2.))
+                            .bg(theme().border)
+                            .child(
+                                div()
+                                    .h_full()
+                                    .rounded(px(2.))
+                                    .w(gpui::relative(tuned.veil))
+                                    .bg(theme().accent),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(5.))
+                            .left(gpui::relative(tuned.veil))
+                            .ml(px(-6.))
+                            .size(px(12.))
+                            .rounded_full()
+                            .bg(theme().text),
+                    )
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                            let veil = pressed(event.position.x);
+                            cx.emit(Action::Appearance(format!("glass-veil:{veil}")));
+                            this.changed(cx);
+                        }),
+                    )
+                    .on_mouse_move(cx.listener(
+                        move |this, event: &gpui::MouseMoveEvent, _, cx| {
+                            if event.pressed_button == Some(gpui::MouseButton::Left) {
+                                let veil = share_at(event.position.x);
+                                cx.emit(Action::Appearance(format!("glass-veil:{veil}")));
+                                this.changed(cx);
+                            }
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme().text_muted)
+                    .child(format!("{}%", (tuned.veil * 100.).round())),
+            );
+        let glass = div()
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .child(backdrops)
+            .child(veil_slider);
         let import = self.button(
             "setting-theme-import".into(),
             "Import VS Code theme…".into(),
@@ -105,6 +256,41 @@ impl Settings {
                     theme().border
                 }),
             );
+        }
+        // The whole window's zoom, as the primary modifier with = - 0 sets it.
+        let percent = theme::zoom_percent();
+        let mut zoom = div().flex().items_center().gap(px(12.));
+        for (id, label, enabled, steps) in [
+            ("out", "−", percent > theme::ZOOM_MIN, -1),
+            ("reset", "Reset", percent != theme::ZOOM_DEFAULT, 0),
+            ("in", "+", percent < theme::ZOOM_MAX, 1),
+        ] {
+            let button = self.button(
+                format!("setting-zoom-{id}"),
+                label.into(),
+                enabled,
+                false,
+                window,
+                cx,
+                move |this, window, cx| {
+                    match steps {
+                        0 => crate::zoom::reset(window, cx),
+                        steps => crate::zoom::step(steps, window, cx),
+                    }
+                    this.changed(cx);
+                },
+            );
+            zoom = zoom.child(button.border_1().border_color(theme().border));
+            if id == "out" {
+                zoom = zoom.child(
+                    div()
+                        .debug_selector(|| "setting-zoom-level".into())
+                        .min_w(px(44.))
+                        .flex()
+                        .justify_center()
+                        .child(crate::zoom::label(percent)),
+                );
+            }
         }
         let installed = self
             .font_families
@@ -159,8 +345,16 @@ impl Settings {
             .child(choices)
             .child(import)
             .children(import_error)
+            .child(
+                div()
+                    .text_color(theme().text_muted)
+                    .child("Glass (All Glass only): backdrop, presets and veil"),
+            )
+            .child(glass)
             .child(div().text_color(theme().text_muted).child("Chat width"))
             .child(widths)
+            .child(div().text_color(theme().text_muted).child("Zoom"))
+            .child(zoom)
             .child(fonts)
             .child(div().text_size(px(11.)).text_color(theme().text_muted)
                 .child("Changes apply immediately and are saved for the next launch. Glass uses the macOS desktop material where supported; other platforms may use solid surfaces."))

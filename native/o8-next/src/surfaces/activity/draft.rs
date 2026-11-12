@@ -23,7 +23,7 @@ pub(super) fn open(
             if let Tab::Session(id) = tab {
                 sessions
                     .iter()
-                    .find(|session| session.id == *id)
+                    .find(|session| session.id == *w.selections.get(id).unwrap_or(id))
                     .map(|session| session.id.clone())
             } else {
                 None
@@ -84,7 +84,7 @@ fn place(
         s.switch(repo.to_owned(), window, cx);
     }
     s.execute(Command::Session(id.to_owned()), window, cx);
-    if let Some(Content::Session(view)) = s.content.get(&s.key(&Tab::Session(id.to_owned()))) {
+    if let Some(Content::Session(view)) = s.thread_content(id) {
         view.update(cx, |surface, cx| surface.prepend_draft(text, window, cx));
     }
 }

@@ -54,6 +54,7 @@ use util::{ResultExt, measure};
 use uuid::Uuid;
 
 mod prompts;
+mod zoom;
 
 use crate::util::atomic_incr_if_not_zero;
 pub use prompts::*;
@@ -890,6 +891,7 @@ pub struct Window {
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
+    zoom: f32, // o8: see window/zoom.rs
     pub(crate) bounds_observers: SubscriberSet<(), AnyObserver>,
     appearance: WindowAppearance,
     pub(crate) appearance_observers: SubscriberSet<(), AnyObserver>,
@@ -1293,6 +1295,7 @@ impl Window {
             modifiers,
             capslock,
             scale_factor,
+            zoom: 1.,
             bounds_observers: SubscriberSet::new(),
             appearance,
             appearance_observers: SubscriberSet::new(),
@@ -1752,8 +1755,7 @@ impl Window {
     }
 
     fn bounds_changed(&mut self, cx: &mut App) {
-        self.scale_factor = self.platform_window.scale_factor();
-        self.viewport_size = self.platform_window.content_size();
+        self.read_platform_metrics();
         self.display_id = self.platform_window.display().map(|display| display.id());
 
         self.refresh();
@@ -1795,6 +1797,56 @@ impl Window {
     /// Returns the size of the drawable area within the window.
     pub fn viewport_size(&self) -> Size<Pixels> {
         self.viewport_size
+    }
+
+    /// The bounds of every element that has a debug selector, as of the last
+    /// frame. o8: read by the development driver (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn debug_selector_bounds(&self) -> Vec<(String, Bounds<Pixels>)> {
+        self.rendered_frame
+            .debug_bounds
+            .iter()
+            .map(|(selector, bounds)| (selector.clone(), *bounds))
+            .collect()
+    }
+
+    /// Dispatches a mouse, scroll or key event as the platform would.
+    /// `dispatch_event` returns a crate-private type, so it cannot be called
+    /// from outside. o8: used by the development driver (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn dispatch_input_event(&mut self, event: PlatformInput, cx: &mut App) {
+        self.dispatch_event(event, cx);
+    }
+
+    /// The bounds of the topmost press area at a point in the last frame,
+    /// before clipping. o8: the development driver checks a press reaches
+    /// the control it named (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn topmost_hitbox_bounds(&self, position: Point<Pixels>) -> Option<Bounds<Pixels>> {
+        self.rendered_frame
+            .hitboxes
+            .iter()
+            .rev()
+            .find(|hitbox| {
+                hitbox
+                    .bounds
+                    .intersect(&hitbox.content_mask.bounds)
+                    .contains(&position)
+            })
+            .map(|hitbox| hitbox.bounds)
+    }
+
+    /// Gives text to the focused text input without a key event, so no key
+    /// listener sees it. False when nothing that takes text has focus. o8:
+    /// used by the development driver (O8-PATCHES.md).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn dispatch_text_input(&mut self, text: &str, cx: &mut App) -> bool {
+        let Some(mut input_handler) = self.platform_window.take_input_handler() else {
+            return false;
+        };
+        input_handler.dispatch_input(text, self, cx);
+        self.platform_window.set_input_handler(input_handler);
+        true
     }
 
     /// Returns whether this window is focused by the operating system (receiving key events).
@@ -3702,7 +3754,7 @@ impl Window {
         // Handlers may set this to true by calling `prevent_default`.
         self.default_prevented = false;
 
-        let event = match event {
+        let event = match self.input_from_platform(event) {
             // Track the mouse position with our own state, since accessing the platform
             // API for the mouse position can only occur on the main thread.
             PlatformInput::MouseMove(mouse_move) => {
@@ -3776,7 +3828,7 @@ impl Window {
                     PlatformInput::FileDrop(FileDropEvent::Exited)
                 }
             },
-            PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_) => event,
+            event @ (PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_)) => event,
         };
 
         if let Some(any_mouse_event) = event.mouse_event() {

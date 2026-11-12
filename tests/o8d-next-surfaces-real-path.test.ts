@@ -76,6 +76,31 @@ beforeAll(async () => {
 }, 180_000);
 afterAll(async () => { await server?.stop(); });
 
+it('registers each setup API path and method only once across surfaces', async () => {
+  const { nativeSurfaceRoutes } = await import('@/lib/ws-server/native-http-registry');
+  const seen = new Set<string>();
+  const duplicates: string[] = [];
+  for (const route of Object.values(nativeSurfaceRoutes).flat().filter(route => route.path.startsWith('/api/setup/'))) {
+    for (const method of route.methods) {
+      const key = `${method} ${route.path}`;
+      if (seen.has(key)) duplicates.push(key);
+      seen.add(key);
+    }
+  }
+  expect(duplicates).toEqual([]);
+});
+
+it.each(['/api/panel/branches', '/api/visualizations'])(
+  'lists every split-registration verb once, sorted, when PATCH %s is refused', async (path) => {
+    const response = await fetch(origin + path, {
+      method: 'PATCH', headers: { authorization: `Bearer ${server.token}` },
+    });
+    expect(response.status).toBe(405);
+    expect(response.headers.get('allow')).toBe('GET, POST');
+    expect(await response.json()).toEqual({ error: 'Method not allowed' });
+  },
+);
+
 it.each([
   ['Settings', 'GET', '/api/panel/operator-defaults?include=native', 200],
   ['Projects', 'GET', '/api/panel/projects', 200],
@@ -400,20 +425,14 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   if (routePath === '/api/runtime/acp-registry') {
     expect(JSON.parse(body)).toMatchObject({ stale: false, agents: [{ id: 'fixture-agent', version: '1.0.0' }] });
   }
-  // These reads also register their existing production writes; all other reads stay GET-only.
-  const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
-  const readWriteMethods: Record<string, string[]> = {
-    '/api/tasks': ['GET', 'POST'],
-    '/api/cortex/proposals': ['GET', 'POST'],
-    '/api/cortex/cross-repo-proposals': ['GET', 'POST'],
-    '/api/setup/cli-updates': ['GET', 'POST'],
-    '/api/panel/problem-dossiers': ['GET', 'POST'],
-    '/api/repo-spec': ['GET', 'PUT', 'POST'],
-  };
-  expect(methods).toEqual(readWriteMethods[routePath] ?? ['GET']);
-  const registeredMethods = new Set(nativeSurfaceRoutes[surface]
-    .filter(route => route.path === routePath).flatMap(route => route.methods));
-  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !registeredMethods.has(method))) {
+  // Split registrations share one HTTP path and advertise all supported verbs.
+  const methods = [...new Set(nativeSurfaceRoutes[surface]
+    .filter(route => route.path === routePath).flatMap(route => route.methods))].sort();
+  const readWritePaths = ['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals',
+    '/api/setup/cli-updates', '/api/panel/problem-dossiers', '/api/panel/branches', '/api/visualizations'];
+  expect(methods).toEqual(routePath === '/api/repo-spec' ? ['GET', 'POST', 'PUT']
+    : readWritePaths.includes(routePath) ? ['GET', 'POST'] : ['GET']);
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
     expect(refused.headers.get('allow')).toBe(methods.join(', '));
@@ -869,7 +888,7 @@ it('serves the operator MCP host over native and rejects non-POST/DELETE verbs (
 
   const rejected = await fetch(`${origin}/api/mcp`, { headers: { authorization: `Bearer ${server.token}` } });
   expect(rejected.status).toBe(405);
-  expect(rejected.headers.get('allow')).toBe('POST, DELETE');
+  expect(rejected.headers.get('allow')).toBe('DELETE, POST');
 });
 
 it('adds, lists and removes a session rule through the native transport', async () => {

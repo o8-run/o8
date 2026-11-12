@@ -30,19 +30,10 @@ import { createRoleRouteChoice } from '@/lib/operator/role-routing';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 import { flushBrainQuotaAlerts, noteBrainQuotaError } from './brain-quota-alert';
 
+import { ManagedBrainUnavailableError } from './managed-brain-unavailable';
+
 export type SseEmit = (name: string, payload: unknown) => void;
-
-export const MANAGED_BRAIN_UNAVAILABLE_MESSAGE = 'Managed Brain inference is unavailable or its allowance is reached. Select Subscription in Brain settings to use a connected CLI.';
-
-/** A managed-only request failed. Callers must surface it and never cache it. */
-export class ManagedBrainUnavailableError extends Error {
-  readonly code = 'managed_brain_unavailable';
-
-  constructor() {
-    super(MANAGED_BRAIN_UNAVAILABLE_MESSAGE);
-    this.name = 'ManagedBrainUnavailableError';
-  }
-}
+export { ManagedBrainUnavailableError, MANAGED_BRAIN_UNAVAILABLE_MESSAGE } from './managed-brain-unavailable';
 
 /**
  * Class A compose chain (rewired in #915 path-to-70 phase 1.7 v2):

@@ -261,11 +261,19 @@ export function handleBroadcastPost(
         403,
       );
     }
+    if (refs.laneId && !sqlite.prepare('SELECT id FROM lanes WHERE id = ? AND packet_id = ?')
+      .get(refs.laneId, principal.packetId)) {
+      throw new BroadcastPostError(
+        'A worker can post only for a lane of its bound packet.',
+        'worker_lane_mismatch',
+        403,
+      );
+    }
     refs.packetId = principal.packetId;
   }
   return appendBroadcastEvent({
     kind: body.kind as 'commentary' | 'conversation',
-    actor: body.actor as string,
+    actor: principal.role === 'worker' ? `worker:${principal.packetId}` : body.actor as string,
     audience: body.audience as string | null | undefined,
     text: body.text as string,
     refs,
