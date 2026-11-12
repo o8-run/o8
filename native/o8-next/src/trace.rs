@@ -878,7 +878,7 @@ pub(crate) fn seconds(ms: f64) -> String {
 }
 
 /// The header: "Thinking" with its running seconds, then how long it took.
-fn title(steps: &[Step], trace: &Trace, now: f64) -> (String, Option<String>) {
+pub(crate) fn title(steps: &[Step], trace: &Trace, now: f64) -> (String, Option<String>) {
     if trace.live {
         let elapsed = trace.started.map(|start| seconds(now - start));
         let working = steps.is_empty() && !trace.thinking;
