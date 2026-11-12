@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 export async function seedWorkerTargets(directory: string) {
@@ -6,7 +7,7 @@ export async function seedWorkerTargets(directory: string) {
   const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
   await withLockedState(state => {
     for (const id of ['packet-a', 'packet-b', 'packet-no-pr']) state.packets.push({
-      id, title: id, summary: 'fixture', status: 'running', workspaceTargetPath: directory,
+      id, title: id, summary: 'fixture', status: 'running', workspaceTargetPath: join(directory, id), orchestratorThreadId: `thread-${id}`,
     } as OrchestratorPacket);
     return state;
   });

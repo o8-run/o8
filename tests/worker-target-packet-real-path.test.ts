@@ -63,3 +63,26 @@ it('checks the recorded packet PR destination', async () => {
   expect(await response.json()).toMatchObject({ mirrored: false, reason: 'no proof screenshots for this packet/lane' });
   expect((await call('/api/panel/artifacts/mirror', { ...body, packetId: 'packet-b' }, operator)).status).toBe(422);
 });
+
+it.each([
+  ['prNumber', 11, 22],
+  ['threadId', 'thread-packet-a', 'thread-packet-b'],
+  ['repoPath', join(directory, 'packet-a'), join(directory, 'packet-b')],
+])('checks artifact %s against the caller packet', async (field, own, other) => {
+  const body = { packetId: 'packet-a', bytesBase64: 'eA==', kind: 'video', mimeType: 'video/mp4' };
+  expect((await call('/api/panel/artifacts', { ...body, [field]: other })).status).toBe(403);
+  const accepted = await call('/api/panel/artifacts', { ...body, [field]: own });
+  expect(accepted.status).toBe(200);
+  const { artifactId } = await accepted.json();
+  const { listArtifacts } = await import('@/lib/artifacts/store');
+  expect(listArtifacts({ packetId: 'packet-a' }).find(a => a.id === artifactId)).toMatchObject({ [field]: own });
+  expect((await call('/api/panel/artifacts', { ...body, [field]: other }, operator)).status).toBe(200);
+});
+it('stores the canonical managed run packet ID', async () => {
+  const accepted = await call('/api/panel/managed-runs', { id: 'trimfixture', session: 'cortex-run-trimfixture',
+    command: 'fixture', cwd: directory, packetId: ' packet-a ', laneId: seeded.own });
+  expect(accepted.status).toBe(200);
+  expect(await accepted.json()).toMatchObject({ run: { packetId: 'packet-a' } });
+  const { findManagedRun } = await import('@/lib/runtimes/managed-runs/registry');
+  expect(findManagedRun('trimfixture')?.packetId).toBe('packet-a');
+});

@@ -17,6 +17,8 @@ import {
 } from '@/lib/artifacts/store';
 import { publishArtifactRecorded } from '@/lib/realtime/publisher';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
+import { packetHasRecordedPr } from '@/lib/artifacts/worker-binding';
+import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { getLane } from '@/lib/lane/registry';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25MB — generous for PNG; videos gate later.
@@ -156,6 +158,17 @@ export async function POST(request: Request) {
     || (meta.laneId ? workerPacketRefusal(principal, getLane(meta.laneId)?.packetId) : null);
   if (ownershipRefusal) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
+
+  if (principal.role === 'worker') {
+    const packet = readOrchestratorControlPlaneState().packets.find(p => p.id === principal.packetId);
+    if (!packet
+      || (meta.prNumber !== null && !packetHasRecordedPr(packet.id, meta.prNumber))
+      || (meta.threadId !== null && meta.threadId !== packet.orchestratorThreadId)
+      || (meta.repoPath !== null && meta.repoPath !== packet.workspaceTargetPath)) {
+      return NextResponse.json({ ok: false, error: { code: 'worker_packet_mismatch',
+        message: 'Artifact associations must match the caller packet.' } }, { status: 403 });
+    }
   }
 
   const id = newArtifactId();
