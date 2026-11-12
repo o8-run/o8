@@ -22,3 +22,18 @@ Module._load = function(request, parent, isMain) {
   return real;
 };
 if (process.env.O8_SYMON_FIXTURE_DEFAULT === '1') delete process.env.O8_NEXT_O8D;
+
+// Opt-in daemon lifecycle diagnostics for the real-path fixture.
+if (process.env.O8_TEST_DAEMON_TRACE === '1') {
+  const cp = require('node:child_process');
+  const spawn = cp.spawn;
+  cp.spawn = function(...args) {
+    const child = spawn.apply(this, args);
+    if (args[1]?.includes('--app-upstream')) {
+      console.error('[daemon] spawn', child.pid);
+      child.stderr?.on('data', chunk => process.stderr.write(chunk));
+      child.on('exit', (code, signal) => console.error('[daemon] exit', child.pid, code, signal));
+    }
+    return child;
+  };
+}
