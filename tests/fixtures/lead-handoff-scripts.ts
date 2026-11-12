@@ -71,7 +71,8 @@ if (process.env.O8_WORKER_PACKET_ID) {
   process.exit(0);
 }
 if (prompt.includes('[fixture:dispatch-worker]')) {
-  const deadline = Date.now() + 20_000;
+  // The parent prepares and launches the real worker before releasing this turn.
+  const deadline = Date.now() + 60_000;
   while (!process.env.O8_TEST_DISPATCH_READY_FILE || !existsSync(process.env.O8_TEST_DISPATCH_READY_FILE)) {
     if (Date.now() >= deadline) throw new Error('Timed out waiting for real-path worker dispatch.');
     await new Promise((resolve) => setTimeout(resolve, 25));

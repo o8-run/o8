@@ -180,7 +180,7 @@ async function wait(mode: OutputMode, args: string[]): Promise<number> {
   if (!Number.isSafeInteger(cursor) || cursor < 0) {
     throw new CliError('invalid_args', '--after must be a non-negative integer.', EXIT.INVALID_ARGS);
   }
-  const terminal = new Set(['completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
+  const terminal = new Set(['unreported', 'completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
   let latest: LeadResponse | null = null;
   let turnId = value(args, 'turn');
   while (Date.now() < deadline) {
@@ -197,6 +197,11 @@ async function wait(mode: OutputMode, args: string[]): Promise<number> {
       : latest.requestedTurn?.status ?? latest.lead.status;
     if (terminal.has(terminalStatus) || terminalStatus === 'interrupted') {
       printLead(mode, latest);
+      if (terminalStatus === 'unreported') {
+        throw new CliError('lead_unreported',
+          `unreported: ${latest.lead.result?.reason ?? 'turn ended without an outcome report'}. Send new work or stop the lead.`,
+          EXIT.LEAD_UNREPORTED);
+      }
       return 0;
     }
   }

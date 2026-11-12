@@ -18,6 +18,7 @@ import {
 import { resolveOrchestratorThreadProjectId } from '@/lib/mobile/orchestrator-thread-project';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import {
+  UNREPORTED_LEAD_REASON,
   cleanLeadString,
   digestLeadRequest,
   LeadLifecycleError,
@@ -140,13 +141,14 @@ function authoritativeLane(packet: ReturnType<typeof threadPackets>[number]) {
 }
 
 async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: LeadStatus; detail: string }> {
-  if (!turn.outcome_kind) {
-    return { status: 'waiting', detail: 'Turn ended without an outcome report.' };
-  }
   const packets = threadPackets(lead.thread_id);
   const unresolvedPackets = packets.filter((packet) => !packetIsResolved(packet));
   const obligations = unresolvedPackets.map((packet) => ({ packet, lane: authoritativeLane(packet) }));
   const lanes = obligations.flatMap(({ lane }) => lane ? [lane] : []);
+  if (lanes.some((lane) => lane.status === 'failed')
+    || obligations.some(({ packet, lane }) => !lane && ['failed', 'blocked'].includes(packet.status))) {
+    return { status: 'blocked', detail: 'A bound worker failed or is blocked.' };
+  }
   if (lanes.some((lane) => lane.status === 'awaiting_human')) {
     return { status: 'needs_approval', detail: 'A bound worker requires a distinct human approval.' };
   }
@@ -158,18 +160,21 @@ async function classifyLead(lead: LeadRow, turn: TurnRow): Promise<{ status: Lea
     return { status: 'needs_approval', detail: 'Lead review passed; operator-controlled release remains pending.' };
   }
   const activeWorker = lanes.some((lane) => [
-    'idle', 'launching', 'running', 'paused', 'recovering', 'merging',
+    'idle', 'launching', 'running', 'paused', 'recovering', 'merging', 'reviewing',
   ].includes(lane.status));
   const missingActiveLane = obligations.some(({ packet, lane }) => !lane
     && !['failed', 'blocked'].includes(packet.status));
   if (activeWorker || missingActiveLane) {
     return { status: 'waiting_workers', detail: 'Lead is waiting for a bound worker return.' };
   }
-  const unresolvedReview = lanes.some((lane) => ['reviewing', 'awaiting_orchestrator', 'awaiting_input', 'failed'].includes(lane.status));
+  const unresolvedReview = lanes.some((lane) => ['awaiting_orchestrator', 'awaiting_input', 'failed'].includes(lane.status));
   const unresolvedPacket = obligations.some(({ packet, lane }) => !lane
     && ['failed', 'blocked'].includes(packet.status));
   if (unresolvedReview || unresolvedPacket) {
     return { status: 'blocked', detail: 'A bound worker failure, context request, or review obligation remains unresolved.' };
+  }
+  if (!turn.outcome_kind) {
+    return { status: 'unreported', detail: UNREPORTED_LEAD_REASON };
   }
   if (turn.outcome_kind === 'completed') {
     const evidence = turn.outcome_evidence_json
@@ -297,10 +302,9 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
     const now = Date.now();
     getSqlite().transaction(() => {
       const settled = getSqlite().prepare(`
-        UPDATE orchestrator_lead_turns SET status = ?, result_text = ?, session_id = ?, finished_at = ?, error = ?
+        UPDATE orchestrator_lead_turns SET status = ?, result_text = ?, session_id = ?, finished_at = ?
         WHERE id = ? AND status = 'running' AND lease_token = ?
-      `).run(classification.status, text || null, sessionId, now,
-        classification.status === 'waiting' ? classification.detail : null, turn.id, turn.lease_token);
+      `).run(classification.status, text || null, sessionId, now, turn.id, turn.lease_token);
       if (settled.changes !== 1) return;
       const queued = (getSqlite().prepare(`
         SELECT COUNT(*) AS count FROM orchestrator_lead_turns WHERE lead_id = ? AND status = 'queued'
@@ -662,7 +666,7 @@ export function stopLead(leadIdRaw: string, reasonRaw?: string) {
     getSqlite().prepare(`
       UPDATE orchestrator_lead_turns
       SET status = 'stopped', error = ?, finished_at = ?
-      WHERE lead_id = ? AND status IN ('queued', 'running', 'waiting_workers')
+      WHERE lead_id = ? AND status IN ('queued', 'running', 'waiting_workers', 'unreported')
     `).run(reason, now, leadId);
     event(leadId, lead.current_turn_id, 'lead', 'stopped', reason);
   })();

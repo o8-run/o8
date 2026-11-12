@@ -39,7 +39,7 @@ export async function sendLeadTerminalStatus(
       channel: 'orchestrator',
       event: 'status',
       data: {
-        status: status === 'failed' || status === 'stopped' ? 'dead' : status === 'waiting' ? 'waiting' : 'ready',
+        status: status === 'failed' || status === 'stopped' ? 'dead' : status === 'unreported' ? 'unreported' : 'ready',
         outcome: receipt.requestedTurn?.outcome ?? null,
         reason: receipt.requestedTurn?.reason ?? null,
         leadStatus: status,

@@ -4,7 +4,7 @@
  * Wraps fetch with bearer-token injection and translates HTTP failures into
  * the documented exit-code surface (#2 connection refused, #3 unauthorized,
  * #4 not found, #5 conflict, #6 ambiguous server timeout). Every other error
- * bubbles as exit 1.
+ * bubbles as exit 1. Lead wait uses #7 for an ended turn without an outcome.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -20,6 +20,7 @@ export const EXIT = {
   NOT_FOUND: 4,
   CONFLICT: 5,
   SERVER_TIMEOUT: 6,
+  LEAD_UNREPORTED: 7,
 } as const;
 
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];

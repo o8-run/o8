@@ -8,8 +8,10 @@ import { modelBelongsToRuntime } from '@/lib/lane/orchestrator-model-guard';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { resolveEffortPin, type ConcreteThinkingEffort } from '@/lib/orchestrator/effort-pin';
 
-export type LeadStatus = 'queued' | 'running' | 'waiting' | 'waiting_workers' | 'completed'
+export type LeadStatus = 'queued' | 'running' | 'unreported' | 'waiting_workers' | 'completed'
   | 'blocked' | 'needs_approval' | 'failed' | 'stopped';
+
+export const UNREPORTED_LEAD_REASON = 'turn ended without an outcome report';
 
 export type LeadOutcomeKind = 'completed' | 'waiting_workers' | 'needs_context'
   | 'needs_approval' | 'blocked';

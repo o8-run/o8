@@ -592,7 +592,7 @@ describe('persistent lead handoff real path', () => {
     ]);
     expect(sent.exitCode, sent.stderr).toBe(0);
     const waitedPromise = runCli(['lead', 'wait', lead.id, '--turn',
-      (JSON.parse(sent.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '40s']);
+      (JSON.parse(sent.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '80s']);
     const leadTurnId = (JSON.parse(sent.stdout) as LeadCliReceipt).admittedTurnId!;
     const [{ getOrCreateWsToken }, { resolvePortInfo }] = await Promise.all([
       import('@/lib/ws-auth'),
@@ -694,6 +694,24 @@ describe('persistent lead handoff real path', () => {
       repoPath, packetId: worker.packetId, laneId: worker.laneId, label: 'duplicate natural return',
     })).toBe(true);
     expect(reviewCount()).toBe(1);
+    // Model a new admitted worker turn before its exit. A watch must not
+    // resurrect an awaiting-review packet without new work admission.
+    await withMissionRegistryState(worker.missionId, (state) => {
+      const packet = state.packets.find(candidate => candidate.id === worker.packetId)!;
+      packet.status = 'running';
+      if (packet.lane) packet.lane.status = 'running';
+      return { state, result: undefined };
+    });
+    updateLane(worker.laneId, { status: 'running' }, 'system', { reason: 'fixture successor admitted' });
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+    await withLockedState(state => {
+      const packet = state.packets.find(candidate => candidate.id === worker.packetId);
+      if (packet) {
+        packet.status = 'running';
+        if (packet.lane) packet.lane.status = 'running';
+      }
+    });
+
     appendEvent(worker.laneId, 'runtime_process_exit', 'system', {
       surfaceId: lane.sessionKey,
       runId: 'fixture-successor-finished-run',
@@ -709,6 +727,7 @@ describe('persistent lead handoff real path', () => {
     });
     expect(successorWatch.status).toBe(200);
     await vi.waitFor(() => expect(reviewCount()).toBe(2), { timeout: 10_000 });
+    expect((await settled(lead.id)).lead.status).toBe('needs_approval');
 
     updateLane(worker.laneId, { status: 'failed' }, 'system', { reason: 'retired test generation' });
     await withMissionRegistryState(worker.missionId, (state) => {
@@ -724,7 +743,7 @@ describe('persistent lead handoff real path', () => {
     ]);
     expect(released.exitCode, released.stderr).toBe(0);
     expect((await settled(lead.id)).lead.status).toBe('completed');
-  }, 90_000);
+  }, 120_000);
 
   it('preserves legacy WS chat and governs persistent WS execution, display, permissions, and stop', async () => {
     const started = await runCli(startArgs('outcome-and-ws'));

@@ -1,5 +1,6 @@
 import { getSqlite } from '@/lib/db';
 import {
+  UNREPORTED_LEAD_REASON,
   cleanLeadString,
   LeadLifecycleError,
   type LeadRow,
@@ -8,7 +9,7 @@ import {
 } from '@/lib/orchestrator/lead-contract';
 import { leadTurnOwnerState } from '@/lib/orchestrator/lead-turn-owner';
 
-const TERMINAL = new Set<LeadStatus>(['completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
+const TERMINAL = new Set<LeadStatus>(['unreported', 'completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
 
 export function appendLeadEvent(
   leadId: string,
@@ -115,7 +116,7 @@ export function getLeadStatus(leadIdRaw: string, afterCursor = 0, requestedTurnI
     kind: turn.kind,
     status: turn.status,
     outcome: outcome(turn),
-    reason: turn.status === 'waiting' ? turn.error : null,
+    reason: turn.status === 'unreported' ? UNREPORTED_LEAD_REASON : null,
     resultText: turn.result_text?.slice(0, 2_000) ?? null,
     error: turn.error?.slice(0, 2_000) ?? null,
     errorTruncated: Boolean(turn.error && turn.error.length > 2_000),
@@ -136,7 +137,7 @@ export function getLeadStatus(leadIdRaw: string, afterCursor = 0, requestedTurnI
         turnId: lead.result_turn_id,
         status: lead.result_status,
         outcome: outcome(resultTurn),
-        reason: lead.result_status === 'waiting' ? resultTurn?.error ?? null : null,
+        reason: lead.result_status === 'unreported' ? UNREPORTED_LEAD_REASON : null,
         text: lead.result_text?.slice(0, 2_000) ?? null,
         textTruncated: Boolean(lead.result_text && lead.result_text.length > 2_000),
         error: lead.error?.slice(0, 2_000) ?? null,
