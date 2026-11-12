@@ -1,6 +1,5 @@
-import { runtimeSelectionRefusal } from '@/lib/agents/routing';
+import { runtimeSelectionRefusal, validateRequestedRuntime } from '@/lib/agents/routing';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
-import { validateRequestedRuntime } from '@/lib/agents/routing';
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { RepoDispatchAdmissionError } from '@/lib/lane/repo-preflight';
