@@ -1,6 +1,6 @@
-import { lstatSync, realpathSync } from 'node:fs';
-import { dirname, basename, isAbsolute, join, sep } from 'node:path';
 import { NextResponse } from 'next/server';
+import { directoryInsideCheckout } from '@/lib/runtimes/managed-runs/checkout-containment';
+import { managedRunRepoPath } from '@/lib/runtimes/managed-runs/source-repo-path';
 import {
   registerManagedRun,
   finishManagedRun,
@@ -92,47 +92,6 @@ type RegisterBody = {
   cancelledBeforeLaunch?: boolean;
   stopRequestId?: string | null;
 };
-
-/** Resolve existing ancestors before appending a not-yet-created directory. */
-function realRunDirectory(directory: string): string {
-  try {
-    return realpathSync(directory);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    // A dangling symlink is not a directory that can safely be created here.
-    try {
-      if (lstatSync(directory).isSymbolicLink()) throw error;
-    } catch (statError) {
-      if (statError === error || (statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError;
-    }
-    const parent = dirname(directory);
-    if (parent === directory) throw error;
-    return join(realRunDirectory(parent), basename(directory));
-  }
-}
-
-function directoryInsideCheckout(cwd: string, checkout: string): boolean {
-  try {
-    const root = realpathSync(checkout);
-    const directory = realRunDirectory(isAbsolute(cwd) ? cwd : process.cwd() + sep + cwd);
-    return directory === root || directory.startsWith(root.endsWith(sep) ? root : root + sep);
-  } catch {
-    return false;
-  }
-}
-
-function managedRunRepoPath(run: ManagedRunRecord): string {
-  const lane = run.laneId ? getLane(run.laneId) : null;
-  if (lane) return lane.repoPath;
-  if (run.packetId) {
-    const latest = findLatestLaneByPacket(run.packetId);
-    if (!latest || !directoryInsideCheckout(run.cwd, latest.worktreePath ?? latest.repoPath)) {
-      throw new Error('managed_run_directory_outside_checkout');
-    }
-    return latest.repoPath;
-  }
-  return run.cwd;
-}
 
 /** POST — register a run (default), finish one (action:'finish'), or kill one (action:'kill'). */
 export async function POST(req: Request) {
@@ -307,6 +266,7 @@ async function post(req: Request) {
   }
   if (principal.role === 'worker') {
     const lane = body.laneId ? getLane(body.laneId) : findLatestLaneByPacket(principal.packetId!);
+    // Without a worktree, the lane's whole repository is its checkout.
     if (!lane || lane.packetId !== principal.packetId
       || !directoryInsideCheckout(body.cwd, lane.worktreePath ?? lane.repoPath)) {
       return NextResponse.json({ ok: false, error: 'managed_run_directory_outside_checkout' }, { status: 403 });
