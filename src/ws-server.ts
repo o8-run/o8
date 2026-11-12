@@ -9809,7 +9809,7 @@ async function bootstrapWsServer() {
   if (shuttingDown) return;
   try {
     const { reconcileResourceLeasesAtStartup } = await import(
-      '@/lib/leases/resource-lease-service'
+      '@/lib/leases/resource-lease-default-store'
     );
     const result = await reconcileResourceLeasesAtStartup();
     if (result.inspected > 0) {

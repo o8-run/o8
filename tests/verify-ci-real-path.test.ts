@@ -301,7 +301,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
     `);
     writeFileSync(preload, "import { register } from 'node:module'; register(new URL('./contention-loader.mjs', import.meta.url));");
   }
-  const result = spawnSync(process.execPath, [...(contend ? ['--import', preload] : []), path.join(directory, 'scripts/verify-ci.mjs')], {
+  const result = spawnSync(process.execPath, [...(contend ? ['--import', preload] : []), path.join(directory, 'scripts/verify-ci.mjs'), '--allow-concurrent'], {
     cwd: directory, encoding: 'utf8', timeout: 60_000,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
       VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,

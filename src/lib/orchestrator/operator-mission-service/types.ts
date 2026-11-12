@@ -108,6 +108,7 @@ export interface CreateMissionInput {
 }
 
 export interface DispatchMissionInput {
+  force?: boolean;
   missionId?: string;
   runtime?: OrchestratorRuntime;
 }

@@ -4240,6 +4240,15 @@
       ]
     },
     {
+      "path": "tests/machine-heavy-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/macos-cpu-packages.test.ts",
       "reasons": [
         "child-process",
