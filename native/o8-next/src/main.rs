@@ -4,36 +4,37 @@ mod activity;
 mod app_parent;
 mod brain;
 mod browser_panel;
+mod change_map;
 #[path = "shell_features/connection/client.rs"]
 mod client;
 mod clock;
 mod composer;
 mod devices_panel;
 mod diff;
-#[cfg(any(test, feature = "driver"))]
-mod driver;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;
+#[cfg(any(test, feature = "driver"))]
+mod driver;
 mod editor_command;
 mod files_panel;
 mod grid_sessions;
 mod icon;
 mod inbox;
-mod lineage;
 #[cfg(test)]
 mod input_reuse_tests;
-#[cfg(test)]
-mod native_anchor_tests;
 mod issues;
+mod lineage;
 mod merge;
 mod mission_card;
 mod model;
 mod motion;
+#[cfg(test)]
+mod native_anchor_tests;
 mod pane;
-mod pane_tree;
 mod pane_grid;
 mod pane_layout;
+mod pane_tree;
 mod project_icon;
 mod projects;
 mod projects_model;
@@ -47,6 +48,7 @@ mod shell_state;
 mod sidebar;
 mod snapshot_hotkey;
 mod stream;
+mod subagents;
 mod switch_receipt;
 mod terminal;
 mod terminal_grid;
@@ -54,20 +56,19 @@ mod terminal_transport;
 mod text;
 #[cfg(test)]
 mod text_ellipsis_tests;
-mod thread_messages;
 mod theme;
-mod theme_import;
 #[cfg(test)]
 mod theme_font_tests;
+mod theme_import;
 #[cfg(test)]
 mod theme_tests;
+mod thread_messages;
 mod trace;
-mod subagents;
 mod transcript_actions;
 mod transcript_diagram;
 mod transcript_peek;
-mod turn_files;
 mod transport;
+mod turn_files;
 mod ui;
 mod visualizations;
 mod wake;

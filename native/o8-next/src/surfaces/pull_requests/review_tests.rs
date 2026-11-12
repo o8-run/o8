@@ -71,3 +71,55 @@ fn pull_requests_submitted_reviews_survive_refresh_and_changed_head(cx: &mut Tes
     assert!(visual.debug_bounds("pr-discussion-submitted-501").is_some());
     assert!(visual.debug_bounds("pr-discussion-submitted-502").is_some());
 }
+
+#[gpui::test]
+fn pull_requests_change_map_reads_selected_head_and_filters_diff(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_args(&["--change-map"]);
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
+    });
+    settle(visual);
+    click(visual, "pr-row-7");
+    assert!(visual.debug_bounds("change-map-summary").is_some());
+    view.read_with(visual, |s, _| {
+        assert_eq!(s.map.delta["status"], "ready", "{}", s.map.summary());
+        assert_eq!(s.map.delta["summary"]["addedEdges"], 1);
+    });
+    click(visual, "change-map-summary");
+    let index = view.read_with(visual, |s, _| {
+        s.map.delta["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|n| n["path"] == "entry.ts")
+            .unwrap()
+    });
+    click(visual, &format!("change-map-node-{index}"));
+    view.read_with(visual, |s, _| {
+        assert_eq!(s.tab, "changes");
+        assert_eq!(s.map.selected, vec!["entry.ts"]);
+        assert!(s.open_files.contains("entry.ts"));
+    });
+    assert!(visual.debug_bounds("pr-file-0").is_some());
+    click(visual, "pr-tab-checks");
+    click(visual, "change-map-summary");
+    assert_eq!(
+        view.read_with(visual, |s, _| s.tab.clone()),
+        "checks",
+        "disclosure must not navigate to a retained selection"
+    );
+    click(visual, "change-map-summary");
+    assert_eq!(view.read_with(visual, |s, _| s.tab.clone()), "checks");
+    // Local edits are not part of the immutable PR evidence.
+    std::fs::write(
+        std::path::Path::new(&fixture.workspace).join("entry.ts"),
+        "export const entry = 2;\n",
+    )
+    .unwrap();
+    view.update(visual, |s, cx| s.select(7, cx));
+    settle(visual);
+    view.read_with(visual, |s, _| {
+        assert_eq!(s.map.delta["status"], "ready");
+        assert!(s.map.selected.is_empty());
+    });
+}

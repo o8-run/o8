@@ -20,6 +20,7 @@ import {
   architectureSnapshotCacheKey,
   createExpiringLruCache,
   mapWithConcurrency,
+  readArchitectureSources,
   sourceImportSpecifiers,
   type ParsedSourceImports,
 } from '@/lib/review/architecture-delta-work';
@@ -68,6 +69,8 @@ const snapshotCache = createExpiringLruCache<ArchitectureDeltaResult>(
 export interface BuildArchitectureDeltaOptions {
   repoPath: string;
   baseRef?: string;
+  headRef?: string;
+  trackedOnly?: boolean;
   afterCacheKeyForTesting?: () => void | Promise<void>;
   afterSnapshotForTesting?: () => void | Promise<void>;
 }
@@ -183,10 +186,10 @@ async function workspaceFingerprint(repoRoot: string) {
   return `${head}\0${status}`;
 }
 
-async function readChanges(repoRoot: string, baseCommit: string) {
+async function readChanges(repoRoot: string, baseCommit: string, headCommit?: string, trackedOnly = false) {
   const [tracked, untracked] = await Promise.all([
-    gitOutput(repoRoot, ['diff', '--name-status', '-z', '--find-renames', baseCommit, '--']),
-    gitOutput(repoRoot, ['ls-files', '--others', '--exclude-standard', '-z']),
+    gitOutput(repoRoot, ['diff', '--name-status', '-z', '--find-renames', baseCommit, ...(headCommit ? [headCommit] : []), '--']),
+    headCommit || trackedOnly ? Promise.resolve('') : gitOutput(repoRoot, ['ls-files', '--others', '--exclude-standard', '-z']),
   ]);
   const allChanges = parseNameStatus(tracked);
   const knownPaths = new Set(allChanges.map((change) => change.path));
@@ -207,8 +210,8 @@ async function readChanges(repoRoot: string, baseCommit: string) {
   };
 }
 
-async function listAfterPaths(repoRoot: string) {
-  const output = await gitOutput(repoRoot, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
+async function listAfterPaths(repoRoot: string, trackedOnly = false) {
+  const output = await gitOutput(repoRoot, ['ls-files', '--cached', ...(trackedOnly ? [] : ['--others', '--exclude-standard']), '-z']);
   return splitNulls(output).map(toPosix);
 }
 
@@ -217,48 +220,14 @@ async function listBeforePaths(repoRoot: string, baseCommit: string) {
   return splitNulls(output).map(toPosix);
 }
 
-async function readCurrentSources(
-  repoRoot: string,
-  paths: string[],
-  priorityPaths: Set<string>,
-) {
-  const supported = paths.filter(isSupportedSource);
-  const ordered = [...supported].sort((left, right) => {
-    const priority = Number(priorityPaths.has(right)) - Number(priorityPaths.has(left));
-    return priority || left.localeCompare(right);
+async function readCurrentSources(repoRoot: string, paths: string[], priorityPaths: Set<string>, headCommit?: string) {
+  return readArchitectureSources(paths.filter(isSupportedSource), priorityPaths, {
+    maxFiles: MAX_SOURCE_FILES, maxFileBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_TOTAL_BYTES,
+    concurrency: CURRENT_READ_CONCURRENCY,
+    read: (filePath, maxBytes) => headCommit
+      ? readBaseFile(repoRoot, headCommit, filePath, maxBytes)
+      : readCurrentFile(repoRoot, filePath, maxBytes),
   });
-  const limited = ordered.slice(0, MAX_SOURCE_FILES);
-  const omittedPaths = ordered.slice(MAX_SOURCE_FILES);
-
-  let totalBytes = 0;
-  const contents = new Map<string, string>();
-  let truncated = ordered.length > limited.length;
-  for (let offset = 0; offset < limited.length; offset += CURRENT_READ_CONCURRENCY) {
-    if (totalBytes >= MAX_TOTAL_BYTES) {
-      truncated = true;
-      omittedPaths.push(...limited.slice(offset));
-      break;
-    }
-    const batch = limited.slice(offset, offset + CURRENT_READ_CONCURRENCY);
-    const maxBytes = Math.min(MAX_FILE_BYTES, MAX_TOTAL_BYTES - totalBytes);
-    const loaded = await mapWithConcurrency(
-      batch,
-      CURRENT_READ_CONCURRENCY,
-      (filePath) => readCurrentFile(repoRoot, filePath, maxBytes),
-    );
-    for (const [index, filePath] of batch.entries()) {
-      const content = loaded[index] ?? null;
-      const size = content === null ? 0 : Buffer.byteLength(content, 'utf8');
-      if (content === null || totalBytes + size > MAX_TOTAL_BYTES) {
-        truncated = true;
-        omittedPaths.push(filePath);
-        continue;
-      }
-      totalBytes += size;
-      contents.set(filePath, content);
-    }
-  }
-  return { contents, truncated, omittedPaths };
 }
 
 async function readCurrentFile(repoRoot: string, filePath: string, maxBytes: number) {
@@ -336,6 +305,7 @@ async function exactSnapshotCacheKey(
   baseCommit: string,
   workspaceState: string,
   changes: LaneFileChange[],
+  trackedOnly = false,
 ) {
   const currentChangedPaths = currentSnapshotPaths(changes);
   const contents = new Map<string, string>();
@@ -357,7 +327,7 @@ async function exactSnapshotCacheKey(
       totalBytes += size;
     }
   }
-  const resolver = await loadCurrentResolverConfig(repoRoot);
+  const resolver = await loadCurrentResolverConfig(repoRoot, trackedOnly);
   return architectureSnapshotCacheKey({
     repoRoot,
     baseCommit,
@@ -440,8 +410,11 @@ async function parseResolverConfig(configPath: string, content: string): Promise
   return { aliases: rules, baseRoots: baseUrlValue ? [baseRoot] : [], warnings };
 }
 
-async function loadCurrentResolverConfig(repoRoot: string): Promise<ResolverConfig> {
+async function loadCurrentResolverConfig(repoRoot: string, trackedOnly = false): Promise<ResolverConfig> {
+  const tracked = trackedOnly
+    ? new Set(splitNulls(await gitOutput(repoRoot, ['ls-files', '-z', '--', 'tsconfig.json', 'jsconfig.json']))) : null;
   for (const configPath of ['tsconfig.json', 'jsconfig.json']) {
+    if (tracked && !tracked.has(configPath)) continue;
     const content = await readCurrentFile(repoRoot, configPath, MAX_FILE_BYTES);
     if (content !== null) return parseResolverConfig(configPath, content);
   }
@@ -473,6 +446,7 @@ function analysisContentFingerprint(contents: Map<string, string>, config: Resol
 async function rereadAnalysisContentFingerprint(
   repoRoot: string,
   analyzedContents: Map<string, string>,
+  trackedOnly = false,
 ) {
   const filePaths = [...analyzedContents.keys()];
   const loaded = await mapWithConcurrency(
@@ -486,7 +460,7 @@ async function rereadAnalysisContentFingerprint(
     if (content === null) return null;
     contents.set(filePath, content);
   }
-  const config = await loadCurrentResolverConfig(repoRoot);
+  const config = await loadCurrentResolverConfig(repoRoot, trackedOnly);
   return analysisContentFingerprint(contents, config);
 }
 
@@ -698,23 +672,29 @@ function buildResult(
 export async function buildArchitectureDelta({
   repoPath,
   baseRef = 'HEAD',
+  headRef,
+  trackedOnly = false,
   afterCacheKeyForTesting,
   afterSnapshotForTesting,
 }: BuildArchitectureDeltaOptions): Promise<ArchitectureDeltaResult> {
   const repoRoot = await resolveRepoRoot(repoPath);
   const baseCommit = await resolveBaseCommit(repoRoot, baseRef);
-  const firstFingerprint = await workspaceFingerprint(repoRoot);
-  const changeSet = await readChanges(repoRoot, baseCommit);
+  const headCommit = headRef ? await resolveBaseCommit(repoRoot, headRef) : undefined;
+  const fingerprint = async () => `${trackedOnly ? 'tracked\0' : ''}${await workspaceFingerprint(repoRoot)}`;
+  const firstFingerprint = headCommit ?? await fingerprint();
+  const changeSet = await readChanges(repoRoot, baseCommit, headCommit, trackedOnly);
   const { changes, unsupportedPaths } = changeSet;
   const snapshotCacheKey = afterSnapshotForTesting
     ? null
-    : await exactSnapshotCacheKey(repoRoot, baseCommit, firstFingerprint, changes);
+    : headCommit ? `commit:${repoRoot}:${baseCommit}:${headCommit}`
+      : await exactSnapshotCacheKey(repoRoot, baseCommit, firstFingerprint, changes, trackedOnly);
   await afterCacheKeyForTesting?.();
   const cachedResult = snapshotCacheKey ? snapshotCache.read(snapshotCacheKey) : null;
+  if (cachedResult && headCommit) return cachedResult;
   if (cachedResult && snapshotCacheKey) {
     const [confirmedFingerprint, confirmedCacheKey] = await Promise.all([
-      workspaceFingerprint(repoRoot),
-      exactSnapshotCacheKey(repoRoot, baseCommit, firstFingerprint, changes),
+      fingerprint(),
+      exactSnapshotCacheKey(repoRoot, baseCommit, firstFingerprint, changes, trackedOnly),
     ]);
     if (confirmedFingerprint === firstFingerprint && confirmedCacheKey === snapshotCacheKey) {
       return cachedResult;
@@ -722,7 +702,7 @@ export async function buildArchitectureDelta({
   }
   const changedPaths = changedPathSet(changes);
   const [listedAfterPaths, beforePathList] = await Promise.all([
-    listAfterPaths(repoRoot),
+    headCommit ? listBeforePaths(repoRoot, headCommit) : listAfterPaths(repoRoot, trackedOnly),
     listBeforePaths(repoRoot, baseCommit),
   ]);
   const afterAbsentPaths = afterAbsentPathSet(changes);
@@ -733,6 +713,7 @@ export async function buildArchitectureDelta({
     repoRoot,
     afterPaths,
     changedPaths,
+    headCommit,
   );
   const { contents: beforeContents, omittedPaths: beforeOmittedPaths } = await buildBeforeContents(
     repoRoot,
@@ -743,7 +724,7 @@ export async function buildArchitectureDelta({
   );
   const [beforeResolver, afterResolver] = await Promise.all([
     loadBaseResolverConfig(repoRoot, baseCommit),
-    loadCurrentResolverConfig(repoRoot),
+    headCommit ? loadBaseResolverConfig(repoRoot, headCommit) : loadCurrentResolverConfig(repoRoot, trackedOnly),
   ]);
   const firstAnalysisContentFingerprint = analysisContentFingerprint(afterContents, afterResolver);
   await afterSnapshotForTesting?.();
@@ -769,8 +750,8 @@ export async function buildArchitectureDelta({
       || beforeGraph.truncated
       || afterGraph.truncated,
   );
-  const lastAnalysisContentFingerprint = await rereadAnalysisContentFingerprint(repoRoot, afterContents);
-  const lastFingerprint = await workspaceFingerprint(repoRoot);
+  const lastAnalysisContentFingerprint = headCommit ? firstAnalysisContentFingerprint : await rereadAnalysisContentFingerprint(repoRoot, afterContents, trackedOnly);
+  const lastFingerprint = headCommit ?? await fingerprint();
   if (
     lastFingerprint !== firstFingerprint
     || lastAnalysisContentFingerprint !== firstAnalysisContentFingerprint
@@ -788,7 +769,7 @@ export async function buildArchitectureDelta({
       resolver: afterResolver,
       maxTotalBytes: MAX_TOTAL_BYTES,
     });
-    snapshotCache.write(analyzedCacheKey, result);
+    snapshotCache.write(headCommit ? snapshotCacheKey : analyzedCacheKey, result);
   }
   return result;
 }

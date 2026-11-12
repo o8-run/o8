@@ -11,6 +11,7 @@ import {
 import {
   ImmutableReviewUnavailableError,
   immutableReviewUnavailablePayload,
+  laneReviewRevision,
   readLaneReviewDiff,
 } from '@/lib/lane/review-source';
 
@@ -61,6 +62,7 @@ export async function GET(
       laneId: lane.id,
       packetId: lane.packetId ?? null,
       headSha: review.headSha,
+      revision: laneReviewRevision(lane.id, review),
       base: review.base,
       diffBase: review.diffBase,
       branch: review.source.branch,

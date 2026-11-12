@@ -17,6 +17,9 @@ impl Drop for Server {
     }
 }
 fn fixture() -> (Server, Client) {
+    fixture_mode("--review-drop-first")
+}
+fn fixture_mode(mode: &str) -> (Server, Client) {
     let mut child = Command::new("node")
         .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .args([
@@ -26,7 +29,7 @@ fn fixture() -> (Server, Client) {
             "tsx",
             "scripts/next/dev-server.ts",
             "--review",
-            "--review-drop-first",
+            mode,
             "--owned-stdio",
         ])
         .env("O8_NEXT_API_TOKEN", "fixture-next-review-operator")
@@ -455,4 +458,153 @@ fn a_bare_blank_line_never_fills_a_short_packet_hunk() {
     ] {
         assert!(crate::diff::parse(patch).unsupported, "{patch}");
     }
+}
+
+#[gpui::test]
+fn change_map_leads_packet_diff(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let (_view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    visual.run_until_parked();
+    assert!(
+        visual.debug_bounds("change-map-summary").is_some(),
+        "packet review must lead with a collapsed change map"
+    );
+}
+
+fn change_map_fixture() -> crate::change_map::ChangeMap {
+    let v: Value = serde_json::from_str(include_str!("../fixtures/change-map.json")).unwrap();
+    crate::change_map::ChangeMap {
+        delta: v["delta"].clone(),
+        attention: v["attention"].clone(),
+        ..Default::default()
+    }
+}
+fn map_click(cx: &mut gpui::VisualTestContext, id: &'static str) {
+    cx.update(|w, cx| {
+        w.refresh();
+        w.draw(cx).clear();
+    });
+    let bounds = cx
+        .debug_bounds(id)
+        .unwrap_or_else(|| panic!("missing {id}"));
+    cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn change_map_fixture_graph_summary_filters_real_diff_and_attention(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    visual.run_until_parked();
+    view.update(visual, |s, cx| {
+        s.map = change_map_fixture();
+        cx.notify();
+    });
+    assert_eq!(
+        view.read_with(visual, |s, _| s.map.summary()),
+        "3 modules touched, 1 new dependency, 1 removed dependency, 1 area needs attention"
+    );
+    assert!(
+        visual.debug_bounds("change-map-node-0").is_none(),
+        "map starts collapsed"
+    );
+    map_click(visual, "change-map-summary");
+    for i in 0..3 {
+        assert!(
+            visual
+                .debug_bounds(Box::leak(format!("change-map-node-{i}").into_boxed_str()))
+                .is_some()
+        );
+    }
+    for edge in ["diff-map-edge-0", "diff-map-edge-1"] {
+        assert!(
+            visual.debug_bounds(edge).is_some(),
+            "changed dependency must be inspectable: {edge}"
+        );
+    }
+    let graph = visual.debug_bounds("change-map-graph").unwrap();
+    assert!(graph.size.width > gpui::px(0.) && graph.size.height > gpui::px(0.));
+    map_click(visual, "change-map-node-0");
+    visual.simulate_keystrokes("alt-down");
+    view.read_with(visual, |s, _| {
+        assert_eq!(
+            s.shown()
+                .iter()
+                .map(|i| s.document.files[*i].path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["added.ts"]
+        );
+        assert_eq!(s.document.files[s.selected].path, "added.ts");
+        assert!(s.row_count() > 0);
+    });
+    map_click(visual, "diff-map-attention-medium.ts");
+    view.read_with(visual, |s, _| {
+        assert_eq!(s.document.files[s.selected].path, "medium.ts");
+        assert_eq!(s.shown().len(), 1);
+    });
+    map_click(visual, "diff-map-clear");
+    assert!(view.read_with(visual, |s, _| s.shown().len() > 1));
+    map_click(visual, "change-map-summary");
+    for (w, h) in [(900., 700.), (1680., 1050.)] {
+        visual.simulate_resize(gpui::size(gpui::px(w), gpui::px(h)));
+        visual.update(|w, cx| {
+            w.refresh();
+            w.draw(cx).clear();
+        });
+        let b = visual.debug_bounds("change-map-node-0").unwrap();
+        assert!(b.right() <= gpui::px(w));
+    }
+}
+
+#[gpui::test]
+fn change_map_empty_has_an_explanation_and_no_nodes(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    visual.run_until_parked();
+    view.update(visual, |s, cx| {
+        s.map = crate::change_map::ChangeMap { delta: json!({"ok":true,"status":"ready","nodes":[],"edges":[],"summary":{"changedModules":0,"addedEdges":0,"removedEdges":0}}), ..Default::default() };
+        cx.notify();
+    });
+    map_click(visual, "change-map-summary");
+    assert!(visual.debug_bounds("change-map-empty").is_some());
+    assert!(visual.debug_bounds("change-map-node-0").is_none());
+}
+
+#[gpui::test]
+fn change_map_refuses_a_lane_revision_newer_than_the_displayed_diff(cx: &mut TestAppContext) {
+    let (_server, client) = fixture_mode("--change-map-stale");
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    for _ in 0..200 {
+        visual.run_until_parked();
+        if view.read_with(visual, |s, _| {
+            s.ready && (!s.map.delta.is_null() || s.map.error.is_some())
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(visual.debug_bounds("change-map-summary").is_some());
+    view.read_with(visual, |s, _| {
+        assert!(
+            s.map.delta.is_null(),
+            "a newer lane map must not annotate the old diff"
+        );
+        assert!(
+            s.map
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("Review changed")),
+            "{:?}",
+            s.map.error
+        );
+        assert!(!s.document.files.is_empty());
+    });
 }

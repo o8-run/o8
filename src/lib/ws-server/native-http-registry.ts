@@ -480,6 +480,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/approvals', 'GET POST', () => import('@/app/api/panel/approvals/route')),
   ],
   diff: [
+    route('/api/review/architecture-delta', 'GET', () => import('@/app/api/review/architecture-delta/route')),
+    route('/api/review/architecture-attention', 'POST', () => import('@/app/api/review/architecture-attention/route')),
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/orchestrator/review-state', 'GET', () => import('@/app/api/orchestrator/review-state/route')),
     route('/api/orchestrator/review', 'POST', () => import('@/app/api/orchestrator/review/route')),

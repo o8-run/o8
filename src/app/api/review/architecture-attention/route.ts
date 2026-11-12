@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
-import { readLaneReviewDiff } from '@/lib/lane/review-source';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { rankArchitectureAttention } from '@/lib/review/architecture-attention';
-import {
-  ArchitectureDeltaInputError,
-  buildArchitectureDelta,
-  unavailableArchitectureDelta,
-} from '@/lib/review/architecture-delta';
+import { ArchitectureDeltaInputError } from '@/lib/review/architecture-delta';
 import { filterArchitectureResult } from '@/lib/review/architecture-scope';
+
+import { ArchitectureReviewChangedError, buildArchitectureReviewTarget, buildLaneArchitectureReviewTarget } from '@/lib/review/architecture-review-target';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,21 +42,14 @@ function parseBody(value: unknown) {
   return { expectedAnalysisId, scopePaths: [...new Set(scopePaths)] } as const;
 }
 
-async function analyzeRequestTarget(laneId: string | null, workspace: string | null) {
+async function analyzeRequestTarget(laneId: string | null, workspace: string | null, params: URLSearchParams) {
   if (laneId) {
     const lane = getLane(laneId) ?? findLatestLaneByPacket(laneId);
     if (!lane) return { error: 'No review lane found for that id or packet.', status: 404 } as const;
-    const review = await readLaneReviewDiff(lane);
-    if (review.source.kind !== 'materialized') {
-      return { result: unavailableArchitectureDelta(
-        'Architecture attention currently requires a materialized packet workspace.',
-      ) } as const;
-    }
-    const baseRef = review.diffBase.mergeBase ?? review.diffBase.comparisonRef;
-    return { result: await buildArchitectureDelta({ repoPath: review.source.cwd, baseRef }), repoPath: review.source.cwd } as const;
+    return buildLaneArchitectureReviewTarget(lane, params);
   }
   if (!workspace) return { error: 'A review lane or workspace is required.', status: 400 } as const;
-  return { result: await buildArchitectureDelta({ repoPath: workspace }), repoPath: workspace } as const;
+  return { result: await buildArchitectureReviewTarget(workspace, params), repoPath: workspace } as const;
 }
 
 export async function POST(request: NextRequest) {
@@ -84,7 +74,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const analyzed = await analyzeRequestTarget(laneId, workspace);
+    const analyzed = await analyzeRequestTarget(laneId, workspace, request.nextUrl.searchParams);
     if ('error' in analyzed) {
       return NextResponse.json({ ok: false, error: analyzed.error }, { status: analyzed.status });
     }
@@ -101,7 +91,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to build the advisory review lens.';
-    const status = error instanceof ArchitectureDeltaInputError ? 400 : 500;
+    const status = error instanceof ArchitectureReviewChangedError ? 409 : error instanceof ArchitectureDeltaInputError ? 400 : 500;
     return NextResponse.json({ ok: false, error: message }, { status });
   }
 }

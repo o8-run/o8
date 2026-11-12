@@ -16,6 +16,8 @@ use std::{
     rc::Rc,
 };
 
+#[path = "diff_ui_map.rs"]
+mod map;
 #[path = "diff_ui_scope.rs"]
 mod scope;
 #[path = "diff_ui_stack.rs"]
@@ -24,6 +26,7 @@ pub(crate) use scope::Scope;
 
 pub(crate) struct DiffSurface {
     client: Client,
+    pub(crate) map: crate::change_map::ChangeMap,
     pub(crate) target: Target,
     pub(crate) document: Rc<Document>,
     pub(crate) selected: usize,
@@ -91,6 +94,7 @@ impl DiffSurface {
         focus.focus(window);
         let mut surface = Self {
             client,
+            map: Default::default(),
             target,
             document: Rc::new(Document::default()),
             selected: 0,
@@ -130,6 +134,10 @@ impl DiffSurface {
         self.failed = false;
         self.pending = None;
         self.notice = "Reading diff…".into();
+        self.map = crate::change_map::ChangeMap {
+            expanded: self.map.expanded,
+            ..Default::default()
+        };
         if self.stacked() {
             self.read_scope(cx);
         }
@@ -141,7 +149,9 @@ impl DiffSurface {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.generation != generation { return; }
+                if this.generation != generation {
+                    return;
+                }
                 match result {
                     Ok((document, state)) => {
                         this.document = Rc::new(document);
@@ -157,6 +167,7 @@ impl DiffSurface {
                         }
                         this.state = state;
                         this.ready = true;
+                        this.load_map(generation, cx);
                         if this.stacked() {
                             // A refresh keeps the reader's place in the stack.
                             this.painted.borrow_mut().clear();
@@ -168,11 +179,14 @@ impl DiffSurface {
                     Err(error) => {
                         this.notice = error;
                         this.failed = true;
+                        this.map.error =
+                            Some("Change map unavailable until the diff can be read.".into());
                     }
                 }
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
         cx.notify();
     }
     fn state_label(&self) -> String {
@@ -207,6 +221,14 @@ impl DiffSurface {
         cx.notify();
     }
     pub(crate) fn row_count(&self) -> usize {
+        if self
+            .document
+            .files
+            .get(self.selected)
+            .is_some_and(|f| !self.map.keeps(&f.path) && !self.map.keeps(&f.old_path))
+        {
+            return 0;
+        }
         self.document.files.get(self.selected).map_or(0, |f| {
             if self.split {
                 f.split.len()
@@ -396,7 +418,12 @@ impl Render for DiffSurface {
                             } else {
                                 theme().background
                             })
-                            .child(div().text_size(px(13.5)).child(f.path.clone()))
+                            .child(
+                                div()
+                                    .text_size(px(13.5))
+                                    .text_ellipsis()
+                                    .child(f.path.clone()),
+                            )
                             .child(
                                 div()
                                     .mt(px(4.))
@@ -501,7 +528,10 @@ impl Render for DiffSurface {
                     }
                     "home" => this.scroll_to(0, cx),
                     "end" => this.scroll_to(this.row_count().saturating_sub(1), cx),
-                    key @ ("up" | "down") if event.keystroke.modifiers.alt && this.stacked() => {
+                    key @ ("up" | "down")
+                        if event.keystroke.modifiers.alt
+                            && (this.stacked() || !this.map.selected.is_empty()) =>
+                    {
                         // Steps through the files the scope shows.
                         let shown = this.shown();
                         let at = shown.iter().position(|i| *i >= this.selected);
@@ -638,6 +668,13 @@ impl Render for DiffSurface {
                             )
                         },
                     ),
+            )
+            .when(
+                matches!(
+                    &self.target,
+                    Target::Packet(_) | Target::Worktree { file: None, .. }
+                ),
+                |view| view.child(div().px(px(8.)).child(self.change_map_view(cx))),
             )
             .child(body)
     }

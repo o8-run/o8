@@ -27,6 +27,28 @@ pub(super) struct Review {
     pub diff: Value,
     pub directives: Value,
     pub files: Vec<Value>,
+    pub map: crate::change_map::ChangeMap,
+    pub patches: std::sync::Arc<Vec<(String, String, Vec<crate::files_panel::file_diff::Line>)>>,
+}
+fn review_patch(file: &crate::diff::File) -> Vec<crate::files_panel::file_diff::Line> {
+    let patch = file
+        .lines
+        .iter()
+        .map(|line| {
+            format!(
+                "{}{}",
+                match line.kind {
+                    crate::diff::Kind::Added => "+",
+                    crate::diff::Kind::Removed => "-",
+                    crate::diff::Kind::Context => " ",
+                    _ => "",
+                },
+                line.text
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::files_panel::file_diff::parse(&patch)
 }
 pub(super) struct Editor {
     pub id: String,
@@ -123,17 +145,21 @@ impl ActivityPane {
                     Ok(v) => {
                         let document = crate::diff::parse(&text(&v, "diff"));
                         read.files = document.files.iter().map(|f| json!({"path":f.path,"status":f.status,"additions":f.additions,"deletions":f.deletions})).collect();
+                        read.patches = std::sync::Arc::new(document.files.iter().map(|f| (f.path.clone(), f.old_path.clone(), review_patch(f))).collect());
                         read.diff = v;
                     }
                     Err(e) => errors.push(format!("Branch review: {}", e.message)),
                 }
 
             }
+            if lane_id.is_empty() {
+                read.map.error = Some("Change map unavailable: this packet has no review lane.".into());
+            }
             if !errors.is_empty() { read.error = Some(errors.join("\n")); }
             read
         });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let mut result = task.await;
             let _ = this.update(cx, |this, cx| {
                 if generation != this.generation
                     || this
@@ -148,7 +174,55 @@ impl ActivityPane {
                 {
                     return;
                 }
+                result.map.expanded = this
+                    .packet
+                    .reads
+                    .get(&row.id)
+                    .is_some_and(|r| r.map.expanded);
+                let paths = result
+                    .files
+                    .iter()
+                    .filter_map(|v| v["path"].as_str().map(str::to_owned))
+                    .collect();
+                let lane_id = text(&row.data["lane"], "laneId");
+                let map_query = if lane_id.is_empty() {
+                    None
+                } else {
+                    result.map.bind_revision(
+                        vec![("lane".into(), lane_id)],
+                        result.diff["revision"].as_str(),
+                    )
+                };
+                let map_id = row.id.clone();
+                let map_key = key.clone();
                 this.packet.reads.insert(row.id, result);
+                if let Some(query) = map_query {
+                    crate::change_map::ChangeMap::load(
+                        this.client.clone(),
+                        query,
+                        paths,
+                        cx,
+                        move |this, mut map, cx| {
+                            if generation != this.generation
+                                || !this
+                                    .rows
+                                    .iter()
+                                    .any(|r| r.id == map_id && identity(r) == map_key)
+                            {
+                                return;
+                            }
+                            let Some(read) = this.packet.reads.get_mut(&map_id) else {
+                                return;
+                            };
+                            if read.request != request || read.identity != map_key {
+                                return;
+                            }
+                            map.expanded = read.map.expanded;
+                            read.map = map;
+                            this.changed(cx);
+                        },
+                    );
+                }
                 this.changed(cx);
             });
         })
@@ -307,7 +381,7 @@ impl ActivityPane {
     pub(in super::super) fn packet_evidence(&self, id: &str) -> Value {
         match self.packet.reads.get(id) {
             Some(r) => {
-                json!({"loading":r.loading,"spec":r.spec,"files":r.files.len(),"error":r.error,"request":r.request})
+                json!({"loading":r.loading,"spec":r.spec,"files":r.files.len(),"error":r.error,"request":r.request,"mapLoading":r.map.delta.is_null() && r.map.error.is_none(),"mapStatus":r.map.delta["status"],"mapError":r.map.error})
             }
             None => Value::Null,
         }

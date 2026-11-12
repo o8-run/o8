@@ -1,0 +1,24 @@
+{
+  "delta": {
+    "ok": true,
+    "status": "ready",
+    "analysisId": "1234567890abcdef12345678",
+    "nodes": [
+      { "path": "added.ts", "state": "added", "focusPath": "added.ts" },
+      { "path": "medium.ts", "state": "changed", "focusPath": "medium.ts" },
+      { "path": "large.ts", "state": "removed", "focusPath": "large.ts" }
+    ],
+    "edges": [
+      { "from": "added.ts", "to": "medium.ts", "state": "added", "focusPath": "added.ts" },
+      { "from": "medium.ts", "to": "large.ts", "state": "removed", "focusPath": "medium.ts" }
+    ],
+    "summary": { "changedModules": 3, "addedEdges": 1, "removedEdges": 1, "contextEdges": 0 },
+    "truncated": false
+  },
+  "attention": {
+    "ok": true,
+    "status": "ready",
+    "analysisId": "1234567890abcdef12345678",
+    "items": [ { "path": "medium.ts", "reviewPath": "medium.ts", "rank": 1, "lens": "interface_contract" } ]
+  }
+}

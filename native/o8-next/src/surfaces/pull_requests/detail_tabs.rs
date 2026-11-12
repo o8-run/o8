@@ -59,13 +59,31 @@ pub(super) fn age(at: &str) -> String {
 
 impl PullRequests {
     pub(super) fn tab_body(&self, cx: &mut Context<Self>) -> AnyElement {
-        match self.tab.as_str() {
+        let body = match self.tab.as_str() {
             "timeline" => self.timeline_tab(cx),
             "changes" => self.changes_tab(cx),
             "checks" => self.checks_tab(cx),
             "reviews" => self.reviews_tab(),
             _ => self.summary_tab(cx),
-        }
+        };
+        div()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(self.map.view("pr-map", cx, |s, command, cx| {
+                let navigate = matches!(
+                    command,
+                    crate::change_map::Command::Select(_) | crate::change_map::Command::Focus(_)
+                );
+                s.map.apply(&command);
+                if navigate && !s.map.selected.is_empty() {
+                    s.tab = "changes".into();
+                    s.open_files.extend(s.map.selected.iter().cloned());
+                }
+                s.changed(cx);
+            }))
+            .child(body)
+            .into_any_element()
     }
 
     fn summary_tab(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -77,13 +95,23 @@ impl PullRequests {
                 .iter()
                 .filter_map(|v| v.as_str().map(str::to_owned))
                 .collect();
-            if names.is_empty() { "None requested".into() } else { names.join(", ") }
+            if names.is_empty() {
+                "None requested".into()
+            } else {
+                names.join(", ")
+            }
         };
         let labels: Vec<_> = array(d, "labels")
             .iter()
             .filter_map(|v| v.as_str().map(str::to_owned))
             .collect();
-        let term = |text: &'static str| div().w(px(80.)).flex_shrink_0().text_color(theme().text_muted).child(text);
+        let term = |text: &'static str| {
+            div()
+                .w(px(80.))
+                .flex_shrink_0()
+                .text_color(theme().text_muted)
+                .child(text)
+        };
         let open = self.description_open;
         let body = string(d, "body").trim().to_owned();
         let commits = format!("{}/commits", string(d, "url"));
@@ -100,7 +128,12 @@ impl PullRequests {
                     .flex()
                     .flex_col()
                     .gap(px(14.))
-                    .child(div().flex().child(term("Reviewers")).child(div().text_color(theme().text_secondary).child(reviewers)))
+                    .child(
+                        div()
+                            .flex()
+                            .child(term("Reviewers"))
+                            .child(div().text_color(theme().text_secondary).child(reviewers)),
+                    )
                     .child(
                         div().flex().child(term("Labels")).child(
                             div()
@@ -109,7 +142,11 @@ impl PullRequests {
                                 .gap(px(6.))
                                 .children(labels.iter().map(|l| super::super::label_chip(l)))
                                 .when(labels.is_empty(), |row| {
-                                    row.child(muted(if d["labels"].is_null() { "Not available" } else { "None" }))
+                                    row.child(muted(if d["labels"].is_null() {
+                                        "Not available"
+                                    } else {
+                                        "None"
+                                    }))
                                 }),
                         ),
                     ),
@@ -208,16 +245,22 @@ impl PullRequests {
                                 .flex_1()
                                 .min_w_0()
                                 .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_wrap()
-                                                .gap(px(4.))
-                                                .child(div().font_weight(gpui::FontWeight::MEDIUM).child(string(e, "actor").to_owned()))
-                                                .child(div().text_color(theme().text_secondary).child(string(e, "title").to_owned())),
-                                        ),
+                                    div().text_size(px(12.)).child(
+                                        div()
+                                            .flex()
+                                            .flex_wrap()
+                                            .gap(px(4.))
+                                            .child(
+                                                div()
+                                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                                    .child(string(e, "actor").to_owned()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_color(theme().text_secondary)
+                                                    .child(string(e, "title").to_owned()),
+                                            ),
+                                    ),
                                 )
                                 .child(
                                     div()
@@ -226,7 +269,9 @@ impl PullRequests {
                                         .gap(px(8.))
                                         .text_size(px(10.))
                                         .text_color(theme().text_muted)
-                                        .when(!sha.is_empty(), |m| m.child(div().font_family(theme().font_mono).child(sha)))
+                                        .when(!sha.is_empty(), |m| {
+                                            m.child(div().font_family(theme().font_mono).child(sha))
+                                        })
                                         .child(age(string(e, "at"))),
                                 )
                                 .when(!body.is_empty(), |c| {
@@ -257,30 +302,56 @@ impl PullRequests {
                     .items_center()
                     .justify_between()
                     .gap(px(8.))
-                    .child(div().text_size(px(11.)).text_color(theme().text_muted).child(if loaded {
-                        format!("{} events{}", events.len(), if self.timeline_next.is_some() { " loaded" } else { "" })
-                    } else {
-                        "Pull request activity".into()
-                    }))
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme().text_muted)
+                            .child(if loaded {
+                                format!(
+                                    "{} events{}",
+                                    events.len(),
+                                    if self.timeline_next.is_some() {
+                                        " loaded"
+                                    } else {
+                                        ""
+                                    }
+                                )
+                            } else {
+                                "Pull request activity".into()
+                            }),
+                    )
                     .child(
                         div()
                             .flex()
                             .gap(px(6.))
                             .child(
-                                small_button("pr-timeline-order".into(), if self.newest_first { "Newest first" } else { "Oldest first" })
-                                    .on_click(cx.listener(|s, _, _, cx| {
+                                small_button(
+                                    "pr-timeline-order".into(),
+                                    if self.newest_first {
+                                        "Newest first"
+                                    } else {
+                                        "Oldest first"
+                                    },
+                                )
+                                .on_click(cx.listener(
+                                    |s, _, _, cx| {
                                         s.newest_first = !s.newest_first;
                                         s.changed(cx);
-                                    })),
+                                    },
+                                )),
                             )
                             .child(
-                                small_button("pr-timeline-refresh".into(), "Refresh")
-                                    .on_click(cx.listener(|s, _, _, cx| s.load_timeline(false, cx))),
+                                small_button("pr-timeline-refresh".into(), "Refresh").on_click(
+                                    cx.listener(|s, _, _, cx| s.load_timeline(false, cx)),
+                                ),
                             ),
                     ),
             )
             .when(self.timeline_loading && !loaded, |c| {
-                c.child(muted(format!("Loading activity for PR #{}…", self.selected.unwrap_or_default())))
+                c.child(muted(format!(
+                    "Loading activity for PR #{}…",
+                    self.selected.unwrap_or_default()
+                )))
             })
             .when(!self.timeline_error.is_empty(), |c| {
                 c.child(
@@ -309,11 +380,21 @@ impl PullRequests {
     }
 
     fn changes_tab(&self, cx: &mut Context<Self>) -> AnyElement {
-        let files = array(&self.detail, "files");
+        let files: Vec<_> = array(&self.detail, "files")
+            .into_iter()
+            .filter(|f| {
+                self.map.keeps(string(f, "path")) || self.map.keeps(string(f, "previousPath"))
+            })
+            .collect();
         if files.is_empty() {
-            return div().p(px(16.)).child(muted("No file changes reported.")).into_any_element();
+            return div()
+                .p(px(16.))
+                .child(muted("No file changes reported."))
+                .into_any_element();
         }
-        let all_open = files.iter().all(|f| self.open_files.contains(string(f, "path")));
+        let all_open = files
+            .iter()
+            .all(|f| self.open_files.contains(string(f, "path")));
         let toolbar = div()
             .px(px(18.))
             .pb(px(8.))
@@ -324,7 +405,9 @@ impl PullRequests {
             .text_color(theme().text_muted)
             .child(format!(
                 "{} files · +{} −{}",
-                self.detail["changedFiles"].as_u64().unwrap_or(files.len() as u64),
+                self.detail["changedFiles"]
+                    .as_u64()
+                    .unwrap_or(files.len() as u64),
                 self.detail["additions"].as_u64().unwrap_or(0),
                 self.detail["deletions"].as_u64().unwrap_or(0)
             ))
@@ -333,25 +416,35 @@ impl PullRequests {
                     .flex()
                     .gap(px(6.))
                     .child(
-                        small_button("pr-diff-view".into(), if self.split_diff { "Unified" } else { "Split" })
-                            .on_click(cx.listener(|s, _, _, cx| {
-                                s.split_diff = !s.split_diff;
-                                s.changed(cx);
-                            })),
+                        small_button(
+                            "pr-diff-view".into(),
+                            if self.split_diff { "Unified" } else { "Split" },
+                        )
+                        .on_click(cx.listener(|s, _, _, cx| {
+                            s.split_diff = !s.split_diff;
+                            s.changed(cx);
+                        })),
                     )
                     .child(
-                        small_button("pr-files-toggle".into(), if all_open { "Collapse all" } else { "Expand all" })
-                            .on_click(cx.listener(move |s, _, _, cx| {
-                                if all_open {
-                                    s.open_files.clear();
-                                } else {
-                                    s.open_files = array(&s.detail, "files")
-                                        .iter()
-                                        .map(|f| string(f, "path").to_owned())
-                                        .collect();
-                                }
-                                s.changed(cx);
-                            })),
+                        small_button(
+                            "pr-files-toggle".into(),
+                            if all_open {
+                                "Collapse all"
+                            } else {
+                                "Expand all"
+                            },
+                        )
+                        .on_click(cx.listener(move |s, _, _, cx| {
+                            if all_open {
+                                s.open_files.clear();
+                            } else {
+                                s.open_files = array(&s.detail, "files")
+                                    .iter()
+                                    .map(|f| string(f, "path").to_owned())
+                                    .collect();
+                            }
+                            s.changed(cx);
+                        })),
                     ),
             );
         let mut list = div().flex().flex_col().px(px(12.)).gap(px(6.));
@@ -385,8 +478,18 @@ impl PullRequests {
                                 .text_size(px(11.5))
                                 .child(path),
                         )
-                        .child(div().text_size(px(11.)).text_color(theme().success).child(format!("+{}", f["additions"].as_u64().unwrap_or(0))))
-                        .child(div().text_size(px(11.)).text_color(theme().danger).child(format!("−{}", f["deletions"].as_u64().unwrap_or(0))))
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(theme().success)
+                                .child(format!("+{}", f["additions"].as_u64().unwrap_or(0))),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(theme().danger)
+                                .child(format!("−{}", f["deletions"].as_u64().unwrap_or(0))),
+                        )
                         .on_click(cx.listener(move |s, _, _, cx| {
                             if !s.open_files.remove(&toggle) {
                                 s.open_files.insert(toggle.clone());
@@ -399,7 +502,8 @@ impl PullRequests {
                 // both sides and pair each removal with its replacement.
                 let body = match f["patch"].as_str() {
                     Some(patch) => {
-                        let mut scroll = div().id(("pr-file-diff", i)).overflow_x_scroll().py(px(4.));
+                        let mut scroll =
+                            div().id(("pr-file-diff", i)).overflow_x_scroll().py(px(4.));
                         // A vertical wheel over a wide split diff scrolls the
                         // PR, not the file sideways.
                         scroll.style().restrict_scroll_to_axis = Some(true);
@@ -423,7 +527,11 @@ impl PullRequests {
             }
             list = list.child(file);
         }
-        div().pb(px(18.)).child(toolbar).child(list).into_any_element()
+        div()
+            .pb(px(18.))
+            .child(toolbar)
+            .child(list)
+            .into_any_element()
     }
 
     fn checks_tab(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -431,10 +539,19 @@ impl PullRequests {
         let checks = array(d, "statusCheckRollup");
         let mut body = div().flex().flex_col();
         if checks.is_empty() {
-            body = body.child(div().p(px(16.)).child(muted("No checks reported for this PR.")));
+            body = body.child(
+                div()
+                    .p(px(16.))
+                    .child(muted("No checks reported for this PR.")),
+            );
         }
         if d["checksUnavailable"] == true {
-            body = body.child(div().px(px(14.)).py(px(8.)).child(muted("Some checks are unavailable. Refresh to try again.")));
+            body = body.child(
+                div()
+                    .px(px(14.))
+                    .py(px(8.))
+                    .child(muted("Some checks are unavailable. Refresh to try again.")),
+            );
         }
         for (bucket, label) in [
             ("failing", "Failing"),
@@ -443,7 +560,11 @@ impl PullRequests {
             ("neutral", "Neutral"),
             ("skipped", "Skipped"),
         ] {
-            let items: Vec<_> = checks.iter().enumerate().filter(|(_, c)| check_bucket(c) == bucket).collect();
+            let items: Vec<_> = checks
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| check_bucket(c) == bucket)
+                .collect();
             if items.is_empty() {
                 continue;
             }
@@ -496,13 +617,23 @@ impl PullRequests {
                                 .flex()
                                 .flex_col()
                                 .gap(px(2.))
-                                .child(div().text_size(px(12.5)).truncate().child(string(c, "name").to_owned()))
-                                .child(div().text_size(px(10.)).text_color(theme().text_muted).child(
-                                    match (string(c, "status"), string(c, "conclusion")) {
-                                        (status, "") => status.to_lowercase(),
-                                        (_, conclusion) => conclusion.to_lowercase(),
-                                    },
-                                )),
+                                .child(
+                                    div()
+                                        .text_size(px(12.5))
+                                        .truncate()
+                                        .child(string(c, "name").to_owned()),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(10.))
+                                        .text_color(theme().text_muted)
+                                        .child(
+                                            match (string(c, "status"), string(c, "conclusion")) {
+                                                (status, "") => status.to_lowercase(),
+                                                (_, conclusion) => conclusion.to_lowercase(),
+                                            },
+                                        ),
+                                ),
                         )
                         .when(link, |row| {
                             row.child(
@@ -520,7 +651,12 @@ impl PullRequests {
                                     .cursor_pointer()
                                     .hover(|b| b.bg(theme().hover).text_color(theme().text))
                                     .child("View run")
-                                    .child(crate::icon::stroke(EXTERNAL, theme().text_faint, 11., 1.8))
+                                    .child(crate::icon::stroke(
+                                        EXTERNAL,
+                                        theme().text_faint,
+                                        11.,
+                                        1.8,
+                                    ))
                                     .on_click(move |_, _, cx| cx.open_url(&url)),
                             )
                         }),
@@ -542,7 +678,11 @@ impl PullRequests {
                     .border_color(theme().border)
                     .child(crate::icon::stroke(
                         if pass { CHECK_CIRCLE } else { X_CIRCLE },
-                        if pass { theme().success } else { theme().danger },
+                        if pass {
+                            theme().success
+                        } else {
+                            theme().danger
+                        },
                         14.,
                         1.8,
                     ))
@@ -553,11 +693,28 @@ impl PullRequests {
                             .flex()
                             .flex_col()
                             .gap(px(2.))
-                            .child(div().text_size(px(12.)).child(string(check, "name").to_owned()))
-                            .child(div().text_size(px(11.)).text_color(theme().text_muted).child(string(check, "detail").to_owned()))
-                            .children(array(check, "actions").iter().filter_map(|a| a.as_str().map(str::to_owned)).map(|a| {
-                                div().text_size(px(11.)).text_color(theme().text_secondary).child(a)
-                            })),
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .child(string(check, "name").to_owned()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(theme().text_muted)
+                                    .child(string(check, "detail").to_owned()),
+                            )
+                            .children(
+                                array(check, "actions")
+                                    .iter()
+                                    .filter_map(|a| a.as_str().map(str::to_owned))
+                                    .map(|a| {
+                                        div()
+                                            .text_size(px(11.))
+                                            .text_color(theme().text_secondary)
+                                            .child(a)
+                                    }),
+                            ),
                     )
             };
             body = body.child(
@@ -585,5 +742,4 @@ impl PullRequests {
         let _ = cx;
         body.into_any_element()
     }
-
 }

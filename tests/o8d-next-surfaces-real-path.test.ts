@@ -16,6 +16,7 @@ const NATIVE_READS = [
   ['session', '/api/panel/branches', 400],
   ['diff', '/api/panel/commits/[hash]', 400],
   ['diff', '/api/review/last-turn', 200],
+  ['diff', '/api/review/architecture-delta', 400],
   ['session', '/api/panel/files', 200],
   ['session', '/api/panel/file-diff', 400],
   ['settings', '/api/panel/status', 200],
@@ -123,6 +124,7 @@ it.each([
   // reaches the handler, which 400s on the empty body (deviceId required) before any revoke — proving
   // the POST write path is registered and operator-gated without mutating the token-hash file. (#5243)
   ['Device revoke validation', 'POST', '/api/mobile/devices/revoke', 400],
+  ['Change map attention validation', 'POST', '/api/review/architecture-attention', 400],
   ['Diff commit validation', 'POST', '/api/review/commit', 400],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
@@ -400,13 +402,20 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   if (routePath === '/api/runtime/acp-registry') {
     expect(JSON.parse(body)).toMatchObject({ stale: false, agents: [{ id: 'fixture-agent', version: '1.0.0' }] });
   }
-  // Task creation and Cortex decisions reuse production POSTs; the remaining reads stay GET-only.
-  const methods = nativeSurfaceRoutes[surface].find(route => route.path === routePath)?.methods ?? [];
-  expect(methods).toEqual(['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals'].includes(routePath) ? ['GET', 'POST'] : ['GET']);
+  // A path may register its read and operator writes on different surfaces.
+  const registration = nativeSurfaceRoutes[surface].find(route => route.path === routePath);
+  const methods = [...new Set(Object.values(nativeSurfaceRoutes).flat()
+    .filter(route => route.path === routePath).flatMap(route => route.methods))];
+  const getPost = ['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals',
+    '/api/panel/branches', '/api/setup/cli-updates', '/api/panel/problem-dossiers', '/api/visualizations'];
+  const expected = routePath === '/api/repo-spec' ? ['GET', 'PUT', 'POST']
+    : getPost.includes(routePath) ? ['GET', 'POST'] : ['GET'];
+  expect([...methods].sort()).toEqual(expected.sort());
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
-    expect(refused.headers.get('allow')).toBe(methods.join(', '));
+    // The bridge advertises the matched registration; union advertising is tracked in #5966.
+    expect(refused.headers.get('allow')).toBe(registration?.methods.join(', '));
     await refused.arrayBuffer();
   }
 });
@@ -931,4 +940,43 @@ it('resets an orchestrator session through the native transport', async () => {
     body: JSON.stringify({ repoPath: server.directory, threadId: 'thoughts-native-reset' }) });
   expect(response.status).toBe(200);
   expect((await response.json()).ok).toBe(true);
+});
+
+it('reads a persisted change graph and attention through native routes with Next stopped (#5880)', async () => {
+  const repo = join(server.directory, 'change-map-review');
+  mkdirSync(repo);
+  const git = async (...args: string[]) => (await promisify(execFile)('git', ['-C', repo, ...args])).stdout.trim();
+  await git('init', '-b', 'main');
+  await git('config', 'user.name', 'Review fixture');
+  await git('config', 'user.email', 'review@example.test');
+  writeFileSync(join(repo, 'core.ts'), 'export const core = 1;\n');
+  await git('add', '.'); await git('commit', '-m', 'test: base');
+  const base = await git('rev-parse', 'HEAD');
+  writeFileSync(join(repo, 'entry.ts'), "import { core } from './core';\nexport const entry = core;\n");
+  await git('add', '.'); await git('commit', '-m', 'test: review head');
+  const expectedHead = await git('rev-parse', 'HEAD');
+  const query = new URLSearchParams({ workspace: repo, base, expectedHead });
+  const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const response = await fetch(`${origin}/api/review/architecture-delta?${query}`, { headers });
+  expect(response.status).toBe(200);
+  const delta = await response.json();
+  expect(delta).toMatchObject({ status: 'ready', summary: { changedModules: 1, addedEdges: 1 },
+    nodes: expect.arrayContaining([expect.objectContaining({ path: 'entry.ts', state: 'added' })]),
+    edges: expect.arrayContaining([expect.objectContaining({ from: 'entry.ts', to: 'core.ts', state: 'added' })]) });
+  const body = JSON.stringify({ expectedAnalysisId: delta.analysisId, scopePaths: ['entry.ts'] });
+  const attention = await fetch(`${origin}/api/review/architecture-attention?${query}`, { method: 'POST', headers, body });
+  expect(attention.status).toBe(200);
+  expect(await attention.json()).toMatchObject({ ok: true, analysisId: delta.analysisId });
+  for (const authorization of [undefined, 'Bearer wrong-review-token']) {
+    const denied = await fetch(`${origin}/api/review/architecture-attention?${query}`, { method: 'POST',
+      headers: { ...(authorization ? { authorization } : {}), 'content-type': 'application/json',
+        'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1' }, body });
+    expect(denied.status).toBe(401);
+  }
+  writeFileSync(join(repo, 'entry.ts'), 'export const entry = 2;\n');
+  const unchanged = await fetch(`${origin}/api/review/architecture-delta?${query}`, { headers });
+  expect(await unchanged.json()).toMatchObject({ status: 'ready', analysisId: delta.analysisId });
+  const stale = await fetch(`${origin}/api/review/architecture-attention?${query}`, { method: 'POST', headers,
+    body: JSON.stringify({ expectedAnalysisId: '0'.repeat(24), scopePaths: ['entry.ts'] }) });
+  expect(stale.status).toBe(409);
 });
