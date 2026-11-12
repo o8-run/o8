@@ -3,8 +3,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import * as processApi from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { assertChildArguments, childEnvironmentContext, refreshChildEnvironment, stampChildPolicy } from './spawn-environment';
+import { assertChildArguments, childObservedSecrets, retainObservedChildSecrets, childEnvironmentContext, refreshChildEnvironment, stampChildPolicy } from './spawn-environment';
 import { credentialPolicyFingerprint } from './credential-policy';
 import { withProviderStoreLock } from './store-lock';
 import { assertLegacyRuntimeConfigSelection } from './legacy-runtime-config';
@@ -26,6 +27,10 @@ export function withChildCreationGuard<T>(check: () => void, operation: () => T)
     // inspecting the worker launch they are meant to validate.
     creationGuard.exit(() => { parent?.(); check(); });
   }, operation);
+}
+
+function assertIsolatedChildContext(): void {
+  if (creationGuard.getStore()) throw new Error('Push isolation refuses an active child creation guard.');
 }
 
 export interface SecretToolResult { code: number | null; stdout: string; stderr: string; missing?: boolean }
@@ -156,3 +161,66 @@ export const spawnSyncReadOnly = ((...args: unknown[]) => invoke('spawnSync', ar
 export const execFileSyncReadOnly = ((...args: unknown[]) => invoke('execFileSync', args, false, true)) as typeof processApi.execFileSync;
 export const execFileReadOnly: typeof processApi.execFile = ((...args: unknown[]) => invoke('execFile', args, false, true)) as typeof processApi.execFile;
 Object.defineProperty(execFileReadOnly, promisify.custom, { value: (...args: unknown[]) => promised('execFile', args, true) });
+
+// Trusted review helper bootstrap; Git policy preparation runs in its process.
+type PushResult = { status: number; body: Record<string, unknown> };
+const LIMIT = 2 * 1024 * 1024;
+
+export function runPushChild(root: string, signal: AbortSignal): Promise<PushResult> {
+  assertIsolatedChildContext();
+  if (signal.aborted) return Promise.reject(new Error('Push aborted'));
+  const here = dirname(fileURLToPath(import.meta.url));
+  const development = import.meta.url.endsWith('.ts');
+  const args = development
+    ? ['--import', 'tsx', join(here, '../review/push-entry.ts')]
+    : [join(here, 'review-push.mjs')];
+  return new Promise((resolve, reject) => {
+    // No ambient secrets or Node preload knobs enter the loader. The trusted
+    // helper receives the original environment over stdin, before policy import.
+    const child = processApi.spawn(process.execPath, args, {
+      env: { NODE_ENV: process.env.NODE_ENV, SystemRoot: process.env.SystemRoot },
+      windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let failure: Error | undefined;
+    const stop = (message: string) => {
+      failure = new Error(message);
+      // Kill the Git/helper/hook process group, including a sync Git grandchild.
+      if (process.platform !== 'win32' && child.pid) {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+      } else {
+        if (child.pid && process.env.SystemRoot) {
+          const killer = processApi.spawn(join(process.env.SystemRoot, 'System32', 'taskkill.exe'),
+            ['/PID', String(child.pid), '/T', '/F'], { env: { NODE_ENV: process.env.NODE_ENV, SystemRoot: process.env.SystemRoot }, windowsHide: true, stdio: 'ignore' });
+          killer.once('error', () => child.kill('SIGKILL'));
+        } else child.kill('SIGKILL');
+      }
+    };
+    const abort = () => stop('Push aborted');
+    const timer = setTimeout(() => stop('Push timed out'), 125_000);
+    const cleanup = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+      if (stdout.length > LIMIT) stop('Push response too large');
+    });
+    child.stderr.resume();
+    child.stdin.on('error', () => { /* close/error supplies the response */ });
+    child.once('error', () => { cleanup(); reject(new Error('Push failed')); });
+    child.once('close', () => {
+      cleanup();
+      if (failure) { reject(failure); return; }
+      try {
+        const receipt = JSON.parse(stdout) as { result: PushResult; observed: string[] };
+        const result = receipt.result;
+        if (!Array.isArray(receipt.observed) || receipt.observed.some(value => typeof value !== 'string')) throw new Error();
+        retainObservedChildSecrets(receipt.observed);
+        if (![200, 400, 500].includes(result.status) || !result.body || typeof result.body !== 'object') throw new Error();
+        resolve(result);
+      } catch { reject(new Error('Push failed')); }
+    });
+    child.stdin.end(JSON.stringify({ root, env: process.env, observed: childObservedSecrets() }));
+  });
+}

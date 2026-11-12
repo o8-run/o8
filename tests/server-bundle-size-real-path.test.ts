@@ -7,10 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const roots: string[] = [];
 const check = join(process.cwd(), 'scripts/check-server-bundle-size.mjs');
-const entries = ['src/ws-server.ts', 'src/lib/ws-server/terminal-host-entry.ts',
-  'src/lib/mcp/operator-mcp-server.ts', 'src/lib/mcp/operator-mcp-server-bundle-entry.ts',
-  'src/lib/mcp/operator-mcp-proxy.ts', 'src/lib/codex/app-server-exec-bridge.ts',
-  'src/lib/mcp/cortex-mcp-server.ts'];
+const entries = Object.values(SERVER_ENTRIES);
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
