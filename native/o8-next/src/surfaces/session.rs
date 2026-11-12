@@ -71,9 +71,10 @@ fn create(
         sessions.push(session.clone());
     }
     let all = shell.sessions.clone();
+    let snoozes = shell.state.sidebar_snoozes.clone();
     Some(Content::Session(cx.new(|cx| {
         let mut surface = Surface::shell_new(client, sessions, id, window, cx);
-        surface.shell_overview(&all, cx);
+        surface.shell_overview(&all, &snoozes, cx);
         surface
     })))
 }

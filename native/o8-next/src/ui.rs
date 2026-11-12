@@ -195,6 +195,8 @@ pub(crate) struct Surface {
     sessions: Vec<Session>,
     /// The shell's whole thread list, for an empty thread's overview.
     overview_sessions: Vec<Session>,
+    /// The sidebar's snoozes, thread id to wake time, for the same overview.
+    overview_snoozes: std::collections::BTreeMap<String, u64>,
     selected: Option<String>,
     /// Embedded side conversations must not follow main-history navigation.
     bound_session: Option<String>,
@@ -289,6 +291,7 @@ impl Surface {
             subscriptions: vec![],
             sessions: vec![],
             overview_sessions: vec![],
+            overview_snoozes: Default::default(),
             selected: None,
             bound_session: None,
             rows: Rc::new(vec![]),

@@ -227,7 +227,7 @@ pub(super) fn rows(
 }
 
 /// A thread waiting on the user: a question or an approval.
-pub(super) fn needs_input(s: &Session) -> bool {
+pub(crate) fn needs_input(s: &Session) -> bool {
     sidebar::rank(s) == 3 || s.status.trim().eq_ignore_ascii_case("approval")
 }
 

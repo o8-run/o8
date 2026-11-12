@@ -13,6 +13,8 @@ pub(crate) use thread_list::recents::calendar::{
 pub(crate) use thread_list::repo_identity;
 /// Tabular figures, for an empty thread's overview counts.
 pub(crate) use thread_list::inbox_card::tabular;
+/// A thread waiting on the user, so the overview agrees with the Inbox.
+pub(crate) use thread_list::needs_input;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
 #[path = "sidebar/thread_mutations_client.rs"]
@@ -440,6 +442,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                 }
                 ThreadEvent::Snoozes(snoozes) => {
                     shell.state.sidebar_snoozes = snoozes.iter().cloned().collect();
+                    shell.share_overview(cx);
                     shell.persist();
                 }
                 ThreadEvent::Error(error) => {
@@ -536,14 +539,22 @@ impl Shell {
         for content in self.content.values() {
             match content {
                 Content::Grid(grid) => grid.update(cx, |g, cx| g.load(cx)),
-                // An empty thread's overview lists threads from every project.
-                Content::Session(surface) => {
-                    surface.update(cx, |s, cx| s.shell_overview(&self.sessions, cx))
-                }
                 _ => {}
             }
         }
+        self.share_overview(cx);
         self.persist();
+    }
+    /// An empty thread's overview lists threads from every project, less the
+    /// ones snoozed in the sidebar.
+    fn share_overview(&self, cx: &mut Context<Self>) {
+        for content in self.content.values() {
+            if let Content::Session(surface) = content {
+                surface.update(cx, |s, cx| {
+                    s.shell_overview(&self.sessions, &self.state.sidebar_snoozes, cx)
+                });
+            }
+        }
     }
     /// Starts a thread on the operator's lead in the open repository, as the
     /// sidebar's New thread does, opening it in the main pane when `open`;

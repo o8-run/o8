@@ -3,7 +3,9 @@
 //! holds. It leaves the moment the thread has a message or a send starts.
 use super::*;
 use crate::client::Session;
+use crate::shell::sidebar::needs_input;
 use gpui::{Animation, AnimationExt};
+use std::collections::BTreeMap;
 
 /// Rows a list card shows.
 const ROWS: usize = 4;
@@ -12,8 +14,11 @@ pub(crate) const DAYS: usize = 12 * 7;
 /// A card's fade, and the most a later card waits behind the one before it.
 const FADE_MS: u64 = 180;
 const STAGGER_MS: u64 = 40;
-/// A card's narrowest width; two fit side by side only when both have this.
-const CARD_MIN: f32 = 280.;
+/// The width a card asks for, and the least it takes. The least decides how
+/// many sit side by side; the workspace is never narrower than its 420-point
+/// reserve, so one card always fits.
+const CARD_BASIS: f32 = 280.;
+const CARD_MIN: f32 = 240.;
 const GAP: f32 = 12.;
 
 /// One thread row in a list card.
@@ -73,25 +78,36 @@ fn newest_first(a: &Session, b: &Session) -> std::cmp::Ordering {
         .then_with(|| a.id.cmp(&b.id))
 }
 
-/// Why a thread waits on you, in the sidebar's attention bands.
-fn attention(s: &Session) -> Option<&'static str> {
+/// Why a thread waits on you, and how soon it is listed. A question or an
+/// approval comes first, as at the top of the sidebar's Inbox; the rest
+/// follow the sidebar's attention bands.
+fn attention(s: &Session) -> Option<(u8, &'static str)> {
+    if needs_input(s) {
+        return Some((u8::MAX, "Waiting on you"));
+    }
     Some(match crate::sidebar::rank(s) {
-        5 => "Failed",
-        4 => "Changes requested",
-        3 => "Waiting on you",
-        2 => "Review ready",
-        1 => "Merged",
-        _ if s.unread => "Unread",
+        5 => (5, "Failed"),
+        4 => (4, "Changes requested"),
+        2 => (2, "Review ready"),
+        1 => (1, "Merged"),
+        _ if s.unread => (0, "Unread"),
         _ => return None,
     })
 }
 
-/// Threads waiting on you, most urgent first, then newest.
-pub(crate) fn needs_you(sessions: &[Session], current: Option<&str>, now: u64) -> Vec<Row> {
+/// Threads waiting on you: questions and approvals, then the most urgent,
+/// then newest. A thread snoozed in the sidebar stays out until it wakes.
+pub(crate) fn needs_you(
+    sessions: &[Session],
+    snoozes: &BTreeMap<String, u64>,
+    current: Option<&str>,
+    now: u64,
+) -> Vec<Row> {
     let mut waiting: Vec<_> = sessions
         .iter()
         .filter(|s| listable(s, current))
-        .filter_map(|s| attention(s).map(|note| (crate::sidebar::rank(s), s, note)))
+        .filter(|s| !snoozes.get(&s.id).is_some_and(|until| *until > now))
+        .filter_map(|s| attention(s).map(|(urgency, note)| (urgency, s, note)))
         .collect();
     waiting.sort_by(|(a_rank, a, _), (b_rank, b, _)| {
         b_rank.cmp(a_rank).then_with(|| newest_first(a, b))
@@ -121,10 +137,25 @@ fn finished(s: &Session) -> bool {
     matches!(status.as_str(), "merged" | "released" | "completed") || outcome == "merged"
 }
 
+/// Local midnight at the start of each of the last `DAYS` days, oldest first,
+/// the last one today. Each is asked of the calendar: a day is 23 or 25 hours
+/// long when the clocks change, so counting back in 24-hour steps put a
+/// thread on the wrong day.
+pub(crate) fn day_starts(now: u64) -> [u64; DAYS] {
+    let mut starts = [0; DAYS];
+    let mut start = crate::shell::sidebar::calendar_midnight(now);
+    for slot in starts.iter_mut().rev() {
+        *slot = start;
+        start = crate::shell::sidebar::calendar_midnight(start.saturating_sub(1));
+    }
+    starts
+}
+
 /// Finished threads per day over the last twelve weeks, oldest first, the last
 /// cell today. A thread counts on the day of its last message, since the
-/// listing carries no separate finish time.
-pub(crate) fn finished_by_day(sessions: &[Session], today: u64) -> [u32; DAYS] {
+/// listing carries no separate finish time; a time ahead of this clock counts
+/// as today.
+pub(crate) fn finished_by_day(sessions: &[Session], starts: &[u64; DAYS]) -> [u32; DAYS] {
     let mut days = [0; DAYS];
     for s in sessions
         .iter()
@@ -133,27 +164,19 @@ pub(crate) fn finished_by_day(sessions: &[Session], today: u64) -> [u32; DAYS] {
         let Some(at) = crate::clock::timestamp(&s.last_message_at) else {
             continue;
         };
-        let ago = if at >= today {
-            0
-        } else {
-            ((today - at - 1) / 86_400 + 1) as usize
-        };
-        if ago < DAYS {
-            days[DAYS - 1 - ago] += 1;
+        // The last day that had started by then; none means before the window.
+        if let Some(day) = starts.partition_point(|start| *start <= at).checked_sub(1) {
+            days[day] += 1;
         }
     }
     days
 }
 
-/// The heatmap's one line: this week, then the twelve.
+/// The heatmap's one line: the last seven days, then the twelve weeks.
 pub(crate) fn week_total(days: &[u32; DAYS]) -> String {
     let week: u32 = days[DAYS - 7..].iter().sum();
     let all: u32 = days.iter().sum();
-    let noun = |n: u32| if n == 1 { "thread" } else { "threads" };
-    format!(
-        "{week} {} finished this week · {all} in 12 weeks",
-        noun(week)
-    )
+    format!("{week} in the last 7 days · {all} in 12 weeks")
 }
 
 /// A cell's strength, 0 empty to 4 the busiest day.
@@ -187,12 +210,23 @@ impl Surface {
 
     /// The shell's whole thread list, which the overview reads; this surface
     /// otherwise holds only its own workspace's threads.
-    pub(crate) fn shell_overview(&mut self, sessions: &[Session], cx: &mut Context<Self>) {
+    pub(crate) fn shell_overview(
+        &mut self,
+        sessions: &[Session],
+        snoozes: &BTreeMap<String, u64>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut changed = false;
         if self.overview_sessions.as_slice() != sessions {
             self.overview_sessions = sessions.to_vec();
-            if self.empty_chat() {
-                cx.notify();
-            }
+            changed = true;
+        }
+        if &self.overview_snoozes != snoozes {
+            self.overview_snoozes = snoozes.clone();
+            changed = true;
+        }
+        if changed && self.empty_chat() {
+            cx.notify();
         }
     }
 
@@ -213,9 +247,9 @@ impl Surface {
         let now = crate::clock::now();
         let sessions = self.overview_source();
         let current = self.selected.as_deref();
-        let needs = needs_you(sessions, current, now);
+        let needs = needs_you(sessions, &self.overview_snoozes, current, now);
         let recents = recent(sessions, current, now);
-        let days = finished_by_day(sessions, crate::shell::sidebar::calendar_midnight(now));
+        let days = finished_by_day(sessions, &day_starts(now));
         let cards = [
             self.list_card(
                 "Needs you",
@@ -234,31 +268,37 @@ impl Surface {
             usage_card(),
             heat_card(&days),
         ];
+        // The width cap sits on a frame around the wrapping row. The layout
+        // engine wraps a capped row at the pane's width, not at its cap, so a
+        // capped row kept all four cards on one line and ran past the composer.
+        let row = div()
+            .debug_selector(|| "empty-overview".into())
+            .w_full()
+            .flex()
+            .flex_wrap()
+            .gap(px(GAP))
+            .children(cards.into_iter().enumerate().map(|(index, card)| {
+                let delay = STAGGER_MS * index as u64;
+                let total = FADE_MS + delay;
+                card.with_animation(
+                    ("empty-overview-fade", index),
+                    Animation::new(std::time::Duration::from_millis(total)),
+                    move |card, delta| {
+                        let elapsed = delta * total as f32 - delay as f32;
+                        card.opacity(crate::motion::ease_out(
+                            (elapsed / FADE_MS as f32).clamp(0., 1.),
+                        ))
+                    },
+                )
+            }));
         Some(
             div()
-                .debug_selector(|| "empty-overview".into())
                 .w_full()
                 .max_w(px(crate::theme::chat_width()))
                 .mx_auto()
                 .pt(px(20.))
                 .pb(px(24.))
-                .flex()
-                .flex_wrap()
-                .gap(px(GAP))
-                .children(cards.into_iter().enumerate().map(|(index, card)| {
-                    let delay = STAGGER_MS * index as u64;
-                    let total = FADE_MS + delay;
-                    card.with_animation(
-                        ("empty-overview-fade", index),
-                        Animation::new(std::time::Duration::from_millis(total)),
-                        move |card, delta| {
-                            let elapsed = delta * total as f32 - delay as f32;
-                            card.opacity(crate::motion::ease_out(
-                                (elapsed / FADE_MS as f32).clamp(0., 1.),
-                            ))
-                        },
-                    )
-                }))
+                .child(row)
                 .into_any_element(),
         )
     }
@@ -349,8 +389,9 @@ fn card(title: &'static str, selector: &'static str) -> gpui::Div {
     div()
         .debug_selector(move || selector.into())
         .flex_grow()
-        .flex_basis(px(CARD_MIN))
-        .min_w(px(CARD_MIN.min(240.)))
+        .flex_basis(px(CARD_BASIS))
+        .min_w(px(CARD_MIN))
+        .overflow_hidden()
         .p(px(8.))
         .flex()
         .flex_col()
@@ -427,7 +468,7 @@ fn heat_card(days: &[u32; DAYS]) -> gpui::Div {
                 })
             })
     };
-    card("This week", "empty-overview-week").child(
+    card("Finished threads", "empty-overview-week").child(
         div()
             .px(px(8.))
             .pb(px(4.))
