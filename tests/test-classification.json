@@ -5927,6 +5927,14 @@
       ]
     },
     {
+      "path": "tests/o8d-task-dispatch-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-task-lane-mutations-native-real-path.test.ts",
       "reasons": [
         "child-process",

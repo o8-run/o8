@@ -254,6 +254,7 @@ const API_BASE_CLIENTS = [
   'src/lib/operator/settings-window-owner.ts',
   'src/lib/runtimes/shared/dispatch-readiness.ts',
   'src/lib/startup/schedule.ts',
+  'src/lib/tasks/dispatch-owner-client.ts',
 ];
 function apiBaseClients() {
   return [...sourceFiles('src', '.ts'), ...sourceFiles('src', '.tsx')]

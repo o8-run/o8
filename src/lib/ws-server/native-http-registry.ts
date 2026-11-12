@@ -49,6 +49,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route'), ARTIFACT_REQUEST_MAX_BYTES),
     route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
     route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
+    route('/api/tasks/dispatch-owner', 'POST', () => import('@/lib/tasks/dispatch-owner-route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),
