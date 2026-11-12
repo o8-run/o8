@@ -4,6 +4,14 @@ Source: the crates.io `gpui` 0.2.2 package, Apache-2.0, checksum
 `979b45cfa6ec723b6f42330915a1b3769b930d02b2d505f9697f8ca602bee707`.
 The original `LICENSE-APACHE` and package metadata are retained.
 
+Rule: application code first. Before a new edit here, try it in o8 next's own
+code through GPUI's public API. An edit lands only with an entry below that
+says what changed and why application code could not do it; every entry is
+redone by hand at each toolkit upgrade. A pull request that changes this
+directory without changing this file fails the `o8 next surface boundary`
+check, whatever its labels. To run it before pushing:
+`node scripts/next/check-surface-boundary.mjs --base origin/main --head HEAD --select-only`.
+
 Local changes:
 
 - `src/platform/mac/frame_clock.rs`: a deterministic 100 ms idle policy.
