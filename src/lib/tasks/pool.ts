@@ -23,16 +23,35 @@ import type {
 } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext, ProjectNotFoundError, type ProjectContext } from '@/lib/projects/context';
 
+interface FallbackReceipt { fromRuntime?: string; suggestedModel?: string }
+
+/** One read for the listed tasks; malformed historical rows cannot break the pool. */
+function taskFallbackReceipts(lanes: Lane[]): Map<string, FallbackReceipt> {
+  const receipts = new Map<string, FallbackReceipt>();
+  if (!lanes.length) return receipts;
+  const runtimes = new Map(lanes.map(lane => [lane.id, lane.runtime]));
+  const rows = getSqlite().prepare(`SELECT lane_id, payload_json FROM lane_events
+    WHERE verb = 'worker_fallback' AND lane_id IN (SELECT value FROM json_each(?))
+    ORDER BY rowid DESC`).all(JSON.stringify([...runtimes.keys()])) as Array<{ lane_id: string; payload_json: string }>;
+  for (const row of rows) {
+    if (receipts.has(row.lane_id)) continue;
+    try {
+      const value: unknown = JSON.parse(row.payload_json);
+      if (!value || typeof value !== 'object') continue;
+      const receipt = value as Record<string, unknown>;
+      if (receipt.status !== 'redispatched' || receipt.toRuntime !== runtimes.get(row.lane_id)) continue;
+      receipts.set(row.lane_id, {
+        fromRuntime: typeof receipt.fromRuntime === 'string' ? receipt.fromRuntime : undefined,
+        suggestedModel: typeof receipt.suggestedModel === 'string' ? receipt.suggestedModel : undefined,
+      });
+    } catch { /* Skip corrupt historical event payloads. */ }
+  }
+  return receipts;
+}
+
 /** Project the durable fallback receipt, keeping the original requested route. */
-function taskWorkerRouting(packet: OrchestratorPacket, lane: Lane | null): WorkerRouting | null {
-  const routing = packet.workerRouting;
-  if (!routing || !lane || routing.selectedRuntime === lane.runtime) return routing ?? null;
-  const fallback = getSqlite().prepare(`SELECT payload_json FROM lane_events WHERE lane_id = ?
-    AND verb = 'worker_fallback' AND json_extract(payload_json, '$.status') = 'redispatched'
-    AND json_extract(payload_json, '$.toRuntime') = ? ORDER BY rowid DESC LIMIT 1`)
-    .get(lane.id, lane.runtime) as { payload_json: string } | undefined;
-  if (!fallback) return routing;
-  const receipt = JSON.parse(fallback.payload_json) as { fromRuntime?: string; suggestedModel?: string };
+function taskWorkerRouting(packet: OrchestratorPacket, lane: Lane, receipt: FallbackReceipt): WorkerRouting {
+  const routing = packet.workerRouting!;
   return {
     ...routing,
     selectedRuntime: lane.runtime,
@@ -41,6 +60,11 @@ function taskWorkerRouting(packet: OrchestratorPacket, lane: Lane | null): Worke
     selectedEffort: null,
     reason: `Worker quota fallback from ${receipt.fromRuntime ?? routing.selectedRuntime} to ${lane.runtime}.`,
   };
+}
+
+function taskRuntimeSubstitution(packet: OrchestratorPacket, routing: WorkerRouting | null): string | null {
+  return routing?.runtimeSubstitution?.reason ?? (routing && ((routing.requestedRuntime && routing.requestedRuntime !== routing.selectedRuntime)
+    || packet.workerRouting?.selectedRuntime !== routing.selectedRuntime) ? routing.reason : null);
 }
 
 export type TaskPoolGroup = 'ready' | 'running' | 'review' | 'blocked' | 'done';
@@ -312,6 +336,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
   const packetIds = new Set(packets.map((packet) => packet.id));
   const projectCache = new Map<string, ProjectContext | null>();
   const tasks: TaskPoolTask[] = [];
+  const fallbackCandidates: Array<{ packet: OrchestratorPacket; lane: Lane; task: TaskPoolTask }> = [];
   const nowMs = Date.now();
 
   for (const packet of packets) {
@@ -331,8 +356,8 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
     const group = chooseGroup(packet, lane, execution ? remoteJob : undefined);
     if (!options.includeDone && group === 'done') continue;
 
-    const routing = taskWorkerRouting(packet, lane);
-    tasks.push({
+    const routing = packet.workerRouting ?? null;
+    const task: TaskPoolTask = {
       id: packet.id,
       packetId: packet.id,
       laneId: lane?.id ?? packet.lane?.laneId ?? null,
@@ -343,8 +368,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       runtime: lane?.runtime ?? packet.runtime,
       workerIntent: packet.workerIntent ?? null,
       workerRouting: routing,
-      runtimeSubstitution: routing?.runtimeSubstitution?.reason ?? (routing && ((routing.requestedRuntime && routing.requestedRuntime !== routing.selectedRuntime)
-        || packet.workerRouting?.selectedRuntime !== routing.selectedRuntime) ? routing.reason : null),
+      runtimeSubstitution: taskRuntimeSubstitution(packet, routing),
       branch: lane?.branch ?? packet.branchTarget ?? null,
       baseBranch: lane?.baseBranch ?? null,
       repoPath,
@@ -368,7 +392,17 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
           taskBody: packet.summary,
         })
         : undefined,
-    });
+    };
+    tasks.push(task);
+    if (lane && routing && routing.selectedRuntime !== lane.runtime) fallbackCandidates.push({ packet, lane, task });
+  }
+
+  const receipts = taskFallbackReceipts(fallbackCandidates.map(candidate => candidate.lane));
+  for (const { packet, lane, task } of fallbackCandidates) {
+    const receipt = receipts.get(lane.id);
+    if (!receipt) continue;
+    task.workerRouting = taskWorkerRouting(packet, lane, receipt);
+    task.runtimeSubstitution = taskRuntimeSubstitution(packet, task.workerRouting);
   }
 
   for (const lane of lanes) {

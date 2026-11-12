@@ -1,4 +1,3 @@
-import { validateRequestedRuntime } from '@/lib/agents/routing';
 import { delegationInstance, withDelegationInstance } from '@/lib/orchestrator/delegation-instance';
 import { findPrRepairOwner, PrRepairOwnerError, repairPacketStillOwned, samePrRepairRepo } from '@/lib/orchestrator/pr-repair-owner';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
@@ -450,8 +449,6 @@ export function POST(request: NextRequest) {
 
 async function postDelegate(request: NextRequest) {
   const body = await request.clone().json().catch(() => null) as Record<string, unknown> | null;
-  try { validateRequestedRuntime(body?.runtime); }
-  catch (error) { return NextResponse.json({ ok: false, code: 'invalid_runtime', error: (error as Error).message }, { status: 400 }); }
   let instance;
   try { instance = delegationInstance(body ?? {}); } catch (error) {
     return NextResponse.json({ ok: false, code: 'invalid_instance', error: error instanceof Error ? error.message : 'Invalid provider instance.' }, { status: 400 });
@@ -602,7 +599,8 @@ async function postDelegate(request: NextRequest) {
   // Older persisted failures predate the typed refusal boundary. Replays must
   // follow the same disclosure policy as a fresh launch.
   if (body?.checkoutMode === 'shared' && outcome.result.payload.ok === false
-    && outcome.result.payload.code !== 'shared_checkout_refusal') {
+    && outcome.result.payload.code !== 'shared_checkout_refusal'
+    && !(outcome.result.status === 400 && outcome.result.payload.code === 'worker_not_enabled')) {
     console.warn('[orchestrator-delegate] Shared worker failure receipt:', outcome.result.payload);
     return NextResponse.json({ ok: false, error: SHARED_CHECKOUT_LAUNCH_FAILURE,
       replayed: outcome.replayed || undefined }, { status: outcome.result.status });

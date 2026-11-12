@@ -46,6 +46,7 @@ export interface ResolveWorkerRoutingInput {
   requestedEffort?: unknown;
   source?: string;
   confidence?: WorkerRoutingConfidence;
+  decidedAt?: unknown;
   reason?: string;
 }
 
@@ -232,6 +233,8 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
     enforcement: PRODUCTION_AGENT_ENFORCEMENT,
     confidence: input.confidence ?? routingConfidence(workerIntent),
     reason: substitutionReason ?? (modelDisposition === 'rejected-incompatible' ? resolvedReason : input.reason ?? resolvedReason),
-    decidedAt: new Date().toISOString(),
+    // Preserve durable decisions; an inferred saved substitution has no known decision time.
+    decidedAt: typeof input.decidedAt === 'string' && Number.isFinite(Date.parse(input.decidedAt))
+      ? input.decidedAt : substituted ? undefined : new Date().toISOString(),
   };
 }

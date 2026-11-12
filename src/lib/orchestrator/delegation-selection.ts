@@ -15,7 +15,7 @@ export async function resolveDelegationSelection(body: Record<string, unknown>, 
   const defaults = snapshot.values;
   let runtime;
   try { runtime = validateRequestedRuntime(body.runtime, defaults.defaultDispatchRuntime); }
-  catch (error) { throw new DelegationSelectionError('invalid_runtime', (error as Error).message); }
+  catch (error) { throw new DelegationSelectionError('worker_not_enabled', (error as Error).message); }
   if (!runtime || !configuredWorkerPool(snapshot).includes(runtime)) {
     throw new DelegationSelectionError('worker_not_enabled', 'This worker is not in the configured pool. Choose one from cortex_worker_catalog or enable it in Settings > Models.');
   }

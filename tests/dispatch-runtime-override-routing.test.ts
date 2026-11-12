@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest';
+import Ajv from 'ajv';
 import { createEmptyOrchestratorMissionState, normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { preparePacketsForExplicitDispatch } from '@/lib/orchestrator/operator-mission-service/dispatch-runtime-override';
 const h = vi.hoisted(() => ({ dispatch: vi.fn(async (_input: unknown) => ({ ok: true })) }));
@@ -39,4 +40,15 @@ it('refuses a typo through the dispatch HTTP admission route with its reason', a
   const response = await POST(new NextRequest('http://localhost/api/orchestrator/dispatch', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtime: 'typo-runtime' }) }));
   expect(response.status).toBe(400);
   expect(JSON.stringify(await response.json())).toContain('typo-runtime');
+});
+
+it('accepts claude in the published dispatch schema and maps it while preserving force', async () => {
+  const { MISSION_TOOLS } = await import('@/lib/mcp/operator-handlers/mission');
+  const tool = MISSION_TOOLS.find(tool => tool.name === 'dispatch_mission')!;
+  const validate = new Ajv().compile(tool.inputSchema);
+  const args = { missionId: 'fixture', runtime: 'claude', force: true };
+  expect(validate(args), JSON.stringify(validate.errors)).toBe(true);
+  h.dispatch.mockClear();
+  expect((await handleDispatchMission(args)).isError).not.toBe(true);
+  expect(h.dispatch).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'claude-code', force: true }));
 });

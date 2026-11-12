@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { normalizeOrchestratorMissionState, createEmptyOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
@@ -17,4 +17,18 @@ it('loads unknown saved runtimes, continues fanout and preserves the substitutio
 });
 it('does not execute conversion hooks in malformed saved runtime data', () => {
   expect(() => resolveWorkerRouting({ requestedRuntime: { toString: 0 } })).not.toThrow();
+});
+
+it('keeps the saved substitution receipt identical across two loads', () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    const raw = { ...createEmptyOrchestratorMissionState(), packets: [{ id: 'old', runtime: 'retired-runtime', title: 'Saved worker' }] };
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const first = normalizeOrchestratorMissionState(raw).packets[0].workerRouting;
+    vi.setSystemTime(new Date('2026-01-02T00:00:00Z'));
+    expect(normalizeOrchestratorMissionState(raw).packets[0].workerRouting).toEqual(first);
+    expect(normalizeOrchestratorMissionState({ ...raw, packets: [{ ...raw.packets[0], workerRouting: first }] }).packets[0].workerRouting).toEqual(first);
+    const dated = { ...first, decidedAt: '2025-12-01T00:00:00.000Z' };
+    expect(normalizeOrchestratorMissionState({ ...raw, packets: [{ ...raw.packets[0], workerRouting: dated }] }).packets[0].workerRouting?.decidedAt).toBe(dated.decidedAt);
+  } finally { vi.useRealTimers(); }
 });

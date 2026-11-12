@@ -303,7 +303,7 @@ function normalizeWorkerRouting(value: unknown, runtime: unknown, workerIntent: 
     // Carry requestedEffort through the round-trip so selectedEffort survives a
     // reload before launch (normalize re-derives via resolveWorkerRouting).
     requestedEffort: routing.requestedEffort,
-    confidence,
+    confidence, decidedAt: routing.decidedAt,
     source: 'orchestrator-state',
   });
 }

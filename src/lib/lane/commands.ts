@@ -141,10 +141,15 @@ async function dispatchUnlocked(
   switch (command.verb) {
     case 'open_lane': {
       try { assertNotKnowledgeSource(command.repoPath); } catch (error) { return { ok: false, laneId: '', note: error instanceof Error ? error.message : 'Knowledge sources are read-only.' }; }
-      const workerRouting = resolveWorkerRouting({
-        requestedRuntime: validateRequestedRuntime(command.runtime, resolveDefaultDispatchRuntimeSync()),
-        source: 'lane-open',
-      });
+      let workerRouting: ReturnType<typeof resolveWorkerRouting>;
+      try {
+        workerRouting = resolveWorkerRouting({
+          requestedRuntime: validateRequestedRuntime(command.runtime, resolveDefaultDispatchRuntimeSync()),
+          source: 'lane-open',
+        });
+      } catch (error) {
+        return { ok: false, laneId: '', note: error instanceof Error ? error.message : 'Invalid worker runtime.' };
+      }
       const existing = (await import('@/lib/lane/registry')).findLaneByRepoAndBranch(
         command.repoPath,
         command.branch,

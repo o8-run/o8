@@ -18,11 +18,10 @@ await defaults.updateOperatorDefaults({ defaultDispatchRuntime: 'claude-code', s
 const { closeDb } = await import('@/lib/db');
 afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
 let sequence = 0;
-for (const entry of ['create-mission', 'spawn-prompt', 'comparison-fanout', 'mcp-create-mission'] as const) {
+for (const entry of ['create-mission', 'spawn-prompt', 'mcp-create-mission'] as const) {
   it.each(['typo-runtime', undefined])('%s runtime selection through '+entry, async runtime => {
     h.create.mockClear();
-    const body = { repoPath: repo, runtime, requestedRuntime: runtime, dispatch: false, task: 'Inspect fixture', issues: [{ number: 90131, title: 'Routing fixture', body: '', url: '' }], clientMutationId: `runtime-${++sequence}`,
-      ...(entry === 'comparison-fanout' ? { comparisonModels: ['model-a', 'model-b'] } : {}) };
+    const body = { repoPath: repo, runtime, requestedRuntime: runtime, dispatch: false, task: 'Inspect fixture', issues: [{ number: 90131, title: 'Routing fixture', body: '', url: '' }], clientMutationId: `runtime-${++sequence}` };
     if (entry === 'mcp-create-mission') {
       const { handleCreateMission } = await import('@/lib/mcp/operator-handlers/mission-create');
       const result = await handleCreateMission({ ...body, issues: ['90131'] });
@@ -36,3 +35,18 @@ for (const entry of ['create-mission', 'spawn-prompt', 'comparison-fanout', 'mcp
     else { expect(response.status).toBe(201); expect(h.create.mock.lastCall?.[0]).toMatchObject({ runtime: 'claude-code' }); }
   });
 }
+
+it('admits comparison candidates through real fan-out with the saved default and explicit runtime', async () => {
+  const { normalizeOrchestratorMissionState, createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  const { fanOutComparisonPackets } = await import('@/lib/orchestrator/comparison-fanout');
+  h.create.mockClear();
+  const state = normalizeOrchestratorMissionState({ ...createEmptyOrchestratorMissionState(), packets: [{
+    id: 'comparison-seed', title: 'Compare real candidates', runtime: defaults.resolveDefaultDispatchRuntimeSync(),
+    comparisonModels: ['model-a', 'codex'], status: 'queued', queueState: 'queued', releaseState: 'pending',
+  }] });
+  const result = fanOutComparisonPackets(state);
+  expect(result.packets.map(packet => packet.runtime)).toEqual(['claude-code', 'codex']);
+  expect(result.packets.map(packet => packet.dispatchRuntimePin)).toEqual(['claude-code', 'codex']);
+  expect(result.packets.map(packet => packet.workerRouting?.selectedRuntime)).toEqual(['claude-code', 'codex']);
+  expect(h.create).not.toHaveBeenCalled();
+});

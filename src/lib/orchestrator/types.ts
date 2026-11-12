@@ -64,7 +64,7 @@ export interface WorkerRouting {
   enforcement: 'dispatchable_runtimes';
   confidence: WorkerRoutingConfidence;
   reason: string;
-  decidedAt: string;
+  decidedAt?: string;
 }
 
 export type OrchestratorPacketStatus =

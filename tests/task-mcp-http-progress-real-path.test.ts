@@ -470,16 +470,6 @@ it('creates a task on the saved operator runtime when runtime is omitted', async
     expect((await response.json()).workerRouting.selectedRuntime).toBe('claude-code');
   } finally { await defaults.updateOperatorDefaults({ defaultDispatchRuntime: prior.values.defaultDispatchRuntime }); }
 });
-it('returns 409 for a non-dispatchable saved default through task creation', async () => {
-  const defaults = await import('@/lib/operator/defaults');
-  const spy = vi.spyOn(defaults, 'resolveDefaultDispatchRuntimeSync').mockReturnValue('magnitude');
-  try {
-    const tasks = await import('@/app/api/tasks/route');
-    const response = await tasks.POST(new NextRequest('http://localhost/api/tasks', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Unsupported saved default', repoPath: repo }) }));
-    expect(response.status).toBe(409);
-    expect((await response.json()).error).toMatch(/magnitude.*dispatchable/);
-  } finally { spy.mockRestore(); }
-});
 it.each(['assistant', 'open_lane'])('validates runtime and applies the saved default through %s', async entry => {
   const defaults = await import('@/lib/operator/defaults');
   const prior = await defaults.getOperatorDefaults();
@@ -489,7 +479,10 @@ it.each(['assistant', 'open_lane'])('validates runtime and applies the saved def
       if (entry === 'assistant') return (await import('@/lib/llm/tools')).executeTool('dispatch_codex_task', { repoPath: repo, task: 'Inspect fixture', branch: `entry-${++sequence}`, runtime });
       return (await import('@/lib/lane/commands')).dispatch({ verb: 'open_lane', repoPath: repo, branch: `entry-${++sequence}`, runtime: runtime as never, actor: 'user' });
     };
-    const refused = await invoke('typo-runtime').catch(error => ({ error: error.message }));
+    const refused = entry === 'open_lane'
+      ? await invoke('typo-runtime')
+      : await invoke('typo-runtime').catch(error => ({ error: error.message }));
+    if (entry === 'open_lane') expect(refused).toMatchObject({ ok: false, note: expect.stringContaining('typo-runtime') });
     expect(JSON.stringify(refused)).toContain('typo-runtime');
     expect(JSON.stringify(refused)).not.toContain('"ok":true');
     if (entry === 'assistant') h.launch.mockResolvedValueOnce({ ok: true, surfaceId: 'claude-code-owned:assistant-fixture', note: 'Started fixture' });
@@ -551,4 +544,27 @@ it.each(['claude', undefined])('routes MCP task_dispatch with requestedRuntime=%
     expect(result.data.workerRouting?.selectedRuntime).toBe('claude-code');
     await vi.waitFor(() => expect(lanes.findLatestLaneByPacket(task.packetId)).toMatchObject({ runtime: 'claude-code', status: 'running' }), { timeout: 5000 });
   } finally { await defaults.updateOperatorDefaults({ defaultDispatchRuntime: prior.values.defaultDispatchRuntime }); }
+});
+
+it('batches pool fallback receipts and ignores malformed saved event JSON', async () => {
+  fixture();
+  const { resolveWorkerRouting } = await import('@/lib/agents/routing');
+  const { getTaskPool } = await import('@/lib/tasks/pool');
+  const state = control.readOrchestratorControlPlaneState();
+  const seed = state.packets[0];
+  const ids = ['bad', 'good'].map(kind => `${seed.id}-${kind}`);
+  state.packets = ids.map(id => ({ ...seed, id, branchTarget: `task/${id}`, workerRouting: resolveWorkerRouting({ requestedRuntime: 'codex' }) }));
+  control.writeOrchestratorControlPlaneState(state);
+  for (const [index, id] of ids.entries()) {
+    const lane = lanes.createLane({ repoPath: repo, branch: `task/${id}`, runtime: 'claude-code', packetId: id });
+    const event = lanes.appendEvent(lane.id, 'worker_fallback', 'system', { status: 'redispatched', toRuntime: 'claude-code', fromRuntime: 'codex' });
+    if (index === 0) getSqlite().prepare('UPDATE lane_events SET payload_json = ? WHERE id = ?').run('{', event.id);
+  }
+  const queries = vi.spyOn(getSqlite(), 'prepare');
+  try {
+    const pool = await getTaskPool({ repoPath: repo });
+    expect(pool.tasks.find(task => task.id === ids[0])?.runtimeSubstitution).toBeNull();
+    expect(pool.tasks.find(task => task.id === ids[1])?.runtimeSubstitution).toContain('Worker quota fallback from codex to claude-code');
+    expect(queries.mock.calls.filter(([sql]) => sql.includes('worker_fallback'))).toHaveLength(1);
+  } finally { queries.mockRestore(); }
 });

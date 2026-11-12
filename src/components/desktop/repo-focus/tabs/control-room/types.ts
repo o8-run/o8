@@ -30,7 +30,7 @@ export interface TaskPoolWorkerRouting {
   enforcement: string;
   confidence: string;
   reason: string;
-  decidedAt: string;
+  decidedAt?: string;
 }
 
 export interface TaskPoolProjectSummary {
