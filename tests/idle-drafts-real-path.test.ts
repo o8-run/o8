@@ -155,3 +155,18 @@ it('reports an uncertain owner assignment without posting a handoff comment', as
   expect(await response.json()).toMatchObject({ ownerAssigned: null, commentPosted: false });
   expect(h.comment).not.toHaveBeenCalled(); expect(h.dispatch).not.toHaveBeenCalled();
 });
+it('stops later decision writes when the GitHub account changes during handoff', async () => {
+  const { bumpSignInEpoch } = await import('@/lib/github-broker/managed');
+  h.assign.mockImplementationOnce(async () => {
+    bumpSignInEpoch();
+    return { response: Response.json({ assignees: [{ login: 'fixture-owner' }] }) };
+  });
+  const response = await post('handoff', { owner: 'fixture-owner' });
+  expect(response.status).toBe(502);
+  expect(h.comment).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
+  h.comment.mockImplementationOnce(async () => { bumpSignInEpoch(); });
+  const closing = await post('close', { reason: 'Superseded' });
+  expect(closing.status).toBe(502);
+  expect(await closing.json()).toMatchObject({ commentPosted: true });
+  expect(h.close).not.toHaveBeenCalled();
+});

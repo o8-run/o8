@@ -67,7 +67,9 @@ export async function recordDraftDecision(repo: string, number: number, input: R
   if (decision === 'close' && !reason) throw new DraftDecisionError(400, 'A reason is required to close a draft.');
   const owner = typeof input.owner === 'string' ? input.owner.trim() : '';
   if (decision === 'handoff' && !/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(owner)) throw new DraftDecisionError(400, 'A GitHub owner login is required.');
+  const account = captureGitHubAccount();
   const pr = await fetchGitHubPullRequestDetail(repo, number);
+  requireGitHubAccount(account);
   idleDraftCache.clear();
   if (pr.state !== 'open' || !pr.draft) throw new DraftDecisionError(409, 'This pull request is no longer an open draft. Refresh before deciding.');
   let ownerAssigned = false;
@@ -82,11 +84,12 @@ export async function recordDraftDecision(repo: string, number: number, input: R
   }
   const comment = decision === 'handoff' ? `Handoff draft to @${owner}: ${reason || 'Ownership transferred.'}`
     : decision === 'close' ? `Close draft: ${reason}` : `Continue draft: ${reason || 'Work will continue.'}`;
+  requireGitHubAccount(account);
   try { await commentOnGitHubPullRequest(repo, number, comment); }
   catch { throw new DraftDecisionError(502, 'Comment outcome is unknown. Inspect the pull request before retrying.', null, ownerAssigned); }
   idleDraftCache.clear();
   if (decision === 'close') {
-    try { await closeGitHubPullRequest(repo, number); }
+    try { requireGitHubAccount(account); await closeGitHubPullRequest(repo, number); }
     catch { throw new DraftDecisionError(502, 'Reason posted; closing could not be confirmed. Inspect the pull request before retrying.', true); }
   }
   return { ok: true, decision, commentPosted: true, ownerAssigned, ...(ownerAssigned ? { owner } : {}) };
