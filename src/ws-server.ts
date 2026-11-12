@@ -7756,7 +7756,8 @@ function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
 const httpServer = createServer(async (req, res) => {
   // Rust classifies and stamps only the first request on a connection. End each
   // relayed response so the next request is classified and stamped on a fresh socket.
-  if (o8dBridge && process.env.O8_NEXT_O8D === '1') res.setHeader('Connection', 'close');
+  const receiverControl = req.url?.split('?')[0] === '/api/panel/symon/messages-receiver';
+  if (o8dBridge && (process.env.O8_NEXT_O8D === '1' || receiverControl)) res.setHeader('Connection', 'close');
   // Transport health is independent of Next and recovery. Stateful requests
   // retain the original recovery-before-use ordering.
   if (req.url !== '/health') await wsStartupReady;
@@ -7767,7 +7768,7 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
-  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
+  if ((process.env.O8_NEXT_O8D === '1' || receiverControl) && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
     o8dBridge ? o8dBridge.clientAddress(req) : req.socket.localPort === WS_PORT ? req.socket.remoteAddress ?? null : null)) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
@@ -9660,6 +9661,15 @@ async function bootstrapWsServer() {
     syncPacketWorkerTokenHashes();
   } catch (error) {
     console.warn('[ws-server] could not rebuild the worker credential file:', error instanceof Error ? error.message : error);
+  }
+  // WS owns Messages in every transport mode; the install lock refuses another owner.
+  if (process.platform === 'darwin') {
+    try {
+      const { startMessagesReceiver } = await import('./lib/symon/messages-receiver/loop');
+      startMessagesReceiver();
+    } catch {
+      console.warn('[symon] Messages receiver failed to start');
+    }
   }
   if (o8dBridge) {
     await o8dBridge.start();

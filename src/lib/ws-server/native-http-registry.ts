@@ -41,6 +41,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/mobile/symon', 'GET POST', () => import('@/lib/mobile/symon-relay-route')),
     route('/api/mobile/symon/confirm', 'POST', () => import('@/lib/mobile/symon-confirm-route')),
     route('/api/mobile/symon/tool', 'POST DELETE', () => import('@/lib/mobile/symon-tool-route')),
+    route('/api/panel/symon/messages-receiver', 'GET POST', () => import('@/lib/symon/messages-receiver/control-route')),
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
