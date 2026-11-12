@@ -15,7 +15,7 @@
 //! own buttons come back in the title bar it reveals there.
 use gpui::{
     AnyElement, App, InteractiveElement, IntoElement, ParentElement, Rgba,
-    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px, rgb, rgba,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 
 /// A button's diameter, as the native and classic ones.
@@ -32,12 +32,7 @@ pub(crate) const HIT: f32 = SIZE + 4.;
 pub(crate) const DRAWN: bool = cfg!(any(test, target_os = "macos"));
 
 const GROUP: &str = "window-lights";
-const GLYPH: Rgba = Rgba {
-    r: 0.,
-    g: 0.,
-    b: 0.,
-    a: 0.55,
-};
+const GLYPH: Rgba = crate::theme::WINDOW_LIGHT_GLYPH;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum Light {
@@ -71,10 +66,10 @@ impl Light {
         }
     }
     fn color(self) -> Rgba {
-        rgb(match self {
-            Light::Close => 0xFF5F57,
-            Light::Minimize => 0xFEBC2E,
-            Light::Zoom => 0x28C840,
+        crate::theme::window_light(match self {
+            Light::Close => 0,
+            Light::Minimize => 1,
+            Light::Zoom => 2,
         })
     }
     /// The classic glyphs, doubled onto the 24-unit icon grid.
@@ -168,11 +163,9 @@ fn button(light: Light, active: bool) -> impl IntoElement {
                 // The native hairline rim, inside the circle.
                 dot.bg(light.color())
                     .border(px(0.5))
-                    .border_color(rgba(0x0000002e))
+                    .border_color(crate::theme::WINDOW_LIGHT_RIM)
             } else {
-                let mut grey = crate::theme::current().text;
-                grey.a *= 0.22;
-                dot.bg(grey)
+                dot.bg(crate::theme::window_light_inactive())
             }
         })
         // Glyphs only on an active window, on all three while the group is
