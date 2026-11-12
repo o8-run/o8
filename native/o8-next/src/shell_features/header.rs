@@ -87,7 +87,7 @@ fn render(
         .when(hidden && !moving, |row| row.child(nav(true, cx)))
         .child(tabs(s, cx))
         .child(
-            div().w(px(32.)).flex_shrink_0().children(
+            div().w(px(88.)).flex().items_center().flex_shrink_0().children(
                 s.active().as_ref().and_then(|tab| thread_worktree_badge(s, tab))
             )
         )

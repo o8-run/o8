@@ -154,7 +154,7 @@ impl Shell {
     }
     fn persist(&mut self) {
         let open = self.state.workspaces.iter().flat_map(|(scope, saved)| {
-            saved.tabs.iter().filter_map(|tab| match tab {
+            saved.tabs.iter().filter_map(move |tab| match tab {
                 Tab::Session(id) => Some(format!(
                     "{scope}|{}", saved.selections.get(id).unwrap_or(id)
                 )),
