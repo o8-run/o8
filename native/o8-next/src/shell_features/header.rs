@@ -200,10 +200,10 @@ fn edge_mark() -> gpui::Div {
 /// The toggle's and an arrow's widths: 7px either side of a 14px and a 15px glyph.
 const TOGGLE_W: f32 = 28.;
 const ARROW_W: f32 = 29.;
-/// Past the traffic lights, so the toggle never crowds them. The lights keep
-/// their size when the window zooms out, so the inset keeps its screen width.
-fn toggle_inset(window: &Window) -> f32 {
-    crate::zoom::chrome_clearance(26. + super::super::rail::LIGHTS, window)
+/// Past the window buttons, so the toggle never crowds them. The app draws
+/// them in window units (window_lights), so the inset zooms with them.
+fn toggle_inset(_: &Window) -> f32 {
+    26. + super::super::rail::LIGHTS
 }
 /// The travelling slot's floor: the folded strip's inset, toggle, Back and
 /// Forward with their gaps and the 4px before the tabs, less the strip's 16px
