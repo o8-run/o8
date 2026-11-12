@@ -1,3 +1,6 @@
+import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
+import { isNativeCortexReader } from '@/lib/cortex/owner-process';
+import { callSteerOwner } from '@/lib/orchestrator/operator-mission-service/steer-owner-client';
 import { createHash } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
 import { getApproval } from '@/lib/approvals/store';
@@ -33,6 +36,7 @@ function source(input: unknown): ReviewCorrectionSource {
 
 /** A deliberate handoff, never an automatic restart or a resolution receipt. */
 export async function correctAuthorFromReview(input: ComposerQueueTarget & { review: unknown }) {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) return callSteerOwner<Awaited<ReturnType<typeof correctWorkers>>>({ kind: 'review-correct', input });
   const target = validateComposerQueueTarget(input);
   const review = source(input.review);
   const scope = `review-author-${createHash('sha256').update(review.packetId).digest('hex').slice(0, 24)}-`;

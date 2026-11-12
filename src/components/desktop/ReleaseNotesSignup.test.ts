@@ -5,7 +5,7 @@ import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AboutTab } from './settings/AboutTab';
 import { Onboarding } from './Onboarding';
-import { createOnboardingPreviewRequest } from '@/app/preview/first-run/FirstRunPreview';
+import { createOnboardingPreviewRequest } from '../../../tests/fixtures/onboarding/FirstRunPreview';
 
 vi.mock('./settings/ReportIssueSection', () => ({ ReportIssueSection: () => null }));
 vi.mock('@/lib/ws-auth', () => ({ getOrCreateWsToken: () => 'fixture-operator-token' }));

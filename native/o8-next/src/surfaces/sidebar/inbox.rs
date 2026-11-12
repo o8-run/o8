@@ -67,6 +67,11 @@ pub(crate) fn open_key(shelf: &str) -> String {
     format!("open:{shelf}")
 }
 
+/// Whether a disclosure key is a shelf's unfold key.
+pub(crate) fn is_open_key(key: &str) -> bool {
+    key.starts_with("open:")
+}
+
 /// Working on top when anything runs, then Active; then the Snoozed and
 /// Settled shelves. A shelf is a
 /// `shelf` row (its count in `age`, "open" in `status` when unfolded) followed
@@ -222,7 +227,7 @@ pub(super) fn rows(
 }
 
 /// A thread waiting on the user: a question or an approval.
-pub(super) fn needs_input(s: &Session) -> bool {
+pub(crate) fn needs_input(s: &Session) -> bool {
     sidebar::rank(s) == 3 || s.status.trim().eq_ignore_ascii_case("approval")
 }
 

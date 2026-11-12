@@ -29,6 +29,7 @@ const integrationPolicyCommand = 'node scripts/ci/prepare-integration-policy.mjs
 // Merge-queue reuse only ever skips steps on the runner. Local verification
 // always runs them, so the uniform gate is removed before exact shape checks.
 const reuseGate = "needs.reuse.outputs.reuse != 'true'";
+const rustSelectionCommand = "selection=$(mktemp)\nchanged=true\nif GITHUB_OUTPUT=\"$selection\" node scripts/ci/native-changes.mjs; then\n  case \"$(cat \"$selection\")\" in\n    changed=false) changed=false ;;\n  esac\nfi\nprintf 'changed=%s\\n' \"$changed\" >> \"$GITHUB_OUTPUT\"\nrm -f \"$selection\"\n";
 const reuseGatedJobs = ['typecheck', 'server-bundle-size', 'lint', 'classification', 'test-shards', 'integration-changed',
   'security', 'governance-smoke', 'rust-check-windows', 'rust-check-linux', 'o8-next-tests'];
 
@@ -49,7 +50,7 @@ function expand(value, shard) {
 }
 function withoutReuseGate(jobs) {
   const reuse = jobs.reuse;
-  requireCondition(reuse && !reuse.if && !reuse.needs && !reuse.strategy
+  requireCondition(reuse && reuse.if === "github.event_name == 'merge_group'" && !reuse.needs && !reuse.strategy
     && isDeepStrictEqual(reuse.outputs, { reuse: '${{ steps.decide.outputs.reuse }}' }),
   'merge-queue reuse job changed; update verify:ci coverage');
   for (const [id, job] of Object.entries(jobs)) {
@@ -57,6 +58,11 @@ function withoutReuseGate(jobs) {
     const gated = reuseGatedJobs.includes(id);
     requireCondition(needs.includes('reuse') === gated, `${id} merge-queue reuse gating needs a verify:ci equivalent`);
     if (!gated) continue;
+    const prefix = "cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && "
+      + (id === 'governance-smoke' ? "needs.typecheck.result == 'success' && " : '');
+    requireCondition(typeof job.if === 'string' && job.if.startsWith(prefix) && job.if.endsWith(')'),
+      `${id} must preserve merge-queue dependency failure and cancellation gates`);
+    job.if = job.if.slice(prefix.length + 1, -1);
     const rest = needs.filter(need => need !== 'reuse');
     if (rest.length === 0) delete job.needs;
     else job.needs = rest.length === 1 ? rest[0] : rest;
@@ -71,6 +77,52 @@ function withoutReuseGate(jobs) {
       step.if = step.if.slice(prefix.length);
     }
   }
+  const classification = jobs.classification;
+  const selector = classification.steps.find(step => step.id === 'rust-inputs');
+  requireCondition(isDeepStrictEqual(classification.outputs, { rust_changed: '${{ steps.rust-inputs.outputs.changed }}' })
+    && isDeepStrictEqual(selector, { name: 'Select Rust inputs before runner admission', id: 'rust-inputs', run: rustSelectionCommand })
+    && classification.steps.indexOf(selector) > classification.steps.findIndex(step => step.uses === 'actions/setup-node@v4')
+    && classification.steps.some(step => step.uses === 'actions/setup-node@v4')
+    && isDeepStrictEqual(classification.steps[0].with, { 'fetch-depth': 0, filter: 'blob:none' }),
+  'Rust admission selection needs a verify:ci equivalent');
+  delete classification.outputs;
+  classification.steps = classification.steps.filter(step => step !== selector);
+  for (const id of ['rust-check-linux', 'rust-check-windows']) {
+    const job = jobs[id];
+    const suffix = ") && needs.classification.result == 'success' && needs.classification.outputs.rust_changed != 'false'";
+    requireCondition(isDeepStrictEqual(job.needs, 'classification') && job.if.startsWith('(') && job.if.endsWith(suffix),
+      `${id} Rust admission condition needs a verify:ci equivalent`);
+    delete job.needs;
+    job.if = job.if.slice(1, -suffix.length);
+  }
+}
+// Hosted tool provisioning is normalized away; local verification still audits
+// with the installed cargo-audit. Reject any attempt to cache advisory results.
+function withoutAuditToolCache(security) {
+  const identity = security.steps.find(step => step.id === 'audit-tool');
+  const cache = security.steps.find(step => step.id === 'audit-tool-cache');
+  const install = security.steps.find(step => step.name === 'Install cargo-audit');
+  requireCondition(isDeepStrictEqual(identity, {
+    name: 'Resolve current audit tool identity', id: 'audit-tool',
+    run: 'node scripts/ci/audit-tool-cache.mjs "$(rustc -Vv)"',
+  }) && isDeepStrictEqual(cache, {
+    uses: 'actions/cache@v4', id: 'audit-tool-cache', if: "steps.audit-tool.outputs.cacheable == 'true'", with: {
+      path: '~/.cargo/bin/cargo-audit',
+      key: '${{ runner.os }}-${{ runner.arch }}-cargo-audit-v2-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.source }}-${{ steps.audit-tool.outputs.toolchain }}-${{ steps.audit-tool.outputs.image }}-${{ steps.audit-tool.outputs.recipe }}',
+    },
+  }) && isDeepStrictEqual(install, {
+    name: 'Install cargo-audit',
+    env: { AUDIT_TOOL_VERSION: '${{ steps.audit-tool.outputs.version }}', AUDIT_TOOL_CACHEABLE: '${{ steps.audit-tool.outputs.cacheable }}',
+      AUDIT_TOOL_CACHE_HIT: '${{ steps.audit-tool-cache.outputs.cache-hit }}' },
+    run: 'bash scripts/ci/install-audit-tool.sh',
+  }) && ['Audit root dependencies', 'Audit Rust dependencies', 'Review dependency changes'].every(name => {
+    const audit = security.steps.find(step => step.name === name);
+    return audit && !audit.if && !audit['continue-on-error'];
+  }), 'audit executable cache needs a verify:ci equivalent; advisory data must not be cached');
+  security.steps = security.steps.filter(step => step !== identity && step !== cache);
+  delete install.if;
+  delete install.env;
+  install.run = 'cargo install cargo-audit --locked';
 }
 function usesTestProcess(command, scripts, seen = new Set()) {
   if (/\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs|native-test-shard\.mjs --cargo --phase=timed/.test(command)) return true;
@@ -132,6 +184,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   requireCondition(jobs && typeof jobs === 'object', 'CI must define jobs');
   requireCondition(workflow.defaults?.run === undefined, 'workflow run defaults need a verify:ci equivalent');
   withoutReuseGate(jobs);
+  withoutAuditToolCache(jobs.security);
   for (const id of Object.keys(jobs)) {
     requireCondition(localJobs.includes(id) || Object.hasOwn(hostedJobs, id), `CI job ${id} is missing from verify:ci`);
   }
@@ -252,8 +305,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
         'restore-keys': '${{ steps.native-cache-key.outputs.restore-key }}' } },
     { id: 'registration-cache', if: "inputs.registration-cache == 'true' && inputs.headless-tests == 'true'",
       uses: 'actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684',
-      with: { path: registrationPath, key: '${{ steps.native-cache-key.outputs.registration-key }}',
-        'restore-keys': '${{ steps.native-cache-key.outputs.registration-restore-key }}' } },
+      with: { path: registrationPath, key: '${{ steps.native-cache-key.outputs.registration-key }}' } },
     { if: "inputs.headless-tests == 'true'", shell: 'bash',
       env: { O8_NATIVE_CACHE_HIT: '${{ steps.native-cache.outputs.cache-hit }}' },
       run: 'node scripts/ci/native-test-cache.mjs restore' },

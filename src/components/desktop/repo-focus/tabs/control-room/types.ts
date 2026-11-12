@@ -30,7 +30,7 @@ export interface TaskPoolWorkerRouting {
   enforcement: string;
   confidence: string;
   reason: string;
-  decidedAt: string;
+  decidedAt?: string;
 }
 
 export interface TaskPoolProjectSummary {
@@ -51,6 +51,7 @@ export interface TaskPoolTask {
   status: string;
   runtime: string;
   workerIntent: string | null;
+  runtimeSubstitution?: string | null;
   workerRouting: TaskPoolWorkerRouting | null;
   branch: string | null;
   baseBranch: string | null;

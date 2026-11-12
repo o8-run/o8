@@ -48,6 +48,7 @@ export function TaskRow({
   const metaParts = [
     repoLabel,
     `${intentLabel(taskIntent)} - ${runtimeLabel(selectedRuntime)}`,
+    task.runtimeSubstitution,
     taskTimeLabel(task),
   ].filter(Boolean);
   const showActions = compactActions || hovered || active;

@@ -80,7 +80,7 @@ const NEW_RUNTIMES = listDeclarativeRuntimes();
 function request(runtime: OrchestratorRuntime, issueNumber: number): NextRequest {
   return new NextRequest('http://localhost:3001/api/orchestrator/create-mission', {
     method: 'POST',
-    headers: { host: 'localhost:3001' },
+    headers: { host: 'localhost:3001', 'x-o8-worker-packet-id': 'untrusted-packet' },
     body: JSON.stringify({
       clientMutationId: `create-runtime-${issueNumber}`,
       repoPath,
@@ -143,6 +143,7 @@ describe('create_mission runtime reachability', () => {
     expect(await response.json()).toMatchObject({ ok: true });
 
     const packet = readOrchestratorControlPlaneState().packets.find((entry) => entry.title.includes(runtime));
+    expect(packet?.dispatcher).toEqual({ surface: 'operator', id: 'desktop' });
     expect(packet?.runtime).toBe(runtime);
     expect(packet?.workerRouting?.requestedRuntime).toBe(runtime);
     expect(packet?.workerRouting?.selectedRuntime).toBe(runtime);
@@ -159,7 +160,7 @@ describe('create_mission runtime reachability', () => {
   it('persists transient outside-launch provenance on the packet', async () => {
     const response = await createMissionRoute.POST(new NextRequest('http://localhost:3001/api/orchestrator/create-mission', {
       method: 'POST',
-      headers: { host: 'localhost:3001' },
+      headers: { host: 'localhost:3001', 'x-o8-worker-packet-id': 'untrusted-packet' },
       body: JSON.stringify({
         clientMutationId: 'create-runtime-outside-launch',
         repoPath,

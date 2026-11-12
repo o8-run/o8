@@ -2,9 +2,7 @@ import 'server-only';
 
 import { randomBytes, randomUUID } from 'node:crypto';
 
-import {
-  getResourceLeaseStore,
-} from './resource-lease-service';
+import type { ResourceLeaseStore } from './resource-lease-service';
 import { observeResourceLeaseParticipant } from './resource-lease-participant';
 import {
   normalizeResourceLeaseTtl,
@@ -16,7 +14,7 @@ import {
 
 const INTERNAL_WAIT_INTERVAL_MS = 50;
 export const DEFAULT_INTERNAL_RESOURCE_LEASE_MAX_WAIT_MS = 5_000;
-const MAX_INTERNAL_RESOURCE_LEASE_WAIT_MS = 10 * 60_000;
+const MAX_INTERNAL_RESOURCE_LEASE_WAIT_MS = 24 * 60 * 60_000;
 
 export interface ResourceLeaseGuardRefusal {
   code: 'resource_lease_wait_timeout' | 'resource_lease_acquire_failed';
@@ -34,8 +32,8 @@ export type ResourceLeaseGuardResult<T> =
 
 function normalizeMaxWaitMs(value: number | undefined): number {
   const maxWaitMs = value ?? DEFAULT_INTERNAL_RESOURCE_LEASE_MAX_WAIT_MS;
-  if (!Number.isSafeInteger(maxWaitMs) || maxWaitMs <= 0 || maxWaitMs > MAX_INTERNAL_RESOURCE_LEASE_WAIT_MS) {
-    throw new Error(`Resource lease max wait must be an integer from 1 through ${MAX_INTERNAL_RESOURCE_LEASE_WAIT_MS} milliseconds.`);
+  if (!Number.isSafeInteger(maxWaitMs) || maxWaitMs < 0 || maxWaitMs > MAX_INTERNAL_RESOURCE_LEASE_WAIT_MS) {
+    throw new Error(`Resource lease max wait must be an integer from 0 through ${MAX_INTERNAL_RESOURCE_LEASE_WAIT_MS} milliseconds.`);
   }
   return maxWaitMs;
 }
@@ -56,7 +54,12 @@ export async function withResourceLease<T>(input: {
   actor: string;
   ttlMs?: number;
   maxWaitMs?: number;
+  pollIntervalMs?: number;
+  store?: ResourceLeaseStore;
+  signal?: AbortSignal;
+  onWaiting?: (position: number | null, holder: ResourceLeaseHolder | null) => void;
 }, action: () => Promise<T>): Promise<ResourceLeaseGuardResult<T>> {
+  const store = input.store ?? (await import('./resource-lease-default-store')).getResourceLeaseStore();
   const startedAt = Date.now();
   const waiterId = `waiter-${randomUUID()}`;
   const claimToken = randomBytes(32).toString('base64url');
@@ -75,14 +78,14 @@ export async function withResourceLease<T>(input: {
       actor: input.actor,
       claimToken,
     });
-    const store = getResourceLeaseStore();
     const deadline = startedAt + maxWaitMs;
     while (!lease) {
+      if (input.signal?.aborted) throw new Error('Heavy step cancelled while waiting.');
       const result = await store.acquire({
         resource: input.resource,
         participant,
         ttlMs,
-        wait: true,
+        wait: maxWaitMs > 0,
         waiterId,
       });
       if (result.state === 'acquired') {
@@ -92,6 +95,7 @@ export async function withResourceLease<T>(input: {
       holder = result.holder;
       nextWaiter = result.state === 'queued' ? result.waiter : result.nextWaiter;
       blocked = result.blocked;
+      input.onWaiting?.(result.state === 'queued' ? result.waiter.position : null, holder);
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) {
         const snapshot = await store.timeoutWait({
@@ -115,12 +119,12 @@ export async function withResourceLease<T>(input: {
           },
         };
       }
-      await waitBriefly(Math.min(INTERNAL_WAIT_INTERVAL_MS, remainingMs));
+      await waitBriefly(Math.min(input.pollIntervalMs ?? INTERNAL_WAIT_INTERVAL_MS, remainingMs));
     }
 
   } catch (error) {
     if (participant) {
-      await getResourceLeaseStore().timeoutWait({
+      await store.timeoutWait({
         resource: input.resource,
         participant,
         waiterId,
@@ -142,7 +146,6 @@ export async function withResourceLease<T>(input: {
 
   const acquiredParticipant = participant;
   const acquiredLease = lease;
-  const store = getResourceLeaseStore();
   const heartbeatEveryMs = Math.max(1_000, Math.min(30_000, Math.floor(ttlMs / 3)));
   const heartbeat = setInterval(() => {
     void store.heartbeat({ resource: input.resource, participant: acquiredParticipant, ttlMs })

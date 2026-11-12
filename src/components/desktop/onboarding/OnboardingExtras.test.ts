@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Onboarding } from '../Onboarding';
-import { createOnboardingPreviewRequest, PREVIEW_PROJECT } from '@/app/preview/first-run/FirstRunPreview';
+import { createOnboardingPreviewRequest, PREVIEW_PROJECT } from '../../../../tests/fixtures/onboarding/FirstRunPreview';
 import { IPHONE_APP_INSTALL_URL } from '../canvas/mobile-app-link';
 import { emptyProgress, PROGRESS_KEY } from './onboarding-progress';
 

@@ -413,3 +413,158 @@ it('resumes a modern persisted event cursor after restarting the standalone MCP 
     expect(next.nextSince).toBeGreaterThanOrEqual(first.nextSince);
   } finally { await stop(); }
 }, 60000);
+
+it.each(['claude', 'codex', 'claude-code', 'gemini', 'opencode'])('preserves named runtime %s from task creation to started child', async (requestedRuntime) => {
+  const tasks = await import('@/app/api/tasks/route');
+  const dispatch = await import('@/lib/tasks/http/dispatch');
+  const expected = requestedRuntime === 'claude' ? 'claude-code' : requestedRuntime;
+  h.launch.mockImplementationOnce(async (input) => {
+    const child = spawn(process.execPath, ['-e', 'process.stdout.write(process.argv[1])', input.runtime]);
+    let observed = '';
+    child.stdout!.on('data', chunk => { observed += String(chunk); });
+    await once(child, 'close');
+    expect(observed).toBe(expected);
+    return { ok: true, surfaceId: `${observed}:fixture`, note: 'Stub worker started' };
+  });
+  const response = await tasks.POST(new NextRequest('http://localhost/api/tasks', {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ title: `Runtime fixture ${++sequence}`, repoPath: repo, requestedRuntime, workerIntent: 'reviewer' }),
+  }));
+  expect(response.status).toBe(201);
+  const created = await response.json();
+  const result = await dispatch.POST(new NextRequest('http://localhost/dispatch', {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}',
+  }), { params: Promise.resolve({ taskId: created.taskId }) });
+  expect(result.status).toBe(200);
+  await vi.waitFor(() => expect(lanes.findLaneByPacket(created.packetId)).toMatchObject({ runtime: expected, status: 'running' }), { timeout: 5000 });
+});
+
+it('refuses an unknown explicit runtime before creating a task', async () => {
+  const tasks = await import('@/app/api/tasks/route');
+  const response = await tasks.POST(new NextRequest('http://localhost/api/tasks', {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'Unknown runtime fixture', repoPath: repo, requestedRuntime: 'uninstalled-typo' }),
+  }));
+  expect(response.status).toBe(400);
+  expect((await response.json()).error).toContain('uninstalled-typo');
+});
+it.each([42, {}, false])('refuses non-string requestedRuntime %j through HTTP', async requestedRuntime => {
+  const tasks = await import('@/app/api/tasks/route');
+  const response = await tasks.POST(new NextRequest('http://localhost/api/tasks', {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'Invalid runtime fixture', repoPath: repo, requestedRuntime }),
+  }));
+  expect(response.status).toBe(400);
+});
+it('creates a task on the saved operator runtime when runtime is omitted', async () => {
+  const defaults = await import('@/lib/operator/defaults');
+  const prior = await defaults.getOperatorDefaults();
+  await defaults.updateOperatorDefaults({ defaultDispatchRuntime: 'claude-code' });
+  try {
+    const tasks = await import('@/app/api/tasks/route');
+    const response = await tasks.POST(new NextRequest('http://localhost/api/tasks', {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Operator default fixture', repoPath: repo }),
+    }));
+    expect(response.status).toBe(201);
+    expect((await response.json()).workerRouting.selectedRuntime).toBe('claude-code');
+  } finally { await defaults.updateOperatorDefaults({ defaultDispatchRuntime: prior.values.defaultDispatchRuntime }); }
+});
+it.each(['assistant', 'open_lane'])('validates runtime and applies the saved default through %s', async entry => {
+  const defaults = await import('@/lib/operator/defaults');
+  const prior = await defaults.getOperatorDefaults();
+  await defaults.updateOperatorDefaults({ defaultDispatchRuntime: 'claude-code' });
+  try {
+    const invoke = async (runtime?: string) => {
+      if (entry === 'assistant') return (await import('@/lib/llm/tools')).executeTool('dispatch_codex_task', { repoPath: repo, task: 'Inspect fixture', branch: `entry-${++sequence}`, runtime });
+      return (await import('@/lib/lane/commands')).dispatch({ verb: 'open_lane', repoPath: repo, branch: `entry-${++sequence}`, runtime: runtime as never, actor: 'user' });
+    };
+    const refused = entry === 'open_lane'
+      ? await invoke('typo-runtime')
+      : await invoke('typo-runtime').catch(error => ({ error: error.message }));
+    if (entry === 'open_lane') expect(refused).toMatchObject({ ok: false, note: expect.stringContaining('typo-runtime') });
+    expect(JSON.stringify(refused)).toContain('typo-runtime');
+    expect(JSON.stringify(refused)).not.toContain('"ok":true');
+    if (entry === 'assistant') h.launch.mockResolvedValueOnce({ ok: true, surfaceId: 'claude-code-owned:assistant-fixture', note: 'Started fixture' });
+    const result = await invoke();
+    expect(JSON.stringify(result)).toContain('claude-code');
+  } finally { await defaults.updateOperatorDefaults({ defaultDispatchRuntime: prior.values.defaultDispatchRuntime }); }
+});
+
+async function runtimeToolCall(name: string, args: Record<string, unknown>) {
+  const response = await fetch(`http://127.0.0.1:${h.port}/api/mcp`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+  });
+  expect(response.status).toBe(200);
+  const envelope = await response.json();
+  const text = envelope.result?.content?.map((part: { text?: string }) => part.text ?? '').join('\n') ?? JSON.stringify(envelope.error);
+  let data: Partial<import('@/lib/tasks/actions').TaskMutationResult> = {};
+  try { data = JSON.parse(text); } catch { /* Refusals can be plain MCP text. */ }
+  return { refused: Boolean(envelope.error || envelope.result?.isError), text, data };
+}
+it.each(['claude', undefined])('routes MCP task_create with requestedRuntime=%s through persisted state', async requestedRuntime => {
+  fixture();
+  const defaults = await import('@/lib/operator/defaults');
+  const prior = await defaults.getOperatorDefaults();
+  await defaults.updateOperatorDefaults({ defaultDispatchRuntime: 'claude-code' });
+  try {
+    const count = control.readOrchestratorControlPlaneState().packets.length;
+    const refused = await runtimeToolCall('o8_task_create', { title: 'Refuse runtime typo', repoPath: repo, requestedRuntime: 'typo-runtime' });
+    expect(refused.refused).toBe(true);
+    expect(refused.text).toMatch(/runtime/i);
+    expect(control.readOrchestratorControlPlaneState().packets).toHaveLength(count);
+    const result = await runtimeToolCall('o8_task_create', { title: 'MCP runtime fixture', repoPath: repo, requestedRuntime });
+    expect(result.refused).toBe(false);
+    expect(result.data.workerRouting?.selectedRuntime).toBe('claude-code');
+    expect(control.readOrchestratorControlPlaneState().packets.find(packet => packet.id === result.data.packetId)?.runtime).toBe('claude-code');
+  } finally { await defaults.updateOperatorDefaults({ defaultDispatchRuntime: prior.values.defaultDispatchRuntime }); }
+});
+it.each(['claude', undefined])('routes MCP task_dispatch with requestedRuntime=%s to the admitted runtime', async requestedRuntime => {
+  fixture();
+  const defaults = await import('@/lib/operator/defaults');
+  const prior = await defaults.getOperatorDefaults();
+  await defaults.updateOperatorDefaults({ defaultDispatchRuntime: 'claude-code' });
+  try {
+    const tasks = await import('@/app/api/tasks/route');
+    const response = await tasks.POST(new NextRequest('http://localhost/api/tasks', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ title: 'MCP dispatch runtime fixture', repoPath: repo }) }));
+    expect(response.status).toBe(201);
+    const task = await response.json();
+    const before = h.launch.mock.calls.length;
+    const refused = await runtimeToolCall('o8_task_dispatch', { taskId: task.taskId, requestedRuntime: 'typo-runtime' });
+    expect(refused.refused).toBe(true);
+    expect(refused.text).toMatch(/runtime/i);
+    expect(h.launch).toHaveBeenCalledTimes(before);
+    h.launch.mockImplementationOnce(async input => {
+      expect(input.runtime).toBe('claude-code');
+      return { ok: true, surfaceId: `claude-code-owned:mcp-${++sequence}`, note: 'Started stub worker' };
+    });
+    const result = await runtimeToolCall('o8_task_dispatch', { taskId: task.taskId, requestedRuntime });
+    expect(result.refused).toBe(false);
+    expect(result.data.workerRouting?.selectedRuntime).toBe('claude-code');
+    await vi.waitFor(() => expect(lanes.findLatestLaneByPacket(task.packetId)).toMatchObject({ runtime: 'claude-code', status: 'running' }), { timeout: 5000 });
+  } finally { await defaults.updateOperatorDefaults({ defaultDispatchRuntime: prior.values.defaultDispatchRuntime }); }
+});
+
+it('batches pool fallback receipts and ignores malformed saved event JSON', async () => {
+  fixture();
+  const { resolveWorkerRouting } = await import('@/lib/agents/routing');
+  const { getTaskPool } = await import('@/lib/tasks/pool');
+  const state = control.readOrchestratorControlPlaneState();
+  const seed = state.packets[0];
+  const ids = ['bad', 'good'].map(kind => `${seed.id}-${kind}`);
+  state.packets = ids.map(id => ({ ...seed, id, branchTarget: `task/${id}`, workerRouting: resolveWorkerRouting({ requestedRuntime: 'codex' }) }));
+  control.writeOrchestratorControlPlaneState(state);
+  for (const [index, id] of ids.entries()) {
+    const lane = lanes.createLane({ repoPath: repo, branch: `task/${id}`, runtime: 'claude-code', packetId: id });
+    const event = lanes.appendEvent(lane.id, 'worker_fallback', 'system', { status: 'redispatched', toRuntime: 'claude-code', fromRuntime: 'codex' });
+    if (index === 0) getSqlite().prepare('UPDATE lane_events SET payload_json = ? WHERE id = ?').run('{', event.id);
+  }
+  const queries = vi.spyOn(getSqlite(), 'prepare');
+  try {
+    const pool = await getTaskPool({ repoPath: repo });
+    expect(pool.tasks.find(task => task.id === ids[0])?.runtimeSubstitution).toBeNull();
+    expect(pool.tasks.find(task => task.id === ids[1])?.runtimeSubstitution).toContain('Worker quota fallback from codex to claude-code');
+    expect(queries.mock.calls.filter(([sql]) => sql.includes('worker_fallback'))).toHaveLength(1);
+  } finally { queries.mockRestore(); }
+});

@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Onboarding } from '../Onboarding';
-import { createOnboardingPreviewRequest, PREVIEW_PROJECT } from '@/app/preview/first-run/FirstRunPreview';
+import { createOnboardingPreviewRequest, PREVIEW_PROJECT } from '../../../../tests/fixtures/onboarding/FirstRunPreview';
 import { PROGRESS_KEY, emptyProgress } from './onboarding-progress';
 import { recommendRuntimeSetup } from '@/lib/setup/runtime-recommendation';
 import type { OnboardingRequest } from './request';
