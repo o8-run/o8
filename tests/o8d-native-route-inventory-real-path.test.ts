@@ -252,6 +252,7 @@ const API_BASE_CLIENTS = [
   'src/lib/cortex/knowledge/reconcile.ts',
   'src/lib/hooks/claude-code-pretool-hook.ts',
   'src/lib/operator/settings-window-owner.ts',
+  'src/lib/orchestrator/http/reload.ts',
   'src/lib/runtimes/shared/dispatch-readiness.ts',
   'src/lib/startup/schedule.ts',
 ];
@@ -281,7 +282,8 @@ it('counts the desktop shell, the MCP server, the WS process and the CLI toward 
   expect(apiBaseClients()).toEqual(API_BASE_CLIENTS);
   const wsFound = checkCallers([
     { files: nextCallers, pattern: /(?:buildNextUrl|fetchNext\w*|nextFetch\w*)(?:<[^(]*>)?\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]/g, methods: callMethods },
-    { files: API_BASE_CLIENTS, pattern: /[`'"][^`'"\s]*?(\/api\/[^`'"\s]+)[`'"]/g },
+    // App-module aliases are imports, not API requests.
+    { files: API_BASE_CLIENTS, pattern: /[`'"](?!@\/)[^`'"\s]*?(\/api\/[^`'"\s]+)[`'"]/g },
     // A fetch built against a base or the request's own URL: `new URL('/api/v2/proxy/llm', request.url)`.
     { files: [...sourceFiles('src', '.ts'), ...sourceFiles('src', '.tsx')], pattern: /new URL\(\s*[`'"](\/api\/[^`'"\s]+)[`'"]\s*,/g },
   ], keys(NEXT_ONLY_WS_PATHS));
