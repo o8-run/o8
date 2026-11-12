@@ -96,11 +96,7 @@ fn render(
         .pr(px(8.))
         .when(hidden && !moving, |row| row.child(nav(true, cx)))
         .child(tabs(s, cx))
-        .child(
-            div().w(px(88.)).flex().items_center().flex_shrink_0().children(
-                s.active().as_ref().and_then(|tab| thread_worktree_badge(s, tab))
-            )
-        )
+        .children(s.active().as_ref().and_then(|tab| thread_worktree_badge(s, tab)))
         .child(
             div()
                 .flex()
@@ -662,6 +658,11 @@ fn strip(
     cx: &mut Context<Shell>,
 ) -> gpui::Stateful<gpui::Div> {
     let active = s.active();
+    let tabs = s.current().map(|w| w.tabs.as_slice()).unwrap_or(&[]);
+    let chats = tabs.iter().filter(|tab| matches!(tab, Tab::Session(_))).count();
+    let fixed = tabs.iter().filter(|tab| !matches!(tab, Tab::Session(_)))
+        .map(|tab| tab_label(s, tab).chars().count() as f32 * 7. + 40.).sum::<f32>();
+    let chat_width = ((scroll.viewport_width() - fixed - 24. - tabs.len().saturating_sub(1) as f32 * 2.) / chats.max(1) as f32 - 40.).clamp(120., 180.);
     let geometry = crate::theme::GEOMETRY;
     let motion = s.features.read::<pills::Pills>();
     div()
@@ -800,7 +801,10 @@ fn strip(
                                 let shown = label.clone();
                                 pill.child(
                                     div()
-                                        .w(px(180.))
+                                        .when(matches!(&t, Tab::Session(_)), |title| {
+                                            title.w(px(chat_width)).min_w(px(120.)).max_w(px(180.))
+                                        })
+                                        .debug_selector(move || format!("surface-tab-title-{i}"))
                                         .overflow_hidden()
                                         .whitespace_nowrap()
                                         .text_ellipsis()

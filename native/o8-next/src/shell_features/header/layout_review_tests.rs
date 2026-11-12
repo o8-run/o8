@@ -1,7 +1,7 @@
 use super::*;
 use crate::shell::test_support::*;
 #[gpui::test]
-fn review_header_fifteen_tabs_at_both_zooms(cx: &mut TestAppContext) {
+fn review_layout_fifteen_tabs_at_both_zooms(cx: &mut TestAppContext) {
     for zoom in [1., 2.] {
         let f = Fixture::new();
         let mut state = crate::shell_state::State::default();
@@ -25,28 +25,34 @@ fn review_header_fifteen_tabs_at_both_zooms(cx: &mut TestAppContext) {
                 s.sessions.push(thread);
             }
             for thread in &mut s.sessions { thread.is_worktree = Some(false); }
-            tabs.push(Tab::Inbox);
+            tabs.insert(1, Tab::Inbox);
             let saved = s.state.workspaces.get_mut(&scope).unwrap();
             saved.tabs = tabs;
             saved.active = 0;
         });
+        draw(&mut v);
+        // Insertion motion clips full-size pills inside growing wrappers for 450 ms.
+        // Measure their settled layout, keeping every geometry assertion intact.
+        std::thread::sleep(Duration::from_millis(500));
         for _ in 0..4 { draw(&mut v); }
         let strip = v.debug_bounds("surface-tabs").unwrap();
         let controls = v.debug_bounds("thread-header-controls").unwrap();
+        let viewport = v.update(|window, _| window.viewport_size());
+        assert!(controls.right() <= viewport.width, "controls stay inside the zoomed viewport");
         assert!(controls.left() - strip.right() <= px(5.), "no empty badge slot");
         let mut previous = None;
         let mut overflow = false;
         for i in 0..15 {
             let tab = v.debug_bounds(Box::leak(format!("surface-tab-{i}").into_boxed_str()));
             if let Some(tab) = tab {
-                if let Some(right) = previous { assert!(tab.left() >= right, "tabs never overlap"); }
+                if let Some(right) = previous { assert!(tab.left() >= right, "tabs never overlap: zoom={zoom}, tab={i}, left={:?}, previous={right:?}", tab.left()); }
                 previous = Some(tab.right());
                 if tab.right() > strip.right() { overflow = true; }
                 if tab.left() >= strip.left() && tab.right() <= strip.right() {
                     let close = v.debug_bounds(Box::leak(format!("surface-tab-close-{i}").into_boxed_str())).expect("fully visible tab has its close control");
                     assert!(close.left() >= tab.left() && close.right() <= tab.right(), "close stays fully in tab");
                 }
-                if i == 14 { assert!(tab.size.width < px(120.), "fixed Inbox tab has natural width"); }
+                if i == 1 { assert!(tab.size.width < px(120.), "fixed Inbox tab has natural width"); }
             } else { overflow = true; }
         }
         assert!(overflow, "15 tabs exceed this viewport at zoom {zoom}");

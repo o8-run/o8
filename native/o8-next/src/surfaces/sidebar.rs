@@ -518,6 +518,8 @@ impl Shell {
         // catalogs keep the user's workspace as long as it still exists.
         let bootstrap = !self.surfaces.sidebar.bootstrapped;
         self.sessions = sessions;
+        self.session_titles = self.sessions.iter().filter(|session| !session.title.trim().is_empty())
+            .map(|session| (format!("{}|{}", session.workspace(), session.id), session.title.clone())).collect();
         let mut workspaces = self
             .sessions
             .iter()

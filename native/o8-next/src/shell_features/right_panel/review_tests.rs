@@ -7,14 +7,14 @@ fn setup(cx: &mut TestAppContext) -> (Fixture, Entity<Shell>, VisualTestContext)
     (f, s, v)
 }
 #[gpui::test]
-fn review_panel_lower_browser_survives_project_and_disk_round_trip(cx: &mut TestAppContext) {
+fn review_layout_lower_browser_survives_project_and_disk_round_trip(cx: &mut TestAppContext) {
     let (f, s, mut v) = setup(cx);
     s.update_in(&mut v, |s, w, cx| {
         let a = s.state.selected.clone().unwrap();
         let b = s.workspaces.iter().find(|p| **p != a).unwrap().clone();
         let p = s.features.get::<Panel>();
         p.lower = Some(Tool::Browser);
-        p.lower_tabs = vec![Tool::Browser];
+        p.lower_tabs = vec![Tool::Browser, Tool::Prs, Tool::Issues, Tool::Compare];
         layout::save(s);
         s.switch(b, w, cx);
         layout::sync(s, w, cx);
@@ -24,12 +24,12 @@ fn review_panel_lower_browser_survives_project_and_disk_round_trip(cx: &mut Test
         let file = f.root.join("lower-browser.json");
         s.state.save(&file).unwrap();
         let loaded = crate::shell_state::State::load(&file).unwrap();
-        assert_eq!(loaded.right_panel.secondary_tabs[&a], ["browser"]);
+        assert_eq!(loaded.right_panel.secondary_tabs[&a], [Tool::Browser, Tool::Prs, Tool::Issues, Tool::Compare].map(Tool::slug));
         assert_eq!(loaded.right_panel.lower_tools[&a], "browser");
     });
 }
 #[gpui::test]
-fn review_panel_unchanged_restore_does_not_persist(cx: &mut TestAppContext) {
+fn review_layout_unchanged_restore_does_not_persist(cx: &mut TestAppContext) {
     let (_f, s, mut v) = setup(cx);
     s.update_in(&mut v, |s, w, cx| {
         s.features.get::<Panel>().scope = None;
@@ -41,7 +41,7 @@ fn review_panel_unchanged_restore_does_not_persist(cx: &mut TestAppContext) {
     });
 }
 #[gpui::test]
-fn review_panel_title_cache_visits_only_open_tabs(cx: &mut TestAppContext) {
+fn review_layout_title_cache_visits_only_open_tabs(cx: &mut TestAppContext) {
     let (_f, s, mut v) = setup(cx);
     s.update(&mut v, |s, cx| {
         let mut catalog = s.sessions.clone();

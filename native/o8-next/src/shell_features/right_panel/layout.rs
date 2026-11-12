@@ -11,7 +11,7 @@ impl Tool {
             .iter()
             .flat_map(|(_, tools)| tools.iter())
             .copied()
-            .chain([Self::Launcher, Self::Prs, Self::Compare])
+            .chain([Self::Launcher, Self::Prs, Self::Issues, Self::Compare])
             .find(|t| t.slug() == value)
     }
     pub(super) fn utility(self) -> bool {
@@ -93,11 +93,15 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         contextual::refresh(s, window, cx);
         return;
     }
+    let before = s.state.right_panel.clone();
     side::cancel_focus(s);
     // Hidden tools must leave every retained layout, including the global empty scope.
     let saved = &mut s.state.right_panel;
-    for tabs in saved.utility_tabs.values_mut().chain(saved.secondary_tabs.values_mut()) {
+    for tabs in saved.utility_tabs.values_mut() {
         tabs.retain(|value| Tool::find(value).is_some_and(Tool::utility));
+    }
+    for tabs in saved.secondary_tabs.values_mut() {
+        tabs.retain(|value| Tool::find(value).is_some());
     }
     saved.selected_tools.retain(|_, value| Tool::find(value).is_some());
     saved.lower_tools.retain(|_, value| Tool::find(value).is_some());
@@ -166,11 +170,19 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         }
     }
     contextual::refresh(s, window, cx);
-    save(s);
+    if s.state.right_panel != before {
+        store(s);
+        s.persist();
+    }
     cx.notify();
 }
 
 pub(super) fn save(s: &mut Shell) {
+    store(s);
+    s.persist();
+}
+
+fn store(s: &mut Shell) {
     let p = s.features.get::<Panel>();
     let (scope, tabs, primary, lower) = (
         p.scope.clone().unwrap_or_default(),
@@ -202,7 +214,6 @@ pub(super) fn save(s: &mut Shell) {
     if let Some(t) = lower {
         saved.secondary = t.slug();
     }
-    s.persist();
 }
 
 pub(super) fn select(s: &mut Shell, tool: Tool, _: &mut Window, cx: &mut Context<Shell>) {

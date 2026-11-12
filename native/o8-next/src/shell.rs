@@ -87,6 +87,7 @@ pub struct Shell {
     #[cfg(test)]
     review_title_visits: usize,
     sessions: Vec<Session>,
+    session_titles: std::collections::BTreeMap<String, String>,
     workspaces: Vec<String>,
     /// Tunnels to saved machines, shared with the sidebar.
     links: crate::shell::settings::machine_links::Links,
@@ -138,6 +139,7 @@ impl Shell {
             #[cfg(test)]
             review_title_visits: 0,
             sessions: vec![],
+            session_titles: Default::default(),
             workspaces: vec![],
             links: Default::default(),
             content: HashMap::new(),
@@ -171,13 +173,10 @@ impl Shell {
             })
         }).collect::<BTreeSet<_>>();
         self.state.thread_titles.retain(|key, _| open.contains(key));
-        for session in &self.sessions {
+        for key in &open {
             #[cfg(test)] { self.review_title_visits += 1; }
-            let key = format!("{}|{}", session.workspace(), session.id);
-            if open.contains(&key) && !session.title.trim().is_empty() {
-                self.state.thread_titles.insert(
-                    key, session.title.chars().take(256).collect()
-                );
+            if let Some(title) = self.session_titles.get(key) {
+                self.state.thread_titles.insert(key.clone(), title.chars().take(256).collect());
             }
         }
         if let Some(local) = self

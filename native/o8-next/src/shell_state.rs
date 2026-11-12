@@ -37,7 +37,7 @@ impl std::ops::DerefMut for Workspace {
     }
 }
 /// Classic right-panel preferences; pane contents and credentials stay elsewhere.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PanelState {
     pub visible: bool,
