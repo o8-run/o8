@@ -103,7 +103,10 @@ fn displays(s: &Shell, id: &str) -> usize {
 
 #[gpui::test]
 fn review_takeover_new_thread_menu_in_other_repo_comes_to_front(cx: &mut TestAppContext) {
-    let fixture = Fixture::start_mode(true, "--shell --composer --sidebar --settings");
+    let fixture = Fixture::start_mode(
+        true,
+        "--shell --composer --sidebar --settings --sidebar-two-repo-create",
+    );
     let first: Value = fixture
         .client
         .get(
