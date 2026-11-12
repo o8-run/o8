@@ -570,7 +570,8 @@ fn inbox_cards_counts_statuses_and_approval_match_desktop_routes(cx: &mut TestAp
             _ => panic!("Inbox"),
         }
     });
-    assert_eq!(after_counts, vec![1, 2, 2, 4, 3]);
+    // Audit events use their own model; the sixth view has no ordinary cards.
+    assert_eq!(after_counts, vec![1, 2, 2, 4, 3, 0]);
     let uncertain = id("Unconfirmed continuation");
     let before_uncertain = record(&uncertain).clone();
     click(cx, &format!("inbox-approve-{uncertain}"));
