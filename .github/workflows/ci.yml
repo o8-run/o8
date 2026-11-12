@@ -507,7 +507,7 @@ jobs:
         if: needs.reuse.outputs.reuse != 'true'
         with:
           path: ~/.cargo/bin/cargo-audit
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-audit-v1-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.toolchain }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-audit-v2-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.source }}-${{ steps.audit-tool.outputs.toolchain }}
       - name: Install cargo-audit
         if: needs.reuse.outputs.reuse != 'true' && steps.audit-tool-cache.outputs.cache-hit != 'true'
         env:

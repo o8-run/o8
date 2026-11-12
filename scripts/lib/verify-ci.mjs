@@ -89,7 +89,7 @@ function withoutAuditToolCache(security) {
   }) && isDeepStrictEqual(cache, {
     uses: 'actions/cache@v4', id: 'audit-tool-cache', with: {
       path: '~/.cargo/bin/cargo-audit',
-      key: '${{ runner.os }}-${{ runner.arch }}-cargo-audit-v1-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.toolchain }}',
+      key: '${{ runner.os }}-${{ runner.arch }}-cargo-audit-v2-${{ steps.audit-tool.outputs.version }}-${{ steps.audit-tool.outputs.source }}-${{ steps.audit-tool.outputs.toolchain }}',
     },
   }) && isDeepStrictEqual(install, {
     name: 'Install cargo-audit', if: "steps.audit-tool-cache.outputs.cache-hit != 'true'",

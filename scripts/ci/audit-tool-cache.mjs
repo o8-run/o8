@@ -10,7 +10,12 @@ const response = await fetch(process.env.AUDIT_TOOL_REGISTRY_URL ?? 'https://cra
   headers: { 'User-Agent': 'o8-ci-audit-tool-cache' }, signal: AbortSignal.timeout(20_000),
 });
 if (!response.ok) throw new Error(`Scanner version registry returned ${response.status}`);
-const version = (await response.json())?.crate?.max_stable_version;
+const metadata = await response.json();
+const version = metadata?.crate?.max_stable_version;
 if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Registry returned no stable scanner version');
+const release = Array.isArray(metadata?.versions)
+  ? metadata.versions.find(entry => entry?.num === version && entry?.yanked === false) : undefined;
+const source = release?.checksum;
+if (typeof source !== 'string' || !/^[a-f0-9]{64}$/.test(source)) throw new Error('Registry returned no stable scanner source checksum');
 const identity = createHash('sha256').update(toolchain).digest('hex');
-appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ntoolchain=${identity}\n`);
+appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nsource=${source}\ntoolchain=${identity}\n`);

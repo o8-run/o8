@@ -9,7 +9,10 @@ import { parse, stringify } from 'yaml';
 import { createVerifierCoverageFixture } from './helpers/verify-ci-coverage.fixture';
 
 const root = mkdtempSync(path.join(tmpdir(), 'o8-audit-tool-'));
-let response: unknown = { crate: { max_stable_version: '0.23.0' } };
+const release = (version = '0.23.0', checksum = 'a'.repeat(64)) => ({
+  crate: { max_stable_version: version }, versions: [{ num: version, checksum, yanked: false }],
+});
+let response: unknown = release();
 let status = 200;
 const server = createServer((_request, reply) => {
   reply.writeHead(status, { 'content-type': 'application/json' });
@@ -38,14 +41,26 @@ async function resolve(toolchain = 'rustc 1.fixture\nhost: fixture-target') {
 it('resolves current stable versions on every invocation and binds identity to the toolchain', async () => {
   const first = await resolve();
   expect(first.code, first.stderr).toBe(0);
-  expect(first.output).toMatch(/^version=0\.23\.0\ntoolchain=[a-f0-9]{64}\n$/);
+  expect(first.output).toMatch(/^version=0\.23\.0\nsource=a{64}\ntoolchain=[a-f0-9]{64}\n$/);
   expect((await resolve('rustc other')).output).not.toBe(first.output);
-  response = { crate: { max_stable_version: '0.24.0' } };
+  response = release('0.23.0', 'b'.repeat(64));
+  expect((await resolve()).output).toContain(`source=${'b'.repeat(64)}\n`);
+  response = release('0.24.0');
   expect((await resolve()).output).toContain('version=0.24.0\n');
 });
 it('fails closed on registry failure or malformed version without publishing outputs', async () => {
   for (const version of ['0.24.0\ncache=unsafe', '', null, '0.25.0-preview.1']) {
     response = { crate: { max_stable_version: version } };
+    const result = await resolve();
+    expect(result.code).not.toBe(0);
+    expect(result.output).toBe('');
+  }
+  for (const metadata of [
+    { crate: { max_stable_version: '0.23.0' }, versions: [] },
+    { ...release(), versions: [{ num: '0.23.0', checksum: 'invalid', yanked: false }] },
+    { ...release(), versions: [{ num: '0.23.0', checksum: 'a'.repeat(64), yanked: true }] },
+  ]) {
+    response = metadata;
     const result = await resolve();
     expect(result.code).not.toBe(0);
     expect(result.output).toBe('');
@@ -61,6 +76,7 @@ it('caches only the audit executable and still runs every advisory and dependenc
   expect(cache.with.path).toBe('~/.cargo/bin/cargo-audit');
   expect(cache.with['restore-keys']).toBeUndefined();
   expect(cache.with.key).toContain('${{ steps.audit-tool.outputs.version }}');
+  expect(cache.with.key).toContain('${{ steps.audit-tool.outputs.source }}');
   expect(cache.with.key).toContain('${{ steps.audit-tool.outputs.toolchain }}');
   expect(cache.with.key).toContain('${{ runner.arch }}');
   const install = steps.find((step: { name?: string }) => step.name === 'Install cargo-audit');
@@ -78,10 +94,11 @@ it('keeps local verification complete and rejects caching advisories or stale to
   const workflowPath = path.join(fixture, '.github/workflows/ci.yml');
   const run = () => spawnSync(process.execPath, [path.join(fixture, 'scripts/ci/check-verify-ci.mjs')], { encoding: 'utf8' });
   expect(run().status).toBe(0);
-  for (const mutation of ['advisories', 'stale identity', 'conditional audit']) {
+  for (const mutation of ['advisories', 'stale identity', 'conditional audit', 'missing source digest']) {
     const workflow = parse(readFileSync('.github/workflows/ci.yml', 'utf8'));
     const steps = workflow.jobs.security.steps;
     if (mutation === 'advisories') steps.find((step: { id?: string }) => step.id === 'audit-tool-cache').with.path = '~/.cargo/advisory-db';
+    if (mutation === 'missing source digest') steps.find((step: { id?: string }) => step.id === 'audit-tool-cache').with.key = steps.find((step: { id?: string }) => step.id === 'audit-tool-cache').with.key.replace('${{ steps.audit-tool.outputs.source }}', '');
     if (mutation === 'stale identity') steps.find((step: { id?: string }) => step.id === 'audit-tool').run = 'echo version=0.1';
     if (mutation === 'conditional audit') steps.find((step: { name?: string }) => step.name === 'Audit Rust dependencies').if += " && steps.audit-tool-cache.outputs.cache-hit != 'true'";
     writeFileSync(workflowPath, stringify(workflow));
