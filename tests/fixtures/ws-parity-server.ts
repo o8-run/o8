@@ -113,6 +113,12 @@ export async function startParityReference(options: {
     diagnostics.code = code;
     diagnostics.signal = signal;
     diagnostics.exitAfterStop = stopRequested;
+    // A listener that dies mid-test otherwise surfaces only as ECONNREFUSED in the next
+    // request. Report why the child went away, from the child itself.
+    if (!stopRequested) {
+      console.error(`[ws-parity-server] WS child exited unexpectedly (pid ${child.pid}, code ${code}, signal ${signal}, `
+        + `${diagnostics.stderrBytes} stderr bytes). Last stderr:\n${diagnostics.stderr.slice(-8_192) || '(none)'}`);
+    }
   });
   const receipt = () => ({ ...diagnostics });
   const stop = async () => {

@@ -9342,6 +9342,12 @@
       ]
     },
     {
+      "path": "tests/ws-parity-server-child-exit-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ws-safety-net-real-path.test.ts",
       "reasons": [
         "real-path"
