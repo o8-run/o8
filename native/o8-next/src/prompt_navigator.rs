@@ -106,6 +106,10 @@ impl Navigator {
             .upgrade()
             .is_some_and(|old| Rc::ptr_eq(&old, rows))
         {
+            let anchor = self
+                .range
+                .and_then(|start| self.prompts.get(start))
+                .map(|p| p.id.clone());
             self.prompts = Rc::new(
                 rows.iter()
                     .enumerate()
@@ -125,6 +129,7 @@ impl Navigator {
                     })
                     .collect(),
             );
+            self.range = anchor.and_then(|id| self.prompts.iter().position(|p| p.id == id));
             self.rows = Rc::downgrade(rows);
             for id in [&mut self.hovered, &mut self.selected] {
                 if id
@@ -340,7 +345,8 @@ pub(crate) fn overlay(
                                 .unwrap_or_else(|| prompts[current].id.clone())
                         })
                     })
-                    .and_then(|id| prompts.iter().position(|p| p.id == id));
+                    .and_then(|id| prompts.iter().position(|p| p.id == id))
+                    .filter(|index| *index >= start && *index < start + visible);
                 (start, preview)
             };
             let height = visible as f32 * 12. + if paged { 36. } else { 0. };
