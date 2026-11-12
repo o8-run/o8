@@ -29,6 +29,7 @@ const integrationPolicyCommand = 'node scripts/ci/prepare-integration-policy.mjs
 // Merge-queue reuse only ever skips steps on the runner. Local verification
 // always runs them, so the uniform gate is removed before exact shape checks.
 const reuseGate = "needs.reuse.outputs.reuse != 'true'";
+const rustSelectionCommand = "selection=$(mktemp)\nchanged=true\nif GITHUB_OUTPUT=\"$selection\" node scripts/ci/native-changes.mjs; then\n  case \"$(cat \"$selection\")\" in\n    changed=false) changed=false ;;\n  esac\nfi\nprintf 'changed=%s\\n' \"$changed\" >> \"$GITHUB_OUTPUT\"\nrm -f \"$selection\"\n";
 const reuseGatedJobs = ['typecheck', 'server-bundle-size', 'lint', 'classification', 'test-shards', 'integration-changed',
   'security', 'governance-smoke', 'rust-check-windows', 'rust-check-linux', 'o8-next-tests'];
 
@@ -75,6 +76,24 @@ function withoutReuseGate(jobs) {
         `every ${id} step must carry the merge-queue reuse gate`);
       step.if = step.if.slice(prefix.length);
     }
+  }
+  const classification = jobs.classification;
+  const selector = classification.steps.find(step => step.id === 'rust-inputs');
+  requireCondition(isDeepStrictEqual(classification.outputs, { rust_changed: '${{ steps.rust-inputs.outputs.changed }}' })
+    && isDeepStrictEqual(selector, { name: 'Select Rust inputs before runner admission', id: 'rust-inputs', run: rustSelectionCommand })
+    && classification.steps.indexOf(selector) > classification.steps.findIndex(step => step.uses === 'actions/setup-node@v4')
+    && classification.steps.some(step => step.uses === 'actions/setup-node@v4')
+    && isDeepStrictEqual(classification.steps[0].with, { 'fetch-depth': 0, filter: 'blob:none' }),
+  'Rust admission selection needs a verify:ci equivalent');
+  delete classification.outputs;
+  classification.steps = classification.steps.filter(step => step !== selector);
+  for (const id of ['rust-check-linux', 'rust-check-windows']) {
+    const job = jobs[id];
+    const suffix = ") && needs.classification.result == 'success' && needs.classification.outputs.rust_changed != 'false'";
+    requireCondition(isDeepStrictEqual(job.needs, 'classification') && job.if.startsWith('(') && job.if.endsWith(suffix),
+      `${id} Rust admission condition needs a verify:ci equivalent`);
+    delete job.needs;
+    job.if = job.if.slice(1, -suffix.length);
   }
 }
 function usesTestProcess(command, scripts, seen = new Set()) {
