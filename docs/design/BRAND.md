@@ -97,6 +97,12 @@ Glance's body is always **fog**: solid in the middle, fading evenly to nothing a
 
 Never below 16px. Where layered SVG can't render, use the flat fallback in `brand/glance/flat/`.
 
+### Core (under test)
+
+Core is an alternate Glance treatment being tested next to Fog. Same body, eyes and dot, but the fog is a crisp, dense middle with a longer, softer tail. **Fog stays the default until Core is picked.** Core only applies at 48px and up; below that both use Tight and Hairline.
+
+Files are in `brand/glance/core/`: `glance-core-{light,dark}.svg` (hero), `states/glance-{reviewing,working,sentback,approved}-core-{light,dark}.svg`, and `working/<key>.svg`, the 96px stage indicator in Core. Ship nothing in Core until it's chosen. If it wins, swap the `fog` style for `core` in `build_v1.py` and rebuild.
+
 ### Color states
 
 Four states only. The face always carries the state too, so colour is never the only signal.
@@ -231,7 +237,7 @@ Everything here is editable source, so later rounds build on v1 instead of start
 | To change | Edit | Then run (from `brand/src`) |
 | --- | --- | --- |
 | Ring, loop steps, app icon, favicon | `logos.py` (geometry), `build_v1.py` (colours, sizes) | `python3 -I build_v1.py "$PWD" ../..` |
-| Glance shape, faces, fog | `glance.py`, `fog.py` | same as above |
+| Glance shape, faces, fog (and the Core test set) | `glance.py`, `fog.py` | same as above |
 | A motion | `studies.py` (and `working.py` for the two indicator-only loops) | `python3 -I motions.py "$PWD"`, then `build_v1.py` for the indicator SVGs |
 | Indicator frames for native | after any motion or indicator change | `python3 -I frames.py "$PWD" ../working/frames-80 20 80 tight` |
 | The studies page | `studies_page.py` and `page*.css` | `python3 -I studies_page.py "$PWD" ../studies/o8-mark-studies.html` |
