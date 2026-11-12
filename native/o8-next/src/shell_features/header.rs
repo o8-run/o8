@@ -5,6 +5,9 @@ mod open_in_editor_tests;
 #[path = "header/pills.rs"]
 mod pills;
 #[cfg(test)]
+#[path = "header/ring_tests.rs"]
+mod ring_tests;
+#[cfg(test)]
 #[path = "header/worktree_badge_tests.rs"]
 mod worktree_badge_tests;
 struct Header;
@@ -63,13 +66,14 @@ fn render(
             }))
         })
     };
-    // Toggle, Back and Forward: one cluster that never moves.
+    // Ring, Toggle, Back and Forward: one cluster that never moves.
     let nav = |hidden: bool, cx: &mut Context<Shell>| {
         div()
             .flex()
             .flex_shrink_0()
             .items_center()
             .gap(px(4.))
+            .child(header_ring())
             .child(sidebar_toggle(hidden, cx))
             .child(history("header-back", BACK, "Back", back, cx))
             .child(history("header-forward", FORWARD, "Forward", forward, cx))
@@ -194,11 +198,26 @@ const ARROW_W: f32 = 29.;
 fn toggle_inset(window: &Window) -> f32 {
     crate::zoom::chrome_clearance(26. + super::super::rail::LIGHTS, window)
 }
-/// The travelling slot's floor: the folded strip's inset, toggle, Back and
-/// Forward with their gaps and the 4px before the tabs, less the strip's 16px
-/// padding in flight, so the tabs land where the folded header puts them.
+/// The travelling slot's floor: the folded strip's inset, Ring, toggle, Back
+/// and Forward with their gaps and the 4px before the tabs, less the strip's
+/// 16px padding in flight, so the tabs land where the folded header puts them.
 fn folded(inset: f32) -> f32 {
-    inset + TOGGLE_W + 4. + ARROW_W + 4. + ARROW_W + 4. - 16.
+    inset + RING_W + 4. + TOGGLE_W + 4. + ARROW_W + 4. + ARROW_W + 4. - 16.
+}
+
+/// The Ring's side, in layout units, so it zooms with the header.
+const RING_W: f32 = 16.;
+
+/// The Ring between the traffic lights and the sidebar toggle. Not a control:
+/// it has no hover, click or tip, and a press on it moves the window as the
+/// bare header does (a drag area of its own, so it is the topmost hitbox).
+fn header_ring() -> gpui::Div {
+    div()
+        .debug_selector(|| "header-ring".into())
+        .size(px(RING_W))
+        .flex_shrink_0()
+        .window_control_area(gpui::WindowControlArea::Drag)
+        .child(crate::ring::ring(RING_W))
 }
 
 fn sidebar_toggle(hidden: bool, cx: &mut Context<Shell>) -> gpui::Stateful<gpui::Div> {
@@ -480,7 +499,7 @@ pub(super) const OPEN_IN_EDITOR: &str =
     "M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6";
 
 /// The open thread's project folder and the saved machine it lives on.
-pub(super) fn editor_target(s: &Shell) ->Option<(Option<String>, String)> {
+pub(super) fn editor_target(s: &Shell) -> Option<(Option<String>, String)> {
     let Some(Tab::Session(id)) = s.active() else {
         return None;
     };
@@ -506,9 +525,9 @@ pub(super) fn open_in_editor(
     cx: &mut Context<Shell>,
 ) {
     let client = s.client.clone();
-    let task = cx.background_executor().spawn(async move {
-        crate::editor_command::open(&client, machine.as_deref(), &path)
-    });
+    let task = cx
+        .background_executor()
+        .spawn(async move { crate::editor_command::open(&client, machine.as_deref(), &path) });
     cx.spawn(async move |_, cx| {
         if let Err(error) = task.await {
             let _ = cx.update(|cx| {
