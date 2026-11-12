@@ -538,7 +538,7 @@ const retired = [
   // Canvas intents drive the canvas page Next renders in the desktop webview (#5576).
   route('/api/canvas/intent', 'POST', () => import('@/lib/canvas/intent-unavailable-route')),
 ];
-const routes = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...retired, ...viewerHttpRoutes];
+const routes: Route[] = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...retired, ...viewerHttpRoutes];
 function parameters(pattern: string, pathname: string): Record<string, string> | null {
   const expected = pattern.split('/');
   const actual = pathname.split('/');
