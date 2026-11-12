@@ -32,22 +32,34 @@ fail() {
   exit 1
 }
 
+# The window is the process whose command is exactly the kept binary. The
+# path is compared as text, never as a pattern, so any directory name works.
 window_pid() {
-  pgrep -f "^$BIN( |\$)" | head -1 || true
+  local pid cmd
+  while read -r pid cmd; do
+    case "$cmd" in
+      "$BIN" | "$BIN "*)
+        echo "$pid"
+        return
+        ;;
+    esac
+  done < <(ps -axo pid=,command=)
 }
 
 build() {
   local flag=()
   [ "$PROFILE" = release ] && flag=(--release)
   CARGO_TARGET_DIR="$TARGET" cargo build --manifest-path "$SRC/native/o8-next/Cargo.toml" \
-    --locked --bin o8-next --features driver "${flag[@]}"
+    --locked --bin o8-next --features driver ${flag[@]+"${flag[@]}"}
 }
 
 keep() {
   [ -x "$BUILT" ] || fail "no build at $BUILT; run build first"
   # Cargo writes every checkout's build to the same file in a shared build
   # directory. Refuse a binary some other checkout built there.
-  strings -a "$BUILT" | grep -q -m1 -F "$SRC/native/o8-next" \
+  # grep reads to the end: stopping at the first match would kill strings
+  # and, under pipefail, turn a match into a failure.
+  strings -a "$BUILT" | grep -F "$SRC/native/o8-next" >/dev/null \
     || fail "$BUILT was not built from $SRC; not copied"
   mkdir -p "$HOME_DIR/bin"
   cp "$BUILT" "$BIN.new"
@@ -60,13 +72,19 @@ launch() {
   [ -x "$BIN" ] || fail "no binary at $BIN; run build and keep first"
   [ -z "$(window_pid)" ] || fail "a development window is already open (pid $(window_pid)); run stop first"
   command -v o8 >/dev/null || fail "the o8 command is not on PATH"
-  if [ -z "${O8_NEXT_API_TOKEN:-}" ] && [ -n "$TOKEN_FILE" ]; then
+  mkdir -p "$HOME_DIR"
+  # One launch at a time, so two cannot both find no window and each open one.
+  mkdir "$HOME_DIR/launch.lock" 2>/dev/null || fail "another launch is in progress ($HOME_DIR/launch.lock)"
+  trap 'rmdir "$HOME_DIR/launch.lock" 2>/dev/null' EXIT
+  [ -z "$(window_pid)" ] || fail "a development window is already open (pid $(window_pid)); run stop first"
+  # A token file names the token for this server, so it wins over one that
+  # happens to be in the environment already.
+  if [ -n "$TOKEN_FILE" ]; then
     [ -r "$TOKEN_FILE" ] || fail "cannot read $TOKEN_FILE"
     # Read into the environment of the window only; never printed.
     O8_NEXT_API_TOKEN="$(cat "$TOKEN_FILE")"
     export O8_NEXT_API_TOKEN
   fi
-  mkdir -p "$HOME_DIR"
   O8_NEXT_DRIVER_SOCKET="$SOCKET" nohup o8 next --enable-next --binary "$BIN" --app-shell \
     --server "$SERVER" --shell-state "$STATE" >"$HOME_DIR/window.log" 2>&1 </dev/null &
   local tries
@@ -74,8 +92,7 @@ launch() {
     [ -n "$(window_pid)" ] && { echo "window up (pid $(window_pid)); log $HOME_DIR/window.log"; return; }
     sleep 0.5
   done
-  tail -5 "$HOME_DIR/window.log" >&2
-  fail "the window did not start after $((tries / 2)) seconds"
+  fail "the window did not start after $((tries / 2)) seconds; see $HOME_DIR/window.log"
 }
 
 stop() {

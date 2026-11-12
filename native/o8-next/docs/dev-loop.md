@@ -24,7 +24,8 @@ All are environment variables; `dev.sh env` prints the values in use.
 | Variable | Default | What it is |
 | --- | --- | --- |
 | `O8_NEXT_DEV_SERVER` | none; `launch` refuses without it | The server origin the window attaches to. There is no default so a development build never attaches to a server by accident. |
-| `O8_NEXT_DEV_TOKEN_FILE` | none | A file holding that server's token. Read into the window's environment only. |
+| `O8_NEXT_DEV_TOKEN_FILE` | none | A file holding that server's token. Read into the window's environment only. When set, it is used instead of any `O8_NEXT_API_TOKEN` already in the environment. |
+| `O8_NEXT_DRIVER_SOCKET` | `$O8_NEXT_DEV_HOME/driver.sock` | The driver's socket, for `launch` and `drive`. |
 | `O8_NEXT_DEV_SRC` | the checkout the script is in | The checkout to build. |
 | `O8_NEXT_DEV_HOME` | `~/.o8/next-dev` | Where the kept binary, the window's saved state, its log, the capture and the driver socket live. |
 | `O8_NEXT_DEV_TARGET` | `$O8_NEXT_DEV_HOME/target` | The cargo build directory. |
