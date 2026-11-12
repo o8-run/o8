@@ -138,7 +138,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Server not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true, server });
+    return NextResponse.json({ ok: true, server: { ...server, env: null, envJson: null, oauthToken: null } });
   } catch (error) {
     console.error('[api] setup/mcp-servers failed:', error);
     return NextResponse.json(

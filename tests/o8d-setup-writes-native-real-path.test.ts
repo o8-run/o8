@@ -20,9 +20,17 @@ it('permits only the operator to persist MCP and OpenCode setup without returnin
         'x-o8-client-addr': '127.0.0.1', ...(relay ? { 'x-o8-relay-forward': '1' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
       ...(method === 'GET' ? {} : { body: JSON.stringify(body) }),
     });
+    Object.assign(process.env, { CORTEX_IDE_DATA_DIR: server.directory, CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token });
+    delete process.env.O8_DATA_DIR;
+    const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
+    const boundWorker = mintPacketWorkerToken('setup-packet');
+    const { getSpectatorTokenStore } = await import('@/lib/broadcast/spectator-token-store');
+    const spectator = getSpectatorTokenStore().mint({ repoGrants: [server.directory] });
+    const { getSqlite } = await import('@/lib/db');
+    const sqlite = getSqlite();
     const input = { name: 'Fixture', transport: 'stdio', command: 'fixture-command', env: { FIXTURE_SECRET: secret }, workerInjection: true };
     for (const path of ['mcp-servers', 'opencode']) {
-      for (const [token, status] of [['', 401], ['wrong', 401], [device, 403], [worker, 403]] as const) {
+      for (const [token, status] of [['', 401], ['wrong', 401], [device, 403], [worker, 403], [boundWorker, 403], [spectator.bearer, 403]] as const) {
         expect((await call(path, token, input)).status).toBe(status);
         expect((await call(path, token, input, true)).status).toBe(status);
       }
@@ -34,8 +42,25 @@ it('permits only the operator to persist MCP and OpenCode setup without returnin
     const response = await created.text();
     expect(response).not.toContain(secret);
     expect(JSON.parse(response)).toMatchObject({ ok: true, server: { name: 'Fixture', env: null, oauthToken: null } });
+    const id = JSON.parse(response).server.id;
+    const oauth = 'setup-fixture-oauth-secret';
+    sqlite.prepare('UPDATE external_mcp_servers SET oauth_token = ? WHERE id = ?').run(oauth, id);
+    const setupRoute = await import('@/app/api/setup/mcp-servers/route');
+    const patched = await setupRoute.PATCH(new Request('http://127.0.0.1/api/setup/mcp-servers', {
+      method: 'PATCH', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ id, enabled: false }),
+    }));
+    expect(patched.status).toBe(200);
+    const patchText = await patched.text();
+    expect(patchText).not.toContain(secret);
+    expect(patchText).not.toContain(oauth);
+    expect(JSON.parse(patchText).server).toMatchObject({ env: null, envJson: null, oauthToken: null });
     const listing = await call('mcp-servers', server.token, {}, false, 'GET');
-    expect(await listing.text()).not.toContain(secret);
+    const listText = await listing.text();
+    expect(listText).not.toContain(secret);
+    expect(listText).not.toContain(oauth);
+    expect(JSON.parse(listText).servers.find((entry: { id: string }) => entry.id === id))
+      .toMatchObject({ env: null, envJson: null, oauthToken: null });
     const installed = await call('opencode', server.token, {});
     expect(installed.status).toBe(200);
     expect(await installed.text()).not.toContain(server.token);
@@ -57,6 +82,9 @@ it('permits only the operator to persist MCP and OpenCode setup without returnin
       }));
       expect(forwarded.status).toBe(200);
       expect(await forwarded.text()).not.toContain(secret);
+      const stored = sqlite.prepare('SELECT env_json, worker_injection FROM external_mcp_servers WHERE name = ?').get('Forwarded') as { env_json: string; worker_injection: number };
+      expect(JSON.parse(stored.env_json)).toEqual(input.env);
+      expect(stored.worker_injection).toBe(1);
       expect(localInvalidations).toBe(0);
     } finally { unregister(); }
     expect(server.diagnostics().stderr).not.toContain(secret);
