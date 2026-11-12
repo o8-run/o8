@@ -172,7 +172,7 @@ export function createProviderToolStream(options: StreamOptions): Response {
         };
         latestAnthropicStopMetadata = mergeAnthropicStopState(latestAnthropicStopMetadata, stopMetadata);
         if (stopMetadata?.stopReason === 'budget_exhausted') {
-          console.info(`[llm-proxy] Anthropic stop_reason=budget_exhausted model=${model}`);
+          console.info(`[llm-proxy] Anthropic stop_reason=budget_exhausted`);
         }
         let loopCount = 0;
         const allSources: Array<{ title: string; url?: string; path?: string }> = [];
@@ -353,7 +353,7 @@ export function createProviderToolStream(options: StreamOptions): Response {
             followResult.stopMetadata,
           );
           if (followResult.stopMetadata?.stopReason === 'budget_exhausted') {
-            console.info(`[llm-proxy] Anthropic stop_reason=budget_exhausted model=${model}`);
+            console.info(`[llm-proxy] Anthropic stop_reason=budget_exhausted`);
           }
         }
 
@@ -397,14 +397,14 @@ export function createProviderToolStream(options: StreamOptions): Response {
               agentName: 'llm-chat',
               requestType: 'chat',
             });
-          } catch (error) {
-            console.error('[proxy/llm] Failed to log usage:', error);
+          } catch {
+            console.error('[proxy/llm] Failed to log usage');
           }
         }
       } catch (error) {
         enqueue(JSON.stringify({
           type: 'error',
-          message: error instanceof Error ? error.message : 'Stream error',
+          message: error instanceof ChatGPTPlanError ? error.message : 'Stream error',
           ...(error instanceof ChatGPTPlanError ? { code: error.code } : {}),
         }));
       } finally {

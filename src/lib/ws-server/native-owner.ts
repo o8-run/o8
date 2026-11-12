@@ -12,6 +12,8 @@ type Handler = (request: Request) => Promise<Response>;
 export const O8_PAGE_ORIGIN_HEADER = 'x-o8-page-origin';
 
 type Options = {
+  /** Route-specific context only; never caller-address or transport attestation headers. */
+  forwardHeaders?: ReadonlyArray<'cookie' | 'x-tab-id' | 'x-cortex-repo-path' | 'x-o8-agent-tool'>;
   /** Checks the caller's page on the Next side: its origin to forward, or a refusal. */
   pageOrigin?: (request: Request) => string | Response;
 };
@@ -37,7 +39,7 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
       if (page instanceof Response) return page;
       headers.set(O8_PAGE_ORIGIN_HEADER, page);
     }
-    for (const name of ['authorization', 'content-type', 'x-clerk-session-token']) {
+    for (const name of ['authorization', 'content-type', 'x-clerk-session-token', ...(options.forwardHeaders ?? [])]) {
       const value = request.headers.get(name);
       if (value !== null) headers.set(name, value);
     }

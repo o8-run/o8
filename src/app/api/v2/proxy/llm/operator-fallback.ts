@@ -80,11 +80,11 @@ export async function streamOpenRouterFallback(options: StreamOptions): Promise<
       }),
       signal: controller.signal,
     });
-  } catch (error) {
+  } catch {
     clearTimeout(timer);
     return new Response(
       JSON.stringify({
-        error: error instanceof Error ? error.message : 'OpenRouter fallback request failed',
+        error: 'OpenRouter fallback request failed',
       }),
       { status: 502, headers: { 'Content-Type': 'application/json' } },
     );
@@ -93,10 +93,10 @@ export async function streamOpenRouterFallback(options: StreamOptions): Promise<
   }
 
   if (!upstream.ok) {
-    const text = await upstream.text().catch(() => 'Unknown error');
+    await upstream.body?.cancel();
     return new Response(
       JSON.stringify({
-        error: `OpenRouter fallback error (${upstream.status}): ${text.slice(0, 500)}`,
+        error: `OpenRouter fallback error (${upstream.status}): Request failed`,
       }),
       { status: upstream.status, headers: { 'Content-Type': 'application/json' } },
     );

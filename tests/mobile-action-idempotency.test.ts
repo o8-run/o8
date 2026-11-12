@@ -18,6 +18,8 @@ vi.mock('@/lib/mobile/inbox', () => ({
   invalidateInboxCache: vi.fn(),
 }));
 
+// Warm the classic handler before timing in-flight actions; native forwarding keeps it cold.
+await import('@/lib/mobile/action-route');
 const actionRoute = await import('@/app/api/mobile/action/route');
 const actionIdempotency = await import('@/lib/mobile/action-idempotency');
 const { __resetIdempotencyStoreForTests } = await import('@/lib/orchestrator/idempotency-store');

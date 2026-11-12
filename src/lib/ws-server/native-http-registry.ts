@@ -464,7 +464,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   inbox: [
     route('/api/panel/supervisor-inbox', 'GET', () => import('@/app/api/panel/supervisor-inbox/route')),
-    route('/api/panel/approvals', 'GET POST', () => import('@/app/api/panel/approvals/route')),
+    route('/api/panel/approvals', 'GET POST', () => import('@/lib/approvals/route')),
   ],
   diff: [
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
@@ -487,6 +487,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
 
 // Authoritative producers requested by the existing WS checkpoint/command path.
 const producers = [
+  // One owner for inference cancellation, connection attempts, abuse windows and
+  // one-shot tool grants issued by desktop/mobile approval continuations.
+  // Next forwards these handlers; the existing middleware grants remain unchanged.
+  route('/api/v2/proxy/llm', 'POST', () => import('@/lib/llm/proxy-route')),
+  route('/api/panel/models/chatgpt', 'GET POST DELETE', () => import('@/lib/chatgpt-plan/route')),
+  route('/api/mobile/action', 'POST', () => import('@/lib/mobile/action-route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
   // Worker-dispatch readiness: dispatch-readiness.ts probes it on the API base with the operator

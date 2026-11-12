@@ -218,20 +218,20 @@ async function fetchGoogleStream(
       if (response.ok) {
         return { ok: true, response, activeModel: model, fallbackUsed: null };
       }
-      const message = await response.text().catch(() => 'Unknown error');
-      return { ok: false, status: response.status, message: `google API error (${response.status}): ${message.slice(0, 500)}` };
+      await response.body?.cancel();
+      return { ok: false, status: response.status, message: `google API error (${response.status}): Request failed` };
     }
 
     const fallbackModel = GOOGLE_FALLBACKS[model];
     if (!fallbackModel) {
-      const message = await response.text().catch(() => 'Unknown error');
-      return { ok: false, status: response.status, message: `google API error (${response.status}): ${message.slice(0, 500)}` };
+      await response.body?.cancel();
+      return { ok: false, status: response.status, message: `google API error (${response.status}): Request failed` };
     }
 
     const fallbackResponse = await attempt(fallbackModel);
     if (!fallbackResponse.ok) {
-      const message = await fallbackResponse.text().catch(() => 'Unknown error');
-      return { ok: false, status: fallbackResponse.status, message: `google API error (${fallbackResponse.status}): ${message.slice(0, 500)}` };
+      await fallbackResponse.body?.cancel();
+      return { ok: false, status: fallbackResponse.status, message: `google API error (${fallbackResponse.status}): Request failed` };
     }
 
     return {
@@ -240,21 +240,21 @@ async function fetchGoogleStream(
       activeModel: fallbackModel,
       fallbackUsed: { originalModel: model, fallbackModel, reason: `Model overloaded (${response.status})` },
     };
-  } catch (error) {
+  } catch {
     const fallbackModel = GOOGLE_FALLBACKS[model];
     if (!fallbackModel) {
       return {
         ok: false,
         status: 502,
-        message: error instanceof Error ? error.message : 'Google request failed',
+        message: 'Google request failed',
       };
     }
 
     try {
       const fallbackResponse = await attempt(fallbackModel);
       if (!fallbackResponse.ok) {
-        const message = await fallbackResponse.text().catch(() => 'Unknown error');
-        return { ok: false, status: fallbackResponse.status, message: `google API error (${fallbackResponse.status}): ${message.slice(0, 500)}` };
+        await fallbackResponse.body?.cancel();
+        return { ok: false, status: fallbackResponse.status, message: `google API error (${fallbackResponse.status}): Request failed` };
       }
       return {
         ok: true,
@@ -262,11 +262,11 @@ async function fetchGoogleStream(
         activeModel: fallbackModel,
         fallbackUsed: { originalModel: model, fallbackModel, reason: 'Initial request failed' },
       };
-    } catch (fallbackError) {
+    } catch {
       return {
         ok: false,
         status: 502,
-        message: fallbackError instanceof Error ? fallbackError.message : 'Google request failed',
+        message: 'Google request failed',
       };
     }
   }
@@ -486,15 +486,15 @@ export async function createGoogleToolResponseStream(options: GoogleStreamOption
               agentName: 'llm-chat',
               requestType: 'chat',
             });
-          } catch (error) {
-            console.error('[proxy/llm/google] Failed to log usage:', error);
+          } catch {
+            console.error('[proxy/llm/google] Failed to log usage');
           }
         }
 
-      } catch (error) {
+      } catch {
         enqueue({
           type: 'error',
-          message: error instanceof Error ? error.message : 'Google stream error',
+          message: 'Google stream error',
         });
       } finally {
         try {
