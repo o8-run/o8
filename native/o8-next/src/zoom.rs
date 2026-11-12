@@ -2,11 +2,19 @@
 //! GPUI's per-window zoom lays the window out in a viewport divided by the
 //! level and paints it that much larger, so text, icons, spacing and every
 //! surface scale together (vendor/gpui/O8-PATCHES.md).
-use gpui::{App, Bounds, Pixels, Window};
+use gpui::{App, Bounds, Keystroke, Pixels, Size, Window, px, size};
 
-/// Applies the saved level to `window`.
+/// The shell window's smallest size in layout pixels (its design floor).
+pub(crate) const MIN_SIZE: (f32, f32) = (600., 400.);
+
+/// Applies the saved level to `window`; the shell window's minimum size
+/// follows it.
 pub(crate) fn apply(window: &mut Window, cx: &mut App) {
     window.set_zoom(crate::theme::zoom(), cx);
+    if window.root::<crate::shell::Shell>().flatten().is_some() {
+        let display = window.display(cx).map(|display| display.bounds().size);
+        set_min_size(window, min_size(window.zoom(), display));
+    }
 }
 /// Zooms in (`steps` > 0) or out one step at a time, saves and applies it.
 pub(crate) fn step(steps: i32, window: &mut Window, cx: &mut App) {
@@ -21,6 +29,92 @@ fn set(percent: u16, window: &mut Window, cx: &mut App) {
     crate::theme::set_zoom_percent(percent);
     apply(window, cx);
     window.refresh();
+    // The level is one preference: the app's other windows follow, after
+    // the caller's update, so none is updated while it is borrowed.
+    cx.defer(|cx| {
+        for handle in cx.windows() {
+            let _ = handle.update(cx, |_, window, cx| apply(window, cx));
+        }
+    });
+}
+/// Which zoom command a key runs: 1 in, -1 out, 0 reset. The primary
+/// modifier is Cmd on macOS and Ctrl elsewhere, as the `secondary` defaults
+/// in the Shortcuts list.
+pub(crate) fn shortcut(keystroke: &Keystroke) -> Option<i32> {
+    let m = keystroke.modifiers;
+    let primary = if cfg!(target_os = "macos") {
+        m.platform && !m.control
+    } else {
+        m.control && !m.platform
+    };
+    if !primary || m.alt || m.function {
+        return None;
+    }
+    match keystroke.key.as_str() {
+        // Cmd+= and Cmd++ (Shift+=) both zoom in.
+        "=" | "+" => Some(1),
+        "-" if !m.shift => Some(-1),
+        "0" if !m.shift => Some(0),
+        _ => None,
+    }
+}
+/// The zoom shortcuts in every window but the shell's, whose own key handler
+/// runs them (and lets the Shortcuts list rebind them). Keystroke
+/// interceptors run before any view sees the key and outside every update.
+pub(crate) fn install(cx: &mut App) {
+    cx.intercept_keystrokes(|event, window, cx| {
+        if window.root::<crate::shell::Shell>().flatten().is_some() {
+            return;
+        }
+        if let Some(steps) = shortcut(&event.keystroke) {
+            match steps {
+                0 => reset(window, cx),
+                steps => step(steps, window, cx),
+            }
+            cx.stop_propagation();
+        }
+    })
+    .detach();
+}
+/// The minimum window size in screen points: the design floor at this zoom,
+/// never larger than the display.
+pub(crate) fn min_size(zoom: f32, display: Option<Size<Pixels>>) -> Size<Pixels> {
+    let floor = size(px(MIN_SIZE.0 * zoom), px(MIN_SIZE.1 * zoom));
+    display.map_or(floor, |display| floor.min(&display))
+}
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)] // objc's msg_send
+fn set_min_size(window: &Window, min: Size<Pixels>) {
+    use cocoa::{base::id, foundation::NSSize};
+    use objc::{msg_send, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    let view = handle.ns_view.as_ptr() as id;
+    unsafe {
+        let native: id = msg_send![view, window];
+        if !native.is_null() {
+            let (width, height) = (f32::from(min.width), f32::from(min.height));
+            let min = NSSize::new(f64::from(width), f64::from(height));
+            let _: () = msg_send![native, setContentMinSize: min];
+        }
+    }
+}
+/// Other platforms keep the minimum the window opened with.
+#[cfg(not(target_os = "macos"))]
+fn set_min_size(_: &Window, _: Size<Pixels>) {}
+/// The page zoom a fixed-width device preview needs: its CSS viewport spans
+/// the web view's real frame, `width` layout pixels at this zoom.
+pub(crate) fn preview_page_zoom(width: f32, viewport: f32, zoom: f32) -> f64 {
+    if viewport > 0. {
+        f64::from(width * zoom) / f64::from(viewport)
+    } else {
+        1.
+    }
 }
 /// The level as Settings shows it, such as "110%".
 pub(crate) fn label(percent: u16) -> String {
@@ -158,5 +252,59 @@ mod tests {
         cx.update(|window, cx| window.set_zoom(1., cx));
         let (restored, _, _) = painted(cx);
         assert_eq!(restored, plain);
+    }
+
+    #[test]
+    fn zoom_device_preview_page_spans_the_zoomed_frame() {
+        // A 390-wide phone preview: 390 layout pixels, so 390 or 780 points.
+        assert_eq!(super::preview_page_zoom(390., 390., 1.), 1.);
+        assert_eq!(super::preview_page_zoom(390., 390., 2.), 2.);
+        // The CSS viewport stays 390 at both: the frame's points / page zoom.
+        assert_eq!(390. * 2. / super::preview_page_zoom(390., 390., 2.), 390.);
+        assert_eq!(super::preview_page_zoom(195., 390., 2.), 1.);
+        assert_eq!(super::preview_page_zoom(390., 0., 2.), 1.);
+    }
+
+    #[test]
+    fn zoom_minimum_window_is_the_design_floor_within_the_display() {
+        use gpui::size;
+        let min = |zoom, display| super::min_size(zoom, display);
+        assert_eq!(min(1., None), size(px(600.), px(400.)));
+        assert_eq!(min(2., None), size(px(1200.), px(800.)));
+        assert_eq!(min(0.7, None), size(px(600. * 0.7), px(400. * 0.7)));
+        let laptop = Some(size(px(1280.), px(720.)));
+        assert_eq!(min(2., laptop), size(px(1200.), px(720.)));
+        assert_eq!(min(1., laptop), size(px(600.), px(400.)));
+    }
+
+    struct Popout;
+    impl Render for Popout {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full()
+        }
+    }
+
+    #[gpui::test]
+    fn zoom_popout_windows_open_at_the_saved_zoom_and_take_the_shortcuts(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|cx| {
+            super::install(cx);
+            crate::theme::set_zoom_percent(120);
+        });
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            super::apply(window, cx);
+            Popout
+        });
+        let zoom = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, _| (window.zoom(), crate::theme::zoom_percent()))
+        };
+        assert_eq!(zoom(cx), (1.2, 120));
+        cx.simulate_keystrokes("secondary-=");
+        assert_eq!(zoom(cx), (1.3, 130));
+        cx.simulate_keystrokes("secondary--");
+        assert_eq!(zoom(cx), (1.2, 120));
+        cx.simulate_keystrokes("secondary-0");
+        assert_eq!(zoom(cx), (1., 100));
     }
 }

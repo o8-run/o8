@@ -31,27 +31,7 @@ impl ShellFeature for Zoom {
     }
 }
 
-/// Which zoom command a key runs: 1 in, -1 out, 0 reset. The primary
-/// modifier is Cmd on macOS and Ctrl elsewhere, as the `secondary` defaults
-/// in the Shortcuts list.
-pub(super) fn zoom_key(keystroke: &gpui::Keystroke) -> Option<i32> {
-    let m = keystroke.modifiers;
-    let primary = if cfg!(target_os = "macos") {
-        m.platform && !m.control
-    } else {
-        m.control && !m.platform
-    };
-    if !primary || m.alt || m.function {
-        return None;
-    }
-    match keystroke.key.as_str() {
-        // Cmd+= and Cmd++ (Shift+=) both zoom in.
-        "=" | "+" => Some(1),
-        "-" if !m.shift => Some(-1),
-        "0" if !m.shift => Some(0),
-        _ => None,
-    }
-}
+use crate::zoom::shortcut as zoom_key;
 
 fn dispatch(
     s: &mut Shell,

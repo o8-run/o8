@@ -535,6 +535,7 @@ pub fn launch(client: Client, offscreen: bool, options: Options) -> Result<(), S
         Application::new()
     })
     .run(move |cx: &mut App| {
+        crate::zoom::install(cx);
         let handle = cx
             .open_window(
                 WindowOptions {
@@ -551,6 +552,7 @@ pub fn launch(client: Client, offscreen: bool, options: Options) -> Result<(), S
                     ..Default::default()
                 },
                 |window, cx| {
+                    crate::zoom::apply(window, cx);
                     cx.new(|cx| {
                         let mut grid = Grid::new(client, options, window, cx);
                         grid.load(cx);

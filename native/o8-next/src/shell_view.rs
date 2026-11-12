@@ -191,6 +191,7 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
     })
     .with_assets(crate::icon::Assets)
     .run(move |cx: &mut App| {
+        crate::zoom::install(cx);
         let (sender, receiver) = async_channel::bounded(1);
         let client = client.with_wakeup(sender);
         let handle = open_window(client, file, state, offscreen, cx);
@@ -254,11 +255,11 @@ pub(super) fn open_window(
             focus: false,
             show: !offscreen,
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            // Screen points, so the minimum keeps 600 by 400 layout units at the
-            // zoom the window opens with (a later zoom change keeps this floor).
-            window_min_size: Some(size(
-                px(600. * crate::theme::zoom().max(1.)),
-                px(400. * crate::theme::zoom().max(1.)),
+            // Screen points: the 600 by 400 layout floor at the opening zoom,
+            // within the display. Each zoom change resets it (zoom::apply).
+            window_min_size: Some(crate::zoom::min_size(
+                crate::theme::zoom(),
+                cx.primary_display().map(|display| display.bounds().size),
             )),
             // On macOS the traffic lights sit in the header band above the rail, as in
             // the desktop shell: first light centred at x=20, all three on y=20 (the
