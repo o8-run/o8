@@ -1233,17 +1233,28 @@ impl Render for ActivityPane {
             .is_some_and(|s| !s.trim().is_empty())
         {
             let pending = self.pending;
+            let asking = self.stop_armed.is_some();
+            let stop = self.compact(
+                "activity-stop-mission",
+                if asking { "Stop every packet?" } else { "Stop mission" },
+                Action::StopMission,
+                pending,
+                cx,
+            );
+            let stop = if asking {
+                stop.text_color(tint(marks::DELETE, 1.))
+                    .border_color(tint(marks::DELETE, 0.5))
+            } else {
+                stop
+            };
             top = top.child(
-                self.compact(
-                    "activity-stop-mission",
-                    "Stop mission",
-                    Action::StopMission,
-                    pending,
-                    cx,
-                )
-                .tooltip(|_, cx| {
-                    cx.new(|_| icon::Tip("Stop and hold every packet in this mission".into()))
-                        .into()
+                stop.tooltip(move |_, cx| {
+                    let tip = if asking {
+                        "Press again to stop and hold every packet"
+                    } else {
+                        "Stop and hold every packet in this mission"
+                    };
+                    cx.new(|_| icon::Tip(tip.into())).into()
                 }),
             );
         }
