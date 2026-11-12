@@ -941,18 +941,14 @@ impl Render for Surface {
                         let at_composer = composer.is_focused(window);
                         let at_navigator = this.navigator.borrow().is_focused(window);
                         if event.keystroke.modifiers.shift {
-                            if at_composer {
-                                if !this.navigator.borrow().focus(window) {
-                                    this.focus.focus(window);
-                                }
-                            } else if at_navigator {
+                            if at_composer || at_navigator {
                                 this.focus.focus(window);
-                            } else {
+                            } else if !this.navigator.borrow().focus(window) {
                                 composer.focus(window);
                             }
                         } else if at_composer {
                             this.focus.focus(window);
-                        } else if at_navigator || !this.navigator.borrow().focus(window) {
+                        } else {
                             composer.focus(window);
                         }
                     }
