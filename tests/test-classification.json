@@ -2433,9 +2433,11 @@
       "path": "tests/close-archived-owner-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli",
         "process-signal",
-        "real-path"
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -6591,6 +6593,12 @@
     },
     {
       "path": "tests/panel-artifact-raster-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/panel-json-body-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

@@ -520,7 +520,10 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json() as { action?: string; workspaceId?: string };
+    const body = await req.json().catch(() => null) as { action?: string; workspaceId?: string };
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
     const workspaceId = body.workspaceId?.trim();
     if (!workspaceId) {
       return NextResponse.json({ error: 'workspaceId is required' }, { status: 400 });

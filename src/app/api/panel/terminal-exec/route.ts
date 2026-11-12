@@ -12,7 +12,11 @@ export async function POST(request: Request) {
   try {
     const wsToken = getOrCreateWsToken();
     const { wsPort } = resolvePortInfo();
-    const { sessionName, command } = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
+    const { sessionName, command } = body;
 
     if (!sessionName || !command) {
       return NextResponse.json({ error: 'sessionName and command required' }, { status: 400 });
