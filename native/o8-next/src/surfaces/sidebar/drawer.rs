@@ -136,19 +136,9 @@ impl ThreadList {
     ) -> Option<AnyElement> {
         let at = self.drawer_at()?;
         let count = self.rows[at].age.clone();
-        let keyboard = self.focus.is_focused(window);
         let row_height = if self.cards() { detailed::ROW_HEIGHT } else { 28. } + 2.;
-        let body: Vec<AnyElement> = (at + 1..self.rows.len())
-            .map(|i| {
-                div()
-                    .w_full()
-                    .flex_shrink_0()
-                    .py(px(1.))
-                    .child(self.render_row(i, keyboard, cx))
-                    .into_any_element()
-            })
-            .collect();
-        let full = body.len() as f32 * row_height + 2.;
+        let threads = self.rows.len() - at - 1;
+        let full = threads as f32 * row_height + 2.;
         // The dot breathes once a second, as the Inbox's terminal mark.
         let pulse = if recents::now() % 2 == 1 { 0.45 } else { 1. };
         let open = !self.working_closed;
@@ -201,18 +191,34 @@ impl ThreadList {
                 2.,
             ))
             .on_click(cx.listener(|this, _, _, cx| this.toggle_drawer(true, cx)));
-        let rows = (!body.is_empty()).then(|| {
-            div()
-                .id("sidebar-working-rows")
-                .debug_selector(|| "sidebar-working-rows".into())
-                .w_full()
-                .min_h_0()
-                .flex_shrink()
-                .h(px(full * openness))
-                .overflow_y_scroll()
-                .flex()
-                .flex_col()
-                .children(body)
+        // A virtual list, as the one above: hundreds of runs paint only
+        // the rows in view.
+        let rows = (threads > 0).then(|| {
+            gpui::uniform_list(
+                "sidebar-working-rows",
+                threads,
+                cx.processor(|this, range: std::ops::Range<usize>, window, cx| {
+                    let keyboard = this.focus.is_focused(window);
+                    let Some(at) = this.drawer_at() else {
+                        return Vec::new();
+                    };
+                    let end = range.end.min(this.rows.len().saturating_sub(at + 1));
+                    (range.start.min(end)..end)
+                        .map(|k| {
+                            div()
+                                .w_full()
+                                .py(px(1.))
+                                .child(this.render_row(at + 1 + k, keyboard, cx))
+                        })
+                        .collect()
+                }),
+            )
+            .debug_selector(|| "sidebar-working-rows".into())
+            .track_scroll(self.drawer_scroll.clone())
+            .w_full()
+            .min_h_0()
+            .flex_shrink()
+            .h(px(full * openness))
         });
         Some(
             div()

@@ -129,42 +129,20 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
                 });
             }
         }
-        // First/last navigation also crosses the complete virtual inventory.
+        // First/last navigation also crosses the complete virtual inventory;
+        // running threads end it in the Working drawer's own virtual list.
         shell.read_with(cx, |s, cx| {
-            s.surfaces
-                .sidebar
-                .view
-                .as_ref()
-                .unwrap()
-                .read(cx)
-                .scroll
-                .scroll_to_item(
-                    s.surfaces
-                        .sidebar
-                        .view
-                        .as_ref()
-                        .unwrap()
-                        .read(cx)
-                        // The last row of the scrolling list; the Working
-                        // drawer under it is not part of the virtual list.
-                        .top_len()
-                        - 1,
-                    ScrollStrategy::Top,
-                )
+            let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+            list.scroll_row(list.rows.len() - 1, ScrollStrategy::Top, false)
         });
         draw(cx);
         shell.read_with(cx, |s, cx| {
-            assert!(
-                s.surfaces
-                    .sidebar
-                    .view
-                    .as_ref()
-                    .unwrap()
-                    .read(cx)
-                    .painted
-                    .get()
-                    > 1900
-            )
+            let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+            let last = [list.painted.get(), list.drawer_painted.get()]
+                .into_iter()
+                .filter(|i| *i != usize::MAX)
+                .max();
+            assert!(last.is_some_and(|i| i > 1900), "{last:?}")
         });
         assert!(cx.simulate_close());
     }

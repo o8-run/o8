@@ -155,6 +155,8 @@ pub struct ThreadList {
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
     pub scroll: UniformListScrollHandle,
+    /// The Working drawer's own virtual list.
+    pub(super) drawer_scroll: UniformListScrollHandle,
     /// Detailed mode's variable-height list (threads 66px, headings 28px).
     pub detailed_list: gpui::ListState,
     focus: FocusHandle,
@@ -228,6 +230,8 @@ pub struct ThreadList {
     /// below a shelf that ends the list can drop last.
     pub(super) pin_bounds: HashMap<String, gpui::Bounds<gpui::Pixels>>,
     pub painted: Rc<Cell<usize>>,
+    /// The last drawer row painted, a probe as `painted` is for the list.
+    pub drawer_painted: Rc<Cell<usize>>,
     pub materialized: Rc<Cell<usize>>,
     /// When the column last opened; rows fade in top-down from here.
     reveal: Option<std::time::Instant>,
@@ -297,6 +301,7 @@ impl ThreadList {
             rows: Rc::new(vec![]),
             selected: None,
             scroll: UniformListScrollHandle::new(),
+            drawer_scroll: UniformListScrollHandle::new(),
             detailed_list: gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(200.)),
             focus: cx.focus_handle(),
             archived_focus: cx.focus_handle().tab_stop(true),
@@ -350,6 +355,7 @@ impl ThreadList {
             pin_drop: None,
             pin_bounds: HashMap::new(),
             painted: Rc::new(Cell::new(usize::MAX)),
+            drawer_painted: Rc::new(Cell::new(usize::MAX)),
             materialized: Rc::new(Cell::new(0)),
             reveal: None,
         }
@@ -1337,13 +1343,15 @@ pub(crate) mod status_mark;
 impl ThreadList {
     /// Scroll either list to a row; detailed mode reveals it in its list.
     pub(crate) fn scroll_row(&self, index: usize, strategy: ScrollStrategy, strict: bool) {
-        // A foot row (shelf or drawer) sits below the scrolling list.
+        // A foot row sits below the scrolling list; the drawer scrolls its own.
         if index < self.top_len() {
             if strict {
                 self.scroll.scroll_to_item_strict(index, strategy);
             } else {
                 self.scroll.scroll_to_item(index, strategy);
             }
+        } else if let Some(at) = self.drawer_at().filter(|at| index > *at) {
+            self.drawer_scroll.scroll_to_item(index - at - 1, strategy);
         }
         // A shelf row sits below the scrolling list, always in view.
         if self.cards() && index < self.top_len() {
