@@ -399,10 +399,13 @@ mod macos {
         }
 
         pub fn position(&self, bounds: gpui::Bounds<gpui::Pixels>, window: &gpui::Window) {
+            // AppKit frames are in unzoomed window points.
+            let bounds = crate::zoom::native(bounds, window);
             unsafe {
                 let parent: id = msg_send![self.view, superview];
                 let flipped: BOOL = msg_send![parent, isFlipped];
-                let height = f64::from(f32::from(window.viewport_size().height));
+                let height =
+                    f64::from(f32::from(window.viewport_size().height) * window.zoom());
                 let x = |v: gpui::Pixels| f64::from(f32::from(v));
                 let top = if flipped == YES {
                     x(bounds.top())

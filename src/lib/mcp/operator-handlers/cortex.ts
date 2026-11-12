@@ -1,5 +1,5 @@
 import { KNOWLEDGE_SOURCE_TOOLS, handleKnowledgeSources } from './knowledge-sources';
-import { McpInputError } from '@/lib/mcp/api-error';
+import { O8ApiError, McpInputError } from '@/lib/mcp/api-error';
 import {
   apiFetch,
   errorText,
@@ -140,6 +140,7 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
       ...(result.classifier ? { classifier: result.classifier, classificationReceiptId: result.classificationReceiptId ?? null } : {}),
     });
   } catch (error) {
+    if (error instanceof O8ApiError && error.managedBrainUnavailable) return jsonResult(error.managedBrainUnavailable);
     return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
