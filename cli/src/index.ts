@@ -1,3 +1,4 @@
+import { runHeavy } from './commands/run-heavy.js';
 import { runPrStack } from './commands/pr-stack.js';
 import { runBrainSources } from './commands/brain-sources.js';
 import { runThreads } from './commands/threads.js';
@@ -11,8 +12,9 @@ import { commandUsage } from './command-help.js';
  * Design principles (epic #926):
  *   - Agent-first I/O: JSON to stdout by default, --human for pretty fallback.
  *   - Exit codes that mean things: 0 ok, 1 invalid args, 2 connection refused,
- *     3 unauthorized, 4 not found, 5 conflict. Agents branch on these without
- *     parsing strings.
+ *     3 unauthorized, 4 not found, 5 conflict, 6 server timeout,
+ *     7 lead turn is unreported (send new work or stop the lead).
+ *     Agents branch on these without parsing strings.
  *   - Stable, schema-versioned output. Every payload carries `schema: o8/cli/<cmd>/v1`.
  *   - Command mode has no telemetry, auto-update, or prompts. Failures loud (stderr),
  *     successes silent unless --verbose.
@@ -202,6 +204,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       rest.push(tok);
     } else if (command.length < 2 && !tok.startsWith('-')) {
       command.push(tok);
+      if (command.length === 1 && tok === 'run-heavy') {
+        rest.push(...argv.slice(i + 1));
+        break;
+      }
       if (command.length === 2) secondaryIndex = i;
     } else {
       if (firstRestIndex === null) firstRestIndex = i;
@@ -241,6 +247,7 @@ commands:
   lead stop            durably stop the lead; recovery cannot auto-resume it
   connect [--status]   register this signed-in machine, or list connected machines
   disconnect           remove this machine from the operator's connected devices
+  run-heavy -- <cmd>   queue a native build or full suite on this machine
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
   run --last           show the latest command, start, exit receipt, and retained log
@@ -376,6 +383,7 @@ exit codes:
   0 ok   1 invalid args   2 connection refused
   3 unauthorized   4 not found   5 conflict
   6 server timeout (ambiguous: the operation may have landed)
+  7 lead turn is unreported (send new work or stop the lead)
 
 error JSON:
   error.ambiguous is true when retry safety cannot be inferred from the result
@@ -511,6 +519,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
       throw unknownSubcommandError('lane', secondary);
     }
+    case 'run-heavy':
+      return runHeavy(args.rest);
     case 'lease':
       return runLease(args.mode, secondary, args.rest);
     case 'mission':

@@ -149,6 +149,16 @@ describe('shared server bundles in the packaged layout', () => {
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}' });
       expect(brain.status).toBe(400);
       expect(await brain.json()).toEqual({ ok: false, error: 'question is required' });
+      const workspace = join(root, 'push-workspace');
+      mkdirSync(workspace);
+      for (const args of [['init', '-q', '-b', 'main'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'fixture']]) {
+        const git = spawnSync('git', args, { cwd: workspace, encoding: 'utf8' });
+        expect(git.status, git.stderr).toBe(0);
+      }
+      const pushed = await fetch(origin + '/api/review/push', { method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ workspace }) });
+      expect([pushed.status, await pushed.json()]).toEqual([400, { error: 'No git remote configured for this workspace' }]);
     } finally { await stop(child); }
   }, 180_000);
 

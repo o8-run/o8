@@ -298,6 +298,15 @@ describe('cross-house quota fallback real paths', () => {
       runtime: 'codex',
       packetId,
     });
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const { resolveWorkerRouting } = await import('@/lib/agents/routing');
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), repoPath: lane.repoPath, packets: [{
+      id: packetId, referenceLabel: 'P1', title: 'Quota fixture', summary: '', runtime: 'codex', workspaceTargetPath: lane.repoPath,
+      branchTarget: lane.branch, dependencyLabels: [], dependencyPacketIds: [], status: 'running',
+      queueState: 'queued', releaseState: 'pending',
+      workerRouting: resolveWorkerRouting({ requestedRuntime: 'codex' }),
+    }] });
     launchRuntimeSurface.mockClear();
     await updateOperatorDefaults({ crossHouseWorkerFallback: true, subscriptionProfile: 'both' });
 
@@ -328,6 +337,15 @@ describe('cross-house quota fallback real paths', () => {
         status: 'running',
       });
       expect(getLaneEvents(lane.id).find((event) => event.verb === 'worker_fallback')).toBeTruthy();
+      const { getTaskPoolTask } = await import('@/lib/tasks/pool');
+      const { taskSignal } = await import('@/components/desktop/repo-focus/tabs/control-room/helpers');
+      const task = (await getTaskPoolTask(packetId))!;
+      expect(task.runtimeSubstitution).toContain('Worker quota fallback from codex to claude-code.');
+      expect(taskSignal({ ...task, sourceIssue: task.sourceIssue ?? null })).not.toContain('Worker quota fallback');
+      expect((await getTaskPoolTask(packetId))?.workerRouting).toMatchObject({
+        requestedRuntime: 'codex', selectedRuntime: 'claude-code',
+        reason: expect.stringContaining('quota'),
+      });
       expect(listRoleRoutingReceipts({ role: 'recovery', repoPath: lane.repoPath })[0]).toMatchObject({
         requested: { runtime: 'codex' },
         effective: { runtime: 'claude-code' },

@@ -1,17 +1,11 @@
-import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
-import { publishVisualization } from '@/lib/visualizations/service';
-import { visualizationBody, visualizationFailure, visualizationResponse } from '@/lib/visualizations/http';
-import { visualizationReference } from '@/lib/visualizations/types';
+import { ownedByNativeTransport } from '@/lib/ws-server/native-owner';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function POST(request: Request) {
-  try {
-    const { document, warnings, check } = await publishVisualization(await visualizationBody(request), resolveRequestPrincipalContext(request));
-    return visualizationResponse({ visualization: visualizationReference(document), warnings, check }, 201);
-  } catch (error) { return visualizationFailure(error); }
-}
+export const POST = ownedByNativeTransport(
+  async request => (await import('@/lib/visualizations/publish-route')).POST(request),
+  () => Response.json({ error: 'Visualization owner unavailable' }, { status: 503 }),
+);
 
-// The native transport imports the same GET without loading publication tooling.
 export { GET } from '@/lib/visualizations/read';

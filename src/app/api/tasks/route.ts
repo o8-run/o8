@@ -1,5 +1,7 @@
+import { RuntimeSelectionError, validateRequestedRuntime } from '@/lib/agents/routing';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { createTask, readTaskEffortSelection, TaskMutationError } from '@/lib/tasks/actions';
 import { getTaskPool } from '@/lib/tasks/pool';
@@ -11,6 +13,9 @@ export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
+  const principal = resolveRequestPrincipalContext(request);
+  const refusal = workerPacketRefusal(principal, principal.role === 'worker' ? principal.packetId : null);
+  if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
   const params = request.nextUrl.searchParams;
   const projectId = params.get('projectId')?.trim() || null;
   const repoPath = params.get('repoPath')?.trim() || null;
@@ -18,7 +23,10 @@ export async function GET(request: NextRequest) {
   const includeBrief = params.get('includeBrief') === 'true';
 
   try {
-    const pool = await getTaskPool({ projectId, repoPath, includeDone, includeBrief });
+    const pool = await getTaskPool({
+      projectId, repoPath, includeDone, includeBrief,
+      packetId: principal.role === 'worker' ? principal.packetId : undefined,
+    });
     return NextResponse.json(pool, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
@@ -70,7 +78,7 @@ export async function POST(request: NextRequest) {
       requestedEffort: readTaskEffortSelection(body),
       workerIntent: optionalString(body.workerIntent),
       requestedProvider: optionalString(body.requestedProvider),
-      requestedRuntime: optionalString(body.requestedRuntime),
+      requestedRuntime: validateRequestedRuntime(body.requestedRuntime),
       allowedFiles: optionalStringArray(body.allowedFiles),
       sourceIssue: optionalIssueSource(body.sourceIssue),
     });
@@ -80,7 +88,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Task creation failed.';
-    const status = error instanceof TaskMutationError ? error.status : 500;
+    const status = error instanceof TaskMutationError || error instanceof RuntimeSelectionError ? error.status : 500;
     return NextResponse.json(
       { error: message },
       { status, headers: { 'Cache-Control': 'no-store, max-age=0' } },

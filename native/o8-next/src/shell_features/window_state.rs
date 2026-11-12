@@ -34,9 +34,10 @@ impl ShellFeature for WindowState {
                     .features
                     .get::<Runtime>()
                     .subscriptions
-                    .push(cx.observe_window_bounds(window, |s, window, _| {
+                    .push(cx.observe_window_bounds(window, |s, window, cx| {
                         capture_bounds(s, window);
                         persist(s);
+                        crate::zoom::apply_shell(window, cx);
                     }));
                 let view = cx.weak_entity();
                 window.on_window_should_close(cx, move |window, cx| {

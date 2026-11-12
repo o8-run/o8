@@ -4,7 +4,7 @@ import { resolveRequestPrincipalContext, type RequestPrincipalContext } from '@/
 import { isLegacyLocalWorkerToken } from '@/lib/auth/worker-token';
 import {
   getResourceLeaseStore,
-} from '@/lib/leases/resource-lease-service';
+} from '@/lib/leases/resource-lease-default-store';
 import { observeResourceLeaseParticipant } from '@/lib/leases/resource-lease-participant';
 import {
   ResourceLeaseInputError,

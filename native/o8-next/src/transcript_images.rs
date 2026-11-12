@@ -243,7 +243,9 @@ pub(crate) fn open(image: Arc<RenderImage>, name: String, cx: &mut App) {
             ..Default::default()
         },
         |window, cx| {
+            crate::zoom::apply(window, cx);
             cx.new(|cx| {
+                crate::zoom::follow(window, false, cx);
                 let focus = cx.focus_handle();
                 focus.focus(window);
                 Viewer { image, name, focus }

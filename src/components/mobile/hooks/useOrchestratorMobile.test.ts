@@ -131,6 +131,22 @@ describe('mobile orchestrator durable send delivery', () => {
     document.body.replaceChildren();
   });
 
+  it('settles an unreported turn with its attention reason', async () => {
+    let latest!: HookValue;
+    const mounted = mountHook(value => { latest = value; });
+    await flushConnection();
+    const socket = FakeWebSocket.instances.at(-1)!;
+    act(() => socket.emit({ channel: 'orchestrator', event: 'status', data: {
+      threadId: thread.id, status: 'busy',
+    } }));
+    act(() => socket.emit({ channel: 'orchestrator', event: 'status', data: {
+      threadId: thread.id, status: 'unreported', reason: 'turn ended without an outcome report',
+    } }));
+    expect(latest.turnStatus).toBe('error');
+    expect(latest.errorNote).toContain('turn ended without an outcome report');
+    act(() => mounted.root.unmount());
+  });
+
   it('retains legacy history rows without message ids when using the shared transcript adapter', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ messages: [
       { role: 'user', content: 'Legacy prompt' }, { role: 'assistant', content: 'Legacy reply' },
