@@ -257,6 +257,17 @@ impl Shell {
     fn key(&self, tab: &Tab) -> String {
         format!("{}|{:?}", self.state.selected.as_deref().unwrap_or(""), tab)
     }
+    /// Content for the thread a tab displays, independent of its stable key.
+    fn thread_content(&self, id: &str) -> Option<&Content> {
+        let saved = self.current()?;
+        let tab = saved.tabs.iter().find(|tab| match tab {
+            Tab::Session(original) => {
+                saved.selections.get(original).unwrap_or(original).as_str() == id
+            }
+            _ => false,
+        })?;
+        self.content.get(&self.key(tab))
+    }
     fn active(&self) -> Option<Tab> {
         self.current().and_then(|w| w.tabs.get(w.active)).cloned()
     }
@@ -513,7 +524,12 @@ impl Shell {
             .or_else(|| tab.registration().global.then(String::new))
         {
             let saved = self.state.workspaces.entry(workspace).or_default();
-            let index = saved.tabs.iter().position(|t| t == &tab);
+            let index = saved.tabs.iter().position(|t| match (&tab, t) {
+                (Tab::Session(id), Tab::Session(original)) => {
+                    saved.selections.get(original).unwrap_or(original) == id
+                }
+                _ => t == &tab,
+            });
             if index.is_none() && saved.tabs.len() >= 32 {
                 toasts::show(
                     toasts::Kind::Info,
@@ -525,6 +541,22 @@ impl Shell {
                 return;
             }
             saved.active = index.unwrap_or_else(|| {
+                let mut tab = tab;
+                if let Tab::Session(id) = &tab
+                    && saved.tabs.contains(&tab)
+                {
+                    let id = id.clone();
+                    let mut suffix = 1;
+                    let key = loop {
+                        let key = format!("chat-tab:{id}:{suffix}");
+                        if !saved.tabs.contains(&Tab::Session(key.clone())) {
+                            break key;
+                        }
+                        suffix += 1;
+                    };
+                    saved.selections.insert(key.clone(), id);
+                    tab = Tab::Session(key);
+                }
                 saved.tabs.push(tab);
                 saved.tabs.len() - 1
             });

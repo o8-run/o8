@@ -188,7 +188,7 @@ impl Shell {
             if self.active().as_ref() != Some(&tab) {
                 self.execute(Command::Session(id.clone()), w, cx);
             }
-            let surface = match self.content.get(&self.key(&tab)) {
+            let surface = match self.thread_content(&id) {
                 Some(Content::Session(surface)) => Some(surface.clone()),
                 _ => None,
             };

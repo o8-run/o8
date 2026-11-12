@@ -252,21 +252,9 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
         return true;
     }
     if close_tab {
-        if let Some(tab) = s.active() {
-            s.content.remove(&s.key(&tab));
-            let saved = s
-                .state
-                .workspaces
-                .get_mut(s.state.selected.as_deref().unwrap_or(""))
-                .unwrap();
-            (tab.registration().remove)(saved, &tab);
-            saved.tabs.remove(saved.active);
-            saved.active = saved.active.min(saved.tabs.len().saturating_sub(1));
-            s.ensure(window, cx);
-            s.restore_focus(window, cx);
-            s.persist();
+        if let Some(index) = s.current().map(|w| w.active) {
+            features::close_tab(s, index, window, cx);
             s.revision += 1;
-            cx.notify();
         }
         return true;
     }

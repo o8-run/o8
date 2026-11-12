@@ -584,22 +584,6 @@ impl Shell {
         if self.state.selected.as_ref() != Some(&workspace) {
             self.switch(workspace, window, cx);
         }
-        if let Some(Tab::Session(original)) = self.active() {
-            let key = self.key(&Tab::Session(original.clone()));
-            let sessions = self.workspace_sessions();
-            if let Some(Content::Session(surface)) = self.content.get(&key) {
-                surface.update(cx, |s, cx| s.shell_select(sessions, id.clone(), cx));
-                self.state
-                    .workspaces
-                    .get_mut(self.state.selected.as_ref().unwrap())
-                    .unwrap()
-                    .selections
-                    .insert(original, id);
-                self.persist();
-                cx.notify();
-                return;
-            }
-        }
         self.execute(Command::Session(id), window, cx);
     }
 }
