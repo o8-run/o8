@@ -22,14 +22,16 @@ it.each(['muse', 'opencode'] as const)('%s established processes recycle after s
     await backend.sendTurn(process.cwd(), 'fixture', event => events.push(event), { threadId: 'billing-fixture' });
     expect(events.filter(event => event.type === 'error')).toEqual([]);
     const text = events.filter((event): event is Extract<OrchestratorEvent, { type: 'text' }> => event.type === 'text').map(event => event.text).join('');
+    expect(text).not.toContain('fixture-acp-key');
+    expect(JSON.stringify(events)).not.toContain('fixture-acp-key');
     const result = JSON.parse(text) as { pid: number; key: string | null; keyDigest: string | null; alias: string | null }; children.add(result.pid); return result;
   };
   await mode('subscription'); await save(); const subscription = await turn();
   expect(subscription.key).toBeNull(); expect(subscription.keyDigest).toBeNull(); expect(subscription.alias).toBeNull();
   const authorizedDigest = createHash('sha256').update('fixture-acp-key').digest('hex');
-  await mode('api'); const api = await turn(); expect(api.key).toBe('[redacted]'); expect(api.keyDigest).toBe(authorizedDigest); expect(api.pid).not.toBe(subscription.pid);
+  await mode('api'); const api = await turn(); expect(api.key).toBe('[redacted]'); expect(api.alias).toBe('[redacted]'); expect(api.keyDigest).toBe(authorizedDigest); expect(api.pid).not.toBe(subscription.pid);
   expect((await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'))).status).toBe(200);
   const removed = await turn(); expect(removed.key).toBeNull(); expect(removed.keyDigest).toBeNull(); expect(removed.alias).toBeNull(); expect(removed.pid).not.toBe(api.pid);
-  await save(); const restored = await turn(); expect(restored.key).toBe('[redacted]'); expect(restored.keyDigest).toBe(authorizedDigest);
+  await save(); const restored = await turn(); expect(restored.key).toBe('[redacted]'); expect(restored.alias).toBe('[redacted]'); expect(restored.keyDigest).toBe(authorizedDigest);
   await mode('subscription'); const switched = await turn(); expect(switched.key).toBeNull(); expect(switched.keyDigest).toBeNull(); expect(switched.pid).not.toBe(restored.pid);
 }, 30_000);
