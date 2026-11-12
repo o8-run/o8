@@ -56,7 +56,8 @@ it.each(['1', undefined])('Next forwards to WS without creating receiver state (
   } finally { vi.unstubAllEnvs(); }
 });
 
-it('WS startup owns the install lock only on macOS', () => {
+it('WS startup owns the install lock only on macOS', async () => {
+  expect((await call('GET')).status).toBe(200);
   const claimed = execFileSync(process.execPath, ['--require=tsx/cjs', '-e',
     "console.log(require('./src/lib/symon/messages-receiver/owner.ts').claimMessagesReceiver());"],
   { env: { ...process.env, CORTEX_IDE_DATA_DIR: server.directory }, encoding: 'utf8' }).trim();

@@ -145,7 +145,7 @@ beforeAll(async () => {
   wsPort = await freePort();
 
   const { POST: mintTextSession } = await import('@/app/api/mobile/symon/text-session/route');
-  const { POST: runTextTurn, DELETE: interruptTextTurn } = await import('@/app/api/mobile/symon/text-turn/route');
+  const { POST: runTextTurn, DELETE: interruptTextTurn } = await import('@/lib/symon/http/text-turn');
   apiServer = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${apiPort}`);
     const chunks: Buffer[] = [];

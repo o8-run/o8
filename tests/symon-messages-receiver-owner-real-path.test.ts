@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,4 +50,20 @@ it('does not claim ownership, create state or schedule a timer on non-macOS', ()
   expect(runtime.__o8MessagesOwner).toBeUndefined();
   expect(runtime.__o8MessagesReceiver).toBeUndefined();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it('releases the receiver claim when its holder is killed', async () => {
+  directory = mkdtempSync(join(tmpdir(), 'o8-receiver-killed-'));
+  const child = spawn(process.execPath, ['--require=tsx/cjs', '-e',
+    "process.send(require('./src/lib/symon/messages-receiver/owner.ts').claimMessagesReceiver()); setInterval(() => {}, 1000);"],
+  { env: { ...process.env, CORTEX_IDE_DATA_DIR: directory }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  try {
+    expect((await once(child, 'message'))[0]).toBe(true);
+    const exit = once(child, 'exit'); child.kill('SIGKILL'); await exit;
+    expect(execFileSync(process.execPath, ['--require=tsx/cjs', '-e',
+      "console.log(require('./src/lib/symon/messages-receiver/owner.ts').claimMessagesReceiver());"],
+    { env: { ...process.env, CORTEX_IDE_DATA_DIR: directory }, encoding: 'utf8' }).trim()).toBe('true');
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) { const exit = once(child, 'exit'); child.kill('SIGKILL'); await exit; }
+  }
 });

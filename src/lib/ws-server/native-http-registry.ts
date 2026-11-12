@@ -37,6 +37,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
     route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
     route('/api/harness', 'POST', () => import('@/lib/harness/route')),
+    route('/api/mobile/symon/text-turn', 'POST DELETE', () => import('@/lib/symon/http/text-turn')),
+    route('/api/panel/symon/conversations', 'GET', () => import('@/lib/symon/http/conversations')),
+    route('/api/panel/symon/conversations/continue', 'POST', () => import('@/lib/symon/http/continue')),
+    route('/api/panel/symon/conversations/transcript', 'GET', () => import('@/lib/symon/http/transcript')),
+    route('/api/panel/symon/conversations/record', 'POST', () => import('@/lib/symon/http/record')),
+    route('/api/symon/managed-messages/inbound', 'POST', () => import('@/lib/symon/http/managed-inbound')),
 
     route('/api/mobile/symon', 'GET POST', () => import('@/lib/mobile/symon-relay-route')),
     route('/api/mobile/symon/confirm', 'POST', () => import('@/lib/mobile/symon-confirm-route')),
