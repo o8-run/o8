@@ -9,7 +9,7 @@ it('permits only the operator to persist MCP and OpenCode setup without returnin
   // The server writes OpenCode config under XDG_CONFIG_HOME when it is set (as on
   // Linux runners). Clear it so the write lands in the fixture's HOME, never the host's.
   delete process.env.XDG_CONFIG_HOME;
-  const server = await startParityReference({ o8d: true, nativeHttp: true });
+  const server = await startParityReference({ o8d: true, nativeHttp: true, preload: './tests/fixtures/ws-setup-cache-observer.cjs' });
   try {
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
@@ -31,11 +31,15 @@ it('permits only the operator to persist MCP and OpenCode setup without returnin
     const spectator = getSpectatorTokenStore().mint({ repoGrants: [server.directory] });
     const { getSqlite } = await import('@/lib/db');
     const sqlite = getSqlite();
-    const input = { name: 'Fixture', transport: 'stdio', command: 'fixture-command', env: { FIXTURE_SECRET: secret }, workerInjection: true };
+    const input = { name: 'Fixture', transport: 'stdio', command: process.execPath, args: [join(process.cwd(), 'tests/fixtures/ws-setup-mcp-server.cjs')], symonInjection: true, env: { FIXTURE_SECRET: secret }, workerInjection: true };
     for (const path of ['mcp-servers', 'opencode']) {
       for (const [token, status] of [['', 401], ['wrong', 401], [device, 403], [worker, 403], [boundWorker, 403], [spectator.bearer, 403]] as const) {
         expect((await call(path, token, input)).status).toBe(status);
         expect((await call(path, token, input, true)).status).toBe(status);
+        if (path === 'mcp-servers') for (const method of ['PATCH', 'DELETE']) {
+          expect((await call(path, token, input, false, method)).status).toBe(status);
+          expect((await call(path, token, input, true, method)).status).toBe(status);
+        }
       }
     }
     const configPath = join(server.directory, '.config', 'opencode', 'opencode.json');
@@ -48,12 +52,21 @@ it('permits only the operator to persist MCP and OpenCode setup without returnin
     const id = JSON.parse(response).server.id;
     const oauth = 'setup-fixture-oauth-secret';
     sqlite.prepare('UPDATE external_mcp_servers SET oauth_token = ? WHERE id = ?').run(oauth, id);
+    Object.assign(process.env, { O8_NEXT_O8D: '1', O8_WS_PORT: new URL(origin).port });
+    // Load the real WS tool catalog, which registers its session/cache invalidator.
+    const catalog = await fetch(`${origin}/api/symon/mcp/tools`, { headers: { authorization: `Bearer ${server.token}` } });
+    expect(catalog.status).toBe(200);
+    expect((await catalog.json()).tools).toHaveLength(1);
+    const invalidations = () => existsSync(join(server.directory, 'cache-invalidations'))
+      ? readFileSync(join(server.directory, 'cache-invalidations'), 'utf8').split('cleared\n').length - 1 : 0;
+    const beforePatch = invalidations();
     const setupRoute = await import('@/app/api/setup/mcp-servers/route');
     const patched = await setupRoute.PATCH(new Request('http://127.0.0.1/api/setup/mcp-servers', {
       method: 'PATCH', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ id, enabled: false }),
     }));
     expect(patched.status).toBe(200);
+    expect(invalidations()).toBe(beforePatch + 1);
     const patchText = await patched.text();
     expect(patchText).not.toContain(secret);
     expect(patchText).not.toContain(oauth);
@@ -88,6 +101,25 @@ it('permits only the operator to persist MCP and OpenCode setup without returnin
       const stored = sqlite.prepare('SELECT env_json, worker_injection FROM external_mcp_servers WHERE name = ?').get('Forwarded') as { env_json: string; worker_injection: number };
       expect(JSON.parse(stored.env_json)).toEqual(input.env);
       expect(stored.worker_injection).toBe(1);
+      expect((await (await fetch(`${origin}/api/symon/mcp/tools`, { headers: { authorization: `Bearer ${server.token}` } })).json()).tools).toHaveLength(1);
+      const forwardedId = (sqlite.prepare('SELECT id FROM external_mcp_servers WHERE name = ?').get('Forwarded') as { id: string }).id;
+      const beforeDelete = invalidations();
+      const removed = await next.DELETE(new Request('http://127.0.0.1/api/setup/mcp-servers', {
+        method: 'DELETE', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ id: forwardedId }),
+      }));
+      expect(removed.status).toBe(200);
+      expect(invalidations()).toBe(beforeDelete + 1);
+      const opencode = await import('@/app/api/setup/opencode/route');
+      // Give Next a different config directory: only the WS owner's file changes.
+      process.env.XDG_CONFIG_HOME = join(server.directory, 'next-config');
+      const forwardedConfig = await opencode.POST(new Request('http://127.0.0.1/api/setup/opencode', {
+        method: 'POST', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ remove: true }),
+      }));
+      expect(forwardedConfig.status).toBe(200);
+      expect(JSON.parse(readFileSync(configPath, 'utf8')).mcp.o8).toBeUndefined();
+      expect(existsSync(join(process.env.XDG_CONFIG_HOME, 'opencode', 'opencode.json'))).toBe(false);
       expect(localInvalidations).toBe(0);
     } finally { unregister(); }
     expect(server.diagnostics().stderr).not.toContain(secret);
