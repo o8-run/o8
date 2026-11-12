@@ -688,9 +688,9 @@ fn sidebar_retained_session_selection_tracks_the_rail(cx: &mut TestAppContext) {
             _ => panic!("session"),
         }
     });
-    assert_ne!(
+    assert_eq!(
         before, after,
-        "a distinct thread opens its own Surface and retains the previous tab's draft"
+        "changing the session in the sidebar must retain the existing Surface and its drafts"
     );
     shell.read_with(cx, |s, cx| {
         let Content::Session(surface) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {

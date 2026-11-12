@@ -502,6 +502,7 @@ impl Shell {
         if features::execute(self, &command, window, cx) {
             return;
         }
+        self.capture(window, cx);
         let registration = command.registration();
         if registration.overlay_command {
             (registration.open)(self, command, window, cx);
