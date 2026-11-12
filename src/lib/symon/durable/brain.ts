@@ -9,11 +9,12 @@
  * admitted under its caller's request id, so a retried delivery reaches the
  * same submission instead of starting a second turn.
  *
- * Only this o8 server process opens the store; Pi Durable has no cross-process
- * locking.
+ * An exclusive OS-backed claim admits one process before opening the store;
+ * Pi Durable itself has no cross-process ownership gate.
  */
 
 import { join } from 'node:path';
+import { claimSymonBrainStore } from './store-owner';
 import type { Message, Models } from '@earendil-works/pi-ai';
 import type {
   Harness,
@@ -169,6 +170,7 @@ export class SymonBrain {
     private readonly model: { provider: string; modelId: string },
     private readonly tools: SymonO8Tools | null,
     private readonly sdk: Awaited<ReturnType<typeof loadSymonSdk>>,
+    private readonly releaseStore: () => void,
   ) {}
 
   static async open(options: SymonBrainOptions): Promise<SymonBrain> {
@@ -177,31 +179,37 @@ export class SymonBrain {
     // node:sqlite, and a static import would break every route that imports
     // this module there (#3486).
     requirePiNode();
-    const sdk = await loadSymonSdk();
-    const { createModels, createRegistry, Harness, BACKGROUND_CONTEXT } = sdk;
-    const { openNodeSqliteStorage } = await import('@earendil-works/pi-durable/storage/sqlite/node');
-    const models = options.models ?? await (async () => {
-      const created = createModels();
-      created.setProvider(await createSymonManagedProvider());
-      return created;
-    })();
-    const registry = createRegistry();
-    registry.install(sdk.extension);
-    const openServers = options.o8Servers === undefined ? openReadOnlyO8Servers : options.o8Servers;
-    const tools = openServers ? await createSymonO8Tools(openServers, options.o8ServersIdleMs) : null;
-    if (tools) registry.install(tools.extension);
-    const harness = await Harness.open(await openNodeSqliteStorage(options.storagePath), {
-      models,
-      registry,
-      settings: {
-        // The managed transport makes one attempt; a failed turn is reported, not repeated.
-        retry: { maxRetries: 0 },
-        compaction: { enabled: true, reserveTokens: 4_096, keepRecentTokens: 8_000, backgroundTokens: 0 },
-      },
-    }, BACKGROUND_CONTEXT);
-    // Continue any turn the previous process left unfinished.
-    harness.resume();
-    return new SymonBrain(harness, options.model ?? { provider: SYMON_MANAGED_MODEL.provider, modelId: SYMON_MANAGED_MODEL.id }, tools, sdk);
+    const releaseStore = claimSymonBrainStore(options.storagePath);
+    try {
+      const sdk = await loadSymonSdk();
+      const { createModels, createRegistry, Harness, BACKGROUND_CONTEXT } = sdk;
+      const { openNodeSqliteStorage } = await import('@earendil-works/pi-durable/storage/sqlite/node');
+      const models = options.models ?? await (async () => {
+        const created = createModels();
+        created.setProvider(await createSymonManagedProvider());
+        return created;
+      })();
+      const registry = createRegistry();
+      registry.install(sdk.extension);
+      const openServers = options.o8Servers === undefined ? openReadOnlyO8Servers : options.o8Servers;
+      const tools = openServers ? await createSymonO8Tools(openServers, options.o8ServersIdleMs) : null;
+      if (tools) registry.install(tools.extension);
+      const harness = await Harness.open(await openNodeSqliteStorage(options.storagePath), {
+        models,
+        registry,
+        settings: {
+          // The managed transport makes one attempt; a failed turn is reported, not repeated.
+          retry: { maxRetries: 0 },
+          compaction: { enabled: true, reserveTokens: 4_096, keepRecentTokens: 8_000, backgroundTokens: 0 },
+        },
+      }, BACKGROUND_CONTEXT);
+      // Continue any turn the previous process left unfinished.
+      harness.resume();
+      return new SymonBrain(harness, options.model ?? { provider: SYMON_MANAGED_MODEL.provider, modelId: SYMON_MANAGED_MODEL.id }, tools, sdk, releaseStore);
+    } catch (error) {
+      releaseStore();
+      throw error;
+    }
   }
 
   private timeoutContext(ms: number) {
@@ -338,6 +346,7 @@ export class SymonBrain {
   async close(): Promise<void> {
     await this.harness.close(this.sdk.BACKGROUND_CONTEXT);
     await this.tools?.close();
+    this.releaseStore();
   }
 }
 

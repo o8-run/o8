@@ -9,10 +9,13 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as {
+    const body = await request.json().catch(() => null) as {
       terminalRepoPaths?: string[];
       activeRepoPath?: string | null;
     };
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
     const next = writeIdeSurfaceState({
       terminalRepoPaths: body.terminalRepoPaths,
       activeRepoPath: body.activeRepoPath,

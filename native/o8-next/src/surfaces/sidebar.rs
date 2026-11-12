@@ -11,12 +11,26 @@ pub(crate) use thread_list::recents::calendar::{
 };
 /// A repository's icon override or monogram, for the Projects page.
 pub(crate) use thread_list::repo_identity;
+/// Tabular figures, for an empty thread's overview counts.
+pub(crate) use thread_list::inbox_card::tabular;
+/// A thread waiting on the user, so the overview agrees with the Inbox.
+pub(crate) use thread_list::needs_input;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
 #[path = "sidebar/thread_mutations_client.rs"]
 mod thread_mutations_client;
 use thread_list::{Event as ThreadEvent, ThreadList};
 pub(super) type Slice = EmptyState;
+#[derive(PartialEq)]
+struct Navigation {
+    workspace: Option<String>,
+    tab: Option<Tab>,
+    shown: Option<String>,
+    settings_open: bool,
+    projects_open: bool,
+    customize_open: bool,
+    refresh_revision: u64,
+}
 #[derive(Default)]
 pub(super) struct Runtime {
     pub view: Option<Entity<ThreadList>>,
@@ -31,10 +45,16 @@ pub(super) struct Runtime {
     pub press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
     workspace_ledger: Option<Ledger>,
     bootstrapped: bool,
+    navigation: Option<Navigation>,
+    pub(crate) generation: std::rc::Rc<std::cell::Cell<u64>>,
 }
 /// The sidebar column; the header lays its toggle and search over it.
 pub(super) const WIDTH: f32 = 280.;
-const MIN_WIDTH: f32 = 160.;
+/// The right padding of the column's head row, where its last control ends;
+/// the header's Back and Forward end on the same edge above it.
+pub(super) const HEAD_PAD: f32 = 8.;
+/// The narrowest the column drags to; below this, row titles and ages crowd.
+pub(super) const MIN_WIDTH: f32 = 250.;
 const MAX_WIDTH: f32 = 500.;
 /// The edge's grab target reaches this far either side of the boundary.
 const EDGE_SLOP: f32 = 8.;
@@ -357,6 +377,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     let sidebar = cx.new(|cx| {
         let mut list = ThreadList::new(shell.client.clone(), cx);
         list.links = links;
+        list.navigation = shell.surfaces.sidebar.generation.clone();
         list
     });
     let scopes = shell.state.sidebar_scope.clone();
@@ -365,16 +386,17 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         shell.state.sidebar_closed_folders.clone(),
     );
     let snoozes = shell.state.sidebar_snoozes.clone();
-    let (detailed, working, inbox_working) = (
+    let (detailed, working, inbox_working, working_open) = (
         shell.state.sidebar_detailed_rows,
-        shell.state.sidebar_working_section,
+        !shell.state.sidebar_working_off,
         !shell.state.sidebar_inbox_working_off,
+        shell.state.sidebar_working_open,
     );
     sidebar.update(cx, |sidebar, _| {
         sidebar.restore_scopes(scopes);
         sidebar.restore_views(&views, &closed);
         sidebar.restore_snoozes(&snoozes);
-        sidebar.restore_row_mode(detailed, working, inbox_working);
+        sidebar.restore_row_mode(detailed, working, inbox_working, working_open);
     });
     shell.subscriptions.push(
         cx.subscribe_in(&sidebar, window, |shell, _, event, window, cx| {
@@ -397,6 +419,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                         shell.switch(path.clone(), window, cx);
                     } else {
                         shell.state.selected = None;
+                        navigation(shell, cx);
                         shell.persist();
                     }
                 }
@@ -410,8 +433,40 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     Some(machine) => {
                         toasts::info(format!("{machine} can't be reached right now."), cx);
                     }
-                    None => shell.open_thread(id.clone(), window, cx),
+                    None => {
+                        shell.open_thread(id.clone(), window, cx);
+                        shell.snapshot_created(id, true, cx);
+                    },
                 },
+                ThreadEvent::OpenInTab(id) => match shell.unreachable_machine(id) {
+                    Some(machine) => {
+                        toasts::info(format!("{machine} can't be reached right now."), cx);
+                    }
+                    None => shell.open_thread_in_tab(id.clone(), window, cx),
+                },
+                ThreadEvent::StartThread(repo) => {
+                    let _ = shell.start_thread_in(repo.clone(), true, cx);
+                }
+                ThreadEvent::Created(id, foreground, started) => {
+                    navigation(shell, cx);
+                    let foreground = *foreground && *started == shell.surfaces.sidebar.generation.get();
+                    if let Some(session) = shell.sessions.iter().find(|s| s.list_id() == *id) {
+                        let list_id = session.list_id();
+                        let workspace = session.workspace();
+                        let tab = Tab::Session(session.id.clone());
+                        if foreground {
+                            if let Some(list) = &shell.surfaces.sidebar.view {
+                                list.update(cx, |list, cx| list.created_foreground(id, cx));
+                            }
+                            shell.open_thread(list_id, window, cx);
+                        } else if shell.insert_tab(&workspace, tab, false, cx) == Some(true) {
+                            shell.persist();
+                            shell.revision += 1;
+                            cx.notify();
+                        }
+                        shell.snapshot_created(id, foreground, cx);
+                    }
+                }
                 ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
                 ThreadEvent::Scope(project, keys) => {
                     if keys.is_empty() {
@@ -429,14 +484,16 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     shell.state.sidebar_closed_folders = closed.iter().cloned().collect();
                     shell.persist();
                 }
-                ThreadEvent::RowMode(detailed, working, inbox_working) => {
+                ThreadEvent::RowMode(detailed, working, inbox_working, working_open) => {
                     shell.state.sidebar_detailed_rows = *detailed;
-                    shell.state.sidebar_working_section = *working;
+                    shell.state.sidebar_working_off = !*working;
+                    shell.state.sidebar_working_open = *working_open;
                     shell.state.sidebar_inbox_working_off = !*inbox_working;
                     shell.persist();
                 }
                 ThreadEvent::Snoozes(snoozes) => {
                     shell.state.sidebar_snoozes = snoozes.iter().cloned().collect();
+                    shell.share_overview(cx);
                     shell.persist();
                 }
                 ThreadEvent::Error(error) => {
@@ -460,7 +517,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     shell.surfaces.sidebar.view = Some(sidebar);
 }
 impl Shell {
-    fn install_sessions(
+    pub(super) fn install_sessions(
         &mut self,
         sessions: Vec<Session>,
         refreshed: bool,
@@ -471,6 +528,8 @@ impl Shell {
         // catalogs keep the user's workspace as long as it still exists.
         let bootstrap = !self.surfaces.sidebar.bootstrapped;
         self.sessions = sessions;
+        self.session_titles = self.sessions.iter().filter(|session| !session.title.trim().is_empty())
+            .map(|session| (format!("{}|{}", session.workspace(), session.id), session.title.clone())).collect();
         let mut workspaces = self
             .sessions
             .iter()
@@ -531,17 +590,34 @@ impl Shell {
             self.notice.clear();
         }
         for content in self.content.values() {
-            if let Content::Grid(grid) = content {
-                grid.update(cx, |g, cx| g.load(cx));
+            match content {
+                Content::Grid(grid) => grid.update(cx, |g, cx| g.load(cx)),
+                _ => {}
             }
         }
+        self.share_overview(cx);
         self.persist();
+    }
+    /// An empty thread's overview lists threads from every project, less the
+    /// ones snoozed in the sidebar.
+    fn share_overview(&self, cx: &mut Context<Self>) {
+        for content in self.content.values() {
+            if let Content::Session(surface) = content {
+                surface.update(cx, |s, cx| {
+                    s.shell_overview(&self.sessions, &self.state.sidebar_snoozes, cx)
+                });
+            }
+        }
     }
     /// Starts a thread on the operator's lead in the open repository, as the
     /// sidebar's New thread does, opening it in the main pane when `open`;
     /// None when no repository is open.
     pub(crate) fn start_thread(&mut self, open: bool, cx: &mut Context<Self>) -> Option<String> {
         let repo = self.state.selected.clone().filter(|w| w != "Unassigned")?;
+        self.start_thread_in(repo, open, cx)
+    }
+    fn start_thread_in(&mut self, repo: String, open: bool, cx: &mut Context<Self>) -> Option<String> {
+        navigation(self, cx);
         let list = self.surfaces.sidebar.view.clone()?;
         Some(list.update(cx, |list, cx| list.start_thread(repo, open, cx)))
     }
@@ -549,7 +625,7 @@ impl Shell {
     /// marker named, or says so when this machine does not list it.
     pub(crate) fn open_thread_by_id(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.sessions.iter().any(|s| s.id == id) {
-            self.open_thread(id, window, cx);
+            self.open_thread_in_tab(id, window, cx);
         } else {
             toasts::show(
                 toasts::Kind::Info,
@@ -561,6 +637,18 @@ impl Shell {
         }
     }
     pub(super) fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_thread_mode(id, true, window, cx);
+    }
+    fn open_thread_in_tab(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_thread_mode(id, false, window, cx);
+    }
+    fn open_thread_mode(
+        &mut self,
+        id: String,
+        replace: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // A sidebar id names one computer's thread; a link from inside a far
         // thread names a thread in that thread's own workspace.
         let selected = self.state.selected.clone();
@@ -583,11 +671,18 @@ impl Shell {
         if self.state.selected.as_ref() != Some(&workspace) {
             self.switch(workspace, window, cx);
         }
-        if let Some(Tab::Session(original)) = self.active() {
+        self.capture(window, cx);
+        let already_open = self
+            .current()
+            .is_some_and(|saved| Self::tab_index(saved, &Tab::Session(id.clone())).is_some());
+        if replace
+            && !already_open
+            && let Some(Tab::Session(original)) = self.active()
+        {
             let key = self.key(&Tab::Session(original.clone()));
             let sessions = self.workspace_sessions();
             if let Some(Content::Session(surface)) = self.content.get(&key) {
-                surface.update(cx, |s, cx| s.shell_select(sessions, id.clone(), cx));
+                surface.update(cx, |surface, cx| surface.shell_select(sessions, id.clone(), cx));
                 self.state
                     .workspaces
                     .get_mut(self.state.selected.as_ref().unwrap())
@@ -605,3 +700,48 @@ impl Shell {
 #[cfg(test)]
 #[path = "sidebar/sidebar_tests.rs"]
 mod tests;
+
+/// Navigation invalidates focus permission, including a change away and back.
+#[cfg(test)]
+thread_local! { static NAVIGATION_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+pub(super) fn navigation_checks() -> usize { NAVIGATION_CHECKS.with(|n| n.get()) }
+
+pub(super) fn navigation(s: &mut Shell, cx: &mut Context<Shell>) {
+    #[cfg(test)]
+    NAVIGATION_CHECKS.with(|n| n.set(n.get() + 1));
+    let next = Navigation {
+        workspace: s.state.selected.clone(),
+        tab: s.active(),
+        shown: s.active().and_then(|tab| {
+            match s.content.get(&s.key(&tab)) {
+                Some(Content::Session(view)) => view.read(cx).shown_thread(),
+                _ => match tab {
+                    Tab::Session(key) => s.current().map(|w| w.selections.get(&key).unwrap_or(&key).clone()),
+                    _ => None,
+                },
+            }
+        }),
+        settings_open: s.surfaces.settings.view.is_some(),
+        projects_open: s.surfaces.projects.open,
+        customize_open: s.surfaces.customize.open,
+        refresh_revision: s.active().and_then(|tab| s.content.get(&s.key(&tab)))
+            .map_or(0, |content| match content {
+                Content::Session(view) => view.read(cx).navigation_refresh_revision,
+                _ => 0,
+            }),
+    };
+    // A catalogue fallback changes the displayed thread, not the user's intent.
+    if let Some(previous) = s.surfaces.sidebar.navigation.as_mut()
+        && previous.workspace == next.workspace && previous.tab == next.tab
+        && next.refresh_revision > previous.refresh_revision
+    {
+        previous.shown.clone_from(&next.shown);
+        previous.refresh_revision = next.refresh_revision;
+    }
+    if s.surfaces.sidebar.navigation.as_ref() != Some(&next) {
+        s.surfaces.sidebar.navigation = Some(next);
+        let generation = &s.surfaces.sidebar.generation;
+        generation.set(generation.get().wrapping_add(1));
+    }
+}

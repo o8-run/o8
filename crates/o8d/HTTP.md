@@ -43,9 +43,9 @@ restart. This requires the WS TypeScript process; it does not claim a Rust-only
 application backend.
 
 The transport inventory is maintained in
-[native-http-registry.ts](../../src/lib/ws-server/native-http-registry.ts) and its
-[named handlers](../../src/lib/ws-server/native-http-handlers.ts). Request and
-response contracts are the existing handlers linked there. The
+[native-http-registry.ts](../../src/lib/ws-server/native-http-registry.ts), where each
+entry loads its handler module directly. Request and response contracts are the
+existing handlers linked there. The
 [HTTP adapter](../../src/lib/ws-server/native-http-routes.ts) and WS producer
 fetcher select routes from that same registry:
 

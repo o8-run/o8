@@ -7,12 +7,15 @@ import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as {
+    const body = await req.json().catch(() => null) as {
       repoPath: string;
       branch: string;
       stash?: boolean;
       force?: boolean;
     };
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
 
     const { repoPath, branch, stash, force } = body;
     if (!repoPath || !branch) {

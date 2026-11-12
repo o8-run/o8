@@ -199,9 +199,9 @@ export function createOrchestratorMessageHandler(
 
     if (options.suppressTurnEventsRef?.current) {
       const terminalStatus = msg.event === 'status'
-        && (msg.data?.status === 'ready' || msg.data?.status === 'dead');
+        && (msg.data?.status === 'ready' || msg.data?.status === 'dead' || msg.data?.status === 'unreported');
       if (terminalStatus) options.suppressTurnEventsRef.current = false;
-      return;
+      if (msg.data?.status !== 'unreported') return;
     }
 
     const observedAt = Date.now();
@@ -444,6 +444,27 @@ export function createOrchestratorMessageHandler(
 
       case 'status': {
         const newStatus = msg.data?.status as string | undefined;
+        if (newStatus === 'unreported') {
+          const reason = typeof msg.data?.reason === 'string' ? msg.data.reason : 'turn ended without an outcome report';
+          const endedAssistantId = options.currentAssistantRef.current?.id;
+          options.flushCurrentAssistant();
+          options.finalizeFirstTurnPlanCapture();
+          options.currentAssistantRef.current = null;
+          if (options.activeTurnBackendRef) options.activeTurnBackendRef.current = null;
+          options.statusRef.current = 'error';
+          options.setStatus('error');
+          setTranscriptMessages(prev => [...prev.map(message => message.id === endedAssistantId ? {
+            ...message, thinkingActive: false,
+            toolCalls: message.toolCalls?.map(tool => tool.status === 'running' || tool.status === 'calling'
+              ? { ...tool, status: undefined } : tool),
+          } : message), {
+            id: `orch-unreported-${Date.now()}`, role: 'system', isError: true,
+            text: `Unreported: ${reason}. Send new work or stop the lead.`,
+            timestamp: Date.now(), timestampLabel: formatTimestampLabel(Date.now()),
+          }]);
+          break;
+        }
+
         // A subscribe-ack carries a point-in-time SNAPSHOT of the session
         // status (ws-server tags it `snapshot:true`), NOT a live turn
         // transition. On the first turn of a fresh tab the threadId mints

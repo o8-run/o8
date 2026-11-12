@@ -298,6 +298,34 @@ fn panel_chrome_maximize_escape_and_narrow_guard(cx: &mut TestAppContext) {
     settle(&mut v);
     bounds(&mut v, "panel-tabs");
 }
+/// The guard is about room, not a fixed window width: the same narrow window
+/// holds the panel once the sidebar is out of the way.
+#[gpui::test]
+fn panel_chrome_opens_in_a_narrow_window_when_the_sidebar_is_hidden(cx: &mut TestAppContext) {
+    let (_f, _s, mut v) = setup(cx);
+    v.simulate_resize(size(px(1100.), px(816.)));
+    settle(&mut v);
+    assert!(
+        v.debug_bounds("panel-tabs").is_none(),
+        "beside the sidebar there is no room at 1100"
+    );
+    click(&mut v, "header-sidebar");
+    settle(&mut v);
+    let tabs = bounds(&mut v, "panel-tabs");
+    assert!(
+        tabs.right() <= px(1100.),
+        "the panel must sit inside the window: {tabs:?}"
+    );
+    // The toggle works again, both ways.
+    click(&mut v, "header-right-panel");
+    assert!(v.debug_bounds("panel-tabs").is_none());
+    click(&mut v, "header-right-panel");
+    bounds(&mut v, "panel-tabs");
+    // Bringing the sidebar back takes the room away.
+    click(&mut v, "header-sidebar");
+    settle(&mut v);
+    assert!(v.debug_bounds("panel-tabs").is_none());
+}
 #[gpui::test]
 fn panel_chrome_browser_pages_are_separate_from_utility_tabs(cx: &mut TestAppContext) {
     let (f, _s, mut v) = setup(cx);
