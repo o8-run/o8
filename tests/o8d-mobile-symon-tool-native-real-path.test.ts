@@ -53,6 +53,12 @@ it('forwards Next calls to the WS owner without a local bridge client', async ()
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ ok: false });
     }
+    // A real tool body must survive the hop: the owner reaches its session-scope check.
+    const scoped = await handlers.POST(new Request(`${origin}${path}`, { method: 'POST',
+      headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json', host: new URL(origin).host },
+      body: JSON.stringify({ sessionId: 'missing-session', callId: 'call', tool: 'read_file', args: {}, dryRun: true }) }));
+    expect(scoped.status).toBe(200);
+    expect(await scoped.json()).toMatchObject({ ok: false, result: { error: 'session_scope_invalid' } });
     expect((globalThis as { __o8BrowserAgentClient?: unknown }).__o8BrowserAgentClient).toBeUndefined();
   } finally {
     if (saved.native === undefined) delete process.env.O8_NEXT_O8D; else process.env.O8_NEXT_O8D = saved.native;
