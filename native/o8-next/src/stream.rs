@@ -290,10 +290,13 @@ impl Transcript {
         }
         let mut changed = replace || was_busy != self.context_busy;
         let time = |e: &Entry| {
-            e.extra
-                .get("timestamp")
-                .and_then(Value::as_u64)
-                .unwrap_or(u64::MAX)
+            crate::shell::session::worker_transcript::saved_time(e).unwrap_or(
+                if e.extra.get("nativeWorkerEvent") == Some(&serde_json::json!(true)) {
+                    u64::MAX
+                } else {
+                    0
+                },
+            )
         };
         for entry in incoming {
             if let Some(&index) = self.worker_lookup.get(&entry.id) {
@@ -782,6 +785,29 @@ impl Transcript {
             return false;
         }
         self.page = history.page;
+        if let Some(marker) = self
+            .entries
+            .last()
+            .filter(|e| e.extra.contains_key("nativeWorkerReadback"))
+            .cloned()
+        {
+            let coverage = &marker.extra["nativeWorkerReadback"];
+            let complete = coverage["coverage_complete"] == true;
+            let first = coverage["coverage_start"].as_u64();
+            let mut incoming: Vec<_> = history
+                .transcript
+                .into_iter()
+                .filter(|entry| {
+                    crate::shell::session::worker_transcript::retain_saved(entry, complete, first)
+                        && !self.entries.iter().any(|current| current.id == entry.id)
+                })
+                .collect();
+            incoming.push(marker);
+            self.backfilled = true;
+            self.worker_entries(incoming, false, self.context_busy);
+            return true;
+        }
+
         let mut next = history.transcript;
         next.retain(|entry| !self.entries.iter().any(|current| current.id == entry.id));
         next.extend(self.entries.clone());

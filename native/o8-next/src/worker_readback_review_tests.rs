@@ -281,3 +281,91 @@ fn native_unknown_time_appends_without_reinterpreting_a_legacy_fallback_time() {
         .collect();
     assert_eq!(answers, vec!["Dated answer", "Unknown time answer"]);
 }
+
+#[test]
+fn complete_normalization_merges_older_prompts_chronologically_without_duplicate_answers() {
+    let h = Host::new(200);
+    *h.saved.lock().unwrap() =
+        vec![json!({"id":"new-user","role":"user","text":"Newer question","timestamp":"2500"})];
+    *h.events.lock().unwrap() = vec![
+        event(1, "old-answer", "Older answer", "1970-01-01T00:00:01Z"),
+        event(2, "new-answer", "Newer answer", "1970-01-01T00:00:03Z"),
+        json!({"seq":3,"type":"done","exitCode":0}),
+    ];
+    let history = h.history();
+    let mut pane = crate::pane::Pane::new(Some(history.session_key.clone()));
+    pane.install(history, h.client.clone());
+    pane.prepend(
+        serde_json::from_value(json!({"sessionKey":"codex-owned:reviewer","transcript":[
+            {"id":"old-user","role":"user","text":"Older question","timestamp":"500"},
+            {"id":"raw-answer","role":"assistant","text":"Older answer","timestamp":"1000"}
+        ]}))
+        .unwrap(),
+    );
+    let texts: Vec<_> = pane
+        .transcript
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .filter(|e| !e.text.is_empty())
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec![
+            "Older question",
+            "Older answer",
+            "Newer question",
+            "Newer answer"
+        ]
+    );
+}
+#[test]
+fn partial_normalization_backfill_keeps_the_saved_prefix_and_filters_covered_prose() {
+    let h = Host::new(200);
+    h.complete.store(false, Ordering::Release);
+    *h.saved.lock().unwrap() =
+        vec![json!({"id":"new-user","role":"user","text":"Newer question","timestamp":"2500"})];
+    *h.events.lock().unwrap() = vec![
+        event(
+            1,
+            "covered-answer",
+            "Covered answer",
+            "1970-01-01T00:00:02.200Z",
+        ),
+        event(2, "new-answer", "Newer answer", "1970-01-01T00:00:03Z"),
+    ];
+    let history = h.history();
+    let mut pane = crate::pane::Pane::new(Some(history.session_key.clone()));
+    pane.install(history, h.client.clone());
+    pane.prepend(
+        serde_json::from_value(json!({"sessionKey":"codex-owned:reviewer","transcript":[
+            {"id":"old-user","role":"user","text":"Older question","timestamp":"500"},
+            {"id":"old-answer","role":"assistant","text":"Saved prefix answer","timestamp":"1000"},
+            {"id":"mid-user","role":"user","text":"Middle question","timestamp":"1800"},
+            {"id":"raw-covered","role":"assistant","text":"Covered answer","timestamp":"2200"}
+        ]}))
+        .unwrap(),
+    );
+    let texts: Vec<_> = pane
+        .transcript
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .filter(|e| !e.text.is_empty())
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(
+        texts,
+        vec![
+            "Older question",
+            "Saved prefix answer",
+            "Middle question",
+            "Covered answer",
+            "Newer question",
+            "Newer answer"
+        ]
+    );
+}

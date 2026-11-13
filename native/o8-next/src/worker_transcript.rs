@@ -37,7 +37,10 @@ fn entry(id: String, role: &str, text: String, event: &Value) -> Entry {
         role: role.into(),
         text,
         tools: None,
-        extra: HashMap::from([("timestamp".into(), timestamp(event))]),
+        extra: HashMap::from([
+            ("timestamp".into(), timestamp(event)),
+            ("nativeWorkerEvent".into(), json!(true)),
+        ]),
     }
 }
 
@@ -51,6 +54,10 @@ pub(crate) struct State {
     cursor_token: Option<String>,
     #[serde(default)]
     pub(crate) cursor_available: bool,
+    #[serde(default)]
+    coverage_complete: bool,
+    #[serde(default)]
+    coverage_start: Option<u64>,
     calls: HashMap<String, Entry>,
     pending: HashMap<String, Vec<String>>,
     answer: Option<Entry>,
@@ -284,6 +291,8 @@ impl State {
         }
         let mut entries = vec![];
         self.apply(&batch.events, &mut entries);
+        self.coverage_complete |= batch.complete;
+        self.coverage_start = self.coverage_start.into_iter().chain(batch.earliest).min();
         self.cursor_available = batch.cursor.is_some();
         self.cursor = batch.cursor.unwrap_or(0);
         self.cursor_token = batch.token;
@@ -329,6 +338,19 @@ fn event_id(event: &Value, occurrences: &mut HashMap<String, usize>) -> String {
     id
 }
 
+pub(crate) fn saved_time(entry: &Entry) -> Option<u64> {
+    let value = entry.extra.get("timestamp")?;
+    value.as_u64().or_else(|| value.as_str()?.parse().ok())
+}
+pub(crate) fn retain_saved(entry: &Entry, complete: bool, first: Option<u64>) -> bool {
+    entry.role == "user"
+        || entry.extra.get("type").is_some_and(|t| t == "card")
+        || (!complete
+            && saved_time(entry)
+                .zip(first)
+                .is_none_or(|(at, first)| at < first))
+}
+
 fn adapt(mut history: History, batch: Readback) -> History {
     if batch.events.is_empty() {
         return history;
@@ -336,16 +358,7 @@ fn adapt(mut history: History, batch: Readback) -> History {
     let mut entries: Vec<_> = history
         .transcript
         .into_iter()
-        .filter(|e| {
-            e.role == "user"
-                || e.extra.get("type").is_some_and(|t| t == "card")
-                || (!batch.complete
-                    && e.extra
-                        .get("timestamp")
-                        .and_then(Value::as_u64)
-                        .zip(batch.earliest)
-                        .is_none_or(|(at, first)| at < first))
-        })
+        .filter(|e| retain_saved(e, batch.complete, batch.earliest))
         .collect();
     let saved: std::collections::HashSet<_> = entries.iter().map(|e| e.id.clone()).collect();
     let mut state = State {
@@ -353,15 +366,13 @@ fn adapt(mut history: History, batch: Readback) -> History {
         ..Default::default()
     };
     state.apply(&batch.events, &mut entries);
+    state.coverage_complete = batch.complete;
+    state.coverage_start = batch.earliest;
     state.cursor_available = batch.cursor.is_some();
     state.cursor = batch.cursor.unwrap_or(0);
     state.cursor_token = batch.token;
-    entries.sort_by_key(|e| {
-        e.extra
-            .get("timestamp")
-            .and_then(Value::as_u64)
-            .unwrap_or(if saved.contains(&e.id) { 0 } else { u64::MAX })
-    });
+    entries
+        .sort_by_key(|e| saved_time(e).unwrap_or(if saved.contains(&e.id) { 0 } else { u64::MAX }));
     entries.push(state.marker());
     history.transcript = entries;
     history
