@@ -502,6 +502,7 @@ mod tests {
         let failed = Arc::new(AtomicBool::new(false));
         let stop = stopped.clone();
         let failing = failed.clone();
+        let recent = crate::clock::now().to_string();
         let server = std::thread::spawn(move || {
             while !stop.load(Ordering::Acquire) {
                 let mut stream = match listener.accept() {
@@ -537,7 +538,7 @@ mod tests {
                 } else {
                     assert!(request.contains("/api/orchestrator/packet-transcript"));
                     let events = if request.contains("cursor=0") {
-                        serde_json::json!([{"seq":1,"ts":"2026-11-02T21:49:25.000Z","type":"assistant","text":"Reviewing."}])
+                        serde_json::json!([{"seq":1,"ts":recent,"type":"assistant","text":"Reviewing."}])
                     } else {
                         serde_json::json!([])
                     };
@@ -556,6 +557,10 @@ mod tests {
         };
         let client = Client::authenticated(&origin, None).unwrap();
         let history = client.history("codex-owned:notice").unwrap();
+        assert!(
+            crate::shell::session::worker_transcript::State::from_history(&history).unwrap().active,
+            "the HTTP retry fixture must model an active worker; idle workers wait for the socket"
+        );
         failed.store(true, Ordering::Release);
         let mut pane = Pane::new(Some("codex-owned:notice".into()));
         pane.install(history, client);
