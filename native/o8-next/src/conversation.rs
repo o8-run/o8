@@ -771,7 +771,7 @@ impl Surface {
             .children(self.empty_chat_hero(cx))
             .children(self.shell_run_card(cx))
             .children(self.lineage_strip(cx))
-            .children(self.changes_pill(cx))
+            .children(self.changes_pill(window, cx))
             .child(self.composer_card(window, cx))
             // An empty chat's project, checkout, branch and access sit under it.
             .children(self.project_bar(cx))
