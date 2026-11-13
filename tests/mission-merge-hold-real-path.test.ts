@@ -151,7 +151,7 @@ it('holds an approved packet from a held mission until the operator approves the
   const held = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
   expect(held.ok).toBe(false);
   expect(held.approvalId).toBeTruthy();
-  expect(getApproval(held.approvalId!)).toMatchObject({ status: 'pending', policyRuleId: 'mission-merge-hold', title: 'Merge held by mission' });
+  expect(getApproval(held.approvalId!)).toMatchObject({ status: 'pending', policyRuleId: 'mission-merge-hold', title: 'Merge held' });
   expect(git(repoPath, 'rev-parse', 'main')).toBe(baseHeadSha);
   expect(getLane(lane.id)?.status).not.toBe('completed');
 

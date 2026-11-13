@@ -14,6 +14,8 @@ import { withPacketLifecycleMutationLock } from './lifecycle-mutation-lock';
 import { samePrRepairRepo } from './pr-repair-owner';
 import { correctWorkers, readWorkerCorrection } from './worker-corrections';
 import type { ComposerQueueTarget } from './composer-queue-types';
+import { saveCorrectionReviewSource } from './correction-review';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
 
 export interface ReviewCorrectionSource {
   packetId: string;
@@ -86,7 +88,8 @@ export async function correctAuthorFromReview(input: ComposerQueueTarget & { rev
         throw new Error('The author has uncommitted changes. Review the current code before sending findings.');
       }
     };
-    const { packet } = currentState();
+    const { packet, lane } = currentState();
+    const registeredRepo = await findRepoByLocalPath(target.repoPath);
     const spent = (getSqlite().prepare('SELECT COUNT(*) AS count FROM worker_corrections WHERE id LIKE ?')
       .get(`${scope}%`) as { count: number }).count;
     const existingRepairs = Math.max(packet.attemptCount ?? 0, packet.typecheckAutoRetries ?? 0, packet.recoveryCount ?? 0);
@@ -103,6 +106,7 @@ export async function correctAuthorFromReview(input: ComposerQueueTarget & { rev
     return correctWorkers({ ...target, id, payload: { message, mode: 'send', holdMerges: false,
       targets: [{ surfaceId: review.surfaceId, runId: review.runId }] } }, {
       state: () => { currentState(); }, code: checkCode,
+      persist: () => saveCorrectionReviewSource(id, lane, { ...review, ...target, findings, repositoryUuid: registeredRepo?.id ?? null }),
     });
   });
 }

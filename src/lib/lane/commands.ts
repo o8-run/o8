@@ -66,7 +66,8 @@ import {
 import { commitDirtyWorktree, readLaneBranchSha } from '@/lib/lane/worktree-merge-git';
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
-import { enqueueLaneReview } from '@/lib/lane/review-queue';
+import { enqueueLaneReview, surfaceReviewQueueBlocker } from '@/lib/lane/review-queue';
+import { CorrectionReviewBlocked, correctionReviewSettled, latestCorrectionReview } from '@/lib/orchestrator/correction-review';
 import { assertPacketCreationBaseAuthority, resolvePacketCreationBase, PacketCreationBaseError, type PacketCreationBaseAuthority } from '@/lib/lane/packet-creation-base';
 import { readLaneCreationBaseCommit, readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { describeStopRefusal, persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
@@ -472,11 +473,13 @@ async function dispatchUnlocked(
 
       // #454 — Guard: auto-commit dirty worktrees before allowing review transition
       const reviewCwd = lane.worktreePath ?? lane.repoPath;
+      const correction = latestCorrectionReview(lane.packetId);
+      const correctionPending = correction && !correctionReviewSettled(correction);
       try {
         const { stdout: porcelain } = await laneGit(reviewCwd, lane.repoPath, ['status', '--porcelain'], {
           maxBuffer: 10 * 1024 * 1024,
         });
-        if (porcelain.trim().length > 0) {
+        if (porcelain.trim().length > 0 && !correctionPending) {
           console.log(`[lane] request_review: dirty worktree detected in ${reviewCwd}, auto-committing`);
           // Commit only onto the lane's branch, wherever the worker pointed HEAD.
           await assertLaneHeadOnBranch(reviewCwd, lane.repoPath, lane.branch);
@@ -564,7 +567,14 @@ async function dispatchUnlocked(
       }
 
       const updated = setLaneStatus(command.laneId, 'reviewing', actor, 'review_requested');
-      if (updated) enqueueLaneReview(updated);
+      try {
+        if (updated) enqueueLaneReview(updated, { retryCorrection: actor !== 'system' });
+      } catch (error) {
+        if (!(error instanceof CorrectionReviewBlocked)) throw error;
+        surfaceReviewQueueBlocker({ laneId: lane.id, reviewId: `correction:${correction?.correction_id ?? lane.id}`,
+          attempts: 0, reason: error.message });
+        return { ok: false, laneId: lane.id, reason: 'correction_review_held', note: error.message, lane: getLane(lane.id) ?? undefined };
+      }
       return { ok: true, laneId: command.laneId, note: 'Review requested.', lane: updated ?? undefined };
     }
 
@@ -921,12 +931,12 @@ async function dispatchUnlocked(
           commitMessage: command.commitMessage,
           expectedHeadSha: command.expectedHeadSha,
           reviewSummary: command.reviewSummary,
-          title: 'Merge held by mission',
-          description: `This packet's mission was created with merges held. Approve to merge "${lane.label}" (${lane.branch} → ${lane.baseBranch}), or leave it held.`,
+          title: 'Merge held',
+          description: `A merge hold is active for this packet. Approve to merge "${lane.label}" (${lane.branch} → ${lane.baseBranch}), or leave it held.`,
           summary: `Merge held: ${lane.branch} → ${lane.baseBranch}`,
           risk: 'medium',
           policyRuleId: MERGE_HOLD_POLICY_RULE_ID,
-          note: 'Merge held: the mission was created with merges held, so the operator decides. An approval card is waiting.',
+          note: 'Merge held for this packet. An approval card is waiting for an explicit release decision.',
         });
       }
 

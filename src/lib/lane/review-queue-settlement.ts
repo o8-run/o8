@@ -25,7 +25,7 @@ interface ClaimedReview {
 export function markReviewCompleted(input: ClaimedReview): boolean {
   const result = getSqlite().prepare(
     `UPDATE review_queue
-     SET status = 'completed', claimed_at = NULL, claim_owner = NULL, updated_at = datetime('now')
+     SET status = 'completed', last_error = NULL, claimed_at = NULL, claim_owner = NULL, updated_at = datetime('now')
      WHERE id = ? AND status = 'in_progress' AND claim_owner = ?`,
   ).run(input.reviewId, input.claimOwner);
   return result.changes === 1;
@@ -80,10 +80,10 @@ export function markReviewDeferred(input: {
 }
 
 export function markReviewFailed(
-  input: ClaimedReview & { laneId: string; error: string; attempts: number },
+  input: ClaimedReview & { laneId: string; error: string; attempts: number; held?: boolean },
 ): boolean {
   const db = getSqlite();
-  if (input.attempts >= MAX_REVIEW_ATTEMPTS) {
+  if (input.held || input.attempts >= MAX_REVIEW_ATTEMPTS) {
     const result = db.prepare(
       `UPDATE review_queue
        SET status = 'failed', last_error = ?, attempts = ?, claimed_at = NULL, claim_owner = NULL,

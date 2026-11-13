@@ -26,6 +26,7 @@ import type { ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-co
 import { currentMissionState, log } from './shared';
 import type { SubmitReviewInput } from './types';
 import { ReviewValidationError } from './review-validation';
+import { completedCorrectionReviewTurn, prepareCorrectionReview } from '../correction-review';
 
 function highestReviewRisk(findings: OrchestratorPacketReviewFinding[]) {
   if (findings.some((finding) => finding.severity === 'high')) {
@@ -243,7 +244,7 @@ function recordPacketReviewAudit(
   };
 }
 
-export async function submitPacketReview(input: SubmitReviewInput) {
+export async function submitPacketReview(input: SubmitReviewInput, internal?: { completedCorrectionTurnId: string; claimOwner: string }) {
   const state = currentMissionState();
   const missionPacket = state.packets.find((candidate) => candidate.id === input.packetId);
 
@@ -265,7 +266,9 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   }
 
   const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
-  const activeReviewTurn = verdictLane ? findActiveReviewTurn(verdictLane.id) : null;
+  const activeReviewTurn = verdictLane ? internal
+    ? completedCorrectionReviewTurn(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner)
+    : findActiveReviewTurn(verdictLane.id) : null;
   if (verdictLane && input.approved && activeReviewTurn?.surface === 'auto-review' && activeReviewTurn.formatRetryRejecting) {
     appendEvent(verdictLane.id, 'review_format_decision_rejected', 'system', {
       packetId: input.packetId,
@@ -423,6 +426,15 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     id: activeReviewTurn?.id ?? `review-turn-standalone-${randomUUID()}`,
     outcome: 'completed' as const,
   };
+  // An operator may still reject/supersede work at any point. Only a new
+  // approval or the queued reviewer must prove this correction's exact turn.
+  const correction = verdictLane && (input.approved || activeReviewTurn?.surface === 'auto-review')
+    ? prepareCorrectionReview(verdictLane, reviewedHeadSha, 'verdict') : null;
+  if (correction && (!activeReviewTurn || activeReviewTurn.surface !== 'auto-review'
+    || ![`auto-review-${verdictLane!.id}-${correction.review_id}`, `auto-review-${verdictLane!.id}-${correction.review_id}-verdict-retry`].includes(activeReviewTurn.threadId ?? ''))) {
+    throw new ReviewValidationError('correction_reviewer_required', 'This correction requires its queued independent reviewer at the corrected HEAD.');
+  }
+  if (internal && verdictLane) completedCorrectionReviewTurn(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner);
   const summary = buildReviewSummary(input.findings, input.approved);
   const auditReview = recordPacketReviewAudit(
     packet,
