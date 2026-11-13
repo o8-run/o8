@@ -124,7 +124,7 @@ jobs:
           docker build -f scripts/linux/diagnostic-stock.Dockerfile -t o8-appimage-stock-diagnosis .
           mkdir -p work/stock-diagnostics
           image=$(find work/linux-downloads -name '*.AppImage' -print -quit)
-          docker run --rm --network none \
+          docker run --rm --init --network none \
             -v "$PWD/scripts/linux:/work/scripts/linux:ro" \
             -v "$PWD/squashfs-root:/payload:ro" \
             -v "$PWD/work/linux-downloads:/packages:ro" \
