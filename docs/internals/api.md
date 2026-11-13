@@ -33,7 +33,7 @@ method-and-path policy and a middleware/route-coverage test in the same change.
   another runtime. Routes that must bypass caching export
   `dynamic = 'force-dynamic'`; this is not a universal boilerplate requirement.
 - Errors return structured JSON: `{ ok: false, error: '<message>' }` with appropriate HTTP status. Never throw — always return a response.
-- Dispatch entry points refuse a known runtime outside the dispatchable capability set with HTTP 400 and `worker_not_enabled`. The delegate client code is preserved; task, mission, and prompt dispatch use the same refusal message. Unknown runtime names remain distinct client errors (400, `invalid_runtime`). This includes `/api/lanes` `open_lane` and the internal task-dispatch owner route; lane command callers retain their structured refusal result.
+- Dispatch entry points refuse a known runtime outside the dispatchable capability set with HTTP 400 and `worker_not_enabled`. The known-runtime delegate refusal keeps `worker_not_enabled`; unknown names now use `invalid_runtime` instead of the delegate API's former `worker_not_enabled`; task, mission, and prompt dispatch use the same refusal message. Unknown runtime names remain distinct client errors (400, `invalid_runtime`). This includes `/api/lanes` `open_lane` and the internal task-dispatch owner route; lane command callers retain their structured refusal result.
 - Pagination is opt-in per-route via `?limit=<n>&offset=<n>` query params (not standardized across the surface).
 - Realtime updates ship over WebSocket (`/ws`) on the dynamically selected port
   written to `~/.o8/ws-port` (dev default `47125`; packaged block

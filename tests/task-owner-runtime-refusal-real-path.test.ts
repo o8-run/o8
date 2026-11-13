@@ -5,6 +5,15 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({ disabled: false }));
+vi.mock('@/lib/tasks/pool', async original => {
+  const actual = await original<typeof import('@/lib/tasks/pool')>();
+  return { ...actual, getTaskPoolTask: async (...args: Parameters<typeof actual.getTaskPoolTask>) => {
+    const task = await actual.getTaskPoolTask(...args);
+    // Persistence normalizes absent packet runtimes. Remove those derived pins
+    // at the pool boundary so this fixture can only select the configured default.
+    return task ? { ...task, runtime: null, workerRouting: undefined } as unknown as typeof task : task;
+  } };
+});
 vi.mock('@/lib/orchestrator/runtime-capabilities', async original => {
   const actual = await original<typeof import('@/lib/orchestrator/runtime-capabilities')>();
   return { ...actual, listDispatchableRuntimes: (...args: Parameters<typeof actual.listDispatchableRuntimes>) => actual.listDispatchableRuntimes(...args).filter(runtime => !h.disabled || runtime !== 'codex') };
@@ -20,11 +29,14 @@ it('owner mode maps an omitted runtime and a configured default that became undi
   const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
   const { withControlPlaneLock, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
   await withControlPlaneLock(() => writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), repoPath: root, packets: [{
-    id: 'pkt-owner-runtime', title: 'Owner fixture', runtime: 'codex', workspaceTargetPath: root, branchTarget: 'fixture',
+    id: 'pkt-owner-runtime', title: 'Owner fixture', runtime: null, workspaceTargetPath: root, branchTarget: 'fixture',
     status: 'queued', queueState: 'held', holdIntent: 'explicit-dispatch', releaseState: 'pending',
-  } as OrchestratorPacket] }));
+  } as unknown as OrchestratorPacket] }));
   vi.stubEnv('O8_NEXT_O8D', '1');
   vi.stubGlobal('__o8NativeCortexReader', true);
+  const { getTaskPoolTask } = await import('@/lib/tasks/pool');
+  expect(await getTaskPoolTask('pkt-owner-runtime')).toMatchObject({ runtime: null });
+  expect((await getTaskPoolTask('pkt-owner-runtime'))?.workerRouting).toBeUndefined();
   h.disabled = true;
   try {
     const { POST } = await import('@/lib/tasks/dispatch-owner-route');
