@@ -357,6 +357,7 @@ ${OPERATOR_PACKET_COMMAND_LINES}
   session resume <key> --message <text> [--idempotency-key <key>]  admit a continuation turn
   session dismiss-pending <key> --confirm-no-continuation  clear an unresolved attempt after provider inspection
   task list            current task pool grouped by ready/running/review/etc.
+  task adopt-pr        adopt a GitHub PR into a durable review task
   task create          add a project-backed task to the ready pool
   task brief <id>      project-backed task brief for a packet or lane
   task claim <id>      bind/reserve a task to a lane

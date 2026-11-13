@@ -40,8 +40,12 @@ it('adopts once, appends immutable revisions and survives reopening the database
   const changed = await (await POST(request())).json(); expect(changed.taskId).toBe(a.taskId); expect(changed.revision.sequence).toBe(2);
   expect(changed.state).toBe('waiting'); expect(listExternalReviews()).toHaveLength(1);
   closeDb();
-  const cold = execFileSync(process.execPath, ['--experimental-sqlite', '--input-type=module', '-e', `import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync(process.argv[1],{readOnly:true}); console.log(JSON.stringify(db.prepare('SELECT t.id,r.head_sha FROM external_pr_review_tasks t JOIN external_pr_review_revisions r ON r.id=t.current_revision_id').all())); db.close();`, join(root,'state.db')], {encoding:'utf8'});
-  expect(JSON.parse(cold)[0]).toEqual({id:a.taskId,head_sha:input.head});
+  const cold = execFileSync(process.execPath, ['--conditions=react-server', '--import', 'tsx', join(process.cwd(),'tests/fixtures/external-review-restart-child.ts'), a.taskId], {encoding:'utf8',timeout:30000});
+  const recovered = JSON.parse(cold.split('RESTART_RESULT:')[1].split('\n')[0].trim());
+  expect(recovered.task.project).not.toBeNull();
+  const {getTaskPool} = await import('@/lib/tasks/pool');
+  expect((await getTaskPool({projectId:recovered.task.project.id})).tasks.filter(t => t.externalReview)).toHaveLength(1);
+  expect(recovered.task.id).toBe(a.taskId); expect(recovered.task.externalReview.revision.headSha).toBe(input.head);
   expect(readExternalReview(a.taskId)?.revision.headSha).toBe(input.head);
 });
 it('starts the existing review path and preserves canonical findings, refusing author handoff', async () => {
@@ -57,6 +61,7 @@ it('starts the existing review path and preserves canonical findings, refusing a
  } finally { vi.stubGlobal('fetch',originalFetch); }
  const { drainReviewQueue } = await import('@/lib/lane/auto-review'); await drainReviewQueue();
  const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+ const {findLaneByPacket} = await import('@/lib/lane/registry'); expect(findLaneByPacket(task.revision.packetId)?.prNumber).toBe(7);
  const packet = readOrchestratorControlPlaneState().packets.find(p => p.id === task.revision.packetId)!;
  expect(packet.review?.findings[0].resolution).toBe('deferred'); expect(packet.review?.reviewedHeadSha).toBe(input.head);
  const { correctAuthorFromReview } = await import('@/lib/orchestrator/review-author-correction');
@@ -81,11 +86,12 @@ it('routes CLI and MCP adoption to the same operator route', async () => {
  try {
   vi.stubEnv('O8_API_TOKEN',getOrCreateWsToken());
   const {handleAdoptPr} = await import('@/lib/mcp/operator-handlers/adopt-pr');
-  const mcp = await handleAdoptPr({repoPath:repo,pullRequest:'https://github.com/example/repo/pull/7'});
+  const mcp = await handleAdoptPr({repoPath:repo,pullRequest:'https://github.com/example/repo/pull/7',intendedOutcome:'Preserve behavior.'});
   expect(mcp.isError).not.toBe(true);
   const {runTaskAdoptPr} = await import('../cli/src/commands/task');
   const output = vi.spyOn(process.stdout,'write').mockImplementation(() => true);
-  try { expect(await runTaskAdoptPr({human:false,verbose:false},['7','--repo',repo])).toBe(0); }
+  try { expect(await runTaskAdoptPr({human:false,verbose:false},['7','--repo',repo,'--intended-outcome','Preserve behavior.'])).toBe(0);
+   const cli = JSON.parse(String(output.mock.calls[0][0])); const content = mcp.content[0]; if (content.type !== 'text') throw new Error('Expected a JSON tool result.'); const tool = JSON.parse(content.text); expect(cli.taskId).toBe(tool.taskId); expect(cli.revision.id).toBe(tool.revision.id); }
   finally { output.mockRestore(); }
   expect(listExternalReviews()).toHaveLength(1);
  } finally { vi.stubGlobal('fetch', original); }

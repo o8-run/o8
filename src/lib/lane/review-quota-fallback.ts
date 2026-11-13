@@ -1,3 +1,4 @@
+import { getSqlite } from '@/lib/db';
 import { recordLaneEvent } from '@/lib/lane/events';
 import {
   buildCrossHouseFallbackMessage,
@@ -72,6 +73,8 @@ async function runAttempt(input: {
   signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
+  const packetId = getLane(input.laneId)?.packetId;
+  const readOnly = input.readOnly || Boolean(packetId && getSqlite().prepare('SELECT 1 FROM external_pr_review_revisions WHERE packet_id = ?').get(packetId));
   const sessionThreadId = input.sessionThreadId ?? input.threadId;
   const session = input.backend.ensureSession(input.repoPath, undefined, sessionThreadId);
   if (session.status === 'busy') {
@@ -132,7 +135,7 @@ async function runAttempt(input: {
       input.onEvent?.(input.backend, event);
     }, {
       threadId: sessionThreadId,
-      ...(input.readOnly ? { permissionMode: 'plan' as const } : {}),
+      ...(readOnly ? { permissionMode: 'plan' as const } : {}),
       ...(input.model ? { model: input.model } : {}),
       ...(input.thinkingEffort ? { thinkingEffort: input.thinkingEffort } : {}),
       reviewUsage,

@@ -5,7 +5,7 @@ import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mu
 import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { nextPacketReferenceLabel } from '@/lib/orchestrator/store';
 import { dispatch } from '@/lib/lane/commands';
-import { getLane, findLaneByPacket } from '@/lib/lane/registry';
+import { getLane, findLaneByPacket, updateLane } from '@/lib/lane/registry';
 import { getProjectContext } from '@/lib/projects/context';
 
 /** One revision owns one packet and lane. Replay never substitutes a newer PR head. */
@@ -37,6 +37,7 @@ export async function startExternalReview(taskId: string) {
       lane = getLane(opened.laneId);
     }
     if (!lane) throw new Error('Reviewer lane unavailable.');
+    updateLane(lane.id, { prNumber: task.pullRequest });
     if (readExternalReview(taskId)?.state === 'approved' || readExternalReview(taskId)?.state === 'sent_back') return readExternalReview(taskId);
     const requested = await dispatch({ verb: 'request_review', laneId: lane.id, actor: 'user' });
     if (!requested.ok) throw new Error(requested.note);
