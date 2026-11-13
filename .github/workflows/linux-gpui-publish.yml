@@ -45,6 +45,7 @@ jobs:
       - name: Validate release and exact GPUI build provenance
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
         run: |
@@ -75,5 +76,6 @@ jobs:
       - name: Attach new assets without replacement or updater feed changes
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: gh release upload "$RELEASE_TAG" publish/*.AppImage publish/*.AppImage.sig

@@ -259,7 +259,7 @@ describe('GPUI release attachment preparation through the real CLI', () => {
     expect(uploads(f)).toEqual([]);
   });
 
-  it('refuses an invalid signature before reading a filesystem or destination', () => {
+  it('refuses an invalid signature before reading embedded identity or destination', () => {
     const f = fixture(); const result = prepare(f, { UPDATER_SIGNATURE: 'invalid' });
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toMatch(/signature|packet/i);
