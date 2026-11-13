@@ -167,6 +167,28 @@ jobs:
               --appimage "$(find work/linux-downloads -name "*.AppImage" -print -quit)" \
               --output work/appimage-offline-proof
           '
+      - name: AppImage without a usable graphics device exits with a clear error
+        if: matrix.format == 'appimage'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          proof=$(mktemp -d)
+          export O8_DATA_DIR="$proof/data" XDG_DATA_HOME="$proof/xdg"
+          export VK_ICD_FILENAMES="$proof/no-driver.json" VK_DRIVER_FILES="$proof/no-driver.json"
+          image=$(find work/linux-downloads -name '*.AppImage' -print -quit)
+          set +e
+          timeout --kill-after=5 90 xvfb-run -a "$image" > "$proof/startup.log" 2>&1
+          result=$?
+          set -e
+          cat "$proof/startup.log"
+          test "$result" -ne 0
+          test "$result" -ne 124
+          test "$result" -ne 137
+          grep -F 'Check that a usable Vulkan graphics device and driver are available' "$proof/startup.log"
+          "$image" serve stop
+          mkdir -p work/appimage-no-driver-proof
+          cp "$proof/startup.log" work/appimage-no-driver-proof/
+          rm -rf "$proof"
       - name: Save first frames, launch evidence and idle RSS
         if: always()
         uses: actions/upload-artifact@v4
@@ -179,5 +201,6 @@ jobs:
             work/appimage-diagnostics/
             work/stock-diagnostics/
             work/appimage-offline-proof/
+            work/appimage-no-driver-proof/
           if-no-files-found: error
           retention-days: 7

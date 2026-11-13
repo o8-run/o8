@@ -228,7 +228,11 @@ async function openDesktop(): Promise<number> {
     // /proc can identify the window. Later clicks can check daemon health.
     closeSync(lock);
     released = true;
-    return (await next).code;
+    const code = (await next).code;
+    if (code !== 0) {
+      process.stderr.write('o8: Could not open the native window. Check that a usable Vulkan graphics device and driver are available. See the startup error above.\n');
+    }
+    return code;
   } finally {
     // Keep unresolved claims across launcher exits and failed health probes.
     try { if (attempt) cleanFinishedAttempt(attempt); }
