@@ -14,6 +14,8 @@ export const O8_PAGE_ORIGIN_HEADER = 'x-o8-page-origin';
 type Options = {
   /** Preserve synchronous dispatch responses beyond fetch's header deadline. */
   longResponse?: boolean;
+  /** WS owns this service even when the native transport flag is unset. */
+  alwaysForward?: boolean;
   /** Checks the caller's page on the Next side: its origin to forward, or a refusal. */
   pageOrigin?: (request: Request) => string | Response;
   /**
@@ -37,7 +39,7 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
     if (options.pageOrigin && request.headers.has(O8_PAGE_ORIGIN_HEADER)) {
       return Response.json({ error: { code: 'page_origin_refused', message: 'Open this from the app.' } }, { status: 400 });
     }
-    if (process.env.O8_NEXT_O8D !== '1') return handler(request);
+    if (!options.alwaysForward && process.env.O8_NEXT_O8D !== '1') return handler(request);
     const url = new URL(request.url);
     const headers = new Headers();
     if (options.pageOrigin) {

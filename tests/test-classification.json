@@ -1816,6 +1816,14 @@
       ]
     },
     {
+      "path": "tests/assigned-reviewer-submission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/attempt-learnings-respawn.test.ts",
       "reasons": [
         "child-process",
@@ -3796,6 +3804,13 @@
       ]
     },
     {
+      "path": "tests/idle-drafts-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/implementation-notes-artifact-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4528,6 +4543,14 @@
     {
       "path": "tests/mcp-launch-payer-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mcp-lead-outcomes-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
@@ -5689,6 +5712,13 @@
       ]
     },
     {
+      "path": "tests/o8d-messages-receiver-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-mobile-symon-native-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5957,6 +5987,14 @@
         "git-cli",
         "native-build",
         "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-symon-brain-owner-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "process-signal",
         "real-path"
       ]
@@ -7932,6 +7970,13 @@
       "browser": true
     },
     {
+      "path": "tests/runtime-refusal-consistency-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/sandbox-owned-stop-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -8445,6 +8490,14 @@
       ]
     },
     {
+      "path": "tests/symon-messages-receiver-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-messages-receiver-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -8500,6 +8553,15 @@
     {
       "path": "tests/task-mutation-worker-packet-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/task-owner-runtime-refusal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
         "real-path"
       ]
     },

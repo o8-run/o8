@@ -1,3 +1,4 @@
+import { assertReviewSubmissionCurrent } from '@/lib/auth/review-submission';
 import { randomUUID } from 'node:crypto';
 
 import { resolveApproval } from '@/lib/approvals/resolution';
@@ -423,6 +424,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     id: activeReviewTurn?.id ?? `review-turn-standalone-${randomUUID()}`,
     outcome: 'completed' as const,
   };
+  if (input.submissionPrincipal) assertReviewSubmissionCurrent(input.submissionPrincipal);
   const summary = buildReviewSummary(input.findings, input.approved);
   const auditReview = recordPacketReviewAudit(
     packet,

@@ -30,3 +30,13 @@ export async function resolveRepoSlug(repoLike: string | null, fallback = DEFAUL
 
   return fallback;
 }
+
+/** Connected GitHub repository identities and their local scope paths. */
+export async function registeredGitHubRepos() {
+  const bySlug = new Map<string, string[]>();
+  for (const entry of await listRepos()) {
+    const slug = normalizeRepoSlug(entry.remoteUrl)?.toLowerCase();
+    if (slug) bySlug.set(slug, [...(bySlug.get(slug) ?? []), entry.localPath]);
+  }
+  return bySlug;
+}

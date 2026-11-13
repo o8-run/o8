@@ -11,6 +11,7 @@ import {
   waitForLead,
 } from '@/lib/orchestrator/lead-lifecycle';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { readLeadStatuses } from '@/lib/orchestrator/lead-status';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -112,6 +113,9 @@ export async function GET(request: NextRequest): Promise<Response> {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
   try {
+    if (request.nextUrl.searchParams.get('list') === 'true') {
+      return json(readLeadStatuses({ sessionKey: request.nextUrl.searchParams.get('sessionKey') || undefined }));
+    }
     const leadId = request.nextUrl.searchParams.get('leadId') ?? '';
     const afterRaw = request.nextUrl.searchParams.get('afterCursor');
     const waitRaw = request.nextUrl.searchParams.get('waitMs');

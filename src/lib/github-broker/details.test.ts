@@ -212,3 +212,11 @@ describe('merge requirements read', () => {
     expect((await readPullRequestRequirements('example/repo', 7, 'main', 'head-sha')).requiredChecks).toBeNull();
   });
 });
+it('mutation preconditions bypass the shared metadata cache', async () => {
+  githubInstallationFetch.mockImplementation(async (_repo: string, path: string) => ({ anonymous: true,
+    response: Response.json(path.endsWith('/pulls/7') ? { ...pull, head: null } : []),
+  }));
+  await fetchGitHubPullRequestDetail('example/fresh', 7, undefined, 'interactive', true);
+  expect(githubInstallationFetch).toHaveBeenCalledWith('example/fresh', '/repos/example/fresh/pulls/7',
+    expect.objectContaining({ cache: 'reload' }), { priority: 'interactive', share: false });
+});
