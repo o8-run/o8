@@ -2,7 +2,7 @@
 /** Read-only runtime diagnosis on a private Xvfb display; never installation. */
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, openSync, closeSync, readSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, openSync, closeSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -44,12 +44,15 @@ function files(directory) {
 }
 const libraries = files(join(payload, 'usr/lib/o8'));
 const missing = [];
+const baselineLibraries = new Set();
+const dependencyPaths = text => [...text.matchAll(/=> (\/[^\s]+)/g)].map(match => realpathSync(match[1]));
 for (const file of libraries) {
   const fd = openSync(file, 'r');
   const header = Buffer.alloc(4);
   try { readSync(fd, header, 0, 4, 0); } finally { closeSync(fd); }
   if (!header.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) continue;
   const result = command('ldd', [file]);
+  for (const path of dependencyPaths(result.stdout)) baselineLibraries.add(path);
   const relative = file.slice(payload.length + 1);
   save(`ldd-${relative.replaceAll('/', '_')}.log`, result.stdout + result.stderr);
   for (const line of (result.stdout + result.stderr).split('\n').filter(line => line.includes('not found'))) {
@@ -61,13 +64,41 @@ save('bundled-vulkan-loader.json', JSON.stringify(libraries.filter(file => /^lib
   .map(file => file.slice(payload.length + 1))));
 recordCommand('glibc', 'getconf', ['GNU_LIBC_VERSION']);
 recordCommand('packages', 'dpkg-query', ['-W', 'mesa-vulkan-drivers', 'libvulkan1', 'vulkan-tools']);
+// Measure a possible software-driver bundle, without changing the AppImage.
+// Subtract libraries already required by the payload; compression is not estimated.
+const driverFiles = command('dpkg-query', ['-L', 'mesa-vulkan-drivers']).stdout.split('\n')
+  .filter(file => /\/libvulkan_lvp\.so$/.test(file));
+const loaderFiles = command('dpkg-query', ['-L', 'libvulkan1']).stdout.split('\n')
+  .filter(file => /\/libvulkan\.so\.\d+\.\d+\.\d+$/.test(file));
+const extra = new Set();
+const pending = [...driverFiles, ...loaderFiles];
+const driverRoots = new Set(pending.map(file => realpathSync(file)));
+while (pending.length) {
+  const file = realpathSync(pending.pop());
+  if (extra.has(file) || (baselineLibraries.has(file) && !driverRoots.has(file))) continue;
+  extra.add(file);
+  pending.push(...dependencyPaths(command('ldd', [file]).stdout));
+}
+const additions = [...extra].map(file => ({ file, bytes: statSync(file).size }));
+save('software-driver-size.json', JSON.stringify({ incrementalUncompressedBytes: additions.reduce((total, item) => total + item.bytes, 0), files: additions }, null, 2));
+recordCommand('software-driver-package-metadata', 'dpkg-query', ['-W', '-f=${Package}\t${Version}\t${Installed-Size}\n', 'mesa-vulkan-drivers', 'libvulkan1', 'libllvm15']);
 recordCommand('vulkan-summary', 'vulkaninfo', ['--summary']);
 const features = command('vulkaninfo', []);
 save('vulkan-required-features.log', (features.stdout + features.stderr).split('\n')
   .filter(line => /apiVersion|deviceName|inlineUniformBlock|maxInlineUniformBlockSize|maxDescriptorSetInlineUniformBlocks|timelineSemaphore|dynamicRendering|VK_EXT_inline_uniform_block|VK_KHR_timeline_semaphore|VK_KHR_descriptor_update_template|VK_KHR_dynamic_rendering/.test(line)).join('\n'));
 
 function snapshot(name) {
-  recordCommand(`${name}-windows`, 'xwininfo', ['-root', '-tree']);
+  const tree = recordCommand(`${name}-windows`, 'xwininfo', ['-root', '-tree']);
+  const windows = [];
+  for (const line of tree.stdout.split('\n').filter(line => /"o8/.test(line))) {
+    const id = line.match(/0x[0-9a-f]+/i)?.[0];
+    if (!id) continue;
+    const file = join(output, `${name}-window-${id}.png`);
+    const captured = command('import', ['-window', id, `png:${file}`]);
+    recordCommand(`${name}-window-${id}`, 'xwininfo', ['-id', id]);
+    windows.push({ id, colors: captured.status === 0 ? Number(command('identify', ['-format', '%k', file]).stdout) : null });
+  }
+  save(`${name}-windows.json`, JSON.stringify(windows));
   const file = join(output, `${name}.png`);
   const image = command('import', ['-window', 'root', `png:${file}`]);
   if (image.status !== 0) { save(`${name}-capture-error.log`, image.stderr); return null; }
