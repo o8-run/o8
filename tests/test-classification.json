@@ -5554,6 +5554,15 @@
       ]
     },
     {
+      "path": "tests/o8d-change-map-lane-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-cli-update-stream-native-real-path.test.ts",
       "reasons": [
         "process-signal",
