@@ -11,6 +11,9 @@ export interface MinimalMissionPacket {
 
 export interface MinimalMissionStatusShape {
   packets?: MinimalMissionPacket[];
+  leadsUnavailable?: boolean;
+  leads?: Array<{ id: string; status: string; reason?: string | null;
+    latestTurn?: { id: string; outcome?: { kind: string } | null } | null }>;
   currentWave?: number;
   totalWaves?: number;
 }
@@ -19,12 +22,24 @@ export interface MinimalMissionStatusShape {
 // evidence says a rerun is still active.
 const PACKET_ATTENTION_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived', 'blocked']);
 
-export function missionPacketSignature(packets: MinimalMissionPacket[] | undefined): string {
-  if (!Array.isArray(packets)) return '';
-  return packets
+export function missionPacketSignature(packets: MinimalMissionPacket[] | undefined, leads: MinimalMissionStatusShape['leads'] = []): string {
+  const packetSignature = (Array.isArray(packets) ? packets : [])
     .map((packet) => `${packet.id ?? ''}:${packet.status ?? ''}:${packet.releaseState ?? ''}:${packet.blockedReason ?? ''}:${packet.lane?.status ?? ''}`)
     .sort()
     .join(',');
+  return packetSignature + (leads.length ? `|${leads.map(lead =>
+    `${lead.id}:${lead.status}:${lead.reason ?? ''}:${lead.latestTurn?.id ?? ''}:${lead.latestTurn?.outcome?.kind ?? ''}`
+  ).sort().join(',')}` : '');
+}
+
+export function findMissionAttention(status: MinimalMissionStatusShape, packetIdFilter: string | null) {
+  if (status.leadsUnavailable) return { terminalPacketId: null, leadsUnavailable: true };
+  // Packet-scoped waits retain their own review/return semantics.
+  const lead = !packetIdFilter && status.leads?.find(item =>
+    ['unreported', 'completed', 'blocked', 'needs_approval', 'failed', 'stopped'].includes(item.status));
+  if (lead) return { terminalPacketId: null, terminalLeadId: lead.id };
+  const packet = findMissionAttentionPacket(status, packetIdFilter);
+  return packet ? { terminalPacketId: packet.id ?? null } : null;
 }
 
 function packetIsActive(packet: MinimalMissionPacket): boolean {
