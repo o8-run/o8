@@ -39,6 +39,8 @@ method-and-path policy and a middleware/route-coverage test in the same change.
   `47105`–`47109`). See `src/ws-server.ts`.
 Note: the realtime `lane-lifecycle` payload carries lane status in the `status` field, not `laneStatus`; client readers should coalesce via `laneStatusOf()` in `src/lib/orchestrator/status-events.ts`.
 
+Review submission requires an operator or a current server-assigned reviewer credential. Reviewer assignments are bound to a packet and review turn; unavailable or completed assignments are refused.
+
 ## Route reference
 
 Routes are grouped by their first path segment.

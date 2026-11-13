@@ -120,6 +120,8 @@ export interface MissionStatusInput {
 }
 
 export interface SubmitReviewInput {
+  /** Server-resolved caller; never read from request JSON. */
+  submissionPrincipal?: import('@/lib/auth/review-submission').ReviewSubmissionPrincipal;
   packetId: string;
   findings: OrchestratorReviewFinding[];
   approved: boolean;
