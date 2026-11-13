@@ -1,3 +1,5 @@
+import { isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
+import { getSqlite } from '@/lib/db';
 /**
  * Auto-review trigger for the orchestrator loop.
  *
@@ -504,14 +506,16 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   // #reviewer-split (2026-07-07): reviews resolve their OWN backend so the
   // accuracy-critical review can run on Claude while the bulk orchestrator
   // stays on Codex. 'follow' (default) = pre-split behavior.
+  const externalReview = isExternalReviewPacket(lane.packetId);
   const reviewTurn = await runReviewerTurnWithQuotaFallback({
+    readOnly: Boolean(getSqlite().prepare('SELECT 1 FROM external_pr_review_revisions WHERE packet_id = ?').get(lane.packetId)),
     laneId: lane.id,
     repoPath: lane.repoPath,
     threadId: `auto-review-${lane.id}-${review.id}`,
     sessionThreadId: reviewerSessionThreadId(reviewerSlot, 'primary'),
     surface: 'auto-review',
     expectedHeadSha: review.head_sha,
-    prompt: (backendId) => backendId === 'codex'
+    prompt: (backendId) => backendId === 'codex' || externalReview
       ? appendCodexAutoReviewVerdictInstructions(reviewPrompt)
       : reviewPrompt,
     onEvent: (turnBackend, event) => {
@@ -539,7 +543,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
     throw new Error(`Review turn failed: ${reviewTurn.errors.join('; ').slice(0, 500)}`);
   }
 
-  if (reviewTurn.backend === 'codex') {
+  if (reviewTurn.backend === 'codex' || externalReview) {
     const recorded = await recordCodexAutoReviewVerdict({
       lane,
       rawText: reviewTurn.text,

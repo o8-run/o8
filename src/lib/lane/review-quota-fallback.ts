@@ -1,3 +1,4 @@
+import { isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { recordLaneEvent } from '@/lib/lane/events';
 import {
   buildCrossHouseFallbackMessage,
@@ -68,9 +69,25 @@ async function runAttempt(input: {
   model?: string;
   thinkingEffort?: ThinkingEffort;
   freshSession?: boolean;
+  readOnly?: boolean;
   signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
+  const packetId = getLane(input.laneId)?.packetId;
+  const externalReview = isExternalReviewPacket(packetId);
+  // External review requires a backend that enforces the requested tool profile.
+  if (externalReview && !(['codex', 'claude', 'pi'] as const).some(id => id === input.backend.id)) {
+    return {
+      observedRoute: null,
+      text: '',
+      errors: [`${input.backend.label} does not support the restricted external-review profile. Select Codex, Claude or Pi.`],
+      quotaError: null,
+      reviewTurnId: null,
+      unavailableReason: null,
+      approximateCost: null,
+    };
+  }
+  const readOnly = input.readOnly || externalReview;
   const sessionThreadId = input.sessionThreadId ?? input.threadId;
   const session = input.backend.ensureSession(input.repoPath, undefined, sessionThreadId);
   if (session.status === 'busy') {
@@ -131,6 +148,8 @@ async function runAttempt(input: {
       input.onEvent?.(input.backend, event);
     }, {
       threadId: sessionThreadId,
+      ...(readOnly ? { permissionMode: 'plan' as const } : {}),
+      ...(externalReview ? { toolProfile: 'propose' as const } : {}),
       ...(input.model ? { model: input.model } : {}),
       ...(input.thinkingEffort ? { thinkingEffort: input.thinkingEffort } : {}),
       reviewUsage,
@@ -187,6 +206,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
   initialBackend?: OrchestratorBackend;
   backendResolver?: (backend: OrchestratorBackendId) => OrchestratorBackend;
+  readOnly?: boolean;
   signal?: AbortSignal;
 }): Promise<ReviewFallbackTurnResult> {
   const backendResolver = input.backendResolver ?? getOrchestratorBackend;
@@ -270,6 +290,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   const piWorkspace = input.surface === 'buyin-doc' ? input.repoPath
     : getLane(input.laneId)?.worktreePath || input.repoPath;
   const first = await runAttempt({
+    readOnly: input.readOnly,
     backend: initialBackend,
     laneId: input.laneId,
     surface: input.surface,
@@ -365,6 +386,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     return refuse('Review fallback model and backend must match the cross-house target.', first.reviewTurnId);
   }
   const second = await runAttempt({
+    readOnly: input.readOnly,
     backend: fallbackBackend,
     laneId: input.laneId,
     surface: input.surface,

@@ -3397,6 +3397,23 @@
       ]
     },
     {
+      "path": "tests/external-pr-review-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/external-review-session-profile-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/feedback-sync-reports.test.ts",
       "reasons": [
         "executable-fixture"

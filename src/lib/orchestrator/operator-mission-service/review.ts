@@ -1,3 +1,4 @@
+import { completedExternalReviewTurn, isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { prepareRunEvidence, reviewExecution, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import { assertReviewSubmissionCurrent } from '@/lib/auth/review-submission';
 import { randomUUID } from 'node:crypto';
@@ -249,7 +250,10 @@ function recordPacketReviewAudit(
   };
 }
 
-export async function submitPacketReview(input: SubmitReviewInput, internal?: { completedCorrectionTurnId: string; claimOwner: string }) {
+export async function submitPacketReview(input: SubmitReviewInput, internal?: { completedCorrectionTurnId: string; claimOwner: string; externalReview?: true }) {
+  if (isExternalReviewPacket(input.packetId) && !internal?.externalReview) {
+    throw new ReviewValidationError('external_reviewer_required', 'External review decisions require their queued reviewer.');
+  }
   const state = currentMissionState();
   const missionPacket = state.packets.find((candidate) => candidate.id === input.packetId);
 
@@ -272,7 +276,7 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
 
   const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
   const activeReviewTurn = verdictLane ? internal
-    ? completedCorrectionReviewTurn(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner)
+    ? (internal.externalReview ? completedExternalReviewTurn : completedCorrectionReviewTurn)(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner)
     : findActiveReviewTurn(verdictLane.id) : null;
   if (verdictLane && input.approved && activeReviewTurn?.surface === 'auto-review' && activeReviewTurn.formatRetryRejecting) {
     appendEvent(verdictLane.id, 'review_format_decision_rejected', 'system', {
@@ -439,7 +443,7 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
     || ![`auto-review-${verdictLane!.id}-${correction.review_id}`, `auto-review-${verdictLane!.id}-${correction.review_id}-verdict-retry`].includes(activeReviewTurn.threadId ?? ''))) {
     throw new ReviewValidationError('correction_reviewer_required', 'This correction requires its queued independent reviewer at the corrected HEAD.');
   }
-  if (internal && verdictLane) completedCorrectionReviewTurn(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner);
+  if (internal && verdictLane) (internal.externalReview ? completedExternalReviewTurn : completedCorrectionReviewTurn)(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner);
   if (input.submissionPrincipal) assertReviewSubmissionCurrent(input.submissionPrincipal);
   const principal = input.submissionPrincipal;
   const evidencePrincipal = principal?.role === 'operator' ? { role: 'operator' as const, source: 'authenticated_operator' as const }
