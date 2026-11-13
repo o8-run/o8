@@ -1,3 +1,4 @@
+import { ADOPT_PR_TOOL, handleAdoptPr } from './operator-handlers/adopt-pr';
 import { CONVERSATION_PR_TOOLS, handleConversationPrs } from './operator-handlers/conversation-prs';
 import { PR_STACK_TOOLS, handlePrStack } from './operator-handlers/pr-stack';
 import { THREAD_TOOLS, handleThreadsList } from './operator-handlers/threads';
@@ -278,6 +279,7 @@ async function handleUserContext(): Promise<McpToolResult> {
 
 const TOOLS: McpTool[] = [
   ...THREAD_TOOLS,
+  ADOPT_PR_TOOL,
   ...CONVERSATION_PR_TOOLS,
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_send'),
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_status'),
@@ -371,6 +373,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_approve: handleApprove,
   o8_reject: handleReject,
   o8_history: handleHistory,
+  o8_adopt_pr: handleAdoptPr,
   o8_conversation_prs: handleConversationPrs,
   o8_lane_events: handleLaneEvents,
   o8_packet_transcript: handleTranscript,

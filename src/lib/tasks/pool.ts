@@ -1,3 +1,4 @@
+import { listExternalReviews, type ExternalReviewTask } from './external-review-store';
 import 'server-only';
 
 import { basename } from 'node:path';
@@ -116,6 +117,7 @@ export interface TaskPoolRemoteExecution {
 }
 
 export interface TaskPoolTask {
+  externalReview?: ExternalReviewTask;
   id: string;
   packetId: string | null;
   laneId: string | null;
@@ -452,6 +454,23 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
         })
         : undefined,
     });
+  }
+
+  if (!options.packetId) {
+    for (const external of listExternalReviews()) {
+      if (options.repoPath && normalizePath(options.repoPath) !== normalizePath(external.repoPath)) continue;
+      const packetIds = new Set((getSqlite().prepare('SELECT packet_id FROM external_pr_review_revisions WHERE task_id = ?').all(external.taskId) as Array<{packet_id: string}>).map(r => r.packet_id));
+      const current = tasks.find(t => t.packetId === external.revision.packetId);
+      for (let i = tasks.length - 1; i >= 0; i--) if (tasks[i].packetId && packetIds.has(tasks[i].packetId!)) tasks.splice(i, 1);
+      if (options.projectId && !current) continue;
+      tasks.push({ id: external.taskId, packetId: external.revision.packetId, laneId: null, title: `Review PR #${external.pullRequest}`,
+        summary: external.revision.intendedOutcome ?? 'Intended outcome missing.', group: 'ready', status: 'draft', runtime: 'codex',
+        workerIntent: 'reviewer', workerRouting: null, branch: null, baseBranch: external.revision.baseRef, repoPath: external.repoPath,
+        repoName: basename(external.repoPath), queueState: 'held', releaseState: 'pending', blockedReason: null, lastEventAt: external.revision.adoptedAt,
+        lastEventLabel: external.state, allowedFiles: [], sourceIssue: null, problemDossierId: null, problemRemedyId: null,
+        project: null, lane: null, execution: null, ...current, externalReview: external,
+        ...(current ? { id: external.taskId } : {}) });
+    }
   }
 
   tasks.sort((left, right) => {

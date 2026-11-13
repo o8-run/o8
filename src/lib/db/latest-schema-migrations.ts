@@ -1,3 +1,4 @@
+import { ensureV81ExternalPrReviewSchema } from './v81-external-pr-review-migration';
 import { ensureV74ConversationPrProvenanceSchema } from '@/lib/db/v74-conversation-pr-provenance-migration';
 import { ensureV75ComposerQueueLedgerSchema } from '@/lib/db/v75-composer-queue-ledger-migration';
 import { ensureV76BotMembershipSchema } from '@/lib/db/v76-bot-membership-migration';
@@ -101,4 +102,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV77BotNetworkThreadSchema(sqlite);
   ensureV78BotQuestionSchema(sqlite);
   ensureV79MissionCardsSchema(sqlite);
+  ensureV81ExternalPrReviewSchema(sqlite);
 }

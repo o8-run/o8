@@ -110,6 +110,7 @@ import {
   runTaskBrief,
   runTaskClaim,
   runTaskCreate,
+  runTaskAdoptPr,
   runTaskDispatch,
   runTaskList,
   runTaskPrune,
@@ -553,6 +554,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runSession(args.mode, secondary, args.rest);
     case 'task': {
       if (secondary === 'list') return runTaskList(args.mode, args.rest);
+      if (secondary === 'adopt-pr') return runTaskAdoptPr(args.mode, args.rest);
       if (secondary === 'create') return runTaskCreate(args.mode, args.rest);
       if (secondary === 'brief') return runTaskBrief(args.mode, args.rest);
       if (secondary === 'claim') return runTaskClaim(args.mode, args.rest);

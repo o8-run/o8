@@ -429,3 +429,12 @@ export async function runTaskPrune(mode: OutputMode, rest: string[]): Promise<nu
     reason: readFlagValue(rest, '--reason'),
   });
 }
+
+export async function runTaskAdoptPr(mode: OutputMode, rest: string[]): Promise<number> {
+  const repoPath = readFlagValue(rest, '--repo');
+  const pullRequest = positionalArgs(rest)[0];
+  if (!repoPath || !pullRequest) throw new CliError('invalid_args', 'Use o8 task adopt-pr <number-or-url> --repo <registered-repo>.', EXIT.INVALID_ARGS);
+  const result = await apiFetch(resolveConfig(), '/api/tasks/adopt-pr', { method: 'POST', body: { repoPath, pullRequest } });
+  if (mode.human) process.stdout.write(JSON.stringify(result.data, null, 2) + '\n'); else printJson(result.data);
+  return 0;
+}
