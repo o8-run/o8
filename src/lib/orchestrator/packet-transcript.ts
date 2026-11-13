@@ -281,7 +281,7 @@ function readTextPayload(payload: Record<string, unknown>, ...keys: string[]): s
   return '';
 }
 
-function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
+function laneSteerEvents(laneId: string, native = false): LaneSteerTranscriptEvent[] {
   // Read intents separately so a long busy turn's delivery receipts cannot
   // paginate the original message out of the pane.
   const queued = getSqlite().prepare(`SELECT id, payload_json, timestamp FROM lane_events
@@ -325,7 +325,7 @@ function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
           : [noteText, stderrHead].filter(Boolean).join('\n')));
       return {
         seq: index + 1,
-        eventId: event.id,
+        ...(native ? { eventId: event.id } : {}),
         ts: event.timestamp,
         type: 'steer',
         source,
@@ -336,14 +336,14 @@ function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
     });
 }
 
-function laneHuddleEvents(laneId: string): LaneHuddleTranscriptEvent[] {
+function laneHuddleEvents(laneId: string, native = false): LaneHuddleTranscriptEvent[] {
   return getLaneEvents(laneId, 500)
     .filter((event) => event.verb === 'agent_report' && event.payload.event === 'huddle')
     .map((event, index) => {
       const message = readTextPayload(event.payload, 'message') || 'Huddle plan posted.';
       return {
         seq: index + 1,
-        eventId: event.id,
+        ...(native ? { eventId: event.id } : {}),
         ts: event.timestamp,
         type: 'assistant',
         text: message,
@@ -351,16 +351,16 @@ function laneHuddleEvents(laneId: string): LaneHuddleTranscriptEvent[] {
     });
 }
 
-function laneSteerEventsForSession(sessionKey: string): LaneSteerTranscriptEvent[] {
+function laneSteerEventsForSession(sessionKey: string, native = false): LaneSteerTranscriptEvent[] {
   if (!sessionKey) return [];
   const lane = listLanes().find((candidate) => candidate.sessionKey === sessionKey);
-  return lane ? laneSteerEvents(lane.id) : [];
+  return lane ? laneSteerEvents(lane.id, native) : [];
 }
 
-function laneHuddleEventsForSession(sessionKey: string): LaneHuddleTranscriptEvent[] {
+function laneHuddleEventsForSession(sessionKey: string, native = false): LaneHuddleTranscriptEvent[] {
   if (!sessionKey) return [];
   const lane = listLanes().find((candidate) => candidate.sessionKey === sessionKey);
-  return lane ? laneHuddleEvents(lane.id) : [];
+  return lane ? laneHuddleEvents(lane.id, native) : [];
 }
 
 function mergeTranscriptEvents(runtimeEvents: TranscriptEvent[], extraEvents: TranscriptEvent[]): TranscriptEvent[] {
@@ -377,12 +377,12 @@ function mergeTranscriptEvents(runtimeEvents: TranscriptEvent[], extraEvents: Tr
   return stamped.map(({ event }, index) => ({ ...event, seq: index + 1 }) as TranscriptEvent);
 }
 
-export function readSessionSteerTranscriptEvents(sessionKey: string): LaneSteerTranscriptEvent[] {
-  return laneSteerEventsForSession(sessionKey);
+export function readSessionSteerTranscriptEvents(sessionKey: string, native = false): LaneSteerTranscriptEvent[] {
+  return laneSteerEventsForSession(sessionKey, native);
 }
 
-export function readSessionHuddleTranscriptEvents(sessionKey: string): LaneHuddleTranscriptEvent[] {
-  return laneHuddleEventsForSession(sessionKey);
+export function readSessionHuddleTranscriptEvents(sessionKey: string, native = false): LaneHuddleTranscriptEvent[] {
+  return laneHuddleEventsForSession(sessionKey, native);
 }
 
 export async function readSessionTranscriptEvents(sessionKey: string, fullHistory = false, native = false): Promise<SessionTranscriptReadback> {
@@ -405,7 +405,7 @@ export async function readSessionTranscriptEvents(sessionKey: string, fullHistor
     earliestEventTime: earliest.length ? new Date(earliest.reduce((a, b) => Math.min(a, b))).toISOString() : undefined,
     events: mergeTranscriptEvents(
       runtimeEvents,
-      [...laneHuddleEventsForSession(sessionKey), ...laneSteerEventsForSession(sessionKey)],
+      [...laneHuddleEventsForSession(sessionKey, native), ...laneSteerEventsForSession(sessionKey, native)],
     ),
   };
 }
@@ -428,7 +428,7 @@ export async function readPacketTranscriptEvents(packetId: string, fullHistory =
 
   const readback = await readSessionTranscriptEvents(sessionKey, fullHistory, native);
   const packetEvents = packetLane && packetLane.sessionKey !== sessionKey
-    ? [...laneHuddleEvents(packetLane.id), ...laneSteerEvents(packetLane.id)]
+    ? [...laneHuddleEvents(packetLane.id, native), ...laneSteerEvents(packetLane.id, native)]
     : [];
   return {
     packetId,
