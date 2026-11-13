@@ -64,27 +64,14 @@ jobs:
             }
           '
           gh run download "$BUILD_RUN_ID" --name linux-gpui-review-packages --dir packages
-      - name: Authenticate AppImage identity before any upload
+      - name: Authenticate AppImage identity and matching channel manifest
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          O8_PUBLISH_LINUX: ${{ inputs.publish_linux }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           UPDATER_SIGNATURE: ${{ inputs.updater_signature }}
-        run: |
-          node --input-type=module <<'JS'
-          import {readdirSync, writeFileSync, mkdirSync, copyFileSync} from 'node:fs';
-          import {assertLinuxArtifactChannels} from './scripts/lib/linux-build-channel.mjs';
-          const images = readdirSync('packages').filter(name => name.endsWith('.AppImage'));
-          if (images.length !== 1) throw new Error('Expected exactly one GPUI AppImage');
-          const version = process.env.RELEASE_TAG.slice(1);
-          const source = `packages/${images[0]}`;
-          writeFileSync(`${source}.sig`, process.env.UPDATER_SIGNATURE + '\n');
-          // Signature verification precedes reading embedded identity. Do not
-          // pass unsigned distribution packages to any release publisher.
-          assertLinuxArtifactChannels(process.cwd(), version, undefined, [source, `${source}.sig`]);
-          mkdirSync('publish');
-          const target = `publish/o8-${version}-x86_64.AppImage`;
-          copyFileSync(source, target);
-          copyFileSync(`${source}.sig`, `${target}.sig`);
-          JS
+        run: node scripts/linux/prepare-release-attachment.mjs
       - name: Attach new assets without replacement or updater feed changes
         env:
           GH_TOKEN: ${{ github.token }}
