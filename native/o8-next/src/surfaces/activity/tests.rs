@@ -946,7 +946,7 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
             .unwrap()
             .iter()
             .filter_map(|body| serde_json::from_str::<Value>(body.as_str()?).ok())
-            .filter(|body| body["verb"].is_string())
+            .filter(|body| body["verb"].is_string() || body["packetId"].is_string())
             .collect::<Vec<_>>();
         (commands, state["laneId"].clone())
     };
@@ -985,17 +985,10 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
     activity_click(cx, "activity-lane-merge");
     settle(cx);
     let (commands, _) = lane_commands();
-    assert_eq!(commands.last().unwrap()["verb"], "merge");
-    assert_eq!(
-        commands.last().unwrap()["commitMessage"],
-        "Merge lane: Fixture packet"
-    );
+    assert_eq!(commands.last().unwrap()["packetId"], "activity-packet");
+    assert!(commands.last().unwrap()["idempotencyKey"].is_string());
     let notice = view.read_with(cx, |v, _| v.notice.clone());
-    assert!(
-        notice.contains("Merge conflict in fixture.ts.")
-            && notice.ends_with("Try \"Create PR\" instead."),
-        "{notice}"
-    );
+    assert_eq!(notice, "Merge conflict in fixture.ts. Try \"Create PR\" instead.");
 
     // The first close answer is still running: the same body replays until its
     // receipt settles, and the busy confirm cannot send a second close.

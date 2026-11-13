@@ -189,3 +189,7 @@ mod updates_tests;
 #[cfg(test)]
 #[path = "activity/commit_tests.rs"]
 mod commit_tests;
+
+#[cfg(test)]
+#[path = "activity/recovery_tests.rs"]
+mod recovery_tests;

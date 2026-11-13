@@ -45,6 +45,7 @@ pub(super) struct State {
     pub action: Option<String>,
     pub corrections: HashMap<String, Entity<crate::request_changes::RequestChanges>>,
     pub correction_observers: HashMap<String, gpui::Subscription>,
+    pub recovery: recovery::State,
 }
 pub(super) fn identity(row: &Row) -> String {
     json!([
@@ -161,6 +162,10 @@ impl ActivityPane {
         self.changed(cx);
     }
     pub(super) fn packet_focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.packet.recovery.ask.is_some() {
+            self.recovery_focus(window, cx);
+            return;
+        }
         if let Some(editor) = &self.packet.editor {
             editor.input.read(cx).focus.focus(window);
         }
