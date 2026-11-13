@@ -10,16 +10,12 @@ function listFiles(directory, suffix) {
     .sort();
 }
 
-// The Linux build produces a local AppImage named "o8_<version>_amd64.AppImage"
-// (see tests/release-artifacts.test.ts fixtures), but the publish-preview job
-// in .github/workflows/port-build.yml re-uploads it under a different name:
-// "o8_<version>_linux_amd64_preview.AppImage". The updater manifest url must
-// point at the name the asset is actually published under, not the local
-// build's basename.
-const LINUX_APPIMAGE_NAME_PATTERN = /^o8_(.+)_amd64\.AppImage$/;
+// Accept legacy local bundles and the catalog name. New public assets use
+// the same standard basename as the GPUI packager.
+const LINUX_APPIMAGE_NAME_PATTERN = /^(?:o8_(.+)_amd64|o8-(.+)-x86_64)\.AppImage$/;
 
 export function publishedLinuxAssetName(version) {
-  return `o8_${version}_linux_amd64_preview.AppImage`;
+  return `o8-${version}-x86_64.AppImage`;
 }
 
 // Single definition of the linux-x86_64 updater entry, shared by the local
@@ -40,7 +36,7 @@ function assertLinuxAppImageVersionMatches(artifactPath, version) {
       `Linux AppImage release artifact "${name}" does not match the expected "o8_<version>_amd64.AppImage" naming pattern`,
     );
   }
-  const [, appImageVersion] = match;
+  const appImageVersion = match[1] ?? match[2];
   if (appImageVersion !== version) {
     throw new Error(
       `Linux AppImage version "${appImageVersion}" (from "${name}") does not match release version "${version}"`,

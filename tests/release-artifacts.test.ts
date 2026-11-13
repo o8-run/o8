@@ -243,12 +243,12 @@ describe('release updater manifest', () => {
 
     // publish-preview (.github/workflows/port-build.yml) re-uploads the local
     // "o8_<version>_amd64.AppImage" build output under
-    // "o8_<version>_linux_amd64_preview.AppImage" — the manifest url must
+    // "o8-<version>-x86_64.AppImage" — the manifest url must
     // match the published name, not the local build's basename, or the
     // updater 404s.
     expect(plan.latestJson.platforms['linux-x86_64']).toEqual({
       signature: 'linux-fixture-signature',
-      url: 'https://github.com/example/releases/download/v0.1.999/o8_0.1.999_linux_amd64_preview.AppImage',
+      url: 'https://github.com/example/releases/download/v0.1.999/o8-0.1.999-x86_64.AppImage',
     });
     expect(plan.uploadArgs).toEqual([
       ...bundle.macosAssets,

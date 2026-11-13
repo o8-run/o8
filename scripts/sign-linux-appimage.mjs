@@ -9,7 +9,7 @@
  * the signature is produced here, by hand, against an already-published tag:
  *
  *   1. Verify the tag's release is published (not a draft) and actually holds
- *      the expected `o8_<version>_linux_amd64_preview.AppImage`
+ *      the expected `o8-<version>-x86_64.AppImage`
  *   2. Download that asset
  *   3. Sign it with the same key + invocation the macOS updater artifact uses
  *   4. Verify the signature and inspect the embedded build channel without

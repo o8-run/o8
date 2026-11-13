@@ -92,7 +92,7 @@ function main() {
     mkdirSync(output); // Exclusive; never replace an operator's directory.
     const prefix = `o8_${channel.version}`;
     const artifacts = [
-      { format: 'appimage', name: `${prefix}_linux_amd64_preview.AppImage` },
+      { format: 'appimage', name: `o8-${channel.version}-x86_64.AppImage` },
       { format: 'deb', name: `${prefix}_amd64.deb` },
       { format: 'rpm', name: `o8-${channel.version}-1.x86_64.rpm` },
     ];

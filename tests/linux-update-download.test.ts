@@ -70,7 +70,7 @@ describe('install-info route decides the update action (seam A)', () => {
     stubInstall('linux', 'x64', null);
     await expect(actionForRunningInstall('0.1.726')).resolves.toEqual({
       kind: 'download',
-      url: 'https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage',
+      url: 'https://github.com/o8-run/o8/releases/download/v0.1.726/o8-0.1.726-x86_64.AppImage',
     });
   });
 
@@ -94,7 +94,7 @@ describe('install chokepoint honours the install verdict (seam B)', () => {
   });
 
   it('opens the release download and never runs the updater when the install cannot self-update', async () => {
-    const url = 'https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage';
+    const url = 'https://github.com/o8-run/o8/releases/download/v0.1.726/o8-0.1.726-x86_64.AppImage';
     await expect(installUpdateAndRestart(url, { selfUpdatable: false })).resolves.toEqual({
       installed: false,
       downloadOpened: true,
