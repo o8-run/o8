@@ -58,4 +58,14 @@ it.each(['codex','claude'] as const)('builds restricted real reviewer sessions f
  expect(appServers.operator?.enabled).toBe(false);
  requestOrchestratorSessionReset(repo,thread);
 },60000);
+it('refuses an external reviewer backend without restricted profile support before session creation',async()=>{
+ const packetId='pkt-pr-review-cccccccccccccccc';const db=getSqlite();
+ db.prepare('INSERT INTO external_pr_review_tasks (id,repo_id,repo_path,repository_id,pr_number,pr_url) VALUES (?,?,?,?,?,?)').run('unsupported-task','repo',repo,'123',3,'https://github.com/example/repo/pull/3');
+ db.prepare('INSERT INTO external_pr_review_revisions (id,task_id,sequence,head_sha,base_sha,base_ref,packet_id,adopted_at) VALUES (?,?,?,?,?,?,?,?)').run('unsupported-revision','unsupported-task',1,'a'.repeat(40),'b'.repeat(40),'main',packetId,new Date().toISOString());
+ const lane=createLane({repoPath:repo,branch:'unsupported-review',baseBranch:'main',runtime:'codex',packetId});
+ const ensureSession=vi.fn(codexBackend.ensureSession);const sendTurn=vi.fn(async()=>{});
+ const result=await runReviewerTurnWithQuotaFallback({laneId:lane.id,repoPath:repo,threadId:'unsupported-review',surface:'auto-review',prompt:'Review the saved input.',initialBackend:{...codexBackend,id:'fable',label:'Fable',ensureSession,sendTurn}});
+ expect(result.ok).toBe(false);expect(result.errors.join('; ')).toContain('does not support the restricted external-review profile');
+ expect(ensureSession).not.toHaveBeenCalled();expect(sendTurn).not.toHaveBeenCalled();expect(result.reviewTurnId).toBeNull();
+},60000);
 afterAll(()=>{for(const thread of sessions)requestOrchestratorSessionReset(repo,thread);closeDb();vi.unstubAllEnvs();rmSync(root,{recursive:true,force:true});});

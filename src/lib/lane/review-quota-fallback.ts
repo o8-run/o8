@@ -75,6 +75,18 @@ async function runAttempt(input: {
 }): Promise<ReviewAttemptResult> {
   const packetId = getLane(input.laneId)?.packetId;
   const externalReview = isExternalReviewPacket(packetId);
+  // External review requires a backend that enforces the requested tool profile.
+  if (externalReview && !(['codex', 'claude', 'pi'] as const).some(id => id === input.backend.id)) {
+    return {
+      observedRoute: null,
+      text: '',
+      errors: [`${input.backend.label} does not support the restricted external-review profile. Select Codex, Claude or Pi.`],
+      quotaError: null,
+      reviewTurnId: null,
+      unavailableReason: null,
+      approximateCost: null,
+    };
+  }
   const readOnly = input.readOnly || externalReview;
   const sessionThreadId = input.sessionThreadId ?? input.threadId;
   const session = input.backend.ensureSession(input.repoPath, undefined, sessionThreadId);

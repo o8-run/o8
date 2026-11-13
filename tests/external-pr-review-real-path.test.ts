@@ -212,7 +212,7 @@ it('requires the revision head when the worktree and completed turn agree on ano
  let refusal:unknown;
  try{const {submitPacketReview}=await import('@/lib/orchestrator/operator-mission-service/review');await submitPacketReview({packetId:task.revision.packetId,approved:false,findings:[{file:'answer.txt',severity:'note',description:'Retain the request.',resolution:'deferred'}],reviewedHeadSha:head},{externalReview:true,completedCorrectionTurnId:turn,claimOwner:claim.claim_owner!});}catch(error){refusal=error;}
  finally{db.prepare("UPDATE review_queue SET status='completed' WHERE id=?").run(claim.id);}
- expect(refusal).toBeDefined();
+ expect(refusal).toBeInstanceOf(Error);expect((refusal as Error).message).toBe('The external review turn was interrupted or superseded.');
  const {readOrchestratorControlPlaneState}=await import('@/lib/orchestrator/control-plane');expect(readOrchestratorControlPlaneState().packets.find(p=>p.id===task.revision.packetId)?.review).toBeFalsy();
  const {listApprovalsForContext}=await import('@/lib/approvals/store');expect(listApprovalsForContext({packetId:task.revision.packetId}).filter(row=>row.toolName==='orchestrator_review')).toHaveLength(0);
 },60000);
