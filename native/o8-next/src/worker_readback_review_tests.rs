@@ -389,7 +389,7 @@ fn active_caught_up_worker_keeps_cursor_when_the_socket_invalidates() {
     }
     let reads = h.reads();
     assert!(reads.len() > before, "the socket must invalidate the caught-up readback");
-    assert!(reads[1..].iter().all(|cursor| *cursor > 0), "caught-up polling and the next socket frame must never request cursor=0: {reads:?}");
+    assert!(reads[1..].iter().all(|request| !request.contains("cursor=0&")), "caught-up polling and the next socket frame must never request cursor=0: {reads:?}");
     drop(subscription);
 }
 
