@@ -574,7 +574,7 @@ struct LiveHost {
 impl LiveHost {
     fn new() -> Self {
         use std::{
-            io::{Read, Write},
+            io::{ErrorKind, Read, Write},
             sync::{
                 Arc, Mutex,
                 atomic::{AtomicBool, Ordering},
@@ -585,14 +585,16 @@ impl LiveHost {
         let client =
             Client::authenticated(&format!("http://{}", listener.local_addr().unwrap()), None)
                 .unwrap();
+        let port = listener.local_addr().unwrap().port();
         let events = Arc::new(Mutex::new(vec![
-            json!({"seq":1,"type":"assistant","text":"Reading the patch."}),
+            json!({"seq":1,"eventId":"1","type":"assistant","text":"Reading the patch."}),
         ]));
         let recorded = events.clone();
         let stopped = Arc::new(AtomicBool::new(false));
         let stop = stopped.clone();
         let server = std::thread::spawn(move || {
-            while !stop.load(Ordering::Acquire) {
+            let mut sockets = Vec::new();
+            'requests: while !stop.load(Ordering::Acquire) {
                 let mut stream = match listener.accept() {
                     Ok((s, _)) => s,
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -606,11 +608,47 @@ impl LiveHost {
                     .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                     .unwrap();
                 let mut buf = [0; 8192];
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                let n = loop {
+                    if stop.load(Ordering::Acquire) || std::time::Instant::now() >= deadline {
+                        continue 'requests;
+                    }
+                    match stream.peek(&mut buf) {
+                        Ok(0) | Err(_) => continue 'requests,
+                        Ok(n) if buf[..n].contains(&b'\n') => break n,
+                        Ok(_) => std::thread::park_timeout(std::time::Duration::from_millis(1)),
+                    }
+                };
+                if String::from_utf8_lossy(&buf[..n]).starts_with("GET /ws?") {
+                    let stopped = stop.clone();
+                    let events = recorded.clone();
+                    sockets.push(std::thread::spawn(move || {
+                        let Ok(mut socket) = tungstenite::accept(stream) else { return };
+                        if socket.read().is_err() { return; }
+                        socket.get_mut().set_read_timeout(Some(std::time::Duration::from_millis(50))).unwrap();
+                        let mut previous = 0;
+                        while !stopped.load(Ordering::Acquire) {
+                            let count = events.lock().unwrap().len();
+                            if count != previous {
+                                previous = count;
+                                let frame = json!({"channel":"history","event":"update","data":{"sessionKey":"codex-owned:live-nav","entries":[]}});
+                                if socket.send(tungstenite::Message::Text(frame.to_string().into())).is_err() { break; }
+                            }
+                            match socket.read() {
+                                Ok(tungstenite::Message::Close(_)) => break,
+                                Err(tungstenite::Error::Io(e)) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {},
+                                Err(_) => break,
+                                _ => {},
+                            }
+                        }
+                    }));
+                    continue;
+                }
                 let n = stream.read(&mut buf).unwrap();
                 let request = String::from_utf8_lossy(&buf[..n]);
-                // Exercise active HTTP fallback when a fixture has no socket.
+                // A null HTTP cursor waits for the real session socket to invalidate it.
                 let socket_info = request.contains("/api/panel/ws-info");
-                let body=if socket_info { json!({"error":"this fixture has no socket"})
+                let body=if socket_info { json!({"wsPort":port,"wsToken":"fixture-token"})
                 } else if request.contains("/api/mobile/history") {
                     json!({"sessionKey":"codex-owned:live-nav","transcript":[
                         {"id":"live-p0","role":"user","text":"First **prompt**","packetHeader":{"enabled":true}},
@@ -619,14 +657,13 @@ impl LiveHost {
                     assert!(request.contains("/api/orchestrator/packet-transcript"));
                     let cursor=request.split("cursor=").nth(1).and_then(|s|s.split(['&',' ']).next()).unwrap().parse::<u64>().unwrap();
                     let page:Vec<_>=recorded.lock().unwrap().iter().filter(|e| e["seq"].as_u64().unwrap()>cursor).cloned().collect();
-                    json!({"sessionKey":"codex-owned:live-nav","nextCursor":page.last().map(|e|e["seq"].clone()),"events":page})
+                    json!({"sessionKey":"codex-owned:live-nav","nextCursor":page.last().map(|e|e["seq"].clone()),"cursorToken":format!("live-{}",page.last().and_then(|e|e["seq"].as_u64()).unwrap_or(cursor)),"events":page})
                 }.to_string();
-                let status = if socket_info {
-                    "404 Not Found"
-                } else {
-                    "200 OK"
-                };
+                let status = "200 OK";
                 write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+            }
+            for socket in sockets {
+                socket.join().unwrap();
             }
         });
         Self {
@@ -665,10 +702,10 @@ fn a_prompt_arriving_in_a_live_pane_updates_ticks_and_preserves_cached_text(
         v.0.navigator.borrow().cached_preview().unwrap().0
     });
     host.events.lock().unwrap().extend([
-        json!({"seq":2,"type":"assistant","text":"The first check passed."}),
-        json!({"seq":3,"type":"steer","text":"New live prompt"}),
-        json!({"seq":4,"type":"assistant","text":"The new answer is ready."}),
-        json!({"seq":5,"type":"done","exitCode":0}),
+        json!({"seq":2,"eventId":"2","type":"assistant","text":"The first check passed."}),
+        json!({"seq":3,"eventId":"3","type":"steer","text":"New live prompt"}),
+        json!({"seq":4,"eventId":"4","type":"assistant","text":"The new answer is ready."}),
+        json!({"seq":5,"eventId":"5","type":"done","exitCode":0}),
     ]);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
