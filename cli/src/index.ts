@@ -344,6 +344,8 @@ commands:
   plugin terminal launch <plugin-id> <entry-id> --revision <sha256> [--repo <path>] [--request <uuid>]
   plugin terminal stop <receipt-id> (stop the process, retain its receipt)
   inbox list           pending governance approvals (--all includes resolved)
+  inbox drafts         drafts idle three days (age, checks, conflicts)
+  inbox continue-draft|handoff-draft|close-draft <number> --repo owner/repo --expected-head-sha SHA --expected-updated-at ISO [--owner login] [--reason text]
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
 ${OPERATOR_PACKET_COMMAND_LINES}
