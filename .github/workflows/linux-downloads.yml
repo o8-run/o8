@@ -140,6 +140,27 @@ jobs:
         run: |
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' squashfs-root/usr/lib/o8/node scripts/linux/smoke-payload.mjs --appimage "$(find work/linux-downloads -name '*.AppImage' -print -quit)" --output work/appimage-proof
+      - name: AppImage offline fresh-server and terminal-daemon launch
+        if: matrix.format == 'appimage'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          # A private network namespace has no external interfaces. Enable only
+          # loopback, which the bundled server and native window use locally.
+          sudo --preserve-env=VK_ICD_FILENAMES unshare --net bash -euc '
+            ip link set lo up
+            test "$(ls /sys/class/net)" = lo
+            ip -brief address
+            test -z "$(ip route show)"
+            exec runuser -u "$SUDO_USER" -- env \
+              LIBGL_ALWAYS_SOFTWARE=1 APPIMAGE_EXTRACT_AND_RUN=1 \
+              VK_ICD_FILENAMES="$VK_ICD_FILENAMES" \
+              xvfb-run -a -s "-screen 0 1440x1024x24 -nolisten tcp -noreset -br" \
+              squashfs-root/usr/lib/o8/node scripts/linux/smoke-payload.mjs \
+              --appimage "$(find work/linux-downloads -name "*.AppImage" -print -quit)" \
+              --output work/appimage-offline-proof
+          '
       - name: Save first frames, launch evidence and idle RSS
         if: always()
         uses: actions/upload-artifact@v4
@@ -151,5 +172,6 @@ jobs:
             work/appimage-proof/
             work/appimage-diagnostics/
             work/stock-diagnostics/
+            work/appimage-offline-proof/
           if-no-files-found: error
           retention-days: 7
