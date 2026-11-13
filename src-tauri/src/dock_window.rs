@@ -78,7 +78,7 @@ const DOCK_TOP_INSET: f64 = 0.0;
 /// Next port written to ~/.o8/api-port.
 #[cfg(target_os = "macos")]
 pub fn create(app: &tauri::AppHandle, api_port: u16) {
-    use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+    use tauri::Manager;
 
     if app.get_webview_window(DOCK_LABEL).is_some() {
         return;
@@ -100,6 +100,18 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
         _ => format!("http://127.0.0.1:{}", api_port),
     };
     let url = format!("{}/dictation-pill", base);
+    create_at_url(app, &url);
+}
+
+/// Voice-only feedback is bundled locally and has no server prerequisite.
+#[cfg(target_os = "macos")]
+pub fn create_voice_only(app: &tauri::AppHandle) {
+    create_at_url(app, "o8-voice://localhost/index.html");
+}
+
+#[cfg(target_os = "macos")]
+fn create_at_url(app: &tauri::AppHandle, url: &str) {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
     let parsed = match url.parse() {
         Ok(u) => u,
         Err(e) => {
