@@ -77,6 +77,7 @@ mod wake;
 mod worker_transcript_tests;
 #[cfg(test)]
 mod worker_transport_tests;
+mod worker_backfill;
 mod window_lights;
 mod zoom;
 use crate::{

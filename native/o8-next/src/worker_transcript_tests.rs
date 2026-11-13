@@ -79,7 +79,7 @@ fn readback_with_moving_history(events: Value, moving: bool) -> History {
                 let next = page.last().map(|e| e["seq"].clone());
                 (
                     "200 OK",
-                    json!({"sessionKey":"codex-owned:reviewer", "events":page, "nextCursor":next}),
+                    json!({"sessionKey":"codex-owned:reviewer", "events":page, "nextCursor":next, "historyComplete":true}),
                 )
             };
             let body = body.to_string();

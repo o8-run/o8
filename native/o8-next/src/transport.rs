@@ -268,7 +268,7 @@ pub(crate) fn subscribe_history(client: Client, history: &crate::model::History)
                     _ => {}
                 }
             }
-            if dirty || (!state.done && Instant::now() >= next) {
+            if dirty || (!state.done && state.active && Instant::now() >= next) {
                 dirty = false;
                 match state.poll(&client) {
                     Ok(entries) => {

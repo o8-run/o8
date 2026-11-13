@@ -98,12 +98,12 @@ function normalizeTs(raw: unknown, fallback: string): string {
  * flips when the tool completes), so we synthesize matching `tool_call`
  * + `tool_result` events from one log line.
  */
-export function normalizeOpencodeEvents(rawJsonl: string): TranscriptEvent[] {
+export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString()): TranscriptEvent[] {
   if (!rawJsonl || typeof rawJsonl !== 'string') return [];
 
   const out: TranscriptEvent[] = [];
   const emittedTools = new Map<string, { callIndex: number; resultIndex?: number }>();
-  const fallbackTs = new Date().toISOString();
+  const fallbackTs = fallbackTimestamp;
   let seq = 0;
   const nextSeq = () => (seq += 1);
 
@@ -270,13 +270,13 @@ function extractToolResultText(content: unknown): string {
  * Tool calls and results live in separate JSONL lines, so we maintain a
  * pending-call map keyed by `tool_use_id` to keep the call/result pairing.
  */
-export function normalizeClaudeCodeEvents(rawJsonl: string): TranscriptEvent[] {
+export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString()): TranscriptEvent[] {
   if (!rawJsonl || typeof rawJsonl !== 'string') return [];
 
   const out: TranscriptEvent[] = [];
   const pending = new Map<string, { tool: string }>();
   const backgroundAgents = createBackgroundAgents();
-  const fallbackTs = new Date().toISOString();
+  const fallbackTs = fallbackTimestamp;
   let seq = 0;
   const nextSeq = () => (seq += 1);
 

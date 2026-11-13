@@ -293,7 +293,7 @@ impl Transcript {
             e.extra
                 .get("timestamp")
                 .and_then(Value::as_u64)
-                .unwrap_or(0)
+                .unwrap_or(u64::MAX)
         };
         for entry in incoming {
             if let Some(&index) = self.worker_lookup.get(&entry.id) {

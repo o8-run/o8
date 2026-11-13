@@ -93,6 +93,8 @@ pub struct Pane {
     file_root: Option<gpui::SharedString>,
     peeks: crate::transcript_peek::Peeks,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
+    action_ends: RefCell<crate::transcript_actions::TurnEndsCache>,
+    backfill: Option<crate::worker_backfill::Backfill>,
 }
 impl Pane {
     pub fn new(key: Option<String>) -> Self {
@@ -118,6 +120,8 @@ impl Pane {
             file_root: None,
             peeks: Default::default(),
             action_feedback: Default::default(),
+            action_ends: Default::default(),
+            backfill: None,
         }
     }
     pub fn metadata(&mut self, session: &Session) {
@@ -139,6 +143,7 @@ impl Pane {
         }
     }
     pub fn install(&mut self, history: History, client: Client) {
+        self.backfill = crate::worker_backfill::Backfill::new(client.clone(), &history);
         self.client = Some(client.clone());
         self.peeks.connect(client.clone());
         self.subscription = Some(transport::subscribe_history(client, &history));
@@ -184,8 +189,7 @@ impl Pane {
         let anchor = self.list.logical_scroll_top();
         for (index, row) in self.rows.iter().enumerate() {
             let mut row = row.borrow_mut();
-            if !crate::subagents::trace::delegates(&row.row)
-            {
+            if !crate::subagents::trace::delegates(&row.row) {
                 continue;
             }
             row.bind_subagent_focus(cx);
@@ -247,6 +251,25 @@ impl Pane {
         self.rows = Rc::new(states);
     }
     pub fn poll(&mut self) -> bool {
+        let mut backfilled = false;
+        let pages: Vec<_> = self
+            .backfill
+            .as_ref()
+            .map(|b| b.receiver.try_iter().take(1).collect())
+            .unwrap_or_default();
+        for page in pages {
+            match page {
+                Ok(history) => {
+                    self.prepend(history);
+                    backfilled = true;
+                }
+                Err(error) => {
+                    self.notice = error;
+                    self.backfill = None;
+                    backfilled = true;
+                }
+            }
+        }
         let mut visualizations_changed = false;
         for (index, row) in self.rows.iter().enumerate() {
             if row.borrow_mut().poll_visualizations() {
@@ -288,7 +311,7 @@ impl Pane {
                 self.navigate(true);
             }
         }
-        changed || visualizations_changed || notice_changed
+        changed || visualizations_changed || notice_changed || backfilled
     }
     pub fn navigate(&mut self, end: bool) {
         if !self.rows.is_empty() {
@@ -303,7 +326,9 @@ impl Pane {
     /// never constructs a list or calls the retained row's shaping/paint path.
     pub fn content(&self) -> AnyElement {
         self.content_with(
-            crate::transcript_actions::turn_ends(&self.rows)
+            self.action_ends
+                .borrow_mut()
+                .get(&self.rows)
                 .into_keys()
                 .collect(),
             |_, row, _, _| row,
@@ -311,7 +336,7 @@ impl Pane {
     }
     /// Finished answers use the chat's Play/Copy footer in the reading pane too.
     pub(crate) fn content_for<V: 'static>(&self, view: gpui::Entity<V>) -> AnyElement {
-        let ends = crate::transcript_actions::turn_ends(&self.rows);
+        let ends = self.action_ends.borrow_mut().get(&self.rows);
         let client = self.client.clone();
         let feedback = self.action_feedback.clone();
         self.content_with(

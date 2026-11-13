@@ -43,12 +43,13 @@ fn entry(id: String, role: &str, text: String, event: &Value) -> Entry {
 pub(crate) struct State {
     key: String,
     pub(crate) cursor: u64,
-    run: u64,
+    #[serde(default)]
+    cursor_token: Option<String>,
     calls: HashMap<String, Entry>,
     pending: HashMap<String, Vec<String>>,
     answer: Option<Entry>,
     pub(crate) done: bool,
-    active: bool,
+    pub(crate) active: bool,
 }
 
 fn upsert(entries: &mut Vec<Entry>, entry: Entry) {
@@ -103,7 +104,7 @@ impl State {
                 });
                 self.active = !self.done && recent;
             }
-            let id = format!("{}:event:{seq}", self.key);
+            let id = format!("{}:event:{}", self.key, event_id(event));
             let tool = event["tool"].as_str().unwrap_or("tool");
             match kind {
                 "tool_call" => {
@@ -126,8 +127,8 @@ impl State {
                                 json!({"input":args})
                             }
                         });
+                    let tool_id = format!("{id}:call:{call}");
                     let mut row = entry(id, "tool", String::new(), event);
-                    let tool_id = format!("{}:call:{}:{call}", self.key, self.run);
                     row.tools = Some(vec![json!({"id":tool_id,"name":tool,"args":args,
                         "nativeWorkerTrace":true,"preview":event["summary"],"status":"running","startedAt":row.extra["timestamp"]})]);
                     if !self.calls.contains_key(&call) {
@@ -234,7 +235,6 @@ impl State {
                         json!({"terminal":{"outcome":outcome,"completedAt":timestamp(event)}}),
                     );
                     upsert(entries, answer);
-                    self.run = seq;
                     self.pending.clear();
                 }
                 _ => {}
@@ -244,37 +244,97 @@ impl State {
     pub(crate) fn poll(&mut self, client: &Client) -> Result<Vec<Entry>, ReadbackError> {
         // Read a complete batch before advancing state, so a later page failure
         // retries the same cursor without losing events.
-        let (events, _) = client.worker_events(&self.key, self.cursor)?;
-        if events.is_empty() {
+        let from = if self.cursor_token.is_some() {
+            self.cursor
+        } else {
+            0
+        };
+        let batch = client.worker_events(&self.key, from, self.cursor_token.as_deref())?;
+        if batch.events.is_empty() && !batch.reset && batch.cursor == self.cursor {
             return Ok(vec![]);
         }
+        if batch.reset || from == 0 {
+            // Replay a changed snapshot with stable row identities. Retain calls
+            // that slid out of a tail so a later result can still finish them.
+            self.calls.retain(|call, _| {
+                !batch
+                    .events
+                    .iter()
+                    .any(|e| e["type"] == "tool_call" && e["callId"].as_str() == Some(call))
+            });
+            self.pending
+                .values_mut()
+                .for_each(|ids| ids.retain(|id| self.calls.contains_key(id)));
+            self.answer = None;
+            self.cursor = 0;
+        }
         let mut entries = vec![];
-        self.apply(&events, &mut entries);
+        self.apply(&batch.events, &mut entries);
+        self.cursor = batch.cursor;
+        self.cursor_token = batch.token;
         entries.push(self.marker());
         Ok(entries)
     }
 }
 
-fn adapt(mut history: History, events: &[Value]) -> History {
+fn event_id(event: &Value) -> String {
+    if let Some(id) = event["eventId"].as_str() {
+        return id.into();
+    }
+    // Compatibility with older servers: call identity, timestamp and content,
+    // never the mutable position in a normalized list.
+    use std::hash::{Hash, Hasher};
+    let mut content = event.clone();
+    content.as_object_mut().unwrap().remove("seq");
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    content.to_string().hash(&mut hash);
+    format!("{:016x}", hash.finish())
+}
+
+fn adapt(mut history: History, batch: Readback) -> History {
+    if batch.events.is_empty() {
+        return history;
+    }
     let mut entries: Vec<_> = history
         .transcript
         .into_iter()
-        .filter(|e| e.role == "user" || e.extra.get("type").is_some_and(|t| t == "card"))
+        .filter(|e| {
+            e.role == "user"
+                || e.extra.get("type").is_some_and(|t| t == "card")
+                || (!batch.complete
+                    && e.extra
+                        .get("timestamp")
+                        .and_then(Value::as_u64)
+                        .zip(batch.earliest)
+                        .is_none_or(|(at, first)| at < first))
+        })
         .collect();
     let mut state = State {
         key: history.session_key.clone(),
         ..Default::default()
     };
-    state.apply(events, &mut entries);
+    state.apply(&batch.events, &mut entries);
+    state.cursor = batch.cursor;
+    state.cursor_token = batch.token;
     entries.sort_by_key(|e| {
         e.extra
             .get("timestamp")
             .and_then(Value::as_u64)
-            .unwrap_or(0)
+            .unwrap_or(u64::MAX)
     });
     entries.push(state.marker());
     history.transcript = entries;
     history
+}
+
+struct Readback {
+    events: Vec<Value>,
+    bytes: usize,
+    cursor: u64,
+    token: Option<String>,
+    reset: bool,
+    complete: bool,
+    earliest: Option<u64>,
 }
 
 const MAX_READBACK_BYTES: usize = 64 * 1024 * 1024;
@@ -344,9 +404,18 @@ impl Client {
         &self,
         key: &str,
         mut cursor: u64,
-    ) -> Result<(Vec<Value>, usize), ReadbackError> {
-        let mut events = Vec::new();
-        let mut bytes = 0usize;
+        token: Option<&str>,
+    ) -> Result<Readback, ReadbackError> {
+        let mut batch = Readback {
+            events: vec![],
+            bytes: 0,
+            cursor,
+            token: token.map(str::to_owned),
+            reset: false,
+            complete: false,
+            earliest: None,
+        };
+        let mut resets = 0;
         loop {
             let (page, size): (Value, usize) = self
                 .get_counted(
@@ -354,40 +423,60 @@ impl Client {
                     &[
                         ("sessionKey", key),
                         ("cursor", &cursor.to_string()),
+                        ("cursorToken", batch.token.as_deref().unwrap_or("")),
                         ("limit", "200"),
                     ],
                 )
                 .map_err(ReadbackError::request)?;
-            bytes = bytes.saturating_add(size);
+            batch.bytes = batch.bytes.saturating_add(size);
             if page["sessionKey"].as_str() != Some(key) {
                 return Err(ReadbackError::Invalid(
                     "Server returned events for a different session".into(),
                 ));
             }
-            let batch = page["events"]
+            let events = page["events"]
                 .as_array()
                 .ok_or_else(|| ReadbackError::Invalid("Invalid worker transcript events".into()))?;
-            if bytes > MAX_READBACK_BYTES
-                || events.len().saturating_add(batch.len()) > MAX_READBACK_EVENTS
+            let next = page["nextCursor"].as_u64().unwrap_or(cursor);
+            if page["cursorReset"] == true || next < cursor {
+                resets += 1;
+                if resets > 3 {
+                    return Err(ReadbackError::Unavailable(
+                        "Worker transcript changed during readback".into(),
+                    ));
+                }
+                batch.events.clear();
+                batch.reset = true;
+                if events.is_empty() && next < cursor {
+                    cursor = 0;
+                    batch.token = None;
+                    continue;
+                }
+            }
+            if batch.bytes > MAX_READBACK_BYTES
+                || batch.events.len().saturating_add(events.len()) > MAX_READBACK_EVENTS
             {
                 return Err(ReadbackError::Limit);
             }
-            events.extend(batch.iter().cloned());
-            if batch.len() < 200 {
-                break;
+            batch.events.extend(events.iter().cloned());
+            batch.complete = page["historyComplete"] == true;
+            batch.earliest = timestamp(&json!({"ts":page["earliestEventTime"]})).as_u64();
+            batch.token = page["cursorToken"].as_str().map(str::to_owned);
+            batch.cursor = next;
+            if events.len() < 200 {
+                return Ok(batch);
             }
-            cursor = page["nextCursor"]
-                .as_u64()
-                .filter(|next| *next > cursor)
-                .ok_or_else(|| {
-                    ReadbackError::Invalid("Worker transcript cursor did not advance".into())
-                })?;
+            if next <= cursor && !batch.reset {
+                return Err(ReadbackError::Invalid(
+                    "Worker transcript cursor did not advance".into(),
+                ));
+            }
+            cursor = next;
         }
-        Ok((events, bytes))
     }
-    pub(crate) fn worker_history(&self, mut history: History) -> Result<(History, usize), String> {
-        let (events, mut bytes) = match self.worker_events(&history.session_key, 0) {
-            Ok(result) => result,
+    pub(crate) fn worker_history(&self, history: History) -> Result<(History, usize), String> {
+        let batch = match self.worker_events(&history.session_key, 0, None) {
+            Ok(batch) => batch,
             Err(ReadbackError::Unavailable(reason))
                 if reason.ends_with("HTTP 404") || reason.ends_with("HTTP 501") =>
             {
@@ -396,58 +485,9 @@ impl Client {
             Err(ReadbackError::Invalid(reason)) => return Err(reason),
             Err(error) => return Ok((warning(history, error.reason()), 0)),
         };
-        let mut before = None;
-        while let Some(cursor) = history
-            .page
-            .as_ref()
-            .filter(|p| p.has_more)
-            .and_then(|p| p.before_cursor.clone())
-        {
-            if before.as_ref() == Some(&cursor) {
-                return Err("Worker prompt cursor did not advance".into());
-            }
-            let older: Result<(History, usize), String> = self.get_counted(
-                "/api/mobile/history",
-                &[
-                    ("sessionKey", &history.session_key),
-                    ("limit", "100"),
-                    ("page", "1"),
-                    ("before", &cursor),
-                ],
-            );
-            let (older, size) = match older {
-                Err(error) if error.ends_with("HTTP 409") => break,
-                Err(error) => match ReadbackError::request(error) {
-                    ReadbackError::Invalid(reason) => return Err(reason),
-                    error => {
-                        history.page = None;
-                        return Ok((warning(adapt(history, &events), error.reason()), bytes));
-                    }
-                },
-                Ok(result) => result,
-            };
-            if older.session_key != history.session_key {
-                return Err("Server returned history for a different session".into());
-            }
-            if bytes.saturating_add(size) > MAX_READBACK_BYTES
-                || history
-                    .transcript
-                    .len()
-                    .saturating_add(older.transcript.len())
-                    > MAX_READBACK_EVENTS
-            {
-                history.page = None;
-                return Ok((
-                    warning(adapt(history, &events), ReadbackError::Limit.reason()),
-                    bytes,
-                ));
-            }
-            bytes += size;
-            history.transcript.splice(0..0, older.transcript);
-            history.page = older.page;
-            before = Some(cursor);
-        }
-        history.page = None;
-        Ok((adapt(history, &events), bytes))
+        let bytes = batch.bytes;
+        // The first saved page can paint now. Pane loads older saved pages in
+        // the background, retaining its scroll anchor and the pagination token.
+        Ok((adapt(history, batch), bytes))
     }
 }

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { readPacketTranscriptEvents, readSessionTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
+import { transcriptWindow } from '@/lib/orchestrator/packet-transcript-window';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { findLaneBySession } from '@/lib/lane/registry';
@@ -80,24 +81,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    let windowed = readback.events;
-    if (tail) {
-      windowed = readback.events.slice(-limit);
-    } else {
-      const afterCursor = readback.events.filter((event) => event.seq > cursor);
-      windowed = afterCursor.slice(0, limit);
-    }
-
-    const nextCursor = windowed.length > 0
-      ? windowed[windowed.length - 1].seq
-      : null;
+    const window = transcriptWindow(readback.events, cursor, limit, tail, params.get('cursorToken'));
 
     return NextResponse.json(
       {
         packetId,
         sessionKey: readback.sessionKey || null,
-        events: windowed,
-        nextCursor,
+        ...window,
+        historyComplete: readback.historyComplete === true && (!tail || readback.events.length <= limit),
+        earliestEventTime: readback.earliestEventTime ?? null,
         terminalReason: readback.terminalReason ?? null,
         ...(readback.note ? { note: readback.note } : {}),
       },

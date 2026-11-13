@@ -58,6 +58,29 @@ pub(crate) fn turn_ends(rows: &[Rc<RefCell<RowState>>]) -> HashMap<usize, (Strin
     ends
 }
 
+/// Flatten a retained row snapshot only once, including across render passes.
+#[derive(Default)]
+pub(crate) struct TurnEndsCache {
+    rows: std::rc::Weak<Vec<Rc<RefCell<RowState>>>>,
+    ends: Rc<HashMap<usize, (String, String)>>,
+}
+impl TurnEndsCache {
+    pub(crate) fn get(
+        &mut self,
+        rows: &Rc<Vec<Rc<RefCell<RowState>>>>,
+    ) -> Rc<HashMap<usize, (String, String)>> {
+        if !self
+            .rows
+            .upgrade()
+            .is_some_and(|old| Rc::ptr_eq(&old, rows))
+        {
+            self.ends = Rc::new(turn_ends(rows));
+            self.rows = Rc::downgrade(rows);
+        }
+        self.ends.clone()
+    }
+}
+
 /// A message's text: prose and lists line by line, code kept for Copy and left
 /// out when it is read aloud.
 pub(crate) fn plain(nodes: &[Node], speech: bool) -> String {

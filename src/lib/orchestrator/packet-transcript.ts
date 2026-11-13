@@ -31,6 +31,8 @@ interface ResolvedJsonl {
   runtime: TranscriptRuntime;
   fallbackTimestamp?: string;
   unsupportedReason?: string;
+  historyComplete?: boolean;
+  earliestEventTime?: string;
 }
 
 interface RawTailSnapshot {
@@ -43,6 +45,8 @@ export interface SessionTranscriptReadback {
   runtime: TranscriptRuntime;
   events: TranscriptEvent[];
   unsupportedReason?: string;
+  historyComplete?: boolean;
+  earliestEventTime?: string;
 }
 
 export interface PacketTranscriptReadback extends SessionTranscriptReadback {
@@ -125,7 +129,7 @@ async function findClaudeCodeJsonl(sessionId: string): Promise<string | null> {
 
 /** Stream complete Codex history without retaining raw tool payloads in memory. */
 async function readCodexHistory(paths: string[]): Promise<TranscriptEvent[]> {
-  const normalizer = createCodexEventNormalizer();
+  const normalizer = createCodexEventNormalizer('');
   for (const filePath of paths) {
     const handle = await open(await realpath(filePath), 'r');
     try {
@@ -166,7 +170,7 @@ async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false
         const rolloutPath = await getCodexRolloutPath(`codex:${sources.threadId}`, identityId ?? undefined);
         if (fullHistory && rolloutPath) {
           const events = await readCodexHistory([rolloutPath]);
-          if (events.length) return { raw: '', events, runtime: 'codex' };
+          if (events.length) return { raw: '', events, runtime: 'codex', historyComplete: true };
         }
         const raw = rolloutPath ? await readRawTail(rolloutPath) : '';
         if (raw.trim()) return { raw, runtime: 'codex' };
@@ -174,7 +178,7 @@ async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false
         // A missing runtime inventory must not hide the owned stdout fallback.
       }
       const tail = await readOwnedRunStdouts(sources.stdoutPaths);
-      if (fullHistory) return { raw: '', events: await readCodexHistory(sources.stdoutPaths), runtime: 'codex' };
+      if (fullHistory) return { raw: '', events: await readCodexHistory(sources.stdoutPaths), runtime: 'codex', historyComplete: true };
       return { raw: tail.raw, runtime: 'codex', fallbackTimestamp: tail.modifiedAt };
     } catch {
       return { raw: '', runtime: 'codex' };
@@ -185,7 +189,7 @@ async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false
     try {
       const rolloutPath = await getCodexRolloutPath(sessionKey);
       if (!rolloutPath) return { raw: '', runtime: 'codex' };
-      if (fullHistory) return { raw: '', events: await readCodexHistory([rolloutPath]), runtime: 'codex' };
+      if (fullHistory) return { raw: '', events: await readCodexHistory([rolloutPath]), runtime: 'codex', historyComplete: true };
       return { raw: await readRawTail(rolloutPath), runtime: 'codex' };
     } catch {
       return { raw: '', runtime: 'codex' };
@@ -251,18 +255,17 @@ async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false
 function normalizeForRuntime(
   runtime: TranscriptRuntime,
   raw: string,
-  fallbackTimestamp?: string,
 ): TranscriptEvent[] {
   if (!raw) return [];
   switch (runtime) {
     case 'pi-builtin':
-      return normalizePiBuiltinEvents(raw);
+      return normalizePiBuiltinEvents(raw).map(event => event.ts === '1970-01-01T00:00:00.000Z' ? { ...event, ts: '' } : event);
     case 'codex':
-      return normalizeCodexEvents(raw, fallbackTimestamp);
+      return normalizeCodexEvents(raw, '');
     case 'opencode':
-      return normalizeOpencodeEvents(raw);
+      return normalizeOpencodeEvents(raw, '');
     case 'claude-code':
-      return normalizeClaudeCodeEvents(raw);
+      return normalizeClaudeCodeEvents(raw, '');
     default:
       return [];
   }
@@ -389,11 +392,15 @@ export async function readSessionTranscriptEvents(sessionKey: string, fullHistor
     };
   }
 
+  const runtimeEvents = resolved.events ?? normalizeForRuntime(resolved.runtime, resolved.raw);
+  const earliest = runtimeEvents.map(event => Date.parse(event.ts)).filter(Number.isFinite);
   return {
     sessionKey,
     runtime: resolved.runtime,
+    historyComplete: resolved.historyComplete === true,
+    earliestEventTime: earliest.length ? new Date(earliest.reduce((a, b) => Math.min(a, b))).toISOString() : undefined,
     events: mergeTranscriptEvents(
-      resolved.events ?? normalizeForRuntime(resolved.runtime, resolved.raw, resolved.fallbackTimestamp),
+      runtimeEvents,
       [...laneHuddleEventsForSession(sessionKey), ...laneSteerEventsForSession(sessionKey)],
     ),
   };
