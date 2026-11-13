@@ -410,14 +410,16 @@ export async function recordCodexAutoReviewVerdict(input: {
 
   // This authority comes from the server-owned backend turn, never the model payload.
   let principal: import('@/lib/orchestrator/review-run-evidence').ReviewRunPrincipal | null = null;
-  if (reviewTurnId) {
-    const started = getSqlite().prepare("SELECT payload_json FROM lane_events WHERE lane_id = ? AND actor = 'system' AND verb = 'review_turn_started' AND json_extract(payload_json, '$.reviewTurnId') = ? ORDER BY rowid DESC LIMIT 1").get(input.lane.id, reviewTurnId) as { payload_json: string } | undefined;
-    const finished = getSqlite().prepare("SELECT verb, payload_json FROM lane_events WHERE lane_id = ? AND actor = 'system' AND verb IN ('review_turn_finished', 'review_turn_stopped') AND json_extract(payload_json, '$.reviewTurnId') = ? ORDER BY rowid DESC LIMIT 1").get(input.lane.id, reviewTurnId) as { verb: string; payload_json: string } | undefined;
-    const assignment = started ? JSON.parse(started.payload_json) as Record<string, unknown> : null;
-    const outcome = finished ? JSON.parse(finished.payload_json) as Record<string, unknown> : null;
-    if (assignment?.backend === 'codex' && assignment.expectedHeadSha === reviewedHeadSha && finished?.verb === 'review_turn_finished' && outcome?.outcome === 'completed') {
-      principal = { role: 'assigned_reviewer', source: 'server_review_turn', packetId: input.lane.packetId, reviewTurnId, reviewerRuntime: 'codex' };
-    }
+  if (reviewTurnId && verdict.runEvidence?.status === 'run') {
+    try {
+      const started = getSqlite().prepare("SELECT payload_json FROM lane_events WHERE lane_id = ? AND actor = 'system' AND verb = 'review_turn_started' AND json_extract(payload_json, '$.reviewTurnId') = ? ORDER BY rowid DESC LIMIT 1").get(input.lane.id, reviewTurnId) as { payload_json: string } | undefined;
+      const finished = getSqlite().prepare("SELECT verb, payload_json FROM lane_events WHERE lane_id = ? AND actor = 'system' AND verb IN ('review_turn_finished', 'review_turn_stopped') AND json_extract(payload_json, '$.reviewTurnId') = ? ORDER BY rowid DESC LIMIT 1").get(input.lane.id, reviewTurnId) as { verb: string; payload_json: string } | undefined;
+      const assignment = started ? JSON.parse(started.payload_json) as Record<string, unknown> : null;
+      const outcome = finished ? JSON.parse(finished.payload_json) as Record<string, unknown> : null;
+      if (assignment?.backend === 'codex' && assignment.expectedHeadSha === reviewedHeadSha && finished?.verb === 'review_turn_finished' && outcome?.outcome === 'completed') {
+        principal = { role: 'assigned_reviewer', source: 'server_review_turn', packetId: input.lane.packetId, reviewTurnId, reviewerRuntime: 'codex' };
+      }
+    } catch { /* Unverifiable assignment withholds run credit, never the code verdict. */ }
   }
   verdict.runEvidence = prepareRunEvidence(verdict.runEvidence, reviewedHeadSha, principal);
   if (verdict.runEvidence.status === 'not_run' && verdict.runEvidence.warning) verdict.runEvidenceWarning = verdict.runEvidence.warning;

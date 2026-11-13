@@ -260,16 +260,16 @@ it('matches required paths regardless of case and separator and publishes the po
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({ error: { code: 'review_run_evidence_required' } });
 }, 30_000);
-it.each(['valid', 'malformed', 'stale'] as const)('records a Codex fallback verdict with %s runEvidence without changing the code verdict', async kind => {
+it.each(['valid', 'malformed', 'stale', 'unassigned'] as const)('records a Codex fallback verdict with %s runEvidence without changing the code verdict', async kind => {
   const f = await fixture();
   const { startReviewTurn, finishReviewTurn } = await import('@/lib/lane/review-turn-state');
   const { recordCodexAutoReviewVerdict } = await import('@/lib/lane/codex-auto-review-verdict');
   const turn = startReviewTurn({ laneId: f.lane.id, threadId: `review-fallback-${randomUUID()}`, backend: 'codex', surface: 'auto-review', expectedHeadSha: f.head });
   finishReviewTurn({ laneId: f.lane.id, reviewTurnId: turn, outcome: 'completed' });
-  const result = await recordCodexAutoReviewVerdict({ lane: f.lane, requiresSecondPass: false, reviewTurnId: turn, expectedHeadSha: f.head,
+  const result = await recordCodexAutoReviewVerdict({ lane: f.lane, requiresSecondPass: false, reviewTurnId: kind === 'unassigned' ? `unknown-${randomUUID()}` : turn, expectedHeadSha: f.head,
     rawText: 'CODEX_AUTO_REVIEW: ' + JSON.stringify({ approved: true, findings: [], runEvidence: kind === 'malformed' ? { status: 'run', result: 'prose only' } : evidence(kind === 'stale' ? f.base : f.head) }) });
   expect(result).toMatchObject({ reviewUnavailable: false, verdict: { approved: true } });
-  const approval = listApprovalsForContext({ packetId: f.packetId }).find(a => a.args?.reviewTurnId === turn)!;
+  const approval = listApprovalsForContext({ packetId: f.packetId }).filter(a => a.toolName === 'orchestrator_review').sort((a,b) => b.updatedAt - a.updatedAt)[0]!;
   expect(approval.status).toBe('approved');
   if (kind === 'valid') expect(approval.args).toMatchObject({ reviewMode: 'run', verdictLabel: 'approved, run (reviewer-reported)', runEvidence: { principal: { role: 'assigned_reviewer', source: 'server_review_turn', packetId: f.packetId, reviewTurnId: turn } } });
   else expect(approval.args).toMatchObject({ reviewMode: 'read_only', runEvidenceWarning: expect.any(String) });
