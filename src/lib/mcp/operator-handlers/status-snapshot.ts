@@ -112,6 +112,9 @@ export async function readStatusSnapshot(sessionKey: string | undefined, fresh: 
     // A failed lead read must neither erase runtime evidence nor reuse a handback.
     removeNativeStatus(key);
   }
+  if (!live && Date.now() - value.capturedAt >= MAX_AGE_MS) {
+    value = await refresh(source, base, sessionKey);
+  }
   if (Date.now() - value.capturedAt >= MAX_AGE_MS) throw new Error('Status refresh exceeded its freshness bound');
   const data: Record<string, unknown> = { ...value.data };
   delete data.leads;
