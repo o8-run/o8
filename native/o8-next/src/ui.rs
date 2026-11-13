@@ -1020,7 +1020,6 @@ impl Render for Surface {
                                     )
                                 })
                                 .child(self.history_control(cx))
-                                .when(overview.is_none(), |view| view.child(crate::transcript_view::empty()))
                             })
                             // The transcript fades out at its edges, as classic's
                             // did into the composer below it.
