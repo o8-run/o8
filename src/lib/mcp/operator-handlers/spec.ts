@@ -15,12 +15,14 @@
 import {
   apiFetch,
   errorText,
+  getApiBase,
   jsonResult,
   optionalString,
   requiredString,
   type McpTool,
   type McpToolResult,
 } from '@/lib/mcp/operator-handlers/shared';
+import { nativeSpecReadWitness, publishNativeSpec } from '@/lib/mcp/native-read-publication';
 
 const repoPathProp = {
   type: 'string',
@@ -118,7 +120,10 @@ function specPath(repoPath: string, extra: Record<string, string> = {}): string 
 
 export async function handleSpecRead(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
-    return jsonResult(await apiFetch(specPath(requiredString(args, 'repoPath'))));
+    const witness = nativeSpecReadWitness();
+    const response = await apiFetch(specPath(requiredString(args, 'repoPath')));
+    publishNativeSpec(getApiBase(), response, witness);
+    return jsonResult(response);
   } catch (error) {
     return jsonResult({ ok: false, error: errorText(error) }, true);
   }
