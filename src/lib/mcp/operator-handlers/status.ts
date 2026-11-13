@@ -60,13 +60,13 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_status',
     description:
-      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity, and runtime connection evidence with sources and check times. Agent status includes authority, observation time and evidence count; includeEvidence opts into full evidence arrays. Includes snapshot capture time and age; revalidates after 5 seconds and waits for refresh at 15 seconds. Pass fresh: true to wait for a refresh explicitly. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
+      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity, and runtime connection evidence with sources and check times. Agent status includes authority, observation time and evidence count; includeEvidence opts into full evidence arrays. Durable lead receipts include state, reason, turn and outcome and are read live. Unfiltered lists return the 100 most recent leads with leadsTruncated when more exist; use sessionKey to inspect an older lead exactly. A failed lead-store read preserves runtime evidence with leadsUnavailable and omits lead handbacks. Runtime observations include snapshot capture time and age; revalidates after 5 seconds and waits for refresh at 15 seconds. Pass fresh: true to wait for a refresh explicitly. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
     inputSchema: {
       type: 'object',
       properties: {
         sessionKey: {
           type: 'string',
-          description: 'Filter to a specific session. Returns all if omitted.',
+          description: 'Filter by runtime session key, durable lead ID, or lead thread ID. Returns all if omitted.',
         },
         fresh: {
           type: 'boolean',
@@ -597,6 +597,9 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
         runtimeConnections,
         snapshot,
         agents: agents.map((agent) => projectStatusAgent(agent, args.includeEvidence === true)),
+        ...(Array.isArray(data.leads) && data.leads.length ? { leads: data.leads } : {}),
+        ...(data.leadsUnavailable === true ? { leadsUnavailable: true } : {}),
+        ...(data.leadsTruncated === true ? { leadsTruncated: true } : {}),
         approvals: approvalItems,
         approvalCount,
         recentActivity,

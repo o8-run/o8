@@ -3796,6 +3796,13 @@
       ]
     },
     {
+      "path": "tests/idle-drafts-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/implementation-notes-artifact-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4528,6 +4535,14 @@
     {
       "path": "tests/mcp-launch-payer-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mcp-lead-outcomes-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
