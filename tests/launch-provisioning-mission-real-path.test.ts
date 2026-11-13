@@ -35,6 +35,7 @@ const root = mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'launch-provisio
 const repoPath = join(root, 'repo');
 const bin = join(root, 'bin');
 const failureReceipt = join(root, 'failure.json');
+const hostToolPath = process.env.PATH ?? '';
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const fixtureInputs = ['requirements.txt', 'go.mod', 'Cargo.toml'];
 vi.stubEnv('O8_WORKTREE_ROOT', join(root, 'worktrees'));
@@ -191,7 +192,12 @@ describe('launch provisioning through mission HTTP entry points', () => {
   it.each(['success', 'install-failure'])('prepares a Codex packet checkout with server resources: %s', async outcome => {
     const { pathToFileURL } = await import('node:url');
     const { buildPiWriteHelper } = await import('./helpers/pi-write-helper');
-    const binary = process.env.O8_TEST_PREBUILT_WRITE_HELPER || buildPiWriteHelper();
+    const binary = process.env.O8_TEST_PREBUILT_WRITE_HELPER || (() => {
+      // The provisioning fault injector shadows cargo; fixture compilation uses the real toolchain.
+      const fixturePath = process.env.PATH;
+      try { process.env.PATH = hostToolPath; return buildPiWriteHelper(); }
+      finally { if (fixturePath === undefined) delete process.env.PATH; else process.env.PATH = fixturePath; }
+    })();
     const server = join(root, 'server-resources');
     const helper = join(server, 'src-tauri/sidecars/pi-write/target/release/o8-pi-write');
     mkdirSync(join(server, 'src-tauri/sidecars/pi-write/target/release'), { recursive: true });
