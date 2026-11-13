@@ -4,7 +4,7 @@ import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { getSqlite } from '@/lib/db';
 import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 import { correctWorkers } from '@/lib/orchestrator/worker-corrections';
-import { correctAuthorFromReview } from '@/lib/orchestrator/review-author-correction';
+import { correctAuthorFromReview, inspectReviewAuthorCorrection } from '@/lib/orchestrator/review-author-correction';
 import { deliverQueuedPacketSteer, steerPacket, SteerPacketUnavailableError, type SteerPacketInput } from './steer';
 import type { LaneEvent } from '@/lib/lane/types';
 
@@ -34,6 +34,9 @@ export async function POST(request: Request): Promise<Response> {
         payload: JSON.parse(row.payload_json), timestamp: row.timestamp });
     } else if (body?.kind === 'correct') {
       result = await correctWorkers(body.input);
+    } else if (body?.kind === 'review-inspect' && typeof body.packetId === 'string'
+      && body.packetId.length > 0 && body.packetId.length <= 240) {
+      result = await inspectReviewAuthorCorrection(body.packetId);
     } else if (body?.kind === 'review-correct') {
       result = await correctAuthorFromReview(body.input);
     } else {

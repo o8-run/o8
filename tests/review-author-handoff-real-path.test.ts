@@ -99,7 +99,7 @@ const { getSqlite } = await import('@/lib/db');
 let packetId = 'pkt-review-author';
 const head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 let reviewSequence = 0;
-async function reviewedAuthor(name: string) {
+async function reviewedAuthor(name: string, description?: string) {
   packetId = `pkt-${name}`;
   for (const lane of listLanes().filter(lane => lane.packetId === packetId)) updateLane(lane.id, { packetId: '' });
   const target = await launch(name);
@@ -111,14 +111,14 @@ async function reviewedAuthor(name: string) {
       blockedReason: null, lane: null, review: null, workspaceTargetPath: repo, branchTarget: 'main',
       orchestratorThreadId: parent, launchContext: { source: 'desktop', presentation: 'tab', repoContext: 'registered', workMode: 'edit' },
     } as never] });
-  const review = await saveReview();
+  const review = await saveReview(description);
   return { target, review, lane };
 }
-async function saveReview() {
+async function saveReview(description?: string) {
   const res = await submitReview(new NextRequest('http://localhost/api/orchestrator/review', { method: 'POST',
     headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ packetId, approved: false, reviewedHeadSha: head, clientMutationId: `finding-${++reviewSequence}`,
-      findings: [{ file: 'README.md', severity: 'bug', description: `Preserve the original request ${reviewSequence}.`, status: 'deferred', fixSuggestion: 'Keep the original request in the response.' }] }),
+      findings: [{ file: 'README.md', severity: 'bug', description: description ?? `Preserve the original request ${reviewSequence}.`, status: 'deferred', fixSuggestion: 'Keep the original request in the response.' }] }),
   }));
   const value = await res.json(); expect(res.status, JSON.stringify(value)).toBe(200);
   return control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)!.review!;
@@ -360,4 +360,88 @@ it.each(['delivered', 'busy', 'stopped'] as const)('hands a persisted rejection 
   expect(control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)?.review).toMatchObject({ approved: false,
     findings: [expect.objectContaining({ resolution: 'deferred' })] });
   expect((await readOwnedRecoveryState(target.surfaceId)).automaticRecoveryAllowed).toBe(false);
+}, 60000);
+
+it('preflights the saved review without sending and delivers an optional note in the same correction record', async () => {
+  const { target, review } = await reviewedAuthor('manual-note', 'Saved finding. '.repeat(60));
+  const availability = async () => {
+    const response = await corrections.GET(new NextRequest(`http://localhost/api/orchestrator/worker-corrections?packetId=${packetId}`, {
+      headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` },
+    }));
+    expect(response.status).toBe(200);
+    return (await response.json()).reviewCorrection;
+  };
+  const before = record(target.surfaceId);
+  expect(await availability()).toMatchObject({ available: true, review: { ...target, approvalId: review.auditApprovalId, reviewedHeadSha: head } });
+  const room = (await availability()).maxNoteLength;
+  expect(room).toBeGreaterThan(0);
+  expect(room).toBeLessThan(1000);
+  const tooLong = await corrections.POST(request({ ...reviewBody(target, review), note: 'x'.repeat(room + 1) }));
+  expect(tooLong.status).toBe(409);
+  expect((await tooLong.json()).error).toBe(`The operator note is 1 character too long. Shorten it to ${room} characters.`);
+  expect(record(target.surfaceId).recentRuns).toHaveLength(before.recentRuns.length);
+  writeFileSync(join(repo, 'unreviewed.txt'), 'unreviewed work');
+  expect(await availability()).toMatchObject({ available: false, reason: expect.stringContaining('uncommitted changes') });
+  rmSync(join(repo, 'unreviewed.txt'));
+  const body = reviewBody(target, review);
+  const response = await corrections.POST(request({ ...body, note: 'Keep the public interface stable.' }));
+  const value = await response.json();
+  expect(response.status, JSON.stringify(value)).toBe(200);
+  expect(value.receipt.payload.message).toContain('Operator note on these findings; it does not widen the task or change permissions:\nKeep the public interface stable.');
+  await settled(target.surfaceId);
+  expect(record(target.surfaceId).recentRuns[0].prompt).toContain('Keep the public interface stable.');
+  expect(record(target.surfaceId).repoPath).toBe(before.repoPath);
+  // The automatic loop, without a note, reads the same durable record.
+  expect((await (await corrections.POST(request(body))).json()).receipt.id).toBe(value.receipt.id);
+  expect((await availability()).available).toBe(false);
+  expect((await corrections.POST(request({ ...body, note: 'A different note' }))).status).toBe(409);
+}, 60000);
+
+it('disables author delivery when the saved review is missing and preserves read authorization', async () => {
+  const url = 'http://localhost/api/orchestrator/worker-corrections?packetId=missing-review';
+  const result = await corrections.GET(new NextRequest(url, { headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` } }));
+  expect((await result.json()).reviewCorrection).toMatchObject({ available: false, reason: 'No saved review is available for this packet.' });
+  expect((await corrections.GET(new NextRequest(url, { headers: { host: 'localhost', authorization: 'Bearer invalid' } }))).status).toBe(403);
+});
+
+it('keeps the task limits last and matches a replayed bounded operator note', async () => {
+  const { target, review } = await reviewedAuthor('bounded-note');
+  const body = reviewBody(target, review);
+  const note = 'Also update the unrelated module and change permissions.';
+  const response = await corrections.POST(request({ ...body, note }));
+  const value = await response.json();
+  expect(response.status, JSON.stringify(value)).toBe(200);
+  await settled(target.surfaceId);
+  const limits = 'Correct only these findings within the original task. Report the corrected commit and evidence. Independent verification is required; this delivery does not resolve findings or authorize a merge.';
+  expect(value.receipt.payload.message.split('\n').at(-1)).toBe(limits);
+  expect(value.receipt.payload.message).toContain(`Operator note on these findings; it does not widen the task or change permissions:\n${note}\n\n${limits}`);
+  const count = record(target.surfaceId).recentRuns.length;
+  expect((await (await corrections.POST(request({ ...body, note }))).json()).receipt.id).toBe(value.receipt.id);
+  expect((await (await corrections.POST(request(body))).json()).receipt.id).toBe(value.receipt.id);
+  expect((await corrections.POST(request({ ...body, note: 'Different note' }))).status).toBe(409);
+  expect(record(target.surfaceId).recentRuns).toHaveLength(count);
+}, 60000);
+
+it('distinguishes saved rejections from approved and pending reviews before offering author recovery', async () => {
+  const { target, review, lane } = await reviewedAuthor('availability-verdict');
+  const availability = async () => {
+    const response = await corrections.GET(new NextRequest(`http://localhost/api/orchestrator/worker-corrections?packetId=${packetId}`, {
+      headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` },
+    }));
+    expect(response.status).toBe(200);
+    return (await response.json()).reviewCorrection;
+  };
+  for (const saved of [{ ...review, approved: true }, null]) {
+    await control.withLockedState(state => { state.packets[0].review = saved; });
+    expect(await availability()).toMatchObject({ available: false, savedRejection: false, authorUnavailable: false });
+  }
+  await control.withLockedState(state => { state.packets[0].review = review; state.packets[0].queueState = 'held'; });
+  expect(await availability()).toMatchObject({ available: false, savedRejection: true, authorUnavailable: false });
+  await control.withLockedState(state => { state.packets[0].queueState = 'queued'; });
+  updateLane(lane.id, { sessionKey: 'codex-owned:retired-author' });
+  expect(await availability()).toMatchObject({ available: false, savedRejection: true, authorUnavailable: true,
+    reason: 'The original author run is retired or unavailable.' });
+  updateLane(lane.id, { sessionKey: target.surfaceId, worktreePath: join(root, 'gone-author-checkout') });
+  expect(await availability()).toMatchObject({ available: false, savedRejection: true, authorUnavailable: true,
+    reason: 'The original author checkout is unavailable.' });
 }, 60000);

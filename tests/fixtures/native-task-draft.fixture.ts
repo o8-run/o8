@@ -1,14 +1,41 @@
 // Persisted fixture contracts and reservations only; never dispatches a provider.
 import { randomUUID, sign } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { allowAccountRefresh, holdAccountRefresh, publishReadyAccountState, withAccountStateLease } from '@/lib/auth/account-state';
+import { invalidateAccountState, readAccountState, allowAccountRefresh, holdAccountRefresh, publishReadyAccountState, withAccountStateLease } from '@/lib/auth/account-state';
 import { bumpSignInEpoch, clearActiveIdentity, readSignInEpoch, writeActiveIdentity } from '@/lib/github-broker/managed';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { contractHash, findTaskDraft, taskDraftKey, withTaskDraftLock, writeTaskDraft, type TaskDraftRecord } from '@/lib/mcp/task-draft-store';
 import { readTaskExecution, reserveTaskExecution } from '@/lib/mcp/task-execution-store';
 
 async function main() {
+  const backup = join(getDataDir(), 'native-task-account-before.json');
+  const files = ['active-identity', 'github-signin-epoch', 'entitlement.json', 'auth-signed-out-at'];
+  if (process.argv[2] === 'restore-account') {
+    if (!existsSync(backup)) return;
+    const saved = JSON.parse(readFileSync(backup, 'utf8'));
+    await withAccountStateLease(() => {
+      invalidateAccountState();
+      for (const name of files) {
+        const path = join(getDataDir(), name);
+        if (saved.files[name] === null) rmSync(path, { force: true });
+        else writeFileSync(path, Buffer.from(saved.files[name], 'base64'));
+      }
+      if (saved.blocked) holdAccountRefresh(); else allowAccountRefresh();
+      if (saved.state?.status === 'ready' && saved.state.accountId && saved.state.epoch) {
+        const license = JSON.parse(readFileSync(join(getDataDir(), 'entitlement.json'), 'utf8')).licenseKey;
+        publishReadyAccountState(saved.state.accountId, saved.state.epoch, license);
+      }
+    });
+    for (const name of files) {
+      const path = join(getDataDir(), name);
+      const restored = existsSync(path) ? readFileSync(path).toString('base64') : null;
+      if (restored !== saved.files[name]) throw new Error('Fixture account restoration did not preserve its original files.');
+    }
+    rmSync(backup);
+    console.log(JSON.stringify({ restored: true }));
+    return;
+  }
   if (process.argv[2] === 'sign-out') {
     await withAccountStateLease(() => {
       clearActiveIdentity();
@@ -21,6 +48,11 @@ async function main() {
     console.log(JSON.stringify(readTaskExecution(findTaskDraft(process.argv[3]!))));
     return;
   }
+  writeFileSync(backup, JSON.stringify({ state: readAccountState(), blocked: readAccountState()?.signedOut === true,
+    files: Object.fromEntries(files.map(name => {
+      const path = join(getDataDir(), name);
+      return [name, existsSync(path) ? readFileSync(path).toString('base64') : null];
+    })) }));
   const accountId = 'fixture-native-task-account';
   await withAccountStateLease(() => {
     writeActiveIdentity(accountId);

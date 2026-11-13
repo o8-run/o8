@@ -34,8 +34,12 @@ it.skipIf(process.platform === 'win32')('serves packet rerun, reset and spawn na
     const cases: Array<[keyof typeof handlers, Record<string, unknown>]> = [
       ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing', idempotencyKey: 'fixture-reset' }],
       ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing' }],
+      ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing', clearWorktree: false, reason: 'operator retry', idempotencyKey: 'fixture-native-retry' }],
+      ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing', clearWorktree: true, reason: 'operator reset', idempotencyKey: 'fixture-native-clear' }],
+      ['/api/orchestrator/reset-packet', { packetId: 'fixture-missing', clearWorktree: true, reason: 'operator reset' }],
       ['/api/orchestrator/rerun-with-feedback', { packetId: 'fixture-missing', feedback: 'Fixture feedback', idempotencyKey: 'fixture-rerun' }],
       ['/api/orchestrator/rerun-with-feedback', { packetId: 'fixture-missing', feedback: 'Fixture feedback' }],
+      ['/api/orchestrator/rerun-with-feedback', { packetId: 'fixture-missing', feedback: '🙂'.repeat(2001), idempotencyKey: 'fixture-native-feedback-limit' }],
       ['/api/orchestrator/spawn-prompt', { repoPath: directory, task: 'Fixture task' }],
       ['/api/orchestrator/spawn-prompt', { repoPath: directory, task: 'Fixture task', clientMutationId: 'fixture-spawn', count: 0 }],
     ];
@@ -54,8 +58,9 @@ it.skipIf(process.platform === 'win32')('serves packet rerun, reset and spawn na
     // nothing; the TS side is not called, so this test never spawns a worker.
     const spawn = await fetch(`${origin}/api/orchestrator/spawn-prompt`, { method: 'POST', headers: operator,
       body: JSON.stringify({ repoPath: directory, task: 'Fixture task', clientMutationId: 'fixture-spawn-native', runtime: 'codex' }) });
-    expect(spawn.status).toBe(400);
-    expect((await spawn.json()).error.code).toBe('dispatch_cli_auth_unavailable');
+    const spawnBody = await spawn.json();
+    expect(spawn.status, JSON.stringify({ spawnBody, fixture: server.diagnostics() })).toBe(400);
+    expect(spawnBody.error.code).toBe('dispatch_cli_auth_unavailable');
   } finally {
     await server?.stop();
     for (const name of Object.keys(process.env)) if (!(name in saved)) delete process.env[name];
