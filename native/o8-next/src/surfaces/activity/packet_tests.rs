@@ -68,13 +68,15 @@ fn activity_packet_card_review_files_and_diff_controls(cx: &mut TestAppContext) 
         "activity-packet-tab-files",
         "activity-packet-tab-changes",
         "activity-packet-review",
-        "request-changes",
     ] {
         assert!(
             visual.debug_bounds(id).is_some(),
             "Missing packet review control {id}"
         );
     }
+    // This fixture has no saved review; recovery must not be offered yet.
+    assert!(visual.debug_bounds("request-changes-open").is_none());
+    assert!(visual.debug_bounds("request-changes").is_none());
 }
 
 use super::tests::activity_view;
