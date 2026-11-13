@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertLinuxArtifactChannels } from './lib/linux-build-channel.mjs';
 import { artifactChannel } from './lib/build-channel.mjs';
+import { withReleaseFollowLine } from './lib/release-follow-line.mjs';
 import {
   verifyUniversalMacUpdaterArchive,
   verifyMacosDmgMatchesApp,
@@ -199,7 +200,7 @@ function main() {
           '--title',
           `o8 v${version}`,
           '--notes',
-          'Beta candidate.',
+          withReleaseFollowLine('Beta candidate.'),
         ],
         { stdio: 'pipe' },
       );

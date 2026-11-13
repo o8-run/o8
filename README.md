@@ -7,13 +7,13 @@
 
 # o8
 
-[![CI](https://github.com/o8-run/o8/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/o8-run/o8/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/o8-run/o8)](https://github.com/o8-run/o8/releases)
+[![CI](https://github.com/o8-run/o8/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/o8-run/o8/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/o8-run/o8)](https://github.com/o8-run/o8/releases) [![Follow @o8dotrun on X](https://img.shields.io/badge/follow-%40o8dotrun-000000?logo=x&logoColor=white)](https://x.com/o8dotrun)
 
 **Your agents write the code. o8 reviews it, sends it back until it's right, and merges it.**
 
 o8 is a free, open-source review and merge layer for coding agents. Write code wherever you like: T3 Code, Codex, Claude Code, Cursor, or your own editor. o8 takes the work in, and an independent agent, ideally a different model, reviews the actual diff. o8 sends the findings back to the author, re-reviews the fix, and merges the approved commit with a receipt. It runs on one machine, usually your biggest, and serves every tool and machine you connect.
 
-[**Download for macOS**](https://o8.run/download) · [Linux](#linux) · [Build from source](#from-source)
+[**Download for macOS**](https://o8.run/download) · [Linux](#linux) · [Build from source](#from-source) · [Follow @o8dotrun for updates](https://x.com/o8dotrun)
 
 ![A session reviews the working tree, gives its verdict, commits when asked, and shows the log](./assets/review-and-commit.gif)
 
@@ -135,7 +135,7 @@ o8 aims to be the best substrate for reviewing and merging agent work. Any agent
 
 Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and the issues labeled [`claimable`](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3Aclaimable) or [`help wanted`](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). UI changes read [`docs/design`](./docs/design/DESIGN.md) first. The full documentation index is [`docs/README.md`](./docs/README.md); the detailed agent and `o8` CLI reference is [`AGENT_REFERENCE.md`](./AGENT_REFERENCE.md).
 
-Community: [Discord](https://discord.gg/TFK2x9A5WS) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
+Follow [@o8dotrun](https://x.com/o8dotrun) on X for updates: release notes and dev clips post there first. Community: [Discord](https://discord.gg/TFK2x9A5WS) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
 
 ## License
 
