@@ -11,6 +11,7 @@ export interface MinimalMissionPacket {
 
 export interface MinimalMissionStatusShape {
   packets?: MinimalMissionPacket[];
+  leadsUnavailable?: boolean;
   leads?: Array<{ id: string; status: string; reason?: string | null;
     latestTurn?: { id: string; outcome?: { kind: string } | null } | null }>;
   currentWave?: number;
@@ -32,6 +33,7 @@ export function missionPacketSignature(packets: MinimalMissionPacket[] | undefin
 }
 
 export function findMissionAttention(status: MinimalMissionStatusShape, packetIdFilter: string | null) {
+  if (status.leadsUnavailable) return { terminalPacketId: null, leadsUnavailable: true };
   // Packet-scoped waits retain their own review/return semantics.
   const lead = !packetIdFilter && status.leads?.find(item =>
     ['unreported', 'completed', 'blocked', 'needs_approval', 'failed', 'stopped'].includes(item.status));

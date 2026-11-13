@@ -494,8 +494,12 @@ export async function dispatchMission(input: DispatchMissionInput) {
 
 function missionLeadFields(packets: Array<{ orchestratorThreadId?: string | null }>) {
   const threadIds = packets.flatMap(packet => packet.orchestratorThreadId ? [packet.orchestratorThreadId] : []);
-  const leads = readLeadStatuses({ threadIds }).leads;
-  return leads.length ? { leads } : {};
+  try {
+    const leads = readLeadStatuses({ threadIds }).leads;
+    return leads.length ? { leads } : {};
+  } catch {
+    return { leadsUnavailable: true };
+  }
 }
 
 export async function getMissionStatus(input: MissionStatusInput) {
