@@ -442,6 +442,24 @@ fn home_and_end_keep_their_grid_behavior_with_the_prompt_rail_focused(cx: &mut T
     cx.simulate_click(tick.center(), gpui::Modifiers::default());
     draw(cx);
     assert!(grid.read_with(cx, |g, _| g.panes[0].navigator.borrow().is_aligned()));
+    let before = grid.read_with(cx, |g, _| g.panes[0].list.logical_scroll_top());
+    for (key, title) in [("home", "Prompt 0"), ("end", "Prompt 2")] {
+        cx.simulate_keystrokes(key);
+        draw(cx);
+        grid.read_with(cx, |g, _| {
+            let offset = g.panes[0].list.logical_scroll_top();
+            assert!(g.panes[0].navigator.borrow().is_aligned());
+            assert_eq!((offset.item_ix, offset.offset_in_item), (before.item_ix, before.offset_in_item), "rail selection previews without scrolling");
+            assert_eq!(g.panes[0].navigator.borrow().cached_preview().unwrap().0.as_ref(), title);
+        });
+    }
+    cx.simulate_keystrokes("enter");
+    draw(cx);
+    grid.read_with(cx, |g, _| {
+        let index = g.panes[0].rows.iter().position(|r| r.borrow().row.id() == "grid-nav-p2").unwrap();
+        assert_eq!(g.panes[0].list.logical_scroll_top().item_ix, index);
+    });
+    grid.update_in(cx, |g, w, _| g.focus.focus(w));
     cx.simulate_keystrokes("home");
     draw(cx);
     grid.read_with(cx, |g, _| {

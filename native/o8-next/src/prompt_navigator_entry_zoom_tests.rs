@@ -109,11 +109,13 @@ fn zoomed_ticks_keep_hit_targets_preview_bounds_and_jumps(cx: &mut TestAppContex
         paint(cx);
         let tick = cx.debug_bounds("prompt-nav-tick-zoom-nav-p1").unwrap();
         let tolerance = cx.update(|w, _| px(1. / w.scale_factor() + 1e-3));
-        assert!((tick.size.height - px(12.)).abs() <= tolerance);
+        assert!((tick.size.height - px(12. / zoom.min(1.))).abs() <= tolerance);
+        assert!(f32::from(tick.size.height) * zoom >= 12. - f32::from(tolerance), "zoomed hit targets retain at least twelve screen points");
         assert!((tick.size.width - px(24.)).abs() <= tolerance);
         // Test-platform input uses screen points; GPUI converts it to the
         // same zoomed layout units used by the rail's canvas and hit testing.
-        let screen = tick.center().map(|v| v * zoom);
+        let hit = if zoom < 1. { point(tick.center().x, tick.bottom() - px(1.)) } else { tick.center() };
+        let screen = hit.map(|v| v * zoom);
         cx.simulate_mouse_move(screen, None, Modifiers::default());
         paint(cx);
         let card = cx
@@ -189,5 +191,67 @@ fn native_tab_traversal_previews_and_escape_does_not_reopen(cx: &mut TestAppCont
     assert!(
         cx.debug_bounds("prompt-nav-preview").is_none(),
         "retained focus does not reopen a dismissed preview"
+    );
+}
+fn install_chat(view: &Entity<Surface>, cx: &mut VisualTestContext, prefix: &str) {
+    view.update_in(cx, |s, w, cx| {
+        let mut saved = history(prefix, 3);
+        saved.session_key = format!("llm-chat:{prefix}");
+        let transcript = Transcript::new(saved);
+        let rows = transcript.rows.clone();
+        s.transcript = Some(transcript);
+        s.install_rows(rows, cx);
+        s.navigate(false, cx);
+        s.composer.read(cx).focus.focus(w);
+        cx.notify();
+    });
+    paint(cx);
+}
+
+#[gpui::test]
+fn composer_escape_closes_hover_preview_and_its_own_picker(cx: &mut TestAppContext) {
+    let client = Client::authenticated("http://127.0.0.1:1", None).unwrap();
+    let (view, cx) = cx.add_window_view(|w, cx| Surface::new(client, w, cx));
+    install_chat(&view, cx, "escape-composer");
+    let tick = cx
+        .debug_bounds("prompt-nav-tick-escape-composer-p0")
+        .unwrap();
+    cx.simulate_mouse_move(tick.center(), None, Modifiers::default());
+    paint(cx);
+    assert!(cx.debug_bounds("prompt-nav-preview").is_some());
+    view.update_in(cx, |s, w, cx| {
+        s.composer
+            .update(cx, |editor, _| editor.controls.open = Some("attach"));
+        s.composer.read(cx).focus.focus(w);
+    });
+    cx.simulate_keystrokes("escape");
+    paint(cx);
+    view.read_with(cx, |s, cx| {
+        assert!(
+            s.composer.read(cx).controls.open.is_none(),
+            "the composer's own Escape dismissal still runs"
+        );
+    });
+    assert!(
+        cx.debug_bounds("prompt-nav-preview").is_none(),
+        "Escape from the composer also dismisses the hovered preview"
+    );
+}
+
+#[gpui::test]
+fn thread_switch_returns_rail_focus_to_reading(cx: &mut TestAppContext) {
+    let client = Client::authenticated("http://127.0.0.1:1", None).unwrap();
+    let (view, cx) = cx.add_window_view(|w, cx| Surface::new(client, w, cx));
+    install_chat(&view, cx, "switch-focus");
+    view.update_in(cx, |s, w, _| {
+        assert!(s.navigator.borrow().focus(w));
+    });
+    paint(cx);
+    assert!(cx.update(|w, cx| view.read(cx).navigator.borrow().is_focused(w)));
+    view.update(cx, |s, cx| s.select("llm-chat:next-reading".into(), cx));
+    paint(cx);
+    assert!(
+        cx.update(|w, cx| view.read(cx).focus.is_focused(w)),
+        "switching threads transfers rail focus to the transcript before dropping its handle"
     );
 }
