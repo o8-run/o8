@@ -72,7 +72,7 @@ jobs:
           O8_PUBLISH_LINUX: ${{ inputs.publish_linux }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           UPDATER_SIGNATURE: ${{ inputs.updater_signature }}
-        run: node scripts/linux/prepare-release-attachment.mjs
+        run: node scripts/prepare-linux-release-attachment.mjs
       - name: Attach new assets without replacement or updater feed changes
         env:
           GH_TOKEN: ${{ github.token }}

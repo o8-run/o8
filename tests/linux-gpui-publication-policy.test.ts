@@ -14,9 +14,9 @@ it('requires a manual opt-in before granting release write access', () => {
 it('authenticates exact-tag GPUI bytes before an upload without replacement or feed writes', () => {
   const commands = workflow.jobs.attach.steps.filter((step: { run?: string }) => step.run)
     .map((step: { run: string }) => step.run).join('\n');
-  const verification = commands.indexOf('node scripts/linux/prepare-release-attachment.mjs');
+  const verification = commands.indexOf('node scripts/prepare-linux-release-attachment.mjs');
   const upload = commands.indexOf('gh release upload');
-  const prepare = workflow.jobs.attach.steps.find((step: { run?: string }) => step.run === 'node scripts/linux/prepare-release-attachment.mjs');
+  const prepare = workflow.jobs.attach.steps.find((step: { run?: string }) => step.run === 'node scripts/prepare-linux-release-attachment.mjs');
   expect(prepare.env.O8_PUBLISH_LINUX).toBe('${{ inputs.publish_linux }}');
   expect(commands).toContain('run.head_sha !== process.env.EXPECTED_SHA');
   expect(commands).toContain('run.path !== ".github/workflows/linux-downloads.yml"');

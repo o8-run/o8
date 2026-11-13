@@ -4,8 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertLinuxArtifactChannels } from '../lib/linux-build-channel.mjs';
-import { withLinuxPlatform } from '../lib/linux-appimage-signature.mjs';
+import { assertLinuxArtifactChannels } from './lib/linux-build-channel.mjs';
+import { withLinuxPlatform } from './lib/linux-appimage-signature.mjs';
 
 function main() {
   if (process.env.O8_PUBLISH_LINUX !== 'true') {

@@ -205,7 +205,7 @@ describe('signed Linux build channel through the operator CLI', () => {
 });
 
 describe('GPUI release attachment preparation through the real CLI', () => {
-  const attachment = pathToFileURL(join(process.cwd(), 'scripts/linux/prepare-release-attachment.mjs')).href;
+  const attachment = pathToFileURL(join(process.cwd(), 'scripts/prepare-linux-release-attachment.mjs')).href;
   function prepare(f: ReturnType<typeof fixture>, env: Record<string, string> = {}) {
     mkdirSync(join(f.root, 'packages'));
     copyFileSync(f.artifact, join(f.root, 'packages/candidate.AppImage'));
