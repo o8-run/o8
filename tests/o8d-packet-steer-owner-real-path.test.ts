@@ -335,3 +335,40 @@ it.each(['timeout', 'malformed'])('required WS owner returns a structured refusa
     rmSync(data, { recursive: true, force: true });
   }
 }, 60000);
+
+it('inspects saved-review availability in the runtime owner instead of stale caller state', async () => {
+  const f = await fixture();
+  lanes.updateLane(f.lane.id, { status: 'reviewing' });
+  await control.withControlPlaneLock(() => {
+    const state = control.readOrchestratorControlPlaneState();
+    state.packets[0].status = 'awaiting_review';
+    state.packets[0].launchContext = { source: 'desktop', presentation: 'tab', repoContext: 'registered', workMode: 'edit' };
+    control.writeOrchestratorControlPlaneState(state);
+  });
+  const head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const reviewRoute = await import('@/app/api/orchestrator/review/route');
+  const response = await reviewRoute.POST(request('/api/orchestrator/review', { packetId: f.id, approved: false,
+    reviewedHeadSha: head, clientMutationId: `availability-${f.id}`,
+    findings: [{ file: 'README.md', severity: 'bug', description: 'Preserve the request.', status: 'deferred' }] }));
+  expect(response.status, await response.clone().text()).toBe(200);
+  const { inspectReviewAuthorCorrection } = await import('@/lib/orchestrator/review-author-correction');
+  // Only the caller's module is stale. The separate WS owner keeps the durable state.
+  const stale = vi.spyOn(control, 'readOrchestratorControlPlaneState').mockImplementation(() => {
+    throw new Error('Caller state is stale; use the runtime owner.');
+  });
+  try {
+    expect(await inspectReviewAuthorCorrection(f.id)).toMatchObject({ available: true, savedRejection: true,
+      authorUnavailable: false, review: { packetId: f.id, surfaceId: f.surfaceId, runId: 'run-original' } });
+    const native = await fetch(`${origin}/api/orchestrator/worker-corrections?packetId=${f.id}`, {
+      headers: { authorization: `Bearer ${server.token}` },
+    });
+    expect(native.status).toBe(200);
+    expect((await native.json()).reviewCorrection).toMatchObject({ available: true, savedRejection: true,
+      review: { packetId: f.id, surfaceId: f.surfaceId, runId: 'run-original' } });
+    expect(stale).not.toHaveBeenCalled();
+  } finally { stale.mockRestore(); }
+  // The fixture creates this log only on runtime admission, never on a read.
+  const admitted = existsSync(join(server.directory, 'steer-runtime.json'))
+    ? read().delivered.filter(row => row.surfaceId === f.surfaceId) : [];
+  expect(admitted).toHaveLength(0);
+}, 60000);

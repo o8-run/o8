@@ -570,7 +570,8 @@ fn inbox_cards_counts_statuses_and_approval_match_desktop_routes(cx: &mut TestAp
             _ => panic!("Inbox"),
         }
     });
-    assert_eq!(after_counts, vec![1, 2, 2, 4, 3]);
+    // Audit events use their own model; the sixth view has no ordinary cards.
+    assert_eq!(after_counts, vec![1, 2, 2, 4, 3, 0]);
     let uncertain = id("Unconfirmed continuation");
     let before_uncertain = record(&uncertain).clone();
     click(cx, &format!("inbox-approve-{uncertain}"));
@@ -743,7 +744,9 @@ fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestApp
     cx.simulate_keystrokes("i n b o x enter");
     cx.run_until_parked();
     draw(cx);
-    for (lane, _) in crate::inbox::VIEWS {
+    // Audit uses distinct selectors; approval_audit_empty_errors_and_long_filter_labels_are_readable
+    // verifies its empty, error, retry and filtered-empty states without claiming a clean Inbox.
+    for (lane, _) in crate::inbox::VIEWS.into_iter().take(5) {
         click(cx, &format!("inbox-view-{lane}"));
         assert!(bounds(cx, "inbox-empty").is_some());
         assert!(bounds(cx, &format!("inbox-count-{lane}-0")).is_some());

@@ -118,7 +118,28 @@ export async function installActivityFixture(repo: string) {
   const stop = await import('../../../src/app/api/orchestrator/stop-mission/route');
   const discard = await import('../../../src/app/api/orchestrator/discard-packet/route');
   const laneDiff = await import('../../../src/app/api/lanes/[id]/diff/route');
+  // Lifecycle controls are authored transport responses: this fixture never
+  // kills a worker or starts a provider turn. Production-route tests own those seams.
+  const recoveries: Array<{ path: string; body: Record<string, unknown> }> = [];
+  let recoveryPolling = false;
+  const recovery = async (request: NextRequest, startOver: boolean) => {
+    const body = await request.json() as Record<string, unknown>;
+    const path = new URL(request.url).pathname;
+    recoveries.push({ path, body });
+    if (mode === 'recovery-slow') await new Promise(resolve => setTimeout(resolve, 6000));
+    if (mode === 'recovery-refused') return Response.json({ ok: false, error: { code: 'fixture_refused', message: 'Fixture recovery refused. Your input is retained.' } }, { status: 409 });
+    if (mode === 'recovery-unknown') return Response.json({ ok: false, error: { code: 'outcome_unknown', message: 'Fixture request is unsettled. Inspect the original receipt.' } }, { status: 409 });
+    if (mode === 'recovery-poll' && !recoveryPolling) {
+      recoveryPolling = true;
+      return Response.json({ ok: true, result: { inProgress: true, status: 'in_progress' } }, { status: 202 });
+    }
+    return Response.json({ ok: true, result: { packetId: body.packetId,
+      ...(startOver ? { dispatched: true } : { reset: true, salvaged: body.clearWorktree === false }),
+      note: startOver ? 'Fixture new attempt queued with feedback.' : body.clearWorktree ? 'Fixture packet reset and held.' : 'Fixture committed work retained for review.' } });
+  };
   const routes: Record<string, (request: NextRequest) => Promise<Response>> = {
+    'POST /api/orchestrator/reset-packet': request => recovery(request, false),
+    'POST /api/orchestrator/rerun-with-feedback': request => recovery(request, true),
     [`GET /api/panel/commits/${localHash}`]: request => commitDetail.GET(request, { params: Promise.resolve({ hash: localHash }) }),
     [`GET /api/lanes/${laneId}`]: async () => { packetReads.push('lane'); return Response.json({ lane: { worktreePath: repo, repoPath: repo } }); },
     [`GET /api/lanes/${laneId}/diff`]: async request => {
@@ -155,8 +176,12 @@ export async function installActivityFixture(repo: string) {
       slowed = true;
       return Response.json({ ok: true, result: { inProgress: true, status: 'in_progress' } }, { status: 202 });
     },
-    // Real lane verbs drive git and worker processes; the fixture records the
-    // packet card's command and answers like the lanes route does.
+    // Real merges and lane verbs drive git and worker processes. Record the
+    // packet card's command and return the corresponding production envelope.
+    'POST /api/orchestrator/merge': async request => {
+      mutations.push(await request.text());
+      return Response.json({ ok: true, result: { merged: false, note: 'Merge conflict in fixture.ts.' } });
+    },
     'POST /api/lanes': async request => {
       const body = await request.json() as { verb?: string };
       mutations.push(JSON.stringify(body));
@@ -182,7 +207,7 @@ export async function installActivityFixture(repo: string) {
         const { invalidateGitHubSync } = await import('../../../src/lib/github-broker/store');
         invalidateGitHubSync('example/activity', 'issues'); invalidateGitHubSync('example/activity', 'pull_requests');
       }
-      return Response.json({ mode, calls, repo, laneId, mutations, closes, packetReads, reviews, identityRepos: identityRepos.map(entry => ({
+      return Response.json({ mode, calls, repo, laneId, mutations, closes, packetReads, reviews, recoveries, identityRepos: identityRepos.map(entry => ({
         id: entry.id, localPath: entry.localPath, remoteUrl: entry.remoteUrl,
         sha: execFileSync('git', ['-C', entry.localPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
         commonDir: execFileSync('git', ['-C', entry.localPath, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim(),

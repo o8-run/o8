@@ -15,6 +15,9 @@ function evaluation(
 ): HarnessEvaluationResult {
   return {
     schema: 'o8/evaluate-diff/v1',
+    reviewMode: 'read_only',
+    verdictLabel: `${verdict}, not run`,
+    runEvidence: { status: 'not_run', reason: 'Fixture only.' },
     verdict,
     summary: detail,
     findings: hasFinding ? [{

@@ -18,6 +18,10 @@ use std::{
 
 #[path = "diff_ui_map.rs"]
 mod map;
+#[path = "diff_ui_init.rs"]
+mod init;
+#[path = "diff_missing_ui.rs"]
+mod missing;
 #[path = "diff_ui_scope.rs"]
 mod scope;
 #[path = "diff_ui_stack.rs"]
@@ -25,6 +29,9 @@ mod stack;
 pub(crate) use scope::Scope;
 
 pub(crate) struct DiffSurface {
+    request_changes: Option<gpui::Entity<crate::request_changes::RequestChanges>>,
+    _request_changes_observer: Option<gpui::Subscription>,
+    discard_allowed: bool,
     client: Client,
     pub(crate) map: crate::change_map::ChangeMap,
     pub(crate) target: Target,
@@ -36,6 +43,9 @@ pub(crate) struct DiffSurface {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) failed: bool,
     busy: bool,
+    missing: Option<missing::State>,
+    discarded_lanes: BTreeSet<String>,
+    lane_context: Option<String>,
     generation: u64,
     pending: Option<Value>,
     state: Value,
@@ -84,54 +94,16 @@ pub(crate) fn notice(target: &Target, document: &Document, label: String) -> Str
 }
 
 impl DiffSurface {
-    pub(crate) fn new(
-        client: Client,
-        target: Target,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let focus = cx.focus_handle();
-        focus.focus(window);
-        let mut surface = Self {
-            client,
-            map: Default::default(),
-            target,
-            document: Rc::new(Document::default()),
-            selected: 0,
-            split: false,
-            ready: false,
-            failed: false,
-            busy: false,
-            generation: 0,
-            pending: None,
-            state: Value::Null,
-            notice: String::new(),
-            focus,
-            scroll: UniformListScrollHandle::new(),
-            painted: Rc::new(RefCell::new(BTreeSet::new())),
-            stack: Rc::new(vec![]),
-            chosen: HashMap::new(),
-            limit_note: None,
-            scope: Scope::All,
-            scope_paths: None,
-            scope_error: None,
-            scope_generation: 0,
-            drawer: None,
-            width: px(0.),
-            stack_scroll: gpui::ScrollHandle::new(),
-            stack_target: None,
-        };
-        surface.load(cx);
-        surface
-    }
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
         if self.busy {
             return;
         }
+        if let Some(control) = &self.request_changes { control.update(cx, |control, cx| control.refresh(cx)); }
         self.generation += 1;
         let generation = self.generation;
         self.ready = false;
         self.failed = false;
+        self.missing = None;
         self.pending = None;
         self.notice = "Reading diff…".into();
         self.map = crate::change_map::ChangeMap {
@@ -143,9 +115,10 @@ impl DiffSurface {
         }
         let client = self.client.clone();
         let target = self.target.clone();
+        let lane = self.lane_context.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { target.read(&client) });
+            .spawn(async move { target.read_in_lane(&client, lane.as_deref()) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -177,7 +150,11 @@ impl DiffSurface {
                         this.notice = notice(&this.target, &this.document, this.state_label());
                     }
                     Err(error) => {
-                        this.notice = error;
+                        this.notice = error.message;
+                        this.missing = error.missing.map(|checkout| {
+                            let discarded = this.discarded_lanes.contains(&checkout.lane_id);
+                            missing::State::new(checkout).with_discarded(discarded)
+                        });
                         this.failed = true;
                         this.map.error =
                             Some("Change map unavailable until the diff can be read.".into());
@@ -379,6 +356,12 @@ fn cell(line: Option<&Line>, before: bool) -> gpui::Div {
 }
 impl Render for DiffSurface {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let saved_rejection = self.state["orchestratorReview"]["verdict"] == "rejected";
+        let request_trigger = self
+            .request_changes
+            .as_ref()
+            .filter(|control| self.missing.is_none() && saved_rejection && control.read(cx).visible())
+            .map(|control| control.update(cx, |control, cx| control.trigger(cx)));
         let doc = self.document.clone();
         let painted = self.painted.clone();
         let selected = self.selected;
@@ -492,7 +475,9 @@ impl Render for DiffSurface {
             .track_scroll(self.scroll.clone())
             .size_full(),
         );
-        let body = if stacked {
+        let body = if self.missing.is_some() {
+            self.missing_notice().into_any_element()
+        } else if stacked {
             self.stack_view(files.into_any_element(), cx)
         } else {
             div()
@@ -513,7 +498,12 @@ impl Render for DiffSurface {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.5))
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.cancel_missing(event, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
+                if this.request_changes.as_ref().is_some_and(|view| view.read(cx).editing(window, cx)) { return; }
                 match event.keystroke.key.as_str() {
                     key @ ("home" | "end") if this.stacked() => {
                         let shown = this.shown();
@@ -635,11 +625,13 @@ impl Render for DiffSurface {
                             button("diff-approve", "Approve", false)
                                 .on_click(cx.listener(|s, _, _, cx| s.decide(true, cx))),
                         )
+                        .when_some(request_trigger, |bar, trigger| bar.child(trigger))
                         .child(
                             button("diff-reject", "Reject", false)
                                 .on_click(cx.listener(|s, _, _, cx| s.decide(false, cx))),
                         )
                     })
+                    .children(self.missing_actions(cx))
                     .when(self.pending.is_some() && !self.busy, |bar| {
                         bar.child(
                             button("diff-retry", "Retry decision", false)
@@ -647,30 +639,23 @@ impl Render for DiffSurface {
                         )
                     }),
             )
-            .child(
-                div()
-                    .px(px(16.))
-                    .py(px(8.))
-                    .text_size(px(11.))
-                    .text_color(theme().text_muted)
-                    .child(match &self.limit_note {
-                        Some(note) => format!("{} · {note}", self.notice),
-                        None => self.notice.clone(),
-                    })
-                    .when_some(
-                        stacked.then(|| self.scope_stale()).flatten(),
-                        |row, stale| {
-                            row.child(
-                                div()
-                                    .debug_selector(|| "diff-scope-stale".into())
-                                    .text_color(theme().danger)
-                                    .child(stale),
-                            )
-                        },
-                    ),
+            .when_some(
+                self.request_changes
+                    .clone()
+                    .filter(|control| self.missing.is_none() && saved_rejection && control.read(cx).details_visible()),
+                |view, control| {
+                    view.child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .px(px(16.))
+                            .py(px(6.))
+                            .child(control),
+                    )
+                },
             )
             .when(
-                matches!(
+                self.missing.is_none() && matches!(
                     &self.target,
                     Target::Packet(_) | Target::Worktree { file: None, .. }
                 ),
@@ -685,6 +670,30 @@ impl Render for DiffSurface {
                     )
                 },
             )
+            .when(self.missing.is_none(), |surface| {
+                surface.child(
+                    div()
+                        .px(px(16.))
+                        .py(px(8.))
+                        .text_size(px(11.))
+                        .text_color(theme().text_muted)
+                        .child(match &self.limit_note {
+                            Some(note) => format!("{} · {note}", self.notice),
+                            None => self.notice.clone(),
+                        })
+                        .when_some(
+                            stacked.then(|| self.scope_stale()).flatten(),
+                            |row, stale| {
+                                row.child(
+                                    div()
+                                        .debug_selector(|| "diff-scope-stale".into())
+                                        .text_color(theme().danger)
+                                        .child(stale),
+                                )
+                            },
+                        ),
+                )
+            })
             .child(body)
     }
 }
@@ -787,3 +796,11 @@ pub fn try_launch(args: &[String]) -> Result<bool, String> {
     launch(client, target, offscreen);
     Ok(true)
 }
+
+#[cfg(test)]
+#[path = "diff_missing_tests.rs"]
+mod missing_tests;
+
+#[cfg(test)]
+#[path = "diff_request_changes_tests.rs"]
+mod request_changes_render_tests;

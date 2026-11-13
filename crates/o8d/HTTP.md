@@ -74,11 +74,12 @@ fetcher select routes from that same registry:
 | Setup | GET/POST setup config; GET/POST chat-history; existing defaults and repository requests | Existing first-run configuration, selected coding tools and saved conversation creation. |
 | Projects | GET projects and panel projects; POST projects, repos and active project; PATCH/DELETE project and member routes | Project/repository ledgers; IDs, canonical workspace paths and original mutation bodies. |
 | Issues | GET repos, issues and issue number; POST create and enhance | Repository selection, issue pages/details, creation/enhancement request and response. |
+| Held plugin tasks | GET plugins/task-drafts; POST plugins/task-drafts/control | Existing local operator, account/epoch, saved-contract and single-attempt admission. Safety stop retains its signed-out behavior. |
 | Inbox | GET supervisor-inbox and approvals; POST approvals | Existing inbox projection and approval ID/action decision. |
 | Brain | POST cortex/ask | Question/conversation/workspace body; original SSE event stream or validation refusal. |
 | Customize | GET inventory, directives, MCP servers and prompt library; GET/POST/PATCH/DELETE prompt entries | Existing inventories and saved-prompt revision checks; no new configuration writes. |
-| Diff | GET review-state, lane diff and worktree diff; POST review | Existing packet/workspace query and decision receipt. |
-| Activity | GET commits, CI/list/detail, PR details, issues and state; PATCH state; POST stop-mission | Existing activity projections and mission mutation receipts. |
+| Diff | GET review-state, lane diff, worktree diff and worker-corrections; POST review, worker-corrections and discard-orphaned | Existing packet/workspace query, saved-review author availability, decision and original-author delivery receipts. |
+| Activity | GET commits, CI/list/detail, PR details, issues and state; PATCH state; POST stop-mission, orchestrator/merge, reset-packet and rerun-with-feedback | Canonical packet merge gates, prerequisite ordering and cleanup; recovery receipts retain exact-body replay for live operations. Quarantined outcome_unknown errors are terminal. |
 | Pull Requests | GET PR list/detail, GitHub status and merge-preview; POST PR detail | Existing pagination, review/merge gates and action receipts. |
 | Terminal | GET mobile/terminal-sessions; existing WebSocket transport | Existing terminal picker inventory and live PTY transport. |
 | Palette | Local commands and workspace navigation | Reuses the selected surface's transport. |
@@ -360,3 +361,10 @@ The existing GET projections and unsupported-method refusals remain available.
 `tests/o8d-cortex-writes-real-path.test.ts` stops the fixture Next listener,
 writes a directive, accepts and dismisses a proposal, checks their persisted
 files, and checks non-operator refusals through the public o8d socket.
+
+Approval audit reads use `GET /api/panel/approvals?status=all&auditLimit=50`.
+`auditLimit` is a positive safe integer bounding the newest audit events, grouped
+under their approvals. The response also includes `total`, the event count after
+existing project scope and visibility checks. Show more increases the requested
+prefix by 50; refreshing replaces that prefix. Reads without `auditLimit` retain
+the existing response. Authorization and project scope are unchanged.

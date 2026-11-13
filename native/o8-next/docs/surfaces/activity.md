@@ -28,6 +28,37 @@ lost-stop receipt replay. Existing [parity](../../evidence/activity/parity.md),
 under Activity's evidence directory. This extraction does not complete the
 missing parity items or change the installed app's opt-in behavior.
 
+## Request changes
+
+Packet verdicts and the packet diff expose Request changes through the shared
+native control in `src/request_changes.rs`. It inspects the saved rejection and
+exact author run through GET `/api/orchestrator/worker-corrections?packetId=...`,
+then posts that saved review and an optional note to the same existing route.
+The manual control and review loop share one correction identity and record.
+Availability is read-only; POST repeats the delivery checks under the packet lock.
+
+Unavailable authors leave the send control disabled with the reason inline and
+a pointer to Start over with feedback. No failure automatically retires a worker
+or removes its checkout. A transport retry preserves the exact review, run and
+note that may already have reached the author. An accepted delivery remains
+unresolved review evidence until independent verification.
+
+The classic banner's orchestrator-composer recovery prefill is deliberately not
+ported as a third control. Start over with feedback belongs to the reset controls.
+
+### Saved-rejection visibility and recovery
+
+Request changes appears only for a completed saved rejection. Approved and pending
+reviews show no author-correction control. Only a retired author or missing
+checkout gets the Start over with feedback pointer; policy refusals and read
+errors do not recommend discarding work.
+
+Availability and sending use the same runtime owner and existing worker-corrections
+route. After a failed send, Retry send keeps its exact review, run and note.
+Discard and re-check drops only that local retry body, retains the note and reads
+availability again. It does not discard the checkout or remove a durable receipt.
+An unavailable server keeps a fresh send disabled until that check succeeds.
+
 ## Extraction verification
 
 The real GPUI Hold/Release/Stop mission test failed before the discovered fixture
@@ -126,3 +157,25 @@ in [first-run evidence](../../evidence/activity/final-native-first.txt) and
 After rebasing onto #4696, Activity loads its request adapter through its own
 module using the shared transport helpers. Outside Activity's source, fixture,
 documentation and evidence files, the PR adds only one shell registration line.
+
+## Packet recovery controls
+
+Existing action rows on blocked, active or review lanes offer recovery controls;
+queued drafts and archived lanes do not. Retry appears for blocked, idle or
+recovering lanes. Reset (Stop and reset while running) and Start over with feedback
+use content-width secondary buttons in the same decision row. Retry posts `clearWorktree: false` to the
+existing reset route. Reset posts `clearWorktree: true` after a discard confirmation
+and leaves the packet held, as the server already does. Start over uses the
+existing rerun-with-feedback route and confirms that current work is discarded
+before queuing a fresh attempt. Feedback uses the route's 4000 UTF-16-unit limit.
+
+Cancel and Escape close an open recovery form without losing feedback.
+Failures keep the confirmation and feedback. In-flight requests disable recovery
+controls. An unresolved outcome keeps its exact mutation body and identity; Refresh
+reads that original receipt before another action can begin. Server notes remain
+inline so a held packet is not presented as a launched worker.
+
+The Activity fixture records lifecycle submissions and authors responses without
+killing workers or starting provider turns. Native tests cover each control,
+confirmation, input retention, duplicate submission and receipt replay. Production
+route parity and cleanup remain covered by the corresponding real-path suites.

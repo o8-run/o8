@@ -1,3 +1,4 @@
+import { pageApprovalAudit } from '@/lib/approvals/audit-page';
 import { isNativeApprovalContinuation, RUNTIME_APPROVAL_OPERATION } from '@/lib/approvals/runtime-owner';
 import { viewerJson } from '@/lib/viewers/response';
 import { NextRequest, NextResponse } from 'next/server';
@@ -92,6 +93,11 @@ export async function GET(request: NextRequest) {
   if (ownershipRefusal) {
     return viewerJson({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
+  const auditLimitParam = request.nextUrl.searchParams.get('auditLimit');
+  const auditLimit = auditLimitParam === null ? null : Number(auditLimitParam);
+  if (auditLimit !== null && (status !== 'all' || !Number.isSafeInteger(auditLimit) || auditLimit < 1)) {
+    return viewerJson({ ok: false, error: 'auditLimit requires status=all and a positive safe integer.' }, { status: 400 });
+  }
   const terminalAdapter = terminalSession !== null && sessionKey
     ? await readTerminalApprovalAdapter(sessionKey, terminalSession) : null;
   if (principal.role === 'worker' && terminalSession !== null
@@ -109,8 +115,11 @@ export async function GET(request: NextRequest) {
         ]
       : listApprovals({ status, sessionKey, projectId });
 
+  const page = auditLimit === null ? null : pageApprovalAudit(approvals, auditLimit);
+  const visible = page?.approvals ?? approvals;
   return viewerJson({
-    approvals: (isContextQuery || includeDiff) ? approvals : stripDiffPreviews(approvals),
+    approvals: (isContextQuery || includeDiff) ? visible : stripDiffPreviews(visible),
+    ...(page ? { total: page.total } : {}),
     ...(terminalSession !== null ? {
       terminalAdapter,
     } : {}),
@@ -521,7 +530,8 @@ export async function POST(request: NextRequest) {
         || result.reason === 'governance_changed_since_spoken_review'
         || result.reason === 'head_moved_since_review'
         || (Boolean(spokenReviewEvidence) && Boolean(result.expectedHeadSha));
-      if (spokenReviewDrift) {
+      const runPolicyRefusal = !result.ok && result.reason?.startsWith('review_run_') ? result.reason : null;
+      if (spokenReviewDrift || runPolicyRefusal) {
         const reopened = reopenApprovalAfterEvidenceDrift(
           approval.id,
           resolutionClaim.claimId!,
@@ -546,7 +556,7 @@ export async function POST(request: NextRequest) {
         return viewerJson({
           ok: false,
           error: result.note,
-          code: 'spoken_review_changed',
+          code: runPolicyRefusal ?? 'spoken_review_changed',
           approval: reopened,
         }, {
           status: 409,

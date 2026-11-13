@@ -1816,6 +1816,14 @@
       ]
     },
     {
+      "path": "tests/assigned-reviewer-submission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/attempt-learnings-respawn.test.ts",
       "reasons": [
         "child-process",
@@ -5760,7 +5768,8 @@
         "git-cli",
         "native-build",
         "process-signal",
-        "real-path"
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -7797,6 +7806,16 @@
       "path": "tests/review-ready-coalescer-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/review-run-evidence-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path",
+        "worktree-api"
       ]
     },
     {

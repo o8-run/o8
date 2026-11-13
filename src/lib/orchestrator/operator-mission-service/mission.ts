@@ -1,3 +1,4 @@
+import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { readLeadStatuses } from '@/lib/orchestrator/lead-status';
 import { hasForgottenPacketOutcome } from '@/lib/cortex/outcome-exclusion';
@@ -679,6 +680,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
           mergeModeNote: mergePolicy.note,
         } : null,
         review: packet.review ? {
+          ...reviewExecution(packet.review.approved, packet.review.reviewedHeadSha, packet.review.runEvidence),
           approved: packet.review.approved,
           findingsCount: packet.review.findings.length,
           summary: packet.review.summary,

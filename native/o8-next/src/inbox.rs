@@ -9,12 +9,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const VIEWS: [(&str, &str); 5] = [
+pub const VIEWS: [(&str, &str); 6] = [
     ("replies", "Needs reply"),
     ("contributions", "Contributions"),
     ("approvals", "Approvals"),
     ("agents", "Agent issues"),
     ("history", "History"),
+    ("audit", "Audit log"),
 ];
 fn text(value: &Value, field: &str) -> String {
     value[field].as_str().unwrap_or("").to_owned()
@@ -230,6 +231,8 @@ struct InboxResponse {
 #[derive(Deserialize)]
 struct ApprovalsResponse {
     approvals: Vec<Value>,
+    #[serde(default)]
+    total: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -255,7 +258,8 @@ pub struct Inbox {
     questions_at: Instant,
     questions_loading: bool,
     questions_generation: u64,
-    pub(crate) cards: [Vec<Card>; 5],
+    pub(crate) cards: [Vec<Card>; VIEWS.len()],
+    audit: approval_audit::Audit,
     pub(crate) loading: bool,
     pub(crate) loaded: bool,
     pub(crate) errors: [Option<String>; 4],
@@ -286,6 +290,7 @@ impl Inbox {
             questions_loading: false,
             questions_generation: 0,
             cards: Default::default(),
+            audit: approval_audit::Audit::new(cx),
             loading: false,
             loaded: false,
             errors: Default::default(),
@@ -305,12 +310,24 @@ impl Inbox {
         self.focus.focus(window);
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        if self.lane == approval_audit::LANE {
+            if self.audit.last_refresh.elapsed() >= Duration::from_secs(30) {
+                self.load_audit(cx);
+            }
+        }
         self.tick_questions(cx);
         if self.last_refresh.elapsed() >= Duration::from_secs(300) {
-            self.load(cx);
+            self.load_inbox(cx);
         }
     }
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
+        if self.lane == approval_audit::LANE {
+            self.load_audit(cx);
+            return;
+        }
+        self.load_inbox(cx);
+    }
+    fn load_inbox(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
         }
@@ -493,10 +510,12 @@ impl Inbox {
                 .filter(|i| !active(i))
                 .map(Card::incident)
                 .collect(),
+            vec![],
         ];
-        self.selected = self
-            .selected
-            .min(self.cards[self.lane].len().saturating_sub(1));
+        if self.lane != approval_audit::LANE {
+            self.selected = self.selected
+                .min(self.cards[self.lane].len().saturating_sub(1));
+        }
         self.reply_focus
             .retain(|id, _| self.cards.iter().flatten().any(|card| &card.id == id));
         for card in self
@@ -521,13 +540,20 @@ impl Inbox {
         }
     }
     pub(crate) fn select_lane(&mut self, lane: usize, cx: &mut Context<Self>) {
+        if lane >= VIEWS.len() {
+            return;
+        }
+        self.audit.menu = None;
         self.lane = lane;
+        if lane == approval_audit::LANE {
+            self.load_audit(cx);
+        }
         self.selected = 0;
         self.scroll.scroll_to_item(0);
         cx.notify();
     }
     pub(crate) fn scope(&mut self, cx: &mut Context<Self>) {
-        if self.lane == 2 || self.workspace.is_empty() {
+        if matches!(self.lane, 2 | approval_audit::LANE) || self.workspace.is_empty() {
             return;
         }
         self.all = !self.all;
@@ -540,7 +566,8 @@ impl Inbox {
         cx.notify();
     }
     pub(crate) fn can_resolve(&self, card: &Card) -> bool {
-        card.approval
+        self.lane != approval_audit::LANE
+            && card.approval
             && card.status == "pending"
             && !card.unsettled
             && self.busy.is_none()
@@ -591,6 +618,9 @@ impl Inbox {
         cx.notify();
     }
     pub(crate) fn respond(&mut self, card: &Card, cx: &mut Context<Self>) {
+        if self.lane == approval_audit::LANE {
+            return;
+        }
         let instruction = if card.approval {
             "Discuss this approval with the operator. Explain the proposed action and its impact. This draft does not approve or reject it; use the Inbox decision controls for that."
         } else {
@@ -668,3 +698,10 @@ fn github_url(value: &str) -> Option<String> {
 
 #[path = "inbox_questions.rs"]
 mod questions;
+
+#[cfg(test)]
+#[path = "approval_audit_port_tests.rs"]
+mod approval_audit_port_tests;
+
+#[path = "approval_audit.rs"]
+mod approval_audit;
