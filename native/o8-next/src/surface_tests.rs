@@ -122,6 +122,9 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
 #[path = "worker_tests.rs"]
 mod worker_tests;
 
+#[path = "subagents/transcript_parity_tests.rs"]
+mod subagent_transcript_parity_tests;
+
 #[path = "prompt_action_tests.rs"]
 mod prompt_action_tests;
 
