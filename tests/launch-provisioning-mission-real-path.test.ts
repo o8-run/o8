@@ -189,6 +189,82 @@ async function callerStatuses(packet: OrchestratorPacket) {
 }
 
 describe('launch provisioning through mission HTTP entry points', () => {
+  it.each(['busy', 'malformed'])('keeps failure settlement when install-cause lookup is %s', async failure => {
+    const packet = persistMission(`lookup-settlement-${failure}`);
+    const sqlite = getSqlite();
+    const prepare = sqlite.prepare.bind(sqlite);
+    let lookup: { mockRestore(): void } | undefined;
+    let intercepted = false;
+    const { WorktreeManager } = await import('@/lib/worktree/manager');
+    vi.mocked(WorktreeManager.prototype.create).mockImplementationOnce(async () => {
+      lookup = vi.spyOn(sqlite, 'prepare').mockImplementation(sql => {
+        if (sql.includes('SELECT payload_json FROM lane_events') && sql.includes('dependency_install')) {
+          intercepted = true;
+          if (failure === 'busy') throw new Error('fixture database busy');
+          const statement = prepare(sql);
+          vi.spyOn(statement, 'get').mockReturnValueOnce({ payload_json: '{' });
+          return statement;
+        }
+        return prepare(sql);
+      });
+      throw new Error('fixture first preparation cause');
+    });
+    try { await dispatch(packet); } finally { lookup?.mockRestore(); }
+    expect(intercepted).toBe(true);
+    const lane = registry.findLatestLaneByPacket(packet.id)!;
+    expect(lane).toMatchObject({ status: 'failed', outcomeNote: 'fixture first preparation cause' });
+    expect(sqlite.prepare('SELECT state FROM storage_admission_reservations WHERE owner_id = ? ORDER BY owner_generation DESC LIMIT 1').get(packet.id))
+      .toMatchObject({ state: 'released' });
+    expect(registry.getLaneEvents(lane.id, 200)).toContainEqual(expect.objectContaining({
+      verb: 'worktree_provision_failed', payload: expect.objectContaining({ cause: 'fixture first preparation cause', storageRelease: expect.objectContaining({ decision: 'released' }) }),
+    }));
+    expect(boundary.launch).not.toHaveBeenCalled();
+  });
+
+  it.each(['current', 'stored'])('redacts non-install preparation and cleanup diagnostics through task reads: %s', async mode => {
+    const packet = persistMission(`redacted-preparation-${mode}`);
+    const raw = 'clone https://fixture-user:fixture-pass@example.invalid/repo.git into /home/fixture-review/checkout';
+    const safe = 'clone https://fixture-user:[redacted]@example.invalid/repo.git into ~/checkout';
+    const { WorktreePreparationCleanupError } = await import('@/lib/worktree/preparation-failure');
+    const { WorktreeManager } = await import('@/lib/worktree/manager');
+    vi.mocked(WorktreeManager.prototype.create).mockRejectedValueOnce(new WorktreePreparationCleanupError(new Error(raw), new Error(`cleanup ${raw}`)));
+    await dispatch(packet);
+    const lane = registry.findLatestLaneByPacket(packet.id)!;
+    expect(lane.outcomeNote).toBe(safe);
+    const event = registry.getLaneEvents(lane.id, 200).findLast(e => e.verb === 'worktree_provision_failed')!;
+    expect(event.payload).toMatchObject({ cause: safe, cleanup: { status: 'needs_cleanup', reason: `cleanup ${safe}` } });
+    if (mode === 'stored') getSqlite().prepare('UPDATE lane_events SET payload_json = ? WHERE id = ?')
+      .run(JSON.stringify({ ...event.payload, cause: raw, cleanup: { status: 'needs_cleanup', reason: `cleanup ${raw}` } }), event.id);
+    const { GET } = await import('@/app/api/tasks/[taskId]/route');
+    const response = await GET(new NextRequest(`http://localhost/api/tasks/${packet.id}`, { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } }), { params: Promise.resolve({ taskId: packet.id }) });
+    expect(response.status).toBe(200);
+    const task = (await response.json()).task;
+    expect(task).toMatchObject({ failureReason: safe, cleanup: { status: 'needs_cleanup', reason: `cleanup ${safe}` } });
+    const { handleTaskList } = await import('@/lib/mcp/operator-handlers/task-list');
+    const listed = await handleTaskList({});
+    const compact = JSON.parse((listed.content[0] as { text: string }).text).tasks.find((item: { id: string }) => item.id === packet.id);
+    expect(compact).toMatchObject({ failureReason: safe, cleanup: { status: 'needs_cleanup', reason: `cleanup ${safe}` } });
+  });
+
+  it('uses the second attempt error after a prior install failure without a new admission start', async () => {
+    const packet = persistMission('reused-preparation-attempt');
+    const { WorktreeManager } = await import('@/lib/worktree/manager');
+    vi.mocked(WorktreeManager.prototype.create).mockImplementationOnce(async () => {
+      const lane = registry.findLatestLaneByPacket(packet.id)!;
+      registry.appendEvent(lane.id, 'worktree_provision_started', 'system', { packetId: packet.id });
+      registry.appendEvent(lane.id, 'worktree_preparation_timing', 'system', { packetId: packet.id, stage: 'dependency_install', phase: 'failed', cause: 'fixture previous install failure' });
+      registry.appendEvent(lane.id, 'worktree_provision_failed', 'system', { packetId: packet.id, code: 'packet_worktree_provision_failed', cause: 'fixture previous install failure' });
+      throw new Error('fixture second attempt admission failure');
+    });
+    await dispatch(packet);
+    const lane = registry.findLatestLaneByPacket(packet.id)!;
+    expect(lane).toMatchObject({ status: 'failed', outcomeNote: 'fixture second attempt admission failure' });
+    const { GET } = await import('@/app/api/tasks/[taskId]/route');
+    const response = await GET(new NextRequest(`http://localhost/api/tasks/${packet.id}`, { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } }), { params: Promise.resolve({ taskId: packet.id }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).task.failureReason).toBe('fixture second attempt admission failure');
+  });
+
   it.each(['success', 'install-failure'])('prepares a Codex packet checkout with server resources: %s', async outcome => {
     const { pathToFileURL } = await import('node:url');
     const { buildPiWriteHelper } = await import('./helpers/pi-write-helper');

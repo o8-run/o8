@@ -33,10 +33,10 @@ export function readLaneTerminalReason(lane: Lane | null | undefined): LaneTermi
       continue;
     }
     if (row.verb === 'worktree_provision_failed') {
-      const details = preparationFailureDetails(text(payload.cause) || text(payload.note) || 'Worktree preparation failed');
       const cleanup = payload.cleanup as PreparationCleanup | undefined;
-      return { code: text(payload.code) || 'packet_worktree_provision_failed', cause: details.cause,
-        ...(cleanup?.status === 'needs_cleanup' && typeof cleanup.reason === 'string' ? { cleanup: { status: 'needs_cleanup', reason: cleanup.reason } } : details.cleanup ? { cleanup: details.cleanup } : {}) };
+      const details = preparationFailureDetails(text(payload.cause) || text(payload.note) || 'Worktree preparation failed',
+        cleanup?.status === 'needs_cleanup' && typeof cleanup.reason === 'string' ? cleanup : undefined);
+      return { code: text(payload.code) || 'packet_worktree_provision_failed', ...details };
     }
     if (payload.runtimeOutcome !== 'failed'
       && (payload.classification === 'clean-exit' || (payload.exitCode === 0 && !payload.signal))) break;

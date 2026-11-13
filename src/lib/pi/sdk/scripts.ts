@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { dirname, basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,8 +22,12 @@ export function piSdkScriptPath(name: PiSdkScript, env: Record<string, string | 
 
 /** Shared native supervision/write binary, resolved from trusted server resources, never packet cwd. */
 export function nativeProcessHelperPath(env: Record<string, string | undefined> = process.env, moduleUrl = import.meta.url): string {
+  const executableFile = (file: string) => {
+    try { const info = lstatSync(file); return info.isFile() && (info.mode & 0o111) !== 0; }
+    catch { return false; }
+  };
   if (env.O8_PI_WRITE_BIN) {
-    if (!existsSync(env.O8_PI_WRITE_BIN)) throw new Error('Native process helper override is missing from this build');
+    if (!executableFile(env.O8_PI_WRITE_BIN)) throw new Error('Native process helper override is missing from this build');
     return env.O8_PI_WRITE_BIN;
   }
   const entry = dirname(fileURLToPath(moduleUrl));
@@ -37,15 +41,16 @@ export function nativeProcessHelperPath(env: Record<string, string | undefined> 
   // Packaged stdio tools may have no shell-injected helper environment.
   const contents = roots.find(directory => basename(directory) === 'Contents'
     && entry.startsWith(join(directory, 'Resources') + '/'));
-  const bundled = [join(entry, 'o8-pi-write'), ...(contents ? [join(contents, 'MacOS', 'o8-pi-write')] : [])];
-  const shipped = bundled.find(file => existsSync(file));
+  const bundled = env.O8_PACKAGED_APP === '1' || contents
+    ? [join(entry, 'o8-pi-write'), ...(contents ? [join(contents, 'MacOS', 'o8-pi-write')] : [])] : [];
+  const shipped = bundled.find(executableFile);
   if (shipped) return shipped;
   if (env.O8_PACKAGED_APP !== '1') for (const directory of roots) {
     let name: unknown;
     try { name = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')).name; } catch { continue; }
     if (name !== 'o8') continue;
     const file = join(directory, 'src-tauri', 'sidecars', 'pi-write', 'target', 'release', 'o8-pi-write');
-    if (existsSync(file)) return file;
+    if (executableFile(file)) return file;
     break;
   }
   throw new Error('Native process helper is missing from this build');

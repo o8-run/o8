@@ -35,16 +35,20 @@ export function packetWorktreeProvisionError(
   const laneId = request.existingLaneId!;
   const packetId = request.packetId!;
   const details = preparationFailureDetails(causeInput);
-  // Read the current attempt durably; cleanup progress can exceed the recent-event window.
-  const row = getSqlite().prepare(`SELECT payload_json FROM lane_events
-    WHERE lane_id = ? AND actor = 'system' AND verb = 'worktree_preparation_timing'
-      AND json_extract(payload_json, '$.packetId') = ?
-      AND json_extract(payload_json, '$.stage') = 'dependency_install'
-      AND rowid > (SELECT MAX(rowid) FROM lane_events WHERE lane_id = ?
-        AND actor = 'system' AND verb = 'worktree_provision_started')
-    ORDER BY rowid DESC LIMIT 1`).get(laneId, packetId, laneId) as { payload_json: string } | undefined;
-  const install = row ? JSON.parse(row.payload_json) as Record<string, unknown> : null;
-  const cause = install?.phase === 'failed' && typeof install.cause === 'string' ? install.cause : details.cause;
+  let cause = details.cause;
+  try {
+    // Failure also fences attempts that stop before admission or run as background setup.
+    // Read durably; cleanup progress can exceed the recent-event window.
+    const row = getSqlite().prepare(`SELECT payload_json FROM lane_events
+      WHERE lane_id = ? AND actor = 'system' AND verb = 'worktree_preparation_timing'
+        AND json_extract(payload_json, '$.packetId') = ?
+        AND json_extract(payload_json, '$.stage') = 'dependency_install'
+        AND rowid > COALESCE((SELECT MAX(rowid) FROM lane_events WHERE lane_id = ?
+          AND actor = 'system' AND verb IN ('worktree_provision_started', 'worktree_provision_failed')), 0)
+      ORDER BY rowid DESC LIMIT 1`).get(laneId, packetId, laneId) as { payload_json: string } | undefined;
+    const install = row ? JSON.parse(row.payload_json) as Record<string, unknown> : null;
+    if (install?.phase === 'failed' && typeof install.cause === 'string') cause = preparationFailureDetails(install.cause).cause;
+  } catch { /* Optional diagnostics must not prevent failure and storage settlement. */ }
   const lane = getLane(laneId);
   let storageRelease: PacketWorktreeProvisionStorageRelease = {
     decision: 'deferred',
