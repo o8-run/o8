@@ -107,7 +107,7 @@ export function releaseDownloadUrl(info: InstallInfo, version: string | null): s
   const bare = version?.trim().replace(/^v/, '') ?? '';
   if (!bare) return RELEASES_LATEST_URL;
   if (info.platform === 'linux' && packageArch(info.arch) === 'amd64') {
-    return `${RELEASES_BASE}/download/v${bare}/o8_${bare}_linux_amd64_preview.AppImage`;
+    return `${RELEASES_BASE}/download/v${bare}/o8-${bare}-x86_64.AppImage`;
   }
   return `${RELEASES_BASE}/tag/v${bare}`;
 }

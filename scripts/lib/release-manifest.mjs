@@ -10,9 +10,9 @@ function listFiles(directory, suffix) {
     .sort();
 }
 
-// Accept legacy local bundles and the catalog name. New public assets use
-// the same standard basename as the GPUI packager.
-const LINUX_APPIMAGE_NAME_PATTERN = /^(?:o8_(.+)_amd64|o8-(.+)-x86_64)\.AppImage$/;
+// Release inputs and public updater URLs use the GPUI packager basename.
+// Refuse legacy inputs rather than publishing an asset under a different URL.
+const LINUX_APPIMAGE_NAME_PATTERN = /^o8-(.+)-x86_64\.AppImage$/;
 
 export function publishedLinuxAssetName(version) {
   return `o8-${version}-x86_64.AppImage`;
@@ -33,10 +33,10 @@ function assertLinuxAppImageVersionMatches(artifactPath, version) {
   const match = name.match(LINUX_APPIMAGE_NAME_PATTERN);
   if (!match) {
     throw new Error(
-      `Linux AppImage release artifact "${name}" does not match the expected "o8_<version>_amd64.AppImage" naming pattern`,
+      `Linux AppImage release artifact "${name}" does not match the expected "o8-<version>-x86_64.AppImage" naming pattern`,
     );
   }
-  const appImageVersion = match[1] ?? match[2];
+  const [, appImageVersion] = match;
   if (appImageVersion !== version) {
     throw new Error(
       `Linux AppImage version "${appImageVersion}" (from "${name}") does not match release version "${version}"`,

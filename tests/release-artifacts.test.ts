@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -102,8 +102,8 @@ function makeReleaseBundle(includeLinux: boolean, linuxAppImageVersion = '0.1.99
     mkdirSync(appImageDir, { recursive: true });
     mkdirSync(debDir, { recursive: true });
     linuxAssets.push(
-      join(appImageDir, `o8_${linuxAppImageVersion}_amd64.AppImage`),
-      join(appImageDir, `o8_${linuxAppImageVersion}_amd64.AppImage.sig`),
+      join(appImageDir, `o8-${linuxAppImageVersion}-x86_64.AppImage`),
+      join(appImageDir, `o8-${linuxAppImageVersion}-x86_64.AppImage.sig`),
       join(debDir, 'o8_0.1.999_amd64.deb'),
     );
     writeFileSync(linuxAssets[0], 'appimage');
@@ -241,11 +241,8 @@ describe('release updater manifest', () => {
     const bundle = makeReleaseBundle(true);
     const plan = releasePlan(bundle);
 
-    // publish-preview (.github/workflows/port-build.yml) re-uploads the local
-    // "o8_<version>_amd64.AppImage" build output under
-    // "o8-<version>-x86_64.AppImage" — the manifest url must
-    // match the published name, not the local build's basename, or the
-    // updater 404s.
+    // Release inputs already use the published basename. The held legacy
+    // workflow renames its build output before attachment.
     expect(plan.latestJson.platforms['linux-x86_64']).toEqual({
       signature: 'linux-fixture-signature',
       url: 'https://github.com/example/releases/download/v0.1.999/o8-0.1.999-x86_64.AppImage',
@@ -255,6 +252,14 @@ describe('release updater manifest', () => {
       ...bundle.linuxAssets,
       ...bundle.trailingAssets,
     ]);
+  });
+
+  it('refuses legacy local inputs instead of publishing a mismatched updater URL', () => {
+    const bundle = makeReleaseBundle(true);
+    const legacy = join(bundle.bundleDir, 'appimage/o8_0.1.999_amd64.AppImage');
+    renameSync(bundle.linuxAssets[0], legacy);
+    renameSync(bundle.linuxAssets[1], `${legacy}.sig`);
+    expect(() => releasePlan(bundle)).toThrow('o8-<version>-x86_64.AppImage');
   });
 
   it('throws before upload when the Linux AppImage version does not match the release version', () => {
@@ -286,7 +291,7 @@ describe('release updater manifest', () => {
           },
         },
       }),
-    ).toThrow(/does not match the expected "o8_<version>_amd64\.AppImage" naming pattern/);
+    ).toThrow(/does not match the expected "o8-<version>-x86_64\.AppImage" naming pattern/);
   });
 
   it('refuses to emit an arm64 updater entry for an x86_64-only macOS identity', () => {

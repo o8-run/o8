@@ -119,8 +119,8 @@ describe('the download url matches what the release pipeline publishes (seam C)'
     bundles.push(bundleDir);
     const appImageDir = join(bundleDir, 'appimage');
     mkdirSync(appImageDir, { recursive: true });
-    writeFileSync(join(appImageDir, `o8_${version}_amd64.AppImage`), 'appimage');
-    writeFileSync(join(appImageDir, `o8_${version}_amd64.AppImage.sig`), 'linux-fixture-signature\n');
+    writeFileSync(join(appImageDir, `o8-${version}-x86_64.AppImage`), 'appimage');
+    writeFileSync(join(appImageDir, `o8-${version}-x86_64.AppImage.sig`), 'linux-fixture-signature\n');
 
     const downloadBase = 'https://github.com/o8-run/o8/releases/download/v0.1.999';
     const { latestJson } = buildReleaseManifest({

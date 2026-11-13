@@ -53,9 +53,9 @@ describe('isSelfUpdatableInstall', () => {
 describe('releaseDownloadUrl', () => {
   it('points x86_64 Linux at the published AppImage asset', () => {
     expect(releaseDownloadUrl(info({ platform: 'linux', arch: 'x64' }), '0.1.726'))
-      .toBe('https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage');
+      .toBe('https://github.com/o8-run/o8/releases/download/v0.1.726/o8-0.1.726-x86_64.AppImage');
     expect(releaseDownloadUrl(info({ platform: 'linux', arch: 'x86_64' }), 'v0.1.726'))
-      .toBe('https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage');
+      .toBe('https://github.com/o8-run/o8/releases/download/v0.1.726/o8-0.1.726-x86_64.AppImage');
   });
 
   it('falls back to the release page for an arch with no published asset', () => {
@@ -102,7 +102,7 @@ describe('resolveUpdateAction', () => {
       updaterSelfUpdatable: false,
     }), '0.1.726')).toEqual({
       kind: 'download',
-      url: 'https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage',
+      url: 'https://github.com/o8-run/o8/releases/download/v0.1.726/o8-0.1.726-x86_64.AppImage',
     });
   });
 
