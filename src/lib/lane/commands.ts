@@ -49,7 +49,7 @@ import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import { isPacketMergeHeld, MERGE_HOLD_POLICY_RULE_ID } from '@/lib/lane/merge-hold';
 import { assertSessionMergeAllowed } from '@/lib/orchestrator/session-merge-restriction';
-import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
+import { RuntimeSelectionError, runtimeSelectionRefusal, validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { resolvePortInfo } from '@/lib/panel/api-port';
@@ -149,7 +149,7 @@ async function dispatchUnlocked(
           source: 'lane-open',
         });
       } catch (error) {
-        return { ok: false, laneId: '', note: error instanceof Error ? error.message : 'Invalid worker runtime.' };
+        return { ok: false, laneId: '', note: error instanceof Error ? error.message : 'Invalid worker runtime.', ...(error instanceof RuntimeSelectionError ? { runtimeRefusal: runtimeSelectionRefusal(error) } : {}) };
       }
       const existing = (await import('@/lib/lane/registry')).findLaneByRepoAndBranch(
         command.repoPath,
@@ -171,6 +171,7 @@ async function dispatchUnlocked(
             laneId: existing.id,
             note: `Runtime "${existing.runtime}" is not dispatchable (existing lane ${existing.id}). Dispatchable: ${listDispatchableRuntimes({ includeExperimental: true }).join(', ')}. Archive or migrate the lane before launching new work.`,
             lane: existing,
+            runtimeRefusal: runtimeSelectionRefusal(new RuntimeSelectionError(400, `Requested runtime ${existing.runtime} is not dispatchable.`, 'worker_not_enabled')),
           };
         }
         const updatedExisting = command.packetId && existing.packetId !== command.packetId

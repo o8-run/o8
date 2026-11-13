@@ -1,4 +1,5 @@
 import { ADOPT_PR_TOOL, handleAdoptPr } from './operator-handlers/adopt-pr';
+import { IDLE_DRAFT_TOOLS, handleIdleDrafts } from './operator-handlers/idle-drafts';
 import { CONVERSATION_PR_TOOLS, handleConversationPrs } from './operator-handlers/conversation-prs';
 import { PR_STACK_TOOLS, handlePrStack } from './operator-handlers/pr-stack';
 import { THREAD_TOOLS, handleThreadsList } from './operator-handlers/threads';
@@ -327,6 +328,7 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_prune'),
   ...PROBLEM_TOOLS,
   ...PR_STACK_TOOLS,
+  ...IDLE_DRAFT_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'wait_for_mission_ready'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'submit_review'),
   ...CLOSE_PACKET_TOOLS,
@@ -457,6 +459,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_task_archive: handleTaskArchive,
   o8_task_prune: handleTaskPrune,
   o8_pr_stack: handlePrStack,
+  o8_idle_drafts: handleIdleDrafts,
   o8_problem_list: handleProblemList,
   o8_problem_get: handleProblemGet,
   wait_for_mission_ready: handleWaitForMissionReady,

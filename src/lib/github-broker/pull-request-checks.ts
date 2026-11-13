@@ -51,9 +51,15 @@ export function readPullRequestChecks(repo: string, head: string, installationId
       throw new Error(`Pull request checks could not be read (${response.status}). Retry.`);
     }
     const payload = await response.json() as {
+      total_count?: number;
       check_runs?: Array<{ name?: string | null; status?: string | null; conclusion?: string | null; html_url?: string | null }>;
     };
     if (!Array.isArray(payload.check_runs)) throw new Error('Pull request checks response is invalid. Retry.');
+    if (/rel="next"/.test(response.headers.get('link') ?? '')
+      || typeof payload.total_count === 'number' && payload.total_count > payload.check_runs.length
+      || payload.check_runs.length >= 100 && typeof payload.total_count !== 'number') {
+      throw new Error('Pull request checks span multiple pages or are incomplete; checks are unavailable.');
+    }
     const checks = payload.check_runs.filter((check) => Boolean(check.name)).map((check) => ({
       name: check.name!, status: check.status ?? null, conclusion: check.conclusion ?? null, url: check.html_url ?? null,
     }));
