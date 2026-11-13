@@ -61,9 +61,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const native = params.has('cursorToken');
     const readback = packetId
-      ? await readPacketTranscriptEvents(packetId, fullHistory)
-      : { packetId: '', ...(await readSessionTranscriptEvents(sessionKey, fullHistory)) };
+      ? await (native ? readPacketTranscriptEvents(packetId, fullHistory, true) : readPacketTranscriptEvents(packetId, fullHistory))
+      : { packetId: '', ...(await (native ? readSessionTranscriptEvents(sessionKey, fullHistory, true) : readSessionTranscriptEvents(sessionKey, fullHistory))) };
 
     if (readback.unsupportedReason) {
       return NextResponse.json(
