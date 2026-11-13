@@ -276,7 +276,7 @@ it('loads only the newest 2000 first-arrival cohorts for all time', async () => 
   } finally { spy.mockRestore(); for (const restore of restores.reverse()) restore(); }
 });
 
-it.each([5, [null]])('drops malformed nested findings %j through GET', async findings => {
+it.each([{ findings: 5 }, { findings: [null] }])('drops malformed nested findings $findings through GET', async ({ findings }) => {
   lane('shape'); review('shape', true, -1000);
   const db = getSqlite();
   const row = db.prepare("SELECT audit_json FROM approvals WHERE lane_id='shape'").get() as { audit_json: string };
@@ -287,7 +287,7 @@ it.each([5, [null]])('drops malformed nested findings %j through GET', async fin
   expect(body.metrics.find((row: { id: string }) => row.id === 'findings').value).toBe(0);
   expect(body.metrics.find((row: { id: string }) => row.id === 'rounds').value).toBe(1);
 });
-it.each([{}, [null]])('drops malformed nested correction targets %j through GET', async targets => {
+it.each([{ targets: {} }, { targets: [null] }])('drops malformed nested correction targets $targets through GET', async ({ targets }) => {
   lane('shape'); lane('other-shape');
   const prefix = 'review-author-' + createHash('sha256').update('shape').digest('hex').slice(0, 24) + '-';
   getSqlite().prepare('INSERT INTO worker_corrections (id,repo_path,thread_id,payload_json,created_at) VALUES (?,?,?,?,?)')
