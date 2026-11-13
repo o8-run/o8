@@ -15,9 +15,6 @@ pub(crate) fn list_view(
     ends: BTreeSet<usize>,
     mut decorate: impl FnMut(usize, AnyElement, &mut Window, &mut App) -> AnyElement + 'static,
 ) -> AnyElement {
-    if state.item_count() == 0 {
-        return empty();
-    }
     list(state.clone(), move |index, window, cx| {
         let row = rows
             .get(index)

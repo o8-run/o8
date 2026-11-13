@@ -328,7 +328,14 @@ impl Inspector {
             }
         }
         if let Some(detail) = &self.detail {
-            content = content.child(detail.content_for(cx.entity()));
+            // An empty transcript reads as main chat's empty state. It is drawn
+            // here rather than inside every list, so an empty pane elsewhere
+            // never replaces its own retained list.
+            content = content.child(if detail.list.item_count() == 0 {
+                crate::transcript_view::empty()
+            } else {
+                detail.content_for(cx.entity())
+            });
         } else if self.detail_error.is_none() {
             content = content.child(crate::transcript_view::state(
                 if self.detail_pending {
