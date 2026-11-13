@@ -220,6 +220,56 @@ afterEach(() => {
 afterAll(() => { closeDb(); rmSync(dataDir, { recursive: true, force: true }); });
 
 describe('completion and steer overlap through production callbacks and routes', () => {
+  it('blocks a thrown verifier even if another actor requested review during verification', async () => {
+    const { lane, sessionKey, runId } = fixture();
+    const delayed = delayVerification();
+    const completion = ingestAgentCompletionSignal(sessionKey, runId);
+    await delayed.entered;
+    setLaneStatus(lane.id, 'reviewing', 'user', 'review_requested');
+    delayed.reject(new Error('fixture verifier unavailable after external review request'));
+
+    expect(await completion).toBe(true);
+    expect(getLane(lane.id)).toMatchObject({ status: 'awaiting_input', lastEventLabel: 'completion_check_failed' });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ surfaceId: sessionKey, status: 'failed' }));
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'completed' }));
+    expect(dependencies.enqueueAutoReview).not.toHaveBeenCalled();
+  });
+
+  it('preserves accepted reviewing work when the post-transition continuation throws', async () => {
+    const { lane, sessionKey, runId } = fixture();
+    dependencies.queueReviewContinuation.mockImplementationOnce(() => { throw new Error('fixture continuation unavailable'); });
+
+    expect(await ingestAgentCompletionSignal(sessionKey, runId)).toBe(true);
+
+    expect(dependencies.enqueueAutoReview).toHaveBeenCalledWith(lane.id);
+    expect(dependencies.queueReviewContinuation).toHaveBeenCalledOnce();
+    expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', lastEventLabel: 'agent_completed' });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ surfaceId: sessionKey, status: 'completed' }));
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }));
+    expect(readOrchestratorControlPlaneState().packets[0]?.releaseState).toBe('pending');
+    const events = getSqlite().prepare("SELECT payload_json AS payload FROM lane_events WHERE lane_id = ? AND verb = 'update'")
+      .all(lane.id) as Array<{ payload: string }>;
+    expect(events.map(event => JSON.parse(event.payload))).toContainEqual(expect.objectContaining({
+      event: 'review_continuation_failed', sessionKey, packetId: lane.packetId,
+    }));
+  });
+
+  it('holds a clean owned exit when completion verification throws instead of publishing completed', async () => {
+    const { lane, sessionKey, runId } = fixture();
+    h.verify.mockRejectedValueOnce(new Error('fixture verifier unavailable'));
+
+    expect(await ingestAgentCompletionSignal(sessionKey, runId)).toBe(true);
+
+    expect(getLane(lane.id)).toMatchObject({ status: 'awaiting_input',
+      lastEventLabel: 'completion_check_failed' });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ surfaceId: sessionKey,
+      status: 'failed', detail: expect.stringContaining('Completion check failed') }));
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'completed' }));
+    expect(dependencies.enqueueAutoReview).not.toHaveBeenCalled();
+    expect(dependencies.queueReviewContinuation).not.toHaveBeenCalled();
+    expect(readOrchestratorControlPlaneState().packets[0]?.releaseState).toBe('pending');
+  });
+
   it.each(['current', 'registry'] as const)('keeps fully settled %s work reviewable across repeated continuation', async (location) => {
     const { packet, lane, sessionKey, finishRun } = fixture();
     const missionId = `mission-${packet.id}`;

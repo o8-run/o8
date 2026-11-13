@@ -26,7 +26,7 @@ import {
 } from '@/lib/lane/agent-report';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import type { AgentReportReason, Lane, LaneEventActor } from '@/lib/lane/types';
-import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
+import { RuntimeSelectionError, validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { resolveEffortAliases, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -38,6 +38,7 @@ import type {
   OrchestratorPacket,
   OrchestratorPacketStatus,
   WorkerRouting,
+  WorkerLaunchContext,
 } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
@@ -146,7 +147,7 @@ async function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof res
   try {
     const requestedRuntime = validateRequestedRuntime(input.requestedRuntime, resolveDefaultDispatchRuntimeSync());
     routing = resolveWorkerRouting({ ...input, requestedRuntime });
-  } catch (error) { throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
+  } catch (error) { if (error instanceof RuntimeSelectionError) throw error; throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
   const pin = await resolveRuntimeEffortPin({
     requestedEffort: input.requestedEffort,
     runtime: routing.selectedRuntime,
@@ -218,6 +219,13 @@ function buildLaneBinding(
   };
 }
 
+function reviewerLaunchContext(context: WorkerLaunchContext | null | undefined, intent: string | null | undefined): WorkerLaunchContext | null | undefined {
+  return intent === 'reviewer' ? {
+    source: 'agent', presentation: 'tab', repoContext: 'registered', caller: 'task-pool',
+    ...context, workMode: 'read-only',
+  } : context;
+}
+
 async function syncPacketForLane(
   task: TaskPoolTask,
   lane: Lane,
@@ -243,6 +251,7 @@ async function syncPacketForLane(
       runtime: patch.workerRouting?.selectedRuntime ?? packet.runtime,
       workerIntent: patch.workerRouting?.workerIntent ?? packet.workerIntent,
       workerRouting: patch.workerRouting ?? packet.workerRouting,
+      launchContext: reviewerLaunchContext(packet.launchContext, patch.workerRouting?.workerIntent),
       lane: buildLaneBinding(packet, lane, lastEventLabel, patch.workerRouting),
       lastEventAt: nowIso(),
       lastEventLabel,
@@ -433,6 +442,7 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
       lane: null,
       workerIntent: workerRouting.workerIntent,
       workerRouting,
+      launchContext: reviewerLaunchContext(undefined, workerRouting.workerIntent),
       issue: input.sourceIssue ? {
         number: sourceIssueNumber ?? undefined,
         body: input.sourceIssue.body ?? summary,
@@ -501,7 +511,7 @@ export async function claimTask(taskId: string, input: TaskClaimInput = {}): Pro
 export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}): Promise<TaskMutationResult> {
   if (runtimeOwnerRequired() && !isNativeCortexReader()) {
     try { validateRequestedRuntime(input.requestedRuntime); }
-    catch (error) { throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
+    catch (error) { if (error instanceof RuntimeSelectionError) throw error; throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
     return callTaskDispatchOwner(taskId, input);
   }
   const actor = normalizeActor(input.actor);

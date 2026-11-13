@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { claimMessagesReceiver } from './owner';
 import { handleManagedMessage } from '@/lib/symon/managed-messages-inbound';
 import { MessagesReceiver, sendWithMessages, type InboundMessage } from './receiver';
 
@@ -31,10 +32,11 @@ export function getMessagesReceiver(): MessagesReceiver {
   return global.__o8MessagesReceiver;
 }
 
-/** Starts the one receiver loop of this server process on macOS. */
-export function startMessagesReceiver(): void {
+/** WS is the sole startup caller, with or without O8_NEXT_O8D. */
+export function startMessagesReceiver(): boolean {
   const global = globalThis as { __o8MessagesReceiverLoop?: boolean };
-  if (process.platform !== 'darwin' || global.__o8MessagesReceiverLoop) return;
+  if (process.platform !== 'darwin' || global.__o8MessagesReceiverLoop) return false;
+  if (!claimMessagesReceiver()) return false;
   global.__o8MessagesReceiverLoop = true;
   const receiver = getMessagesReceiver();
   const next = async () => {
@@ -48,4 +50,5 @@ export function startMessagesReceiver(): void {
     setTimeout(() => { void next(); }, delay).unref();
   };
   setTimeout(() => { void next(); }, IDLE_MS).unref();
+  return true;
 }

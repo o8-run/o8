@@ -888,6 +888,11 @@ export default function CanvasGlassPreviewPage() {
         clearCanvasTurnAccumulators(lane, turnTextRef.current, turnToolsRef.current);
         setLiveScouts((previous) => ({ ...previous, [lane]: [] }));
         resolveStatus(lane, 'Session ended');
+      } else if (event.status === 'unreported') {
+        clearCanvasTurnAccumulators(lane, turnTextRef.current, turnToolsRef.current);
+        setLiveScouts((previous) => ({ ...previous, [lane]: [] }));
+        resolveStatus(lane, 'Needs attention');
+        appendEntries(lane, [{ role: 'status', text: `Needs attention: ${event.reason ?? 'turn ended without an outcome report'}`, pending: false }]);
       } else if (event.status === 'ready') {
         // Roll the turn's edits / PR / captured screenshots into result cards.
         const acc = turnToolsRef.current.get(lane);
@@ -923,7 +928,11 @@ export default function CanvasGlassPreviewPage() {
     onToolResult: (repo, name, args, output) => {
       handleOrchEvent(repo, { type: 'tool-result', name, args, output });
     },
-    onStatus: (repo, status) => { setOrchBusy(status === 'busy'); handleOrchEvent(repo, { type: 'status', status }); },
+    onStatus: (repo, status, reason) => {
+      setOrchBusy(status === 'busy');
+      if (status === 'unreported') setDockOpen(true);
+      handleOrchEvent(repo, { type: 'status', status, reason });
+    },
     onNotice: (repo, message) => { setDockOpen(true); handleOrchEvent(repo, { type: 'notice', message }); },
     onError: (repo, error) => {
       handleOrchEvent(repo, { type: 'error', error });

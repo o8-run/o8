@@ -35,7 +35,7 @@ vi.mock('@/lib/mobile/symon-text-session-store', () => ({
 }));
 vi.mock('@/lib/chat/gateway-client', () => ({ generateSharedSymonText: h.generateShared }));
 
-import { POST } from './route';
+import { POST } from '@/lib/symon/http/managed-inbound';
 
 const baseTurn = {
   eventId: 'event-1',
@@ -222,4 +222,25 @@ describe('managed Symon Messages real route', () => {
     finish('One answer.');
     expect((await first).status).toBe(200);
   });
+});
+
+it('forwards the Next inbound route with the flag unset without running the brain', async () => {
+  vi.stubEnv('O8_NEXT_O8D', undefined);
+  vi.stubEnv('O8_WS_PORT', '43219');
+  const fetchOwner = vi.fn().mockResolvedValue(Response.json({ ok: true, state: 'done', text: 'Owner reply.' }));
+  vi.stubGlobal('fetch', fetchOwner);
+  try {
+    const next = await import('./route');
+    const response = await next.POST(request());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, state: 'done', text: 'Owner reply.' });
+    expect(fetchOwner).toHaveBeenCalledWith('http://127.0.0.1:43219/api/symon/managed-messages/inbound', expect.objectContaining({ method: 'POST' }));
+    expect(h.store.getOrCreateTurn).not.toHaveBeenCalled();
+    expect(h.generateShared).not.toHaveBeenCalled();
+    expect(h.pollTurn).not.toHaveBeenCalled();
+    expect((globalThis as { __o8SymonBrain?: unknown }).__o8SymonBrain).toBeUndefined();
+  } finally {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
 });

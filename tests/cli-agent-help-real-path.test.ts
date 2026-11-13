@@ -15,6 +15,7 @@ afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
 describe('operator help through the executable entry point', () => {
   it.each([
+    ['evaluate-diff', ['--task', '--repo', '--base', '--diff-file', '--accept', '--human', '--json', '--verbose', '--help']],
     ['mission create', ['--title', '--repo', 'dispatch', 'false']],
     ['mission dispatch', ['--mission', '--wait', '--watch', '--timeout']],
     ['mission status', ['--mission', '--cost']],

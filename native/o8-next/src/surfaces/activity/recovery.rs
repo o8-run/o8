@@ -21,6 +21,15 @@ pub(super) struct State {
     pub inputs: HashMap<String, Editor>,
     pub active: Option<Kind>,
 }
+fn eligible(row: &Row) -> bool {
+    let status = text(&row.data, "status");
+    !row.data["archivedAt"].is_string()
+        && !text(&row.data["lane"], "laneId").is_empty()
+        && matches!(
+            status.as_str(),
+            "blocked" | "idle" | "recovering" | "awaiting_review" | "running" | "launching"
+        )
+}
 impl ActivityPane {
     pub(super) fn recovery_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.pending
@@ -160,13 +169,7 @@ impl ActivityPane {
         cx: &mut Context<Self>,
     ) -> Vec<gpui::AnyElement> {
         let status = text(&row.data, "status");
-        if row.data["archivedAt"].is_string()
-            || text(&row.data["lane"], "laneId").is_empty()
-            || !matches!(
-                status.as_str(),
-                "blocked" | "idle" | "recovering" | "awaiting_review" | "running" | "launching"
-            )
-        {
+        if !eligible(row)        {
             return vec![];
         }
         let active = self.pending && self.packet.action.as_deref() == Some(row.id.as_str());
@@ -238,6 +241,10 @@ impl ActivityPane {
         else {
             return view;
         };
+        if !eligible(row) {
+            self.packet.recovery.ask = None;
+            return view;
+        }
         let starting_over = kind == Kind::StartOver;
         let warning = if starting_over {
             concat!(

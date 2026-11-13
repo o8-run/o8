@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>o8 Voice</title>
+<style>
+  :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  body { margin: 0; background: transparent; display: flex; justify-content: center; }
+  #status { max-width: 460px; padding: 8px 16px; border-radius: 0 0 14px 14px; background: Canvas; color: CanvasText; font-size: 12px; font-weight: 300; line-height: 1.35; letter-spacing: -0.1px; overflow-wrap: anywhere; }
+</style>
+<div id="status" role="status" aria-live="polite">Hold Fn to dictate</div>
+<script>
+  const statusNode = document.getElementById('status');
+  let reset;
+  window.o8VoiceEvent = event => {
+    const labels = { 'system-start': 'Listening…', partial: event.text,
+      final: 'Finishing…', polishing: 'Finishing…', 'system-pasted': 'Pasted',
+      'system-idle': 'Hold Fn to dictate', error: event.text || 'Dictation failed' };
+    const label = labels[event.type];
+    if (typeof label !== 'string') return;
+    clearTimeout(reset);
+    statusNode.textContent = label;
+    if (event.type === 'system-pasted') reset = setTimeout(() => { statusNode.textContent = 'Hold Fn to dictate'; }, 1500);
+  };
+</script>
+</html>
