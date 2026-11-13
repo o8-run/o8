@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { macosBuildPayloadIdentity, macosExecutablePayloadSha256 } from '../scripts/lib/macos-release-artifacts.mjs';
@@ -59,22 +59,33 @@ it('checks both architectures, nested signature, hardened runtime and the enclos
   const config = JSON.parse(readFileSync('src-tauri/tauri.macos.conf.json', 'utf8'));
   expect(config.bundle.externalBin).toContain('helpers/o8-next');
 });
-it('builds and stages both release slices through the prebuild sidecar entry point', () => {
+it.each(['auto', 'off', 'custom', 'absent'])('builds both sidecar slices with compiler cache mode %s', mode => {
   const { root } = fixture();
   const calls = join(root, 'build-calls.jsonl');
+  const cacheTrace = join(root, 'compile-env.jsonl');
+  if (mode === 'absent') symlinkSync(process.execPath, join(root, 'bin/node'));
+  if (mode !== 'absent') writeFileSync(join(root, 'bin/sccache'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   rmSync(join(root, 'src-tauri/helpers/o8-next-build.json'));
   for (const name of ['cargo', 'lipo', 'strip']) writeFileSync(join(root, 'bin', name), `#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path'); const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify([${JSON.stringify(name)}, ...args]) + '\\n');
+if (${JSON.stringify(name)} === 'cargo') fs.appendFileSync(${JSON.stringify(cacheTrace)}, JSON.stringify({ wrapper: process.env.RUSTC_WRAPPER || null, cache: process.env.SCCACHE_DIR || null }) + '\\n');
 if (${JSON.stringify(name)} === 'strip') process.exit(0);
 const at = key => args[args.indexOf(key) + 1];
 const dest = ${JSON.stringify(name)} === 'cargo' ? path.join(at('--target-dir'), at('--target'), 'release', 'o8-next') : at('-output');
 fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(${JSON.stringify(join(root, 'o8.app/Contents/MacOS/o8-next'))}, dest);
 `, { mode: 0o755 });
   const result = spawnSync(process.execPath, [join(process.cwd(), 'scripts/next/build-sidecar.mjs')], {
-    cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}`, O8_TAURI_BUILD_TARGET: 'universal-apple-darwin' },
+    cwd: root, encoding: 'utf8', env: { ...process.env, PATH: mode === 'absent' ? join(root, 'bin') : `${join(root, 'bin')}:${process.env.PATH}`, O8_TAURI_BUILD_TARGET: 'universal-apple-darwin',
+      O8_RELEASE_BUILD_CACHE_DIR: root + '-cache', O8_RELEASE_SCCACHE: mode === 'off' ? 'off' : 'auto',
+      RUSTC_WRAPPER: mode === 'custom' ? '/fixture/custom-wrapper' : '', SCCACHE_DIR: '' },
   });
   expect(result.status, result.stderr).toBe(0);
+  const environments = readFileSync(cacheTrace, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  expect(environments).toHaveLength(2);
+  for (const env of environments) expect(env).toEqual(mode === 'auto'
+    ? { wrapper: join(root, 'bin/sccache'), cache: join(root + '-cache', 'sccache') }
+    : { wrapper: mode === 'custom' ? '/fixture/custom-wrapper' : null, cache: null });
   const built = JSON.parse(readFileSync(join(root, 'src-tauri/helpers/o8-next-build.json'), 'utf8'));
   expect(built.commit).toBe('a'.repeat(40));
   expect(built.payloadSha256).toEqual(fixtureReceipt(root));
@@ -213,4 +224,42 @@ it('provisions and requests the same target in the preview build matrix', () => 
   const workflow = readFileSync('.github/workflows/release.yml', 'utf8');
   expect(workflow).toContain('targets: ${{ matrix.target }}');
   expect(workflow).toContain('O8_TAURI_BUILD_TARGET: ${{ matrix.target }}');
+});
+
+it('configures the compiler cache for the approved-write release helper', () => {
+  const { root } = fixture();
+  mkdirSync(join(root, 'scripts'));
+  const original = readFileSync(join(sourceRoot, 'scripts/build-pi-write.mjs'), 'utf8');
+  writeFileSync(join(root, 'scripts/build-pi-write.mjs'), original.replace('./lib/release-compile-cache.mjs',
+    new URL('../scripts/lib/release-compile-cache.mjs', import.meta.url).href));
+  const trace = join(root, 'pi-compile.json');
+  writeFileSync(join(root, 'bin/sccache'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(root, 'bin/cargo'), `#!${process.execPath}
+const fs = require('node:fs'), path = require('node:path');
+const args = process.argv.slice(2), at = key => args[args.indexOf(key) + 1];
+fs.writeFileSync(${JSON.stringify(trace)}, JSON.stringify({ wrapper: process.env.RUSTC_WRAPPER, cache: process.env.SCCACHE_DIR }));
+const binary = path.join(at('--target-dir'), at('--target'), 'release/o8-pi-write');
+fs.mkdirSync(path.dirname(binary), { recursive: true }); fs.writeFileSync(binary, 'fixture');
+`, { mode: 0o755 });
+  const result = spawnSync(process.execPath, [join(root, 'scripts/build-pi-write.mjs')], {
+    cwd: root, encoding: 'utf8', timeout: 20_000, env: { ...process.env,
+      PATH: `${join(root, 'bin')}:${process.env.PATH}`, RUSTC_WRAPPER: '', O8_RELEASE_SCCACHE: 'auto',
+      O8_RELEASE_BUILD_CACHE_DIR: root + '-cache', O8_TAURI_BUILD_TARGET: 'x86_64-apple-darwin' },
+  });
+  expect(result.status, result.stdout + result.stderr).toBe(0);
+  expect(JSON.parse(readFileSync(trace, 'utf8'))).toEqual({
+    wrapper: join(root, 'bin/sccache'), cache: join(root + '-cache', 'sccache'),
+  });
+});
+
+it('refuses a compiler cache inside the checkout before starting Cargo', () => {
+  const { root } = fixture();
+  writeFileSync(join(root, 'bin/sccache'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const result = spawnSync(process.execPath, [join(sourceRoot, 'scripts/next/build-sidecar.mjs')], {
+    cwd: root, encoding: 'utf8', timeout: 20_000, env: { ...process.env,
+      PATH: `${join(root, 'bin')}:${process.env.PATH}`, RUSTC_WRAPPER: '', O8_RELEASE_SCCACHE: 'auto',
+      O8_RELEASE_BUILD_CACHE_DIR: join(root, 'cache'), O8_TAURI_BUILD_TARGET: 'x86_64-apple-darwin' },
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('Rust compile cache must be outside the checkout.');
 });

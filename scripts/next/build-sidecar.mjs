@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // Stage the GPUI sidecar under the names Tauri externalBin signs and bundles.
+import { releaseCompileEnvironment } from '../lib/release-compile-cache.mjs';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NEXT_BUILD_RECEIPT, nextBuildCommit, nextBuildIdentity } from './build-identity.mjs';
 
 const root = process.cwd();
+const compileEnv = releaseCompileEnvironment(root);
 const requested = process.env.O8_TAURI_BUILD_TARGET || process.env.TAURI_ENV_TARGET_TRIPLE || '';
 if (process.platform !== 'darwin' && !requested.endsWith('-apple-darwin')) {
   console.log('[o8-next] macOS sidecar build skipped');
@@ -28,7 +30,7 @@ try {
   const commit = nextBuildCommit(root);
   for (const triple of triples) {
     execFileSync('cargo', ['build', '--release', '--locked', '--manifest-path', join(root, 'native/o8-next/Cargo.toml'),
-      '--target', triple, '--target-dir', target], { stdio: 'inherit' });
+      '--target', triple, '--target-dir', target], { stdio: 'inherit', env: compileEnv });
     const staged = join(directory, `o8-next-${triple}`);
     copyFileSync(join(target, triple, 'release/o8-next'), staged);
     // Keep Cargo's unstripped output for symbolication. Strip only the bundled
