@@ -475,7 +475,9 @@ impl Client {
                         ("sessionKey", key),
                         ("cursor", &cursor.to_string()),
                         ("cursorToken", batch.token.as_deref().unwrap_or("")),
-                        ("limit", "200"),
+                        // The native route can return the bounded snapshot in
+                        // one read, including a sentinel beyond the event cap.
+                        ("limit", &(MAX_READBACK_EVENTS + 1).to_string()),
                     ],
                 )
                 .map_err(ReadbackError::request)?;
@@ -522,7 +524,9 @@ impl Client {
             batch.earliest = timestamp(&json!({"ts":page["earliestEventTime"]})).as_u64();
             batch.token = page["cursorToken"].as_str().map(str::to_owned);
             batch.cursor = Some(next);
-            if events.len() < 200 {
+            // Older hosts cap replies at 200 and omit hasMore. Keep their
+            // pagination, while a native snapshot avoids a second full read.
+            if page["hasMore"] == false || events.len() < 200 {
                 return Ok(batch);
             }
             if next <= cursor && !batch.reset {

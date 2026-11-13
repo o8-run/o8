@@ -10,12 +10,15 @@ export const dynamic = 'force-dynamic';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+// One bounded native snapshot plus the client's overflow sentinel. Legacy
+// clients retain their existing pagination limit.
+const MAX_NATIVE_LIMIT = 100_001;
 
-function parseLimit(raw: string | null): number {
+function parseLimit(raw: string | null, native: boolean): number {
   if (!raw) return DEFAULT_LIMIT;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIMIT;
-  return Math.min(MAX_LIMIT, Math.floor(parsed));
+  return Math.min(native ? MAX_NATIVE_LIMIT : MAX_LIMIT, Math.floor(parsed));
 }
 
 function parseCursor(raw: string | null): number {
@@ -43,7 +46,8 @@ export async function GET(request: NextRequest) {
   // dispatch, #1389). Live-hit 2026-07-04: every packet tab stuck on "Agent
   // working…" because the poll never resolved a packetId.
   const sessionKey = (params.get('sessionKey') ?? '').trim();
-  const limit = parseLimit(params.get('limit'));
+  const native = params.has('cursorToken');
+  const limit = parseLimit(params.get('limit'), native);
   const cursor = parseCursor(params.get('cursor'));
   const tail = parseTail(params.get('tail'));
   const fullHistory = !tail || params.get('history') === 'complete';
@@ -61,7 +65,6 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const native = params.has('cursorToken');
     const readback = packetId
       ? await (native ? readPacketTranscriptEvents(packetId, fullHistory, true) : readPacketTranscriptEvents(packetId, fullHistory))
       : { packetId: '', ...(await (native ? readSessionTranscriptEvents(sessionKey, fullHistory, true) : readSessionTranscriptEvents(sessionKey, fullHistory))) };

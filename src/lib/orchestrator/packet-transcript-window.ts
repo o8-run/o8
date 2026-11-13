@@ -36,6 +36,11 @@ export function transcriptWindow(events: TranscriptEvent[], cursor: number, limi
   const cursorReset = token !== null && (cursor > identified.length || (cursor > 0 && token !== checkpoint(cursor)));
   const from = cursorReset ? 0 : cursor;
   const windowed = tail ? identified.slice(-limit) : identified.filter(event => event.seq > from).slice(0, limit);
-  const nextCursor = windowed.at(-1)?.seq ?? null;
-  return { events: windowed, nextCursor, cursorToken: checkpoint(nextCursor ?? from), cursorReset };
+  const native = token !== null;
+  const nextCursor = windowed.at(-1)?.seq
+    ?? (native && identified.length > 0 && !cursorReset ? from : null);
+  return {
+    events: windowed, nextCursor, cursorToken: checkpoint(nextCursor ?? from), cursorReset,
+    ...(native ? { hasMore: !tail && identified.some(event => event.seq > (nextCursor ?? from)) } : {}),
+  };
 }

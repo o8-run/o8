@@ -369,15 +369,19 @@ fn partial_normalization_backfill_keeps_the_saved_prefix_and_filters_covered_pro
     );
 }
 
-
 #[test]
 fn active_caught_up_worker_keeps_cursor_when_the_socket_invalidates() {
     let h = Host::new(200);
     let history = h.history();
-    assert!(crate::shell::session::worker_transcript::State::from_history(&history).unwrap().active);
+    assert!(
+        crate::shell::session::worker_transcript::State::from_history(&history)
+            .unwrap()
+            .active
+    );
     let subscription = transport::subscribe_history(h.client.clone(), &history);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while (!h.connected.load(Ordering::Acquire) || h.reads().len() < 2) && Instant::now() < deadline {
+    while (!h.connected.load(Ordering::Acquire) || h.reads().len() < 2) && Instant::now() < deadline
+    {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(h.connected.load(Ordering::Acquire));
@@ -388,8 +392,16 @@ fn active_caught_up_worker_keeps_cursor_when_the_socket_invalidates() {
         std::thread::sleep(Duration::from_millis(10));
     }
     let reads = h.reads();
-    assert!(reads.len() > before, "the socket must invalidate the caught-up readback");
-    assert!(reads[1..].iter().all(|request| !request.contains("cursor=0&")), "caught-up polling and the next socket frame must never request cursor=0: {reads:?}");
+    assert!(
+        reads.len() > before,
+        "the socket must invalidate the caught-up readback"
+    );
+    assert!(
+        reads[1..]
+            .iter()
+            .all(|request| !request.contains("cursor=0&")),
+        "caught-up polling and the next socket frame must never request cursor=0: {reads:?}"
+    );
     drop(subscription);
 }
 
@@ -398,6 +410,39 @@ fn a_long_worker_open_uses_one_bounded_native_snapshot() {
     let h = Host::new(200);
     *h.events.lock().unwrap() = (1..=1001).map(|seq| json!({"seq":seq,"eventId":format!("call-{seq}"),"type":"tool_call","tool":"read","callId":format!("call-{seq}"),"args":"{}"})).collect();
     let history = h.history();
-    assert_eq!(history.transcript.iter().filter(|entry| entry.tools.is_some()).count(), 1001);
-    assert_eq!(h.reads().len(), 1, "one native snapshot must replace per-200-event re-reads");
+    assert_eq!(
+        history
+            .transcript
+            .iter()
+            .filter(|entry| entry.tools.is_some())
+            .count(),
+        1001
+    );
+    assert_eq!(
+        h.reads().len(),
+        1,
+        "one native snapshot must replace per-200-event re-reads"
+    );
+}
+
+#[test]
+fn a_truly_empty_log_still_clears_the_cursor_without_erasing_saved_rows() {
+    let h = Host::new(200);
+    let history = h.history();
+    let mut state =
+        crate::shell::session::worker_transcript::State::from_history(&history).unwrap();
+    let mut transcript = Transcript::new(history);
+    let before = transcript.rows.clone();
+    let was_active = state.active;
+    h.events.lock().unwrap().clear();
+    apply_poll(&h, &mut transcript, &mut state);
+    assert!(!state.cursor_available, "a truly empty log has no cursor");
+    assert_eq!(
+        state.active, was_active,
+        "empty readback is not a terminal event"
+    );
+    assert_eq!(
+        transcript.rows, before,
+        "an empty log retains existing work"
+    );
 }

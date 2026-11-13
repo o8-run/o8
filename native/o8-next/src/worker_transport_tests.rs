@@ -185,16 +185,22 @@ impl Host {
                         .is_some_and(|t| cursor > 0 && *t != prefix(cursor as usize))
                         || cursor > all.len() as u64;
                     let from = if reset { 0 } else { cursor };
+                    let limit = request_url
+                        .query_pairs()
+                        .find(|(key, _)| key == "limit")
+                        .and_then(|(_, value)| value.parse::<usize>().ok())
+                        .unwrap_or(200)
+                        .min(if token.is_some() { 100_001 } else { 200 });
                     let page: Vec<_> = all
                         .iter()
                         .filter(|e| e["seq"].as_u64().unwrap() > from)
-                        .take(200)
+                        .take(limit)
                         .cloned()
                         .collect();
                     let next = page.last().and_then(|e| e["seq"].as_u64()).unwrap_or(from);
                     (
                         status,
-                        json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":if page.is_empty(){None}else{Some(next)},"cursorToken":prefix(next as usize),"cursorReset":reset,"events":page,"historyComplete":complete_response.load(Ordering::Acquire),"earliestEventTime":all.iter().filter_map(|e| e["ts"].as_str()).min().unwrap_or("1970-01-01T00:00:02.000Z")}),
+                        json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":if page.is_empty() && (token.is_none() || all.is_empty() || reset){None}else{Some(next)},"cursorToken":prefix(next as usize),"cursorReset":reset,"hasMore":all.iter().any(|event| event["seq"].as_u64().unwrap() > next),"events":page,"historyComplete":complete_response.load(Ordering::Acquire),"earliestEventTime":all.iter().filter_map(|e| e["ts"].as_str()).min().unwrap_or("1970-01-01T00:00:02.000Z")}),
                     )
                 } else {
                     // Host port discovery may probe this temporary listener.

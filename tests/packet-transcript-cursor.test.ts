@@ -4,10 +4,13 @@ import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 
 const fixture = vi.hoisted(() => ({ events: [] as TranscriptEvent[], reads: 0 }));
 vi.mock('@/lib/orchestrator/packet-transcript', () => ({
-  readSessionTranscriptEvents: async (sessionKey: string) => (fixture.reads++, {
-    sessionKey, runtime: 'claude-code', events: fixture.events,
-    historyComplete: false, earliestEventTime: '2026-01-01T00:00:02Z',
-  }),
+  readSessionTranscriptEvents: async (sessionKey: string) => {
+    fixture.reads += 1;
+    return {
+      sessionKey, runtime: 'claude-code', events: fixture.events,
+      historyComplete: false, earliestEventTime: '2026-01-01T00:00:02Z',
+    };
+  },
   readPacketTranscriptEvents: vi.fn(),
 }));
 vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
