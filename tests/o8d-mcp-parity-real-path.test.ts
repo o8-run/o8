@@ -69,6 +69,7 @@ let rust = '';
 let nativeRust = '';
 let records: RecordedMcpRequest[];
 let failedSource = '';
+let leadStoreUnavailable = false;
 const server = createServer(async (incoming, outgoing) => {
   try {
     const chunks: Buffer[] = [];
@@ -82,7 +83,9 @@ const server = createServer(async (incoming, outgoing) => {
     seen.push({ path: request.nextUrl.pathname, body: body.toString(), headers: incoming.headers });
     const gate = panelGateMiddleware(request);
     const handler = routes[request.nextUrl.pathname]?.[request.method];
-    const response = gate.status !== 200 ? gate : request.nextUrl.pathname === failedSource
+    const response = gate.status !== 200 ? gate
+      : leadStoreUnavailable && request.nextUrl.pathname === '/api/orchestrator/lead'
+        ? Response.json({ error: 'Fixture lead store unavailable' }, { status: 400 }) : request.nextUrl.pathname === failedSource
       ? Response.json({ error: 'fixture unavailable' }, { status: 503 })
       : handler ? await handler(request) : new Response(null, { status: 404 });
     outgoing.writeHead(response.status, Object.fromEntries(response.headers));
@@ -382,6 +385,20 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
       expect(seen.map((entry) => entry.path)).toEqual([]);
     },
   );
+
+  nativeReadTest('preserves runtime evidence and unavailable lead markers across native MCP transports', async () => {
+    await call(base, 'o8_status', { fresh: true });
+    leadStoreUnavailable = true;
+    try {
+      const expected = await call(base, 'o8_status');
+      for (const endpoint of [rust, nativeRust]) {
+        const actual = await call(endpoint, 'o8_status');
+        compareMcpExchanges(expected, actual, ['/body/result/content/0/text/json/data/snapshot/ageMs']);
+        expect(toolPayload(actual).data.leadsUnavailable).toBe(true);
+        expect(toolPayload(actual).data.leads).toBeUndefined();
+      }
+    } finally { leadStoreUnavailable = false; await call(base, 'o8_status', { fresh: true }); }
+  });
 
   nativeReadTest('invalidates a completed lead snapshot and returns its newer unreported receipt', async () => {
     const db = getSqlite();
