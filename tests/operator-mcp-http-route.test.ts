@@ -66,6 +66,7 @@ describe('/api/mcp — real operator host reachability', () => {
       if (url.endsWith('/api/operator/status')) {
         return Response.json({ agents: [], approvals: { items: [], count: 0 }, recentActivity: [] });
       }
+      if (new URL(url).pathname === '/api/orchestrator/lead') return Response.json({ cursor: 0, leads: [] });
       if (url.endsWith('/api/panel/repos')) return Response.json({ repos: [] });
       if (url.endsWith('/api/panel/operator-defaults')) return Response.json({});
       unexpected.push(url);

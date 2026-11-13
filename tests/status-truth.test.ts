@@ -48,6 +48,7 @@ afterAll(() => {
 
 describe('#1476 lie 1 — o8_status summary derives from the agents it ships', () => {
   it('ignores a stale upstream summary that contradicts agents[]', async () => {
+    apiFetchMock.mockResolvedValue({ cursor: 0, leads: [] });
     apiFetchMock.mockResolvedValueOnce({
       summary: '0 agents running. 0 approvals pending. No recent activity.',
       agents: [{ name: 'w1', status: 'failed', elapsed: '2m ago', sessionKey: 'codex-owned:x' }],
