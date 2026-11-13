@@ -45,13 +45,11 @@ Snapshot from 2026-11-10. Rerun the command for the current value.
 Ranked. Work on a lower item does not delay a higher one.
 
 1. **The review and merge loop.** Work from any author moves through intake, independent review, findings sent to the author, re-review of the fix, and a governed merge of the approved commit, with durable receipts. Tracked in [#5815](https://github.com/o8-run/o8/issues/5815).
-   - Done, unreleased: findings go to the original author ([#5828](https://github.com/o8-run/o8/pull/5828), [#5833](https://github.com/o8-run/o8/pull/5833), proven with a real worker), and submitted reviews show with their reviewed commit ([#5825](https://github.com/o8-run/o8/pull/5825)).
-   - In progress: re-review an author's correction against the saved findings ([#5835](https://github.com/o8-run/o8/issues/5835)).
+   - Done, unreleased: findings go to the original author ([#5828](https://github.com/o8-run/o8/pull/5828), [#5833](https://github.com/o8-run/o8/pull/5833), proven with a real worker), submitted reviews show with their reviewed commit ([#5825](https://github.com/o8-run/o8/pull/5825)), an author's correction is re-reviewed against the saved findings ([#5840](https://github.com/o8-run/o8/pull/5840)), and an external pull request is adopted into one review task ([#6070](https://github.com/o8-run/o8/pull/6070)).
    - Next, in order:
      1. merge the approved commit through one governed operation ([#5817](https://github.com/o8-run/o8/issues/5817));
      2. a project automation policy, set once and shown before work runs, which lets o8 merge on its own within explicit rules ([#5822](https://github.com/o8-run/o8/issues/5822));
-     3. adopt an external pull request into one review task ([#5816](https://github.com/o8-run/o8/issues/5816));
-     4. reviewers learn from verified past outcomes ([#5823](https://github.com/o8-run/o8/issues/5823)).
+     3. reviewers learn from verified past outcomes ([#5823](https://github.com/o8-run/o8/issues/5823)).
    - The goal is autonomous: o8 reviews, corrects and merges what the user intended, and asks a person only when a rule says so.
 2. **Governance and security.** The reason to trust the loop. No lane stalls silently ([#2197](https://github.com/o8-run/o8/issues/2197)), and a worker cannot reach anything its packet does not grant ([#2198](https://github.com/o8-run/o8/issues/2198), security lane).
 3. **Other tools plug in.** Work written in another tool enters review without copy and paste. Its author sees verdicts and findings natively inside that tool, so nobody switches apps. o8's MCP server and CLI carry them ([#5841](https://github.com/o8-run/o8/issues/5841)).
