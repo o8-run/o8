@@ -44,6 +44,7 @@ import { assertLinuxArtifactChannels } from './lib/linux-build-channel.mjs';
 import { stableReleaseEffects } from './lib/stable-release-effects.mjs';
 import { artifactChannel } from './lib/build-channel.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
+import { withReleaseFollowLine } from './lib/release-follow-line.mjs';
 
 const REPO = 'o8-run/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
@@ -332,9 +333,9 @@ const warnStamp = gateWarnFailed
   ? '\n\ngate:warn-failed — pre-ship boot gate did not pass; shipped warn-only per #1163.'
   : '';
 const creditLine = stable.creditLine();
-const releaseNotes = (gateReleaseNote
+const releaseNotes = withReleaseFollowLine((gateReleaseNote
   ? `o8 ${tag} — see installer assets.\n\n${gateReleaseNote}`
-  : `o8 ${tag} — see installer assets.`) + (creditLine ? `\n\n${creditLine}` : '') + warnStamp;
+  : `o8 ${tag} — see installer assets.`) + (creditLine ? `\n\n${creditLine}` : '') + warnStamp);
 const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 ${tag}`;
 
 // Universal delivery stays the default and its artifacts always remain in
@@ -411,6 +412,7 @@ try {
   mirrorNotes = stable.prepareNotes();
 } catch { console.warn('[release] Public summary preparation unavailable; publishing the release fallback.'); }
 if (gateReleaseNote) mirrorNotes += `\n\n${gateReleaseNote}`;
+mirrorNotes = withReleaseFollowLine(mirrorNotes);
 
 if (releaseExists) {
   console.log(`[release] ${tag} already exists — replacing assets (O8_RELEASE_CLOBBER=1)`);
