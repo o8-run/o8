@@ -185,10 +185,14 @@ it.each([true,false])('does not project a packet verdict for another reviewed he
   const packet=state.packets.find(p=>p.id===task.revision.packetId)!;
   packet.review={approved,summary:'Stale persisted verdict',findings:[],reviewedHeadSha:input.base,recordedAt:new Date().toISOString()};
  });
- const projected=await detail(task.taskId);expect(['approved','sent_back']).not.toContain(projected.externalReview.state);
- expect(readOrchestratorControlPlaneState().packets.find(p=>p.id===task.revision.packetId)?.review?.auditApprovalId).toBeFalsy();
- const {listApprovalsForContext}=await import('@/lib/approvals/store');
- expect(listApprovalsForContext({packetId:task.revision.packetId}).filter(row=>row.toolName==='orchestrator_review')).toHaveLength(0);
+ try {
+  const projected=await detail(task.taskId);expect(['approved','sent_back']).not.toContain(projected.externalReview.state);
+  expect(readOrchestratorControlPlaneState().packets.find(p=>p.id===task.revision.packetId)?.review?.auditApprovalId).toBeFalsy();
+  const {listApprovalsForContext}=await import('@/lib/approvals/store');
+  expect(listApprovalsForContext({packetId:task.revision.packetId}).filter(row=>row.toolName==='orchestrator_review')).toHaveLength(0);
+ } finally {
+  await withLockedState(state=>{state.packets.find(p=>p.id===task.revision.packetId)!.review=null;});
+ }
 });
 it('bounds listings, reads old tasks directly, and tolerates a missing revision',async()=>{
  const first=await (await adopt({pullRequest:1000})).json();
