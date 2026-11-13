@@ -9,11 +9,13 @@ interface LaneRow {
   repo_path: string; created_at: string;
   session_key: string | null;
 }
-interface EventRow { lane_id: string; verb: string; actor: string; payload_json: string; timestamp: string }
-interface ApprovalRow {
+interface StoredEvent { id: string; lane_id: string; verb: string; actor: string; payload_json: string; timestamp: string }
+interface EventRow extends StoredEvent { payload: Record<string, unknown> }
+interface StoredApproval {
   id: string; lane_id: string | null; packet_id: string | null; tool_name: string | null;
   args_json: string | null; audit_json: string; gate_result_json: string | null; created_at: number;
 }
+interface ApprovalRow extends StoredApproval { audit: ApprovalAuditEvent[]; args: Record<string, unknown>; gate: { passed?: boolean } }
 interface Review extends ApprovalAuditEvent { approvalId: string }
 interface Change {
   id: string; title: string; branch: string; source: Source;
@@ -24,14 +26,20 @@ interface Change {
 interface Entry { id: string; title: string; detail: string }
 interface Metric {
   id: string; section: string; label: string; value: number | null;
-  display: string; note: string; changes: Entry[];
+  display: string; note: string; changes: Entry[]; total: number;
 }
 const SOURCES: Array<{ id: Source; label: string }> = [
   { id: 'chat', label: 'o8 chat' }, { id: 'external', label: 'Another tool' },
   { id: 'pr', label: 'Pull request' }, { id: 'unknown', label: 'Unrecorded source' },
 ];
-function parse<T>(text: string | null, fallback: T): T {
-  return text ? JSON.parse(text) as T : fallback;
+function parse<T>(text: string | null, fallback: T, skipped?: () => void): T {
+  if (!text) return fallback;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (!value || typeof value !== 'object' || Array.isArray(value) !== Array.isArray(fallback)
+      || (Array.isArray(value) && value.some(item => !item || typeof item !== 'object' || Array.isArray(item)))) throw new Error('Invalid stored shape');
+    return value as T;
+  } catch { skipped?.(); return fallback; }
 }
 function indexBy<T>(rows: T[], key: (row: T) => string | null): Map<string, T[]> {
   const index = new Map<string, T[]>();
@@ -52,7 +60,7 @@ function origin(packet?: OrchestratorPacket): Source {
   return 'unknown';
 }
 function entries(changes: Change[]): Entry[] {
-  return changes.map(change => ({ id: change.id, title: change.title,
+  return changes.slice(0, 200).map(change => ({ id: change.id, title: change.title,
     detail: `${change.branch} · ${change.reviews.length} review rounds · ${SOURCES.find(source => source.id === change.source)!.label}` }));
 }
 function median(values: number[]): number | null {
@@ -60,25 +68,25 @@ function median(values: number[]): number | null {
   values.sort((a, b) => a - b);
   return (values[Math.floor((values.length - 1) / 2)] + values[Math.floor(values.length / 2)]) / 2;
 }
-const approvalAsked = (approval: ApprovalRow) => approval.tool_name !== 'orchestrator_review'
-  || parse<ApprovalAuditEvent[]>(approval.audit_json, []).some(event => ['desktop', 'mobile'].includes(event.actor));
+const approvalAsked = (approval: ApprovalRow) => approval.audit.some(event => ['desktop', 'mobile'].includes(event.actor)
+  && ['approved', 'rejected'].includes(event.type));
 const human = (change: Change) => change.correctionAsked || change.events.some(event => event.actor === 'user' && !['create', 'attach_session'].includes(event.verb))
-  || change.events.some(event => event.verb === 'steered_packet' && parse<{ source?: string }>(event.payload_json, {}).source === 'operator')
+  || change.events.some(event => event.verb === 'steered_packet' && event.payload.source === 'operator')
   || change.approvals.some(approvalAsked);
 function merge(change: Change): EventRow | undefined {
   return change.events.find(event => event.verb === 'merge_dispatch_succeeded'
-    && !!parse<Record<string, unknown>>(event.payload_json, {}).mergeSha)
-    ?? change.events.find(event => event.verb === 'merge' && !!parse<Record<string, unknown>>(event.payload_json, {}).laneHeadSha);
+    && !!event.payload.mergeSha)
+    ?? change.events.find(event => event.verb === 'merge' && !!event.payload.laneHeadSha);
 }
 function metrics(changes: Change[], corrections: Map<string, number>): Metric[] {
   const rows: Metric[] = [];
   const add = (id: string, section: string, label: string, selected: Change[], note: string, value: number | null = selected.length, display?: string) => {
-    rows.push({ id, section, label, value, display: display ?? (value === null ? '—' : String(value)), note, changes: entries(selected) });
+    rows.push({ id, section, label, value, display: display ?? (value === null ? '—' : String(value)), note, total: selected.length, changes: entries(selected) });
   };
   const merged = changes.filter(change => merge(change));
   const autonomous = merged.filter(change => {
     const receipt = merge(change)!;
-    const head = parse<Record<string, unknown>>(receipt.payload_json, {}).reviewedHeadSha;
+    const head = receipt.payload.reviewedHeadSha;
     const verdict = change.reviews.filter(review => review.timestamp <= Date.parse(receipt.timestamp)).at(-1);
     return receipt.actor !== 'user' && !human(change) && !corrections.get(change.id) && typeof head === 'string'
       && verdict?.approved === true && verdict.reviewedHeadSha === head
@@ -91,9 +99,9 @@ function metrics(changes: Change[], corrections: Map<string, number>): Metric[] 
   const reasons: Array<[string, string, (change: Change) => boolean]> = [
     ['approval', 'Approval asked', change => change.approvals.some(approvalAsked)],
     ['rejected-twice', 'Review rejected twice', change => change.reviews.filter(review => review.approved === false).length >= 2],
-    ['gate', 'Gate failed', change => change.approvals.some(approval => parse<{ passed?: boolean }>(approval.gate_result_json, {}).passed === false)],
+    ['gate', 'Gate failed', change => change.approvals.some(approval => approval.gate.passed === false)],
     ['start', 'Start failed', change => change.events.some(event => event.verb === 'status_change'
-      && ['launch_failed', 'launch_error', 'launch_preparation_failed', 'relaunch_failed'].includes(parse<{ eventLabel?: string }>(event.payload_json, {}).eventLabel ?? ''))],
+      && ['launch_failed', 'launch_error', 'launch_preparation_failed', 'relaunch_failed'].includes(String(event.payload.eventLabel ?? '')))],
     ['held', 'Held', change => change.held],
   ];
   add('needed-person', 'Needed a person', 'Needed a person', changes.filter(change => human(change) || corrections.get(change.id) || reasons.some(([, , matches]) => matches(change))),
@@ -162,15 +170,48 @@ export function reviewScorecard(range: string, selectedSource: string, repoPath:
   const since = range === 'all' ? 0 : now - Number(range) * 86400000;
   const db = getSqlite();
   return db.transaction(() => {
-    const lanes = db.prepare('SELECT id,packet_id,label,branch,repo_path,session_key,created_at FROM lanes ORDER BY created_at DESC,id').all() as LaneRow[];
-    const approvals = db.prepare('SELECT id,lane_id,packet_id,tool_name,args_json,audit_json,gate_result_json,created_at FROM approvals').all() as ApprovalRow[];
-    const events = db.prepare('SELECT lane_id,verb,actor,payload_json,timestamp FROM lane_events ORDER BY timestamp,id').all() as EventRow[];
+    const skippedRows = new Set<string>();
+    const skipped = (key: string) => () => { skippedRows.add(key); };
+    // Select whole retry groups by their earliest eligible arrival before materializing payloads.
+    const lanes = db.prepare(`WITH eligible AS (
+      SELECT id,packet_id,label,branch,repo_path,session_key,created_at,
+        CASE WHEN packet_id IS NOT NULL AND packet_id != '' THEN 'packet:' || packet_id ELSE 'lane:' || id END AS cohort
+      FROM lanes WHERE (? IS NULL OR repo_path=?) AND julianday(created_at) <= julianday(?)
+    ), cohorts AS (
+      SELECT cohort FROM eligible GROUP BY cohort HAVING MIN(julianday(created_at)) >= julianday(?)
+    ) SELECT id,packet_id,label,branch,repo_path,session_key,created_at FROM eligible
+      WHERE cohort IN (SELECT cohort FROM cohorts) ORDER BY julianday(created_at) DESC,id`)
+      .all(repoPath, repoPath, new Date(now).toISOString(), new Date(since).toISOString()) as LaneRow[];
+    const laneIds = JSON.stringify(lanes.map(lane => lane.id));
+    const packetIds = JSON.stringify([...new Set(lanes.flatMap(lane => lane.packet_id ? [lane.packet_id] : []))]);
+    const repoPaths = JSON.stringify([...new Set(lanes.map(lane => lane.repo_path))]);
+    const approvals = (db.prepare(`SELECT id,lane_id,packet_id,tool_name,args_json,audit_json,gate_result_json,created_at FROM approvals
+      WHERE created_at <= ? AND (lane_id IN (SELECT value FROM json_each(?)) OR packet_id IN (SELECT value FROM json_each(?)))`)
+      .all(now, laneIds, packetIds) as StoredApproval[]).map(row => ({ ...row,
+        audit: parse<ApprovalAuditEvent[]>(row.audit_json, [], skipped(`approval:${row.id}`)),
+        args: parse<Record<string, unknown>>(row.args_json, {}, skipped(`approval:${row.id}`)),
+        gate: parse<{ passed?: boolean }>(row.gate_result_json, {}, skipped(`approval:${row.id}`)),
+      }));
+    const events = (db.prepare(`SELECT id,lane_id,verb,actor,payload_json,timestamp FROM lane_events
+      WHERE lane_id IN (SELECT value FROM json_each(?)) AND julianday(timestamp) <= julianday(?) ORDER BY julianday(timestamp),id`)
+      .all(laneIds, new Date(now).toISOString()) as StoredEvent[]).map(row => ({ ...row,
+        payload: parse<Record<string, unknown>>(row.payload_json, {}, skipped(`event:${row.id}`)),
+      }));
     const approvalsByLane = indexBy(approvals, row => row.lane_id);
     const approvalsByPacket = indexBy(approvals, row => row.packet_id);
     const eventsByLane = indexBy(events, row => row.lane_id);
     const packets = new Map<string, OrchestratorPacket>();
-    for (const row of db.prepare('SELECT mission_state_json FROM missions ORDER BY updated_at').all() as Array<{ mission_state_json: string }>) {
-      for (const packet of parse<{ packets?: OrchestratorPacket[] }>(row.mission_state_json, {}).packets ?? []) packets.set(packet.id, packet);
+    // Extract only the selected packets in SQLite; do not transfer entire mission snapshots to JS.
+    for (const row of db.prepare(`SELECT id FROM missions WHERE repo_path IN (SELECT value FROM json_each(?))
+      AND NOT json_valid(mission_state_json)`).all(repoPaths) as Array<{ id: string }>) skippedRows.add(`mission:${row.id}`);
+    const packetRows = db.prepare(`SELECT m.id, p.value AS packet_json FROM missions m,
+      json_each(CASE WHEN json_valid(m.mission_state_json) THEN m.mission_state_json ELSE '{}' END, '$.packets') p
+      WHERE m.repo_path IN (SELECT value FROM json_each(?))
+        AND json_extract(CASE WHEN p.type='object' THEN p.value ELSE '{}' END, '$.id') IN (SELECT value FROM json_each(?))
+      ORDER BY m.updated_at`).all(repoPaths, packetIds) as Array<{ id: string; packet_json: string }>;
+    for (const row of packetRows) {
+      const packet = parse<OrchestratorPacket | null>(row.packet_json, null, skipped(`mission:${row.id}`));
+      if (packet) packets.set(packet.id, packet);
     }
     const grouped = new Map<string, LaneRow[]>();
     for (const lane of lanes.filter(lane => (!repoPath || lane.repo_path === repoPath) && Date.parse(lane.created_at) <= now)) {
@@ -182,19 +223,19 @@ export function reviewScorecard(range: string, selectedSource: string, repoPath:
       created_at: group.at(-1)!.created_at, laneIds: new Set(group.map(lane => lane.id)),
       sessionKeys: new Set(group.flatMap(lane => lane.session_key ? [lane.session_key] : [])) }));
     const corrections = new Map<string, number>();
-    const handoffs = (db.prepare('SELECT id,payload_json,created_at FROM worker_corrections WHERE created_at <= ?')
-      .all(now) as Array<{ id: string; payload_json: string; created_at: number }>).map(row => ({ ...row,
-        targets: parse<{ targets?: Array<{ surfaceId: string }> }>(row.payload_json, {}).targets ?? [] }));
+    const handoffs = (db.prepare('SELECT id,payload_json,created_at FROM worker_corrections WHERE created_at BETWEEN ? AND ? AND repo_path IN (SELECT value FROM json_each(?))')
+      .all(lanes.length ? Math.min(...lanes.map(lane => Date.parse(lane.created_at))) : now, now, repoPaths) as Array<{ id: string; payload_json: string; created_at: number }>).map(row => ({ ...row,
+        targets: parse<{ targets?: Array<{ surfaceId: string }> }>(row.payload_json, {}, skipped(`correction:${row.id}`)).targets ?? [] }));
     const delivered = db.prepare(`SELECT correction_id,surface_id FROM worker_correction_deliveries
-      WHERE status='delivered' AND updated_at <= ?`).all(now) as Array<{ correction_id: string; surface_id: string }>;
+      WHERE status='delivered' AND updated_at <= ? AND correction_id IN (SELECT value FROM json_each(?))`).all(now, JSON.stringify(handoffs.map(row => row.id))) as Array<{ correction_id: string; surface_id: string }>;
     const deliveriesByCorrection = indexBy(delivered, row => row.correction_id);
     const changes: Change[] = canonical.filter(lane => (!repoPath || lane.repo_path === repoPath)
       && Date.parse(lane.created_at) >= since && Date.parse(lane.created_at) <= now).map(lane => {
       const related = [...new Set([...lane.laneIds].flatMap(id => approvalsByLane.get(id) ?? [])
         .concat(lane.packet_id ? approvalsByPacket.get(lane.packet_id) ?? [] : []))].filter(approval => approval.created_at <= now);
       const reviews = related.filter(approval => approval.tool_name === 'orchestrator_review'
-        && parse<{ reviewTurnOutcome?: string }>(approval.args_json, {}).reviewTurnOutcome === 'completed')
-        .flatMap(approval => parse<ApprovalAuditEvent[]>(approval.audit_json, []).filter(event => event.type === 'orchestrator_review'
+        && approval.args.reviewTurnOutcome === 'completed')
+        .flatMap(approval => approval.audit.filter(event => event.type === 'orchestrator_review'
           && !event.parseWarning && typeof event.approved === 'boolean' && event.timestamp <= now)
           .map(event => ({ ...event, approvalId: approval.id }))).sort((a, b) => a.timestamp - b.timestamp);
       const packet = packets.get(lane.packet_id ?? '');
@@ -206,11 +247,11 @@ export function reviewScorecard(range: string, selectedSource: string, repoPath:
       return { id: lane.id, title: lane.label, branch: lane.branch, source: origin(packet),
         held: packet?.mergeHold === true || packet?.queueState === 'held',
         correctionAsked: sent.length > 0,
-        approvals: related, reviews, events: [{ lane_id: lane.id, verb: 'scorecard_arrival', actor: 'system', payload_json: '{}', timestamp: lane.created_at },
+        approvals: related, reviews, events: [{ id: 'arrival', lane_id: lane.id, verb: 'scorecard_arrival', actor: 'system', payload_json: '{}', payload: {}, timestamp: lane.created_at },
           ...[...lane.laneIds].flatMap(id => eventsByLane.get(id) ?? []).filter(event => Date.parse(event.timestamp) <= now)
             .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))] };
     });
-    return { range, source: selectedSource, basis: `${repoPath ? 'This project' : 'All projects'} · Tracked changes arriving in this range (one per packet, otherwise lane), using durable records through now. Unknown source is kept separate. Pull request records do not establish whether the author is a person.`,
+    return { range, source: selectedSource, basis: `${repoPath ? 'This project' : 'All projects'} · Tracked changes arriving in this range (one per packet, otherwise lane), using durable records through now. Unknown source is kept separate. Pull request records do not establish whether the author is a person.${skippedRows.size ? ` ${skippedRows.size} malformed rows skipped.` : ''}`,
       sources: SOURCES.map(source => ({ ...source, count: changes.filter(change => change.source === source.id).length })),
       metrics: metrics(changes.filter(change => selectedSource === 'all' || change.source === selectedSource), corrections) };
   })();

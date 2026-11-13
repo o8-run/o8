@@ -88,6 +88,8 @@ it('groups recorded escalations and only counts delivered correction handoffs', 
   lane('start'); event('start', 'status_change', -1000, 'system', { eventLabel: 'launch_error' });
   lane('gate'); review('gate', true, -2000);
   getSqlite().prepare("UPDATE approvals SET tool_name='lane_merge',gate_result_json=? WHERE lane_id='gate'").run('{"passed":false}');
+  const gateAudit = getSqlite().prepare("SELECT audit_json FROM approvals WHERE lane_id='gate'").get() as { audit_json: string };
+  getSqlite().prepare("UPDATE approvals SET audit_json=? WHERE lane_id='gate'").run(JSON.stringify([...JSON.parse(gateAudit.audit_json), { type: 'approved', actor: 'desktop', timestamp: now - 1000 }]));
   lane('held');
   getSqlite().prepare('INSERT INTO missions (id,repo_path,mission_state_json,created_at,updated_at) VALUES (?,?,?,?,?)')
     .run('fixture', '/fixture/repo', JSON.stringify({ packets: [{ id: 'held', mergeHold: true }] }), now, now);
@@ -187,6 +189,8 @@ it('materializes only the SQL arrival cohort and its related records', async () 
   lane('old', 20 * day); review('old', true, -1000);
   lane('retry'); getSqlite().prepare("UPDATE lanes SET packet_id='old' WHERE id='retry'").run();
   event('recent', 'fixture-recent', -1000); event('old', 'fixture-old', -1000);
+  getSqlite().prepare('INSERT INTO missions (id,repo_path,mission_state_json,created_at,updated_at) VALUES (?,?,?,?,?)')
+    .run('range-mission', '/fixture/repo', JSON.stringify({ packets: [{ id: 'recent' }, { id: 'old', description: 'old payload'.repeat(1000) }] }), now, now);
   const db = getSqlite();
   const prepare = db.prepare.bind(db);
   const reads: Array<Array<Record<string, unknown>>> = [];
@@ -205,6 +209,8 @@ it('materializes only the SQL arrival cohort and its related records', async () 
     expect(body.sources.find((row: { id: string }) => row.id === 'unknown').count).toBe(1);
     const rows = reads.flat();
     expect(rows.filter(row => 'branch' in row && 'created_at' in row).map(row => row.id)).toEqual(['recent']);
+    expect(rows.some(row => 'mission_state_json' in row)).toBe(false);
+    expect(rows.filter(row => 'packet_json' in row).map(row => JSON.parse(String(row.packet_json)).id)).toEqual(['recent']);
     expect(rows.filter(row => 'audit_json' in row).map(row => row.lane_id)).toEqual(['recent']);
     expect(rows.filter(row => 'payload_json' in row && 'verb' in row).map(row => row.lane_id)).toEqual(['recent']);
   } finally { spy.mockRestore(); }

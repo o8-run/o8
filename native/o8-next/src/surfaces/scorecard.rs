@@ -41,7 +41,10 @@ struct Metric {
     id: String,
     section: String,
     label: String,
+    value: Option<f64>,
     display: String,
+    #[serde(default)]
+    total: usize,
     note: String,
     changes: Vec<Entry>,
 }
@@ -155,75 +158,116 @@ impl Scorecard {
                     .truncate()
                     .child(metric.label.clone()),
             )
-            .child(div().flex_shrink_0().child(metric.display.clone()))
+            .child(div().flex_shrink_0().child(if metric.value.is_none() {
+                "Unavailable".to_owned()
+            } else {
+                metric.display.clone()
+            }))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.selected = if selected { None } else { Some(id.clone()) };
                 cx.notify();
             }));
-        div().flex().flex_col().child(row).when(selected, |v| {
-            v.child(div().debug_selector(|| "scorecard-drilldown".into()).px(px(9.)).pb(px(16.))
-                .flex().flex_col().gap(px(8.)).text_size(px(12.)).text_color(theme().text_muted)
-                .child(metric.note.clone())
-                .when(metric.changes.is_empty(), |v| v.child(div().debug_selector(|| "scorecard-empty".into())
-                    .child("No changes behind this figure. Complete a review or the recorded step to create an outcome.")))
-                .children(metric.changes.iter().map(|entry| {
+        let mut view = div().flex().flex_col().child(row);
+        if selected {
+            let mut details = div()
+                .debug_selector(|| "scorecard-drilldown".into())
+                .px(px(9.))
+                .pb(px(16.))
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .text_size(px(12.))
+                .text_color(theme().text_muted)
+                .child(
+                    div()
+                        .when(metric.value.is_none(), |v| {
+                            v.debug_selector(|| "scorecard-unavailable".into())
+                        })
+                        .child(metric.note.clone()),
+                );
+            if metric.value.is_some() {
+                if metric.changes.is_empty() {
+                    details = details.child(div().debug_selector(|| "scorecard-empty".into())
+                        .child("No changes behind this figure. Complete a review or the recorded step to create an outcome."));
+                }
+                for entry in &metric.changes {
                     let selector = format!("scorecard-change-{}", entry.id);
-                    div().debug_selector(move || selector.clone()).min_w_0().flex().flex_col().gap(px(4.))
-                        .child(div().truncate().text_color(theme().text).child(entry.title.clone()))
-                        .child(div().truncate().child(entry.detail.clone()))
-                })))
-        }).into_any_element()
+                    details = details.child(
+                        div()
+                            .debug_selector(move || selector.clone())
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_color(theme().text)
+                                    .child(entry.title.clone()),
+                            )
+                            .child(div().truncate().child(entry.detail.clone())),
+                    );
+                }
+                if metric.total > metric.changes.len() {
+                    details = details.child(
+                        div()
+                            .debug_selector(|| "scorecard-more".into())
+                            .child(format!("and {} more", metric.total - metric.changes.len())),
+                    );
+                }
+            }
+            view = view.child(details);
+        }
+        view.into_any_element()
     }
 }
 impl Render for Scorecard {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ranges = [("7", "7 days"), ("30", "30 days"), ("all", "All")];
-        let mut body = div()
-            .id("review-scorecard")
-            .debug_selector(|| "review-scorecard".into())
-            .track_focus(&self.focus)
-            .size_full()
-            .min_w_0()
-            .bg(theme().surface)
-            .text_color(theme().text)
-            .font_weight(gpui::FontWeight::LIGHT)
-            .flex()
-            .flex_col()
-            .gap(px(16.))
-            .p(px(16.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(px(14.))
-                            .child("Review scorecard"),
-                    )
-                    .child(
-                        Self::control("scorecard-refresh".into(), false, cx)
-                            .opacity(if self.loading { 0.5 } else { 1. })
-                            .child(if self.loading {
-                                "Reading…"
-                            } else {
-                                "Refresh"
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if !this.loading {
-                                    this.load(cx);
-                                }
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.))
-                    .children(ranges.map(|(range, label)| {
+        let mut body =
+            div()
+                .id("review-scorecard")
+                .debug_selector(|| "review-scorecard".into())
+                .track_focus(&self.focus)
+                .size_full()
+                .min_w_0()
+                .bg(theme().surface)
+                .text_color(theme().text)
+                .font_weight(gpui::FontWeight::LIGHT)
+                .flex()
+                .flex_col()
+                .gap(px(16.))
+                .p(px(16.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(14.))
+                                .child("Review scorecard"),
+                        )
+                        .child(
+                            Self::control("scorecard-refresh".into(), false, cx)
+                                .opacity(if self.loading { 0.5 } else { 1. })
+                                .child(if self.loading {
+                                    "Reading…"
+                                } else {
+                                    "Refresh"
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if !this.loading {
+                                        this.load(cx);
+                                    }
+                                })),
+                        ),
+                )
+                .child(div().flex().flex_wrap().gap(px(8.)).children(ranges.map(
+                    |(range, label)| {
                         Self::control(format!("scorecard-range-{range}"), self.range == range, cx)
                             .child(label)
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -234,8 +278,8 @@ impl Render for Scorecard {
                                     this.load(cx);
                                 }
                             }))
-                    })),
-            );
+                    },
+                )));
         if self.loading {
             body = body.child(
                 div()

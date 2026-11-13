@@ -95,8 +95,38 @@ fn scorecard_range_and_each_figure_from_durable_fixture(cx: &mut TestAppContext)
     settle(&view, cx);
     click(cx, "scorecard-metric-without-person");
     draw(cx);
+    assert!(cx.debug_bounds("scorecard-unavailable").is_some());
+    assert!(cx.debug_bounds("scorecard-empty").is_none());
+    click(cx, "scorecard-metric-findings");
+    draw(cx);
     assert!(cx.debug_bounds("scorecard-empty").is_some());
     click(cx, "scorecard-range-all");
     settle(&view, cx);
     assert_eq!(view.read_with(cx, |view, _| view.range), "all");
+}
+
+#[gpui::test]
+fn scorecard_unavailable_note_and_capped_drilldown(cx: &mut TestAppContext) {
+    let f = Fixture::start_mode(false, "--scorecard");
+    let (view, cx) = cx.add_window_view(|_, cx| Scorecard::new(f.client.clone(), cx));
+    settle(&view, cx);
+    view.update(cx, |view, cx| {
+        view.snapshot = Some(serde_json::from_value(serde_json::json!({
+            "basis":"All projects", "sources":[], "metrics":[
+                {"id":"unavailable","section":"Saved","label":"Learned","value":null,"display":"—","note":"No verified reuse evidence","changes":[],"total":0},
+                {"id":"capped","section":"Saved","label":"Changes","value":205,"display":"205","note":"Backing changes","total":205,
+                 "changes":[{"id":"one","title":"One change","detail":"Saved receipt"}]}
+            ]
+        })).unwrap());
+        cx.notify();
+    });
+    click(cx, "scorecard-metric-unavailable");
+    draw(cx);
+    assert!(cx.debug_bounds("scorecard-unavailable").is_some());
+    assert!(cx.debug_bounds("scorecard-empty").is_none());
+    assert!(cx.debug_bounds("scorecard-more").is_none());
+    click(cx, "scorecard-metric-capped");
+    draw(cx);
+    assert!(cx.debug_bounds("scorecard-more").is_some());
+    assert!(cx.debug_bounds("scorecard-change-one").is_some());
 }
