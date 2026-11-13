@@ -389,6 +389,7 @@ impl X11WindowState {
         params: WindowParams,
         xcb: &Rc<XCBConnection>,
         client_side_decorations_supported: bool,
+        compositor_present: bool,
         x_main_screen_index: usize,
         x_window: xproto::Window,
         atoms: &XcbAtoms,
@@ -402,13 +403,15 @@ impl X11WindowState {
 
         let visual_set = find_visuals(xcb, x_screen_index);
 
-        let visual = match visual_set.transparent {
-            Some(visual) => visual,
-            None => {
-                log::warn!("Unable to find a transparent visual",);
-                visual_set.inherit
-            }
-        };
+        // Without a compositor, use the opaque visual for the Vulkan surface.
+        // Older software drivers can map an ARGB window without presenting its
+        // pixels on the root drawable.
+        let visual = if compositor_present {
+            visual_set.transparent.or(visual_set.opaque)
+        } else {
+            visual_set.opaque
+        }
+        .unwrap_or(visual_set.inherit);
         log::info!("Using {:?}", visual);
 
         let colormap = if visual.colormap != 0 {
