@@ -1,3 +1,5 @@
+import { findLaneByPacket } from '@/lib/lane/registry';
+import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
 import { randomUUID, createHash } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
@@ -17,11 +19,12 @@ function project(row: TaskRow): ExternalReviewTask {
   const revision: ExternalReviewRevision = { id: String(r.id), taskId: row.id, sequence: Number(r.sequence), predecessorId: r.predecessor_id as string | null,
     headSha: String(r.head_sha), baseSha: String(r.base_sha), baseRef: String(r.base_ref), intendedOutcome: r.intended_outcome as string | null,
     packetId: String(r.packet_id), adoptedAt: String(r.adopted_at), runEvidenceId: r.run_evidence_id as string | null };
-  const packet = readOrchestratorControlPlaneState().packets.find(p => p.id === revision.packetId);
+  const packet = readOrchestratorControlPlaneState().packets.find(p => p.id === revision.packetId)
+    ?? findMissionRegistryEntryByPacketId(revision.packetId)?.mission.packets.find(p => p.id === revision.packetId);
   const review = packet?.review?.reviewedHeadSha === revision.headSha ? packet.review : null;
   return { taskId: row.id, repoId: row.repo_id, repoPath: row.repo_path, repositoryId: row.repository_id,
     pullRequest: row.pr_number, url: row.pr_url, revision,
-    state: review ? review.approved ? 'approved' : 'sent_back' : packet?.lane ? 'in_review' : 'waiting' };
+    state: review ? review.approved ? 'approved' : 'sent_back' : findLaneByPacket(revision.packetId) ? 'in_review' : 'waiting' };
 }
 export function readExternalReview(id: string): ExternalReviewTask | null {
   const row = getSqlite().prepare('SELECT * FROM external_pr_review_tasks WHERE id = ?').get(id) as TaskRow | undefined;

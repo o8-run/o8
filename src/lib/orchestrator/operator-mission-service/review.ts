@@ -1,3 +1,4 @@
+import { completedExternalReviewTurn } from '@/lib/tasks/external-review-turn';
 import { randomUUID } from 'node:crypto';
 
 import { resolveApproval } from '@/lib/approvals/resolution';
@@ -244,7 +245,7 @@ function recordPacketReviewAudit(
   };
 }
 
-export async function submitPacketReview(input: SubmitReviewInput, internal?: { completedCorrectionTurnId: string; claimOwner: string }) {
+export async function submitPacketReview(input: SubmitReviewInput, internal?: { completedCorrectionTurnId: string; claimOwner: string; externalReview?: true }) {
   const state = currentMissionState();
   const missionPacket = state.packets.find((candidate) => candidate.id === input.packetId);
 
@@ -267,7 +268,7 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
 
   const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
   const activeReviewTurn = verdictLane ? internal
-    ? completedCorrectionReviewTurn(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner)
+    ? (internal.externalReview ? completedExternalReviewTurn : completedCorrectionReviewTurn)(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner)
     : findActiveReviewTurn(verdictLane.id) : null;
   if (verdictLane && input.approved && activeReviewTurn?.surface === 'auto-review' && activeReviewTurn.formatRetryRejecting) {
     appendEvent(verdictLane.id, 'review_format_decision_rejected', 'system', {
@@ -434,7 +435,7 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
     || ![`auto-review-${verdictLane!.id}-${correction.review_id}`, `auto-review-${verdictLane!.id}-${correction.review_id}-verdict-retry`].includes(activeReviewTurn.threadId ?? ''))) {
     throw new ReviewValidationError('correction_reviewer_required', 'This correction requires its queued independent reviewer at the corrected HEAD.');
   }
-  if (internal && verdictLane) completedCorrectionReviewTurn(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner);
+  if (internal && verdictLane) (internal.externalReview ? completedExternalReviewTurn : completedCorrectionReviewTurn)(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner);
   const summary = buildReviewSummary(input.findings, input.approved);
   const auditReview = recordPacketReviewAudit(
     packet,

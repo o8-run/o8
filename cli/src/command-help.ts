@@ -77,6 +77,7 @@ const help: Record<string, CommandHelp> = {
     details: 'Use o8 lease list to discover active names.',
     example: 'o8 lease status audit',
   },
+  'task adopt-pr': { usage: '<number-or-url> --repo <registered-repo>', required: 'Operator token, registered repository and GitHub PR.', defaults: 'Returns the stable task and current immutable revision; does not start review.', example: 'o8 task adopt-pr 7 --repo /path/to/repo' },
   'task create': {
     usage: '--title <text> [--repo <path>] [--project <id>] [--summary <text>]',
     required: '--title <text> or a positional title. A project must be selected or active.',

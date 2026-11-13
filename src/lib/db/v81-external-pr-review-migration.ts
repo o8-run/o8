@@ -5,7 +5,7 @@ export function ensureV81ExternalPrReviewSchema(sqlite: Database.Database): void
   sqlite.exec(`CREATE TABLE IF NOT EXISTS external_pr_review_tasks (
     id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, repo_path TEXT NOT NULL,
     repository_id TEXT NOT NULL, pr_number INTEGER NOT NULL CHECK(pr_number > 0),
-    pr_url TEXT NOT NULL, current_revision_id TEXT,
+    pr_url TEXT NOT NULL, current_revision_id TEXT REFERENCES external_pr_review_revisions(id),
     UNIQUE(repo_id, repository_id, pr_number)
   );
   CREATE TABLE IF NOT EXISTS external_pr_review_revisions (

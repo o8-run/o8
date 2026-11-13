@@ -46,6 +46,7 @@ interface TaskPoolLaneSummary {
 }
 
 interface TaskPoolTask {
+  externalReview?: { url: string; state: string; revision: { headSha: string; sequence: number } };
   id: string;
   packetId: string | null;
   laneId: string | null;
@@ -175,10 +176,11 @@ function taskIdFromRest(rest: string[], command: string): string {
 }
 
 function printTaskLine(task: TaskPoolTask): void {
-  const id = task.packetId ?? task.laneId ?? task.id;
+  const id = task.externalReview ? task.id : task.packetId ?? task.laneId ?? task.id;
   const repo = task.repoName ?? 'no repo';
   const project = task.project?.name ?? 'no project';
   process.stdout.write(`  ${id}  ${task.status}  ${repo}  ${project}\n`);
+  if (task.externalReview) process.stdout.write(`    ${task.externalReview.url}  ${task.externalReview.revision.headSha}  ${task.externalReview.state}\n`);
   if (task.runtimeSubstitution) process.stdout.write(`    runtime substitution=${task.runtimeSubstitution}\n`);
   if (task.workerIntent || task.workerRouting) {
     process.stdout.write(`    worker=${task.workerIntent ?? 'unknown'} selected=${task.workerRouting?.selectedRuntime ?? task.runtime}\n`);
@@ -225,6 +227,7 @@ function printHumanTaskDetail(detail: TaskDetail): void {
     ['project', task.project?.name ?? '(none)'],
     ['branch', task.branch ?? '(none)'],
   ]);
+  if (task.externalReview) printHumanKv([['PR', task.externalReview.url], ['head SHA', task.externalReview.revision.headSha], ['review state', task.externalReview.state]]);
   process.stdout.write(`\n${task.title}\n`);
   if (task.summary) process.stdout.write(`\n${task.summary}\n`);
   if (task.taskBrief) {

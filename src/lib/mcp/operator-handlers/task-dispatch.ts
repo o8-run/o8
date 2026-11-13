@@ -1,11 +1,17 @@
+import { apiFetch } from './shared';
 import { RuntimeSelectionError, validateRequestedRuntime } from '@/lib/agents/routing';
 import { withToolRuntimeOwner } from '@/lib/runtime/owner-context';
 import { dispatchTask } from '@/lib/tasks/actions';
 import { lifecycleErrorResult } from './lifecycle-error';
-import { jsonResult, McpInputError, optionalString, requiredString, type McpToolResult } from './shared';
+import { jsonResult, textResult, McpInputError, optionalString, requiredString, type McpToolResult } from './shared';
 
 export async function handleTaskDispatch(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
+    const taskId = requiredString(args, 'taskId');
+    if (taskId.startsWith('external-pr-')) {
+      if (process.env.O8_WORKER_TOKEN) return textResult('Operator token required.', true);
+      return jsonResult(await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}/dispatch`, { method: 'POST', body: '{}' }));
+    }
     const result = await withToolRuntimeOwner(() => dispatchTask(requiredString(args, 'taskId'), {
       waitForLaunch: false,
       actor: 'orchestrator',

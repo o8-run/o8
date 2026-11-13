@@ -68,6 +68,7 @@ async function runAttempt(input: {
   model?: string;
   thinkingEffort?: ThinkingEffort;
   freshSession?: boolean;
+  readOnly?: boolean;
   signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
@@ -131,6 +132,7 @@ async function runAttempt(input: {
       input.onEvent?.(input.backend, event);
     }, {
       threadId: sessionThreadId,
+      ...(input.readOnly ? { permissionMode: 'plan' as const } : {}),
       ...(input.model ? { model: input.model } : {}),
       ...(input.thinkingEffort ? { thinkingEffort: input.thinkingEffort } : {}),
       reviewUsage,
@@ -187,6 +189,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
   initialBackend?: OrchestratorBackend;
   backendResolver?: (backend: OrchestratorBackendId) => OrchestratorBackend;
+  readOnly?: boolean;
   signal?: AbortSignal;
 }): Promise<ReviewFallbackTurnResult> {
   const backendResolver = input.backendResolver ?? getOrchestratorBackend;
@@ -270,6 +273,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   const piWorkspace = input.surface === 'buyin-doc' ? input.repoPath
     : getLane(input.laneId)?.worktreePath || input.repoPath;
   const first = await runAttempt({
+    readOnly: input.readOnly,
     backend: initialBackend,
     laneId: input.laneId,
     surface: input.surface,
@@ -365,6 +369,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     return refuse('Review fallback model and backend must match the cross-house target.', first.reviewTurnId);
   }
   const second = await runAttempt({
+    readOnly: input.readOnly,
     backend: fallbackBackend,
     laneId: input.laneId,
     surface: input.surface,

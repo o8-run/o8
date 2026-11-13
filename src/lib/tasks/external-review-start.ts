@@ -1,3 +1,4 @@
+import { ensureReviewQueueDrainStarted } from '@/lib/lane/review-drain-bootstrap';
 import { readExternalReview } from './external-review-store';
 import { resolveReviewerPrSource } from '@/lib/orchestrator/reviewer-pr-source';
 import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
@@ -39,6 +40,7 @@ export async function startExternalReview(taskId: string) {
     if (readExternalReview(taskId)?.state === 'approved' || readExternalReview(taskId)?.state === 'sent_back') return readExternalReview(taskId);
     const requested = await dispatch({ verb: 'request_review', laneId: lane.id, actor: 'user' });
     if (!requested.ok) throw new Error(requested.note);
+    ensureReviewQueueDrainStarted();
     return readExternalReview(taskId);
   });
 }

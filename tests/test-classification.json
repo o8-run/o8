@@ -3391,6 +3391,8 @@
     {
       "path": "tests/external-pr-review-real-path.test.ts",
       "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },

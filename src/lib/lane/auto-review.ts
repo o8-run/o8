@@ -1,3 +1,4 @@
+import { getSqlite } from '@/lib/db';
 /**
  * Auto-review trigger for the orchestrator loop.
  *
@@ -505,6 +506,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   // accuracy-critical review can run on Claude while the bulk orchestrator
   // stays on Codex. 'follow' (default) = pre-split behavior.
   const reviewTurn = await runReviewerTurnWithQuotaFallback({
+    readOnly: Boolean(getSqlite().prepare('SELECT 1 FROM external_pr_review_revisions WHERE packet_id = ?').get(lane.packetId)),
     laneId: lane.id,
     repoPath: lane.repoPath,
     threadId: `auto-review-${lane.id}-${review.id}`,

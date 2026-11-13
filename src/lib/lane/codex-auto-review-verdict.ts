@@ -1,3 +1,4 @@
+import { getSqlite } from '@/lib/db';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
@@ -404,12 +405,13 @@ export async function recordCodexAutoReviewVerdict(input: {
 
   const { recordOrchestratorReview } = await import('@/lib/approvals/store');
   const correction = prepareCorrectionReview(input.lane, reviewedHeadSha, 'verdict');
-  if (correction) {
+  const external = getSqlite().prepare('SELECT 1 FROM external_pr_review_revisions WHERE packet_id = ?').get(input.lane.packetId);
+  if (correction || external) {
     if (!reviewTurnId || !input.correctionClaimOwner) throw new Error('Correction re-review has no current independent review claim.');
     const { submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service/review');
     const recorded = await submitPacketReview({ packetId: input.lane.packetId, approved: verdict.approved,
       findings: verdict.findings, reviewedHeadSha, contractCoverageEvidence: verdict.contractCoverageEvidence },
-    { completedCorrectionTurnId: reviewTurnId, claimOwner: input.correctionClaimOwner });
+    { completedCorrectionTurnId: reviewTurnId, claimOwner: input.correctionClaimOwner, ...(external ? { externalReview: true as const } : {}) });
     if (!recorded.recorded) throw new Error('The correction review verdict was not recorded for its pinned HEAD.');
     return { event: null, verdict, reviewedHeadSha, reviewUnavailable: false };
   }
