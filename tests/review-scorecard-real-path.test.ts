@@ -240,3 +240,59 @@ it('counts only desktop or mobile approval decisions as human steps', async () =
   expect(body.metrics.find((row: { id: string }) => row.id === 'needed-person').value).toBe(0);
   expect(body.metrics.find((row: { id: string }) => row.id === 'without-person').value).toBe(3);
 });
+
+it('loads only the newest 2000 first-arrival cohorts for all time', async () => {
+  const db = getSqlite();
+  db.transaction(() => {
+    for (let i = 0; i < 2001; i++) lane(`bounded-${i}`, day + i * 1000);
+    lane('old-retry', 1000);
+    db.prepare("UPDATE lanes SET packet_id='bounded-2000' WHERE id='old-retry'").run();
+    review('bounded-2000', true, -1000);
+    event('bounded-2000', 'excluded', -1000);
+    db.prepare('INSERT INTO missions (id,repo_path,mission_state_json,created_at,updated_at) VALUES (?,?,?,?,?)')
+      .run('bounded-mission', '/fixture/repo', JSON.stringify({ packets: [{ id: 'bounded-2000' }] }), now, now);
+    const prefix = 'review-author-' + createHash('sha256').update('bounded-2000').digest('hex').slice(0, 24) + '-';
+    db.prepare('INSERT INTO worker_corrections (id,repo_path,thread_id,payload_json,created_at) VALUES (?,?,?,?,?)')
+      .run(prefix + 'excluded', '/fixture/repo', 'fixture-thread', '{}', now - 1000);
+  })();
+  const prepare = db.prepare.bind(db);
+  const reads: Array<Record<string, unknown>> = [];
+  const restores: Array<() => void> = [];
+  const spy = vi.spyOn(db, 'prepare').mockImplementation(sql => {
+    const statement = prepare(sql);
+    const all = statement.all.bind(statement);
+    const allSpy = vi.spyOn(statement, 'all').mockImplementation((...args: unknown[]) => {
+      const rows = all(...args); reads.push(...rows as Array<Record<string, unknown>>); return rows;
+    });
+    restores.push(() => allSpy.mockRestore()); return statement;
+  });
+  try {
+    const body = await score('all');
+    expect(body.basis).toContain('limited to the newest 2000 changes');
+    expect(body.sources.find((row: { id: string }) => row.id === 'unknown').count).toBe(2000);
+    expect(reads.filter(row => 'branch' in row && 'created_at' in row)).toHaveLength(2000);
+    expect(reads.some(row => row.id === 'bounded-2000' || row.id === 'old-retry')).toBe(false);
+    expect(reads.filter(row => 'audit_json' in row || 'verb' in row || 'packet_json' in row || 'payload_json' in row)).toEqual([]);
+  } finally { spy.mockRestore(); for (const restore of restores.reverse()) restore(); }
+});
+
+it.each([5, [null]])('drops malformed nested findings %j through GET', async findings => {
+  lane('shape'); review('shape', true, -1000);
+  const db = getSqlite();
+  const row = db.prepare("SELECT audit_json FROM approvals WHERE lane_id='shape'").get() as { audit_json: string };
+  const audit = JSON.parse(row.audit_json); audit[0].findings = findings;
+  db.prepare("UPDATE approvals SET audit_json=? WHERE lane_id='shape'").run(JSON.stringify(audit));
+  const body = await score();
+  expect(body.basis).toContain('1 malformed rows skipped');
+  expect(body.metrics.find((row: { id: string }) => row.id === 'findings').value).toBe(0);
+  expect(body.metrics.find((row: { id: string }) => row.id === 'rounds').value).toBe(1);
+});
+it.each([{}, [null]])('drops malformed nested correction targets %j through GET', async targets => {
+  lane('shape');
+  const prefix = 'review-author-' + createHash('sha256').update('shape').digest('hex').slice(0, 24) + '-';
+  getSqlite().prepare('INSERT INTO worker_corrections (id,repo_path,thread_id,payload_json,created_at) VALUES (?,?,?,?,?)')
+    .run(prefix + 'shape', '/fixture/repo', 'fixture-thread', JSON.stringify({ targets }), now - 1000);
+  const body = await score();
+  expect(body.basis).toContain('1 malformed rows skipped');
+  expect(body.metrics.find((row: { id: string }) => row.id === 'corrections').value).toBe(0);
+});
