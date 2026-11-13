@@ -38,6 +38,8 @@ export function projectTaskPool(pool: TaskPool, includeDetails: boolean) {
       queueState: task.queueState,
       releaseState: task.releaseState,
       blockedReason: task.blockedReason,
+      ...(task.failureReason ? { failureReason: task.failureReason } : {}),
+      ...(task.cleanup ? { cleanup: task.cleanup } : {}),
       lastEventAt: task.lastEventAt,
       execution: task.execution,
     })),

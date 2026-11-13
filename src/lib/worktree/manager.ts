@@ -1,3 +1,4 @@
+import { WorktreePreparationCleanupError } from './preparation-failure';
 import { committedDiff } from '@/lib/worktree/committed-diff';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 /**
@@ -1776,16 +1777,7 @@ export class WorktreeManager {
     creationError: unknown,
     retirementError: unknown,
   ): Error {
-    const creationMessage = creationError instanceof Error
-      ? creationError.message
-      : String(creationError);
-    const retirementMessage = retirementError instanceof Error
-      ? retirementError.message
-      : String(retirementError);
-    return new Error(
-      `${creationMessage} Exact retirement was refused; durable workspace ownership was retained: ${retirementMessage}`,
-      { cause: retirementError },
-    );
+    return new WorktreePreparationCleanupError(creationError, retirementError);
   }
 
   private async getOriginUrl(): Promise<string | null> {

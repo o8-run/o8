@@ -367,7 +367,7 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
         ? (contextEvent.payload.authRecoveryRequired === true ? CODEX_AUTH_RECOVERY_MESSAGE
           : codexAuthRecoveryMessage(typeof contextEvent.payload.stderr === 'string' ? contextEvent.payload.stderr : ''))
         : lane.lastEventLabel === 'packet_worktree_provision_failed'
-          ? String(provisionFailure?.payload.note ?? provisionFailure?.payload.cause
+          ? String(readLaneTerminalReason(lane)?.cause ?? provisionFailure?.payload.note ?? provisionFailure?.payload.cause
             ?? readLaneTerminalReason(lane)?.cause ?? 'Worktree provisioning failed')
           : null;
       return {
