@@ -18,6 +18,8 @@ use std::{
 struct Host {
     client: Client,
     events: Arc<Mutex<Vec<Value>>>,
+    saved: Arc<Mutex<Vec<Value>>>,
+    complete: Arc<AtomicBool>,
     key: Arc<Mutex<String>>,
     requests: Arc<Mutex<Vec<String>>>,
     wake: Arc<AtomicBool>,
@@ -47,6 +49,13 @@ impl Host {
                 .unwrap();
         let events = Arc::new(Mutex::new(initial()));
         let normalized = events.clone();
+        let saved = Arc::new(Mutex::new(vec![
+            json!({"id":"prompt","role":"user","text":"Review the patch."}),
+            json!({"id":"legacy","role":"assistant","text":"Saved legacy answer","timestamp":1000}),
+        ]));
+        let saved_response = saved.clone();
+        let complete = Arc::new(AtomicBool::new(true));
+        let complete_response = complete.clone();
         let key = Arc::new(Mutex::new("codex-owned:reviewer".to_string()));
         let response_key = key.clone();
         let requests = Arc::new(Mutex::new(vec![]));
@@ -132,7 +141,7 @@ impl Host {
                 } else if request.contains("/api/mobile/history") {
                     (
                         200,
-                        json!({"sessionKey":"codex-owned:reviewer","transcript":[{"id":"prompt","role":"user","text":"Review the patch."},{"id":"legacy","role":"assistant","text":"Saved legacy answer"}]}),
+                        json!({"sessionKey":"codex-owned:reviewer","transcript":*saved_response.lock().unwrap(), "page":{"hasMore":true,"beforeCursor":"older"}}),
                     )
                 } else if request.contains("/api/orchestrator/packet-transcript") {
                     let cursor = request
@@ -142,17 +151,38 @@ impl Host {
                         .unwrap()
                         .parse::<u64>()
                         .unwrap();
-                    let page: Vec<_> = normalized
-                        .lock()
-                        .unwrap()
+                    let all = normalized.lock().unwrap();
+                    let request_url = url::Url::parse(&format!(
+                        "http://fixture{}",
+                        request.split_whitespace().nth(1).unwrap()
+                    ))
+                    .unwrap();
+                    let token = request_url
+                        .query_pairs()
+                        .find(|(k, _)| k == "cursorToken")
+                        .map(|(_, v)| v.into_owned());
+                    let prefix = |n: usize| {
+                        all.iter()
+                            .take(n)
+                            .map(|e| e["eventId"].as_str().unwrap_or("legacy"))
+                            .collect::<Vec<_>>()
+                            .join("-")
+                    };
+                    let reset = token
+                        .as_ref()
+                        .is_some_and(|t| *t != prefix(cursor as usize))
+                        || cursor > all.len() as u64;
+                    let from = if reset { 0 } else { cursor };
+                    let page: Vec<_> = all
                         .iter()
-                        .filter(|e| e["seq"].as_u64().unwrap() > cursor)
+                        .filter(|e| e["seq"].as_u64().unwrap() > from)
                         .take(200)
                         .cloned()
                         .collect();
+                    let next = page.last().and_then(|e| e["seq"].as_u64()).unwrap_or(from);
                     (
                         status,
-                        json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":page.last().map(|e|e["seq"].clone()),"events":page}),
+                        json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":next,"cursorToken":prefix(next as usize),"cursorReset":reset,"events":page,"historyComplete":complete_response.load(Ordering::Acquire),"earliestEventTime":"1970-01-01T00:00:02.000Z"}),
                     )
                 } else {
                     // Host port discovery may probe this temporary listener.
@@ -170,6 +200,8 @@ impl Host {
         Self {
             client,
             events,
+            saved,
+            complete,
             key,
             requests,
             wake,
@@ -383,3 +415,6 @@ fn cursor_only_updates_do_not_repaint_and_late_entries_keep_chronology() {
         "an insertion preserves the ID index for later results"
     );
 }
+
+#[path = "worker_readback_review_tests.rs"]
+mod review;
