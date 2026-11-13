@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 
-const fixture = vi.hoisted(() => ({ events: [] as TranscriptEvent[] }));
+const fixture = vi.hoisted(() => ({ events: [] as TranscriptEvent[], reads: 0 }));
 vi.mock('@/lib/orchestrator/packet-transcript', () => ({
-  readSessionTranscriptEvents: async (sessionKey: string) => ({
+  readSessionTranscriptEvents: async (sessionKey: string) => (fixture.reads++, {
     sessionKey, runtime: 'claude-code', events: fixture.events,
     historyComplete: false, earliestEventTime: '2026-01-01T00:00:02Z',
   }),
@@ -14,8 +14,9 @@ vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipalContext: () => null, workerPacketRefusal: () => null }));
 vi.mock('@/lib/lane/registry', () => ({ findLaneBySession: () => null }));
 const { GET } = await import('@/app/api/orchestrator/packet-transcript/route');
-async function read(cursor = 0, cursorToken = '') {
+async function read(cursor = 0, cursorToken = '', limit?: number) {
   const query = new URLSearchParams({ sessionKey: 'fixture:worker', cursor: String(cursor), cursorToken });
+  if (limit !== undefined) query.set('limit', String(limit));
   const response = await GET(new NextRequest(`http://localhost/api/orchestrator/packet-transcript?${query}`));
   expect(response.status).toBe(200);
   return response.json();
@@ -154,4 +155,31 @@ it('keeps the original fallback identity when a later stream shape supplies an i
   const updated = await read();
   expect(updated.events).toHaveLength(1);
   expect(updated.events[0].eventId).toBe(first.events[0].eventId);
+});
+
+
+it('keeps a native checkpoint when caught up, but null for an actually empty log', async () => {
+  fixture.events = [answer(1, 'Working')];
+  const first = await read();
+  const caught = await read(first.nextCursor, first.cursorToken);
+  expect(caught).toMatchObject({ events: [], nextCursor: first.nextCursor, cursorToken: first.cursorToken, cursorReset: false });
+  fixture.events = [];
+  expect(await read()).toMatchObject({ events: [], nextCursor: null });
+});
+
+it('reads a long native opening snapshot once instead of rebuilding it per legacy-sized page', async () => {
+  fixture.events = Array.from({ length: 1001 }, (_, index) => answer(index + 1, `Answer ${index}`));
+  fixture.reads = 0;
+  let cursor = 0;
+  let token = '';
+  const events: unknown[] = [];
+  for (let page = 0; page < 10; page++) {
+    const batch = await read(cursor, token, 100001);
+    events.push(...batch.events);
+    if (batch.hasMore === false || batch.events.length < 200) break;
+    cursor = batch.nextCursor;
+    token = batch.cursorToken;
+  }
+  expect(events).toHaveLength(1001);
+  expect(fixture.reads, 'native opening must normalize/hash a snapshot only once').toBe(1);
 });

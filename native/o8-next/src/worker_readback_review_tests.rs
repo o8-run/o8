@@ -241,7 +241,7 @@ fn mentioning_a_worker_reads_the_saved_page_without_normalization_or_backfill() 
 }
 
 #[test]
-fn null_cursor_keeps_saved_rows_and_stops_timed_polling() {
+fn caught_up_cursor_keeps_saved_rows_and_polling_position() {
     let h = Host::new(200);
     let history = h.history();
     let mut state =
@@ -249,11 +249,10 @@ fn null_cursor_keeps_saved_rows_and_stops_timed_polling() {
     let mut transcript = Transcript::new(history);
     let before = transcript.rows.clone();
     let was_active = state.active;
-    h.events.lock().unwrap().clear();
     apply_poll(&h, &mut transcript, &mut state);
     assert!(
-        !state.cursor_available,
-        "null is no cursor, not numeric position zero"
+        state.cursor_available,
+        "a caught-up native session retains its polling position"
     );
     assert_eq!(
         state.active, was_active,
@@ -368,4 +367,37 @@ fn partial_normalization_backfill_keeps_the_saved_prefix_and_filters_covered_pro
             "Newer answer"
         ]
     );
+}
+
+
+#[test]
+fn active_caught_up_worker_keeps_cursor_when_the_socket_invalidates() {
+    let h = Host::new(200);
+    let history = h.history();
+    assert!(crate::shell::session::worker_transcript::State::from_history(&history).unwrap().active);
+    let subscription = transport::subscribe_history(h.client.clone(), &history);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while (!h.connected.load(Ordering::Acquire) || h.reads().len() < 2) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(h.connected.load(Ordering::Acquire));
+    std::thread::sleep(Duration::from_millis(2200));
+    let before = h.reads().len();
+    h.wake.store(true, Ordering::Release);
+    while h.reads().len() <= before && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let reads = h.reads();
+    assert!(reads.len() > before, "the socket must invalidate the caught-up readback");
+    assert!(reads[1..].iter().all(|cursor| *cursor > 0), "caught-up polling and the next socket frame must never request cursor=0: {reads:?}");
+    drop(subscription);
+}
+
+#[test]
+fn a_long_worker_open_uses_one_bounded_native_snapshot() {
+    let h = Host::new(200);
+    *h.events.lock().unwrap() = (1..=1001).map(|seq| json!({"seq":seq,"eventId":format!("call-{seq}"),"type":"tool_call","tool":"read","callId":format!("call-{seq}"),"args":"{}"})).collect();
+    let history = h.history();
+    assert_eq!(history.transcript.iter().filter(|entry| entry.tools.is_some()).count(), 1001);
+    assert_eq!(h.reads().len(), 1, "one native snapshot must replace per-200-event re-reads");
 }
