@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { releaseCompileEnvironment } from './lib/release-compile-cache.mjs';
 import { releaseCargoTarget } from './lib/release-cargo-target.mjs';
 import { resolveReleaseBuildEnvironment } from './lib/release-config.mjs';
 import { compilerEnvironment } from './lib/release-native-inputs.mjs';
@@ -22,7 +23,7 @@ const root = process.cwd();
 const startedAt = Date.now();
 const runId = createReleaseBuildCacheRunId();
 const cacheRoot = resolveReleaseBuildCacheRoot();
-const buildEnv = resolveReleaseBuildEnvironment(root);
+const buildEnv = releaseCompileEnvironment(root, resolveReleaseBuildEnvironment(root));
 const cargoTauriArgs = process.argv.slice(2);
 const targetFlagIndex = cargoTauriArgs.indexOf('--target');
 const requestedTarget = targetFlagIndex >= 0 ? cargoTauriArgs[targetFlagIndex + 1]
