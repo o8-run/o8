@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -340,6 +340,47 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
       seen.length = 0;
       compareMcpExchanges(reference, await call(nativeRust, 'o8_spec_read', { repoPath }));
       expect(seen.some((entry) => entry.path === '/api/mcp' && JSON.parse(entry.body).method === 'tools/call')).toBe(true);
+    }
+  });
+
+  nativeReadTest('rechecks inspected spec content and live credential files before native reuse', async () => {
+    const path = join(directory, 'repo', 'o8.md');
+    const original = existsSync(path) ? readFileSync(path) : null;
+    const credentialsPath = join(directory, 'mobile-device-tokens');
+    const credentials = readFileSync(credentialsPath);
+    const candidate = 'e'.repeat(64);
+    const target = join(directory, 'spec-link-target');
+    try {
+      writeFileSync(path, `# Inspected fixture\n\n${candidate}\n`);
+      const inspected = await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') });
+      seen.length = 0;
+      compareMcpExchanges(inspected, await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') }));
+      expect(seen).toHaveLength(0);
+
+      writeFileSync(credentialsPath, `${credentials.toString()}${createHash('sha256').update(candidate).digest('hex')}\n`);
+      seen.length = 0;
+      const rotated = await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') });
+      expect(seen.some(entry => entry.path === '/api/mcp')).toBe(true);
+      expect(toolPayload(rotated).content).not.toContain(candidate);
+      compareMcpExchanges(await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') }), rotated);
+
+      writeFileSync(path, '# Changed source\n');
+      seen.length = 0;
+      const changed = await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') });
+      expect(seen.some(entry => entry.path === '/api/mcp')).toBe(true);
+      compareMcpExchanges(await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') }), changed);
+
+      writeFileSync(target, '# Changed source\n');
+      unlinkSync(path);
+      symlinkSync(target, path);
+      const refused = await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') });
+      compareMcpExchanges(await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') }), refused);
+      expect((refused.body as { result: { isError: boolean } }).result.isError).toBe(true);
+    } finally {
+      writeFileSync(credentialsPath, credentials);
+      if (existsSync(path)) unlinkSync(path);
+      if (existsSync(target)) unlinkSync(target);
+      if (original) writeFileSync(path, original);
     }
   });
 
