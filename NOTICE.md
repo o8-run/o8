@@ -418,6 +418,7 @@ native-consumed server listings. No project settlement scripts are ported.
 
 ## o8 next prompt navigator
 
+- Native reimplementation of T3 Code's prompt navigator (MIT); no upstream code was copied.
 - Copyright: Copyright (c) 2026 T3 Tools Inc.
 - License: MIT
 - Upstream: <https://github.com/pingdotgg/t3code> at commit
