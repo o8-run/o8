@@ -65,8 +65,8 @@ export async function assessPrMergeGate(repo: string, pr: Detail, discussion: Di
   const requestedChanges = reviews.filter(r => r.state?.toLowerCase() === 'changes_requested').length;
   // Match the existing desktop PRHeader workflow rules, including neutral/skipped conclusions.
   const workflow = describeWorkflowStage({ prState: pr.state, failedChecks, pendingChecks, requestedChanges });
-  add('pr-checks', !pr.checksUnavailable && failedChecks === 0 && pendingChecks === 0, pr.requiredChecks
-    ? 'Required checks must be available, finished and successful.' : 'Checks must be available, finished and successful.');
+  add('pr-checks', !pr.checksUnavailable && failedChecks === 0 && pendingChecks === 0, pr.checksUnavailableReason ?? (pr.requiredChecks
+    ? 'Required checks must be available, finished and successful.' : 'Checks must be available, finished and successful.'));
   if (optionalFailures.length) checks.push({ name: 'pr-optional-checks', verdict: 'skipped', detail: `Optional checks failing: ${optionalFailures.join(', ')}. GitHub does not require them.` });
   add('pr-review', discussion.reviewsIncomplete === false && requestedChanges === 0 && !['CHANGES_REQUESTED', 'REVIEW_REQUIRED'].includes(pr.reviewDecision?.toUpperCase() ?? ''), 'Read the complete review state and resolve requested changes before merging.');
   add('pr-workflow', workflow.mergeAllowed, workflow.mergeDetail);
