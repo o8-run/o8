@@ -44,13 +44,22 @@ export function bindNextBrowserPipe(child: ChildProcess): void {
 
 /** null means no owned Next window. Once dispatched, never fall back or replay. */
 export function requestNextBrowser(verb: string, args: Record<string, unknown>): Promise<unknown> | null {
+  if (!NEXT_BROWSER_VERBS.has(verb)) return null;
+  return requestNextControl('browser-agent', verb, args);
+}
+
+/** Presentation only, over the same owned child pipe and bounded receipt queue. */
+export function requestNextPill(args: Record<string, unknown>): Promise<unknown> | null {
+  return requestNextControl('dictation-pill', 'present', args);
+}
+
+function requestNextControl(type: string, verb: string, args: Record<string, unknown>): Promise<unknown> | null {
   const bridge = runtime.__o8NextBrowserPipe;
   if (!bridge || bridge.child.exitCode !== null || bridge.child.signalCode !== null) return null;
-  if (!NEXT_BROWSER_VERBS.has(verb)) return null;
   if (bridge.failed) return Promise.resolve({ ok: false, error: 'The o8 next Browser pipe is unavailable', actionDispatched: false });
   if (bridge.pending.size >= 32) return Promise.resolve({ ok: false, error: 'Browser action queue is full', actionDispatched: false });
   const id = randomUUID();
-  const frame = JSON.stringify({ type: 'browser-agent', id, verb, args, expiresAt: Date.now() + 7000 }) + '\n';
+  const frame = JSON.stringify({ type, id, verb, args, expiresAt: Date.now() + 7000 }) + '\n';
   if (Buffer.byteLength(frame) > 1024 * 1024) return Promise.resolve({ ok: false, error: 'Browser request exceeds 1 MiB', actionDispatched: false });
   return new Promise(resolve => {
     const timer = setTimeout(() => {

@@ -106,6 +106,41 @@ afterEach(async () => {
 });
 
 describe('native Fn dictation surfaces', () => {
+  it('hands pure dictation to native only after prepare, and keeps the web edit chip available', async () => {
+    const frames: Record<string, unknown>[] = [];
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      frames.push(body);
+      return new Response(JSON.stringify({ native: true }), { headers: { 'Content-Type': 'application/json' } });
+    });
+    await wait(1000);
+    await event('system-start', { hud: false, surface: 'off', sessionId: 501 });
+    await event('level', { sessionId: 501, level: 0.7 });
+    await wait(100);
+    expect(frames[0]?.action).toBe('prepare');
+    expect(frames.some(frame => frame.action === 'frame' && (frame.snapshot as { state?: string })?.state === 'recording')).toBe(true);
+    expect((dock.firstElementChild as HTMLElement).style.display).toBe('none');
+    expect(listeningAtNotch()).toBeNull();
+    await act(async () => {
+      bus.get('o8:edit-applied')?.forEach(callback => callback({ payload: { app: 'Fixture' } }));
+    });
+    expect((dock.firstElementChild as HTMLElement).style.display).toBe('flex');
+    expect(dock.textContent).toContain('Revert');
+    expect(listeningAtNotch()).toBeNull();
+    for (const [type, state] of [['final', 'transcribing'], ['audio_file', 'polishing'], ['system-pasted', 'success']] as const) {
+      await event(type, { sessionId: 501, text: 'Delivered words.' });
+      await wait(100);
+      expect(frames.some(frame => (frame.snapshot as { state?: string })?.state === state)).toBe(true);
+      expect(dock.textContent).not.toContain(state === 'success' ? 'Delivered words.' : state === 'polishing' ? 'Polishing' : 'Transcribing');
+    }
+    await event('system-start', { hud: false, surface: 'off', sessionId: 502 });
+    await event('error', { sessionId: 502, message: 'Fixture failure' });
+    await wait(100);
+    expect(frames.some(frame => (frame.snapshot as { state?: string })?.state === 'error')).toBe(true);
+    expect(dock.textContent).not.toContain('Fixture failure');
+
+  });
+
   it('keeps listening, measured waveform, polishing and pasted text in the caret modal', async () => {
     expect((dock.firstElementChild as HTMLElement).style.display).toBe('none');
     await event('system-start', { hud: true, surface: 'caret', mode: 'dictation' });

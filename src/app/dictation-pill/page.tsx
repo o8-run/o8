@@ -23,6 +23,7 @@ import { useAgentConfirmations } from '@/components/desktop/dictation/useAgentCo
 import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 import { EditRevertChip } from './EditRevertChip';
+import { useNativeDictationPill } from './useNativeDictationPill';
 import { DockGlint } from './DockGlint';
 
 export const dynamic = 'force-dynamic';
@@ -860,9 +861,13 @@ export default function DictationPillPage() {
   // click-through except while the cursor is over the PAINTED pill. Report the
   // content wrapper's rect on every morph (ResizeObserver fires through the
   // 0.5s geometry transition; rAF-throttled so we invoke at most per-frame).
+  const nativeDictation = useNativeDictationPill(snapshot);
+  const [editVisible, setEditVisible] = useState(false);
+  const webSnapshot = nativeDictation ? IDLE_SNAPSHOT : snapshot;
   const hitRectHostRef = useRef<HTMLDivElement | null>(null);
-  const dockVisible = topPillEnabled || snapshot.state !== 'idle' || ttsState !== 'idle'
-    || askOpen || agentWorking || !!agentConfirm || realtimeVoice !== 'off';
+  const dockVisible = (!nativeDictation && (topPillEnabled || snapshot.state !== 'idle')) || ttsState !== 'idle'
+    || askOpen || agentWorking || !!agentConfirm || realtimeVoice !== 'off'
+    || (nativeDictation && (editVisible || dropActive || !!stagedChips || (workers.count > 0 || (parkedWorkers?.waiting ?? 0) > 0) || !!glint));
   useEffect(() => {
     if (!isTauri()) return;
     if (!dockVisible) {
@@ -966,7 +971,7 @@ export default function DictationPillPage() {
             click-accepting zone over the menu bar. */}
         <div ref={hitRectHostRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <DockNotchSurface
-            snapshot={snapshot}
+            snapshot={webSnapshot}
             ttsState={ttsState}
             onTogglePause={handleTogglePause}
             onStop={handleStop}
@@ -991,12 +996,12 @@ export default function DictationPillPage() {
             workerTooltip={displayedWorkers.tooltip}
             workerRepos={displayedWorkers.repos}
             showWorkers={showWorkers}
-            panelPending={panelPending}
+            panelPending={nativeDictation ? null : panelPending}
             realtimeVoice={realtimeVoice}
             onStopRealtime={stopRealtimeVoice}
             onFinishDictation={finishSystemDictation}
           />
-          <EditRevertChip onError={dockLog} />
+          <EditRevertChip onError={dockLog} onVisible={setEditVisible} />
         </div>
         {glint ? <DockGlint key={glint.key} glint={glint} fading={glintFading} /> : null}
       </div>
