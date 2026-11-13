@@ -7,7 +7,7 @@
 
 # o8
 
-[![CI](https://github.com/o8-run/o8/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/o8-run/o8/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/o8-run/o8)](https://github.com/o8-run/o8/releases) [![Follow @o8dotrun on X](https://img.shields.io/badge/follow-%40o8dotrun-000000?logo=x&logoColor=white)](https://x.com/o8dotrun)
+[![CI](https://github.com/o8-run/o8/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/o8-run/o8/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/o8-run/o8)](https://github.com/o8-run/o8/releases) [![License: MIT](https://img.shields.io/github/license/o8-run/o8)](./LICENSE) [![Stars](https://img.shields.io/github/stars/o8-run/o8?style=flat)](https://github.com/o8-run/o8/stargazers) [![Discord](https://img.shields.io/badge/discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/TFK2x9A5WS) [![Follow @o8dotrun on X](https://img.shields.io/badge/follow-%40o8dotrun-000000?logo=x&logoColor=white)](https://x.com/o8dotrun)
 
 **Your agents write the code. o8 reviews it, sends it back until it's right, and merges it.**
 
