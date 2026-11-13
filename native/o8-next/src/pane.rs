@@ -153,6 +153,7 @@ impl Pane {
     }
     /// A transcript with no live session behind it: a delegate call's own words.
     pub(crate) fn install_saved(&mut self, history: History) {
+        self.backfill = None;
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
         self.notice.clear();
@@ -329,7 +330,8 @@ impl Pane {
             self.action_ends
                 .borrow_mut()
                 .get(&self.rows)
-                .into_keys()
+                .keys()
+                .copied()
                 .collect(),
             |_, row, _, _| row,
         )

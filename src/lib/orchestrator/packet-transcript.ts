@@ -323,6 +323,7 @@ function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
           : [noteText, stderrHead].filter(Boolean).join('\n')));
       return {
         seq: index + 1,
+        eventId: event.id,
         ts: event.timestamp,
         type: 'steer',
         source,
@@ -340,6 +341,7 @@ function laneHuddleEvents(laneId: string): LaneHuddleTranscriptEvent[] {
       const message = readTextPayload(event.payload, 'message') || 'Huddle plan posted.';
       return {
         seq: index + 1,
+        eventId: event.id,
         ts: event.timestamp,
         type: 'assistant',
         text: message,

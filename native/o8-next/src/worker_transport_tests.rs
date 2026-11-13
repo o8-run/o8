@@ -144,7 +144,7 @@ impl Host {
                 } else if request.contains("/api/mobile/history") {
                     (
                         200,
-                        json!({"sessionKey":"codex-owned:reviewer","transcript":*saved_response.lock().unwrap(), "page":{"hasMore":paged_response.load(Ordering::Acquire) && !request.contains("before="),"beforeCursor":"older"}}),
+                        json!({"sessionKey":"codex-owned:reviewer","transcript":if request.contains("before=") {vec![json!({"id":"older-prompt","role":"user","text":"Earlier question","timestamp":100}),json!({"id":"older-answer","role":"assistant","text":"Earlier saved answer","timestamp":200})]} else {saved_response.lock().unwrap().clone()}, "page":{"hasMore":paged_response.load(Ordering::Acquire) && !request.contains("before="),"beforeCursor":"older"}}),
                     )
                 } else if request.contains("/api/orchestrator/packet-transcript") {
                     let cursor = request

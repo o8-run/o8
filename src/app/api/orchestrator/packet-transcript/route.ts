@@ -88,6 +88,9 @@ export async function GET(request: NextRequest) {
         packetId,
         sessionKey: readback.sessionKey || null,
         ...window,
+        // Existing consumers retain their event shape; native callers opt in
+        // to identity/checkpoint fields with cursorToken, including the first read.
+        events: params.has('cursorToken') ? window.events : window.events.map(({ eventId, ...event }) => { void eventId; return event; }),
         historyComplete: readback.historyComplete === true && (!tail || readback.events.length <= limit),
         earliestEventTime: readback.earliestEventTime ?? null,
         terminalReason: readback.terminalReason ?? null,

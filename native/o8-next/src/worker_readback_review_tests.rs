@@ -163,3 +163,79 @@ fn inactive_sessions_without_done_use_socket_invalidation_not_a_timer() {
     );
     drop(subscription);
 }
+
+#[test]
+fn older_pages_arrive_after_install_and_preserve_the_reading_anchor() {
+    let h = Host::new(200);
+    h.paged.store(true, Ordering::Release);
+    *h.events.lock().unwrap() = completed();
+    let history = h.history();
+    let mut pane = crate::pane::Pane::new(Some(history.session_key.clone()));
+    pane.install(history, h.client.clone());
+    let anchor = pane.rows[pane.list.logical_scroll_top().item_ix]
+        .borrow()
+        .row
+        .id()
+        .to_owned();
+    assert!(
+        !pane
+            .transcript
+            .as_ref()
+            .unwrap()
+            .entries
+            .iter()
+            .any(|e| e.id == "older-answer")
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !pane
+        .transcript
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .any(|e| e.id == "older-answer")
+        && Instant::now() < deadline
+    {
+        pane.poll();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        pane.transcript
+            .as_ref()
+            .unwrap()
+            .entries
+            .iter()
+            .any(|e| e.id == "older-answer")
+    );
+    assert_eq!(
+        pane.rows[pane.list.logical_scroll_top().item_ix]
+            .borrow()
+            .row
+            .id(),
+        anchor
+    );
+}
+#[test]
+fn mentioning_a_worker_reads_the_saved_page_without_normalization_or_backfill() {
+    let h = Host::new(200);
+    h.paged.store(true, Ordering::Release);
+    let source = serde_json::from_value(
+        json!({"id":"codex-owned:reviewer","title":"Worker","repoPath":"/fixture","status":"idle"}),
+    )
+    .unwrap();
+    let text = crate::composer::mention::thread_context(
+        &h.client,
+        vec![("Worker".into(), "codex-owned:reviewer".into())],
+        vec![],
+        source,
+    );
+    assert!(text.contains("Saved legacy answer"));
+    assert!(h.reads().is_empty());
+    assert!(
+        !h.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.contains("before="))
+    );
+}

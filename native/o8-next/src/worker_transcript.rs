@@ -127,7 +127,7 @@ impl State {
                                 json!({"input":args})
                             }
                         });
-                    let tool_id = format!("{id}:call:{call}");
+                    let tool_id = format!("{id}:call");
                     let mut row = entry(id, "tool", String::new(), event);
                     row.tools = Some(vec![json!({"id":tool_id,"name":tool,"args":args,
                         "nativeWorkerTrace":true,"preview":event["summary"],"status":"running","startedAt":row.extra["timestamp"]})]);

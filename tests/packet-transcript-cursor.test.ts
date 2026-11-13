@@ -47,3 +47,9 @@ describe('native worker cursor checkpoints', () => {
     expect(next.earliestEventTime).toBe('2026-01-01T00:00:02Z');
   });
 });
+
+it('keeps the legacy event shape when cursorToken is absent', async () => {
+  fixture.events = [answer(1, 'Legacy answer')];
+  const response = await GET(new NextRequest('http://localhost/api/orchestrator/packet-transcript?sessionKey=fixture:worker'));
+  expect((await response.json()).events).toEqual(fixture.events);
+});
