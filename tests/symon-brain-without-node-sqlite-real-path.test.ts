@@ -73,7 +73,7 @@ describe('Symon routes on a Node without node:sqlite (#3486)', () => {
   it('still answers managed messages on the native planner', async () => {
     h.readPlanner.mockResolvedValue({ available: true, engine: 'codex', model: 'gpt-6.1-sol', effort: 'high', tools: [] });
     h.pollTurn.mockResolvedValue({ state: 'done', result: { status: 'done', text: 'Planner answer.', model: 'gpt-6.1-sol', effort: 'high' } });
-    const { POST } = await import('@/app/api/symon/managed-messages/inbound/route');
+    const { POST } = await import('@/lib/symon/http/managed-inbound');
 
     const response = await POST(request());
 
@@ -82,7 +82,7 @@ describe('Symon routes on a Node without node:sqlite (#3486)', () => {
 
   it('fails a Pi turn with bounded text instead of breaking the route', async () => {
     writeSymonTextBrainMode('pi');
-    const { POST } = await import('@/app/api/symon/managed-messages/inbound/route');
+    const { POST } = await import('@/lib/symon/http/managed-inbound');
 
     const response = await POST(request());
 
@@ -92,8 +92,8 @@ describe('Symon routes on a Node without node:sqlite (#3486)', () => {
 
   it('loads the phone and conversations routes', async () => {
     await expect(import('@/app/api/mobile/symon/text-session/route')).resolves.toBeDefined();
-    await expect(import('@/app/api/mobile/symon/text-turn/route')).resolves.toBeDefined();
-    await expect(import('@/app/api/panel/symon/conversations/route')).resolves.toBeDefined();
+    await expect(import('@/lib/symon/http/text-turn')).resolves.toBeDefined();
+    await expect(import('@/lib/symon/http/conversations')).resolves.toBeDefined();
     await expect(import('@/lib/symon/messages-receiver/loop')).resolves.toBeDefined();
   });
 });
