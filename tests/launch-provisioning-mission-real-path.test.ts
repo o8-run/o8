@@ -217,9 +217,9 @@ describe('launch provisioning through mission HTTP entry points', () => {
       process.chdir(repoPath);
       const packet = persistMission(`server-resource-preparation-${outcome}`);
       if (outcome === 'install-failure') {
-        const module = await import('@/lib/workspace/dependency-materializer');
-        const perform = module.materializeDependencyInstall;
-        materialize = vi.spyOn(module, 'materializeDependencyInstall').mockImplementationOnce(async (...args: Parameters<typeof perform>) => {
+        const materializerModule = await import('@/lib/workspace/dependency-materializer');
+        const perform = materializerModule.materializeDependencyInstall;
+        materialize = vi.spyOn(materializerModule, 'materializeDependencyInstall').mockImplementationOnce(async (...args: Parameters<typeof perform>) => {
           try { return await perform(...args); }
           catch { throw new Error('fixture private install runtime cleanup failed'); }
         });
