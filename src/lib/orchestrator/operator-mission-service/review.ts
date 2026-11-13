@@ -1,4 +1,5 @@
 import { completedExternalReviewTurn } from '@/lib/tasks/external-review-turn';
+import { assertReviewSubmissionCurrent } from '@/lib/auth/review-submission';
 import { randomUUID } from 'node:crypto';
 
 import { resolveApproval } from '@/lib/approvals/resolution';
@@ -436,6 +437,7 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
     throw new ReviewValidationError('correction_reviewer_required', 'This correction requires its queued independent reviewer at the corrected HEAD.');
   }
   if (internal && verdictLane) (internal.externalReview ? completedExternalReviewTurn : completedCorrectionReviewTurn)(verdictLane, internal.completedCorrectionTurnId, internal.claimOwner);
+  if (input.submissionPrincipal) assertReviewSubmissionCurrent(input.submissionPrincipal);
   const summary = buildReviewSummary(input.findings, input.approved);
   const auditReview = recordPacketReviewAudit(
     packet,

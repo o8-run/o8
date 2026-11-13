@@ -40,6 +40,8 @@ method-and-path policy and a middleware/route-coverage test in the same change.
   `47105`–`47109`). See `src/ws-server.ts`.
 Note: the realtime `lane-lifecycle` payload carries lane status in the `status` field, not `laneStatus`; client readers should coalesce via `laneStatusOf()` in `src/lib/orchestrator/status-events.ts`.
 
+Review submission is guarded in depth: middleware refuses worker credentials for `POST /api/orchestrator/review`, and the handler independently re-checks the server-owned reviewer assignment and fails closed. Assigned-reviewer admission is not wired; `mintAssignedReviewerToken` has no production caller. Handler-level assignment tests do not establish admission through the middleware gate.
+
 ## Route reference
 
 Routes are grouped by their first path segment.
