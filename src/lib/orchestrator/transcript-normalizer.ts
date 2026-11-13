@@ -127,6 +127,9 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
   const fallbackTs = fallbackTimestamp;
   let seq = 0;
   let syntheticCallSeq = 0;
+  let currentSourceId = '';
+  const nativeId = (kind: string, callId?: string) => nativeIdentities && currentSourceId
+    ? { eventId: `${currentSourceId}:${kind}:${callId ?? '0'}` } : {};
   const nextSeq = () => (seq += 1);
   const nextSyntheticCallId = (prefix: string) => `${prefix}-synthetic-${syntheticCallSeq += 1}`;
 
@@ -166,6 +169,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
         seq: previousCall!.seq,
         ts: previousCall!.ts,
         type: 'tool_call',
+        ...('eventId' in previousCall ? { eventId: previousCall.eventId } : {}),
         callId: previousCall.type === 'tool_call' ? previousCall.callId : callId,
         tool,
         args,
@@ -191,7 +195,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
     const thisSeq = nextSeq();
     pending.set(callId, { seq: thisSeq, tool });
     const summary = clip(args || `call ${tool}`, MAX_SUMMARY);
-    out.push({ seq: thisSeq, ts, type: 'tool_call', callId, tool, args, summary });
+    out.push({ seq: thisSeq, ts, type: 'tool_call', callId, tool, args, summary, ...nativeId('tool_call', callId) });
     emitted.set(callId, { callIndex: out.length - 1, tool });
     if (identity) {
       aliases.push({ callId, shapes: new Set([shape]) });
@@ -210,6 +214,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
     const result: TranscriptEvent = {
       seq: previousResult?.seq ?? nextSeq(), ts: previousResult?.ts ?? ts, type: 'tool_result', callId: previous && out[previous.callIndex].type === 'tool_call' ? (out[previous.callIndex] as Extract<TranscriptEvent, { type: 'tool_call' }>).callId : callId, tool, ok,
       summary: output || (ok ? 'ok' : `exit ${exitCode}`),
+      ...(previousResult && 'eventId' in previousResult ? { eventId: previousResult.eventId } : nativeId('tool_result', callId)),
     };
     if (previous && previous.resultIndex !== undefined) {
       out[previous.resultIndex] = result;
@@ -230,6 +235,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
 
       const type = readStr(parsed, 'type');
       const sourceId = readStr(parsed, 'uuid', 'id') || readStr(safeObject(parsed.item), 'id') || readStr(safeObject(parsed.payload), 'id');
+      currentSourceId = sourceId;
       const normalizedTimestamp = normalizeTs(parsed.timestamp, fallbackTs);
       const ts = normalizedTimestamp.value;
       const payload = safeObject(parsed.payload);

@@ -28,7 +28,7 @@ export function transcriptWindow(events: TranscriptEvent[], cursor: number, limi
   const checkpoint = (offset: number) => digest(identified.slice(0, offset).map(e => JSON.stringify({ ...e, seq: undefined })).join('\n'));
   const cursorReset = token !== null && (cursor > identified.length || (cursor > 0 && token !== checkpoint(cursor)));
   const from = cursorReset ? 0 : cursor;
-  const windowed = tail ? identified.slice(-limit) : identified.slice(from, from + limit);
+  const windowed = tail ? identified.slice(-limit) : identified.filter(event => event.seq > from).slice(0, limit);
   const nextCursor = windowed.at(-1)?.seq ?? null;
   return { events: windowed, nextCursor, cursorToken: checkpoint(nextCursor ?? from), cursorReset };
 }

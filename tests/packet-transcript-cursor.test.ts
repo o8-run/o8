@@ -99,3 +99,21 @@ it('retains native assistant event ids while keeping legacy normalizer output un
   expect(normalizeClaudeCodeEvents(raw, '')[0]).not.toHaveProperty('eventId');
   expect(normalizeClaudeCodeEvents(raw, '', true)[0]).toHaveProperty('eventId', 'native-message-42:assistant');
 });
+
+it('retains a native part id through an updated tool part', async () => {
+  const { normalizeOpencodeEvents } = await import('@/lib/orchestrator/transcript-normalizer-multi');
+  const line = (status: string, id?: string) => JSON.stringify({ id, type: 'tool_use', part: { id: 'part-42', callID: 'call-42', type: 'tool', tool: 'read', state: { status, input: { path: 'file' }, output: 'result' } } });
+  const first = normalizeOpencodeEvents(line('running'), '', true)[0] as TranscriptEvent & { eventId: string };
+  const updated = normalizeOpencodeEvents(`${line('running')}\n${line('completed')}`, '', true)[0] as TranscriptEvent & { eventId: string };
+  expect(first.eventId).toBe('part-42:tool_call:call-42');
+  expect(updated.eventId).toBe(first.eventId);
+  const wrapperFirst = normalizeOpencodeEvents(line('running', 'message-1'), '', true)[0] as TranscriptEvent & { eventId: string };
+  const wrapperUpdated = normalizeOpencodeEvents(`${line('running', 'message-1')}\n${line('completed', 'message-2')}`, '', true)[0] as TranscriptEvent & { eventId: string };
+  expect(wrapperUpdated.eventId).toBe(wrapperFirst.eventId);
+});
+
+it('preserves legacy after-seq filtering for a non-contiguous event list', async () => {
+  fixture.events = [answer(7, 'First'), answer(12, 'Second')];
+  const response = await GET(new NextRequest('http://localhost/api/orchestrator/packet-transcript?sessionKey=fixture:worker&cursor=1'));
+  expect((await response.json()).events).toEqual(fixture.events);
+});
