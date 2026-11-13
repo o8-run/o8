@@ -288,7 +288,7 @@ it.each([5, [null]])('drops malformed nested findings %j through GET', async fin
   expect(body.metrics.find((row: { id: string }) => row.id === 'rounds').value).toBe(1);
 });
 it.each([{}, [null]])('drops malformed nested correction targets %j through GET', async targets => {
-  lane('shape');
+  lane('shape'); lane('other-shape');
   const prefix = 'review-author-' + createHash('sha256').update('shape').digest('hex').slice(0, 24) + '-';
   getSqlite().prepare('INSERT INTO worker_corrections (id,repo_path,thread_id,payload_json,created_at) VALUES (?,?,?,?,?)')
     .run(prefix + 'shape', '/fixture/repo', 'fixture-thread', JSON.stringify({ targets }), now - 1000);
