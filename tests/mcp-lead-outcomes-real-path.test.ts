@@ -244,6 +244,18 @@ describe('durable lead outcomes through the MCP HTTP entry point', () => {
     expect(descriptions.get('o8_status')).toContain('leadsTruncated');
   });
 
+  it('preserves canonical receipt ownership when a result pointer names another lead turn', async () => {
+    const missing = await fixture(false);
+    const reported = await fixture(true);
+    const reportedTurn = lifecycle.getLeadStatus(reported.leadId).latestTurn!.id;
+    getSqlite().prepare('UPDATE orchestrator_leads SET result_turn_id = ? WHERE id = ?')
+      .run(reportedTurn, missing.leadId);
+    const canonical = lifecycle.getLeadStatus(missing.leadId);
+    const projected = leads(await call('o8_status', { sessionKey: missing.leadId }))[0];
+    expect(projected.result).toEqual(canonical.lead.result);
+    expect(projected).toMatchObject({ status: 'unreported', latestTurn: { outcome: null } });
+  });
+
   it('does not wake a packet-scoped wait just because its lead changes state', async () => {
     const { leadId, missionId, packetId } = await fixture(false);
     const state = readOrchestratorControlPlaneState();
