@@ -1,9 +1,11 @@
+import { getSqlite } from '@/lib/db';
+import { preparationFailureDetails } from '@/lib/worktree/preparation-failure';
 import { recordLaneEvent } from '@/lib/lane/events';
 import {
   releasePacketStorageAfterWorktreeProvisionFailure,
   type PacketWorktreeProvisionStorageRelease,
 } from '@/lib/lane/lane-storage-release';
-import { getLane, setLaneStatus } from '@/lib/lane/registry';
+import { getLane, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import type { LaneStatus } from '@/lib/lane/types';
 
 export const PACKET_WORKTREE_PROVISION_FAILED = 'packet_worktree_provision_failed';
@@ -32,7 +34,21 @@ export function packetWorktreeProvisionError(
 
   const laneId = request.existingLaneId!;
   const packetId = request.packetId!;
-  const cause = causeInput instanceof Error ? causeInput.message : String(causeInput);
+  const details = preparationFailureDetails(causeInput);
+  let cause = details.cause;
+  try {
+    // Failure also fences attempts that stop before admission or run as background setup.
+    // Read durably; cleanup progress can exceed the recent-event window.
+    const row = getSqlite().prepare(`SELECT payload_json FROM lane_events
+      WHERE lane_id = ? AND actor = 'system' AND verb = 'worktree_preparation_timing'
+        AND json_extract(payload_json, '$.packetId') = ?
+        AND json_extract(payload_json, '$.stage') = 'dependency_install'
+        AND rowid > COALESCE((SELECT MAX(rowid) FROM lane_events WHERE lane_id = ?
+          AND actor = 'system' AND verb IN ('worktree_provision_started', 'worktree_provision_failed')), 0)
+      ORDER BY rowid DESC LIMIT 1`).get(laneId, packetId, laneId) as { payload_json: string } | undefined;
+    const install = row ? JSON.parse(row.payload_json) as Record<string, unknown> : null;
+    if (install?.phase === 'failed' && typeof install.cause === 'string') cause = preparationFailureDetails(install.cause).cause;
+  } catch { /* Optional diagnostics must not prevent failure and storage settlement. */ }
   const lane = getLane(laneId);
   let storageRelease: PacketWorktreeProvisionStorageRelease = {
     decision: 'deferred',
@@ -67,6 +83,7 @@ export function packetWorktreeProvisionError(
       PACKET_WORKTREE_PROVISION_FAILED,
     );
   }
+  if (lane) updateLane(laneId, { outcomeNote: cause }, 'system');
   try {
     recordLaneEvent(laneId, 'worktree_provision_failed', 'system', {
       code: PACKET_WORKTREE_PROVISION_FAILED,
@@ -75,7 +92,8 @@ export function packetWorktreeProvisionError(
       laneId,
       repoPath,
       cause,
-      note,
+      note: cause,
+      ...(details.cleanup ? { cleanup: details.cleanup } : {}),
       storageRelease,
     });
   } catch (error) {
@@ -86,6 +104,6 @@ export function packetWorktreeProvisionError(
   }
 
   return new Error(
-    `[${PACKET_WORKTREE_PROVISION_FAILED}] Cannot launch ${runtime} packet outside a managed worktree: ${note}`,
+    `[${PACKET_WORKTREE_PROVISION_FAILED}] Cannot launch ${runtime} packet outside a managed worktree: ${cause}`,
   );
 }

@@ -1,3 +1,4 @@
+import { redactThreadText } from '@/lib/threads/redaction';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { appendEvent, getLane, updateLane } from '@/lib/lane/registry';
 
@@ -66,6 +67,7 @@ export async function timedDependencyInstall<T>(operation: (signal?: AbortSignal
       }, 'system', { stage: 'dependency_install', reason: 'deadline_exceeded' });
     }
     emit('dependency_install', 'failed', performance.now() - started, {
+      cause: redactThreadText((error instanceof Error ? error.message : String(error)).slice(-4000)),
       reason: context.expired ? 'deadline_exceeded' : 'operation_failed', deadlineMs: DEPENDENCY_INSTALL_DEADLINE_MS,
     });
     throw failure;

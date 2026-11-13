@@ -4982,6 +4982,7 @@
     {
       "path": "tests/native-helper-tracing-real-path.test.ts",
       "reasons": [
+        "executable-fixture",
         "native-build",
         "real-path"
       ]
@@ -6555,6 +6556,14 @@
       "reasons": [
         "child-process",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/packet-helper-discovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
         "real-path"
       ]
     },
