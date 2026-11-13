@@ -1,13 +1,14 @@
-- Fable 5.2 is the composer's Fable and the default Fable lead, and usage history prices it and its fast mode. Fable 5.1 stays selectable in Settings.
-- The sidebar has an Inbox, a one-row head, and the navigation in a dock at its foot.
-- The right panel's empty tab is one compact tool list with a letter key for each tool. Opening the Browser keeps the panel's other tabs.
-- The files-changed pill floats over the transcript instead of cutting it off, and an empty chat shows its heading.
-- Stop holds a delegated worker, and Stop all also stops a worker whose packet was archived mid-turn.
-- A chat's unsent draft survives a relaunch or an update.
-- A file pill's peek shows the file's length and its last change.
-- Settings › Voice › Polish edits your words, snippets and instructions. Voice Settings opens at its own size, and the dictation waveform follows your voice more closely.
-- Update can't be clicked into a stuck state, and a second click no longer interrupts a running install.
-- The PR panel blocks a merge only on required checks, and on a branch with a merge queue, Merge joins it.
-- A hidden terminal keeps colored prompts after it resyncs.
-- Workers stay inside their own lane's branch, notes, questions and inbox, and a merge lands the exact commit that was reviewed.
-- More of o8's server runs natively, so more of the app keeps working without the Next server.
+- o8 on macOS now opens in its new native window.
+- The Ring is the new o8 mark: new app icons, and the Ring in the window header.
+- The window has o8's own themes with swatches, a glass clarity setting, and zoom in and out.
+- A Working drawer pins to the bottom of the sidebar, and an empty thread shows an overview under its composer.
+- The thread header is cleaner, and Activity reads in one scroll with short ids.
+- Review findings go back to the agent that wrote the code, and its fix is re-reviewed against the saved findings.
+- A pull request from another tool can be adopted into one review task.
+- An approval is tied to the exact commit and the run evidence it reviewed, and only the assigned reviewer can submit it.
+- Stop mission asks before it stops.
+- The terminal scrolls again under tmux.
+- macOS dictation runs without the app's servers.
+- o8 budgets machine load and queues heavy worker steps.
+- Workers read and act only inside their own packet.
+- More of o8's server runs natively.
