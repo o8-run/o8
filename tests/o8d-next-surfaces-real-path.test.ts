@@ -800,6 +800,7 @@ it('preserves packet-worker lane diff and visualization ownership through o8d', 
 
 // Write routes from #5243, each with the auth basis its gate and handler enforce.
 const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> = [
+  ['POST', '/api/lanes/discard-orphaned', 403],
   ['POST', '/api/orchestrator/handoff', 403],
   ['POST', '/api/orchestrator/reset-session', 403],
   ['POST', '/api/orchestrator/compact', 403],
