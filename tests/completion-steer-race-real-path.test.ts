@@ -220,6 +220,20 @@ afterEach(() => {
 afterAll(() => { closeDb(); rmSync(dataDir, { recursive: true, force: true }); });
 
 describe('completion and steer overlap through production callbacks and routes', () => {
+  it('preserves accepted reviewing work when the post-transition continuation throws', async () => {
+    const { lane, sessionKey, runId } = fixture();
+    dependencies.queueReviewContinuation.mockImplementationOnce(() => { throw new Error('fixture continuation unavailable'); });
+
+    expect(await ingestAgentCompletionSignal(sessionKey, runId)).toBe(true);
+
+    expect(dependencies.enqueueAutoReview).toHaveBeenCalledWith(lane.id);
+    expect(dependencies.queueReviewContinuation).toHaveBeenCalledOnce();
+    expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', lastEventLabel: 'agent_completed' });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ surfaceId: sessionKey, status: 'completed' }));
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }));
+    expect(readOrchestratorControlPlaneState().packets[0]?.releaseState).toBe('pending');
+  });
+
   it('holds a clean owned exit when completion verification throws instead of publishing completed', async () => {
     const { lane, sessionKey, runId } = fixture();
     h.verify.mockRejectedValueOnce(new Error('fixture verifier unavailable'));
