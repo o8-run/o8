@@ -58,3 +58,26 @@ provide.
    with a `linux-x86_64` entry.
 4. No re-dispatch of step 2 is needed — step 3 uploads the `.sig` to the
    mirror itself.
+
+## GPUI publication preparation (operator opt-in)
+
+The held legacy Linux jobs remain disabled. `linux-gpui-publish.yml` is manual
+and defaults `publish_linux` to `false`. The exact approval switch is the
+workflow input `publish_linux: true`. Do not enable it until Linux support
+review (#1672) is complete.
+
+Build the release tag with `linux-downloads.yml` first. Download its
+`linux-gpui-review-packages` artifact and sign the exact AppImage bytes on the
+release host with the existing updater signer. Supply that public signature as
+`updater_signature`, the successful build's `build_run_id`, and `release_tag`
+to the attachment workflow. No private signing key is sent to Actions.
+The workflow checks that the build ran manually at the release tag, verifies
+the updater signature, then reads the embedded channel and version using
+`assertLinuxArtifactChannels`. It attaches only the AppImage and signature,
+using `o8-<version>-x86_64.AppImage`, without replacing existing assets.
+
+DEB and RPM remain Actions review artifacts. They have no authenticated channel
+identity and cannot be published through this path. No updater manifest is
+written by this workflow. Mirror and channel-feed completion still require the
+release host's existing authenticated publication checks. The old mirror job
+is held and must not be used as a GPUI publication path.

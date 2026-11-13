@@ -1,0 +1,92 @@
+name: Linux GPUI release attachment
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_linux:
+        description: 'Operator approval to attach the signed GPUI AppImage (never DEB/RPM)'
+        type: boolean
+        default: false
+      release_tag:
+        description: 'Existing public release tag'
+        type: string
+        required: true
+      build_run_id:
+        description: 'Successful Linux GPUI download artifacts run built at that exact tag'
+        type: string
+        required: true
+      updater_signature:
+        description: 'Public updater signature for the exact downloaded AppImage bytes'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-gpui-publish-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  attach:
+    if: inputs.publish_linux == true
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Read-only inspection prerequisites
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends squashfs-tools
+      - name: Validate release and exact GPUI build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+          gh release view "$RELEASE_TAG" --json isDraft --jq 'if .isDraft then error("Draft release") else . end'
+          git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          expected=$(git rev-parse "$RELEASE_TAG^{commit}")
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" > run.json
+          EXPECTED_SHA="$expected" node --input-type=module -e '
+            import {readFileSync} from "node:fs";
+            const run = JSON.parse(readFileSync("run.json"));
+            if (run.path !== ".github/workflows/linux-downloads.yml" || run.conclusion !== "success"
+              || run.head_sha !== process.env.EXPECTED_SHA || run.event !== "workflow_dispatch") {
+              throw new Error("Expected successful manual GPUI build at release tag");
+            }
+          '
+          gh run download "$BUILD_RUN_ID" --name linux-gpui-review-packages --dir packages
+      - name: Authenticate AppImage identity before any upload
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          UPDATER_SIGNATURE: ${{ inputs.updater_signature }}
+        run: |
+          node --input-type=module <<'JS'
+          import {readdirSync, writeFileSync, mkdirSync, copyFileSync} from 'node:fs';
+          import {assertLinuxArtifactChannels} from './scripts/lib/linux-build-channel.mjs';
+          const images = readdirSync('packages').filter(name => name.endsWith('.AppImage'));
+          if (images.length !== 1) throw new Error('Expected exactly one GPUI AppImage');
+          const version = process.env.RELEASE_TAG.slice(1);
+          const source = `packages/${images[0]}`;
+          writeFileSync(`${source}.sig`, process.env.UPDATER_SIGNATURE + '\n');
+          // Signature verification precedes reading embedded identity. Do not
+          // pass unsigned distribution packages to any release publisher.
+          assertLinuxArtifactChannels(process.cwd(), version, undefined, [source, `${source}.sig`]);
+          mkdirSync('publish');
+          const target = `publish/o8-${version}-x86_64.AppImage`;
+          copyFileSync(source, target);
+          copyFileSync(`${source}.sig`, `${target}.sig`);
+          JS
+      - name: Attach new assets without replacement or updater feed changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release upload "$RELEASE_TAG" publish/*.AppImage publish/*.AppImage.sig
