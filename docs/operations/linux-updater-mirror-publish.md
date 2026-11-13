@@ -19,7 +19,7 @@ Run the `Port Build` workflow (`.github/workflows/port-build.yml`) against an
 existing public release tag with `publish_to_mirror` enabled. The
 `publish-mirror` job:
 
-- Downloads `o8-<version>-x86_64.AppImage` from the source
+- Downloads `o8_<version>_linux_amd64_preview.AppImage` from the source
   release on `o8-run/o8` (uploaded there by the `publish-preview` job in
   the same run, or a previous one).
 - Copies it to the mirror release for the same tag on
