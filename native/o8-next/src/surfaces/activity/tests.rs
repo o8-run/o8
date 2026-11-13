@@ -960,12 +960,15 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
     for control in [
         "activity-lane-resume",
         "activity-lane-create-pr",
-        "activity-lane-merge",
         "activity-close-unmerged",
     ] {
         assert!(cx.debug_bounds(control).is_some(), "{control}");
     }
     assert!(cx.debug_bounds("activity-lane-stop").is_none());
+    assert!(
+        cx.debug_bounds("activity-lane-merge").is_none(),
+        "pending review cannot merge"
+    );
 
     activity_click(cx, "activity-lane-create-pr");
     settle(cx);
@@ -982,6 +985,16 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
         "the created PR's note shows"
     );
 
+    // This UI fixture starts without a saved review. Supply an approved verdict
+    // before exercising the canonical merge conflict response.
+    view.update(cx, |view, cx| {
+        let packet = view.rows.iter_mut()
+            .find(|row| row.id == "activity-packet")
+            .unwrap();
+        packet.data["review"] = serde_json::json!({"approved": true});
+        cx.notify();
+    });
+    draw(cx);
     activity_click(cx, "activity-lane-merge");
     settle(cx);
     let (commands, _) = lane_commands();
