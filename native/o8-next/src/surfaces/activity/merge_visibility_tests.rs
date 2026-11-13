@@ -8,12 +8,23 @@ fn packet_merge_control_requires_approved_review(cx: &mut TestAppContext) {
     cx.run_until_parked();
     pane.update(cx, |pane, cx| {
         for approved in [false, true] {
-            let row = Row { kind:"packet", id:"merge-visibility".into(), repo:None, repo_identity:"local".into(),
-                title:"Review".into(), date:String::new(), ci:vec![],
-                data:json!({"status":"awaiting_review","lane":{"laneId":"fixture"},"review":{"approved":approved}}) };
+            let row = Row {
+                kind: "packet",
+                id: "merge-visibility".into(),
+                repo: None,
+                repo_identity: "local".into(),
+                title: "Review".into(),
+                date: String::new(),
+                ci: vec![],
+                data: json!({"status":"awaiting_review","lane":{"laneId":"fixture"},
+                    "review":{"approved":approved}}),
+            };
             pane.controls.clear();
             let _ = pane.packet_controls(&row, div().into_any_element(), cx);
-            assert_eq!(pane.controls.iter().any(|(id, _)| id == "activity-lane-merge"), approved);
+            assert_eq!(
+                pane.controls.iter().any(|(id, _)| id == "activity-lane-merge"),
+                approved
+            );
         }
     });
 }
