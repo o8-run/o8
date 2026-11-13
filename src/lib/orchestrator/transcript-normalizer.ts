@@ -376,14 +376,14 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
             || extractText(payload?.content),
           MAX_SUMMARY,
         );
-        out.push({ seq: nextSeq(), ts, type: 'error', message: message || 'Codex run error' });
+        out.push({ seq: nextSeq(), ts, type: 'error', message: message || 'Codex run error', ...nativeId('error') });
         continue;
       }
 
       // Terminal
       if (type === 'turn.completed' || (type === 'event_msg' && payloadType === 'task_complete')) {
         const exitCode = readNum(parsed, 'exit_code') ?? readNum(payload, 'exit_code') ?? 0;
-        out.push({ seq: nextSeq(), ts, type: 'done', exitCode });
+        out.push({ seq: nextSeq(), ts, type: 'done', exitCode, ...nativeId('done') });
         continue;
       }
     }

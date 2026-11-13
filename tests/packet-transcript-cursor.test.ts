@@ -126,3 +126,13 @@ it('checkpoints stable native unknown time without changing the legacy timestamp
   const unchanged = await read(first.nextCursor, first.cursorToken);
   expect(unchanged).toMatchObject({ events: [], nextCursor: null, cursorReset: false });
 });
+
+it('marks unknown time on terminal and error records without changing legacy fields', async () => {
+  const { normalizeCodexEvents } = await import('@/lib/orchestrator/transcript-normalizer');
+  const raw = `${JSON.stringify({ type: 'error', message: 'Fixture failure' })}\n${JSON.stringify({ type: 'turn.completed' })}`;
+  const legacy = normalizeCodexEvents(raw, '2026-01-01T00:00:02Z');
+  const native = normalizeCodexEvents(raw, '2026-01-01T00:00:02Z', true);
+  expect(native.map(e => e.ts)).toEqual(legacy.map(e => e.ts));
+  expect(native).toHaveLength(2);
+  for (const event of native) expect(event).toHaveProperty('nativeTimestamp', '');
+});

@@ -199,7 +199,7 @@ export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = ne
         readStr(parsed, 'message', 'error') || readStr(part, 'message', 'error'),
         MAX_SUMMARY,
       );
-      out.push({ seq: nextSeq(), ts, type: 'error', message: message || 'opencode run error' });
+      out.push({ seq: nextSeq(), ts, type: 'error', message: message || 'opencode run error', ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'error') });
       continue;
     }
 
@@ -212,10 +212,10 @@ export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = ne
       if (reason === 'stop' || reason === 'tool-calls' || reason === '') {
         // Don't emit a `done` for tool-calls — that's mid-turn.
         if (reason === 'stop' || reason === '') {
-          out.push({ seq: nextSeq(), ts, type: 'done', exitCode: 0 });
+          out.push({ seq: nextSeq(), ts, type: 'done', exitCode: 0, ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'done') });
         }
       } else if (reason === 'error') {
-        out.push({ seq: nextSeq(), ts, type: 'error', message: 'opencode step ended with error' });
+        out.push({ seq: nextSeq(), ts, type: 'error', message: 'opencode step ended with error', ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'error') });
       }
       continue;
     }
@@ -378,7 +378,7 @@ export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = 
       const text = typeof message?.content === 'string' ? message.content : '';
       const lower = text.toLowerCase();
       if (text && (lower.includes('error') || lower.includes('crash') || lower.includes('fatal'))) {
-        out.push({ seq: nextSeq(), ts, type: 'error', message: clip(text, MAX_SUMMARY) });
+        out.push({ seq: nextSeq(), ts, type: 'error', message: clip(text, MAX_SUMMARY), ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'error') });
       }
       continue;
     }
