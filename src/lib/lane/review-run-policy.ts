@@ -38,18 +38,30 @@ export function reviewRunPolicyConfiguration(): RunEvidenceGate {
   return reviewRunPolicy().valid ? { ok: true, message: 'Run evidence policy configuration is valid.' }
     : { ok: false, code: 'review_run_policy_invalid', message: 'O8_REVIEW_RUN_REQUIRED_PATHS must be a JSON array of relative path globs using *, ** or ?.' };
 }
+/** Early admission checks only configuration and cleanliness, never evidence for a mutable tip. */
+export async function checkReviewRunPreflight(lane: Lane, cwd = lane.worktreePath): Promise<RunEvidenceGate> {
+  if (!reviewRunPolicy().enabled) return { ok: true, message: 'Run evidence policy is off.' };
+  const config = reviewRunPolicyConfiguration();
+  if (!config.ok) return config;
+  if (!cwd) return { ok: false, code: 'review_run_candidate_unavailable', message: 'Run-evidence policy requires a resolved remote merge candidate before merging.' };
+  try {
+    const { stdout: dirty } = await laneGit(cwd, lane.repoPath, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
+    return dirty.length
+      ? { ok: false, code: 'review_run_candidate_unavailable', message: 'Run-evidence policy requires a clean, committed merge candidate. Commit pending edits and review that exact commit before merging; merge-time commits are refused.' }
+      : { ok: true, message: 'The source worktree is clean; evidence is checked against the resolved candidate.' };
+  } catch {
+    return { ok: false, code: 'review_run_candidate_unavailable', message: 'Run-evidence policy could not verify that the candidate worktree is clean.' };
+  }
+}
 /** Evaluate the resolved source commit before rebase. No merge-time snapshot is allowed under this policy. */
 export async function checkReviewRunPolicy(lane: Lane, candidate?: { cwd: string; sha: string }): Promise<RunEvidenceGate> {
   const policy = reviewRunPolicy();
   if (!policy.enabled) return { ok: true, message: 'Run evidence policy is off.' };
-  const config = reviewRunPolicyConfiguration();
-  if (!config.ok) return config;
+  const cwd = candidate?.cwd ?? lane.worktreePath ?? '';
+  const preflight = await checkReviewRunPreflight(lane, cwd);
+  if (!preflight.ok) return preflight;
   const patterns = policy.paths.map(patternRegex);
   try {
-    if (!candidate && !lane.worktreePath) return { ok: false, code: 'review_run_candidate_unavailable', message: 'Run-evidence policy requires a resolved remote merge candidate before merging.' };
-    const cwd = candidate?.cwd ?? lane.worktreePath!;
-    const { stdout: dirty } = await laneGit(cwd, lane.repoPath, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
-    if (dirty.length) return { ok: false, code: 'review_run_candidate_unavailable', message: 'Run-evidence policy requires a clean, committed merge candidate. Commit pending edits and review that exact commit before merging; merge-time commits are refused.' };
     const head = await resolveHeadSha(cwd, candidate?.sha ?? await readHeadSha(cwd, lane.repoPath), lane.repoPath);
     if (!head) return { ok: false, code: 'review_run_candidate_unavailable', message: 'The final source merge-candidate SHA could not be established.' };
     const resolution = await resolveLaneAttributionBase(lane, cwd, head);

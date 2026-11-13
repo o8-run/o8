@@ -36,14 +36,14 @@ export async function performRemoteCustomerMerge(
   const workerRun = fetchWorkerRun(lane.id);
   if (!workerRun?.remoteBranch) {
     setLaneStatus(command.laneId, 'reviewing', 'system', 'remote_branch_missing');
-    return { ok: false, laneId: command.laneId, ...(reviewRunPolicy().enabled ? { reason: 'review_run_candidate_unavailable' } : {}), note: 'No remote branch recorded for this lane.' };
+    return { ok: false, laneId: command.laneId, reason: 'remote_branch_missing', note: 'No remote branch recorded for this lane.' };
   }
 
   const fetched = await fetchWorkerBranch(lane.repoPath, workerRun.remoteBranch, workerRun.id);
   if (!fetched.ok) {
     console.error(`[remote-merge] Merge failed for lane ${lane.id} (packet ${lane.packetId ?? 'unbound'}): ${fetched.note}`);
     setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error', { reason: fetched.note });
-    return { ok: false, laneId: command.laneId, ...(reviewRunPolicy().enabled ? { reason: 'review_run_candidate_unavailable' } : {}), note: fetched.note };
+    return { ok: false, laneId: command.laneId, reason: 'remote_fetch_failed', note: fetched.note };
   }
 
   const { execFile } = await import('@/lib/providers/child-process');

@@ -1,4 +1,4 @@
-import { checkReviewRunPolicy, reviewRunPolicy } from './review-run-policy';
+import { checkReviewRunPolicy, checkReviewRunPreflight, reviewRunPolicy } from './review-run-policy';
 import type {
   ApprovalConflictReport,
   ApprovalGateResult,
@@ -535,7 +535,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       };
     }
 
-    const candidatePreflight = await checkReviewRunPolicy(lane);
+    const candidatePreflight = await checkReviewRunPreflight(lane);
     if (!candidatePreflight.ok) return { ok: false, laneId: lane.id, reason: candidatePreflight.code, note: candidatePreflight.message };
     let reviewedSnapshotSha: string;
     if (spokenEvidence.present && command.commitMessage && !reviewRunPolicy().enabled) {

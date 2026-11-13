@@ -84,7 +84,10 @@ with a recorded warning; the code verdict remains valid, including when policy i
 Old malformed/stale saved evidence also reads as not run. A missing authenticated
 operator or assigned-reviewer principal cannot earn run credit. The server attaches
 the principal (operator, or packet/review-turn/runtime assignment); request JSON and
-model prose cannot choose it. Command, result, excerpt and artifact text is redacted
+model prose cannot choose it. MCP submissions from the in-house reviewer agent use
+the operator credential and are recorded as `authenticated_operator`; an operator
+principal identifies the authenticated channel, not necessarily a person. Command,
+result, excerpt and artifact text is redacted
 through the existing transcript policy before persistence or output.
 A failed command is still an observation; the reviewer owns the approval judgment.
 Prose and author claims do not supply structured evidence. These are reviewer-reported
@@ -124,7 +127,12 @@ approval does not bypass this opt-in requirement. The packet merge HTTP route re
 `review_run_diff_unavailable`. Dirty worktrees, merge-time source commits and
 unresolvable remote candidates refuse with `review_run_candidate_unavailable`;
 commit and review the final source first. Remote lanes check the fetched branch,
-not the canonical checkout. Rebase-carried approvals do not inherit run evidence
+not the canonical checkout. Ordinary missing remote branch metadata and fetch failures
+retain their own reasons (`remote_branch_missing` / `remote_fetch_failed`), separate
+from policy refusals. Early admission checks only validate configuration and a clean
+tree; execution evidence is checked against the resolved source candidate. The
+existing head-integrity guard still refuses a branch that advanced past its reviewed
+commit. Rebase-carried approvals do not inherit run evidence
 for their new HEAD. Existing integration/rebase gates remain in place; these receipts
 refer to the reviewed source commit, not a claim that the eventual integration commit
 was exercised. Launching and driving the reviewed commit remains dependent on #5947.
