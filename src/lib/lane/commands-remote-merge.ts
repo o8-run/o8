@@ -1,3 +1,4 @@
+import { checkReviewRunPolicy } from './review-run-policy';
 import { resolveGitBinary } from '@/lib/git/binary';
 import { pushLfsObjects } from '@/lib/git/lfs-push';
 import { readLaneCreationBaseCommit } from '@/lib/lane/creation-base';
@@ -58,6 +59,10 @@ export async function performRemoteCustomerMerge(
       maxBuffer: 1024 * 1024,
     })).stdout.trim();
 
+    const sourceSha = (await laneGit(fetched.tempWorktreePath, lane.repoPath, ['rev-parse', '--verify', 'HEAD^{commit}'])).stdout.trim();
+    const candidateGate = await checkReviewRunPolicy(lane, { cwd: fetched.tempWorktreePath, sha: sourceSha });
+    if (!candidateGate.ok) return { ok: false, laneId: lane.id, reason: candidateGate.code, note: candidateGate.message };
+
     const attributedCommitMessage = command.commitMessage?.trim()
       ? resolveAttributedCommitMessage(command.commitMessage.trim())
       : undefined;
@@ -77,6 +82,9 @@ export async function performRemoteCustomerMerge(
     const actualBranch = (await laneGit(fetched.tempWorktreePath, lane.repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'], { maxBuffer: 1024 * 1024 })).stdout.trim();
     console.log(`[remote-merge] Actual worktree branch: ${actualBranch} (base ref: ${fetched.baseRef})`);
 
+    const resolvedSha = (await laneGit(fetched.tempWorktreePath, lane.repoPath, ['rev-parse', '--verify', 'HEAD^{commit}'])).stdout.trim();
+    const resolvedGate = await checkReviewRunPolicy(lane, { cwd: fetched.tempWorktreePath, sha: resolvedSha });
+    if (!resolvedGate.ok) return { ok: false, laneId: lane.id, reason: resolvedGate.code, note: resolvedGate.message };
     let rebaseFailed = false;
     let typecheckSkipped: string | null = null;
     try {

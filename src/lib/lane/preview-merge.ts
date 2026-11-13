@@ -1,3 +1,4 @@
+import { reviewRunPolicy } from './review-run-policy';
 /**
  * Merge preview — read-only wrapper around the merge gate (#623).
  *
@@ -42,6 +43,7 @@ export type MergeCheckName =
   | 'review_run_evidence_required'
   | 'review_run_policy_invalid'
   | 'review_run_diff_unavailable'
+  | 'review_run_candidate_unavailable'
   | 'file-size-approval'
   | 'merge-policy'
   | 'merge-approval'
@@ -69,6 +71,7 @@ export interface MergeCheckResult {
 
 /** Shape returned by `buildMergePreview` and by `o8_merge_preview`. */
 export interface MergePreviewResult {
+  reviewRunPolicy?: ReturnType<typeof reviewRunPolicy>;
   packetId: string;
   /** True when the gate passed — a merge call would proceed past the gate. */
   wouldMerge: boolean;
@@ -241,6 +244,7 @@ export async function buildPreviewForLane(
   if (reviewSource.kind === 'immutable_snapshot') {
     return {
       packetId,
+      reviewRunPolicy: reviewRunPolicy(),
       wouldMerge: false,
       checks: [...ALL_CHECKS.map((name) => ({ name, verdict: 'skipped' as const })),
         { name: 'worktree-branch', verdict: 'fail', actions: [`Run o8 packet restore ${packetId}, then rerun verification and merge-preview.`] }],
@@ -350,6 +354,7 @@ export async function buildPreviewForLane(
     : undefined;
   return {
     packetId,
+    reviewRunPolicy: reviewRunPolicy(),
     wouldMerge: blockers.length === 0,
     checks,
     blockers,
@@ -372,6 +377,7 @@ export async function previewPacketMerge(packetId: string): Promise<MergePreview
   if (!lane) {
     return {
       packetId,
+      reviewRunPolicy: reviewRunPolicy(),
       wouldMerge: false,
       checks: ALL_CHECKS.map((name) => ({ name, verdict: 'skipped' as const })),
       blockers: ['no-lane'],

@@ -1,4 +1,6 @@
-import { readRunEvidence, REVIEW_RUN_EVIDENCE_PROMPT, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
+import { redactThreadText } from '@/lib/threads/redaction';
+import { getSqlite } from '@/lib/db';
+import { readRunEvidence, prepareRunEvidence, REVIEW_RUN_EVIDENCE_PROMPT, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
@@ -13,6 +15,7 @@ const RAW_TEXT_LIMIT = 2000;
 export interface ParsedCodexAutoReviewVerdict {
   approved: boolean;
   runEvidence?: ReviewRunEvidence;
+  runEvidenceWarning?: string;
   findings: OrchestratorReviewFinding[];
   rawText: string;
   contractCoverageEvidence?: ReviewCoverageEvidence;
@@ -39,7 +42,7 @@ function trimOptional(value: unknown): string | undefined {
 }
 
 function truncateRawText(value: string): string {
-  const normalized = value.trim();
+  const normalized = redactThreadText(value.trim());
   if (normalized.length <= RAW_TEXT_LIMIT) return normalized;
   return `${normalized.slice(0, RAW_TEXT_LIMIT - 3)}...`;
 }
@@ -229,7 +232,7 @@ export function parseCodexAutoReviewVerdict(rawText: string): ParsedCodexAutoRev
 
   try {
     const runEvidence = payload.runEvidence === undefined ? undefined : readRunEvidence(payload.runEvidence);
-    if (payload.runEvidence !== undefined && !runEvidence) return reviewUnavailable(rawText, 'invalid structured run evidence', approved);
+    const runEvidenceWarning = payload.runEvidence !== undefined && !runEvidence ? 'Malformed structured run evidence was downgraded to not run.' : undefined;
     const findings = parsePayloadFindings(payload);
     const contractCoverageEvidence = readCoverageEvidence({
       contractCoverageEvidence: payload.contractCoverageEvidence,
@@ -242,7 +245,7 @@ export function parseCodexAutoReviewVerdict(rawText: string): ParsedCodexAutoRev
         parseWarning: 'rejected verdict had no structured findings',
       };
     }
-    return { approved, findings, rawText: raw, contractCoverageEvidence, runEvidence: runEvidence ?? undefined };
+    return { approved, findings, rawText: raw, contractCoverageEvidence, runEvidence: runEvidence ?? (runEvidenceWarning ? { status: 'not_run', reason: runEvidenceWarning, warning: runEvidenceWarning } : undefined), ...(runEvidenceWarning ? { runEvidenceWarning } : {}) };
   } catch (error) {
     console.warn(`[auto-review] Codex verdict findings were invalid: ${error instanceof Error ? error.message : String(error)}`);
     const reason = error instanceof Error ? error.message : String(error);
@@ -405,6 +408,19 @@ export async function recordCodexAutoReviewVerdict(input: {
     return { event: null, verdict, reviewUnavailable: true };
   }
 
+  // This authority comes from the server-owned backend turn, never the model payload.
+  let principal: import('@/lib/orchestrator/review-run-evidence').ReviewRunPrincipal | null = null;
+  if (reviewTurnId) {
+    const started = getSqlite().prepare("SELECT payload_json FROM lane_events WHERE lane_id = ? AND actor = 'system' AND verb = 'review_turn_started' AND json_extract(payload_json, '$.reviewTurnId') = ? ORDER BY rowid DESC LIMIT 1").get(input.lane.id, reviewTurnId) as { payload_json: string } | undefined;
+    const finished = getSqlite().prepare("SELECT verb, payload_json FROM lane_events WHERE lane_id = ? AND actor = 'system' AND verb IN ('review_turn_finished', 'review_turn_stopped') AND json_extract(payload_json, '$.reviewTurnId') = ? ORDER BY rowid DESC LIMIT 1").get(input.lane.id, reviewTurnId) as { verb: string; payload_json: string } | undefined;
+    const assignment = started ? JSON.parse(started.payload_json) as Record<string, unknown> : null;
+    const outcome = finished ? JSON.parse(finished.payload_json) as Record<string, unknown> : null;
+    if (assignment?.backend === 'codex' && assignment.expectedHeadSha === reviewedHeadSha && finished?.verb === 'review_turn_finished' && outcome?.outcome === 'completed') {
+      principal = { role: 'assigned_reviewer', source: 'server_review_turn', packetId: input.lane.packetId, reviewTurnId, reviewerRuntime: 'codex' };
+    }
+  }
+  verdict.runEvidence = prepareRunEvidence(verdict.runEvidence, reviewedHeadSha, principal);
+  if (verdict.runEvidence.status === 'not_run' && verdict.runEvidence.warning) verdict.runEvidenceWarning = verdict.runEvidence.warning;
   const { recordOrchestratorReview } = await import('@/lib/approvals/store');
   const event = recordOrchestratorReview(input.lane.packetId, {
     findings: verdict.findings,

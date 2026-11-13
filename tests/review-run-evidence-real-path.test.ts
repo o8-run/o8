@@ -68,7 +68,7 @@ it('reads a literal old saved approval as approved, not run in storage and nativ
 it.each(['missing', 'stale'] as const)('real merge route refuses %s run evidence under a matching policy, including operator calls', async mode => {
   const f = await fixture();
   if (mode === 'stale') getSqlite()!.prepare('UPDATE approvals SET args_json = ? WHERE id = ?')
-    .run(JSON.stringify({ ...f.args, runEvidence: evidence(f.base), reviewMode: 'run', verdictLabel: 'approved, run' }), f.approvalId);
+    .run(JSON.stringify({ ...f.args, runEvidence: evidence(f.base), reviewMode: 'run', verdictLabel: 'approved, run (reviewer-reported)' }), f.approvalId);
   vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["native/o8-next/src/**"]');
   const response = await mergeRoute.POST(request('/api/orchestrator/merge', { packetId: f.packetId, expectedHeadSha: f.head, idempotencyKey: randomUUID() }));
   expect(response.status, await response.clone().text()).toBe(409);
@@ -83,17 +83,17 @@ it('records well-formed current-head evidence through POST review and exposes ap
     runEvidence: receipt, clientMutationId: randomUUID() }));
   expect(response.status).toBe(200);
   const payload = await response.json();
-  expect(payload.result).toMatchObject({ recorded: true, reviewMode: 'run', verdictLabel: 'approved, run', runEvidence: receipt });
+  expect(payload.result).toMatchObject({ recorded: true, reviewMode: 'run', verdictLabel: 'approved, run (reviewer-reported)', runEvidence: receipt });
   expect(getApproval(payload.result.auditApprovalId)?.args).toMatchObject({ runEvidence: receipt, reviewMode: 'run' });
   const state = await stateRoute.GET(request(`/api/orchestrator/review-state?packetId=${f.packetId}`));
-  expect(await state.json()).toMatchObject({ orchestratorReview: { reviewMode: 'run', verdictLabel: 'approved, run', runEvidence: receipt } });
+  expect(await state.json()).toMatchObject({ orchestratorReview: { reviewMode: 'run', verdictLabel: 'approved, run (reviewer-reported)', runEvidence: receipt } });
 }, 30_000);
-it.each(['malformed', 'stale'] as const)('POST review rejects a %s structured run claim instead of accepting prose as evidence', async mode => {
+it.each(['malformed', 'stale'] as const)('POST review preserves the approval but downgrades a %s run claim with a warning', async mode => {
   const f = await fixture();
   const response = await reviewRoute.POST(request('/api/orchestrator/review', { packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head,
     runEvidence: mode === 'stale' ? evidence(f.base) : { status: 'run', result: 'I ran it successfully' }, clientMutationId: randomUUID() }));
-  expect(response.status).toBe(422);
-  expect(await response.json()).toMatchObject({ ok: false, error: { code: 'invalid_run_evidence' } });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ result: { recorded: true, reviewMode: 'read_only', runEvidenceWarning: expect.any(String), runEvidence: { status: 'not_run' } } });
 });
 it('matching current-head evidence clears preview; off and nonmatching policies preserve read-only approvals', async () => {
   const f = await fixture();
@@ -112,7 +112,7 @@ it('matching current-head evidence clears preview; off and nonmatching policies 
   vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["docs/**"]');
   expect((await previewPacketMerge(f.packetId)).checks).toContainEqual(expect.objectContaining({ name: 'review-run-evidence', verdict: 'pass' }));
   vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '[]');
-  expect((await previewPacketMerge(f.packetId)).checks).toContainEqual(expect.objectContaining({ name: 'review-run-evidence', verdict: 'pass' }));
+  expect((await previewPacketMerge(f.packetId)).checks).not.toContainEqual(expect.objectContaining({ name: 'review-run-evidence' }));
   vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', 'not JSON');
   const invalid = await mergeRoute.POST(request('/api/orchestrator/merge', { packetId: f.packetId, expectedHeadSha: f.head, idempotencyKey: randomUUID() }));
   expect(invalid.status).toBe(409);
@@ -129,8 +129,8 @@ it('rejects incomplete or unbounded observations through the review route', asyn
   ];
   for (const runEvidence of invalid) {
     const response = await reviewRoute.POST(request('/api/orchestrator/review', { packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head, runEvidence, clientMutationId: randomUUID() }));
-    expect(response.status, JSON.stringify(runEvidence)).toBe(422);
-    expect(await response.json()).toMatchObject({ error: { code: 'invalid_run_evidence' } });
+    expect(response.status, JSON.stringify(runEvidence)).toBe(200);
+    expect(await response.json()).toMatchObject({ result: { reviewMode: 'read_only', runEvidenceWarning: expect.any(String) } });
   }
 }, 30_000);
 it('CLI and MCP submit and report the same structured review through owned HTTP routes', async () => {
@@ -158,13 +158,13 @@ it('CLI and MCP submit and report the same structured review through owned HTTP 
     const path = join(f.repo, 'receipt.json'); writeFileSync(path, JSON.stringify(evidence(f.head)));
     expect(await runPacketReview({ human: false, verbose: false }, [f.packetId, '--approve', '--expected-sha', f.head, '--run-evidence', path])).toBe(0);
     const payload = stdout.mock.calls.map(([chunk]) => String(chunk)).join('');
-    expect(payload).toContain('approved, run');
+    expect(payload).toContain('approved, run (reviewer-reported)');
     stdout.mockClear();
     expect(await runPacketReview({ human: true, verbose: false }, [f.packetId, '--approve', '--expected-sha', f.head, '--not-run', 'Window driver unavailable.'])).toBe(0);
     expect(stdout.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain('approved, not run');
     const response = await handleSubmitReview({ packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head, runEvidence: evidence(f.head) });
     expect(response.isError, JSON.stringify(response)).not.toBe(true);
-    expect(JSON.stringify(response)).toContain('approved, run');
+    expect(JSON.stringify(response)).toContain('approved, run (reviewer-reported)');
   } finally { stdout.mockRestore(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 }, 30_000);
 
@@ -179,4 +179,35 @@ it('a rename out of a required path still requires evidence, even with a newline
   expect(response.status, await response.clone().text()).toBe(409);
   expect(await response.json()).toMatchObject({ error: { code: 'review_run_evidence_required' } });
   expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
+}, 30_000);
+
+it('refuses a dirty operator candidate before any merge-time commit', async () => {
+  const f = await fixture();
+  git(f.worktree, 'reset', '--hard', f.base);
+  writeFileSync(join(f.worktree, 'base.txt'), 'ordinary committed change\n');
+  git(f.worktree, 'add', '.'); git(f.worktree, 'commit', '-qm', 'ordinary change');
+  const head = git(f.worktree, 'rev-parse', 'HEAD');
+  // No pinned review. Protected work exists only in the dirty tree.
+  getSqlite().prepare('DELETE FROM approvals WHERE id = ?').run(f.approvalId);
+  writeFileSync(join(f.worktree, 'native/o8-next/src/fixture.rs'), '// pending protected change\n');
+  vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["native/o8-next/src/**"]');
+  const response = await mergeRoute.POST(request('/api/orchestrator/merge', { packetId: f.packetId, expectedHeadSha: head, commitMessage: 'operator snapshot', idempotencyKey: randomUUID() }));
+  expect(response.status, await response.clone().text()).toBe(409);
+  expect(await response.json()).toMatchObject({ error: { code: 'review_run_candidate_unavailable' } });
+  expect(git(f.worktree, 'rev-parse', 'HEAD')).toBe(head);
+  expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
+}, 30_000);
+it('redacts evidence before durable review storage and review-state output', async () => {
+  const f = await fixture();
+  const token = 'sk-' + 'x'.repeat(48);
+  const receipt = evidence(f.head);
+  receipt.observations[0] = { ...receipt.observations[0], command: `echo ${token}`, result: token, excerpt: token };
+  const response = await reviewRoute.POST(request('/api/orchestrator/review', { packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head, runEvidence: receipt, clientMutationId: randomUUID() }));
+  expect(response.status).toBe(200);
+  const payload = await response.json();
+  expect(JSON.stringify(payload)).not.toContain(token);
+  const raw = getSqlite().prepare('SELECT args_json, audit_json FROM approvals WHERE id = ?').get(payload.result.auditApprovalId);
+  expect(JSON.stringify(raw)).not.toContain(token);
+  const state = await stateRoute.GET(request(`/api/orchestrator/review-state?packetId=${f.packetId}`));
+  expect(await state.text()).not.toContain(token);
 }, 30_000);

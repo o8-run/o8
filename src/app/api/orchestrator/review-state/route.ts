@@ -1,3 +1,4 @@
+import { reviewRunPolicy } from '@/lib/lane/review-run-policy';
 import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { viewerJson } from '@/lib/viewers/response';
 /**
@@ -405,6 +406,7 @@ export async function GET(request: NextRequest) {
     });
 
     return viewerJson({
+      reviewRunPolicy: reviewRunPolicy(),
       packetId,
       state,
       stateChangedAt,

@@ -1,5 +1,5 @@
+import { prepareRunEvidence, reviewExecution, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import { assertReviewSubmissionCurrent } from '@/lib/auth/review-submission';
-import { readRunEvidence, reviewExecution, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import { randomUUID } from 'node:crypto';
 
 import { resolveApproval } from '@/lib/approvals/resolution';
@@ -429,12 +429,14 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     outcome: 'completed' as const,
   };
   if (input.submissionPrincipal) assertReviewSubmissionCurrent(input.submissionPrincipal);
-  const submittedEvidence = input.runEvidence === undefined ? undefined : readRunEvidence(input.runEvidence);
-  if (input.runEvidence !== undefined && (!submittedEvidence || submittedEvidence.status === 'run' && submittedEvidence.headSha !== reviewedHeadSha?.toLowerCase())) {
-    throw new ReviewValidationError('invalid_run_evidence', 'runEvidence requires well-formed observations bound to the exact reviewed HEAD.');
-  }
+  const principal = input.submissionPrincipal;
+  const evidencePrincipal = principal?.role === 'operator' ? { role: 'operator' as const, source: 'authenticated_operator' as const }
+    : principal?.role === 'assigned_reviewer' ? { role: 'assigned_reviewer' as const, source: 'assigned_credential' as const,
+      packetId: principal.packetId, reviewTurnId: principal.reviewTurnId, reviewerRuntime: principal.reviewerRuntime } : null;
+  const submittedEvidence = prepareRunEvidence(input.runEvidence, reviewedHeadSha, evidencePrincipal);
   const execution = reviewExecution(input.approved, reviewedHeadSha, submittedEvidence);
   const summary = buildReviewSummary(input.findings, execution.verdictLabel);
+  if (input.submissionPrincipal) assertReviewSubmissionCurrent(input.submissionPrincipal);
   const auditReview = recordPacketReviewAudit(
     packet,
     input.findings,

@@ -1,3 +1,4 @@
+import { redactThreadText } from '@/lib/threads/redaction';
 import { reviewExecution, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import type {
   ApprovalAuditEvent,
@@ -64,7 +65,7 @@ export function normalizeOrchestratorReview(review: OrchestratorReviewRecordInpu
     reviewedHeadSha: trimOptional(review.reviewedHeadSha),
     contractCoverageEvidence: review.contractCoverageEvidence,
     requiresSecondPass: review.requiresSecondPass === true,
-    rawText: trimOptional(review.rawText),
+    rawText: review.rawText ? redactThreadText(review.rawText) : undefined,
     parseWarning: trimOptional(review.parseWarning),
     reviewTurnId: trimOptional(review.reviewTurnId),
     reviewTurnOutcome: review.reviewTurnOutcome,
