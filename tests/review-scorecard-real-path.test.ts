@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
-import { beforeEach, expect, it } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { getSqlite } from '@/lib/db';
 import { GET } from '@/app/api/panel/analytics/route';
 
@@ -171,4 +171,64 @@ it('attributes manual correction deliveries to their exact author and counts ope
   const reasons = new Set(decided.metrics.filter((row: { id: string }) => row.id.startsWith('reason-'))
     .flatMap((row: { changes: Array<{ id: string }> }) => row.changes.map(change => change.id)));
   expect(['corrected', 'failed', 'steered'].every(id => reasons.has(id))).toBe(true);
+});
+
+it('caps every backing change list at 200 while keeping its total', async () => {
+  const db = getSqlite();
+  db.transaction(() => { for (let i = 0; i < 205; i++) { lane(`bulk-${i}`); review(`bulk-${i}`, true, -1000); } })();
+  const body = await score('all');
+  const rounds = body.metrics.find((row: { id: string }) => row.id === 'rounds');
+  expect(rounds).toMatchObject({ total: 205 });
+  expect(rounds.changes).toHaveLength(200);
+  for (const metric of body.metrics) expect(metric.changes.length).toBeLessThanOrEqual(200);
+});
+it('materializes only the SQL arrival cohort and its related records', async () => {
+  lane('recent'); review('recent', true, -1000);
+  lane('old', 20 * day); review('old', true, -1000);
+  lane('retry'); getSqlite().prepare("UPDATE lanes SET packet_id='old' WHERE id='retry'").run();
+  event('recent', 'fixture-recent', -1000); event('old', 'fixture-old', -1000);
+  const db = getSqlite();
+  const prepare = db.prepare.bind(db);
+  const reads: Array<Array<Record<string, unknown>>> = [];
+  const spy = vi.spyOn(db, 'prepare').mockImplementation(sql => {
+    const statement = prepare(sql);
+    const all = statement.all.bind(statement);
+    vi.spyOn(statement, 'all').mockImplementation((...args: unknown[]) => {
+      const rows = all(...args);
+      reads.push(rows as Array<Record<string, unknown>>);
+      return rows;
+    });
+    return statement;
+  });
+  try {
+    const body = await score();
+    expect(body.sources.find((row: { id: string }) => row.id === 'unknown').count).toBe(1);
+    const rows = reads.flat();
+    expect(rows.filter(row => 'branch' in row && 'created_at' in row).map(row => row.id)).toEqual(['recent']);
+    expect(rows.filter(row => 'audit_json' in row).map(row => row.lane_id)).toEqual(['recent']);
+    expect(rows.filter(row => 'payload_json' in row && 'verb' in row).map(row => row.lane_id)).toEqual(['recent']);
+  } finally { spy.mockRestore(); }
+});
+it('skips malformed stored JSON rows without losing the scorecard', async () => {
+  lane('bad'); review('bad', true, -1000); event('bad', 'steered_packet', -1000);
+  const db = getSqlite();
+  db.prepare("UPDATE approvals SET audit_json='{broken' WHERE lane_id='bad'").run();
+  db.prepare("UPDATE lane_events SET payload_json='{broken' WHERE lane_id='bad'").run();
+  db.prepare('INSERT INTO missions (id,repo_path,mission_state_json,created_at,updated_at) VALUES (?,?,?,?,?)')
+    .run('bad-mission', '/fixture/repo', '{broken', now, now);
+  const body = await score();
+  expect(body.basis).toContain('3 malformed rows skipped');
+  expect(body.metrics.find((row: { id: string }) => row.id === 'rounds').value).toBeNull();
+});
+it('counts only desktop or mobile approval decisions as human steps', async () => {
+  for (const [id, tool] of [['system-only', 'lane_merge'], ['second-pass', 'orchestrator_second_pass'], ['created-only', 'lane_merge']]) {
+    lane(id); review(id, true, -3000); review(id, true, -2000);
+    getSqlite().prepare('UPDATE approvals SET tool_name=?,audit_json=? WHERE id=?').run(tool,
+      JSON.stringify([{ type: 'created', actor: id === 'created-only' ? 'desktop' : 'system', timestamp: now - 2000 }]), `${id}--2000`);
+    event(id, 'merge_dispatch_succeeded', -1000, 'system', { reviewedHeadSha: 'a'.repeat(40), mergeSha: 'b'.repeat(40) });
+  }
+  const body = await score();
+  expect(body.metrics.find((row: { id: string }) => row.id === 'reason-approval').value).toBe(0);
+  expect(body.metrics.find((row: { id: string }) => row.id === 'needed-person').value).toBe(0);
+  expect(body.metrics.find((row: { id: string }) => row.id === 'without-person').value).toBe(3);
 });
