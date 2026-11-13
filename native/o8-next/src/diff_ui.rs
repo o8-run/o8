@@ -674,7 +674,16 @@ impl Render for DiffSurface {
                     &self.target,
                     Target::Packet(_) | Target::Worktree { file: None, .. }
                 ),
-                |view| view.child(div().px(px(8.)).child(self.change_map_view(cx))),
+                |view| {
+                    view.child(
+                        div()
+                            .px(px(8.))
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .child(self.change_map_view(cx)),
+                    )
+                },
             )
             .child(body)
     }
