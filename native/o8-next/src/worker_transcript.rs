@@ -8,7 +8,11 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 
 fn timestamp(event: &Value) -> Value {
-    let Some(text) = event["ts"].as_str() else {
+    let Some(text) = event
+        .get("nativeTimestamp")
+        .or_else(|| event.get("ts"))
+        .and_then(Value::as_str)
+    else {
         return Value::Null;
     };
     let Some(seconds) = crate::clock::timestamp(text) else {
@@ -310,6 +314,9 @@ fn event_id(event: &Value, occurrences: &mut HashMap<String, usize>) -> String {
     use std::hash::{Hash, Hasher};
     let mut content = event.clone();
     content.as_object_mut().unwrap().remove("seq");
+    if let Some(at) = event.get("nativeTimestamp") {
+        content["ts"] = at.clone();
+    }
     if native_call_id(event).is_none() {
         content.as_object_mut().unwrap().remove("callId");
     }

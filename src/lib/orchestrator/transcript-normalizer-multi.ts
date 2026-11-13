@@ -70,6 +70,13 @@ function argsPreview(input: unknown): string {
   }
 }
 
+function nativeFields(enabled: boolean, sourceId: string, at: string, kind: string, callId?: string, previous?: TranscriptEvent) {
+  if (!enabled) return {};
+  const retained = previous as (TranscriptEvent & { eventId?: string; nativeTimestamp?: string }) | undefined;
+  const eventId = retained?.eventId ?? (sourceId ? `${sourceId}:${kind}${callId ? `:${callId}` : ''}` : undefined);
+  return { nativeTimestamp: retained?.nativeTimestamp ?? at, ...(eventId ? { eventId } : {}) };
+}
+
 function normalizeTs(raw: unknown, fallback: string): string {
   if (typeof raw === 'string' && raw.trim()) {
     const parsed = new Date(raw);
@@ -121,6 +128,7 @@ export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = ne
 
     const type = readStr(parsed, 'type');
     const ts = normalizeTs(parsed.timestamp, fallbackTs);
+    const nativeTimestamp = normalizeTs(parsed.timestamp, '');
     const sourceId = readStr(parsed, 'uuid', 'id') || readStr(safeObject(parsed.part), 'id') || readStr(safeObject(parsed.message), 'id');
     const part = safeObject(parsed.part);
     const partType = readStr(part, 'type');
@@ -128,7 +136,7 @@ export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = ne
     // ── assistant text ────────────────────────────────────────────────────────
     if (type === 'text' && partType === 'text') {
       const text = clip(readStr(part, 'text'), MAX_ASSISTANT_TEXT, true);
-      if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:assistant` } : {}) });
+      if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'assistant') });
       continue;
     }
 
@@ -147,7 +155,7 @@ export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = ne
         seq: previousCall?.seq ?? nextSeq(),
         ts: previousCall?.ts ?? ts,
         type: 'tool_call',
-        ...(previousCall && 'eventId' in previousCall ? { eventId: previousCall.eventId } : nativeIdentities && sourceId ? { eventId: `${sourceId}:tool_call:${callId}` } : {}),
+        ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'tool_call', callId, previousCall),
         callId,
         tool,
         args,
@@ -169,7 +177,7 @@ export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = ne
           seq: previousResult?.seq ?? nextSeq(),
           ts: previousResult?.ts ?? ts,
           type: 'tool_result',
-          ...(previousResult && 'eventId' in previousResult ? { eventId: previousResult.eventId } : nativeIdentities && sourceId ? { eventId: `${sourceId}:tool_result:${callId}` } : {}),
+          ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'tool_result', callId, previousResult),
           callId,
           tool,
           ok,
@@ -297,6 +305,7 @@ export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = 
 
     const type = readStr(parsed, 'type');
     const ts = normalizeTs(parsed.timestamp, fallbackTs);
+    const nativeTimestamp = normalizeTs(parsed.timestamp, '');
     const sourceId = readStr(parsed, 'uuid', 'id') || readStr(safeObject(parsed.part), 'id') || readStr(safeObject(parsed.message), 'id');
     const message = safeObject(parsed.message);
     const content = message?.content;
@@ -304,7 +313,7 @@ export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = 
     // ── assistant text + tool_use blocks ──────────────────────────────────────
     if (type === 'assistant' && message) {
       const text = clip(extractClaudeText(content), MAX_ASSISTANT_TEXT, true);
-      if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:assistant` } : {}) });
+      if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'assistant') });
 
       for (const block of extractClaudeToolBlocks(content)) {
         const tool = block.name ?? 'tool';
@@ -315,7 +324,7 @@ export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = 
           seq: nextSeq(),
           ts,
           type: 'tool_call',
-          ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:tool_call:${callId}` } : {}),
+          ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'tool_call', callId),
           callId,
           tool,
           args,
@@ -339,7 +348,7 @@ export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = 
           seq: nextSeq(),
           ts,
           type: 'tool_result',
-          ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:tool_result:${callId}` } : {}),
+          ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'tool_result', callId),
           callId,
           tool,
           ok: block.is_error !== true,
@@ -360,7 +369,7 @@ export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = 
           ts,
           type: 'tool_result',
           callId: answer.id,
-          ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:tool_result:${answer.id}` } : {}),
+          ...nativeFields(nativeIdentities, sourceId, nativeTimestamp, 'tool_result', answer.id),
           tool: pendingCall?.tool ?? 'tool',
           ok: !answer.isError,
           summary: clip(answer.output, MAX_SUMMARY) || 'ok',

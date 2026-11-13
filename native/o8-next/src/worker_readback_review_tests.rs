@@ -264,3 +264,20 @@ fn null_cursor_keeps_saved_rows_and_stops_timed_polling() {
         "an empty readback retains existing work"
     );
 }
+
+#[test]
+fn native_unknown_time_appends_without_reinterpreting_a_legacy_fallback_time() {
+    let h = Host::new(200);
+    *h.events.lock().unwrap() = vec![
+        event(1, "dated", "Dated answer", "2026-01-02T00:00:02Z"),
+        json!({"seq":2,"eventId":"unknown","type":"assistant","text":"Unknown time answer","ts":"2026-01-01T00:00:02Z","nativeTimestamp":""}),
+    ];
+    let history = h.history();
+    let answers: Vec<_> = history
+        .transcript
+        .iter()
+        .filter(|e| e.role == "assistant" && !e.text.is_empty())
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(answers, vec!["Dated answer", "Unknown time answer"]);
+}

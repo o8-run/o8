@@ -129,7 +129,7 @@ async function findClaudeCodeJsonl(sessionId: string): Promise<string | null> {
 
 /** Stream complete Codex history without retaining raw tool payloads in memory. */
 async function readCodexHistory(paths: string[], native = false): Promise<TranscriptEvent[]> {
-  const normalizer = createCodexEventNormalizer(native ? '' : undefined, native);
+  const normalizer = createCodexEventNormalizer(undefined, native);
   for (const filePath of paths) {
     const handle = await open(await realpath(filePath), 'r');
     try {
@@ -261,13 +261,13 @@ function normalizeForRuntime(
   if (!raw) return [];
   switch (runtime) {
     case 'pi-builtin':
-      return normalizePiBuiltinEvents(raw).map(event => native && event.ts === '1970-01-01T00:00:00.000Z' ? { ...event, ts: '' } : event);
+      return normalizePiBuiltinEvents(raw).map(event => native ? { ...event, nativeTimestamp: event.ts === '1970-01-01T00:00:00.000Z' ? '' : event.ts } : event);
     case 'codex':
-      return normalizeCodexEvents(raw, native ? '' : fallbackTimestamp, native);
+      return normalizeCodexEvents(raw, fallbackTimestamp, native);
     case 'opencode':
-      return normalizeOpencodeEvents(raw, native ? '' : undefined, native);
+      return normalizeOpencodeEvents(raw, undefined, native);
     case 'claude-code':
-      return normalizeClaudeCodeEvents(raw, native ? '' : undefined, native);
+      return normalizeClaudeCodeEvents(raw, undefined, native);
     default:
       return [];
   }
@@ -397,7 +397,7 @@ export async function readSessionTranscriptEvents(sessionKey: string, fullHistor
   }
 
   const runtimeEvents = resolved.events ?? normalizeForRuntime(resolved.runtime, resolved.raw, resolved.fallbackTimestamp, native);
-  const earliest = runtimeEvents.map(event => Date.parse(event.ts)).filter(Number.isFinite);
+  const earliest = runtimeEvents.map(event => Date.parse((event as TranscriptEvent & { nativeTimestamp?: string }).nativeTimestamp ?? event.ts)).filter(Number.isFinite);
   return {
     sessionKey,
     runtime: resolved.runtime,

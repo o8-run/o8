@@ -5,9 +5,15 @@ function identity(event: TranscriptEvent): string {
   const durable = (event as TranscriptEvent & { eventId?: string }).eventId;
   if (durable) return durable;
   // Missing runtime identity is a multiset: repeated equal events are distinct.
+  return digest(JSON.stringify(content(event)));
+
+}
+
+function content(event: TranscriptEvent) {
   const callId = 'callId' in event ? event.callId : undefined;
   const synthetic = callId !== undefined && (/^tool-\d+$/.test(callId) || callId.includes('-synthetic-'));
-  return digest(JSON.stringify({ ...event, seq: undefined, ...(synthetic ? { callId: undefined } : {}) }));
+  const nativeTimestamp = (event as TranscriptEvent & { nativeTimestamp?: string }).nativeTimestamp;
+  return { ...event, seq: undefined, ts: nativeTimestamp ?? event.ts, ...(synthetic ? { callId: undefined } : {}) };
 }
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -25,7 +31,7 @@ export function transcriptWindow(events: TranscriptEvent[], cursor: number, limi
 ;
     return { ...event, eventId: durable ?? `${key}:${occurrence}` };
   });
-  const checkpoint = (offset: number) => digest(identified.slice(0, offset).map(e => JSON.stringify({ ...e, seq: undefined })).join('\n'));
+  const checkpoint = (offset: number) => digest(identified.slice(0, offset).map(e => JSON.stringify(content(e))).join('\n'));
   const cursorReset = token !== null && (cursor > identified.length || (cursor > 0 && token !== checkpoint(cursor)));
   const from = cursorReset ? 0 : cursor;
   const windowed = tail ? identified.slice(-limit) : identified.filter(event => event.seq > from).slice(0, limit);

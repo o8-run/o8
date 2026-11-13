@@ -128,8 +128,13 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
   let seq = 0;
   let syntheticCallSeq = 0;
   let currentSourceId = '';
-  const nativeId = (kind: string, callId?: string) => nativeIdentities && currentSourceId
-    ? { eventId: `${currentSourceId}:${kind}:${callId ?? '0'}` } : {};
+  let currentNativeTimestamp = '';
+  const nativeId = (kind: string, callId?: string, previous?: TranscriptEvent) => {
+    if (!nativeIdentities) return {};
+    const retained = previous as (TranscriptEvent & { eventId?: string; nativeTimestamp?: string }) | undefined;
+    const eventId = retained?.eventId ?? (currentSourceId ? `${currentSourceId}:${kind}${callId ? `:${callId}` : ''}` : undefined);
+    return { nativeTimestamp: retained?.nativeTimestamp ?? currentNativeTimestamp, ...(eventId ? { eventId } : {}) };
+  };
   const nextSeq = () => (seq += 1);
   const nextSyntheticCallId = (prefix: string) => `${prefix}-synthetic-${syntheticCallSeq += 1}`;
 
@@ -169,7 +174,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
         seq: previousCall!.seq,
         ts: previousCall!.ts,
         type: 'tool_call',
-        ...('eventId' in previousCall ? { eventId: previousCall.eventId } : {}),
+        ...nativeId('tool_call', callId, previousCall),
         callId: previousCall.type === 'tool_call' ? previousCall.callId : callId,
         tool,
         args,
@@ -214,7 +219,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
     const result: TranscriptEvent = {
       seq: previousResult?.seq ?? nextSeq(), ts: previousResult?.ts ?? ts, type: 'tool_result', callId: previous && out[previous.callIndex].type === 'tool_call' ? (out[previous.callIndex] as Extract<TranscriptEvent, { type: 'tool_call' }>).callId : callId, tool, ok,
       summary: output || (ok ? 'ok' : `exit ${exitCode}`),
-      ...(previousResult && 'eventId' in previousResult ? { eventId: previousResult.eventId } : nativeId('tool_result', callId)),
+      ...nativeId('tool_result', callId, previousResult),
     };
     if (previous && previous.resultIndex !== undefined) {
       out[previous.resultIndex] = result;
@@ -237,6 +242,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
       const sourceId = readStr(parsed, 'uuid', 'id') || readStr(safeObject(parsed.item), 'id') || readStr(safeObject(parsed.payload), 'id');
       currentSourceId = sourceId;
       const normalizedTimestamp = normalizeTs(parsed.timestamp, fallbackTs);
+      currentNativeTimestamp = normalizedTimestamp.reliable ? normalizedTimestamp.value : '';
       const ts = normalizedTimestamp.value;
       const payload = safeObject(parsed.payload);
       const payloadType = payload ? readStr(payload, 'type') : '';
@@ -247,7 +253,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
           typeof payload!.message === 'string' ? payload!.message : extractText(payload!.content),
           MAX_ASSISTANT_TEXT, true,
         );
-        if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:assistant` } : {}) });
+        if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...nativeId('assistant') });
         continue;
       }
 
@@ -260,7 +266,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
             readStr(item, 'text') || extractText(item!.content) || extractText(item!.message),
             MAX_ASSISTANT_TEXT, true,
           );
-          if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:assistant` } : {}) });
+          if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...nativeId('assistant') });
           continue;
         }
 

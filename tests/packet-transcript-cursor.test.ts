@@ -117,3 +117,12 @@ it('preserves legacy after-seq filtering for a non-contiguous event list', async
   const response = await GET(new NextRequest('http://localhost/api/orchestrator/packet-transcript?sessionKey=fixture:worker&cursor=1'));
   expect((await response.json()).events).toEqual(fixture.events);
 });
+
+it('checkpoints stable native unknown time without changing the legacy timestamp', async () => {
+  fixture.events = [Object.assign(answer(1, 'Untimed answer'), { nativeTimestamp: '' })];
+  const first = await read();
+  expect(first.events[0].ts).toBe('2026-01-01T00:00:02Z');
+  fixture.events = [Object.assign({ ...answer(1, 'Untimed answer'), ts: '2026-01-02T00:00:02Z' }, { nativeTimestamp: '' })];
+  const unchanged = await read(first.nextCursor, first.cursorToken);
+  expect(unchanged).toMatchObject({ events: [], nextCursor: null, cursorReset: false });
+});
