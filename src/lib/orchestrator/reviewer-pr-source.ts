@@ -39,7 +39,7 @@ export class StaleRepairHeadError extends Error {
 export async function resolveReviewerPrSource(input: {
   repoPath: string; packetId: string; pullRequest: number; existing?: ReviewerPrSource;
 }): Promise<ReviewerPrSource> {
-  if (!/^pkt-delegate-[a-f0-9]{16}$/.test(input.packetId)) throw new Error('Invalid reviewer packet identity.');
+  if (!/^pkt-(?:delegate|pr-review)-[a-f0-9]{16}$/.test(input.packetId)) throw new Error('Invalid reviewer packet identity.');
   try {
     if (input.existing) {
       const source = normalizeReviewerPrSource(input.existing);
