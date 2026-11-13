@@ -1,3 +1,5 @@
+import { MANAGED_BRAIN_UNAVAILABLE_MESSAGE } from '@/lib/cortex/qa/managed-brain-unavailable';
+import type { Citation } from '@/lib/cortex/qa/types';
 import { WebviewBridgeError } from '@/lib/mcp/o8-webview-error';
 
 const MAX_ERROR_LENGTH = 200;
@@ -11,7 +13,16 @@ function singleLineMessage(value: unknown, maxLength = MAX_ERROR_LENGTH): string
   return message || null;
 }
 
+export interface ManagedBrainUnavailableResult {
+  ok: false;
+  code: 'managed_brain_unavailable';
+  message: string;
+  citations: Citation[];
+  sourcesConsidered: number;
+}
+
 export class O8ApiError extends Error {
+  managedBrainUnavailable?: ManagedBrainUnavailableResult;
   readonly noRetry: boolean;
 
   constructor(readonly status: number | null, readonly summary: string,
@@ -37,6 +48,23 @@ export class McpInputError extends Error {
 export function apiError(path: string, status: number | null, body: string, detail?: unknown): O8ApiError {
   console.error('[mcp] API error:', { status, path, body }, detail ?? '');
   let summary = `o8 API error (${status ?? 'network'})`;
+  // Only this documented outage envelope can carry retrieved sources across a 5xx.
+  if (path === '/api/cortex/ask/answer' && status === 503) {
+    try {
+      const payload = JSON.parse(body);
+      if (payload?.ok === false && payload.code === 'managed_brain_unavailable'
+        && Array.isArray(payload.citations) && payload.citations.every((citation: Citation) =>
+          citation && typeof citation.kind === 'string' && typeof citation.title === 'string'
+          && typeof citation.rowId === 'string' && typeof citation.table === 'string')
+        && Number.isInteger(payload.sourcesConsidered) && payload.sourcesConsidered >= 0) {
+        const error = new O8ApiError(status, MANAGED_BRAIN_UNAVAILABLE_MESSAGE);
+        error.managedBrainUnavailable = { ok: false, code: payload.code,
+          message: MANAGED_BRAIN_UNAVAILABLE_MESSAGE, citations: payload.citations,
+          sourcesConsidered: payload.sourcesConsidered };
+        return error;
+      }
+    } catch { /* Unknown 5xx payloads keep fixed error text. */ }
+  }
   if (status !== null && status >= 400 && status < 500) {
     try {
       const payload = JSON.parse(body) as { error?: unknown } | null;

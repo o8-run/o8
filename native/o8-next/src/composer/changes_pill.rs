@@ -179,11 +179,15 @@ impl Surface {
                 2.2,
             ))
     }
-    pub(super) fn changes_pill(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+    pub(super) fn changes_pill(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
         self.sync_changes_pill(cx);
         self.sync_pr_status(cx);
         if self.changes_pill.pr.detail.is_some() && self.empty_chat_project().is_none() {
-            return Some(self.pr_status_pill(cx));
+            return Some(self.pr_status_pill(window, cx));
         }
         let pill = &self.changes_pill;
         // A new chat has no changes of its own yet (Q 2026-11-09).

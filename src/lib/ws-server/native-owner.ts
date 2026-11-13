@@ -12,8 +12,18 @@ type Handler = (request: Request) => Promise<Response>;
 export const O8_PAGE_ORIGIN_HEADER = 'x-o8-page-origin';
 
 type Options = {
+  /** Preserve synchronous dispatch responses beyond fetch's header deadline. */
+  longResponse?: boolean;
+  /** WS owns this service even when the native transport flag is unset. */
+  alwaysForward?: boolean;
   /** Checks the caller's page on the Next side: its origin to forward, or a refusal. */
   pageOrigin?: (request: Request) => string | Response;
+  /**
+   * Request headers the handler reads beyond the credential and body type, such
+   * as MCP's mirrored routing headers. Never a header that conveys identity or
+   * locality: the WS listener stamps the caller itself.
+   */
+  forwardHeaders?: readonly string[];
 };
 
 /**
@@ -29,7 +39,7 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
     if (options.pageOrigin && request.headers.has(O8_PAGE_ORIGIN_HEADER)) {
       return Response.json({ error: { code: 'page_origin_refused', message: 'Open this from the app.' } }, { status: 400 });
     }
-    if (process.env.O8_NEXT_O8D !== '1') return handler(request);
+    if (!options.alwaysForward && process.env.O8_NEXT_O8D !== '1') return handler(request);
     const url = new URL(request.url);
     const headers = new Headers();
     if (options.pageOrigin) {
@@ -37,7 +47,7 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
       if (page instanceof Response) return page;
       headers.set(O8_PAGE_ORIGIN_HEADER, page);
     }
-    for (const name of ['authorization', 'content-type', 'x-clerk-session-token']) {
+    for (const name of ['authorization', 'content-type', 'x-clerk-session-token', ...(options.forwardHeaders ?? [])]) {
       const value = request.headers.get(name);
       if (value !== null) headers.set(name, value);
     }
@@ -46,12 +56,15 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
     if (!headersIndicateLoopback(name => request.headers.get(name))) headers.set(O8_RELAY_FORWARD_HEADER, '1');
     try {
       const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
-      const response = await fetch(`${getWsBase().replace(/^ws:/, 'http:')}${url.pathname}${url.search}`,
+      const target = `${getWsBase().replace(/^ws:/, 'http:')}${url.pathname}${url.search}`;
+      const response = options.longResponse
+        ? await (await import('./native-owner-long-request')).forwardLongNativeRequest(target, request, headers, body)
+        : await fetch(`${getWsBase().replace(/^ws:/, 'http:')}${url.pathname}${url.search}`,
         { method: request.method, headers, body, redirect: 'manual', cache: 'no-store', signal: request.signal });
       // fetch has already decoded the body; framing headers belong to that hop.
       const forwarded = new Headers(response.headers);
-      if (forwarded.has('content-encoding')) forwarded.delete('content-length');
-      for (const name of ['connection', 'keep-alive', 'transfer-encoding', 'content-encoding']) forwarded.delete(name);
+      if (!options.longResponse && forwarded.has('content-encoding')) forwarded.delete('content-length');
+      for (const name of ['connection', 'keep-alive', 'transfer-encoding', ...(!options.longResponse ? ['content-encoding'] : [])]) forwarded.delete(name);
       return new Response(response.body, { status: response.status, headers: forwarded });
     } catch (error) {
       console.warn(`[native-owner] ${url.pathname} could not reach the WS listener:`, error instanceof Error ? error.message : error);

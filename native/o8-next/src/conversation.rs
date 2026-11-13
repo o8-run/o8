@@ -38,6 +38,8 @@ pub(crate) use changes_pill::PILL_INSET;
 pub(crate) use changes_pill::ChangesPill;
 #[path = "composer/project_bar.rs"]
 mod project_bar;
+#[path = "composer/empty_overview.rs"]
+pub(crate) mod empty_overview;
 pub(crate) use project_bar::ProjectBar;
 #[path = "composer/queue_tail.rs"]
 mod queue_rows;
@@ -769,7 +771,7 @@ impl Surface {
             .children(self.empty_chat_hero(cx))
             .children(self.shell_run_card(cx))
             .children(self.lineage_strip(cx))
-            .children(self.changes_pill(cx))
+            .children(self.changes_pill(window, cx))
             .child(self.composer_card(window, cx))
             // An empty chat's project, checkout, branch and access sit under it.
             .children(self.project_bar(cx))

@@ -1,3 +1,4 @@
+import { RuntimeSelectionError, runtimeSelectionRefusal } from '@/lib/agents/routing';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
@@ -50,6 +51,12 @@ export async function runTaskMutationRoute(
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
+    if (error instanceof RuntimeSelectionError) {
+      const refusal = runtimeSelectionRefusal(error);
+      return NextResponse.json({ error: refusal.message, code: refusal.code }, {
+        status: refusal.status, headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
     const message = error instanceof Error ? error.message : 'Task mutation failed.';
     const status = error instanceof TaskMutationError ? error.status : 500;
     return NextResponse.json(

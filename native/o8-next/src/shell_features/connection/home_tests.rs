@@ -151,7 +151,7 @@ fn an_older_no_project_chat_is_listed_under_home_and_sends_from_its_scratch_fold
         }
         if Instant::now() >= deadline {
             let state = shell.read_with(cx, |s, cx| {
-                match s.content.get(&s.key(&Tab::Session(id.into()))) {
+                match s.thread_content(id) {
                     Some(Content::Session(view)) => view.read(cx).shell_issue_state(cx).to_string(),
                     _ => "no session view".into(),
                 }

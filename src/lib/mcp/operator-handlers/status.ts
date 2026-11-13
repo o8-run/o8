@@ -1,3 +1,4 @@
+import { RuntimeOwnerUnconfirmedError, withToolRuntimeOwner } from '@/lib/runtime/owner-context';
 import { errorText } from '@/lib/mcp/operator-handlers/shared';
 import { lifecycleErrorResult } from './lifecycle-error';
 import {
@@ -59,13 +60,13 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_status',
     description:
-      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity, and runtime connection evidence with sources and check times. Agent status includes authority, observation time and evidence count; includeEvidence opts into full evidence arrays. Includes snapshot capture time and age; revalidates after 5 seconds and waits for refresh at 15 seconds. Pass fresh: true to wait for a refresh explicitly. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
+      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity, and runtime connection evidence with sources and check times. Agent status includes authority, observation time and evidence count; includeEvidence opts into full evidence arrays. Durable lead receipts include state, reason, turn and outcome and are read live. Unfiltered lists return the 100 most recent leads with leadsTruncated when more exist; use sessionKey to inspect an older lead exactly. A failed lead-store read preserves runtime evidence with leadsUnavailable and omits lead handbacks. Runtime observations include snapshot capture time and age; revalidates after 5 seconds and waits for refresh at 15 seconds. Pass fresh: true to wait for a refresh explicitly. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
     inputSchema: {
       type: 'object',
       properties: {
         sessionKey: {
           type: 'string',
-          description: 'Filter to a specific session. Returns all if omitted.',
+          description: 'Filter by runtime session key, durable lead ID, or lead thread ID. Returns all if omitted.',
         },
         fresh: {
           type: 'boolean',
@@ -484,10 +485,10 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
 
     if (sessionKey) {
       // Steer existing session
-      result = await steerSession(sessionKey, message);
+      result = await withToolRuntimeOwner(() => steerSession(sessionKey, message));
     } else {
       // Launch new task via orchestrator
-      result = await apiFetchCorrelatedMutation<Record<string, unknown>>(
+      result = await withToolRuntimeOwner(() => apiFetchCorrelatedMutation<Record<string, unknown>>(
         '/api/orchestrator/delegate',
         {
           prompt: message,
@@ -496,7 +497,7 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
           readOnly: args.readOnly === true,
         },
         'clientMutationId',
-      );
+      ));
     }
 
     if (result.ok === false) {
@@ -527,6 +528,11 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
       },
     });
   } catch (err) {
+    if (err instanceof RuntimeOwnerUnconfirmedError) {
+      return jsonResult({ ok: false, code: err.code, message: err.message, state: 'unknown',
+        sessionKey: typeof args.sessionKey === 'string' ? args.sessionKey : null,
+        next: 'Inspect the session in o8 before retrying. Do not resend automatically.' }, true);
+    }
     console.error(`[o8-operator] o8_send failed: `, err);
     return textResult(`Failed to send: ${errorText(err)}`, true);
   }
@@ -539,14 +545,14 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
     // #2 Stage 4: route through /api/orchestrator/steer-packet so the lane
     // resolution + status flip run in the Next process (the live registry +
     // warm-session pool), not this MCP process's stale registry instance.
-    const res = await apiFetchCorrelatedMutation<{
+    const res = await withToolRuntimeOwner(() => apiFetchCorrelatedMutation<{
       ok?: boolean;
       result?: Record<string, unknown>;
     }>(
       '/api/orchestrator/steer-packet',
       { packetId, message, source: 'orchestrator' },
       'idempotencyKey',
-    );
+    ));
     return jsonResult({ ok: true, ...(res.result ?? {}) });
   } catch (err) {
     return lifecycleErrorResult('steer_packet', err, args.packetId);
@@ -591,6 +597,9 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
         runtimeConnections,
         snapshot,
         agents: agents.map((agent) => projectStatusAgent(agent, args.includeEvidence === true)),
+        ...(Array.isArray(data.leads) && data.leads.length ? { leads: data.leads } : {}),
+        ...(data.leadsUnavailable === true ? { leadsUnavailable: true } : {}),
+        ...(data.leadsTruncated === true ? { leadsTruncated: true } : {}),
         approvals: approvalItems,
         approvalCount,
         recentActivity,

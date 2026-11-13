@@ -799,3 +799,21 @@ describe('orchestrator socket — stall clock scoping (six-hour-timer incident)'
     expect(h.onVoiceTerminal).toHaveBeenCalledWith(voiceTerminal);
   });
 });
+
+
+describe('unreported lead turn', () => {
+  it.each([false, true])('settles busy and clears suppression=%s with an attention reason', (suppressed) => {
+    const h = makeHarness({ status: 'busy', suppressTurnEvents: suppressed });
+    h.fire({ channel: 'orchestrator', event: 'status', data: {
+      status: 'unreported', reason: 'turn ended without an outcome report',
+    } });
+    expect(h.statusRef.current).toBe('error');
+    expect(h.setStatus).toHaveBeenCalledWith('error');
+    expect(h.suppressTurnEventsRef.current).toBe(false);
+    expect(h.setMessages).toHaveBeenCalled();
+    const update = h.setMessages.mock.calls.at(-1)![0];
+    expect(update([])).toContainEqual(expect.objectContaining({
+      role: 'system', isError: true, text: expect.stringContaining('turn ended without an outcome report'),
+    }));
+  });
+});

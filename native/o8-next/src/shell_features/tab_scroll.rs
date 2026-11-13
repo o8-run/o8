@@ -10,11 +10,19 @@ impl ShellFeature for TabScroll {}
 #[derive(Clone, Default)]
 pub(super) struct Strip {
     handle: ScrollHandle,
+    measured_width: Rc<Cell<f32>>,
     target: Rc<Cell<Option<Bounds<Pixels>>>>,
     revealed: Rc<RefCell<Option<(String, Pixels, Pixels)>>>,
 }
 
 impl Strip {
+    pub(super) fn viewport_width(&self) -> f32 { f32::from(self.handle.bounds().size.width) }
+    fn page(&self, end: bool) {
+        let before = self.handle.offset();
+        let delta = self.handle.bounds().size.width * if end { -0.8 } else { 0.8 };
+        self.handle.set_offset(point((before.x + delta).clamp(-self.handle.max_offset().width, px(0.)), before.y));
+    }
+
     pub(super) fn request_reveal(&self) {
         *self.revealed.borrow_mut() = None;
     }
@@ -110,6 +118,7 @@ pub(super) fn wrap(
     let wheel = state.clone();
     let measure = state.clone();
     let owner = cx.entity().entity_id();
+    let paging = state.clone();
     div()
         .relative()
         .flex_1()
@@ -133,7 +142,9 @@ pub(super) fn wrap(
         )
         .on_children_prepainted(move |_, _, cx| {
             let moved = active.as_deref().is_some_and(|key| measure.reveal(key));
-            if moved || measure.edges() != (left, right) {
+            let width = measure.viewport_width();
+            let resized = measure.measured_width.replace(width) != width;
+            if resized || moved || measure.edges() != (left, right) {
                 cx.notify(owner);
             }
         })
@@ -142,7 +153,17 @@ pub(super) fn wrap(
                 .into_iter()
                 .filter_map(move |(shown, end)| {
                     shown.then(|| {
+                        let click = paging.clone();
+                        let selector = format!("{id}-overflow-{}", if end { "right" } else { "left" });
                         div()
+                            .id(gpui::SharedString::from(selector.clone()))
+                            .debug_selector(move || selector.clone())
+                            .cursor_pointer().occlude()
+                            .on_click(cx.listener(move |_, _, _, cx| { click.page(end); cx.stop_propagation(); cx.notify(); }))
+                            .flex().items_center().justify_center()
+                            .hover(|view| view.bg(theme().hover))
+                            .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(if end { "Scroll tabs right".into() } else { "Scroll tabs left".into() })).into())
+                            .child(crate::icon::stroke(if end { "M9 6l6 6-6 6" } else { "M15 6l-6 6 6 6" }, theme().text_muted, 12., 1.7))
                             .absolute()
                             .top_0()
                             .bottom_0()

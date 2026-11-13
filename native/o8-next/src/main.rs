@@ -10,6 +10,8 @@ mod clock;
 mod composer;
 mod devices_panel;
 mod diff;
+#[cfg(any(test, feature = "driver"))]
+mod driver;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;
@@ -36,6 +38,7 @@ mod project_icon;
 mod projects;
 mod projects_model;
 mod retained;
+mod ring;
 mod rich;
 mod settings;
 mod settings_fields;
@@ -69,6 +72,8 @@ mod transport;
 mod ui;
 mod visualizations;
 mod wake;
+mod window_lights;
+mod zoom;
 use crate::{
     client::Client,
     model::{History, render_tree},

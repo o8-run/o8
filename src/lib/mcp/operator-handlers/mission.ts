@@ -1,6 +1,8 @@
+import { DISPATCH_MISSION_TOOL } from './mission-dispatch-tool';
+import { validateRequestedRuntime } from '@/lib/agents/routing';
 export { handleCreateMission } from './mission-create';
 export { handleResetPacket, handleRetryPacket } from './packet-reset';
-import { lifecycleErrorResult } from './lifecycle-error';
+export { handleTaskDispatch } from './task-dispatch';
 import {
   isAgentReportReason,
   normalizeAgentReportEvent,
@@ -19,7 +21,6 @@ import {
   blockTask,
   claimTask,
   createTask,
-  dispatchTask,
   pruneTask,
   reportTask,
 } from '@/lib/tasks/actions';
@@ -36,13 +37,12 @@ import {
   optionalString,
   parseDirectivesApplied,
   parseDirectivesViolated,
-  parseMissionRuntime,
   parseReviewFindings,
   requiredString,
   textResult,
 } from './shared';
 import {
-  findMissionAttentionPacket,
+  findMissionAttention,
   missionPacketSignature,
   type MinimalMissionStatusShape,
 } from './mission-wait';
@@ -51,22 +51,11 @@ import { WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
 import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
 export const MISSION_TOOLS: McpTool[] = [
   CREATE_MISSION_TOOL,
-  {
-    name: 'dispatch_mission',
-    description:
-      'Dispatch the existing packets of a prepared mission created with dispatch:false. Pass the exact missionId returned by create_mission: dispatch_mission({missionId: "mission-abc123"}). This starts that mission without creating a new mission or generic delegate packet. Also use after reset_packet or retry_packet when a relaunch is needed, or for explicit redispatch. Omit runtime to preserve the prepared routing and contract. create_mission dispatches by default; do not dispatch it again unless it was prepared or needs relaunch. Omitted missionId selects the current stored mission.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        missionId: { type: 'string', description: 'Optional mission ID. If omitted, dispatches the current stored mission.' },
-        runtime: { type: 'string', enum: listDispatchableRuntimes(), description: 'Optional per-dispatch worker runtime. When set, it overrides the runtime stamped on every not-yet-launched packet admitted by this dispatch.' },
-      },
-    },
-  },
+  DISPATCH_MISSION_TOOL,
   {
     name: 'get_mission_status',
     description:
-      'USE THIS WHEN the user asks "how\'s the mission going", "what\'s the status of my dispatch", or right before each tick of an automated review loop to see which packets are awaiting_review / running / blocked. Returns waves, packet state, active agents, blockers, optional cost and timing receipts.',
+      'USE THIS WHEN the user asks "how\'s the mission going", "what\'s the status of my dispatch", or right before each tick of an automated review loop to see which packets are awaiting_review / running / blocked. Returns waves, packet state, active agents, blockers, bound lead turn/outcome receipts, optional cost and timing receipts. Mission-wide wait_for_mission_ready returns already-terminal while any bound lead remains in an attention state (unreported, completed, blocked, needs_approval, failed, stopped).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -179,7 +168,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: listDispatchableRuntimes(),
+          enum: [...listDispatchableRuntimes(), 'claude'],
           description: 'Worker runtime for this task. When omitted, the operator default applies.',
         },
         model: {
@@ -276,7 +265,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: listDispatchableRuntimes(),
+          enum: [...listDispatchableRuntimes(), 'claude'],
           description: 'Worker runtime for this task. When omitted, the operator default applies.',
         },
         projectId: {
@@ -442,7 +431,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'wait_for_mission_ready',
     description:
-      'Long-poll until a packet reaches an attention state or its packet/lane state changes. Reruns and packets with running/reviewing lanes remain active instead of returning already-terminal. Returns the get_mission_status payload plus `wakeReason` ("state-change" | "timeout" | "already-terminal"). Specify packetId to watch one packet. Default timeout 600000ms; cap 1800000ms.',
+      'Long-poll until a bound lead hands back or needs attention, a packet needs attention, or its packet/lane/lead state changes. Reruns and packets with running/reviewing lanes remain active instead of returning already-terminal. Returns the get_mission_status payload plus `wakeReason` ("state-change" | "timeout" | "already-terminal"). Specify packetId to watch one packet. Default timeout 600000ms; cap 1800000ms. Mission-wide calls return already-terminal while any bound lead remains in an attention state (unreported, completed, blocked, needs_approval, failed, stopped); pass packetId to scope the wait to one packet.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -658,12 +647,12 @@ export const MISSION_TOOLS: McpTool[] = [
     },
   },
 ];
-
 export async function handleDispatchMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const result = await dispatchMission({
+      force: args.force === true,
       missionId: optionalString(args, 'missionId') || undefined,
-      runtime: args.runtime === undefined ? undefined : parseMissionRuntime(args.runtime),
+      runtime: validateRequestedRuntime(args.runtime) ?? undefined,
     });
     return jsonResult(result, 'error' in result);
   } catch (error) {
@@ -739,7 +728,7 @@ export async function handleTaskCreate(args: Record<string, unknown>): Promise<M
       model: optionalString(args, 'model') || null,
       workerIntent: optionalString(args, 'workerIntent') || null,
       requestedProvider: optionalString(args, 'requestedProvider') || null,
-      requestedRuntime: optionalString(args, 'requestedRuntime') || null,
+      requestedRuntime: validateRequestedRuntime(args.requestedRuntime),
       allowedFiles,
     });
     return jsonResult(result);
@@ -780,26 +769,6 @@ export async function handleTaskClaim(args: Record<string, unknown>): Promise<Mc
   } catch (error) {
     console.error(`${'[mcp-operator]'} o8_task_claim failed: ${errorText(error)}`);
     return textResult(`Failed to claim task: ${errorText(error)}`, true);
-  }
-}
-
-export async function handleTaskDispatch(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const result = await dispatchTask(requiredString(args, 'taskId'), {
-      waitForLaunch: false,
-      actor: 'orchestrator',
-      message: optionalString(args, 'message') || null,
-      model: optionalString(args, 'model') || null,
-      workerIntent: optionalString(args, 'workerIntent') || null,
-      requestedProvider: optionalString(args, 'requestedProvider') || null,
-      requestedRuntime: optionalString(args, 'requestedRuntime') || null,
-      projectId: optionalString(args, 'projectId') || null,
-      repoPath: optionalString(args, 'repoPath') || null,
-    });
-    if (!result.ok) return lifecycleErrorResult('o8_task_dispatch', { code: 'task_dispatch_failed', note: result.note }, result.packetId ?? args.taskId);
-    return jsonResult(result);
-  } catch (error) {
-    return lifecycleErrorResult('o8_task_dispatch', error, args.taskId);
   }
 }
 
@@ -908,12 +877,12 @@ export async function handleWaitForMissionReady(
 
     // If a terminal state already exists at baseline, return immediately so
     // the caller never blocks unnecessarily.
-    const baselineTerminal = findMissionAttentionPacket(baseline, packetIdFilter);
+    const baselineTerminal = findMissionAttention(baseline, packetIdFilter);
     if (baselineTerminal) {
-      return jsonResult({ ...baseline, wakeReason: 'already-terminal', terminalPacketId: baselineTerminal.id ?? null });
+      return jsonResult({ ...baseline, wakeReason: 'already-terminal', ...baselineTerminal });
     }
 
-    const baselineSig = missionPacketSignature(baseline.packets);
+    const baselineSig = missionPacketSignature(baseline.packets, packetIdFilter ? [] : baseline.leads);
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
@@ -926,11 +895,11 @@ export async function handleWaitForMissionReady(
       if (Date.now() >= deadline) break;
 
       const next = (await readStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
-      const terminal = findMissionAttentionPacket(next, packetIdFilter);
+      const terminal = findMissionAttention(next, packetIdFilter);
       if (terminal) {
-        return jsonResult({ ...next, wakeReason: 'state-change', terminalPacketId: terminal.id ?? null });
+        return jsonResult({ ...next, wakeReason: 'state-change', ...terminal });
       }
-      if (missionPacketSignature(next.packets) !== baselineSig) {
+      if (missionPacketSignature(next.packets, packetIdFilter ? [] : next.leads) !== baselineSig) {
         return jsonResult({ ...next, wakeReason: 'state-change', terminalPacketId: null });
       }
     }

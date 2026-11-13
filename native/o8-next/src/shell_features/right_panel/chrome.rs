@@ -94,7 +94,7 @@ pub(super) fn toggle(s: &Shell, open: bool, cx: &mut Context<Shell>) -> gpui::St
         .read::<Panel>()
         .map(|p| {
             (
-                p.viewport < 1180.,
+                !super::fits(s, p.viewport),
                 p.morph.value().0,
                 p.focus.get("header-right-panel").cloned(),
             )
@@ -105,7 +105,7 @@ pub(super) fn toggle(s: &Shell, open: bool, cx: &mut Context<Shell>) -> gpui::St
         super::toggle(s, w, cx)
     };
     let label = if disabled {
-        "Widen the window to open the right panel"
+        "Widen the window or hide the sidebar to open the right panel"
     } else if open {
         "Close panel  ⌘⌥B"
     } else {

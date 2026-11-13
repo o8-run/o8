@@ -196,14 +196,15 @@ describe('orchestrator delegate worker routing', () => {
     }
   });
 
-  it('rejects an unsupported explicit runtime instead of silently falling back', async () => {
+  it('rejects an unknown explicit runtime instead of silently falling back', async () => {
     mocks.dispatch.mockClear();
     const response = await delegateRoute.POST(request({ runtime: 'not-a-runtime' }));
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
-      code: 'worker_not_enabled',
+      code: 'invalid_runtime',
+      error: 'Unknown requested runtime: not-a-runtime.',
     });
     expect(mocks.dispatch).not.toHaveBeenCalled();
   });

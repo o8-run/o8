@@ -171,8 +171,12 @@ impl Surface {
             .filter(|id| id.starts_with("thoughts-"));
         // The sidebar already discovers explicit PR links. Rendering a thread
         // without one must not start HTTP work or a refresh timer.
-        let Some(source) = &self.pr_link_source else { return };
-        let target = thread.as_ref().and_then(|id| linked_pr(source.read(cx).links_for(id)));
+        let Some(source) = &self.pr_link_source else {
+            return;
+        };
+        let target = thread
+            .as_ref()
+            .and_then(|id| linked_pr(source.read(cx).links_for(id)));
         let state = &mut self.changes_pill.pr;
         if state.thread != thread || state.target != target {
             *state = PrStatus {
@@ -218,7 +222,11 @@ impl Surface {
         .detach();
     }
 
-    pub(super) fn pr_status_pill(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    pub(super) fn pr_status_pill(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         if self.changes_pill.pr.focus.is_none() {
             self.changes_pill.pr.focus = Some(cx.focus_handle());
         }
@@ -231,11 +239,34 @@ impl Surface {
             color(&rows)
         };
         let focus = state.focus.as_ref().unwrap();
+        let viewport = window.viewport_size();
+        let card_width = (f32::from(viewport.width) - 24.).clamp(0., 380.);
+        let position = self
+            .composer
+            .read(cx)
+            .controls
+            .prompt
+            .anchors
+            .get("pr-status")
+            .map(|bounds| {
+                gpui::point(
+                    bounds.center().x - px(card_width / 2.),
+                    bounds.top() - px(8.),
+                )
+            })
+            .unwrap_or_else(|| {
+                gpui::point(
+                    (viewport.width - px(card_width)) / 2.,
+                    viewport.height - px(PILL_HEIGHT + 8.),
+                )
+            });
         let mut card = div()
             .id("composer-pr-card")
             .debug_selector(|| "composer-pr-card".into())
             .occlude()
-            .w(px(380.))
+            .w(px(card_width))
+            .min_w_0()
+            .min_h_0()
             .p(px(12.))
             .rounded(px(10.))
             .border_1()
@@ -245,28 +276,36 @@ impl Surface {
             .flex()
             .flex_col()
             .gap(px(8.))
-            .child(div().child(format!(
+            .child(div().flex_shrink_0().min_w_0().truncate().child(format!(
                 "#{} · {}",
                 pr["number"],
                 pr["title"].as_str().unwrap_or("")
             )))
             .child(
-                div().text_color(theme().text_secondary).child(
-                    pr["headSha"]
-                        .as_str()
-                        .unwrap_or("")
-                        .chars()
-                        .take(7)
-                        .collect::<String>(),
-                ),
+                div()
+                    .flex_shrink_0()
+                    .truncate()
+                    .text_color(theme().text_secondary)
+                    .child(
+                        pr["headSha"]
+                            .as_str()
+                            .unwrap_or("")
+                            .chars()
+                            .take(7)
+                            .collect::<String>(),
+                    ),
             );
         let max_duration = rows.iter().filter_map(duration).max().unwrap_or(1).max(1);
         let list = div()
             .id("composer-pr-checks")
+            .debug_selector(|| "composer-pr-checks".into())
+            .min_w_0()
+            .min_h_0()
             .flex()
             .flex_col()
             .gap(px(4.))
-            .when(rows.len() > 12, |d| d.max_h(px(432.)).overflow_y_scroll())
+            .max_h(px(432.))
+            .overflow_y_scroll()
             .children(rows.iter().enumerate().map(|(index, check)| {
                 let url = check["url"]
                     .as_str()
@@ -282,6 +321,7 @@ impl Surface {
                 };
                 div()
                     .id(("composer-pr-check", index))
+                    .debug_selector(move || format!("composer-pr-check-{index}"))
                     .h(px(32.))
                     .flex_shrink_0()
                     .flex()
@@ -308,7 +348,9 @@ impl Surface {
                     .child(
                         div()
                             .h(px(1.))
-                            .w(px(340. * seconds.unwrap_or(0) as f32 / max_duration as f32))
+                            .w(gpui::relative(
+                                seconds.unwrap_or(0) as f32 / max_duration as f32,
+                            ))
                             .bg(tint),
                     )
                     .on_click(cx.listener(move |_, _, _, cx| {
@@ -319,28 +361,41 @@ impl Surface {
             }));
         if conflicting(pr) {
             let files = conflict_files(pr);
-            card = card.child(div().text_color(theme().warning).child("Conflicting files"));
+            card = card.child(
+                div()
+                    .flex_shrink_0()
+                    .text_color(theme().warning)
+                    .child("Conflicting files"),
+            );
             if let Some(files) = files.filter(|f| !f.is_empty()) {
                 card =
                     card.child(
                         div()
                             .id("composer-pr-conflicts")
+                            .min_w_0()
+                            .min_h_0()
                             .flex()
                             .flex_col()
-                            .when(files.len() > 12, |d| d.max_h(px(240.)).overflow_y_scroll())
+                            .max_h(px(240.))
+                            .overflow_y_scroll()
                             .children(files.into_iter().map(|path| {
                                 div().h(px(20.)).flex_shrink_0().truncate().child(path)
                             })),
                     );
             } else {
                 card =
-                    card.child("File list unavailable until both commits are available locally.");
+                    card.child(
+                        div().min_w_0().min_h_0().overflow_y_scroll().child(
+                            "File list unavailable until both commits are available locally.",
+                        ),
+                    );
             }
             let message = resolve_message(pr);
             card = card.child(
                 div()
                     .id("composer-pr-resolve")
                     .debug_selector(|| "composer-pr-resolve".into())
+                    .flex_shrink_0()
                     .px(px(10.))
                     .py(px(6.))
                     .rounded(px(6.))
@@ -368,10 +423,7 @@ impl Surface {
             card = card.child(list);
         }
         let card_height = if conflicting(pr) {
-            180. + conflict_files(pr)
-                .map(|files| files.len().min(12))
-                .unwrap_or(0) as f32
-                * 20.
+            512.
         } else {
             80. + rows.len().min(12) as f32 * 36.
         };
@@ -390,7 +442,9 @@ impl Surface {
         }
         card = card
             .opacity(crate::motion::ease_out(progress))
-            .max_h(px(card_height * crate::motion::ease_out(progress)))
+            .max_h(px(card_height
+                .min((f32::from(viewport.height) - 24.).max(0.))
+                * crate::motion::ease_out(progress)))
             .overflow_hidden()
             .on_mouse_down_out(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
                 if this
@@ -477,13 +531,10 @@ impl Surface {
         .when(state.open, |d| {
             d.child(
                 gpui::deferred(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom(px(PILL_HEIGHT + 8.))
-                        .flex()
-                        .justify_center()
+                    gpui::anchored()
+                        .position(position)
+                        .anchor(gpui::Corner::BottomLeft)
+                        .snap_to_window_with_margin(px(12.))
                         .child(card),
                 )
                 .with_priority(1),

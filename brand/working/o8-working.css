@@ -1,0 +1,8 @@
+/* Pairs with o8-working.js. Composer size: 40px face, one status line, timer. */
+.o8w { display: flex; align-items: center; gap: 10px; font: 400 13px/1.3 var(--o8-font-sans, "Inter Tight", system-ui); color: var(--o8-ink-muted, #5C584F); }
+.o8w-face { position: relative; width: 40px; height: 40px; flex: none; }
+.o8w-layer { position: absolute; inset: 0; transition: opacity 300ms var(--o8-ease, ease-out); }
+.o8w-layer svg { width: 100%; height: 100%; display: block; }
+.o8w-gone { opacity: 0; }
+.o8w-line { color: var(--o8-ink, #17140F); }
+.o8w-time { margin-left: auto; font-family: var(--o8-font-mono, "JetBrains Mono", monospace); font-size: 11px; color: var(--o8-ink-faint, #706C64); }

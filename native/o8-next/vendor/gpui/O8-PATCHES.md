@@ -4,6 +4,14 @@ Source: the crates.io `gpui` 0.2.2 package, Apache-2.0, checksum
 `979b45cfa6ec723b6f42330915a1b3769b930d02b2d505f9697f8ca602bee707`.
 The original `LICENSE-APACHE` and package metadata are retained.
 
+Rule: application code first. Before a new edit here, try it in o8 next's own
+code through GPUI's public API. An edit lands only with an entry below that
+says what changed and why application code could not do it; every entry is
+redone by hand at each toolkit upgrade. A pull request that changes this
+directory without changing this file fails the `o8 next surface boundary`
+check, whatever its labels. To run it before pushing:
+`node scripts/next/check-surface-boundary.mjs --base origin/main --head HEAD --select-only`.
+
 Local changes:
 
 - `src/platform/mac/frame_clock.rs`: a deterministic 100 ms idle policy.
@@ -60,6 +68,45 @@ Local changes:
   records an invisible marker in paint order, replayed with cached views;
   `native_anchor_cover` returns the visible quads the drawn frame placed above
   it; `on_drawn` runs a hook after each drawn frame, before presentation.
+
+- `src/window.rs`: `Window::debug_selector_bounds`, a read-only accessor for
+  the last frame's debug selector bounds, and `Window::dispatch_input_event`,
+  which forwards to `dispatch_event`. It also adds
+  `Window::topmost_hitbox_bounds`, so a press is refused when something else
+  is on top of the named control, and `Window::dispatch_text_input`, which
+  hands text to the focused input without a key event (the frame's press
+  areas and the platform input handler are both crate-private). All four
+  compile only in tests and with the `test-support` feature. The development driver (`src/driver.rs` in the parent
+  crate, behind its `driver` feature) presses controls by name through them.
+  Application code could not do this: the selector map is `pub(crate)` and a
+  second naming mechanism would have to be added at about 745 call sites, and
+  `dispatch_event` returns a crate-private type, so it cannot be called from
+  outside the toolkit.
+
+- Per-window interface zoom. GPUI's own zoom (`Window::set_rem_size`) only
+  scales rem lengths, and o8 next sizes everything in fixed `px`, so the
+  toolkit scales the window instead of the app converting every length.
+  The zoom multiplies the scale factor and divides the layout viewport, so
+  every primitive, glyph and image paints and rasterizes larger.
+  - `src/window/zoom.rs` (new, the whole mechanism): `Window::zoom`,
+    `Window::set_zoom` (it rescales the stored mouse position into the new
+    window coordinates, and defers the bounds observers until after the
+    caller's update, so a key handler inside an entity update can zoom),
+    `read_platform_metrics`, the conversions `to_platform` and
+    `from_platform`, `input_from_platform` (pointer positions, pixel scroll
+    deltas and file-drop positions), and the test-support
+    `painted_quad_bounds`.
+  - `src/window.rs`: `mod zoom;`, the `zoom` field and its `1.` initializer,
+    `bounds_changed` calls `read_platform_metrics`, and `dispatch_event`
+    matches on `input_from_platform(event)`.
+  - `src/platform.rs` (`PlatformInputHandler`): `bounds_for_range` and
+    `selected_bounds` return `to_platform` bounds, and
+    `character_index_for_point` reads a `from_platform` point, for IME.
+  `Window::show_window_menu` and `Window::set_client_inset` (Wayland and X11
+  client-side decorations) still pass window coordinates unconverted; o8
+  never calls them, and they need `to_platform` if it ever does. The app
+  converts the coordinates it hands AppKit itself (native web view frames,
+  `Window::resize`, the minimum window size).
 
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit

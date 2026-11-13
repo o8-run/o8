@@ -1,3 +1,4 @@
+import { symonOwnerPaths } from './lib/symon/http/owner-paths';
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
 import { VoiceHostBroker, handleVoiceHostHttp } from '@/lib/ws-server/voice-host';
 import { startProductSession, endProductSession } from '@/lib/analytics/session';
@@ -7013,6 +7014,9 @@ async function sendTerminalResync(
     epoch,
     source: snapshotSource,
     historyTruncated,
+    // The shell runs inside tmux, whichever way this snapshot was made. A
+    // viewer then keeps one screen: tmux's own second screen has no history.
+    multiplexed: attachment.snapshotSource === 'tmux',
   });
   view.needsResync = false;
   view.lastGoodOffset = snapshotEndOffset;
@@ -7753,7 +7757,8 @@ function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
 const httpServer = createServer(async (req, res) => {
   // Rust classifies and stamps only the first request on a connection. End each
   // relayed response so the next request is classified and stamped on a fresh socket.
-  if (o8dBridge && process.env.O8_NEXT_O8D === '1') res.setHeader('Connection', 'close');
+  const symonOwnerRequest = symonOwnerPaths.has(req.url?.split('?')[0] ?? '');
+  if (o8dBridge && (process.env.O8_NEXT_O8D === '1' || symonOwnerRequest)) res.setHeader('Connection', 'close');
   // Transport health is independent of Next and recovery. Stateful requests
   // retain the original recovery-before-use ordering.
   if (req.url !== '/health') await wsStartupReady;
@@ -7764,7 +7769,7 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
-  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
+  if ((process.env.O8_NEXT_O8D === '1' || symonOwnerRequest) && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
     o8dBridge ? o8dBridge.clientAddress(req) : req.socket.localPort === WS_PORT ? req.socket.remoteAddress ?? null : null)) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
@@ -9629,6 +9634,8 @@ async function recoverFromPortInUse(): Promise<void> {
 }
 
 httpServer.on('error', (err: NodeJS.ErrnoException) => {
+  // A second WS uses the same receiver lock path; on this port it dies with
+  // EADDRINUSE before receiver startup. A different port still cannot steal the claim.
   if (err.code === 'EADDRINUSE') {
     void recoverFromPortInUse();
   } else {
@@ -9668,6 +9675,32 @@ async function bootstrapWsServer() {
       });
       httpServer.listen(WS_PORT, WS_LISTEN_HOST);
     });
+  }
+
+  // Bind the listener before resuming turns so their tools can reach it. Stateful
+  // requests await this bootstrap; resume schedules work without awaiting a turn.
+  // An older Next holding the store claim refuses this open before any resume.
+  let receiverBlocked = false;
+  try {
+    const { getSymonBrain } = await import('./lib/symon/durable/brain');
+    await getSymonBrain();
+  } catch (error) {
+    console.warn('[symon] Brain startup refused:', error instanceof Error ? error.message : 'unavailable');
+    // If the owner module cannot load, the receiver could not claim either.
+    receiverBlocked = await import('./lib/symon/messages-receiver/owner')
+      .then(({ brainRefusalBlocksReceiver }) => brainRefusalBlocksReceiver(error))
+      .catch(() => true);
+  }
+  // A competing brain owner also keeps this receiver stopped. Restart after
+  // retiring the old process; never run its Messages loop alongside a new one.
+  // Other brain failures leave the receiver running on the native planner.
+  if (!receiverBlocked && process.platform === 'darwin') {
+    try {
+      const { startMessagesReceiver } = await import('./lib/symon/messages-receiver/loop');
+      if (!startMessagesReceiver()) console.warn('[symon] Messages receiver claim refused; another owner is active');
+    } catch {
+      console.warn('[symon] Messages receiver failed to start');
+    }
   }
 
   // Native producers use this listener. Its stateful requests await this
@@ -9806,7 +9839,7 @@ async function bootstrapWsServer() {
   if (shuttingDown) return;
   try {
     const { reconcileResourceLeasesAtStartup } = await import(
-      '@/lib/leases/resource-lease-service'
+      '@/lib/leases/resource-lease-default-store'
     );
     const result = await reconcileResourceLeasesAtStartup();
     if (result.inspected > 0) {

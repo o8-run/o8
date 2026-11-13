@@ -20,6 +20,7 @@ type WireFrame = {
     epoch?: number;
     historyTruncated?: boolean;
     lastGoodOffset?: number;
+    multiplexed?: boolean;
     reason?: string;
     requestId?: string;
     rows?: number;
@@ -430,6 +431,7 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
     ));
     const resync = hidden.received[resyncIndex]?.frame;
     expect(resync?.data?.source).toBe('tmux');
+    expect(resync?.data?.multiplexed).toBe(true);
     expect(resync?.data?.historyTruncated).toBe(false);
     const snapshot = Buffer.from(resync?.data?.data ?? '', 'base64').toString('utf8');
     expect(snapshot).toContain('O8_OVERFLOW_DONE');
@@ -561,6 +563,7 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
       frame.event === 'resync' && frame.data?.sessionName === plainSessionName && frame.data?.epoch === 2
     ))?.frame;
     expect(resync?.data?.source).toBe('scrollback');
+    expect(resync?.data?.multiplexed).toBe(false);
     expect(resync?.data?.historyTruncated).toBe(true);
     const replayed = Buffer.from(resync?.data?.data ?? '', 'base64').toString('utf8');
     expect(replayed).toContain('[terminal history truncated during hidden replay]');
