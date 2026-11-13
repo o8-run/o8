@@ -231,6 +231,8 @@ struct InboxResponse {
 #[derive(Deserialize)]
 struct ApprovalsResponse {
     approvals: Vec<Value>,
+    #[serde(default)]
+    total: Option<usize>,
 }
 
 #[derive(Clone)]

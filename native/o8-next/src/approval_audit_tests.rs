@@ -1,11 +1,7 @@
 use super::*;
 use gpui::TestAppContext;
 use serde_json::json;
-use std::io::{Read, Write};
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::atomic::Ordering;
 
 fn records() -> Vec<Value> {
     vec![
@@ -38,92 +34,9 @@ fn approval_audit_flattens_fallback_stable_sort_and_structured_findings() {
     );
 }
 
-// A bounded peer tolerates idle/closed sockets and independent concurrent Inbox reads.
-struct Peer {
-    client: Client,
-    requests: Arc<Mutex<Vec<String>>>,
-    fail: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
-    worker: Option<std::thread::JoinHandle<()>>,
-}
-impl Peer {
-    fn new() -> Self {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let client = Client::authenticated(
-            &format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port()),
-            Some("fixture".into()),
-        )
-        .unwrap();
-        let requests = Arc::new(Mutex::new(Vec::new()));
-        let fail = Arc::new(AtomicBool::new(false));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (seen, refused, done) = (requests.clone(), fail.clone(), stop.clone());
-        let worker = std::thread::spawn(move || {
-            while !done.load(Ordering::Relaxed) {
-                match listener.accept() {
-                    Ok((mut socket, _)) => {
-                        let seen = seen.clone();
-                        let refused = refused.clone();
-                        std::thread::spawn(move || {
-                            let _ = socket.set_nonblocking(false);
-                            let _ = socket.set_read_timeout(Some(Duration::from_millis(300)));
-                            let mut bytes = Vec::new();
-                            while !bytes.ends_with(b"\r\n\r\n") && bytes.len() < 8192 {
-                                let mut chunk = [0; 1024];
-                                let Ok(count) = socket.read(&mut chunk) else {
-                                    return;
-                                };
-                                if count == 0 {
-                                    return;
-                                }
-                                bytes.extend_from_slice(&chunk[..count]);
-                            }
-                            let request = String::from_utf8_lossy(&bytes).to_string();
-                            let audit = request.starts_with("GET /api/panel/approvals?status=all ");
-                            seen.lock().unwrap().push(request);
-                            let status = if audit && refused.load(Ordering::Relaxed) {
-                                "403 Forbidden"
-                            } else {
-                                "200 OK"
-                            };
-                            let body = if audit { json!({"approvals":records()}) } else { json!({"items":[],"maintainer":{"contributions":[],"replies":[],"sources":[],"truncated":false,"repliesTruncated":false},"approvals":[]}) }.to_string();
-                            let _ = write!(
-                                socket,
-                                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                                body.len()
-                            );
-                        });
-                    }
-                    Err(_) => std::thread::sleep(Duration::from_millis(2)),
-                }
-            }
-        });
-        Self {
-            client,
-            requests,
-            fail,
-            stop,
-            worker: Some(worker),
-        }
-    }
-    fn audit_reads(&self) -> usize {
-        self.requests
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|r| r.starts_with("GET /api/panel/approvals?status=all "))
-            .count()
-    }
-}
-impl Drop for Peer {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(worker) = self.worker.take() {
-            worker.join().unwrap();
-        }
-    }
-}
+#[path = "approval_audit_peer.rs"]
+mod peer;
+use peer::Peer;
 
 #[gpui::test]
 fn approval_audit_filters_clear_and_read_only_handlers(cx: &mut TestAppContext) {
@@ -205,7 +118,7 @@ fn approval_audit_refresh_busy_stale_error_retry_and_poll(cx: &mut TestAppContex
             .lock()
             .unwrap()
             .iter()
-            .filter(|r| r.starts_with("GET /api/panel/approvals?status=all "))
+            .filter(|r| r.starts_with("GET /api/panel/approvals?status=all"))
             .all(|r| {
                 r.to_lowercase().contains("authorization: bearer fixture") && !r.contains("scope=")
             })
@@ -282,3 +195,6 @@ fn approval_audit_direct_shortcuts_menus_and_navigation_are_safe(cx: &mut TestAp
 
 #[path = "approval_audit_review_tests.rs"]
 mod review_tests;
+
+#[path = "approval_audit_paging_tests.rs"]
+mod paging_tests;

@@ -13,8 +13,12 @@ impl Inbox {
             return;
         }
         let client = self.client.clone();
+        let limit = self.audit.fetch_limit.to_string();
         let task = cx.background_executor().spawn(async move {
-            client.get::<ApprovalsResponse>("/api/panel/approvals", &[("status", "all")])
+            client.get::<ApprovalsResponse>(
+                "/api/panel/approvals",
+                &[("status", "all"), ("auditLimit", limit.as_str())],
+            )
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -48,7 +52,12 @@ impl Inbox {
             }
             6 => {
                 if !self.audit.loading {
+                    let local_more = self.audit.visible(now()).len() > self.audit.shown;
                     self.audit.shown = self.audit.shown.saturating_add(50);
+                    if !local_more && self.audit.rows.len() < self.audit.total {
+                        self.audit.fetch_limit = self.audit.fetch_limit.saturating_add(50);
+                        self.load_audit(cx);
+                    }
                 }
             }
             _ => self.load_audit(cx),

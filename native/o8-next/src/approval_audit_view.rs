@@ -162,7 +162,7 @@ impl Inbox {
     }
     pub(in crate::inbox) fn audit_body(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
         let rows = self.audit.visible(now());
-        let more = rows.len() > self.audit.shown;
+        let more = self.audit.more();
         div()
             .id("approval-audit-body")
             .flex_1()
@@ -177,6 +177,21 @@ impl Inbox {
                         .child("Loading approval audit log…"),
                 )
             })
+            .when(
+                self.audit.loaded && self.audit.rows.len() < self.audit.total,
+                |view| {
+                    view.child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(palette().text_muted)
+                            .child(format!(
+                                "Loaded {} of {} events. Filters apply to loaded events.",
+                                self.audit.rows.len(),
+                                self.audit.total
+                            )),
+                    )
+                },
+            )
             .when_some(self.audit.error.clone(), |v, error| {
                 v.child(
                     div()
@@ -198,7 +213,9 @@ impl Inbox {
                             .debug_selector(|| "approval-audit-empty".into())
                             .p(px(16.))
                             .text_color(palette().text_muted)
-                            .child(if self.audit.rows.is_empty() {
+                            .child(if self.audit.rows.len() < self.audit.total {
+                                "No loaded events match these filters"
+                            } else if self.audit.rows.is_empty() {
                                 "No approval audit events yet"
                             } else {
                                 "No events match these filters"

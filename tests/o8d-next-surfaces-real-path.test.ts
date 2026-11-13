@@ -1204,6 +1204,8 @@ it('reads persisted approval audit history and findings over native HTTP with Ne
       agent: 'fixture', sessionKey: 'fixture-audit-' + name, title: 'Audit fixture ' + name,
       description: 'Native audit fixture', summary: 'Audit fixture ' + name, risk: 'high' });
     const completed = create('completed'), pending = create('pending'), foreign = create('foreign', 'other-audit-project');
+    const history = create('history');
+    for (let i = 0; i < 120; i++) recordApprovalAudit(history.id, 'updated', 'system', 'History event ' + i);
     recordApprovalAudit(completed.id, 'orchestrator_review', 'orchestrator', 'Fixture findings remain open.', {
       reviewer: 'fixture-reviewer', approved: false, diffSha: 'b'.repeat(40), reviewedHeadSha: 'c'.repeat(40), findings: [{
         file: 'src/fixture.rs', line: 7, severity: 'bug', description: 'Fixture review finding',
@@ -1236,6 +1238,23 @@ it('reads persisted approval audit history and findings over native HTTP with Ne
         resolution: 'deferred', fixSuggestion: 'Retain the intended scope.' }] }]) });
   expect(approvals.some((row: { id: string }) => row.id === ids.pending)).toBe(true);
   expect(approvals.some((row: { id: string }) => row.id === ids.foreign)).toBe(false);
+  const total = approvals.reduce((count: number, row: { audit: unknown[] }) => count + row.audit.length, 0);
+  expect(total).toBeGreaterThan(120);
+  for (const limit of [50, 100, 150]) {
+    const page = await read(`status=all&auditLimit=${limit}`);
+    expect(page.status).toBe(200);
+    const result = await page.json();
+    expect(result.approvals.reduce((count: number, row: { audit: unknown[] }) => count + row.audit.length, 0))
+      .toBe(Math.min(limit, total));
+    expect(result.total).toBe(total);
+    expect(result.approvals.some((row: { id: string }) => row.id === ids.foreign)).toBe(false);
+  }
+  for (const auditLimit of ['0', '1.5', 'invalid']) {
+    const invalid = await read(`status=all&auditLimit=${auditLimit}`);
+    expect(invalid.status).toBe(400); await invalid.arrayBuffer();
+  }
+  const boundedWorker = await read('status=all&auditLimit=50', worker.token);
+  expect(boundedWorker.status).toBe(403); await boundedWorker.arrayBuffer();
   const current = await read('status=pending');
   expect(current.status).toBe(200);
   expect((await current.json()).approvals.some((row: { id: string }) => row.id === ids.completed)).toBe(false);

@@ -41,6 +41,8 @@ fn flatten(approvals: &[Value]) -> Vec<Row> {
 pub(super) struct Audit {
     pub rows: Vec<Row>,
     pub shown: usize,
+    pub total: usize,
+    pub fetch_limit: usize,
     pub session: Option<String>,
     pub risk: usize,
     pub range: usize,
@@ -59,6 +61,8 @@ impl Audit {
         Self {
             rows: vec![],
             shown: 50,
+            total: 0,
+            fetch_limit: 50,
             session: None,
             risk: 0,
             range: 0,
@@ -86,6 +90,7 @@ impl Audit {
         match result {
             Ok(response) => {
                 self.rows = flatten(&response.approvals);
+                self.total = response.total.unwrap_or(self.rows.len()).max(self.rows.len());
                 self.loaded = true;
                 self.error = None;
             }
@@ -135,12 +140,15 @@ impl Audit {
     fn has_filters(&self) -> bool {
         self.session.is_some() || self.risk != 0 || self.range != 0
     }
+    fn more(&self) -> bool {
+        self.visible(now()).len() > self.shown || self.rows.len() < self.total
+    }
     fn focusable_controls(&self) -> Vec<usize> {
         let mut controls = vec![0, 1, 2];
         if self.has_filters() { controls.push(3); }
         if !self.loading {
             controls.push(4);
-            if self.visible(now()).len() > self.shown { controls.push(6); }
+            if self.more() { controls.push(6); }
             if self.error.is_some() { controls.push(5); }
         }
         controls

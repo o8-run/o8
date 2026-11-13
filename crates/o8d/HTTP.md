@@ -343,3 +343,10 @@ The existing GET projections and unsupported-method refusals remain available.
 `tests/o8d-cortex-writes-real-path.test.ts` stops the fixture Next listener,
 writes a directive, accepts and dismisses a proposal, checks their persisted
 files, and checks non-operator refusals through the public o8d socket.
+
+Approval audit reads use `GET /api/panel/approvals?status=all&auditLimit=50`.
+`auditLimit` is a positive safe integer bounding the newest audit events, grouped
+under their approvals. The response also includes `total`, the event count after
+existing project scope and visibility checks. Show more increases the requested
+prefix by 50; refreshing replaces that prefix. Reads without `auditLimit` retain
+the existing response. Authorization and project scope are unchanged.
