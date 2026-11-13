@@ -92,6 +92,7 @@ pub struct Pane {
     file_root: Option<gpui::SharedString>,
     peeks: crate::transcript_peek::Peeks,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
+    pub(crate) navigator: Rc<RefCell<crate::prompt_navigator::Navigator>>,
     action_ends: RefCell<crate::transcript_actions::TurnEndsCache>,
     backfill: Option<crate::worker_backfill::Backfill>,
     prompt_actions: Rc<RefCell<crate::ui::prompt_actions::reading::Reading>>,
@@ -122,6 +123,7 @@ impl Pane {
             file_root: None,
             peeks: Default::default(),
             action_feedback: Default::default(),
+            navigator: Default::default(),
             action_ends: Default::default(),
             backfill: None,
             prompt_actions: Default::default(),
@@ -153,7 +155,22 @@ impl Pane {
             row.borrow_mut().file_root = self.file_root.clone();
         }
     }
+    fn reset_navigation_for(&mut self, history: &History) {
+        if self
+            .transcript
+            .as_ref()
+            .is_some_and(|old| old.key != history.session_key)
+        {
+            self.navigator = Default::default();
+            self.list = ListState::new(0, ListAlignment::Top, px(400.));
+            self.subscription = None;
+            if self.key.is_some() {
+                self.key = Some(history.session_key.clone());
+            }
+        }
+    }
     pub fn install(&mut self, history: History, client: Client) {
+        self.reset_navigation_for(&history);
         self.backfill = crate::worker_backfill::Backfill::new(client.clone(), &history);
         self.client = Some(client.clone());
         self.peeks.connect(client.clone());
@@ -164,6 +181,7 @@ impl Pane {
     }
     /// A transcript with no live session behind it: a delegate call's own words.
     pub(crate) fn install_saved(&mut self, history: History) {
+        self.reset_navigation_for(&history);
         self.backfill = None;
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
@@ -294,7 +312,11 @@ impl Pane {
                 visualizations_changed = true;
             }
         }
-        let follow = self.rows.is_empty() || crate::retained::at_end(&self.list);
+        let navigation_changed = self.navigator.borrow_mut().resume_at_end(&self.list);
+        if navigation_changed {
+            self.revision += 1;
+        }
+        let follow = self.rows.is_empty() || self.navigator.borrow().at_end(&self.list);
         let messages: Vec<_> = self
             .subscription
             .as_ref()
@@ -328,9 +350,10 @@ impl Pane {
                 self.navigate(true);
             }
         }
-        changed || visualizations_changed || notice_changed || backfilled
+        changed || visualizations_changed || notice_changed || navigation_changed || backfilled
     }
     pub fn navigate(&mut self, end: bool) {
+        self.navigator.borrow_mut().resume();
         if !self.rows.is_empty() {
             self.list.scroll_to(ListOffset {
                 item_ix: if end { self.rows.len() - 1 } else { 0 },
@@ -430,6 +453,7 @@ impl Pane {
         let paints = self.paints.clone();
         let notice = self.notice.clone();
         let file_root = self.file_root.clone();
+        let navigator = self.navigator.clone();
         canvas(
             move |bounds, window, cx| {
                 let clip = bounds.intersect(&window.content_mask().bounds);
@@ -450,6 +474,9 @@ impl Pane {
                         painted_rows,
                         file_root,
                         ends,
+                        navigator,
+                        Rc::new(|_, _| {}),
+                        Rc::new(|_, _, _| {}),
                         decorate,
                     ))
                     .into_any_element();

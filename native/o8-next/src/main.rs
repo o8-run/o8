@@ -37,6 +37,7 @@ mod pane_layout;
 mod project_icon;
 mod projects;
 mod projects_model;
+mod prompt_navigator;
 mod retained;
 mod ring;
 mod rich;

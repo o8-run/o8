@@ -420,3 +420,56 @@ fn slot_terminal_choice_is_keyboard_reachable_and_persisted(cx: &mut TestAppCont
 
 #[path = "grid_terminal_tests.rs"]
 mod terminals;
+
+#[gpui::test]
+fn home_and_end_select_prompts_with_rail_focus_and_scroll_otherwise(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (grid, cx) = cx.add_window_view(|window, cx| {
+        Grid::new(fixture.client.clone(), fixture.options.clone(), window, cx)
+    });
+    grid.update(cx,|g,cx| {
+        let mut entries=Vec::new();
+        for i in 0..3 {
+            entries.push(json!({"id":format!("grid-nav-p{i}"),"role":"user","text":format!("Prompt {i}")}));
+            entries.push(json!({"id":format!("grid-nav-a{i}"),"role":"assistant","text":"Answer detail.\n\n".repeat(40)}));
+        }
+        let h=serde_json::from_value(json!({"sessionKey":"codex-owned:grid-nav","transcript":entries})).unwrap();
+        g.panes[0].install_saved(h);g.panes[0].navigate(false);cx.notify();
+    });
+    cx.run_until_parked();
+    draw(cx);
+    let tick = cx.debug_bounds("prompt-nav-tick-grid-nav-p1").unwrap();
+    cx.simulate_click(tick.center(), gpui::Modifiers::default());
+    draw(cx);
+    assert!(grid.read_with(cx, |g, _| g.panes[0].navigator.borrow().is_aligned()));
+    let before = grid.read_with(cx, |g, _| g.panes[0].list.logical_scroll_top());
+    for (key, title) in [("home", "Prompt 0"), ("end", "Prompt 2")] {
+        cx.simulate_keystrokes(key);
+        draw(cx);
+        grid.read_with(cx, |g, _| {
+            let offset = g.panes[0].list.logical_scroll_top();
+            assert!(g.panes[0].navigator.borrow().is_aligned());
+            assert_eq!((offset.item_ix, offset.offset_in_item), (before.item_ix, before.offset_in_item), "rail selection previews without scrolling");
+            assert_eq!(g.panes[0].navigator.borrow().cached_preview().unwrap().0.as_ref(), title);
+        });
+    }
+    cx.simulate_keystrokes("enter");
+    draw(cx);
+    grid.read_with(cx, |g, _| {
+        let index = g.panes[0].rows.iter().position(|r| r.borrow().row.id() == "grid-nav-p2").unwrap();
+        assert_eq!(g.panes[0].list.logical_scroll_top().item_ix, index);
+    });
+    grid.update_in(cx, |g, w, _| g.focus.focus(w));
+    cx.simulate_keystrokes("home");
+    draw(cx);
+    grid.read_with(cx, |g, _| {
+        assert!(!g.panes[0].navigator.borrow().is_aligned());
+        assert_eq!(g.panes[0].list.logical_scroll_top().item_ix, 0);
+    });
+    cx.simulate_keystrokes("end");
+    draw(cx);
+    grid.read_with(cx, |g, _| {
+        assert!(!g.panes[0].navigator.borrow().is_aligned());
+        assert!(g.panes[0].list.logical_scroll_top().item_ix > 0);
+    });
+}
