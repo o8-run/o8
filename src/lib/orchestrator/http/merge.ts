@@ -145,6 +145,9 @@ export async function POST(request: NextRequest) {
       })),
     );
     if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'packet merge') ?? operatorSuccess(replayShape(outcome), 202);
+    if (outcome.result.reason?.startsWith('review_run_')) {
+      return operatorError(outcome.result.reason, outcome.result.note ?? 'Review run evidence policy refused the merge.', 409);
+    }
     return operatorSuccess(replayShape(outcome));
   } catch (error) {
     const { isHeadShaMismatchError } = await loadMergeModule();

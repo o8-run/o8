@@ -1,3 +1,4 @@
+import { reviewExecution } from './review-run-evidence';
 import { normalizeReviewerPrSource } from '@/lib/orchestrator/reviewer-pr-source-types';
 import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketExecutionCarrier, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType, normalizePacketWorkspaceIdentity } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
@@ -256,6 +257,7 @@ function normalizePacketReview(value: unknown): OrchestratorPacketReview | null 
     : [];
 
   return {
+    ...reviewExecution(Boolean(review.approved), review.reviewedHeadSha, review.runEvidence),
     approved: Boolean(review.approved),
     findings,
     recordedAt: typeof review.recordedAt === 'string' ? review.recordedAt : nowIso(),

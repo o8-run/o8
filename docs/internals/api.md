@@ -40,6 +40,103 @@ method-and-path policy and a middleware/route-coverage test in the same change.
   `47105`–`47109`). See `src/ws-server.ts`.
 Note: the realtime `lane-lifecycle` payload carries lane status in the `status` field, not `laneStatus`; client readers should coalesce via `laneStatusOf()` in `src/lib/orchestrator/status-events.ts`.
 
+Review submission is guarded in depth: middleware refuses worker credentials for `POST /api/orchestrator/review`, and the handler independently re-checks the server-owned reviewer assignment and fails closed. Assigned-reviewer admission is not wired; `mintAssignedReviewerToken` has no production caller. Handler-level assignment tests do not establish admission through the middleware gate.
+
+## Review execution evidence
+
+Saved packet reviews and durable `orchestrator_review` approval JSON carry additive
+`runEvidence`, `reviewMode`, `verdictLabel` and optional `runEvidenceWarning` fields. Existing `approved` and verdict
+enums remain compatible. Readers derive the mode and label from validated evidence,
+never trust a saved mode flag, and read old records with no evidence as
+`read_only` / `approved, not run`. No database columns or storage-version migration
+are needed. Existing JSON is upgraded on read; historical audit entries are preserved.
+
+`POST /api/orchestrator/review` and MCP `submit_review` accept either:
+
+```json
+{ "status": "not_run", "reason": "The window driver is unavailable." }
+```
+
+or a structured receipt for the exact full `reviewedHeadSha`:
+
+```json
+{
+  "status": "run",
+  "headSha": "0123456789012345678901234567890123456789",
+  "reviewerRuntime": "codex",
+  "recordedAt": "2026-11-13T00:00:00.000Z",
+  "observations": [{
+    "kind": "command",
+    "command": "node scripts/acceptance.mjs",
+    "result": "The changed command returned the expected output.",
+    "exitCode": 0,
+    "excerpt": "acceptance passed"
+  }]
+}
+```
+
+A receipt has 1–20 observations. Each needs a command or launch/steps, observed
+result, safe integer exit status (a launch may use null), and an excerpt (at most
+4000 characters) or artifact reference (at most 1000). Commands/results are bounded
+to 2000 characters, the runtime to 100, and the ISO timestamp to 40. A not-run reason
+is bounded to 2000. Invalid or stale submitted evidence is downgraded to `not_run`
+with a recorded warning; the code verdict remains valid, including when policy is off.
+Old malformed/stale saved evidence also reads as not run. A missing authenticated
+operator or assigned-reviewer principal cannot earn run credit. The server attaches
+the principal (operator, or packet/review-turn/runtime assignment); request JSON and
+model prose cannot choose it. MCP submissions from the in-house reviewer agent use
+the operator credential and are recorded as `authenticated_operator`; an operator
+principal identifies the authenticated channel, not necessarily a person. Command,
+result, excerpt and artifact text is redacted
+through the existing transcript policy before persistence or output.
+A failed command is still an observation; the reviewer owns the approval judgment.
+Prose and author claims do not supply structured evidence. These are reviewer-reported
+receipts, not independently attested execution or a measured correctness guarantee.
+
+The reviewer prompt asks for real-entry execution on user-facing changes or a
+specific not-run reason. The self-contained `POST /api/harness` `evaluate_diff` /
+`o8_evaluate_diff` evaluator cannot run a commit and always reports a read-only
+verdict, including when the model claims execution. CLI packet review accepts
+`--run-evidence <JSON-file>` or `--not-run <reason>` and reports the mode in human
+and JSON output. Review-state (including the native window's data), mission status,
+and MCP outputs carry the same fields. The run label is
+`approved, run (reviewer-reported)`. This is data/CLI/MCP support: the native packet
+review, AuditLogPanel and ChatPacketStatusBanner still show a bare Approved label
+(#6076). No native UI or driver is added.
+
+### Opt-in merge requirement
+
+Set **the server process environment** `O8_REVIEW_RUN_REQUIRED_PATHS` to a JSON
+array of repository-relative globs, for example `["native/o8-next/src/**"]`.
+Unset, empty, or `[]` leaves enforcement off. Patterns support `*`, `**` and `?`;
+Matching is case-insensitive and treats backslashes as forward slashes;
+absolute/traversal paths and other glob syntax are refused. The reviewed repository
+cannot set its own policy through this field; no UI setting is added.
+The environment value applies to **every registered repository**; a malformed
+value blocks merges in **every repository**. Per-project settings are tracked in
+#6075 under #5822. Merge preview and review-state expose the active paths, enabled
+state, validity and source. When off, preview omits the run-evidence check row.
+
+Merge preview and the lane merge chokepoint check the full committed change
+at the resolved source candidate SHA after snapshot resolution and before rebase,
+including deleted paths and both sides of renames. A matching change needs a durable,
+approved review with structured run evidence at the exact reviewed HEAD. Operator
+approval does not bypass this opt-in requirement. The packet merge HTTP route returns
+409 `review_run_evidence_required`; invalid configuration returns 409
+`review_run_policy_invalid`, and an unverifiable diff returns 409
+`review_run_diff_unavailable`. Dirty worktrees, merge-time source commits and
+unresolvable remote candidates refuse with `review_run_candidate_unavailable`;
+commit and review the final source first. Remote lanes check the fetched branch,
+not the canonical checkout. Ordinary missing remote branch metadata and fetch failures
+retain their own reasons (`remote_branch_missing` / `remote_fetch_failed`), separate
+from policy refusals. Early admission checks only validate configuration and a clean
+tree; execution evidence is checked against the resolved source candidate. The
+existing head-integrity guard still refuses a branch that advanced past its reviewed
+commit. Rebase-carried approvals do not inherit run evidence
+for their new HEAD. Existing integration/rebase gates remain in place; these receipts
+refer to the reviewed source commit, not a claim that the eventual integration commit
+was exercised. Launching and driving the reviewed commit remains dependent on #5947.
+
 ## Route reference
 
 Routes are grouped by their first path segment.
@@ -543,3 +640,15 @@ Workers authenticate with `Authorization: Bearer cwk_*` per-request.
 | GET | `/api/worktrees/diff?sessionKey=...&worktreePath=...&baseBranch=...` | Full unified diff for an agent's worktree vs base. |
 | GET | `/api/worktrees/diff-summary?sessionKey=...&worktreePath=...&baseBranch=...` | `{ additions, deletions, fileCount }` for a worktree. |
 | POST | `/api/worktrees/merge` | Create PR, merge to main, or discard a worktree. |
+
+### Idle draft decisions
+
+`GET /api/panel/prs?view=idle-drafts&repo=owner/repository&page=1` lists open drafts whose GitHub `updatedAt` is at least 72 hours old, excluding pending checks. The list and decision paths use the same rule: any unfinished check run (including queued, requested, waiting or an unrecognized nonterminal state), or a PENDING/EXPECTED status context, blocks triage even when the aggregate also reports failure. Completed success, failure and other terminal conclusions do not block idle-draft triage. Per-state summary counts cover all checks. Follow `nextPage`; the first page is incomplete when it is present. Rows expose `headSha`, `updatedAt` and `decisionSnapshot` (`expectedHeadSha`, `expectedUpdatedAt`). Unknown checks remain labeled unknown; conflicts with main are true, false or unknown. A non-main base or missing mergeability remains unknown.
+
+Desktop and mobile Inbox read the same registered GitHub repositories. Both carry the decision snapshot; mobile rows include the repo, number and expected fields in their metadata. No new UI is added. Desktop `truncated` describes only its local 200-contribution cap; `idleDraftNextPages` separately identifies repositories with additional remote pages. Mobile `staleDrafts.sources` reports each repository's next page or error. Summary reads retain the bounded account/epoch-scoped 20-second cache.
+
+Use `o8 inbox drafts --repo owner/repository [--page N]`, then `o8 inbox continue-draft NUMBER --repo owner/repository --expected-head-sha SHA --expected-updated-at ISO [--reason TEXT]`. Handoff additionally requires `--owner LOGIN`; Close requires `--reason TEXT`. Copy the snapshot from the row you reviewed, rather than obtaining a newer snapshot automatically for a write. CLI human/JSON output and registered MCP `o8_idle_drafts` expose these fields. MCP decisions require `expectedHeadSha` and `expectedUpdatedAt`.
+
+`POST /api/panel/prs/NUMBER` with `action: "draft-decision"` requires an affirmative operator credential and a literal `owner/repository` in `registeredGitHubRepos()`; unregistered repositories return 403 before any GitHub call. Aliases, paths and default-repository fallback are refused. Before Continue, Handoff or Close, the server bypasses its shared metadata cache and re-fetches the PR. A changed head or timestamp, a non-idle/non-draft PR, pending checks (including optional status contexts) or unavailable fresh check evidence returns 409 with a refresh instruction before writing. Missing snapshot fields and invalid/oversized text return 400. The only operator text input is `reason`; a separate `comment` field / `--comment` flag is refused by the API, CLI and MCP. Reasons and generated GitHub comments (including the decision prefix) are capped at **4096 UTF-8 bytes**. The fresh decision read inspects all status contexts from the existing requirements query, not only required contexts; unavailable or truncated context evidence also refuses. Fresh check-run reads spanning more than one page are treated as checks unavailable, not as a complete first page: a next-page link, a total count exceeding the returned runs, or a full 100-run page without a total count causes a 409 refusal. An in-flight guard per case-insensitive `repo#number` refuses overlapping decisions with 409 instead of queuing duplicate writes.
+
+Account changes stop later write steps. If assignment succeeded before an account change, the 502 receipt reports `ownerAssigned: true` and `commentPosted: false`. These decisions start no workers and do not mark drafts ready. Continue posts a comment; Handoff confirms assignment to the named GitHub user and posts a comment; Close posts the required reason before closing. GitHub writes are separate requests, not an atomic transaction. After an uncertain/partial write, inspect GitHub before retrying; MCP decisions disable automatic HTTP replay.
