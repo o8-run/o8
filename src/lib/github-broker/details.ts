@@ -2,7 +2,7 @@ import 'server-only';
 
 import { githubInstallationFetch } from './auth';
 import { readPullRequestFiles } from './pull-request-files';
-import { readPullRequestChecks } from './pull-request-checks';
+import { PullRequestChecksUnavailableError, readPullRequestChecks } from './pull-request-checks';
 import { readPullRequestRequirements, UNKNOWN_REQUIREMENTS } from './pull-request-requirements';
 import { GitHubRequestDeferredError, type GitHubReadPriority } from './request-budget';
 import { GitHubReadScopeChangedError } from './read-scope';
@@ -159,8 +159,14 @@ async function readPullRequestDetailAttempt(repoFullName: string, prNumber: numb
   const filesPromise = readPullRequestFiles(repoFullName, prNumber, installation?.id, pr.head?.sha, pr.base?.sha, priority, scope);
 
   let checksUnavailable = false;
+  let checksUnavailableReason: string | undefined;
   const checksPromise = pr.head?.sha
-    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id, priority, scope).catch(error => { if (error instanceof GitHubRequestDeferredError || error instanceof GitHubReadScopeChangedError) throw error; checksUnavailable = true; return []; })
+    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id, priority, scope).catch(error => {
+      if (error instanceof GitHubRequestDeferredError || error instanceof GitHubReadScopeChangedError) throw error;
+      checksUnavailable = true;
+      if (error instanceof PullRequestChecksUnavailableError) checksUnavailableReason = error.message;
+      return [];
+    })
     : Promise.resolve([]);
 
   const reviewsPromise = suppliedReviewDecision ?? githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`, { signal: AbortSignal.timeout(18_000) })
@@ -194,6 +200,7 @@ async function readPullRequestDetailAttempt(repoFullName: string, prNumber: numb
       ? { githubIdentity: { repositoryId: pr.base!.repo!.id!, pullRequestId: pr.id! } } : {}),
     ...statusContextEvidence,
     checksUnavailable,
+    ...(checksUnavailableReason ? { checksUnavailableReason } : {}),
     number: pr.number,
     title: pr.title ?? '',
     body: pr.body ?? '',
