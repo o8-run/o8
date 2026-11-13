@@ -1,3 +1,4 @@
+import { checkReviewRunPolicy, reviewRunPolicy } from './review-run-policy';
 import type { DurableReviewAssessment } from '@/lib/lane/durable-review-approval';
 import type { OversizedChangedFile } from '@/lib/lane/file-size-policy';
 import type { MergeCheckResult } from '@/lib/lane/preview-merge';
@@ -86,7 +87,10 @@ export async function mergeReviewPrerequisites(lane: Lane, packet: OrchestratorP
   const reviewActions = review.secondPassPending
     ? [`Complete the required blind second-pass AI review at HEAD ${head}; inspect it with o8 packet info ${packetId}. The second reviewer must agree before an automatic merge.`]
     : [`Resolve the AI review findings and record an approved review at HEAD ${head} using ${reviewCommand}.`, ...contractActions];
+  const runGate = await checkReviewRunPolicy(lane);
   const checks: MergeCheckResult[] = [
+    ...(reviewRunPolicy().enabled ? [{ name: runGate.ok ? 'review-run-evidence' as const : runGate.code, verdict: runGate.ok ? 'pass' as const : 'fail' as const, detail: runGate.message,
+      actions: ['Exercise the exact reviewed commit and submit structured runEvidence; prose does not count.'] }] : []),
     { name: 'durable-review', verdict: actor === 'user' || review.approved ? 'pass' : 'fail', detail: review.reason, actions: reviewActions },
     { name: 'file-size-approval', verdict: sizeApprovalRequired ? 'fail' : 'pass',
       detail: oversizedFiles.length ? `${formatOversizedFiles(oversizedFiles)}. ${sizeApprovalRequired ? 'Operator size approval is required.' : 'Size policy is satisfied.'}` : 'No oversized changed files require approval.',
