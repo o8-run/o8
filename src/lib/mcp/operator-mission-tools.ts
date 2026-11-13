@@ -520,6 +520,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
         findings: input.findings,
         approved: input.approved,
         reviewedHeadSha: input.reviewedHeadSha,
+        runEvidence: input.runEvidence,
         contractCoverageEvidence: input.contractCoverageEvidence,
       },
     );

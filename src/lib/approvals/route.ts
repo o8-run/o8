@@ -521,7 +521,8 @@ export async function POST(request: NextRequest) {
         || result.reason === 'governance_changed_since_spoken_review'
         || result.reason === 'head_moved_since_review'
         || (Boolean(spokenReviewEvidence) && Boolean(result.expectedHeadSha));
-      if (spokenReviewDrift) {
+      const runPolicyRefusal = !result.ok && result.reason?.startsWith('review_run_') ? result.reason : null;
+      if (spokenReviewDrift || runPolicyRefusal) {
         const reopened = reopenApprovalAfterEvidenceDrift(
           approval.id,
           resolutionClaim.claimId!,
@@ -546,7 +547,7 @@ export async function POST(request: NextRequest) {
         return viewerJson({
           ok: false,
           error: result.note,
-          code: 'spoken_review_changed',
+          code: runPolicyRefusal ?? 'spoken_review_changed',
           approval: reopened,
         }, {
           status: 409,

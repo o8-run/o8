@@ -1,3 +1,4 @@
+import { checkReviewRunPreflight, reviewRunPolicyConfiguration } from './review-run-policy';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { pushLfsObjects } from '@/lib/git/lfs-push';
@@ -789,6 +790,8 @@ async function dispatchUnlocked(
       // submit_review persists its ApprovalRecord before updating mission state.
       // Read that durable row before every budget check so an accepted finding
       // waives the same HEAD atomically from the merge gate's perspective.
+      const runGate = isRemoteCustomerLane ? reviewRunPolicyConfiguration() : await checkReviewRunPreflight(lane);
+      if (!runGate.ok) return { ok: false, laneId: lane.id, reason: runGate.code, note: runGate.message };
       const durableReview = await assessDurableApprovedReview(lane);
       const orchestratorReviewedForBudget = command.orchestratorReviewed === true
         || durableReview.diffBudgetWaived;

@@ -230,12 +230,15 @@ async function withGateVerdict(
   }
 
   const blockers = preview.blockers;
-  const reason = result.reason ?? (blockers.length > 0 ? blockers.join(', ') : result.note);
+  // Keep the policy's named refusal stable; the full blocker list remains available.
+  const runPolicyBlocker = blockers.find(blocker => blocker.startsWith('review_run_'));
+  const reason = result.reason ?? runPolicyBlocker ?? (blockers.length > 0 ? blockers.join(', ') : result.note);
   return {
     ...result,
     checks: preview.checks,
     blockers,
     reason,
+    ...(!result.reason && runPolicyBlocker ? { note: preview.checks.find(check => check.name === runPolicyBlocker)?.detail ?? result.note } : {}),
   };
 }
 
