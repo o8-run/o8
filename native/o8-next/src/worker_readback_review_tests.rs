@@ -248,13 +248,17 @@ fn null_cursor_keeps_saved_rows_and_stops_timed_polling() {
         crate::shell::session::worker_transcript::State::from_history(&history).unwrap();
     let mut transcript = Transcript::new(history);
     let before = transcript.rows.clone();
+    let was_active = state.active;
     h.events.lock().unwrap().clear();
     apply_poll(&h, &mut transcript, &mut state);
     assert!(
         !state.cursor_available,
         "null is no cursor, not numeric position zero"
     );
-    assert!(!state.active);
+    assert_eq!(
+        state.active, was_active,
+        "empty readback is not a terminal event"
+    );
     assert_eq!(
         transcript.rows, before,
         "an empty readback retains existing work"

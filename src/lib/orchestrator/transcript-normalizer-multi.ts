@@ -98,7 +98,7 @@ function normalizeTs(raw: unknown, fallback: string): string {
  * flips when the tool completes), so we synthesize matching `tool_call`
  * + `tool_result` events from one log line.
  */
-export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString()): TranscriptEvent[] {
+export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString(), nativeIdentities = false): TranscriptEvent[] {
   if (!rawJsonl || typeof rawJsonl !== 'string') return [];
 
   const out: TranscriptEvent[] = [];
@@ -121,13 +121,14 @@ export function normalizeOpencodeEvents(rawJsonl: string, fallbackTimestamp = ne
 
     const type = readStr(parsed, 'type');
     const ts = normalizeTs(parsed.timestamp, fallbackTs);
+    const sourceId = readStr(parsed, 'uuid', 'id') || readStr(safeObject(parsed.part), 'id') || readStr(safeObject(parsed.message), 'id');
     const part = safeObject(parsed.part);
     const partType = readStr(part, 'type');
 
     // ── assistant text ────────────────────────────────────────────────────────
     if (type === 'text' && partType === 'text') {
       const text = clip(readStr(part, 'text'), MAX_ASSISTANT_TEXT, true);
-      if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
+      if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:assistant` } : {}) });
       continue;
     }
 
@@ -270,7 +271,7 @@ function extractToolResultText(content: unknown): string {
  * Tool calls and results live in separate JSONL lines, so we maintain a
  * pending-call map keyed by `tool_use_id` to keep the call/result pairing.
  */
-export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString()): TranscriptEvent[] {
+export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString(), nativeIdentities = false): TranscriptEvent[] {
   if (!rawJsonl || typeof rawJsonl !== 'string') return [];
 
   const out: TranscriptEvent[] = [];
@@ -294,13 +295,14 @@ export function normalizeClaudeCodeEvents(rawJsonl: string, fallbackTimestamp = 
 
     const type = readStr(parsed, 'type');
     const ts = normalizeTs(parsed.timestamp, fallbackTs);
+    const sourceId = readStr(parsed, 'uuid', 'id') || readStr(safeObject(parsed.part), 'id') || readStr(safeObject(parsed.message), 'id');
     const message = safeObject(parsed.message);
     const content = message?.content;
 
     // ── assistant text + tool_use blocks ──────────────────────────────────────
     if (type === 'assistant' && message) {
       const text = clip(extractClaudeText(content), MAX_ASSISTANT_TEXT, true);
-      if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
+      if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:assistant` } : {}) });
 
       for (const block of extractClaudeToolBlocks(content)) {
         const tool = block.name ?? 'tool';

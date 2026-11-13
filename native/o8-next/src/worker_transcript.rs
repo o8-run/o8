@@ -111,11 +111,7 @@ impl State {
             let tool = event["tool"].as_str().unwrap_or("tool");
             match kind {
                 "tool_call" => {
-                    let call = event["callId"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(&id)
-                        .to_owned();
+                    let call = native_call_id(event).unwrap_or(&id).to_owned();
                     let args = event["args"].as_str().unwrap_or("");
                     let args = serde_json::from_str::<Value>(args)
                         .ok()
@@ -144,9 +140,7 @@ impl State {
                     upsert(entries, row);
                 }
                 "tool_result" => {
-                    let call = event["callId"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
+                    let call = native_call_id(event)
                         .map(str::to_owned)
                         .or_else(|| self.pending.get(tool).and_then(|ids| ids.first().cloned()));
                     if let Some(mut row) = call.as_ref().and_then(|call| self.calls.remove(call)) {
@@ -253,18 +247,31 @@ impl State {
             0
         };
         let batch = client.worker_events(&self.key, from, self.cursor_token.as_deref())?;
+        if batch.events.is_empty() && batch.cursor.is_none() {
+            self.cursor_available = false;
+            self.cursor_token = None;
+            self.cursor = 0;
+            // No event changed. Updating transport state must not emit a fake
+            // transcript update or mutate saved work / its live turn boundary.
+            return Ok(vec![]);
+        }
         if batch.events.is_empty() && !batch.reset && batch.cursor == Some(self.cursor) {
             return Ok(vec![]);
         }
         if batch.reset || from == 0 {
             // Replay a changed snapshot with stable row identities. Retain calls
             // that slid out of a tail so a later result can still finish them.
-            self.calls.retain(|call, _| {
-                !batch
-                    .events
-                    .iter()
-                    .any(|e| e["type"] == "tool_call" && e["callId"].as_str() == Some(call))
-            });
+            let mut occurrences = HashMap::new();
+            let replayed: std::collections::HashSet<_> = batch
+                .events
+                .iter()
+                .map(|e| {
+                    let id = format!("{}:event:{}", self.key, event_id(e, &mut occurrences));
+                    (e["type"].as_str() == Some("tool_call")).then_some(id)
+                })
+                .flatten()
+                .collect();
+            self.calls.retain(|_, row| !replayed.contains(&row.id));
             self.pending
                 .values_mut()
                 .for_each(|ids| ids.retain(|id| self.calls.contains_key(id)));
@@ -277,12 +284,21 @@ impl State {
         self.cursor = batch.cursor.unwrap_or(0);
         self.cursor_token = batch.token;
         if !self.cursor_available {
-            self.active = false;
             self.cursor_token = None;
         }
         entries.push(self.marker());
         Ok(entries)
     }
+}
+
+fn native_call_id(event: &Value) -> Option<&str> {
+    event["callId"].as_str().filter(|id| {
+        !id.is_empty()
+            && !id.contains("-synthetic-")
+            && !id
+                .strip_prefix("tool-")
+                .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    })
 }
 
 fn event_id(event: &Value, occurrences: &mut HashMap<String, usize>) -> String {
@@ -294,6 +310,9 @@ fn event_id(event: &Value, occurrences: &mut HashMap<String, usize>) -> String {
     use std::hash::{Hash, Hasher};
     let mut content = event.clone();
     content.as_object_mut().unwrap().remove("seq");
+    if native_call_id(event).is_none() {
+        content.as_object_mut().unwrap().remove("callId");
+    }
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     content.to_string().hash(&mut hash);
     let key = format!("{:016x}", hash.finish());

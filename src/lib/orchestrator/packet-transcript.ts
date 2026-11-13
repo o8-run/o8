@@ -129,7 +129,7 @@ async function findClaudeCodeJsonl(sessionId: string): Promise<string | null> {
 
 /** Stream complete Codex history without retaining raw tool payloads in memory. */
 async function readCodexHistory(paths: string[]): Promise<TranscriptEvent[]> {
-  const normalizer = createCodexEventNormalizer('');
+  const normalizer = createCodexEventNormalizer('', true);
   for (const filePath of paths) {
     const handle = await open(await realpath(filePath), 'r');
     try {
@@ -261,11 +261,11 @@ function normalizeForRuntime(
     case 'pi-builtin':
       return normalizePiBuiltinEvents(raw).map(event => event.ts === '1970-01-01T00:00:00.000Z' ? { ...event, ts: '' } : event);
     case 'codex':
-      return normalizeCodexEvents(raw, '');
+      return normalizeCodexEvents(raw, '', true);
     case 'opencode':
-      return normalizeOpencodeEvents(raw, '');
+      return normalizeOpencodeEvents(raw, '', true);
     case 'claude-code':
-      return normalizeClaudeCodeEvents(raw, '');
+      return normalizeClaudeCodeEvents(raw, '', true);
     default:
       return [];
   }

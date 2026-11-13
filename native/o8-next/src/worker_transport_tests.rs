@@ -71,6 +71,7 @@ impl Host {
         let socket_ready = connected.clone();
         let server = std::thread::spawn(move || {
             let mut sockets = Vec::new();
+            let mut checkpoints: Option<(Vec<Value>, Vec<String>)> = None;
             'requests: while !stopped.load(Ordering::Acquire) {
                 let mut stream = match listener.accept() {
                     Ok((s, _)) => s,
@@ -164,14 +165,21 @@ impl Host {
                         .query_pairs()
                         .find(|(k, _)| k == "cursorToken")
                         .map(|(_, v)| v.into_owned());
-                    let prefix = |n: usize| {
+                    if checkpoints
+                        .as_ref()
+                        .is_none_or(|(snapshot, _)| snapshot != &*all)
+                    {
                         use std::hash::{Hash, Hasher};
                         let mut hash = std::collections::hash_map::DefaultHasher::new();
-                        for event in all.iter().take(n) {
+                        let mut prefixes = vec![format!("{:016x}", hash.finish())];
+                        for event in all.iter() {
                             event.to_string().hash(&mut hash);
+                            prefixes.push(format!("{:016x}", hash.finish()));
                         }
-                        format!("{:016x}", hash.finish())
-                    };
+                        checkpoints = Some((all.clone(), prefixes));
+                    }
+                    let prefix =
+                        |n: usize| checkpoints.as_ref().unwrap().1[n.min(all.len())].clone();
                     let reset = token
                         .as_ref()
                         .is_some_and(|t| cursor > 0 && *t != prefix(cursor as usize))
@@ -195,7 +203,12 @@ impl Host {
                 };
                 let body = body.to_string();
                 let reason = if code == 200 { "OK" } else { "Refused" };
-                write!(stream,"HTTP/1.1 {code} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+                // A normal canceled probe must not terminate the fixture server.
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {code} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
             }
             for socket in sockets {
                 socket.join().unwrap();

@@ -109,15 +109,15 @@ interface IdentityAlias { callId: string; shapes: Set<ToolCallShape>; }
  * malformed lines are skipped. Returns `[]` when input is empty or entirely
  * unparseable so callers can treat absence as a benign condition.
  */
-export function normalizeCodexEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString()): TranscriptEvent[] {
+export function normalizeCodexEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString(), nativeIdentities = false): TranscriptEvent[] {
   if (!rawJsonl || typeof rawJsonl !== 'string') return [];
-  const normalizer = createCodexEventNormalizer(fallbackTimestamp);
+  const normalizer = createCodexEventNormalizer(fallbackTimestamp, nativeIdentities);
   normalizer.append(rawJsonl);
   return normalizer.events;
 }
 
 /** Incremental JSONL ingestion retains call identities across file chunks and runs. */
-export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOString()) {
+export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOString(), nativeIdentities = false) {
 
   const out: TranscriptEvent[] = [];
   const pending = new Map<string, PendingCall>();
@@ -229,6 +229,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
       if (!parsed) continue;
 
       const type = readStr(parsed, 'type');
+      const sourceId = readStr(parsed, 'uuid', 'id') || readStr(safeObject(parsed.item), 'id') || readStr(safeObject(parsed.payload), 'id');
       const normalizedTimestamp = normalizeTs(parsed.timestamp, fallbackTs);
       const ts = normalizedTimestamp.value;
       const payload = safeObject(parsed.payload);
@@ -240,7 +241,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
           typeof payload!.message === 'string' ? payload!.message : extractText(payload!.content),
           MAX_ASSISTANT_TEXT, true,
         );
-        if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
+        if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:assistant` } : {}) });
         continue;
       }
 
@@ -253,7 +254,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
             readStr(item, 'text') || extractText(item!.content) || extractText(item!.message),
             MAX_ASSISTANT_TEXT, true,
           );
-          if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
+          if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...(nativeIdentities && sourceId ? { eventId: `${sourceId}:assistant` } : {}) });
           continue;
         }
 

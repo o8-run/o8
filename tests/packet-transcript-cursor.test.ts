@@ -72,3 +72,30 @@ it('keeps null for empty and exhausted legacy readbacks', async () => {
   const legacy = await GET(new NextRequest('http://localhost/api/orchestrator/packet-transcript?sessionKey=fixture:worker&cursor=1'));
   expect(await legacy.json()).toMatchObject({ events: [], nextCursor: null });
 });
+
+it('does not use a normalizer positional fallback call id as durable identity', async () => {
+  const call = { seq: 1, ts: '2026-01-01T00:00:02Z', type: 'tool_call' as const, tool: 'read', args: '{}', summary: 'Read' };
+  fixture.events = [{ ...call, callId: 'tool-2' }];
+  const first = await read();
+  fixture.events = [{ ...call, callId: 'tool-1' }];
+  const slid = await read(first.nextCursor, first.cursorToken);
+  expect(slid.cursorReset).toBe(true);
+  expect(slid.events[0].eventId).toBe(first.events[0].eventId);
+});
+
+it('prefers a durable runtime event id when streamed arguments change', async () => {
+  const call = { seq: 1, ts: '', type: 'tool_call' as const, callId: 'native-call-42', tool: 'read', args: '{', summary: 'Read' };
+  fixture.events = [Object.assign(call, { eventId: 'runtime-offset-42' })];
+  const first = await read();
+  fixture.events = [Object.assign({ ...call, args: '{}', summary: 'Read file' }, { eventId: 'runtime-offset-42' })];
+  const changed = await read(first.nextCursor, first.cursorToken);
+  expect(changed.cursorReset).toBe(true);
+  expect(changed.events[0].eventId).toBe(first.events[0].eventId);
+});
+
+it('retains native assistant event ids while keeping legacy normalizer output unchanged', async () => {
+  const { normalizeClaudeCodeEvents } = await import('@/lib/orchestrator/transcript-normalizer-multi');
+  const raw = JSON.stringify({ type: 'assistant', uuid: 'native-message-42', message: { content: [{ type: 'text', text: 'Answer' }] } });
+  expect(normalizeClaudeCodeEvents(raw, '')[0]).not.toHaveProperty('eventId');
+  expect(normalizeClaudeCodeEvents(raw, '', true)[0]).toHaveProperty('eventId', 'native-message-42:assistant');
+});
