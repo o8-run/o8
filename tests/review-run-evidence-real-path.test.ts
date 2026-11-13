@@ -315,13 +315,82 @@ it('refuses a spoken snapshot with dirty edits under policy before committing it
   expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
 }, 30_000);
 
-it('refuses a remote lane whose source candidate cannot be established', async () => {
+it.each(['on', 'off'])('reports a missing remote branch accurately with policy %s', async mode => {
   const f = await fixture();
   getSqlite().prepare('UPDATE lanes SET runtime = ?, worktree_path = NULL, packet_id = NULL WHERE id = ?').run('remote-customer', f.lane.id);
+  vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', mode === 'on' ? '["native/o8-next/src/**"]' : '[]');
+  const { POST } = await import('@/app/api/lanes/route');
+  const response = await POST(request('/api/lanes', { verb: 'merge', laneId: f.lane.id }));
+  expect(response.status).toBe(422);
+  expect(await response.json()).toMatchObject({ ok: false, reason: 'remote_branch_missing' });
+  expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
+}, 30_000);
+
+it('keeps the existing head-integrity refusal when a tip advances beyond a run-approved commit', async () => {
+  const f = await fixture();
+  const reviewed = await reviewRoute.POST(request('/api/orchestrator/review', { packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head, runEvidence: evidence(f.head), clientMutationId: randomUUID() }));
+  expect(reviewed.status).toBe(200);
+  writeFileSync(join(f.worktree, 'base.txt'), 'advanced tip\n');
+  git(f.worktree, 'add', '.'); git(f.worktree, 'commit', '-qm', 'advance tip');
+  const tip = git(f.worktree, 'rev-parse', 'HEAD');
   vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["native/o8-next/src/**"]');
   const { POST } = await import('@/app/api/lanes/route');
   const response = await POST(request('/api/lanes', { verb: 'merge', laneId: f.lane.id }));
-  expect(response.status).toBe(409);
-  expect(await response.json()).toMatchObject({ ok: false, reason: 'review_run_candidate_unavailable' });
+  expect(response.status, await response.clone().text()).toBe(422);
+  expect(await response.json()).toMatchObject({ ok: false, reason: 'head_moved_since_review', reviewedHeadSha: f.head, currentHeadSha: tip });
   expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
+  expect(git(f.worktree, 'rev-parse', 'HEAD')).toBe(tip);
+}, 30_000);
+it('checks the resolved spoken snapshot even when its SHA differs from the tip', async () => {
+  const f = await fixture();
+  // The later tip has no protected diff; reading it instead of the resolved snapshot would pass policy.
+  const tip = git(f.worktree, 'commit-tree', `${f.base}^{tree}`, '-p', f.head, '-m', 'concurrent tip');
+  expect(tip).not.toBe(f.head);
+  expect(git(f.worktree, 'diff', '--name-only', `${f.base}..${tip}`)).toBe('');
+  const { createApproval } = await import('@/lib/approvals/store');
+  const { POST } = await import('@/app/api/panel/approvals/route');
+  const card = createApproval({ source: 'test', runtime: 'codex', agent: 'fixture', sessionKey: f.lane.sessionKey!, title: 'Merge fixture', description: 'Fixture merge', summary: '', risk: 'low',
+    continuation: { kind: 'lane', laneId: f.lane.id, verb: 'merge' } });
+  vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["native/o8-next/src/**"]');
+  const state = await stateRoute.GET(request(`/api/orchestrator/review-state?packetId=${f.packetId}&spoken=1&approvalId=${card.id}`));
+  expect(state.status, await state.clone().text()).toBe(200);
+  const receipt = (await state.json()).spokenReview.evidence;
+  const snapshot = await import('@/lib/lane/spoken-review-snapshot');
+  const resolveSnapshot = snapshot.resolveSpokenReviewSnapshotSha;
+  // Run the real resolver, then schedule a real concurrent Git update before its caller resumes.
+  const moved = vi.spyOn(snapshot, 'resolveSpokenReviewSnapshotSha').mockImplementationOnce(async input => {
+    const sha = await resolveSnapshot(input);
+    expect(sha).toBe(f.head);
+    git(f.worktree, 'reset', '--hard', tip);
+    return sha;
+  });
+  try {
+    const response = await POST(request('/api/panel/approvals', { action: 'approve', id: card.id, spokenReviewEvidence: { approvalId: card.id, packetId: f.packetId,
+      reviewedHeadSha: receipt.headSha, reviewedDiffFingerprint: receipt.fingerprint, reviewedGovernanceFingerprint: receipt.governanceFingerprint } }));
+    expect(moved).toHaveBeenCalledTimes(1);
+    expect(response.status, await response.clone().text()).toBe(409);
+    const body = await response.json();
+    expect(body).toMatchObject({ ok: false, code: 'review_run_evidence_required', approval: { status: 'pending' } });
+    expect(body.error).toContain(f.head);
+    expect(git(f.worktree, 'rev-parse', 'HEAD')).toBe(tip);
+    expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
+    expect(git(f.origin, 'rev-parse', 'main')).toBe(f.base);
+  } finally { moved.mockRestore(); }
+}, 30_000);
+it.each(['on', 'off'])('reports an ordinary remote fetch failure accurately with policy %s', async mode => {
+  const f = await fixture();
+  const { mintPacketWorkerToken, resolvePacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
+  const token = resolvePacketWorkerToken(mintPacketWorkerToken(f.packetId))!;
+  getSqlite().prepare('UPDATE lanes SET runtime = ?, worktree_path = NULL, packet_id = NULL WHERE id = ?').run('remote-customer', f.lane.id);
+  getSqlite().prepare('INSERT INTO worker_runs (id, lane_id, worker_token_id, transport, status, remote_branch, started_at, last_event_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(randomUUID(), f.lane.id, token.tokenId, 'fixture', 'completed', `missing/${randomUUID()}`, new Date().toISOString(), new Date().toISOString());
+  vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', mode === 'on' ? '["native/o8-next/src/**"]' : '[]');
+  const { POST } = await import('@/app/api/lanes/route');
+  const response = await POST(request('/api/lanes', { verb: 'merge', laneId: f.lane.id }));
+  expect(response.status, await response.clone().text()).toBe(422);
+  const body = await response.json();
+  expect(body).toMatchObject({ ok: false, reason: 'remote_fetch_failed' });
+  expect(body.note).toContain('Failed to fetch remote branch');
+  expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
+  expect(git(f.origin, 'rev-parse', 'main')).toBe(f.base);
 }, 30_000);
