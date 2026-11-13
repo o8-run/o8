@@ -31,7 +31,7 @@ function record(text: string): Record<string, unknown> | undefined {
   return undefined;
 }
 
-type CliResult = { code: number; stdout: string; stderr: string };
+type CliResult = { code: number; stdout: string; stderr: string; probed?: boolean };
 function reusableServeError(result: CliResult): boolean {
   // Prefer the structured stdout response. The ordinary CLI currently emits
   // error envelopes on stderr, one pretty-printed JSON object per write; keep
@@ -54,24 +54,32 @@ function healthy(result: CliResult): boolean {
     && typeof status.pid === 'number' && Number.isSafeInteger(status.pid) && status.pid > 0;
 }
 
+// The renderer's own words when no graphics device or driver can be used.
+const NO_GRAPHICS_DEVICE = /NoSupportedDeviceFound|Unable to init GPU context/;
+
 // Set when this launcher forwards a stop signal, so a requested exit is not
 // reported as a failed start.
 let interrupted = false;
 
-async function runCli(args: string[], capture = false, timeoutMs?: number): Promise<CliResult> {
+async function runCli(args: string[], capture = false, timeoutMs?: number, stderrProbe?: RegExp): Promise<CliResult> {
   return new Promise((done, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', timeout: timeoutMs, killSignal: 'SIGKILL',
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : stderrProbe ? ['inherit', 'inherit', 'pipe'] : 'inherit',
+      timeout: timeoutMs, killSignal: 'SIGKILL',
     });
     let stdout = '';
     let stderr = '';
     child.stdout?.on('data', chunk => { stdout += String(chunk); });
-    child.stderr?.on('data', chunk => { stderr += String(chunk); });
+    child.stderr?.on('data', chunk => {
+      // A probed run still shows its errors live; only the tail is kept to match.
+      if (!capture) { process.stderr.write(chunk); stderr = (stderr + String(chunk)).slice(-8192); }
+      else stderr += String(chunk);
+    });
     const forward = () => { interrupted = true; child.kill('SIGTERM'); };
     process.once('SIGINT', forward); process.once('SIGTERM', forward);
     const cleanup = () => { process.off('SIGINT', forward); process.off('SIGTERM', forward); };
     child.once('error', error => { cleanup(); reject(error); });
-    child.once('close', code => { cleanup(); done({ code: code ?? 1, stdout, stderr }); });
+    child.once('close', code => { cleanup(); done({ code: code ?? 1, stdout, stderr, probed: stderrProbe ? stderrProbe.test(stderr) : false }); });
   });
 }
 
@@ -225,17 +233,15 @@ async function openDesktop(): Promise<number> {
     // A terminal daemon cannot inherit this launcher's packaged environment.
     // The existing CLI resolves its health, ports, credentials and shell state.
     let finished = false;
-    const next = runCli(['next', '--binary', binary]);
+    const next = runCli(['next', '--binary', binary], false, undefined, NO_GRAPHICS_DEVICE);
     void next.then(() => { finished = true; }, () => { finished = true; });
     while (!finished && !windowIsOpen()) await delay(100);
-    // False only when the window process ended before /proc ever showed it.
-    const opened = !finished || windowIsOpen();
     // Keep the CLI's signal/exit lifecycle, but release launch exclusion once
     // /proc can identify the window. Later clicks can check daemon health.
     closeSync(lock);
     released = true;
-    const code = (await next).code;
-    if (code !== 0 && !opened && !interrupted) {
+    const { code, probed } = await next;
+    if (code !== 0 && probed && !interrupted) {
       process.stderr.write('o8: Could not open the native window. Check that a usable Vulkan graphics device and driver are available. See the startup error above.\n');
     }
     return code;
