@@ -180,3 +180,37 @@ fn plugin_task_stop_confirmation_survives_failure_and_sign_out(cx: &mut TestAppC
     );
     assert!(cx.debug_bounds("plugin-task-stop").is_none());
 }
+
+#[gpui::test]
+fn plugin_task_refresh_cannot_retarget_stop_confirmation(cx: &mut TestAppContext) {
+    let peer = Peer::new(true);
+    let (view, cx) = cx.add_window_view(|_, cx| Tasks::new(peer.client(), cx));
+    cx.run_until_parked();
+    view.update(cx, |view, cx| {
+        view.confirm(true, cx);
+        assert!(view.confirming);
+    });
+    {
+        let mut data = peer.data.lock().unwrap();
+        data["drafts"][0]["taskId"] = json!("replacement-task");
+        data["drafts"][0]["execution"]["taskId"] = json!("replacement-task");
+    }
+    view.update(cx, |view, cx| view.load(cx));
+    cx.run_until_parked();
+    view.update(cx, |view, cx| {
+        assert_eq!(view.draft().unwrap().task_id, "replacement-task");
+        assert!(
+            !view.confirming,
+            "refresh must cancel the previous task's Stop confirmation"
+        );
+        view.control(Action::Stop, cx);
+    });
+    assert!(peer.posts.lock().unwrap().is_empty());
+    peer.mode.store(1, Ordering::SeqCst);
+    view.update(cx, |view, cx| {
+        view.confirm(true, cx);
+        view.control(Action::Stop, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(peer.posts.lock().unwrap()[0]["taskId"], "replacement-task");
+}
