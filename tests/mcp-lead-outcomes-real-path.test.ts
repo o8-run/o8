@@ -148,7 +148,7 @@ async function call(name: string, args: Record<string, unknown> = {}) {
   }
   return JSON.parse(result.content[0].text) as {
     leads?: LeadView[]; data?: { leads?: LeadView[]; agents?: unknown[]; leadsUnavailable?: boolean; leadsTruncated?: boolean };
-    wakeReason?: string; terminalLeadId?: string;
+    wakeReason?: string; terminalLeadId?: string; terminalPacketId?: string | null; leadsUnavailable?: boolean;
   };
 }
 const tools = ['get_mission_status', 'wait_for_mission_ready', 'o8_status'] as const;
@@ -174,6 +174,35 @@ function seedLeads(prefix: string, count: number) {
 }
 
 describe('durable lead outcomes through the MCP HTTP entry point', () => {
+  it.each([
+    ['get_mission_status', 'current'],
+    ['get_mission_status', 'historical'],
+    ['wait_for_mission_ready', 'active'],
+    ['wait_for_mission_ready', 'released'],
+  ] as const)('returns explicit unavailable lead attention through %s (%s)', async (tool, mode) => {
+    const { missionId } = await fixture(true);
+    if (mode === 'active') {
+      const state = readOrchestratorControlPlaneState();
+      writeOrchestratorControlPlaneState({ ...state, packets: state.packets.map(packet =>
+        ({ ...packet, status: 'draft', queueState: 'queued', releaseState: 'pending' })) });
+    } else if (mode === 'historical') {
+      writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+    }
+    const db = getSqlite();
+    db.exec('ALTER TABLE orchestrator_lead_turns RENAME TO fixture_unavailable_lead_turns');
+    try {
+      const result = await call(tool, { missionId, ...(tool === 'wait_for_mission_ready' ? { timeoutMs: 1000 } : {}) });
+      expect(result.leadsUnavailable).toBe(true);
+      expect(result.leads).toBeUndefined();
+      if (tool === 'wait_for_mission_ready') {
+        expect(result.wakeReason).toBe('already-terminal');
+        expect(result.terminalPacketId).toBeNull();
+      }
+    } finally {
+      db.exec('ALTER TABLE fixture_unavailable_lead_turns RENAME TO orchestrator_lead_turns');
+    }
+  }, 15_000);
+
   it('keeps runtime status available without a cached lead handback when the lead store fails', async () => {
     const { leadId } = await fixture(true);
     const priorNativeReads = process.env.O8D_MCP_READS;
