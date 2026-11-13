@@ -223,8 +223,8 @@ export function reviewScorecard(range: string, selectedSource: string, repoPath:
       created_at: group.at(-1)!.created_at, laneIds: new Set(group.map(lane => lane.id)),
       sessionKeys: new Set(group.flatMap(lane => lane.session_key ? [lane.session_key] : [])) }));
     const corrections = new Map<string, number>();
-    const handoffs = (db.prepare('SELECT id,payload_json,created_at FROM worker_corrections WHERE created_at BETWEEN ? AND ? AND repo_path IN (SELECT value FROM json_each(?))')
-      .all(lanes.length ? Math.min(...lanes.map(lane => Date.parse(lane.created_at))) : now, now, repoPaths) as Array<{ id: string; payload_json: string; created_at: number }>).map(row => ({ ...row,
+    const handoffs = (db.prepare('SELECT id,payload_json,created_at FROM worker_corrections WHERE created_at BETWEEN ? AND ?')
+      .all(lanes.reduce((earliest, lane) => Math.min(earliest, Date.parse(lane.created_at)), now), now) as Array<{ id: string; payload_json: string; created_at: number }>).map(row => ({ ...row,
         targets: parse<{ targets?: Array<{ surfaceId: string }> }>(row.payload_json, {}, skipped(`correction:${row.id}`)).targets ?? [] }));
     const delivered = db.prepare(`SELECT correction_id,surface_id FROM worker_correction_deliveries
       WHERE status='delivered' AND updated_at <= ? AND correction_id IN (SELECT value FROM json_each(?))`).all(now, JSON.stringify(handoffs.map(row => row.id))) as Array<{ correction_id: string; surface_id: string }>;

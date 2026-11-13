@@ -153,7 +153,7 @@ it('attributes manual correction deliveries to their exact author and counts ope
   }
   event('steered', 'steered_packet', -3000, 'orchestrator', { source: 'operator' });
   getSqlite().prepare('INSERT INTO worker_corrections (id,repo_path,thread_id,payload_json,created_at) VALUES (?,?,?,?,?)')
-    .run('manual-correction', '/fixture/repo', 'fixture-thread', JSON.stringify({ targets: [{ surfaceId: 'corrected' }, { surfaceId: 'failed' }] }), now - 3000);
+    .run('manual-correction', '/fixture/repo/.worktrees/author', 'fixture-thread', JSON.stringify({ targets: [{ surfaceId: 'corrected' }, { surfaceId: 'failed' }] }), now - 3000);
   for (const [surface, status] of [['corrected', 'delivered'], ['failed', 'unavailable']]) {
     getSqlite().prepare('INSERT INTO worker_correction_deliveries (correction_id,surface_id,run_id,status,note,updated_at) VALUES (?,?,?,?,?,?)')
       .run('manual-correction', surface, 'fixture-run', status, '', now - 2000);
@@ -194,14 +194,16 @@ it('materializes only the SQL arrival cohort and its related records', async () 
   const db = getSqlite();
   const prepare = db.prepare.bind(db);
   const reads: Array<Array<Record<string, unknown>>> = [];
+  const restoreStatements: Array<() => void> = [];
   const spy = vi.spyOn(db, 'prepare').mockImplementation(sql => {
     const statement = prepare(sql);
     const all = statement.all.bind(statement);
-    vi.spyOn(statement, 'all').mockImplementation((...args: unknown[]) => {
+    const allSpy = vi.spyOn(statement, 'all').mockImplementation((...args: unknown[]) => {
       const rows = all(...args);
       reads.push(rows as Array<Record<string, unknown>>);
       return rows;
     });
+    restoreStatements.push(() => allSpy.mockRestore());
     return statement;
   });
   try {
@@ -213,7 +215,7 @@ it('materializes only the SQL arrival cohort and its related records', async () 
     expect(rows.filter(row => 'packet_json' in row).map(row => JSON.parse(String(row.packet_json)).id)).toEqual(['recent']);
     expect(rows.filter(row => 'audit_json' in row).map(row => row.lane_id)).toEqual(['recent']);
     expect(rows.filter(row => 'payload_json' in row && 'verb' in row).map(row => row.lane_id)).toEqual(['recent']);
-  } finally { spy.mockRestore(); }
+  } finally { spy.mockRestore(); for (const restore of restoreStatements.reverse()) restore(); }
 });
 it('skips malformed stored JSON rows without losing the scorecard', async () => {
   lane('bad'); review('bad', true, -1000); event('bad', 'steered_packet', -1000);

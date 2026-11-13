@@ -16,6 +16,32 @@ fn settle(view: &Entity<View>, cx: &mut VisualTestContext) {
 }
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
+    if selector.starts_with("scorecard-metric-") {
+        for _ in 0..5 {
+            let target = cx.debug_bounds(selector).expect(selector);
+            let viewport = cx
+                .debug_bounds("scorecard-scroll")
+                .expect("scorecard scroll area");
+            if viewport.contains(&target.center()) {
+                break;
+            }
+            cx.simulate_event(gpui::ScrollWheelEvent {
+                position: viewport.center(),
+                delta: gpui::ScrollDelta::Pixels(point(
+                    px(0.),
+                    viewport.center().y - target.center().y,
+                )),
+                ..Default::default()
+            });
+            draw(cx);
+        }
+        assert!(
+            cx.debug_bounds("scorecard-scroll")
+                .unwrap()
+                .contains(&cx.debug_bounds(selector).unwrap().center()),
+            "metric must scroll into view: {selector}"
+        );
+    }
     let bounds = cx
         .debug_bounds(selector)
         .unwrap_or_else(|| panic!("missing {selector}"));
