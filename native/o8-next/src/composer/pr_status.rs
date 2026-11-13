@@ -582,5 +582,11 @@ mod tests {
         pr["mergeable"] = json!(false);
         pr["state"] = json!("closed");
         assert!(!conflicting(&pr));
+        pr["state"] = json!("open");
+        pr["mergeable"] = json!(true);
+        assert!(!conflicting(&pr));
+        pr["mergeable"] = json!(false);
+        pr["mergedAt"] = json!("2026-01-01T00:00:00Z");
+        assert!(!conflicting(&pr));
     }
 }
