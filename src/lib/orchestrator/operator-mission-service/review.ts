@@ -445,7 +445,9 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
   const principal = input.submissionPrincipal;
   const evidencePrincipal = principal?.role === 'operator' ? { role: 'operator' as const, source: 'authenticated_operator' as const }
     : principal?.role === 'assigned_reviewer' ? { role: 'assigned_reviewer' as const, source: 'assigned_credential' as const,
-      packetId: principal.packetId, reviewTurnId: principal.reviewTurnId, reviewerRuntime: principal.reviewerRuntime } : null;
+      packetId: principal.packetId, reviewTurnId: principal.reviewTurnId, reviewerRuntime: principal.reviewerRuntime }
+    : internal && activeReviewTurn?.backend ? { role: 'assigned_reviewer' as const, source: 'server_review_turn' as const,
+      packetId: packet.id, reviewTurnId: activeReviewTurn.id, reviewerRuntime: activeReviewTurn.backend } : null;
   const submittedEvidence = prepareRunEvidence(input.runEvidence, reviewedHeadSha, evidencePrincipal);
   const execution = reviewExecution(input.approved, reviewedHeadSha, submittedEvidence);
   const summary = buildReviewSummary(input.findings, execution.verdictLabel);

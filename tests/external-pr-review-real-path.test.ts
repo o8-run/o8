@@ -28,7 +28,7 @@ vi.mock('@/lib/github-broker/auth', () => ({ githubInstallationFetch: async (_re
 vi.mock('@/lib/lane/orchestrator-backends/registry', async importOriginal => {
  const actual = await importOriginal<typeof import('@/lib/lane/orchestrator-backends/registry')>();
  const backend = { id: 'codex', label: 'Fixture reviewer', peekSession: () => ({ sessionName: 'review', status: 'ready' }), ensureSession: () => ({ sessionName: 'review', status: 'ready' }),
- async sendTurn(_repo: string, _prompt: string, emit: (v: {type: string; text: string}) => void, options?: {permissionMode?:string}) { expect(options?.permissionMode).toBe('plan'); if (input.beforeVerdict) await input.beforeVerdict(); emit({type:'text', text:'CODEX_AUTO_REVIEW: {"approved":false,"findings":[{"file":"answer.txt","severity":"note","description":"Preserve the request.","status":"deferred"}]}'}); } };
+ async sendTurn(_repo: string, _prompt: string, emit: (v: {type: string; text: string}) => void, options?: {permissionMode?:string}) { expect(options?.permissionMode).toBe('plan'); if (input.beforeVerdict) await input.beforeVerdict(); emit({type:'text', text:`CODEX_AUTO_REVIEW: ${JSON.stringify({approved:false,findings:[{file:'answer.txt',severity:'note',description:'Preserve the request.',status:'deferred'}],runEvidence:{status:'run',headSha:input.head,reviewerRuntime:'codex',recordedAt:new Date().toISOString(),observations:[{kind:'command',command:'fixture assertion',result:'passed',exitCode:0,excerpt:'controlled reviewer receipt'}]}})}`}); } };
  return {...actual, getActiveReviewerBackend: () => backend, getOrchestratorBackend: () => backend};
 });
 vi.mock('@/lib/lane/packet-explainer-queue', () => ({ drainPacketExplainerQueue: async () => {}, enqueuePacketExplainer: async () => {}, notifyCorrectnessReviewQueued: () => {}, startPacketExplainerQueueDrain: () => () => {} }));
@@ -69,6 +69,7 @@ it('starts the existing review path and preserves canonical findings, refusing a
  const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
  const {findLaneByPacket} = await import('@/lib/lane/registry'); expect(findLaneByPacket(task.revision.packetId)?.prNumber).toBe(7);
  const packet = readOrchestratorControlPlaneState().packets.find(p => p.id === task.revision.packetId)!;
+ expect(packet.review).toMatchObject({reviewMode:'run',runEvidence:{status:'run',headSha:input.head,principal:{role:'assigned_reviewer',source:'server_review_turn',packetId:packet.id}}});
  expect(packet.review?.findings[0].resolution).toBe('deferred'); expect(packet.review?.reviewedHeadSha).toBe(input.head);
  const { correctAuthorFromReview } = await import('@/lib/orchestrator/review-author-correction');
  await expect(correctAuthorFromReview({repoPath:repo,threadId:'external',review:{packetId:packet.id,approvalId:packet.review!.auditApprovalId!, reviewedHeadSha:input.head,surfaceId:'codex-owned:reviewer',runId:'reviewer'}})).rejects.toThrow();

@@ -432,7 +432,7 @@ export async function recordCodexAutoReviewVerdict(input: {
     if (!reviewTurnId || !input.correctionClaimOwner) throw new Error('Correction re-review has no current independent review claim.');
     const { submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service/review');
     const recorded = await submitPacketReview({ packetId: input.lane.packetId, approved: verdict.approved,
-      findings: verdict.findings, reviewedHeadSha, contractCoverageEvidence: verdict.contractCoverageEvidence },
+      findings: verdict.findings, reviewedHeadSha, contractCoverageEvidence: verdict.contractCoverageEvidence, runEvidence: verdict.runEvidence },
     { completedCorrectionTurnId: reviewTurnId, claimOwner: input.correctionClaimOwner, ...(external ? { externalReview: true as const } : {}) });
     if (!recorded.recorded) throw new Error('The correction review verdict was not recorded for its pinned HEAD.');
     return { event: null, verdict, reviewedHeadSha, reviewUnavailable: false };
