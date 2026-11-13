@@ -1,4 +1,5 @@
-//! Prompt rail adapted to native GPUI from the behavior in T3 Code (MIT):
+//! Native reimplementation of the prompt navigator in T3 Code (MIT).
+//! No upstream code was copied.
 //! https://github.com/pingdotgg/t3code
 //! apps/web/src/components/chat/TimelineMinimap.tsx
 //! apps/web/src/components/chat/timelineMinimapItems.ts
@@ -38,8 +39,10 @@ pub(crate) struct Navigator {
     selected: Option<String>,
     aligned: bool,
     pending: bool,
-    /// The rail's own preview follows keyboard selection, never focus alone.
+    /// Keyboard entry and selection open the preview; retained focus alone
+    /// does not reopen it after dismissal.
     keyed: bool,
+    focused: bool,
     range: Option<usize>,
     current: Option<String>,
     preview: Option<CachedPreview>,
@@ -57,6 +60,7 @@ impl Default for Navigator {
             aligned: false,
             pending: false,
             keyed: false,
+            focused: false,
             range: None,
             current: None,
             preview: None,
@@ -329,13 +333,29 @@ pub(crate) fn overlay(
                     }
                     s.current = Some(prompts[current].id.clone());
                 }
-                if !focus.is_focused(window) {
+                let focused = focus.is_focused(window);
+                let entered = focused && !s.focused;
+                s.focused = focused;
+                if !focused {
                     s.keyed = false;
                 }
-                let start = s
+                let mut start = s
                     .range
                     .unwrap_or(current.saturating_sub(visible / 2))
                     .min(prompts.len() - visible);
+                if entered {
+                    let selected = s
+                        .selected
+                        .as_ref()
+                        .and_then(|id| prompts.iter().position(|p| &p.id == id))
+                        .unwrap_or(current);
+                    if selected < start || selected >= start + visible {
+                        s.range = Some(selected);
+                        start = selected.min(prompts.len() - visible);
+                    }
+                    s.hovered = None;
+                    s.keyed = true;
+                }
                 let preview = s
                     .hovered
                     .clone()
@@ -439,6 +459,8 @@ pub(crate) fn overlay(
                         s.selected = Some(click_prompts[index].id.clone());
                         s.hovered = None;
                         s.keyed = false;
+                        // A pointer jump dismisses its card while focusing the rail.
+                        s.focused = true;
                     }
                     click_focus.focus(window);
                     jump(
@@ -585,6 +607,7 @@ pub(crate) fn overlay(
                                 s.selected = Some(page_selected.clone());
                                 s.hovered = None;
                                 s.keyed = false;
+                                s.focused = true;
                                 drop(s);
                                 page_focus.focus(window);
                                 window.refresh();
