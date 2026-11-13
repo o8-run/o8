@@ -93,6 +93,7 @@ jobs:
           test -x /usr/lib/o8/o8-next-viz-render
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           test -n "$VK_ICD_FILENAMES"
+          xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' /usr/lib/o8/node scripts/linux/diagnose-payload.mjs / work/deb-diagnostics
           xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' /usr/lib/o8/node scripts/linux/smoke-payload.mjs --installed-root / --output work/deb-proof
           cp /usr/lib/o8/node "$RUNNER_TEMP/o8-proof-node"
           sudo apt-get remove -y o8
@@ -146,6 +147,7 @@ jobs:
           name: linux-gpui-${{ matrix.format }}-install-proof
           path: |
             work/deb-proof/
+            work/deb-diagnostics/
             work/appimage-proof/
             work/appimage-diagnostics/
             work/stock-diagnostics/

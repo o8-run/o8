@@ -113,6 +113,8 @@ async function probe(name, binary, args, env) {
   await delay(5_000);
   const earlyColors = snapshot(`${name}-early`);
   await delay(10_000);
+  const middleColors = snapshot(`${name}-middle`);
+  await delay(15_000);
   const lateColors = snapshot(`${name}-late`);
   recordCommand(`${name}-xrefresh`, 'xrefresh', ['-none']);
   const refreshedColors = snapshot(`${name}-refreshed`);
@@ -122,7 +124,7 @@ async function probe(name, binary, args, env) {
   if (child.exitCode === null && !child.signalCode) child.kill('SIGKILL');
   await delay(200);
   save(`${name}-stdout.log`, stdout); save(`${name}-stderr.log`, stderr);
-  return { name, ...beforeStop, earlyColors, lateColors, refreshedColors };
+  return { name, ...beforeStop, earlyColors, middleColors, lateColors, refreshedColors };
 }
 
 // Only the direct renderer probe uses this synthetic endpoint. It is not a
