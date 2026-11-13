@@ -1,3 +1,4 @@
+import type { ReviewRunEvidence, ReviewMode } from './review-run-evidence';
 import type { OutcomeMemoryProvenance } from '@/lib/cortex/memory-provenance';
 // Orchestrator domain types — runtimes, packets, lanes
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
@@ -161,6 +162,9 @@ export interface OrchestratorPacketReviewDirectiveViolation {
 }
 
 export interface OrchestratorPacketReview {
+  runEvidence?: ReviewRunEvidence;
+  reviewMode?: ReviewMode;
+  verdictLabel?: string;
   approved: boolean;
   findings: OrchestratorPacketReviewFinding[];
   recordedAt: string;

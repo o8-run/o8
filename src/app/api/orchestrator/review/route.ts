@@ -85,6 +85,7 @@ export async function POST(request: NextRequest) {
   const reviewInput = {
       packetId,
       submissionPrincipal,
+      runEvidence: record.runEvidence as import('@/lib/orchestrator/review-run-evidence').ReviewRunEvidence | undefined,
       findings: parseReviewFindings(record.findings),
       approved: record.approved,
       reviewedHeadSha: typeof record.reviewedHeadSha === 'string' && record.reviewedHeadSha.trim()

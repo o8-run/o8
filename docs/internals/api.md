@@ -42,6 +42,76 @@ Note: the realtime `lane-lifecycle` payload carries lane status in the `status` 
 
 Review submission is guarded in depth: middleware refuses worker credentials for `POST /api/orchestrator/review`, and the handler independently re-checks the server-owned reviewer assignment and fails closed. Assigned-reviewer admission is not wired; `mintAssignedReviewerToken` has no production caller. Handler-level assignment tests do not establish admission through the middleware gate.
 
+## Review execution evidence
+
+Saved packet reviews and durable `orchestrator_review` approval JSON carry additive
+`runEvidence`, `reviewMode` and `verdictLabel` fields. Existing `approved` and verdict
+enums remain compatible. Readers derive the mode and label from validated evidence,
+never trust a saved mode flag, and read old records with no evidence as
+`read_only` / `approved, not run`. No database columns or storage-version migration
+are needed. Existing JSON is upgraded on read; historical audit entries are preserved.
+
+`POST /api/orchestrator/review` and MCP `submit_review` accept either:
+
+```json
+{ "status": "not_run", "reason": "The window driver is unavailable." }
+```
+
+or a structured receipt for the exact full `reviewedHeadSha`:
+
+```json
+{
+  "status": "run",
+  "headSha": "0123456789012345678901234567890123456789",
+  "reviewerRuntime": "codex",
+  "recordedAt": "2026-11-13T00:00:00.000Z",
+  "observations": [{
+    "kind": "command",
+    "command": "node scripts/acceptance.mjs",
+    "result": "The changed command returned the expected output.",
+    "exitCode": 0,
+    "excerpt": "acceptance passed"
+  }]
+}
+```
+
+A receipt has 1–20 observations. Each needs a command or launch/steps, observed
+result, safe integer exit status (a launch may use null), and an excerpt (at most
+4000 characters) or artifact reference (at most 1000). Commands/results are bounded
+to 2000 characters, the runtime to 100, and the ISO timestamp to 40. A not-run reason
+is bounded to 2000. Invalid or stale submitted evidence returns 422
+`invalid_run_evidence`. Old malformed/stale saved evidence reads as not run.
+A failed command is still an observation; the reviewer owns the approval judgment.
+Prose and author claims do not supply structured evidence. These are reviewer-reported
+receipts, not independently attested execution or a measured correctness guarantee.
+
+The reviewer prompt asks for real-entry execution on user-facing changes or a
+specific not-run reason. The self-contained `POST /api/harness` `evaluate_diff` /
+`o8_evaluate_diff` evaluator cannot run a commit and always reports a read-only
+verdict, including when the model claims execution. CLI packet review accepts
+`--run-evidence <JSON-file>` or `--not-run <reason>` and reports the mode in human
+and JSON output. Review-state (including the native window's data), mission status,
+and MCP outputs carry the same fields. No native UI or driver is added.
+
+### Opt-in merge requirement
+
+Set **the server process environment** `O8_REVIEW_RUN_REQUIRED_PATHS` to a JSON
+array of repository-relative globs, for example `["native/o8-next/src/**"]`.
+Unset, empty, or `[]` leaves enforcement off. Patterns support `*`, `**` and `?`;
+absolute/traversal paths and other glob syntax are refused. The reviewed repository
+cannot set its own policy through this field; no UI setting is added.
+
+Merge preview and the lane merge chokepoint check the full committed change,
+including deleted paths and both sides of renames. A matching change needs a durable,
+approved review with structured run evidence at the exact reviewed HEAD. Operator
+approval does not bypass this opt-in requirement. The packet merge HTTP route returns
+409 `review_run_evidence_required`; invalid configuration returns 409
+`review_run_policy_invalid`, and an unverifiable diff returns 409
+`review_run_diff_unavailable`. Rebase-carried approvals do not inherit run evidence
+for their new HEAD. Existing integration/rebase gates remain in place; these receipts
+refer to the reviewed source commit, not a claim that the eventual integration commit
+was exercised. Launching and driving the reviewed commit remains dependent on #5947.
+
 ## Route reference
 
 Routes are grouped by their first path segment.

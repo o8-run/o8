@@ -1,4 +1,5 @@
 import { assertReviewSubmissionCurrent } from '@/lib/auth/review-submission';
+import { readRunEvidence, reviewExecution, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import { randomUUID } from 'node:crypto';
 
 import { resolveApproval } from '@/lib/approvals/resolution';
@@ -38,8 +39,7 @@ function highestReviewRisk(findings: OrchestratorPacketReviewFinding[]) {
   return 'low';
 }
 
-function buildReviewSummary(findings: OrchestratorReviewFinding[], approved: boolean) {
-  const verdict = approved ? 'Approved' : 'Changes requested';
+function buildReviewSummary(findings: OrchestratorReviewFinding[], verdict: string) {
   if (findings.length === 0) {
     return `${verdict}. No findings recorded.`;
   }
@@ -63,8 +63,10 @@ function buildPacketReview(
   auditApprovalId?: string | null,
   directivesApplied?: string[],
   directivesViolated?: SubmitReviewInput['directivesViolated'],
+  runEvidence?: ReviewRunEvidence,
 ): OrchestratorPacketReview {
   const review: OrchestratorPacketReview = {
+    ...reviewExecution(approved, reviewedHeadSha, runEvidence),
     approved,
     findings: findings.map((finding) => ({
       file: finding.file,
@@ -194,6 +196,7 @@ function recordPacketReviewAudit(
   contractCoverageEvidence: ReviewCoverageEvidence | undefined,
   missingContractWaiverReason: string | undefined,
   reviewTurn: { id: string; outcome: 'active' | 'completed' },
+  runEvidence: ReviewRunEvidence,
 ) {
   const lane = findLaneByPacket(packet.id);
   const requiresSecondPass = requiresSecondPassForLane(lane, approved);
@@ -208,6 +211,7 @@ function recordPacketReviewAudit(
     toolName: 'orchestrator_review',
     args: {
       packetId: packet.id,
+      ...reviewExecution(approved, reviewedHeadSha, runEvidence),
       approved,
       findings,
       reviewedHeadSha,
@@ -425,7 +429,12 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     outcome: 'completed' as const,
   };
   if (input.submissionPrincipal) assertReviewSubmissionCurrent(input.submissionPrincipal);
-  const summary = buildReviewSummary(input.findings, input.approved);
+  const submittedEvidence = input.runEvidence === undefined ? undefined : readRunEvidence(input.runEvidence);
+  if (input.runEvidence !== undefined && (!submittedEvidence || submittedEvidence.status === 'run' && submittedEvidence.headSha !== reviewedHeadSha?.toLowerCase())) {
+    throw new ReviewValidationError('invalid_run_evidence', 'runEvidence requires well-formed observations bound to the exact reviewed HEAD.');
+  }
+  const execution = reviewExecution(input.approved, reviewedHeadSha, submittedEvidence);
+  const summary = buildReviewSummary(input.findings, execution.verdictLabel);
   const auditReview = recordPacketReviewAudit(
     packet,
     input.findings,
@@ -435,6 +444,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     input.contractCoverageEvidence,
     missingContractWaiverReason,
     reviewTurn,
+    execution.runEvidence,
   );
 
   // Only update mission state when the packet actually lives there — orphan
@@ -459,6 +469,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
         auditReview.approvalId,
         input.directivesApplied,
         input.directivesViolated,
+        execution.runEvidence,
       );
       return target.review;
     });
@@ -475,6 +486,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
       const { appendEvent } = await import('@/lib/lane/registry');
       appendEvent(verdictLane.id, 'review_recorded', 'orchestrator', {
         approved: input.approved,
+        ...execution,
         summary,
         reviewedHeadSha: reviewedHeadSha ?? null,
         auditApprovalId: resolvedAuditApprovalId,
@@ -521,6 +533,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
 
   return {
     recorded: true,
+    ...execution,
     findingsCount: input.findings.length,
     reviewedHeadSha: reviewedHeadSha ?? null,
     ...(secondPassSchedulingWarning ? {
