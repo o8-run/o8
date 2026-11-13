@@ -33,20 +33,27 @@ jobs:
 
             const { owner, repo } = context.repo;
             const kind = isPullRequest ? 'pr' : 'issue';
-            const earlier = await github.rest.search.issuesAndPullRequests({
-              q: `repo:${owner}/${repo} author:${item.user.login} is:${kind}`,
-              per_page: 2,
-            });
-            if (earlier.data.total_count > 1) return;
-
             const links = 'o8 updates post first on x at [@o8dotrun](https://x.com/o8dotrun), '
               + 'and [discord](https://discord.gg/TFK2x9A5WS) is open for quick questions.';
             const body = isPullRequest
               ? `thanks for the first pr, it gets a real review. ${links}`
               : `thanks for filing this. steps to reproduce help the most if they are not in here yet. ${links}`;
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: item.number,
-              body,
-            });
+
+            // A missed welcome must never fail a contributor's check.
+            try {
+              const earlier = await github.rest.search.issuesAndPullRequests({
+                q: `repo:${owner}/${repo} author:${item.user.login} is:${kind}`,
+                per_page: 2,
+              });
+              // The new item may not be indexed yet, so compare by number
+              // instead of trusting the count.
+              if (earlier.data.items.some((found) => found.number !== item.number)) return;
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: item.number,
+                body,
+              });
+            } catch (error) {
+              core.warning(`welcome skipped: ${error.message}`);
+            }
