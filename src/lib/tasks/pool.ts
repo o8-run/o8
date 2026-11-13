@@ -1,3 +1,4 @@
+import { readLaneTerminalReason } from '@/lib/lane/terminal-reason';
 import 'server-only';
 
 import { basename } from 'node:path';
@@ -134,6 +135,8 @@ export interface TaskPoolTask {
   queueState: OrchestratorPacket['queueState'] | null;
   releaseState: OrchestratorPacket['releaseState'] | null;
   blockedReason: string | null;
+  failureReason?: string | null;
+  cleanup?: import('@/lib/worktree/preparation-failure').PreparationCleanup;
   lastEventAt: string | null;
   lastEventLabel: string | null;
   allowedFiles: string[];
@@ -323,6 +326,12 @@ async function resolveProjectContext(
   }
 }
 
+function preparationFields(lane: Lane | null) {
+  const reason = readLaneTerminalReason(lane);
+  return reason?.code === 'packet_worktree_provision_failed'
+    ? { failureReason: reason.cause, ...(reason.cleanup ? { cleanup: reason.cleanup } : {}) } : {};
+}
+
 export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPool> {
   const panelProjects = (await getProjectsLedger()).projects;
   const mission = currentMissionState();
@@ -358,6 +367,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
 
     const routing = packet.workerRouting ?? null;
     const task: TaskPoolTask = {
+      ...preparationFields(lane),
       id: packet.id,
       packetId: packet.id,
       laneId: lane?.id ?? packet.lane?.laneId ?? null,
@@ -417,6 +427,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
     if (!options.includeDone && group === 'done') continue;
 
     tasks.push({
+      ...preparationFields(lane),
       id: lane.id,
       packetId: null,
       laneId: lane.id,

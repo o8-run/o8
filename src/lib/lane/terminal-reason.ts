@@ -1,9 +1,11 @@
+import { preparationFailureDetails, type PreparationCleanup } from '@/lib/worktree/preparation-failure';
 import { getSqlite } from '@/lib/db';
 import { isLaneTerminal } from '@/lib/lane/terminal-states';
 import type { Lane } from '@/lib/lane/types';
 
 export interface LaneTerminalReason {
   code: string;
+  cleanup?: PreparationCleanup;
   cause: string | null;
 }
 
@@ -31,7 +33,10 @@ export function readLaneTerminalReason(lane: Lane | null | undefined): LaneTermi
       continue;
     }
     if (row.verb === 'worktree_provision_failed') {
-      return { code: text(payload.code) || 'packet_worktree_provision_failed', cause: text(payload.cause) || text(payload.note) };
+      const details = preparationFailureDetails(text(payload.cause) || text(payload.note) || 'Worktree preparation failed');
+      const cleanup = payload.cleanup as PreparationCleanup | undefined;
+      return { code: text(payload.code) || 'packet_worktree_provision_failed', cause: details.cause,
+        ...(cleanup?.status === 'needs_cleanup' && typeof cleanup.reason === 'string' ? { cleanup } : details.cleanup ? { cleanup: details.cleanup } : {}) };
     }
     if (payload.runtimeOutcome !== 'failed'
       && (payload.classification === 'clean-exit' || (payload.exitCode === 0 && !payload.signal))) break;

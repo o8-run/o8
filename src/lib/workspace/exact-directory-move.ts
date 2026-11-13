@@ -2,7 +2,7 @@ import { spawn } from '@/lib/providers/child-process';
 import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import path from 'node:path';
-import { piWriteHelperPath } from '@/lib/pi/sdk/scripts';
+import { nativeProcessHelperPath } from '@/lib/pi/sdk/scripts';
 import { assertWorktreeMaterializationIdentity, type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 
 /** Only this opt-in call requires atomic no-replace. No ordinary rename fallback. */
@@ -19,7 +19,7 @@ export async function moveExactDirectoryNoReplace(parent: WorktreeMaterializatio
   try {
     const held = await directory.stat();
     if (!held.isDirectory() || held.dev !== parent.device || held.ino !== parent.inode) throw new Error('Directory parent changed.');
-    const helper = piWriteHelperPath();
+    const helper = nativeProcessHelperPath();
     const receipt = await new Promise<string>((resolve, reject) => {
       const child = spawn(helper, ['move-directory-no-replace'], { cwd: '/',
         env: { NODE_ENV: 'production' }, stdio: ['pipe', 'pipe', 'pipe', directory.fd] });

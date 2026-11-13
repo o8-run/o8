@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { NextRequest } from 'next/server';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const boundary = vi.hoisted(() => ({
+  helperModuleUrl: undefined as string | undefined,
   wedge: false,
   invalidateLane: false,
   humanDecision: false,
@@ -15,6 +16,11 @@ const boundary = vi.hoisted(() => ({
   refuseStorage: false,
   launch: vi.fn(async () => ({ ok: true, sessionKey: 'codex-owned:fixture', note: 'fixture launch' })),
 }));
+vi.mock('@/lib/pi/sdk/scripts', async original => {
+  const actual = await original<typeof import('@/lib/pi/sdk/scripts')>();
+  const resolve = (env = process.env) => (actual.piWriteHelperPath as (env: NodeJS.ProcessEnv, url?: string) => string)(env, boundary.helperModuleUrl);
+  return { ...actual, nativeProcessHelperPath: resolve, piWriteHelperPath: resolve };
+});
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => undefined) }));
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn(async () => undefined) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => undefined) }));
@@ -62,7 +68,7 @@ beforeAll(async () => {
       `const command = ${JSON.stringify(command)};`,
       'const args = process.argv.slice(2);',
       "const failure = fs.existsSync(receipt) ? JSON.parse(fs.readFileSync(receipt, 'utf8')) : {};",
-      "if (failure.command === command && (command !== 'git' || args.includes('add') && args.includes('worktree'))) {",
+      "if (failure.command === command && (command !== 'git' || args.includes('clone') || args.includes('add') && args.includes('worktree'))) {",
       "  if (command !== 'git') { fs.mkdirSync('partial-dependencies', { recursive: true }); fs.writeFileSync('partial-dependencies/partial', 'incomplete'); }",
       '  fs.writeFileSync(receipt, JSON.stringify({ ...failure, failedAt: Date.now(), attempts: (failure.attempts ?? 0) + 1 }));',
       "  console.error('fixture ' + command + ' provisioning refused'); process.exit(42);",
@@ -114,6 +120,7 @@ beforeAll(async () => {
   vi.spyOn(getRuntime('codex')!, 'launch').mockImplementation(boundary.launch);
   boundary.launch.mockImplementation(async () => ({ ok: true, sessionKey: 'codex-owned:fixture', note: 'fixture launch' }));
 });
+beforeEach(() => boundary.launch.mockClear());
 afterEach(() => {
   boundary.wedge = false;
   boundary.invalidateLane = false;
@@ -181,6 +188,88 @@ async function callerStatuses(packet: OrchestratorPacket) {
 }
 
 describe('launch provisioning through mission HTTP entry points', () => {
+  it('prepares a Codex packet checkout with the supervisor resolved from server resources', async () => {
+    const { pathToFileURL } = await import('node:url');
+    const { buildPiWriteHelper } = await import('./helpers/pi-write-helper');
+    const binary = process.env.O8_TEST_PREBUILT_WRITE_HELPER || buildPiWriteHelper();
+    const server = join(root, 'server-resources');
+    const helper = join(server, 'src-tauri/sidecars/pi-write/target/release/o8-pi-write');
+    mkdirSync(join(server, 'src-tauri/sidecars/pi-write/target/release'), { recursive: true });
+    copyFileSync(binary, helper); chmodSync(helper, 0o755);
+    writeFileSync(join(server, 'package.json'), JSON.stringify({ name: 'o8' }));
+    boundary.helperModuleUrl = pathToFileURL(join(server, 'src/lib/pi/sdk/scripts.ts')).href;
+    const { APFS_DEPENDENCY_IMAGES_ENV } = await import('@/lib/workspace/dependency-materializer');
+    const keys = ['O8_PI_WRITE_BIN', 'O8_PACKAGED_APP', APFS_DEPENDENCY_IMAGES_ENV];
+    const saved = keys.map(key => process.env[key]);
+    const cwd = process.cwd();
+    try {
+      process.env.O8_PI_WRITE_BIN = ''; process.env.O8_PACKAGED_APP = ''; process.env[APFS_DEPENDENCY_IMAGES_ENV] = '0';
+      writeFileSync(join(repoPath, 'package.json'), JSON.stringify({ name: 'empty-preparation-fixture', version: '1.0.0' }));
+      writeFileSync(join(repoPath, 'package-lock.json'), JSON.stringify({ name: 'empty-preparation-fixture', version: '1.0.0', lockfileVersion: 3, packages: { '': { name: 'empty-preparation-fixture', version: '1.0.0' } } }));
+      writeFileSync(join(repoPath, '.gitignore'), 'node_modules/\n');
+      mkdirSync(join(repoPath, 'hooks'), { recursive: true });
+      for (const name of ['claude-code-pretool-hook.js', 'post-edit-typecheck.js', 'completion-gate.js']) copyFileSync(join(cwd, 'dist/hooks', name), join(repoPath, 'hooks', name));
+      execFileSync(realGit, ['add', '-A'], { cwd: repoPath });
+      execFileSync(realGit, ['-c', 'user.email=test@o8.invalid', '-c', 'user.name=o8-test', 'commit', '-m', 'empty dependency fixture'], { cwd: repoPath });
+      execFileSync(realGit, ['push', 'origin', 'main'], { cwd: repoPath });
+      process.chdir(repoPath);
+      const packet = persistMission('server-resource-preparation');
+      await dispatch(packet);
+      const lane = registry.findLatestLaneByPacket(packet.id)!;
+      expect(boundary.launch, JSON.stringify(registry.getLaneEvents(lane.id, 200).filter(e => e.verb === 'worktree_provision_failed'))).toHaveBeenCalledTimes(1);
+      expect(lane.worktreePath).toBeTruthy();
+      expect(registry.getLaneEvents(lane.id, 200)).toContainEqual(expect.objectContaining({ verb: 'worktree_preparation_timing', payload: expect.objectContaining({ stage: 'dependency_install', phase: 'completed' }) }));
+    } finally {
+      process.chdir(cwd); boundary.helperModuleUrl = undefined;
+      keys.forEach((key, i) => { if (saved[i] === undefined) delete process.env[key]; else process.env[key] = saved[i]; });
+      rmSync(join(repoPath, 'hooks'), { recursive: true, force: true });
+      for (const file of ['package.json', 'package-lock.json', '.gitignore']) rmSync(join(repoPath, file), { force: true });
+    }
+  }, 120_000);
+
+  it.each(['cause', 'cleanup', 'legacy'])('lists preparation %s independently after retirement refusal', async field => {
+    writeFileSync(join(repoPath, 'requirements.txt'), 'fixture\n');
+    execFileSync(realGit, ['add', '-A'], { cwd: repoPath });
+    execFileSync(realGit, ['-c', 'user.email=test@o8.invalid', '-c', 'user.name=o8-test', 'commit', '--allow-empty', '-m', 'fixture failure'], { cwd: repoPath });
+    execFileSync(realGit, ['push', 'origin', 'main'], { cwd: repoPath });
+    writeFileSync(failureReceipt, JSON.stringify({ command: 'pip' }));
+    const { WorktreeManager } = await import('@/lib/worktree/manager');
+    const proto = WorktreeManager.prototype as unknown as { retireFailedManagedCreation(...args: unknown[]): Promise<void> };
+    const retire = vi.spyOn(proto, 'retireFailedManagedCreation').mockRejectedValueOnce(new Error('fixture exact purge identity changed'));
+    try {
+      const packet = persistMission(`preparation-cleanup-receipt-${field}`);
+      await dispatch(packet);
+      const lane = registry.findLatestLaneByPacket(packet.id)!;
+      const event = registry.getLaneEvents(lane.id, 200).findLast(e => e.verb === 'worktree_provision_failed');
+      if (field === 'cause') {
+        expect(event?.payload.cause).toContain('fixture pip provisioning refused');
+        expect(event?.payload.cause).not.toContain('Exact retirement');
+      } else if (field === 'cleanup') {
+        expect(event?.payload.cleanup).toMatchObject({ status: 'needs_cleanup', reason: 'fixture exact purge identity changed' });
+      } else {
+        const legacy = { ...event!.payload, cause: 'fixture pip provisioning refused Exact retirement was refused; durable workspace ownership was retained: fixture exact purge identity changed' };
+        delete (legacy as Record<string, unknown>).cleanup;
+        getSqlite().prepare('UPDATE lane_events SET payload_json = ? WHERE lane_id = ? AND verb = ?')
+          .run(JSON.stringify(legacy), lane.id, 'worktree_provision_failed');
+      }
+      const { GET } = await import('@/app/api/tasks/[taskId]/route');
+      const response = await GET(new NextRequest(`http://localhost/api/tasks/${packet.id}`, { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } }), { params: Promise.resolve({ taskId: packet.id }) });
+      expect(response.status).toBe(200);
+      const task = (await response.json()).task;
+      if (field !== 'cleanup') {
+        expect(task.failureReason).toContain('fixture pip provisioning refused');
+        expect(task.failureReason).not.toContain('Exact retirement');
+      }
+      if (field !== 'cause') expect(task.cleanup).toMatchObject({ status: 'needs_cleanup', reason: 'fixture exact purge identity changed' });
+      const { handleTaskList } = await import('@/lib/mcp/operator-handlers/task-list');
+      const listed = await handleTaskList({});
+      const compact = JSON.parse((listed.content[0] as { text: string }).text).tasks.find((t: { id: string }) => t.id === packet.id);
+      if (field !== 'cause') expect(compact.cleanup.status).toBe('needs_cleanup');
+      if (field !== 'cleanup') expect(compact.failureReason).not.toContain('Exact retirement');
+      expect(boundary.launch).not.toHaveBeenCalled();
+    } finally { retire.mockRestore(); }
+  }, 60_000);
+
   it.each([
     ['git', null], ['pip', 'requirements.txt'],
     ['go', 'go.mod'], ['cargo', 'Cargo.toml'], ['storage', null],

@@ -6558,6 +6558,14 @@
       ]
     },
     {
+      "path": "tests/packet-helper-discovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/packet-launch-budget-real-path.test.ts",
       "reasons": [
         "apfs-tool",

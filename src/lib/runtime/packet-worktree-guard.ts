@@ -1,9 +1,10 @@
+import { preparationFailureDetails } from '@/lib/worktree/preparation-failure';
 import { recordLaneEvent } from '@/lib/lane/events';
 import {
   releasePacketStorageAfterWorktreeProvisionFailure,
   type PacketWorktreeProvisionStorageRelease,
 } from '@/lib/lane/lane-storage-release';
-import { getLane, setLaneStatus } from '@/lib/lane/registry';
+import { getLane, getLaneEvents, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import type { LaneStatus } from '@/lib/lane/types';
 
 export const PACKET_WORKTREE_PROVISION_FAILED = 'packet_worktree_provision_failed';
@@ -32,7 +33,12 @@ export function packetWorktreeProvisionError(
 
   const laneId = request.existingLaneId!;
   const packetId = request.packetId!;
-  const cause = causeInput instanceof Error ? causeInput.message : String(causeInput);
+  const details = preparationFailureDetails(causeInput);
+  const events = getLaneEvents(laneId, 200);
+  const start = events.findLastIndex(event => event.verb === 'worktree_provision_started');
+  const install = start < 0 ? undefined : events.slice(start + 1).findLast(event => event.actor === 'system' && event.payload.packetId === packetId && event.verb === 'worktree_preparation_timing'
+    && event.payload.stage === 'dependency_install' && event.payload.phase === 'failed');
+  const cause = typeof install?.payload.cause === 'string' ? install.payload.cause : details.cause;
   const lane = getLane(laneId);
   let storageRelease: PacketWorktreeProvisionStorageRelease = {
     decision: 'deferred',
@@ -67,6 +73,7 @@ export function packetWorktreeProvisionError(
       PACKET_WORKTREE_PROVISION_FAILED,
     );
   }
+  if (lane) updateLane(laneId, { outcomeNote: cause }, 'system');
   try {
     recordLaneEvent(laneId, 'worktree_provision_failed', 'system', {
       code: PACKET_WORKTREE_PROVISION_FAILED,
@@ -75,7 +82,8 @@ export function packetWorktreeProvisionError(
       laneId,
       repoPath,
       cause,
-      note,
+      note: cause,
+      ...(details.cleanup ? { cleanup: details.cleanup } : {}),
       storageRelease,
     });
   } catch (error) {
@@ -86,6 +94,6 @@ export function packetWorktreeProvisionError(
   }
 
   return new Error(
-    `[${PACKET_WORKTREE_PROVISION_FAILED}] Cannot launch ${runtime} packet outside a managed worktree: ${note}`,
+    `[${PACKET_WORKTREE_PROVISION_FAILED}] Cannot launch ${runtime} packet outside a managed worktree: ${cause}`,
   );
 }
