@@ -383,12 +383,14 @@ impl Surface {
                             })),
                     );
             } else {
-                card =
-                    card.child(
-                        div().min_w_0().min_h_0().overflow_y_scroll().child(
-                            "File list unavailable until both commits are available locally.",
-                        ),
-                    );
+                card = card.child(
+                    div()
+                        .id("composer-pr-conflicts-unavailable")
+                        .min_w_0()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .child("File list unavailable until both commits are available locally."),
+                );
             }
             let message = resolve_message(pr);
             card = card.child(
