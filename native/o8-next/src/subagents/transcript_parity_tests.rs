@@ -110,9 +110,15 @@ fn main_and_subagents_panel_render_identical_transcript_rows(cx: &mut TestAppCon
     let (main, main_cx) = cx.add_window_view(|window, cx| {
         Surface::shell_new(client.clone(), sessions, session.id.clone(), window, cx)
     });
-    main_cx.simulate_resize(size(px(480.), px(1000.)));
+    let width = crate::theme::GEOMETRY.right_width;
+    // Main reserves its chrome inset and the existing adjacent column gap.
+    main_cx.simulate_resize(size(
+        px(width + 2. * crate::theme::GEOMETRY.inset + crate::theme::GEOMETRY.gap),
+        px(1000.),
+    ));
     wait(main_cx, "transcript-verdict-2");
     let expected = structure(main_cx);
+    assert_eq!(expected[0].1.width, px(width));
     // Keep the main view alive while mounting the actual right-panel Inspector.
     assert!(main.read_with(main_cx, |s, _| s.transcript.is_some()));
     let (panel, panel_cx) = main_cx.cx.add_window_view(|window, cx| {
@@ -127,12 +133,15 @@ fn main_and_subagents_panel_render_identical_transcript_rows(cx: &mut TestAppCon
             )
         });
         inspector.update(cx, |s, cx| {
-            s.set_native(vec![agent(Some(format!("llm-chat:{}", session.id)), false)], cx);
+            s.set_native(
+                vec![agent(Some(format!("llm-chat:{}", session.id)), false)],
+                cx,
+            );
             s.inspect(Some("parity".into()), window, cx);
         });
         Panel(inspector)
     });
-    panel_cx.simulate_resize(size(px(480.), px(1000.)));
+    panel_cx.simulate_resize(size(px(width), px(1000.)));
     wait(panel_cx, "transcript-verdict-2");
     assert_eq!(
         structure(panel_cx),
@@ -163,14 +172,31 @@ fn main_and_subagents_panel_render_identical_transcript_rows(cx: &mut TestAppCon
 fn failed_subagent_without_turns_uses_the_shared_trace_state(cx: &mut TestAppContext) {
     let (_host, client) = fixture();
     let (_panel, cx) = cx.add_window_view(|window, cx| {
-        let inspector = cx.new(|cx| Inspector::new(client.clone(), Scope { repo: "/repo".into(), parent: None }, cx));
+        let inspector = cx.new(|cx| {
+            Inspector::new(
+                client.clone(),
+                Scope {
+                    repo: "/repo".into(),
+                    parent: None,
+                },
+                cx,
+            )
+        });
         inspector.update(cx, |s, cx| {
             s.set_native(vec![agent(None, true)], cx);
             s.inspect(Some("parity".into()), window, cx);
         });
         Panel(inspector)
     });
+    cx.simulate_resize(size(px(320.), px(620.)));
     paint(cx);
-    assert!(cx.debug_bounds("trace-header-0").is_some(), "failed task without turns must render its state and reason through the shared trace row");
+    assert!(
+        cx.debug_bounds("trace-header-0").is_some(),
+        "failed task without turns must render its state and reason through the shared trace row"
+    );
     assert!(cx.debug_bounds("transcript-row-0").is_some());
+    assert!(
+        cx.debug_bounds("transcript-row-1").is_some(),
+        "the failure reason is a wrapping shared system-message row"
+    );
 }

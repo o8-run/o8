@@ -124,12 +124,7 @@ impl Surface {
             }))
             .when(!self.notice.is_empty(), |view| {
                 view.child(
-                    div()
-                        .px(px(24.))
-                        .py(px(8.))
-                        .text_size(px(11.))
-                        .text_color(theme().text_muted)
-                        .child(self.notice.clone()),
+                    crate::transcript_view::notice(self.notice.clone()),
                 )
             })
             .child(crate::transcript_view::list_view(

@@ -19,7 +19,7 @@ pub(crate) mod images;
 #[path = "lineage_view.rs"]
 mod lineage_view;
 #[path = "prompt_actions.rs"]
-mod prompt_actions;
+pub(crate) mod prompt_actions;
 #[path = "session_sidebar.rs"]
 mod session_sidebar;
 #[path = "shell_session.rs"]
@@ -1016,15 +1016,11 @@ impl Render for Surface {
                             .when(empty, |view| {
                                 view.when(!self.notice.is_empty(), |view| {
                                     view.child(
-                                        div()
-                                            .px(px(24.))
-                                            .py(px(8.))
-                                            .text_size(px(11.))
-                                            .text_color(theme().text_muted)
-                                            .child(self.notice.clone()),
+                                        crate::transcript_view::notice(self.notice.clone()),
                                     )
                                 })
                                 .child(self.history_control(cx))
+                                .when(overview.is_none(), |view| view.child(crate::transcript_view::empty()))
                             })
                             // The transcript fades out at its edges, as classic's
                             // did into the composer below it.

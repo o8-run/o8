@@ -1,5 +1,4 @@
 //! Transcript pane uses the production native stream merger and retained rows.
-use crate::theme::current as theme;
 use crate::{
     client::{Client, Session},
     model::History,
@@ -95,6 +94,9 @@ pub struct Pane {
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
     action_ends: RefCell<crate::transcript_actions::TurnEndsCache>,
     backfill: Option<crate::worker_backfill::Backfill>,
+    prompt_actions: Rc<RefCell<crate::ui::prompt_actions::reading::Reading>>,
+    turn_files: RefCell<crate::turn_files::Cache>,
+    turn_files_open: Rc<RefCell<BTreeSet<String>>>,
 }
 impl Pane {
     pub fn new(key: Option<String>) -> Self {
@@ -122,6 +124,9 @@ impl Pane {
             action_feedback: Default::default(),
             action_ends: Default::default(),
             backfill: None,
+            prompt_actions: Default::default(),
+            turn_files: Default::default(),
+            turn_files_open: Default::default(),
         }
     }
     pub fn metadata(&mut self, session: &Session) {
@@ -142,6 +147,12 @@ impl Pane {
             }
         }
     }
+    pub(crate) fn reading_root(&mut self, root: &str) {
+        self.file_root = (!root.is_empty()).then(|| gpui::SharedString::from(root.to_owned()));
+        for row in self.rows.iter() {
+            row.borrow_mut().file_root = self.file_root.clone();
+        }
+    }
     pub fn install(&mut self, history: History, client: Client) {
         self.backfill = crate::worker_backfill::Backfill::new(client.clone(), &history);
         self.client = Some(client.clone());
@@ -157,6 +168,11 @@ impl Pane {
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
         self.notice.clear();
+    }
+    pub(crate) fn install_readonly(&mut self, history: History, client: Client) {
+        self.client = Some(client.clone());
+        self.peeks.connect(client);
+        self.install_saved(history);
     }
     pub(crate) fn prepend(&mut self, history: History) {
         let anchor = self.list.logical_scroll_top();
@@ -341,26 +357,65 @@ impl Pane {
         let ends = self.action_ends.borrow_mut().get(&self.rows);
         let client = self.client.clone();
         let feedback = self.action_feedback.clone();
+        let files = self.turn_files.borrow_mut().get(&self.rows, &ends);
+        let open = self.turn_files_open.clone();
+        let rows = self.rows.clone();
+        let list = self.list.clone();
+        let root = self.file_root.clone();
+        let prompts = self.prompt_actions.clone();
+        if let Some(transcript) = &self.transcript {
+            prompts.borrow_mut().sync(&rows, transcript.shown_entries());
+        }
+        let source = self.key.clone().unwrap_or_default();
         self.content_with(
             ends.keys().copied().collect(),
-            move |index, row, _, _| match (ends.get(&index), &client) {
-                (Some(text), Some(client)) => div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .child(row)
-                    .child(crate::transcript_actions::row(
-                        view.clone(),
-                        client.clone(),
-                        feedback.clone(),
-                        index,
-                        text.clone(),
-                    ))
-                    .into_any_element(),
-                _ => row,
+            move |index, row, window, cx| {
+                if let (Some(text), Some(client)) = (ends.get(&index), &client) {
+                    return div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .child(row)
+                        .children(files.get(&index).map(|files| {
+                            let turn = rows[index].borrow().row.id().to_owned();
+                            let expanded = open.borrow().contains(&turn);
+                            let (open, list, view) = (open.clone(), list.clone(), view.downgrade());
+                            crate::turn_files::card_with(
+                                index,
+                                files,
+                                root.as_ref().map(|root| root.as_ref()),
+                                expanded,
+                                move |cx| {
+                                    open.borrow_mut().insert(turn.clone());
+                                    let anchor = list.logical_scroll_top();
+                                    list.splice(index..index + 1, 1);
+                                    list.scroll_to(anchor);
+                                    let _ = view.update(cx, |_, cx| cx.notify());
+                                },
+                            )
+                        }))
+                        .child(crate::transcript_actions::row(
+                            view.clone(),
+                            client.clone(),
+                            feedback.clone(),
+                            index,
+                            text.clone(),
+                        ))
+                        .into_any_element();
+                }
+                crate::ui::prompt_actions::reading::Reading::decorate(
+                    prompts.clone(),
+                    view.clone(),
+                    &source,
+                    index,
+                    row,
+                    window,
+                    cx,
+                )
             },
         )
     }
+
     fn content_with(
         &self,
         ends: BTreeSet<usize>,
@@ -387,15 +442,7 @@ impl Pane {
                     .flex_col()
                     .overflow_hidden()
                     .when(!notice.is_empty(), |view| {
-                        view.child(
-                            div()
-                                .h(px(18.))
-                                .px(px(8.))
-                                .truncate()
-                                .text_size(px(9.5))
-                                .text_color(theme().text_muted)
-                                .child(notice),
-                        )
+                        view.child(crate::transcript_view::notice(notice))
                     })
                     .child(crate::transcript_view::list_view(
                         list_state.clone(),
@@ -558,7 +605,9 @@ mod tests {
         let client = Client::authenticated(&origin, None).unwrap();
         let history = client.history("codex-owned:notice").unwrap();
         assert!(
-            crate::shell::session::worker_transcript::State::from_history(&history).unwrap().active,
+            crate::shell::session::worker_transcript::State::from_history(&history)
+                .unwrap()
+                .active,
             "the HTTP retry fixture must model an active worker; idle workers wait for the socket"
         );
         failed.store(true, Ordering::Release);
