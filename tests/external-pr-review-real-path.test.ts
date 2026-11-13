@@ -8,7 +8,7 @@ const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-external-pr-')));
 vi.stubEnv('O8_DATA_DIR', root);
 vi.stubEnv('CORTEX_IDE_DATA_DIR', root);
 vi.stubEnv('CORTEX_IDE_DB_PATH', join(root, 'state.db'));
-const input = vi.hoisted(() => ({ head: 'a'.repeat(40), base: 'b'.repeat(40), state: 'open', merged: false, draft: false, hostFailure: false, beforeVerdict: null as null | (() => Promise<void>), hostHook: null as null | (() => Promise<void>) }));
+const input = vi.hoisted(() => ({ head: 'a'.repeat(40), base: 'b'.repeat(40), state: 'open', merged: false, draft: false, hostFailure: false, primaryQuota: false, beforeVerdict: null as null | (() => Promise<void>), hostHook: null as null | (() => Promise<void>) }));
 const repo = join(root, 'repo');
 execFileSync('git', ['init', '-q', '-b', 'main', repo]);
 execFileSync('git', ['-C', repo, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'base']);
@@ -17,7 +17,7 @@ execFileSync('git', ['-C', repo, '-c', 'user.name=fixture', '-c', 'user.email=fi
 input.head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example/repo.git']);
 const { addRepo } = await import('@/lib/repos/registry');
-beforeAll(async () => { await addRepo(repo); });
+beforeAll(async () => { await addRepo(repo); const {updateOperatorDefaults}=await import('@/lib/operator/defaults');updateOperatorDefaults({reviewerBackend:'codex',subscriptionProfile:'both'}); });
 vi.mock('@/lib/github-broker/auth', () => ({ githubInstallationFetch: async (_remote: string, path: string) => {
  const snapshot = { number: Number(path.split('/').at(-1)), state: input.state, merged: input.merged, draft: input.draft,
   head: {sha:input.head}, base:{sha:input.base,ref:'main',repo:{id:123,full_name:'example/repo'}} };
@@ -28,8 +28,8 @@ vi.mock('@/lib/github-broker/auth', () => ({ githubInstallationFetch: async (_re
 vi.mock('@/lib/lane/orchestrator-backends/registry', async importOriginal => {
  const actual = await importOriginal<typeof import('@/lib/lane/orchestrator-backends/registry')>();
  const backend = { id: 'codex', label: 'Fixture reviewer', peekSession: () => ({ sessionName: 'review', status: 'ready' }), ensureSession: () => ({ sessionName: 'review', status: 'ready' }),
- async sendTurn(_repo: string, _prompt: string, emit: (v: {type: string; text: string}) => void, options?: {permissionMode?:string}) { expect(options?.permissionMode).toBe('plan'); if (input.beforeVerdict) await input.beforeVerdict(); emit({type:'text', text:`CODEX_AUTO_REVIEW: ${JSON.stringify({approved:false,findings:[{file:'answer.txt',severity:'note',description:'Preserve the request.',status:'deferred'}],runEvidence:{status:'run',headSha:input.head,reviewerRuntime:'codex',recordedAt:new Date().toISOString(),observations:[{kind:'command',command:'fixture assertion',result:'passed',exitCode:0,excerpt:'controlled reviewer receipt'}]}})}`}); } };
- return {...actual, getActiveReviewerBackend: () => backend, getOrchestratorBackend: () => backend};
+ async sendTurn(_repo: string, _prompt: string, emit: (v: {type: string; text: string}) => void, options?: {permissionMode?:string}) { expect(options?.permissionMode).toBe('plan'); if(this.id==='codex' && input.primaryQuota){emit({type:'error',text:'',error:'You have hit your usage limit. Try again when it resets.'} as {type:string;text:string});return;} if (input.beforeVerdict) await input.beforeVerdict(); emit({type:'text', text:`CODEX_AUTO_REVIEW: ${JSON.stringify({approved:false,findings:[{file:'answer.txt',severity:'note',description:'Preserve the request.',status:'deferred'}],runEvidence:{status:'run',headSha:input.head,reviewerRuntime:this.id,recordedAt:new Date().toISOString(),observations:[{kind:'command',command:'fixture assertion',result:'passed',exitCode:0,excerpt:'controlled reviewer receipt'}]}})}`}); } };
+ return {...actual, getActiveReviewerBackend: () => backend, getOrchestratorBackend: (id:string) => id==='claude'?{...backend,id:'claude'}:backend};
 });
 vi.mock('@/lib/lane/packet-explainer-queue', () => ({ drainPacketExplainerQueue: async () => {}, enqueuePacketExplainer: async () => {}, notifyCorrectnessReviewQueued: () => {}, startPacketExplainerQueueDrain: () => () => {} }));
 vi.mock('@/lib/lane/review-drain-bootstrap', () => ({ensureReviewQueueDrainStarted: vi.fn()}));
@@ -37,6 +37,10 @@ const { POST } = await import('@/app/api/tasks/adopt-pr/route');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { closeDb } = await import('@/lib/db');
 const { readExternalReview, listExternalReviews } = await import('@/lib/tasks/external-review-store');
+const {handleSubmitReview}=await import('@/lib/mcp/operator-handlers/mission');
+const {handleApprove}=await import('@/lib/mcp/operator-handlers/approve');
+const {POST:reviewPost}=await import('@/app/api/orchestrator/review/route');
+const {POST:approvalPost}=await import('@/lib/approvals/route');
 function request(token = getOrCreateWsToken()) { return new NextRequest('http://localhost/api/tasks/adopt-pr', { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ repoPath: repo, pullRequest: 7 }) }); }
 it('adopts once, appends immutable revisions and survives reopening the database', async () => {
   const first = await POST(request()); expect(first.status).toBe(200); const a = await first.json();
@@ -75,6 +79,7 @@ it('starts the existing review path and preserves canonical findings, refusing a
  await expect(correctAuthorFromReview({repoPath:repo,threadId:'external',review:{packetId:packet.id,approvalId:packet.review!.auditApprovalId!, reviewedHeadSha:input.head,surfaceId:'codex-owned:reviewer',runId:'reviewer'}})).rejects.toThrow();
  const { getTaskPool } = await import('@/lib/tasks/pool');
  const pool = await getTaskPool({repoPath:repo,includeDone:true}); expect(pool.tasks.filter(t => t.externalReview)).toHaveLength(1);
+ execFileSync('git',['-C',repo,'config','--unset-all',`url.${repo}/.insteadOf`]); await addRepo(repo);
 }, 60000);
 it('keeps the old verdict on its revision when another head is adopted', async () => {
  const old = listExternalReviews()[0]; expect(old.state).toBe('sent_back');
@@ -116,6 +121,8 @@ async function prepareReview() {
  const {POST:start} = await import('@/lib/tasks/http/dispatch');
  const started = await start(new NextRequest(`http://localhost/api/tasks/${task.taskId}/dispatch`,{method:'POST',headers:{authorization:`Bearer ${getOrCreateWsToken()}`},body:'{}'}),{params:Promise.resolve({taskId:task.taskId})});
  expect(started.status,await started.clone().text()).toBe(200);
+ execFileSync('git',['-C',repo,'config','--unset-all',`url.${repo}/.insteadOf`]);
+ await addRepo(repo);
  return task;
 }
 async function detail(taskId: string) {
@@ -163,6 +170,52 @@ it('refuses a stale concurrent adoption instead of moving the pointer backwards'
   expect(readExternalReview(fresh.taskId)?.revision.id).toBe(fresh.revision.id);
  } finally {release();input.hostHook=null;await stale;}
 });
+it('records the external reviewer fallback final-line verdict at the saved head',async()=>{
+ const task=await prepareReview();const {findLaneByPacket}=await import('@/lib/lane/registry');const lane=findLaneByPacket(task.revision.packetId)!;
+ const {getSqlite}=await import('@/lib/db');getSqlite().prepare("UPDATE review_queue SET status='completed' WHERE lane_id != ? AND status='pending'").run(lane.id);
+ const {updateOperatorDefaults}=await import('@/lib/operator/defaults');updateOperatorDefaults({subscriptionProfile:'both'});input.primaryQuota=true;
+ try{const {drainReviewQueue}=await import('@/lib/lane/auto-review');await drainReviewQueue();}finally{input.primaryQuota=false;}
+ const {readOrchestratorControlPlaneState}=await import('@/lib/orchestrator/control-plane');expect(readOrchestratorControlPlaneState().packets.find(p=>p.id===task.revision.packetId)?.review).toMatchObject({approved:false,reviewedHeadSha:task.revision.headSha});
+ const {getLaneEvents}=await import('@/lib/lane/registry');expect(getLaneEvents(lane.id,100).some(event=>event.verb==='review_fallback')).toBe(true);
+ expect(readExternalReview(task.taskId)?.state).toBe('sent_back');
+},60000);
+it.each(['submit_review','o8_approve'] as const)('keeps external verdicts on their queued path through %s',async surface=>{
+ const task=await prepareReview(); const {getApproval,createApproval,listApprovalsForContext}=await import('@/lib/approvals/store');
+ const approval=surface==='o8_approve'?createApproval({source:'runtime',runtime:'codex',agent:'Fixture reviewer',sessionKey:'fixture-review',title:'Queued review',description:'Review decision',summary:'Pending review',toolName:'orchestrator_review',risk:'low',args:{packetId:task.revision.packetId,approved:true,reviewedHeadSha:task.revision.headSha}}):null;
+ const original=globalThis.fetch;
+ vi.stubGlobal('fetch',async(url:string|URL|Request,init?:RequestInit)=>{
+  const req=new NextRequest(String(url),{method:init?.method,headers:init?.headers,body:init?.body});
+  return surface==='submit_review'?reviewPost(req):approvalPost(req);
+ });
+ try{
+  const result=surface==='submit_review'?await handleSubmitReview({packetId:task.revision.packetId,approved:true,findings:[],reviewedHeadSha:task.revision.headSha})
+   :await handleApprove({id:approval!.id});
+  expect(result.isError,JSON.stringify(result)).toBe(true);
+ }finally{vi.stubGlobal('fetch',original);}
+ const {readOrchestratorControlPlaneState}=await import('@/lib/orchestrator/control-plane');
+ expect(readOrchestratorControlPlaneState().packets.find(p=>p.id===task.revision.packetId)?.review).toBeFalsy();
+ if(approval)expect(getApproval(approval.id)?.status).toBe('pending');
+ expect(listApprovalsForContext({packetId:task.revision.packetId}).filter(row=>row.status==='approved')).toHaveLength(0);
+});
+it('requires the revision head when the worktree and completed turn agree on another head',async()=>{
+ const task=await prepareReview();const {findLaneByPacket}=await import('@/lib/lane/registry');const lane=findLaneByPacket(task.revision.packetId)!;
+ const {getSqlite}=await import('@/lib/db');const db=getSqlite();
+ // Select this queued attempt with the production claimer, independently of earlier fixture attempts.
+ db.prepare("UPDATE review_queue SET status='completed' WHERE lane_id != ? AND status='pending'").run(lane.id);
+ const {claimNextReview}=await import('@/lib/lane/review-drain-recovery');const claim=claimNextReview()!;expect(claim.lane_id).toBe(lane.id);
+ const cwd=lane.worktreePath || lane.repoPath;
+ execFileSync('git',['-C',cwd,'-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','--allow-empty','-qm','another reviewed commit']);
+ const head=execFileSync('git',['-C',cwd,'rev-parse','HEAD'],{encoding:'utf8'}).trim();expect(head).not.toBe(task.revision.headSha);
+ const {startReviewTurn,finishReviewTurn}=await import('@/lib/lane/review-turn-state');
+ const turn=startReviewTurn({laneId:lane.id,threadId:`auto-review-${lane.id}-${claim.id}`,sessionThreadId:'thoughts-auto-review-head-fixture',backend:'codex',surface:'auto-review',expectedHeadSha:head});
+ finishReviewTurn({laneId:lane.id,reviewTurnId:turn,outcome:'completed'});
+ let refusal:unknown;
+ try{const {submitPacketReview}=await import('@/lib/orchestrator/operator-mission-service/review');await submitPacketReview({packetId:task.revision.packetId,approved:false,findings:[{file:'answer.txt',severity:'note',description:'Retain the request.',resolution:'deferred'}],reviewedHeadSha:head},{externalReview:true,completedCorrectionTurnId:turn,claimOwner:claim.claim_owner!});}catch(error){refusal=error;}
+ finally{db.prepare("UPDATE review_queue SET status='completed' WHERE id=?").run(claim.id);}
+ expect(refusal).toBeDefined();
+ const {readOrchestratorControlPlaneState}=await import('@/lib/orchestrator/control-plane');expect(readOrchestratorControlPlaneState().packets.find(p=>p.id===task.revision.packetId)?.review).toBeFalsy();
+ const {listApprovalsForContext}=await import('@/lib/approvals/store');expect(listApprovalsForContext({packetId:task.revision.packetId}).filter(row=>row.toolName==='orchestrator_review')).toHaveLength(0);
+},60000);
 it('refuses a completed reviewer turn started for another head', async () => {
  const task=await prepareReview();
  const {getSqlite}=await import('@/lib/db'); const {findLaneByPacket}=await import('@/lib/lane/registry');
@@ -194,6 +247,14 @@ it.each([true,false])('does not project a packet verdict for another reviewed he
  } finally {
   await withLockedState(state=>{state.packets.find(p=>p.id===task.revision.packetId)!.review=null;});
  }
+});
+it('retains an older live revision when the external overview contains 100 newer tasks',async()=>{
+ const old=await prepareReview();
+ for(let i=2000;i<2100;i++){const response=await adopt({pullRequest:i});expect(response.status,await response.clone().text()).toBe(200);}
+ expect(listExternalReviews()).toHaveLength(100);expect(listExternalReviews().some(t=>t.taskId===old.taskId)).toBe(false);
+ const {getTaskPool}=await import('@/lib/tasks/pool');const pool=await getTaskPool({includeDone:true});
+ expect(pool.tasks.some(t=>t.packetId===old.revision.packetId)).toBe(true);
+ expect((await detail(old.taskId)).externalReview.revision.id).toBe(old.revision.id);
 });
 it('bounds listings, reads old tasks directly, and tolerates a missing revision',async()=>{
  const first=await (await adopt({pullRequest:1000})).json();

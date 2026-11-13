@@ -1,4 +1,4 @@
-import { getSqlite } from '@/lib/db';
+import { isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { recordLaneEvent } from '@/lib/lane/events';
 import {
   buildCrossHouseFallbackMessage,
@@ -74,7 +74,8 @@ async function runAttempt(input: {
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
   const packetId = getLane(input.laneId)?.packetId;
-  const readOnly = input.readOnly || Boolean(packetId && getSqlite().prepare('SELECT 1 FROM external_pr_review_revisions WHERE packet_id = ?').get(packetId));
+  const externalReview = isExternalReviewPacket(packetId);
+  const readOnly = input.readOnly || externalReview;
   const sessionThreadId = input.sessionThreadId ?? input.threadId;
   const session = input.backend.ensureSession(input.repoPath, undefined, sessionThreadId);
   if (session.status === 'busy') {
@@ -136,6 +137,7 @@ async function runAttempt(input: {
     }, {
       threadId: sessionThreadId,
       ...(readOnly ? { permissionMode: 'plan' as const } : {}),
+      ...(externalReview ? { toolProfile: 'propose' as const } : {}),
       ...(input.model ? { model: input.model } : {}),
       ...(input.thinkingEffort ? { thinkingEffort: input.thinkingEffort } : {}),
       reviewUsage,

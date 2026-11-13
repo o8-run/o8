@@ -472,14 +472,13 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
 
   if (!options.packetId) {
     const currentTasks = new Map(tasks.flatMap(task => task.packetId ? [[task.packetId, task] as const] : []));
-    const revisionPackets = new Set((getSqlite().prepare(`SELECT packet_id FROM external_pr_review_revisions
-      WHERE packet_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify([...currentTasks.keys()])) as Array<{ packet_id: string }>).map(row => row.packet_id));
-    for (let i = tasks.length - 1; i >= 0; i--) if (tasks[i].packetId && revisionPackets.has(tasks[i].packetId!)) tasks.splice(i, 1);
+    const representedTasks: string[] = [];
     for (const external of listExternalReviews({ taskId: options.externalTaskId, packets, lanes, historyPackets: readHistory })) {
       if (options.repoPath && normalizePath(options.repoPath) !== normalizePath(external.repoPath)) continue;
       const current = currentTasks.get(external.revision.packetId);
       const context = await resolveProjectContext(projectCache, external.repoPath, null);
       if (options.projectId && context?.id !== options.projectId && context?.slug !== options.projectId) continue;
+      representedTasks.push(external.taskId);
       tasks.push({ id: external.taskId, packetId: external.revision.packetId, laneId: null, title: `Review PR #${external.pullRequest}`,
         summary: external.revision.intendedOutcome ?? 'Intended outcome missing.', group: 'ready', status: 'draft', runtime: 'codex',
         workerIntent: 'reviewer', workerRouting: null, branch: null, baseBranch: external.revision.baseRef, repoPath: external.repoPath,
@@ -487,6 +486,14 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
         lastEventLabel: external.state, allowedFiles: [], sourceIssue: null, problemDossierId: null, problemRemedyId: null,
         project: context ? toProjectSummary(context, panelProjects) : null, lane: null, execution: null, ...current, externalReview: external,
         ...(current ? { id: external.taskId } : {}) });
+    }
+    const revisionPackets = new Set((getSqlite().prepare(`SELECT r.packet_id FROM external_pr_review_revisions r
+      JOIN external_pr_review_tasks t ON t.id = r.task_id
+      WHERE r.packet_id IN (SELECT value FROM json_each(?))
+        AND (r.id != t.current_revision_id OR r.task_id IN (SELECT value FROM json_each(?)))`)
+      .all(JSON.stringify([...currentTasks.keys()]), JSON.stringify(representedTasks)) as Array<{ packet_id: string }>).map(row => row.packet_id));
+    for (let i = tasks.length - 1; i >= 0; i--) {
+      if (!tasks[i].externalReview && tasks[i].packetId && revisionPackets.has(tasks[i].packetId!)) tasks.splice(i, 1);
     }
   }
 

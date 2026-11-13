@@ -1,4 +1,4 @@
-import { completedExternalReviewTurn } from '@/lib/tasks/external-review-turn';
+import { completedExternalReviewTurn, isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { prepareRunEvidence, reviewExecution, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import { assertReviewSubmissionCurrent } from '@/lib/auth/review-submission';
 import { randomUUID } from 'node:crypto';
@@ -251,6 +251,9 @@ function recordPacketReviewAudit(
 }
 
 export async function submitPacketReview(input: SubmitReviewInput, internal?: { completedCorrectionTurnId: string; claimOwner: string; externalReview?: true }) {
+  if (isExternalReviewPacket(input.packetId) && !internal?.externalReview) {
+    throw new ReviewValidationError('external_reviewer_required', 'External review decisions require their queued reviewer.');
+  }
   const state = currentMissionState();
   const missionPacket = state.packets.find((candidate) => candidate.id === input.packetId);
 

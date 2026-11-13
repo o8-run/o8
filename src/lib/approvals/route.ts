@@ -1,3 +1,4 @@
+import { isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { pageApprovalAudit } from '@/lib/approvals/audit-page';
 import { isNativeApprovalContinuation, RUNTIME_APPROVAL_OPERATION } from '@/lib/approvals/runtime-owner';
 import { viewerJson } from '@/lib/viewers/response';
@@ -269,6 +270,9 @@ export async function POST(request: NextRequest) {
   const current = getApproval(id);
   if (!current) {
     return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
+  }
+  if (current.toolName === 'orchestrator_review' && isExternalReviewPacket(typeof current.args?.packetId === 'string' ? current.args.packetId : null)) {
+    return NextResponse.json({ ok: false, code: 'external_reviewer_required', error: 'External review decisions require their queued reviewer.' }, { status: 409 });
   }
   // Scope the operation using the exact record resolved below, after caller admission.
   // A changed continuation cannot fall through into LLM grant issuance.
