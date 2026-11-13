@@ -1,6 +1,7 @@
-# Worker completion receipts audit
+# Worker completion receipts audit (snapshot at c87d0ab6d)
 
 Refs #6040 and #6060. Source baseline: `c87d0ab6d524e5cc40556072e8f239e5bec809d6`.
+The table records behavior at that commit; follow the linked issues for subsequent fixes.
 Persistent lead turn reporting is handled by #6042; MCP projections are tracked by #6054.
 This audit distinguishes a runtime turn ending, work becoming reviewable, and a packet being released.
 

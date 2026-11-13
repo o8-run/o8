@@ -1,5 +1,5 @@
 import { completionOutcomeId } from '@/lib/cortex/outcome-exclusion';
-import { findLaneBySession, setLaneStatus, updateLane } from '@/lib/lane/registry';
+import { findLaneBySession, getLane, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import type { Lane } from '@/lib/lane/types';
 import type { AgentCompletionDecision } from './agent-supervisor-types';
@@ -386,6 +386,8 @@ export async function handleAgentCompletion(
     const detail = 'Completion check failed; work is retained and needs operator input.';
     try {
       guard.check();
+      // Review acceptance already passed its checks; a follow-up cannot undo it.
+      if (getLane(lane.id)?.status === 'reviewing') return;
       updateLane(lane.id, { status: 'awaiting_input', outcomeNote: detail,
         lastEventAt: new Date().toISOString(), lastEventLabel: 'completion_check_failed' }, 'system');
     } catch (holdError) {
