@@ -5759,7 +5759,8 @@
         "git-cli",
         "native-build",
         "process-signal",
-        "real-path"
+        "real-path",
+        "worktree-api"
       ]
     },
     {

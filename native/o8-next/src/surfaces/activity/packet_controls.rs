@@ -58,12 +58,21 @@ impl ActivityPane {
                 Action::Lane(row.clone(), "create_pr"),
                 cx,
             ));
-            view = view.child(self.packet_button(
-                "activity-lane-merge",
-                "Merge",
-                Action::Lane(row.clone(), "merge"),
-                cx,
-            ));
+            if row.data["review"]["approved"] == true {
+                view = view.child(self.packet_button(
+                    "activity-lane-merge",
+                    "Merge",
+                    Action::Lane(row.clone(), "merge"),
+                    cx,
+                ));
+                view = view.child(
+                    div()
+                        .text_size(px(10.))
+                        .text_color(theme().text_faint)
+                        .child("May merge prerequisite packets.")
+                        .debug_selector(|| "activity-packet-merge-scope".into()),
+                );
+            }
         }
 
         if row.data["queueState"] == "held" || row.data["lane"].is_null() {
@@ -124,7 +133,9 @@ impl ActivityPane {
                 cx,
             ));
         }
-        view = view.child(destructive);
+        view = view
+            .children(self.recovery_actions(row, live, cx))
+            .child(destructive);
         if self.closing.as_deref() == Some(row.id.as_str()) {
             view = view.child(self.close_unmerged(row, cx));
         }
@@ -161,6 +172,10 @@ impl ActivityPane {
             );
         }
 
-        view
+        view.child(self.recovery_confirmation(row, cx))
     }
 }
+
+#[cfg(test)]
+#[path = "merge_visibility_tests.rs"]
+mod visibility_tests;
