@@ -608,3 +608,55 @@ fn change_map_refuses_a_lane_revision_newer_than_the_displayed_diff(cx: &mut Tes
         assert!(!s.document.files.is_empty());
     });
 }
+
+#[gpui::test]
+fn change_map_zoom_keeps_the_clear_target_visible_and_clickable(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    for _ in 0..1000 {
+        visual.run_until_parked();
+        if view.read_with(visual, |s, _| {
+            s.ready && (!s.map.delta.is_null() || s.map.error.is_some())
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(view.read_with(visual, |s, _| s.ready));
+    for zoom in [0.7, 1., 2.] {
+        view.update(visual, |s, cx| {
+            let mut map = change_map_fixture();
+            map.delta["nodes"] = json!((0..24).map(|index| json!({
+                "path": format!("module-{index}.ts"), "state": "changed", "focusPath": "added.ts"
+            })).collect::<Vec<_>>());
+            map.delta["edges"] = json!([]);
+            map.delta["summary"] = json!({"changedModules":24,"addedEdges":0,"removedEdges":0});
+            map.attention["items"] = json!([]);
+            map.expanded = true;
+            map.selected = vec!["added.ts".into()];
+            s.map = map;
+            cx.notify();
+        });
+        visual.simulate_resize(gpui::size(gpui::px(900.), gpui::px(700.)));
+        for _ in 0..2 {
+            visual.update(|w, cx| {
+                w.set_zoom(zoom, cx);
+                w.refresh();
+                w.draw(cx).clear();
+            });
+        }
+        let viewport = visual.update(|w, _| w.viewport_size());
+        let clear = visual
+            .debug_bounds("diff-map-clear")
+            .expect("clear map filter");
+        assert!(
+            clear.top() >= gpui::px(0.) && clear.bottom() <= viewport.height,
+            "clear must remain inside the zoomed review: zoom={zoom}, clear={clear:?}, viewport={viewport:?}"
+        );
+        visual.simulate_click(clear.center().map(|v| v * zoom), gpui::Modifiers::default());
+        visual.run_until_parked();
+        assert!(view.read_with(visual, |s, _| s.map.selected.is_empty()));
+    }
+}
