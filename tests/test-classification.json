@@ -5698,6 +5698,13 @@
       ]
     },
     {
+      "path": "tests/o8d-messages-receiver-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-mobile-symon-native-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5966,6 +5973,14 @@
         "git-cli",
         "native-build",
         "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-symon-brain-owner-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "process-signal",
         "real-path"
       ]
@@ -8449,6 +8464,14 @@
       "path": "tests/symon-mcp-real-path.test.ts",
       "reasons": [
         "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/symon-messages-receiver-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "process-signal",
         "real-path"
       ]
