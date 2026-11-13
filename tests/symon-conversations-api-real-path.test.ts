@@ -5,10 +5,10 @@ import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createModels, fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai';
 import { SymonBrain } from '@/lib/symon/durable/brain';
-import { GET as listConversations } from '@/app/api/panel/symon/conversations/route';
-import { GET as readTranscript } from '@/app/api/panel/symon/conversations/transcript/route';
-import { POST as continueConversation } from '@/app/api/panel/symon/conversations/continue/route';
-import { POST as recordConversation } from '@/app/api/panel/symon/conversations/record/route';
+import { GET as listConversations } from '@/lib/symon/http/conversations';
+import { GET as readTranscript } from '@/lib/symon/http/transcript';
+import { POST as continueConversation } from '@/lib/symon/http/continue';
+import { POST as recordConversation } from '@/lib/symon/http/record';
 
 type BrainGlobal = { __o8SymonBrain?: Promise<SymonBrain> };
 const TOKEN = 'symon-conversations-test-token';

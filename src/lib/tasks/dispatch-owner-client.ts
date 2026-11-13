@@ -1,3 +1,4 @@
+import { RuntimeSelectionError } from '@/lib/agents/routing';
 import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 import { getWsBase } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -22,6 +23,8 @@ export async function callTaskDispatchOwner(taskId: string, input: TaskDispatchI
     const message = reply.error || 'Task dispatch owner refused the operation.';
     const error = reply.errorClass === 'ControlPlaneLockTimeoutError'
       ? new ControlPlaneLockTimeoutError(reply.waitTimeoutMs ?? 0)
+      : reply.errorClass === 'RuntimeSelectionError'
+        ? new RuntimeSelectionError(response.status, message, reply.code === 'worker_not_enabled' ? 'worker_not_enabled' : 'invalid_runtime')
       : reply.errorClass === 'TaskMutationError' || (!reply.errorClass && response.status < 500)
         ? new TaskMutationError(response.status, message)
         : new Error(message);

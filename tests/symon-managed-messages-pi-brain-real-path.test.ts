@@ -46,7 +46,7 @@ async function installBrain(faux = fauxProvider()) {
 }
 
 async function route() {
-  return (await import('@/app/api/symon/managed-messages/inbound/route')).POST;
+  return (await import('@/lib/symon/http/managed-inbound')).POST;
 }
 
 function request(overrides: Record<string, string> = {}) {
