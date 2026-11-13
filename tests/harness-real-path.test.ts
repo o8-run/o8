@@ -62,7 +62,7 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', () => ({
       }
       onEvent({
         type: 'text',
-        text: JSON.stringify({ verdict: 'approve', summary: 'Patch satisfies the supplied contract.', findings: [] }),
+        text: JSON.stringify({ verdict: 'approve', summary: 'Patch satisfies the supplied contract. I ran it successfully.', findings: [], runEvidence: { status: 'run' } }),
       });
     },
   }),
@@ -287,7 +287,7 @@ describe.sequential('harness real path', () => {
       diff: 'diff --git a/widget.ts b/widget.ts\n--- a/widget.ts\n+++ b/widget.ts\n@@ -1 +1 @@\n-export function renderWidget(value: string) { return value.trim(); }\n+export function renderWidget(value: string): string { return value.trim(); }\n',
       acceptanceCriteria: ['Return type is explicit'],
     });
-    expect(evaluation).toMatchObject({ verdict: 'approve', reviewerBackend: 'codex' });
+    expect(evaluation).toMatchObject({ verdict: 'approve', reviewerBackend: 'codex', reviewMode: 'read_only', verdictLabel: 'approved, not run', runEvidence: { status: 'not_run' } });
     expect(reviewer.calls).toBe(1);
     const threadId = reviewer.sessionThreadIds.at(-1);
     expect(threadId).toMatch(/^thoughts-harness-evaluate-/);

@@ -106,6 +106,7 @@ fn row(target: Target, status: &Value) -> Row {
 }
 
 pub(crate) struct Mcp {
+    pub(super) tasks: gpui::Entity<super::plugin_tasks::Tasks>,
     client: Client,
     statuses: HashMap<&'static str, Value>,
     notes: HashMap<&'static str, String>,
@@ -121,6 +122,7 @@ impl Mcp {
         let _ = cx;
         // Nothing is read until the page is first shown.
         Self {
+            tasks: cx.new(|cx| super::plugin_tasks::Tasks::new(client.clone(), cx)),
             client,
             statuses: HashMap::new(),
             notes: HashMap::new(),
@@ -357,6 +359,7 @@ impl Render for Mcp {
             .children(self.error.clone().map(muted))
             .child(muted("Clients".to_string()))
             .children(rows)
+            .child(self.tasks.clone())
             .when(!details.is_empty(), |v| {
                 v.child(div().mt(px(8.)).child(muted("System details".to_string())))
                     .children(details)
@@ -405,3 +408,7 @@ mod tests {
         assert!(!row.removable);
     }
 }
+
+#[cfg(test)]
+#[path = "plugin_task_entry_tests.rs"]
+pub(crate) mod plugin_task_entry_tests;

@@ -21,7 +21,7 @@ import { resolveLaneTranscriptHealth } from '@/lib/lane/transcript-health';
 import { readTerminalWorktreeStorage } from '@/lib/lane/terminal-worktree-storage';
 import { getLaneDiffStat } from '@/lib/lane/lane-diff-facts';
 import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
-import type { LaneCommand } from '@/lib/lane/types';
+import type { LaneCommand, LaneCommandResult } from '@/lib/lane/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -155,6 +155,13 @@ function createPrIdempotencyBody(command: Extract<LaneCommand, { verb: 'create_p
   });
 }
 
+function commandResponse(result: LaneCommandResult) {
+  const refusal = result.runtimeRefusal;
+  return NextResponse.json(refusal ? { ...result, code: refusal.code, error: refusal.message } : result, {
+    status: refusal?.status ?? (result.ok ? 200 : result.reason?.startsWith('review_run_') ? 409 : 422), headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
+}
+
 export async function POST(req: NextRequest) {
   const denied = requirePanelAuth(req);
   if (denied) return denied;
@@ -223,10 +230,7 @@ export async function POST(req: NextRequest) {
       }
       try {
         const result = await dispatch(command);
-        return NextResponse.json(result, {
-          status: result.ok ? 200 : 422,
-          headers: { 'Cache-Control': 'no-store, max-age=0' },
-        });
+        return commandResponse(result);
       } finally {
         await withLockedState((state) => {
           const packet = state.packets.find((entry) => entry.id === command.packetId);
@@ -255,17 +259,11 @@ export async function POST(req: NextRequest) {
         });
       }
       const result = outcome.result;
-      return NextResponse.json(result, {
-        status: result.ok ? 200 : 422,
-        headers: { 'Cache-Control': 'no-store, max-age=0' },
-      });
+      return commandResponse(result);
     }
 
     const result = await dispatch(command);
-    return NextResponse.json(result, {
-      status: result.ok ? 200 : 422,
-      headers: { 'Cache-Control': 'no-store, max-age=0' },
-    });
+    return commandResponse(result);
   } catch (err) {
     console.error('[api] lanes failed:', err);
     const message = 'Command failed.';

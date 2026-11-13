@@ -115,7 +115,7 @@ async function inspectOrphanProcesses(input: {
     if (!targets.some(target => row.file === target || row.file.startsWith(target + path.sep))) continue;
     if (isHelper?.(row.pid)) helperObserved = true;
     else if (!closeObservedHelperSettled(row.pid)) {
-      throw new OrphanCloseRefusal(`live process PID ${row.pid} (${row.commandName}) has an open file or cwd in the worktree`);
+      throw new OrphanCloseRefusal(`live process PID ${row.pid} (${row.commandName}) holds ${row.file}. Stop this process and retry Close`);
     }
   }
   if (isHelper && !helperObserved) throw new OrphanCloseRefusal('lsof did not cover the attested purge helper');

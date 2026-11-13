@@ -1,4 +1,6 @@
+import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { readLeadStatuses } from '@/lib/orchestrator/lead-status';
 import { hasForgottenPacketOutcome } from '@/lib/cortex/outcome-exclusion';
 import { buildHistoricalMissionStatus } from './historical-status';
 import { readLaneTerminalReason } from '@/lib/lane/terminal-reason';
@@ -491,6 +493,16 @@ export async function dispatchMission(input: DispatchMissionInput) {
   };
 }
 
+function missionLeadFields(packets: Array<{ orchestratorThreadId?: string | null }>) {
+  const threadIds = packets.flatMap(packet => packet.orchestratorThreadId ? [packet.orchestratorThreadId] : []);
+  try {
+    const leads = readLeadStatuses({ threadIds }).leads;
+    return leads.length ? { leads } : {};
+  } catch {
+    return { leadsUnavailable: true };
+  }
+}
+
 export async function getMissionStatus(input: MissionStatusInput) {
   const currentState = currentMissionState();
   const requestedMissionId = input.missionId?.trim();
@@ -512,7 +524,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
       const funnel = input.includeTiming && record.missionState
         ? await projectMissionFunnel(record.missionState)
         : undefined;
-      return { ...historical, ...(input.includeTiming ? { funnel: funnel ?? null } : {}) };
+      return { ...historical, ...missionLeadFields(record.missionState?.packets ?? []), ...(input.includeTiming ? { funnel: funnel ?? null } : {}) };
     }
   }
 
@@ -599,6 +611,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
 
   return {
     missionId: state.missionId || '',
+    ...missionLeadFields(state.packets),
     prompt: state.prompt,
     summary: state.summary,
     repoPath: state.repoPath ?? null,
@@ -667,6 +680,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
           mergeModeNote: mergePolicy.note,
         } : null,
         review: packet.review ? {
+          ...reviewExecution(packet.review.approved, packet.review.reviewedHeadSha, packet.review.runEvidence),
           approved: packet.review.approved,
           findingsCount: packet.review.findings.length,
           summary: packet.review.summary,

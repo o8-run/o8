@@ -593,6 +593,8 @@ export interface LanePolicy {
 // ── Command Result ──
 
 export interface LaneCommandResult {
+  /** Runtime selection remains a command result for internal callers; HTTP preserves this refusal. */
+  runtimeRefusal?: { status: number; code: string; message: string };
   ok: boolean;
   laneId: string;
   note: string;

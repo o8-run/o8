@@ -37,10 +37,17 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
     route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
     route('/api/harness', 'POST', () => import('@/lib/harness/route')),
+    route('/api/mobile/symon/text-turn', 'POST DELETE', () => import('@/lib/symon/http/text-turn')),
+    route('/api/panel/symon/conversations', 'GET', () => import('@/lib/symon/http/conversations')),
+    route('/api/panel/symon/conversations/continue', 'POST', () => import('@/lib/symon/http/continue')),
+    route('/api/panel/symon/conversations/transcript', 'GET', () => import('@/lib/symon/http/transcript')),
+    route('/api/panel/symon/conversations/record', 'POST', () => import('@/lib/symon/http/record')),
+    route('/api/symon/managed-messages/inbound', 'POST', () => import('@/lib/symon/http/managed-inbound')),
 
     route('/api/mobile/symon', 'GET POST', () => import('@/lib/mobile/symon-relay-route')),
     route('/api/mobile/symon/confirm', 'POST', () => import('@/lib/mobile/symon-confirm-route')),
     route('/api/mobile/symon/tool', 'POST DELETE', () => import('@/lib/mobile/symon-tool-route')),
+    route('/api/panel/symon/messages-receiver', 'GET POST', () => import('@/lib/symon/messages-receiver/control-route')),
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
@@ -426,6 +433,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // (tests/o8d-backend-models-native-real-path.test.ts). The OpenRouter metadata cache is per process and
     // the probe cache is on disk, so neither needs a single owner. (#5243)
     route('/api/orchestrator/backend-models', 'GET', () => import('@/app/api/orchestrator/backend-models/route')),
+    // Existing local operator review; account, epoch and single-attempt admission stay in the handlers.
+    route('/api/plugins/task-drafts', 'GET', () => import('@/app/api/plugins/task-drafts/route')),
+    route('/api/plugins/task-drafts/control', 'POST', () => import('@/app/api/plugins/task-drafts/control/route')),
     // MCP config generator (Settings > MCP). GET only, no handler-level auth: gated by
     // panelGateMiddleware, which does not public-allowlist /api/setup/* (hardening #1562).
     // It is not one of the gate's loopback reads, so it is operator-ws-token-only, whatever the
@@ -523,6 +533,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/orchestrator/review-state', 'GET', () => import('@/app/api/orchestrator/review-state/route')),
     route('/api/orchestrator/review', 'POST', () => import('@/app/api/orchestrator/review/route')),
+    // Reuse the operator-only handler; it proves the recorded checkout is absent.
+    route('/api/lanes/discard-orphaned', 'POST', () => import('@/app/api/lanes/discard-orphaned/route')),
     route('/api/lanes/[id]/diff', 'GET', () => import('@/app/api/lanes/[id]/diff/route')),
     route('/api/worktrees/diff', 'GET', () => import('@/app/api/worktrees/diff/route')),
     route('/api/review/last-turn', 'GET', () => import('@/app/api/review/last-turn/route')),

@@ -1,3 +1,4 @@
+import { isUnfinishedCheckRunState, isPendingStatusContext } from './check-state';
 import 'server-only';
 
 import { githubInstallationFetch } from './auth';
@@ -12,7 +13,7 @@ interface GitHubListPull {
   state: 'open' | 'closed';
   merged_at: string | null;
   draft?: boolean;
-  head: { ref: string; repo?: { full_name: string } | null };
+  head: { ref: string; sha?: string; repo?: { full_name: string } | null };
   base: { ref: string };
   updated_at: string;
   created_at: string;
@@ -25,7 +26,7 @@ interface PullStats {
   additions: number;
   deletions: number;
   reviewRequests: { nodes: Array<{ requestedReviewer: { login?: string } | null } | null> } | null;
-  commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string } | null } }> };
+  commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string; contexts?: { checkRunCountsByState: Array<{ state: string; count: number }>; statusContextCountsByState: Array<{ state: string; count: number }> } } | null } }> };
   reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
   mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
 }
@@ -35,7 +36,7 @@ const STATS_QUERY = `query PullRequestListStats($ids: [ID!]!) {
     ... on PullRequest {
       number additions deletions reviewDecision mergeable
       reviewRequests(first: 100) { nodes { requestedReviewer { ... on User { login } } } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 1) { checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
     }
   }
 }`;
@@ -75,13 +76,18 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
     nextPage: /rel="next"/.test(response.headers.get('link') ?? '') ? page + 1 : null,
     prs: pulls.map((pull) => {
       const summary = stats.get(pull.number);
-      const checksState = summary?.commits.nodes[0]?.commit.statusCheckRollup?.state;
+      const rollup = summary?.commits.nodes[0]?.commit.statusCheckRollup;
+      const checksState = rollup?.state;
+      const checksPending = isPendingStatusContext(checksState ?? '')
+        || Boolean(rollup?.contexts?.checkRunCountsByState.some(row => row.count > 0 && isUnfinishedCheckRunState(row.state)))
+        || Boolean(rollup?.contexts?.statusContextCountsByState.some(row => row.count > 0 && isPendingStatusContext(row.state)));
       return {
       number: pull.number, title: pull.title, author: pull.user?.login ?? 'Unknown author',
       avatarUrl: pull.user?.avatar_url ?? null, additions: summary?.additions ?? null, deletions: summary?.deletions ?? null,
       checks: checksState === 'SUCCESS' ? 'success' : checksState === 'FAILURE' || checksState === 'ERROR' ? 'failure' : checksState === 'PENDING' || checksState === 'EXPECTED' ? 'pending' : null,
       requestedReviewers: summary ? (summary.reviewRequests?.nodes ?? []).flatMap((request) => request?.requestedReviewer?.login ? [request.requestedReviewer.login] : []) : null,
       state: pull.merged_at ? 'merged' : pull.state, draft: pull.draft ?? false,
+      checksPending, headSha: pull.head.sha ?? null,
       headRefName: pull.head.ref, baseRefName: pull.base.ref, updatedAt: pull.updated_at,
       headRepoFullName: pull.head.repo?.full_name ?? null,
       url: pull.html_url, labels: pull.labels.map((label) => label.name),

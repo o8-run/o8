@@ -191,6 +191,7 @@ each remote machine until fleet execution is available.
 | 4 | not found |
 | 5 | conflict (state machine rejected the op) |
 | 6 | server timeout; the operation may have landed |
+| 7 | lead turn is unreported; send new work or stop the lead |
 
 ## Output schema
 

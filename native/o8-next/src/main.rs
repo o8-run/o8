@@ -15,6 +15,9 @@ mod driver;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;
+mod request_changes;
+#[cfg(test)]
+mod request_changes_revision_tests;
 mod editor_command;
 mod files_panel;
 mod grid_sessions;
@@ -38,6 +41,7 @@ mod project_icon;
 mod projects;
 mod projects_model;
 mod retained;
+mod ring;
 mod rich;
 mod settings;
 mod settings_fields;

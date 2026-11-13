@@ -260,6 +260,7 @@ function formatUncommittedPaths(paths: string[]): string {
 // non-user merge or PR action to skip the operator approval card.
 export async function assessDurableApprovedReview(
   lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'baseBranch' | 'runtime'>,
+  candidateSha?: string,
 ): Promise<DurableReviewAssessment> {
   try {
     const [{ listApprovalsForContext }, { normalizeHeadSha, readHeadSha }] = await Promise.all([
@@ -289,7 +290,7 @@ export async function assessDurableApprovedReview(
 
     let currentHead: string | undefined;
     try {
-      currentHead = normalizeHeadSha(await readHeadSha(cwd, lane.repoPath));
+      currentHead = normalizeHeadSha(candidateSha ?? await readHeadSha(cwd, lane.repoPath));
     } catch {
       return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'Current HEAD could not be verified against the AI review.' };
     }

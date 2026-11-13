@@ -2,7 +2,7 @@ import 'server-only';
 
 import { githubInstallationFetch } from './auth';
 import { readPullRequestFiles } from './pull-request-files';
-import { readPullRequestChecks } from './pull-request-checks';
+import { PullRequestChecksUnavailableError, readPullRequestChecks } from './pull-request-checks';
 import { readPullRequestRequirements, UNKNOWN_REQUIREMENTS } from './pull-request-requirements';
 import { GitHubRequestDeferredError, type GitHubReadPriority } from './request-budget';
 import { GitHubReadScopeChangedError } from './read-scope';
@@ -113,19 +113,19 @@ export async function fetchGitHubIssueDetail(repoFullName: string, issueNumber: 
   };
 }
 
-export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number, suppliedReviewDecision?: Promise<string | null>, priority: GitHubReadPriority = 'interactive') {
+export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number, suppliedReviewDecision?: Promise<string | null>, priority: GitHubReadPriority = 'interactive', fresh = false) {
   try {
-    return await readPullRequestDetailAttempt(repoFullName, prNumber, suppliedReviewDecision, priority);
+    return await readPullRequestDetailAttempt(repoFullName, prNumber, suppliedReviewDecision, priority, false, fresh);
   } catch (error) {
     if (!(error instanceof GitHubReadScopeChangedError) || !error.anonymous) throw error;
     // Discard every first-attempt result, including any supplied review decision.
     // The second attempt must establish anonymous authority from fresh metadata.
-    return readPullRequestDetailAttempt(repoFullName, prNumber, undefined, priority, true);
+    return readPullRequestDetailAttempt(repoFullName, prNumber, undefined, priority, true, fresh);
   }
 }
 
-async function readPullRequestDetailAttempt(repoFullName: string, prNumber: number, suppliedReviewDecision: Promise<string | null> | undefined, priority: GitHubReadPriority, requireAnonymous = false) {
-  const { response, installation, scope, anonymous } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000) }, { priority, share: true });
+async function readPullRequestDetailAttempt(repoFullName: string, prNumber: number, suppliedReviewDecision: Promise<string | null> | undefined, priority: GitHubReadPriority, requireAnonymous = false, fresh = false) {
+  const { response, installation, scope, anonymous } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000), ...(fresh ? { cache: 'reload' as const } : {}) }, { priority, share: !fresh });
   if (requireAnonymous && !anonymous) {
     void response.body?.cancel().catch(() => {});
     throw new Error('GitHub authorization changed before the anonymous pull request retry. Retry.');
@@ -159,8 +159,14 @@ async function readPullRequestDetailAttempt(repoFullName: string, prNumber: numb
   const filesPromise = readPullRequestFiles(repoFullName, prNumber, installation?.id, pr.head?.sha, pr.base?.sha, priority, scope);
 
   let checksUnavailable = false;
+  let checksUnavailableReason: string | undefined;
   const checksPromise = pr.head?.sha
-    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id, priority, scope).catch(error => { if (error instanceof GitHubRequestDeferredError || error instanceof GitHubReadScopeChangedError) throw error; checksUnavailable = true; return []; })
+    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id, priority, scope).catch(error => {
+      if (error instanceof GitHubRequestDeferredError || error instanceof GitHubReadScopeChangedError) throw error;
+      checksUnavailable = true;
+      if (error instanceof PullRequestChecksUnavailableError) checksUnavailableReason = error.message;
+      return [];
+    })
     : Promise.resolve([]);
 
   const reviewsPromise = suppliedReviewDecision ?? githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`, { signal: AbortSignal.timeout(18_000) })
@@ -186,12 +192,15 @@ async function readPullRequestDetailAttempt(repoFullName: string, prNumber: numb
   const changed = scopeChanges.find(result => result.status === 'rejected' && !result.reason.anonymous) ?? scopeChanges[0];
   if (changed?.status === 'rejected') throw changed.reason;
   const [files, statusCheckRollup, reviewDecision, requirements] = await Promise.all(reads);
+  const statusContextEvidence: { statusContextsPending?: boolean | null } = { statusContextsPending: requirements.pendingStatusContexts ?? null };
 
   return {
     githubScope: scope,
     ...(Number.isSafeInteger(pr.id) && Number(pr.id) > 0 && Number.isSafeInteger(pr.base?.repo?.id) && Number(pr.base?.repo?.id) > 0
       ? { githubIdentity: { repositoryId: pr.base!.repo!.id!, pullRequestId: pr.id! } } : {}),
+    ...statusContextEvidence,
     checksUnavailable,
+    ...(checksUnavailableReason ? { checksUnavailableReason } : {}),
     number: pr.number,
     title: pr.title ?? '',
     body: pr.body ?? '',

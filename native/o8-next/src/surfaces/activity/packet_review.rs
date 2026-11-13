@@ -7,6 +7,25 @@ impl ActivityPane {
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let review = &row.data["review"];
+        let rejected = review["approved"] == false
+            && review["auditApprovalId"].as_str().is_some_and(|id| !id.is_empty());
+        if rejected && !self.packet.corrections.contains_key(&row.id) {
+            let control = cx.new(|cx| {
+                crate::request_changes::RequestChanges::new(self.client.clone(), row.id.clone(), cx)
+            });
+            let observer = cx.observe(&control, |_, _, cx| cx.notify());
+            self.packet
+                .correction_observers
+                .insert(row.id.clone(), observer);
+            self.packet.corrections.insert(row.id.clone(), control);
+        }
+        let control = rejected
+            .then(|| self.packet.corrections.get(&row.id).cloned())
+            .flatten();
+        let trigger = control
+            .as_ref()
+            .filter(|control| control.read(cx).visible())
+            .map(|control| control.update(cx, |control, cx| control.trigger(cx)));
         let verdict = if review.is_null() {
             "Review pending"
         } else if review["approved"] == true {
@@ -24,10 +43,20 @@ impl ActivityPane {
             .debug_selector(|| "activity-packet-review".to_string())
             .child(
                 div()
-                    .text_size(px(11.))
-                    .font_weight(FontWeight(450.))
-                    .child(verdict),
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .font_weight(FontWeight(450.))
+                            .child(verdict),
+                    )
+                    .when_some(trigger, |row, trigger| row.child(trigger)),
             );
+        if let Some(control) = control.filter(|control| control.read(cx).details_visible()) {
+            view = view.child(control);
+        }
         for field in [
             "summary",
             "note",
@@ -68,3 +97,7 @@ impl ActivityPane {
         view.into_any_element()
     }
 }
+
+#[cfg(test)]
+#[path = "review_visibility_tests.rs"]
+mod review_visibility_tests;

@@ -1,3 +1,5 @@
+import { redactThreadText } from '@/lib/threads/redaction';
+import { reviewExecution, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import type {
   ApprovalAuditEvent,
   ApprovalRisk,
@@ -8,6 +10,7 @@ import type { Lane } from '@/lib/lane/types';
 import type { ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
 
 export interface OrchestratorReviewRecordInput {
+  runEvidence?: ReviewRunEvidence;
   findings: OrchestratorReviewFinding[];
   reviewer?: string;
   approved: boolean;
@@ -42,7 +45,7 @@ function normalizeReviewFinding(finding: OrchestratorReviewFinding): Orchestrato
 
 function buildOrchestratorReviewNote(review: OrchestratorReviewRecordInput) {
   const reviewer = review.reviewer ?? 'orchestrator';
-  const verdict = review.approved ? 'approved' : 'requested changes';
+  const verdict = reviewExecution(review.approved, review.reviewedHeadSha, review.runEvidence).verdictLabel;
   const findingCount = review.findings.length;
   const findingsSummary = findingCount === 0
     ? 'no findings'
@@ -54,6 +57,7 @@ function buildOrchestratorReviewNote(review: OrchestratorReviewRecordInput) {
 
 export function normalizeOrchestratorReview(review: OrchestratorReviewRecordInput): OrchestratorReviewRecordInput {
   return {
+    ...reviewExecution(review.approved, review.reviewedHeadSha, review.runEvidence),
     findings: review.findings.map(normalizeReviewFinding),
     reviewer: trimOptional(review.reviewer),
     approved: review.approved,
@@ -61,7 +65,7 @@ export function normalizeOrchestratorReview(review: OrchestratorReviewRecordInpu
     reviewedHeadSha: trimOptional(review.reviewedHeadSha),
     contractCoverageEvidence: review.contractCoverageEvidence,
     requiresSecondPass: review.requiresSecondPass === true,
-    rawText: trimOptional(review.rawText),
+    rawText: review.rawText ? redactThreadText(review.rawText) : undefined,
     parseWarning: trimOptional(review.parseWarning),
     reviewTurnId: trimOptional(review.reviewTurnId),
     reviewTurnOutcome: review.reviewTurnOutcome,
@@ -93,6 +97,7 @@ export function deriveOrchestratorReviewRisk(review: OrchestratorReviewRecordInp
 
 export function buildOrchestratorReviewEvent(review: OrchestratorReviewRecordInput): ApprovalAuditEvent {
   return {
+    ...reviewExecution(review.approved, review.reviewedHeadSha, review.runEvidence),
     type: 'orchestrator_review',
     actor: 'orchestrator',
     timestamp: Date.now(),
@@ -127,6 +132,7 @@ export function buildOrchestratorReviewApprovalInput(
     toolName: 'orchestrator_review',
     args: {
       packetId,
+      ...reviewExecution(review.approved, review.reviewedHeadSha, review.runEvidence),
       approved: review.approved,
       findings: review.findings,
       ...(review.reviewedHeadSha ? { reviewedHeadSha: review.reviewedHeadSha } : {}),
