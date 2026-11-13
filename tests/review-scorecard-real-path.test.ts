@@ -268,9 +268,9 @@ it('loads only the newest 2000 first-arrival cohorts for all time', async () => 
   });
   try {
     const body = await score('all');
-    expect(body.basis).toContain('limited to the newest 2000 changes');
-    expect(body.sources.find((row: { id: string }) => row.id === 'unknown').count).toBe(2000);
     expect(reads.filter(row => 'branch' in row && 'created_at' in row)).toHaveLength(2000);
+    expect(body.sources.find((row: { id: string }) => row.id === 'unknown').count).toBe(2000);
+    expect(body.basis).toContain('limited to the newest 2000 changes');
     expect(reads.some(row => row.id === 'bounded-2000' || row.id === 'old-retry')).toBe(false);
     expect(reads.filter(row => 'audit_json' in row || 'verb' in row || 'packet_json' in row || 'payload_json' in row)).toEqual([]);
   } finally { spy.mockRestore(); for (const restore of restores.reverse()) restore(); }
