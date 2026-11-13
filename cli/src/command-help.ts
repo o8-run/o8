@@ -7,6 +7,13 @@ interface CommandHelp {
 }
 
 const help: Record<string, CommandHelp> = {
+  'evaluate-diff': {
+    usage: '--task <text> [--repo <path>] [--base <ref>] [--diff-file <path>] [--accept <criterion>...]',
+    required: '--task <text>, the task the diff should satisfy. Execution requires an authenticated local API.',
+    defaults: 'Uses the current directory and tracked working-tree changes against HEAD, with no acceptance criteria. JSON output; --human prints formatted output.',
+    details: '--repo selects the repository. --base compares its merge base with HEAD (committed changes only). --diff-file reads a UTF-8 diff instead and takes precedence over --base. --accept is repeatable. Evaluation may contact the configured model service. Global flags: --human, --json, --verbose (-v), --help (-h).',
+    example: 'o8 evaluate-diff --repo /path/to/repo --base origin/main --task "Check the patch" --accept "Existing tests pass"',
+  },
   triage: {
     usage: '[--model <id>]',
     required: 'An installed local codex agent. No flags are required.',

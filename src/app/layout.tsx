@@ -19,7 +19,7 @@ import { TAURI_SURFACE_STAMP } from '@/lib/tauri/surface-stamp';
 
 export const metadata: Metadata = {
   title: 'o8',
-  description: 'Mobile command surface for AI agent orchestration',
+  description: "Your agents write the code. o8 reviews it, sends it back until it's right, and merges it.",
   other: {
     'theme-color': '#1C1C1E',
     'apple-mobile-web-app-capable': 'yes',

@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -16,7 +16,13 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => ({
   ensureDispatchBackendReady: async () => ({ ready: true }),
 }));
 // Keep terminal cleanup from racing the explicit Close endpoint under test.
-vi.mock('@/lib/lane/terminal-lane-cleanup', () => ({ scheduleTerminalLaneCleanup: vi.fn() }));
+const cleanupMode = vi.hoisted(() => ({ automatic: false }));
+vi.mock('@/lib/lane/terminal-lane-cleanup', async original => {
+  const actual = await original<typeof import('@/lib/lane/terminal-lane-cleanup')>();
+  return { ...actual, scheduleTerminalLaneCleanup: (...args: Parameters<typeof actual.scheduleTerminalLaneCleanup>) => {
+    if (cleanupMode.automatic) actual.scheduleTerminalLaneCleanup(...args);
+  } };
+});
 
 const root = mkdtempSync(join(os.tmpdir(), 'o8-archived-close-'));
 const ownedRoot = join(root, 'owned-codex');
@@ -42,6 +48,8 @@ const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/
 const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
 
+const { codexParseRunLog } = await import('@/lib/codex/owned-log');
+
 // Simulated provider output, real owned-process lifecycle and persisted exit evidence.
 const store = createOwnedSessionStore({
   runtimeId: 'codex', surfaceIdPrefix: 'codex-owned:',
@@ -49,13 +57,19 @@ const store = createOwnedSessionStore({
   binaryName: 'node', binaryEnvOverride: 'O8_TEST_ARCHIVED_CLOSE_BIN',
   humanLabel: 'Archived close fixture', squadShortName: 'CloseFixture',
   sessionIdPrefix: 'codex-owned-archived-close-',
-  launchArgs: () => ['-e', 'process.stdout.write("done\\n");'],
+  launchArgs: request => ['-e', request.prompt.includes('review-fixture')
+    ? `console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'done <self-review>'+JSON.stringify({passed:true,confidence:'high',summary:'Review complete',outcome:'The reviewed change meets the request.',evidence:['Inspected the pinned commit and its tests.'],residual:'none',decision:'finding_ready',recurrenceProtection:'none'})+'</self-review>'}})); console.log(JSON.stringify({type:'turn.completed'}));`
+    : 'process.stdout.write("done\\n");'],
   resumeArgs: () => null,
-  parseRunLog: (raw): ParsedRunLog => ({
-    entries: [], outcome: raw.includes('done') ? 'finished' : 'running',
+  parseRunLog: (raw, run): ParsedRunLog => ({
+    entries: codexParseRunLog(raw, run).entries, outcome: raw.includes('done') ? 'finished' : 'running',
     completedTurn: raw.includes('done'),
   }),
 }, { workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }) });
+
+// Cases drive refresh explicitly; no inventory scan may outlive fixture teardown.
+const refreshTimer = (globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>)[Symbol.for('o8.ownedSession.refreshTimer.codex')];
+if (refreshTimer) clearInterval(refreshTimer);
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -71,7 +85,7 @@ afterEach(({ task }) => {
   }) + '\n');
 });
 
-async function fixture(label: string) {
+async function fixture(label: string, readOnly = false) {
   const fixtureRoot = mkdtempSync(join(root, `${label}-`));
   const repoPath = join(fixtureRoot, 'repo');
   const packetId = `pkt-${label}`;
@@ -92,14 +106,15 @@ async function fixture(label: string) {
     packetId, label, ownership: 'managed',
   });
   currentLaneId = lane.id;
-  const launched = await store.launch({ cwd: worktreePath, prompt: 'exit-clean', laneId: lane.id, packetId });
+  const launched = await store.launch({ cwd: worktreePath, prompt: readOnly ? 'review-fixture' : 'exit-clean', laneId: lane.id, packetId });
   attachSession(lane.id, launched.surfaceId, 'system', { fixture: label });
   const deadline = Date.now() + 10_000;
   while (!getLaneEvents(lane.id, 100).some((event) => event.verb === 'runtime_process_exit')) {
     if (Date.now() > deadline) throw new Error('Owned fixture did not finish.');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  const archived = await store.archiveSession(launched.surfaceId);
+  const archived = readOnly ? { archived: true, note: '', archivePath: join(ownedRoot, launched.surfaceId.split(':')[1]!) }
+    : await store.archiveSession(launched.surfaceId);
   expect(archived.archived, archived.note).toBe(true);
   const archivePath = archived.archivePath!;
   const recordPath = join(archivePath, 'session.json');
@@ -115,11 +130,13 @@ async function fixture(label: string) {
     materializationIdentity: await captureWorktreeMaterializationIdentity(worktreePath),
     materializationParentIdentity: await captureWorktreeMaterializationIdentity(join(worktreePath, '..')),
   }));
-  setLaneStatus(lane.id, 'paused', 'user', 'operator_stopped');
-  updateLane(lane.id, { sessionKey: null });
-  writeFileSync(join(worktreePath, 'result.txt'), 'retained result\n');
-  git(worktreePath, ['add', 'result.txt']);
-  git(worktreePath, ['commit', '-m', 'result']);
+  if (!readOnly) {
+    setLaneStatus(lane.id, 'paused', 'user', 'operator_stopped');
+    updateLane(lane.id, { sessionKey: null });
+    writeFileSync(join(worktreePath, 'result.txt'), 'retained result\n');
+    git(worktreePath, ['add', 'result.txt']);
+    git(worktreePath, ['commit', '-m', 'result']);
+  } else setLaneStatus(lane.id, 'running', 'system', 'session_running');
   const resultHead = git(worktreePath, ['rev-parse', 'HEAD']);
   writeOrchestratorControlPlaneState({
     ...createEmptyOrchestratorMissionState(), missionId: `mission-${label}`, repoPath, runtime: 'codex',
@@ -127,8 +144,9 @@ async function fixture(label: string) {
       id: packetId, referenceLabel: '#archived-close-fixture', title: label, summary: label,
       workspaceTargetPath: repoPath, branchTarget: branch, runtime: 'codex',
       dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
-      status: 'blocked', operatorStopped: true, blockedReason: 'operator_stopped', review: null,
-      lane: { tileId: lane.id, tabId: lane.id, repoPath, worktreePath, runtime: 'codex', laneId: lane.id },
+      status: readOnly ? 'running' : 'blocked', operatorStopped: !readOnly, blockedReason: readOnly ? null : 'operator_stopped', review: null,
+      ...(readOnly ? { workerIntent: 'reviewer', launchContext: { source: 'agent', presentation: 'tab', repoContext: 'registered', workMode: 'read-only' } } : {}),
+      lane: { tileId: lane.id, tabId: lane.id, repoPath, worktreePath, runtime: 'codex', laneId: lane.id, ...(readOnly ? { sessionKey: launched.surfaceId } : {}) },
     } as OrchestratorPacket], updatedAt: new Date().toISOString(),
   });
   return { repoPath, packetId, branch, lane, worktreePath, worktreeId, recordPath,
@@ -285,3 +303,49 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
     }
   }, 120_000);
 });
+
+
+it('discards an exited owner despite an unrelated nameless routing socket', async () => {
+  const f = await fixture('routing-socket');
+  const before = readFileSync(f.recordPath, 'utf8');
+  const lsof = execFileSync('which', ['lsof'], { encoding: 'utf8' }).trim();
+  const bin = join(root, 'routing-bin'); mkdirSync(bin);
+  writeFileSync(join(bin, 'lsof'), `#!/bin/sh\n'${lsof}' "$@"\nprintf 'p999999\\ncroute\\nf8\\ntrte\\nn\\n'\n`);
+  chmodSync(join(bin, 'lsof'), 0o700);
+  const priorPath = process.env.PATH;
+  process.env.PATH = `${bin}:${priorPath}`;
+  try {
+    const response = await closeRoute.POST(request(f.packetId, 'adopted_elsewhere'));
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+    expect(existsSync(f.worktreePath)).toBe(false);
+    expect(readFileSync(f.recordPath, 'utf8')).toBe(before);
+    expect(git(f.repoPath, ['rev-parse', f.branch])).toBe(f.resultHead);
+  } finally { process.env.PATH = priorPath; }
+}, 120_000);
+
+
+it('automatically retires a finished read-only review and retains its verdict and transcript', async () => {
+  const f = await fixture('automatic-review', true);
+  const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+  const { completeReadOnlyZeroDiffLane } = await import('@/lib/orchestrator/read-only-completion');
+  const { waitForTerminalLaneWork } = await import('@/lib/lane/terminal-work');
+  const context = await capturePacketCompletionContext(f.packetId, f.sessionKey);
+  expect(context.selfReview?.decision, readFileSync(f.record.recentRuns[0]!.stdoutPath, 'utf8')).toBe('finding_ready');
+  const stdoutPath = f.record.recentRuns[0]!.stdoutPath;
+  const stdout = readFileSync(stdoutPath, 'utf8');
+  cleanupMode.automatic = true;
+  try {
+    expect((await completeReadOnlyZeroDiffLane(getLane(f.lane.id)!, context)).completed).toBe(true);
+    await waitForTerminalLaneWork();
+    expect(getLane(f.lane.id)).toMatchObject({ status: 'completed', worktreePath: null });
+    expect(existsSync(f.worktreePath)).toBe(false);
+    expect(readFileSync(stdoutPath, 'utf8')).toBe(stdout);
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ releaseState: 'released' });
+    const { findRepoByLocalPath } = await import('@/lib/repos/registry');
+    const { readCompletionHandoff } = await import('@/lib/workspace/completion-handoff-store');
+    const repo = await findRepoByLocalPath(f.repoPath);
+    expect(readCompletionHandoff(repo!.id, f.packetId)?.context.selfReview).toMatchObject({
+      passed: true, decision: 'finding_ready', outcome: context.selfReview!.outcome,
+    });
+  } finally { cleanupMode.automatic = false; }
+}, 120_000);

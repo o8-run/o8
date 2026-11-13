@@ -505,6 +505,10 @@ export function useOrchestratorMobile({
           if (status === 'ready') {
             sealStreamingBuffer();
             setTurnStatus('idle');
+          } else if (status === 'unreported') {
+            sealStreamingBuffer();
+            setTurnStatus('error');
+            setErrorNote(`Unreported: ${typeof data.reason === 'string' ? data.reason : 'turn ended without an outcome report'}. Send new work or stop the lead.`);
           } else if (status === 'busy') {
             setTurnStatus('busy');
           } else if (status === 'dead') {
