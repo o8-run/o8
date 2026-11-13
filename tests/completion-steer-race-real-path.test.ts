@@ -220,6 +220,22 @@ afterEach(() => {
 afterAll(() => { closeDb(); rmSync(dataDir, { recursive: true, force: true }); });
 
 describe('completion and steer overlap through production callbacks and routes', () => {
+  it('holds a clean owned exit when completion verification throws instead of publishing completed', async () => {
+    const { lane, sessionKey, runId } = fixture();
+    h.verify.mockRejectedValueOnce(new Error('fixture verifier unavailable'));
+
+    expect(await ingestAgentCompletionSignal(sessionKey, runId)).toBe(true);
+
+    expect(getLane(lane.id)).toMatchObject({ status: 'awaiting_input',
+      lastEventLabel: 'completion_check_failed' });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ surfaceId: sessionKey,
+      status: 'failed', detail: expect.stringContaining('Completion check failed') }));
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'completed' }));
+    expect(dependencies.enqueueAutoReview).not.toHaveBeenCalled();
+    expect(dependencies.queueReviewContinuation).not.toHaveBeenCalled();
+    expect(readOrchestratorControlPlaneState().packets[0]?.releaseState).toBe('pending');
+  });
+
   it.each(['current', 'registry'] as const)('keeps fully settled %s work reviewable across repeated continuation', async (location) => {
     const { packet, lane, sessionKey, finishRun } = fixture();
     const missionId = `mission-${packet.id}`;

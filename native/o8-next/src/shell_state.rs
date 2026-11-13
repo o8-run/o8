@@ -37,11 +37,14 @@ impl std::ops::DerefMut for Workspace {
     }
 }
 /// Classic right-panel preferences; pane contents and credentials stay elsewhere.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PanelState {
     pub visible: bool,
     pub primary: String,
+    /// Upper and lower tool selections belong to their workspace.
+    pub selected_tools: BTreeMap<String, String>,
+    pub lower_tools: BTreeMap<String, String>,
     pub utility_tabs: BTreeMap<String, Vec<String>>,
     pub split: bool,
     pub secondary: String,
@@ -60,6 +63,8 @@ impl Default for PanelState {
         Self {
             visible: false,
             primary: "launcher".into(),
+            selected_tools: BTreeMap::new(),
+            lower_tools: BTreeMap::new(),
             utility_tabs: BTreeMap::new(),
             split: false,
             secondary: "o8-md".into(),
@@ -93,6 +98,9 @@ pub struct State {
     /// Names the person gave tabs, by tab key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tab_labels: BTreeMap<String, String>,
+    /// Last seen titles for open threads, by workspace and thread id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub thread_titles: BTreeMap<String, String>,
     /// Native Quick docs pins, isolated by the workspace's repository path.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub quick_doc_pins: BTreeMap<String, Vec<String>>,
@@ -125,9 +133,13 @@ pub struct State {
     /// Detailed three-line chat rows (opt-in; compact when absent).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sidebar_detailed_rows: bool,
-    /// Running threads fold into a collapsible Working section.
+    /// Running threads stay in their groups instead of the Working drawer at
+    /// the foot of the sidebar (on unless turned off).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub sidebar_working_section: bool,
+    pub sidebar_working_off: bool,
+    /// The Working drawer is open (closed to one row when absent).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sidebar_working_open: bool,
     /// The Inbox keeps running threads in Active instead of folding them into
     /// its Working shelf (on unless turned off, as in T3 Code).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -196,6 +208,7 @@ impl Default for State {
             right_panel_width: None,
             right_panel: Default::default(),
             tab_labels: BTreeMap::new(),
+            thread_titles: BTreeMap::new(),
             quick_doc_pins: BTreeMap::new(),
             browser_pages: BTreeMap::new(),
             browser_pip_wide: false,
@@ -207,7 +220,8 @@ impl Default for State {
             terminal_views: BTreeSet::new(),
             terminal_launched: BTreeMap::new(),
             sidebar_detailed_rows: false,
-            sidebar_working_section: false,
+            sidebar_working_off: false,
+            sidebar_working_open: false,
             sidebar_inbox_working_off: false,
             notes: Default::default(),
             keybindings: BTreeMap::new(),
@@ -263,6 +277,8 @@ impl State {
             || !(400. ..=16_384.).contains(&h)
             || !self.right_panel.ratio.is_finite()
             || !(25. ..=75.).contains(&self.right_panel.ratio)
+            || self.right_panel.selected_tools.len() > 500
+            || self.right_panel.lower_tools.len() > 500
             || self.right_panel.utility_tabs.len() > 500
             || self
                 .right_panel
@@ -327,12 +343,21 @@ impl State {
         if bytes.len() > 1024 * 1024 {
             return Ok(Self::recovered());
         }
-        let state: Self = match serde_json::from_slice(&bytes) {
+        let mut state: Self = match serde_json::from_slice(&bytes) {
             Ok(state) => state,
             Err(_) => return Ok(Self::recovered()),
         };
         if state.validate().is_err() {
             return Ok(Self::recovered());
+        }
+        if state.right_panel.selected_tools.is_empty()
+            && let Some(scope) = &state.selected
+        {
+            let panel = &mut state.right_panel;
+            panel.selected_tools.insert(scope.clone(), panel.primary.clone());
+            if panel.split {
+                panel.lower_tools.entry(scope.clone()).or_insert(panel.secondary.clone());
+            }
         }
         Ok(state)
     }

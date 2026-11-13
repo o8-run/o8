@@ -383,5 +383,17 @@ export async function handleAgentCompletion(
     if (error instanceof SupersededCompletionError)
       return { superseded: true };
     console.error('[supervisor] Completion callback failed:', error);
+    const detail = 'Completion check failed; work is retained and needs operator input.';
+    try {
+      guard.check();
+      updateLane(lane.id, { status: 'awaiting_input', outcomeNote: detail,
+        lastEventAt: new Date().toISOString(), lastEventLabel: 'completion_check_failed' }, 'system');
+    } catch (holdError) {
+      if (holdError instanceof SupersededCompletionError) return { superseded: true };
+      console.error('[supervisor] Failed to retain completion attention state:', holdError);
+    }
+    // An unavailable check is never an affirmative completion verdict, even
+    // when persisting the attention state also fails.
+    return { block: true, detail };
   }
 }

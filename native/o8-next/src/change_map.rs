@@ -324,8 +324,13 @@ impl ChangeMap {
                 details = details.child(
                     div()
                         .px(px(8.))
-                        .text_color(theme().text_muted)
-                        .child("Dependencies: green added · red removed · muted existing"),
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(6.))
+                        .child(div().text_color(theme().text_muted).child("Dependencies:"))
+                        .child(div().text_color(theme().success).child("+ added"))
+                        .child(div().text_color(theme().danger).child("− removed"))
+                        .child(div().text_color(theme().text_muted).child("existing")),
                 );
             }
             for (index, edge) in self.delta["edges"]

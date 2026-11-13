@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { NextRequest } from 'next/server';
 import { panelGateMiddleware } from '@/middleware';
 import { mutationWorkspace } from '@/lib/repos/mutation-workspace';
-import { matchNativeHttpRoute } from './native-http-registry';
+import { matchNativeHttpRoute, nativeHttpMethods } from './native-http-registry';
 import { nativeSessionReadsEnabled } from './native-session-reads';
 import { markNativeCortexReader } from '@/lib/cortex/owner-process';
 import { isLoopbackAddress } from '@/lib/auth/loopback-request';
@@ -79,18 +79,19 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
       response = denied ?? new Response(null, { status: 204 });
       admission = !denied;
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
-      response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: match.route.methods.join(', ') } });
+      response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });
     } else if (match.route.path === '/api/runtime/archive' && typeof mutationWorkspace({ url: url.href }) !== 'string') {
       response = Response.json({ error: 'An absolute workspace is required for native archive' }, { status: 400 });
     } else {
+      const requestLimit = match.route.maxBodyBytes ?? REQUEST_LIMIT;
       let size = 0;
       const chunks: Buffer[] = [];
       for await (const chunk of req.iterator({ destroyOnReturn: false })) {
         size += chunk.length;
-        if (size > REQUEST_LIMIT) break;
+        if (size > requestLimit) break;
         chunks.push(Buffer.from(chunk));
       }
-      if (size > REQUEST_LIMIT) response = Response.json({ error: 'Request exceeds 16 MiB' }, { status: 413 });
+      if (size > requestLimit) response = Response.json({ error: requestLimit === REQUEST_LIMIT ? 'Request exceeds 16 MiB' : `Request exceeds ${requestLimit} bytes` }, { status: 413 });
       else {
         const handlers = await match.route.load() as Record<string, Handler>;
         const request = new NextRequest(url, { ...init, ...(size ? { body: Buffer.concat(chunks) } : {}) });

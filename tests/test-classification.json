@@ -2203,6 +2203,15 @@
       ]
     },
     {
+      "path": "tests/ci-audit-tool-cache-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ci-gates-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2424,9 +2433,11 @@
       "path": "tests/close-archived-owner-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli",
         "process-signal",
-        "real-path"
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -2948,6 +2959,12 @@
         "git-cli",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cortex-managed-unavailable-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -4240,6 +4257,15 @@
       ]
     },
     {
+      "path": "tests/machine-heavy-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/macos-cpu-packages.test.ts",
       "reasons": [
         "child-process",
@@ -4925,6 +4951,12 @@
       ]
     },
     {
+      "path": "tests/native-dispatch-long-forward.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "tests/native-helper-tracing-real-path.test.ts",
       "reasons": [
         "native-build",
@@ -5445,6 +5477,22 @@
       ]
     },
     {
+      "path": "tests/o8d-approval-runtime-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-artifacts-harness-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-backend-models-native-real-path.test.ts",
       "reasons": [
         "executable-fixture",
@@ -5467,6 +5515,12 @@
     },
     {
       "path": "tests/o8d-broadcast-commentary-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-broadcast-writes-native-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -5592,6 +5646,12 @@
       ]
     },
     {
+      "path": "tests/o8d-knowledge-owner-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-lane-commands-native-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5624,6 +5684,18 @@
     },
     {
       "path": "tests/o8d-mcp-receipts-corrections-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-mobile-symon-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-mobile-symon-tool-native-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -5681,7 +5753,25 @@
       ]
     },
     {
+      "path": "tests/o8d-orchestrator-control-writes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-orchestrator-digest-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-orchestrator-mission-writes-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-orchestrator-reads-native-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -5689,6 +5779,15 @@
     {
       "path": "tests/o8d-orchestrator-reruns-native-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-packet-steer-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
         "real-path"
       ]
     },
@@ -5720,6 +5819,19 @@
     },
     {
       "path": "tests/o8d-projects-create-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-propose-spec-cache-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-proxy-write-origin-native-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -5788,9 +5900,31 @@
       ]
     },
     {
+      "path": "tests/o8d-review-push-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-session-read-admission-real-path.test.ts",
       "reasons": [
         "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-settings-window-owner-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-setup-writes-native-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -5805,6 +5939,13 @@
       "reasons": [
         "child-process",
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-spectator-preview-native-real-path.test.ts",
+      "reasons": [
+        "network-listener",
         "real-path"
       ]
     },
@@ -5837,6 +5978,14 @@
     {
       "path": "tests/o8d-symon-watches-native-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-task-dispatch-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
@@ -5920,6 +6069,26 @@
       "reasons": [
         "executable-fixture",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-worker-availability-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-worker-targets-native-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-worker-task-native-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -6421,6 +6590,12 @@
       ]
     },
     {
+      "path": "tests/panel-json-body-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/panel-raster-image-serving-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -6637,6 +6812,12 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/plan-approval-persist-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -7273,6 +7454,14 @@
       ]
     },
     {
+      "path": "tests/repo-default-branch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-inventory-realtime-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -7558,6 +7747,14 @@
       ]
     },
     {
+      "path": "tests/review-push-next-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-ready-coalescer-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -7713,6 +7910,14 @@
       ]
     },
     {
+      "path": "tests/runtime-entrypoints-round2-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/runtime-launch-idempotency-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -7800,14 +8005,14 @@
       "path": "tests/server-bundle-size-real-path.test.ts",
       "reasons": [
         "child-process",
-        "real-path",
-        "terminal-host"
+        "real-path"
       ]
     },
     {
       "path": "tests/server-bundles-packaged-layout-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "native-build",
         "network-listener",
         "process-signal",
@@ -9003,6 +9208,12 @@
       "browser": true
     },
     {
+      "path": "tests/worker-packet-reads-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-pane-drafts-real-path.test.ts",
       "reasons": [
         "browser",
@@ -9324,6 +9535,12 @@
       "reasons": [
         "child-process",
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/ws-parity-server-child-exit-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
