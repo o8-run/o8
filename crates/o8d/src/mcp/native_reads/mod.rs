@@ -168,7 +168,7 @@ impl NativeReads {
             }
             let name = message["params"]["name"].as_str().ok_or(())?;
             let result = if !names.iter().any(|v| v == name) || !matches!(requested, "" | "full") {
-                json!({"isError":true,"content":[{"type":"text","text":format!("Tool unavailable in operator MCP profile {profile}: {name}")}]})
+                json!({"isError":true,"content":[{"type":"text","text":format!("Tool unavailable in operator MCP profile {profile}: {name}. Call tools/list and use an available name exactly.")}]})
             } else {
                 let args = message["params"]
                     .get("arguments")
@@ -194,7 +194,7 @@ impl NativeReads {
                     }
                     "o8_lease_list" => leases::read(&tx)?,
                     "o8_lease_status" => leases::status(&tx, &args)?,
-                    "o8_spec_read" => spec::read(&args)?,
+                    "o8_spec_read" => spec::read(&tx, &args, &policy, &self.directory)?,
                     _ => return Err(()),
                 };
                 json!({"isError":data.get("error").is_some(),"content":[{"type":"text","text":data.to_string()}]})
