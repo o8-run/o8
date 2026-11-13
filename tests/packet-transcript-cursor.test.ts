@@ -128,7 +128,7 @@ it('checkpoints stable native unknown time without changing the legacy timestamp
   expect(first.events[0].ts).toBe('2026-01-01T00:00:02Z');
   fixture.events = [Object.assign({ ...answer(1, 'Untimed answer'), ts: '2026-01-02T00:00:02Z' }, { nativeTimestamp: '' })];
   const unchanged = await read(first.nextCursor, first.cursorToken);
-  expect(unchanged).toMatchObject({ events: [], nextCursor: null, cursorReset: false });
+  expect(unchanged).toMatchObject({ events: [], nextCursor: first.nextCursor, cursorToken: first.cursorToken, cursorReset: false });
 });
 
 it('marks unknown time on terminal and error records without changing legacy fields', async () => {
@@ -145,7 +145,7 @@ it('does not rename fallback events when JSON property order changes', async () 
   fixture.events = [answer(1, 'Same answer')];
   const first = await read();
   fixture.events = [{ text: 'Same answer', type: 'assistant', ts: '2026-01-01T00:00:02Z', seq: 1 }];
-  expect(await read(first.nextCursor, first.cursorToken)).toMatchObject({ events: [], cursorReset: false, nextCursor: null });
+  expect(await read(first.nextCursor, first.cursorToken)).toMatchObject({ events: [], cursorReset: false, nextCursor: first.nextCursor, cursorToken: first.cursorToken });
 });
 
 it('keeps the original fallback identity when a later stream shape supplies an item id', async () => {
