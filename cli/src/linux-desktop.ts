@@ -54,6 +54,10 @@ function healthy(result: CliResult): boolean {
     && typeof status.pid === 'number' && Number.isSafeInteger(status.pid) && status.pid > 0;
 }
 
+// Set when this launcher forwards a stop signal, so a requested exit is not
+// reported as a failed start.
+let interrupted = false;
+
 async function runCli(args: string[], capture = false, timeoutMs?: number): Promise<CliResult> {
   return new Promise((done, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
@@ -63,7 +67,7 @@ async function runCli(args: string[], capture = false, timeoutMs?: number): Prom
     let stderr = '';
     child.stdout?.on('data', chunk => { stdout += String(chunk); });
     child.stderr?.on('data', chunk => { stderr += String(chunk); });
-    const forward = () => { child.kill('SIGTERM'); };
+    const forward = () => { interrupted = true; child.kill('SIGTERM'); };
     process.once('SIGINT', forward); process.once('SIGTERM', forward);
     const cleanup = () => { process.off('SIGINT', forward); process.off('SIGTERM', forward); };
     child.once('error', error => { cleanup(); reject(error); });
@@ -224,12 +228,14 @@ async function openDesktop(): Promise<number> {
     const next = runCli(['next', '--binary', binary]);
     void next.then(() => { finished = true; }, () => { finished = true; });
     while (!finished && !windowIsOpen()) await delay(100);
+    // False only when the window process ended before /proc ever showed it.
+    const opened = !finished || windowIsOpen();
     // Keep the CLI's signal/exit lifecycle, but release launch exclusion once
     // /proc can identify the window. Later clicks can check daemon health.
     closeSync(lock);
     released = true;
     const code = (await next).code;
-    if (code !== 0) {
+    if (code !== 0 && !opened && !interrupted) {
       process.stderr.write('o8: Could not open the native window. Check that a usable Vulkan graphics device and driver are available. See the startup error above.\n');
     }
     return code;

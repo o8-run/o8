@@ -184,6 +184,8 @@ jobs:
           test "$result" -ne 0
           test "$result" -ne 124
           test "$result" -ne 137
+          # The renderer's own reason must be present, so another early failure cannot pass.
+          grep -F 'NoSupportedDeviceFound' "$proof/startup.log"
           grep -F 'Check that a usable Vulkan graphics device and driver are available' "$proof/startup.log"
           "$image" serve stop
           mkdir -p work/appimage-no-driver-proof
