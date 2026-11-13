@@ -660,3 +660,63 @@ fn change_map_zoom_keeps_the_clear_target_visible_and_clickable(cx: &mut TestApp
         assert!(view.read_with(visual, |s, _| s.map.selected.is_empty()));
     }
 }
+
+fn change_map_long_label_bounds(cx: &mut TestAppContext, zoom: f32) {
+    let (_server, client) = fixture();
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    for _ in 0..1000 {
+        visual.run_until_parked();
+        if view.read_with(visual, |s, _| {
+            s.ready && (!s.map.delta.is_null() || s.map.error.is_some())
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(view.read_with(visual, |s, _| s.ready));
+    view.update(visual, |s, cx| {
+        let mut map = change_map_fixture();
+        let long_path = format!(
+            "src/{}/very long module name with many words.ts",
+            "long directory name ".repeat(30)
+        );
+        map.delta["nodes"] = json!([
+            {"path":long_path, "state":"changed", "focusPath":"added.ts"},
+            {"path":"second.ts", "state":"changed", "focusPath":"medium.ts"}
+        ]);
+        map.delta["edges"] = json!([]);
+        map.attention["items"] = json!([]);
+        map.expanded = true;
+        s.map = map;
+        cx.notify();
+    });
+    visual.simulate_resize(gpui::size(gpui::px(440.), gpui::px(900.)));
+    for _ in 0..2 {
+        visual.update(|w, cx| {
+            w.set_zoom(zoom, cx);
+            w.refresh();
+            w.draw(cx).clear();
+        });
+    }
+    let first = visual.debug_bounds("change-map-node-0").expect("long node");
+    let next = visual.debug_bounds("change-map-node-1").expect("next node");
+    let viewport = visual.update(|w, _| w.viewport_size());
+    assert!(
+        first.size.height <= gpui::px(32.) && first.bottom() <= next.top(),
+        "node must fit its 36px row without overlapping: zoom={zoom}, first={first:?}, next={next:?}"
+    );
+    assert!(
+        first.left() >= gpui::px(0.) && first.right() <= viewport.width,
+        "node must fit the narrow zoomed pane: zoom={zoom}, first={first:?}, viewport={viewport:?}"
+    );
+}
+#[gpui::test]
+fn change_map_long_labels_at_zoom_140(cx: &mut TestAppContext) {
+    change_map_long_label_bounds(cx, 1.4);
+}
+#[gpui::test]
+fn change_map_long_labels_at_zoom_200(cx: &mut TestAppContext) {
+    change_map_long_label_bounds(cx, 2.);
+}

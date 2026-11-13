@@ -123,3 +123,41 @@ fn pull_requests_change_map_reads_selected_head_and_filters_diff(cx: &mut TestAp
         assert!(s.map.selected.is_empty());
     });
 }
+
+#[gpui::test]
+fn pull_requests_change_map_filtered_count_and_empty_recovery(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_args(&["--change-map"]);
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
+    });
+    settle(visual);
+    click(visual, "pr-row-7");
+    let index = view.read_with(visual, |s, _| {
+        s.map.delta["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|node| node["path"] == "entry.ts")
+            .unwrap()
+    });
+    click(visual, "change-map-summary");
+    click(visual, &format!("change-map-node-{index}"));
+    assert!(
+        visual.debug_bounds("pr-changes-count-1").is_some(),
+        "the toolbar must count the single selected file"
+    );
+    view.update(visual, |s, cx| {
+        s.map.selected = vec!["not-in-this-diff.ts".into()];
+        s.changed(cx);
+    });
+    draw(visual);
+    assert!(visual.debug_bounds("pr-changes-count-0").is_some());
+    assert!(visual.debug_bounds("pr-map-no-files").is_some());
+    assert!(visual.debug_bounds("pr-file-0").is_none());
+    click(visual, "pr-map-show-all");
+    view.read_with(visual, |s, _| {
+        assert!(s.map.selected.is_empty());
+        assert_eq!(s.tab, "changes");
+    });
+    assert!(visual.debug_bounds("pr-file-0").is_some());
+}

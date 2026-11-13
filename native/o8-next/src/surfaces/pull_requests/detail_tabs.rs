@@ -395,7 +395,11 @@ impl PullRequests {
         let all_open = files
             .iter()
             .all(|f| self.open_files.contains(string(f, "path")));
+        let count = self.detail["changedFiles"]
+            .as_u64()
+            .unwrap_or(files.len() as u64);
         let toolbar = div()
+            .debug_selector(move || format!("pr-changes-count-{count}"))
             .px(px(18.))
             .pb(px(8.))
             .flex()
@@ -405,9 +409,7 @@ impl PullRequests {
             .text_color(theme().text_muted)
             .child(format!(
                 "{} files · +{} −{}",
-                self.detail["changedFiles"]
-                    .as_u64()
-                    .unwrap_or(files.len() as u64),
+                count,
                 self.detail["additions"].as_u64().unwrap_or(0),
                 self.detail["deletions"].as_u64().unwrap_or(0)
             ))
