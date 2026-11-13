@@ -792,13 +792,15 @@ impl Transcript {
             .cloned()
         {
             let coverage = &marker.extra["nativeWorkerReadback"];
-            let complete = coverage["coverage_complete"] == true;
             let first = coverage["coverage_start"].as_u64();
             let mut incoming: Vec<_> = history
                 .transcript
                 .into_iter()
                 .filter(|entry| {
-                    crate::shell::session::worker_transcript::retain_saved(entry, complete, first)
+                    // Backfill can predate even a complete normalized log.
+                    // Only replace prose inside its known coverage; unknown
+                    // times remain conservative, as on bounded tail readers.
+                    crate::shell::session::worker_transcript::retain_saved(entry, false, first)
                         && !self.entries.iter().any(|current| current.id == entry.id)
                 })
                 .collect();
