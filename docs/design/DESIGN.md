@@ -150,6 +150,8 @@ Matches the landing's structural blue. Already in light use on empty states; for
 
 ### Font — LOCKED (system stack; supersedes the old Plus Jakarta Sans lock)
 
+> **Superseded 2026-11-12:** o8 Branding v1 sets Inter Tight and JetBrains Mono ([BRAND.md](BRAND.md) §9). The system stack stays until step 4 of [BRAND-IMPLEMENT.md](BRAND-IMPLEMENT.md) lands.
+
 **System stack via `var(--font-sans-system)`** — `-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", …`. The Plus Jakarta Sans pass was rolled back (2026-05): SF Pro's hinting at the light weights we run beats any webfont we tested. Never hard-code `'Inter'` or any webfont on chrome.
 
 Mono remains SF Mono / Menlo / Consolas fallback chain.

@@ -1,3 +1,4 @@
+import { RuntimeSelectionError, runtimeSelectionRefusal } from '@/lib/agents/routing';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
@@ -34,6 +35,10 @@ export async function POST(request: Request): Promise<Response> {
     };
     return Response.json(await dispatchTask(body.taskId, input), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
+    if (error instanceof RuntimeSelectionError) {
+      const refusal = runtimeSelectionRefusal(error);
+      return Response.json({ error: refusal.message, code: refusal.code, errorClass: 'RuntimeSelectionError' }, { status: refusal.status, headers: { 'Cache-Control': 'no-store' } });
+    }
     const lockTimeout = error instanceof ControlPlaneLockTimeoutError;
     const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
     return Response.json({

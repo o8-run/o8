@@ -27,7 +27,7 @@ vi.mock('@/lib/mobile/symon-text-bridge-client', () => ({
 
 import { POST as generate } from '@/app/api/mobile/genui/stream/route';
 import { POST as mint } from '@/app/api/mobile/symon/text-session/route';
-import { POST as runTurn } from '@/app/api/mobile/symon/text-turn/route';
+import { POST as runTurn } from '@/lib/symon/http/text-turn';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-mobile-ask-effort-'));
 const capture = join(root, 'launches.jsonl');

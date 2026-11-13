@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
@@ -13,7 +14,10 @@ const CREATION_RECEIPT_TTL_MS = Math.floor(Number.MAX_SAFE_INTEGER / 2);
 
 export async function POST(request: Request) {
   const account = captureGitHubAccount();
-  const body = await request.json();
+  const body = await readJsonObject(request);
+    if (!body) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
   const { title, description, labels, repo, clientMutationId } = body as {
     title: string;
     description?: string;

@@ -1,0 +1,27 @@
+
+/* round 5: two faces, the loop saga */
+.faces.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:720px){ .faces.two{grid-template-columns:1fr} }
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:28px}
+.step{margin:0;border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface);display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start}
+.step.st-now{border-color:var(--b-acc)}
+.step .era-ring{padding:10px}
+.step .era-ring .mk{width:52px;height:52px}
+.step figcaption{display:flex;flex-direction:column;gap:3px;min-width:0}
+.step small{font-family:var(--f-mono);font-size:10.5px;color:var(--faint);letter-spacing:.05em;text-transform:uppercase}
+.step.st-now small{color:var(--b-acc)}
+.step b{font-family:var(--disp);font-weight:500;font-size:18px;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+.step b .avatar{width:22px;height:22px;margin:0;display:inline-block;background:none;border:0}
+.step b .avatar .mk{width:22px;height:22px}
+.st-does{font-size:14px;line-height:1.45;color:var(--fg)}
+.st-where{font-size:12.5px;line-height:1.45;color:var(--muted)}
+.st-mo{font-family:var(--f-mono);font-size:11px;color:var(--faint);margin-top:2px}
+.shows{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:24px}
+.shows p{margin:0;font-size:14px;line-height:1.55;color:var(--muted)}
+@media (max-width:900px){ .steps,.shows{grid-template-columns:1fr} }
+@media (max-width:420px){ .step{grid-template-columns:1fr} }
+.today{display:flex;gap:18px;align-items:center;border:1px solid var(--b-hair);border-radius:16px;padding:16px 18px;background:var(--b-paper);color:var(--b-ink);margin:0 0 16px}
+.today .today-ring{width:88px;height:88px;flex:none}
+.today p{margin:0;font-size:14.5px;line-height:1.55;color:var(--b-muted)}
+.today b{color:var(--b-ink);font-weight:500}
+@media (max-width:420px){ .today{flex-direction:column;align-items:flex-start} }

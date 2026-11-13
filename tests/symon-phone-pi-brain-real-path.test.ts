@@ -28,7 +28,7 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
 }));
 
 import { POST as mintTextSession } from '@/app/api/mobile/symon/text-session/route';
-import { DELETE as stopTextTurn, POST as runTextTurn } from '@/app/api/mobile/symon/text-turn/route';
+import { DELETE as stopTextTurn, POST as runTextTurn } from '@/lib/symon/http/text-turn';
 
 type BrainGlobal = { __o8SymonBrain?: Promise<SymonBrain> };
 

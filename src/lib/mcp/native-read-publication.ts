@@ -67,3 +67,32 @@ export function removeNativeStatus(sourceKey: string): void {
     getSqlite().prepare('DELETE FROM app_state WHERE key = ?').run(`${prefix}status/${sourceKey}`);
   } catch { /* Native freshness bounds still apply if pruning fails. */ }
 }
+
+/** Bind inspected spec payloads to the paired process and live credential files. */
+export function nativeSpecReadWitness() {
+  const environment = JSON.stringify(Object.entries(process.env).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  const files = ['ws-token', 'mobile-device-tokens'].map(name => {
+    try { return readFileSync(join(getDataDir(), name), 'utf8'); } catch { return null; }
+  });
+  return { environment: createHash('sha256').update(environment).digest('hex'),
+    credentials: createHash('sha256').update(JSON.stringify(files)).digest('hex') };
+}
+
+/** Reuse the canonical viewer response, including its inspected text and marks. */
+export function publishNativeSpec(base: string, response: unknown, witness: ReturnType<typeof nativeSpecReadWitness>): void {
+  if (process.env.O8D_MCP_READS !== '1') return;
+  try {
+    const value = response as { ok?: boolean; path?: string; contentHash?: string; redaction?: { version?: number } };
+    if (!value?.ok || typeof value.path !== 'string' || !/^[a-f0-9]{64}$/.test(value.contentHash ?? '')
+      || value.redaction?.version !== 1 || Buffer.byteLength(JSON.stringify(value)) > 16_000
+      || JSON.stringify(nativeSpecReadWitness()) !== JSON.stringify(witness)) return;
+    const sqlite = getSqlite();
+    const key = `${prefix}spec/${createHash('sha256').update(value.path).digest('hex')}`;
+    sqlite.transaction(() => {
+      sqlite.prepare('INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+        .run(key, JSON.stringify({ generation, base, response: value, ...witness }), Date.now());
+      sqlite.prepare('DELETE FROM app_state WHERE key IN (SELECT key FROM app_state WHERE key LIKE ? ORDER BY updated_at DESC, key LIMIT -1 OFFSET 64)')
+        .run(`${prefix}spec/%`);
+    })();
+  } catch { /* Unpublished or changed sources retain the canonical TypeScript read. */ }
+}

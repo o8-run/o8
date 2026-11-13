@@ -924,6 +924,15 @@ pub mod annotate {
     pub const HINT: u32 = 0xffffffcc;
 }
 
+/// Brand v1's fixed colours (brand/tokens, docs/design/BRAND.md): the Ring's
+/// ink and paper and its orange review point. The Ring and the app icon use
+/// them on every theme, so they are not theme tokens.
+pub mod brand {
+    pub const INK: u32 = 0x17140f;
+    pub const PAPER: u32 = 0xf4f2ec;
+    pub const ORANGE: u32 = 0xff5a1f;
+}
+
 /// Activity's fixed tints, the same on every appearance: classic
 /// ACTIVITY_COLORS (o8-activity-helpers.tsx) and orchestratorStatusTone
 /// (src/lib/orchestrator/display.ts).

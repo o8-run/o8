@@ -68,7 +68,7 @@ struct List {
     account_id: String,
     drafts: Vec<Draft>,
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct Handle {
     account: String,
     task: String,
@@ -110,6 +110,7 @@ pub(crate) struct Tasks {
     generation: u64,
     message: Option<String>,
     confirming: bool,
+    confirmation_target: Option<Handle>,
     expanded: bool,
     focus: FocusHandle,
     controls: HashMap<&'static str, FocusHandle>,
@@ -130,6 +131,7 @@ impl Tasks {
             generation: 0,
             message: None,
             confirming: false,
+            confirmation_target: None,
             expanded: false,
             focus: cx.focus_handle(),
             controls: HashMap::new(),
@@ -241,7 +243,7 @@ impl Tasks {
                             .is_some_and(|handle| handle.account != list.account_id)
                         {
                             this.stop_handle = None;
-                            this.confirming = false;
+                            this.clear_confirmation();
                         }
                         this.account = Some(list.account_id);
                         this.drafts = list.drafts;
@@ -254,11 +256,18 @@ impl Tasks {
                         this.message = Some(HELD.into());
                     }
                 }
+                if this.confirming && this.confirmation_target != this.stop_target() {
+                    this.clear_confirmation();
+                }
                 cx.notify();
             });
         })
         .detach();
         cx.notify();
+    }
+    fn clear_confirmation(&mut self) {
+        self.confirming = false;
+        self.confirmation_target = None;
     }
     pub(super) fn select(&mut self, index: usize, cx: &mut Context<Self>) {
         if self.reading || self.busy.is_some() {
@@ -266,7 +275,7 @@ impl Tasks {
         }
         if let Some(draft) = self.drafts.get(index) {
             self.selected = Some(draft.task_id.clone());
-            self.confirming = false;
+            self.clear_confirmation();
             self.expanded = false;
             self.message = None;
             self.remember_attempt();
@@ -276,6 +285,7 @@ impl Tasks {
     pub(crate) fn confirm(&mut self, confirm: bool, cx: &mut Context<Self>) {
         if self.available(Action::Stop) {
             self.confirming = confirm;
+            self.confirmation_target = confirm.then(|| self.stop_target()).flatten();
             cx.notify();
         }
     }
@@ -291,6 +301,11 @@ impl Tasks {
         let Some(target) = target else {
             return;
         };
+        if action == Action::Stop && self.confirmation_target.as_ref() != Some(&target) {
+            self.clear_confirmation();
+            cx.notify();
+            return;
+        }
         if action == Action::Launch {
             self.uncertain.insert(target.task.clone());
             self.stop_handle = Some(target.clone());
@@ -326,7 +341,7 @@ impl Tasks {
                         }
                         this.stop_handle =
                             (!receipt.stopped && !receipt.completed).then_some(target);
-                        this.confirming = false;
+                        this.clear_confirmation();
                     }
                     Err(_) => this.message = Some(UNCERTAIN.into()),
                 }
@@ -345,7 +360,7 @@ impl Tasks {
         if event.keystroke.key == "escape" {
             if self.confirming {
                 if self.busy.is_none() && !self.reading {
-                    self.confirming = false;
+                    self.clear_confirmation();
                     cx.notify();
                 }
                 return true;
