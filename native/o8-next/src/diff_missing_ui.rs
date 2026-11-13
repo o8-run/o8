@@ -24,8 +24,12 @@ impl State {
 }
 
 impl DiffSurface {
+    pub(crate) fn allow_orphan_discard(&mut self, allowed: bool) {
+        self.discard_allowed = allowed;
+        if !allowed && let Some(state) = &mut self.missing { state.confirming = false; }
+    }
     pub(super) fn confirm_missing(&mut self, confirm: bool, cx: &mut Context<Self>) {
-        if self.busy {
+        if self.busy || !self.discard_allowed {
             return;
         }
         if let Some(state) = &mut self.missing {
@@ -46,9 +50,10 @@ impl DiffSurface {
         let Some(state) = &mut self.missing else {
             return;
         };
-        if self.busy || !state.confirming || state.discarded {
+        if self.busy || !self.discard_allowed || !state.confirming || state.discarded {
             return;
         }
+        // Discard the server error.laneId, never the inspector caller's lane hint.
         let lane_id = state.checkout.lane_id.clone();
         state.failure = None;
         self.busy = true;
@@ -57,7 +62,12 @@ impl DiffSurface {
         let client = self.client.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { discard(&client, &lane_id) });
+            .spawn(async move {
+                discard(&client, &lane_id)?;
+                // Classic lifecycle-reconcile refreshes this same projection.
+                let _ = client.get::<Value>("/api/panel/workspaces", &[]);
+                Ok::<(), String>(())
+            });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -86,7 +96,7 @@ impl DiffSurface {
         let Some(state) = &self.missing else {
             return vec![];
         };
-        if state.discarded {
+        if state.discarded || !self.discard_allowed {
             return vec![];
         }
         if !state.confirming {

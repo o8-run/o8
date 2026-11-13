@@ -27,6 +27,9 @@ mod stack;
 pub(crate) use scope::Scope;
 
 pub(crate) struct DiffSurface {
+    request_changes: Option<gpui::Entity<crate::request_changes::RequestChanges>>,
+    _request_changes_observer: Option<gpui::Subscription>,
+    discard_allowed: bool,
     client: Client,
     pub(crate) target: Target,
     pub(crate) document: Rc<Document>,
@@ -92,6 +95,7 @@ impl DiffSurface {
         if self.busy {
             return;
         }
+        if let Some(control) = &self.request_changes { control.update(cx, |control, cx| control.refresh(cx)); }
         self.generation += 1;
         let generation = self.generation;
         self.ready = false;
@@ -334,6 +338,12 @@ fn cell(line: Option<&Line>, before: bool) -> gpui::Div {
 }
 impl Render for DiffSurface {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let saved_rejection = self.state["orchestratorReview"]["verdict"] == "rejected";
+        let request_trigger = self
+            .request_changes
+            .as_ref()
+            .filter(|control| self.missing.is_none() && saved_rejection && control.read(cx).visible())
+            .map(|control| control.update(cx, |control, cx| control.trigger(cx)));
         let doc = self.document.clone();
         let painted = self.painted.clone();
         let selected = self.selected;
@@ -465,11 +475,12 @@ impl Render for DiffSurface {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.5))
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.cancel_missing(event, cx) {
                     cx.stop_propagation();
                     return;
                 }
+                if this.request_changes.as_ref().is_some_and(|view| view.read(cx).editing(window, cx)) { return; }
                 match event.keystroke.key.as_str() {
                     key @ ("home" | "end") if this.stacked() => {
                         let shown = this.shown();
@@ -588,6 +599,7 @@ impl Render for DiffSurface {
                             button("diff-approve", "Approve", false)
                                 .on_click(cx.listener(|s, _, _, cx| s.decide(true, cx))),
                         )
+                        .when_some(request_trigger, |bar, trigger| bar.child(trigger))
                         .child(
                             button("diff-reject", "Reject", false)
                                 .on_click(cx.listener(|s, _, _, cx| s.decide(false, cx))),
@@ -600,6 +612,21 @@ impl Render for DiffSurface {
                                 .on_click(cx.listener(|s, _, _, cx| s.decide(false, cx))),
                         )
                     }),
+            )
+            .when_some(
+                self.request_changes
+                    .clone()
+                    .filter(|control| self.missing.is_none() && saved_rejection && control.read(cx).details_visible()),
+                |view, control| {
+                    view.child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .px(px(16.))
+                            .py(px(6.))
+                            .child(control),
+                    )
+                },
             )
             .when(self.missing.is_none(), |surface| {
                 surface.child(
@@ -731,3 +758,7 @@ pub fn try_launch(args: &[String]) -> Result<bool, String> {
 #[cfg(test)]
 #[path = "diff_missing_tests.rs"]
 mod missing_tests;
+
+#[cfg(test)]
+#[path = "diff_request_changes_tests.rs"]
+mod request_changes_render_tests;

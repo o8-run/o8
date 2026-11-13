@@ -36,13 +36,18 @@ impl Fixture {
                     std::thread::sleep(Duration::from_millis(2));
                     continue;
                 };
+                let worker_gets = worker_gets.clone();
+                let worker_posts = worker_posts.clone();
+                let worker_mode = worker_mode.clone();
+                std::thread::spawn(move || {
+                    stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
                 let mut header = Vec::new();
                 while !header.ends_with(b"\r\n\r\n") {
                     let mut byte = [0];
-                    stream.read_exact(&mut byte).unwrap();
+                    if stream.read_exact(&mut byte).is_err() { return; }
                     header.push(byte[0]);
                 }
                 let header = String::from_utf8(header).unwrap();
@@ -55,7 +60,7 @@ impl Fixture {
                     })
                     .unwrap_or(0);
                 let mut body = vec![0; length];
-                stream.read_exact(&mut body).unwrap();
+                if stream.read_exact(&mut body).is_err() { return; }
                 let (status, value) = if header.starts_with("GET ") {
                     worker_gets
                         .lock()
@@ -96,6 +101,7 @@ impl Fixture {
                     body
                 )
                 .unwrap();
+                });
             }
         });
         Self {
@@ -196,6 +202,7 @@ fn diff_missing_checkout_notice_and_discard(cx: &mut TestAppContext) {
         assert!(state.failure.is_none());
     });
     assert_eq!(fixture.posts.lock().unwrap().len(), 2);
+    assert!(fixture.gets.lock().unwrap().iter().any(|path| path.contains("/api/panel/workspaces")), "discard refreshes the lifecycle projection");
     assert!(cx.debug_bounds("diff-discard-orphan").is_none());
     view.update(cx, |view, cx| view.load(cx));
     cx.run_until_parked();
@@ -232,75 +239,5 @@ fn diff_other_refusals_never_offer_discard(cx: &mut TestAppContext) {
     }
 }
 
-/// The constructor used by the worker card keeps the ordinary working-diff read,
-/// then obtains canonical missing-checkout proof from the recorded lane.
-#[gpui::test]
-fn diff_missing_checkout_from_worker_inspector(cx: &mut TestAppContext) {
-    let fixture = Fixture::new(409, "worktree_missing", "lane-orphan");
-    let (view, cx) = cx.add_window_view(|window, cx| {
-        DiffSurface::in_lane(
-            fixture.client(),
-            Target::Worktree {
-                path: "/fixture/removed-checkout".into(),
-                base: None,
-                file: None,
-            },
-            Some("lane-orphan".into()),
-            window,
-            cx,
-        )
-    });
-    cx.run_until_parked();
-    assert!(cx.debug_bounds("diff-missing-checkout").is_some());
-    assert!(cx.debug_bounds("diff-discard-orphan").is_some());
-    assert!(cx.debug_bounds("diff-approve").is_none());
-    let gets = fixture.gets.lock().unwrap().clone();
-    assert_eq!(gets.len(), 2);
-    assert!(gets[0].starts_with("GET /api/worktrees/diff?"));
-    assert!(gets[1].starts_with("GET /api/lanes/lane-orphan/diff?"));
-    view.update(cx, |view, cx| {
-        view.confirm_missing(true, cx);
-        view.discard_missing(cx);
-    });
-    cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert_eq!(
-            view.missing.as_ref().unwrap().failure.as_deref(),
-            Some("Fixture discard refused.")
-        );
-    });
-    assert_eq!(
-        *fixture.posts.lock().unwrap(),
-        vec![json!({"laneId":"lane-orphan"})]
-    );
-}
-
-#[gpui::test]
-fn diff_worker_inspector_keeps_successful_working_diff(cx: &mut TestAppContext) {
-    let fixture = Fixture::new(200, "", "lane-present");
-    let (view, cx) = cx.add_window_view(|window, cx| {
-        DiffSurface::in_lane(
-            fixture.client(),
-            Target::Worktree {
-                path: "/fixture/present-checkout".into(),
-                base: None,
-                file: None,
-            },
-            Some("lane-present".into()),
-            window,
-            cx,
-        )
-    });
-    cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert!(view.ready && !view.failed && view.missing.is_none())
-    });
-    assert!(cx.debug_bounds("diff-discard-orphan").is_none());
-    let gets = fixture.gets.lock().unwrap();
-    assert_eq!(
-        gets.len(),
-        1,
-        "a valid working diff needs no lane proof read"
-    );
-    assert!(gets[0].starts_with("GET /api/worktrees/diff?"));
-}
+#[path = "diff_missing_worker_tests.rs"]
+mod worker_tests;

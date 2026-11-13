@@ -19,7 +19,19 @@ impl DiffSurface {
     ) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
+        let request_changes = match &target {
+            Target::Packet(packet) => Some(cx.new(|cx| {
+                crate::request_changes::RequestChanges::new(client.clone(), packet.clone(), cx)
+            })),
+            _ => None,
+        };
+        let observer = request_changes
+            .as_ref()
+            .map(|control| cx.observe(control, |_, _, cx| cx.notify()));
         let mut surface = Self {
+            request_changes,
+            _request_changes_observer: observer,
+            discard_allowed: true,
             client,
             target,
             document: Rc::new(Document::default()),
