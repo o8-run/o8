@@ -1,0 +1,52 @@
+name: Welcome
+
+# Posts one short note on a person's first issue or first pull request.
+# It never checks out or runs code from the pull request.
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+concurrency:
+  group: welcome-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Welcome a first-time author
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const item = context.payload.pull_request ?? context.payload.issue;
+            const isPullRequest = Boolean(context.payload.pull_request);
+            if (item.user.type === 'Bot') return;
+            if (['OWNER', 'MEMBER', 'COLLABORATOR'].includes(item.author_association)) return;
+
+            const { owner, repo } = context.repo;
+            const kind = isPullRequest ? 'pr' : 'issue';
+            const earlier = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${repo} author:${item.user.login} is:${kind}`,
+              per_page: 2,
+            });
+            if (earlier.data.total_count > 1) return;
+
+            const links = 'o8 updates post first on x at [@o8dotrun](https://x.com/o8dotrun), '
+              + 'and [discord](https://discord.gg/TFK2x9A5WS) is open for quick questions.';
+            const body = isPullRequest
+              ? `thanks for the first pr, it gets a real review. ${links}`
+              : `thanks for filing this. steps to reproduce help the most if they are not in here yet. ${links}`;
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: item.number,
+              body,
+            });

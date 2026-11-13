@@ -135,6 +135,8 @@ o8 aims to be the best substrate for reviewing and merging agent work. Any agent
 
 Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and the issues labeled [`claimable`](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3Aclaimable) or [`help wanted`](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). UI changes read [`docs/design`](./docs/design/DESIGN.md) first. The full documentation index is [`docs/README.md`](./docs/README.md); the detailed agent and `o8` CLI reference is [`AGENT_REFERENCE.md`](./AGENT_REFERENCE.md).
 
+[![Contributors to o8](https://contrib.rocks/image?repo=o8-run/o8&max=24)](https://github.com/o8-run/o8/graphs/contributors)
+
 Follow [@o8dotrun](https://x.com/o8dotrun) on X for updates: release notes and dev clips post there first. Community: [Discord](https://discord.gg/TFK2x9A5WS) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
 
 ## License
