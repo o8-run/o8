@@ -106,6 +106,7 @@ export function checkLinuxGlibc(targets, { max = DEFAULT_MAX_GLIBC, log = consol
       for (const file of files) {
         const required = highestGlibcRequirement(run('objdump', ['-p', file]));
         scanned += 1;
+        log(`[glibc] ${basename(target)}:${relative(root, file) || basename(file)}: highest GLIBC_${required ?? 'none'}`);
         if (!required) continue;
         const label = `${basename(target)}:${relative(root, file) || basename(file)}`;
         if (!packageHighest || compareGlibcVersions(required, packageHighest) > 0) packageHighest = required;

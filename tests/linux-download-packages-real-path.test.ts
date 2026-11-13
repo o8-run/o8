@@ -102,7 +102,7 @@ it.skipIf(process.platform !== 'linux' || process.env.O8_LINUX_PACKAGE_TESTS !==
   expect(built.status, built.stderr + built.stdout).toBe(0);
   const receipt = JSON.parse(readFileSync(join(output, 'linux-downloads.json'), 'utf8'));
   expect(receipt).toMatchObject({ application: 'o8-next', channel: 'beta', version, published: false,
-    platform: 'linux-x86_64', maxGlibc: '2.39' });
+    platform: 'linux-x86_64', maxGlibc: '2.35' });
   expect(receipt.artifacts).toHaveLength(3);
   for (const artifact of receipt.artifacts) {
     const file = join(output, artifact.name);
@@ -130,7 +130,7 @@ it.skipIf(process.platform !== 'linux' || process.env.O8_LINUX_PACKAGE_TESTS !==
         .toBe(createHash('sha256').update(readFileSync(join(stage, 'usr/lib/o8', binary))).digest('hex'));
     }
   }
-  const abi = run(process.execPath, ['scripts/ci/check-linux-glibc.mjs', '--max', '2.39',
+  const abi = run(process.execPath, ['scripts/ci/check-linux-glibc.mjs', '--max', '2.35',
     ...receipt.artifacts.map((a: { name: string }) => join(output, a.name))]);
   expect(abi.status, abi.stderr).toBe(0);
   expect(abi.stdout.match(/ELF files/g)).toHaveLength(3);

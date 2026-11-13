@@ -50,7 +50,7 @@ function main() {
   }
   const channel = JSON.parse(readFileSync(join(stage, 'usr/lib/o8/server/o8-build-channel.json'), 'utf8'));
   if (channel.schema !== 'o8/build-channel/v1' || channel.channel !== 'beta' || !/^\d+\.\d+\.\d+$/.test(channel.version)) throw new Error('Expected a versioned beta server export');
-  const abi = checkLinuxGlibc([stage], { max: '2.39' });
+  const abi = checkLinuxGlibc([stage], { max: '2.35' });
   if (abi.failures.length) throw new Error(abi.failures.join('\n'));
   const scratch = mkdtempSync(join(tmpdir(), 'o8-linux-packages-'));
   try {
@@ -67,7 +67,7 @@ function main() {
       cpSync(file, join(libraries, name));
       cpSync(`/usr/share/doc/${distributionPackage}/copyright`, join(appdir, 'usr/share/doc/o8', `${distributionPackage}-copyright`));
     }
-    const libraryAbi = checkLinuxGlibc([libraries], { max: '2.39' });
+    const libraryAbi = checkLinuxGlibc([libraries], { max: '2.35' });
     if (libraryAbi.failures.length) throw new Error(libraryAbi.failures.join('\n'));
     const identity = createHash('sha256');
     for (const file of files(join(appdir, 'usr'))) identity.update(file.path.slice(appdir.length) + '\0' + file.bytes + '\0').update(readFileSync(file.path));
@@ -82,13 +82,13 @@ function main() {
     const debroot = join(scratch, 'deb');
     mkdirSync(join(debroot, 'DEBIAN'), { recursive: true });
     cpSync(join(appdir, 'usr'), join(debroot, 'usr'), { recursive: true });
-    const dependencies = 'libc6 (>= 2.39), libgcc-s1, libstdc++6, libx11-6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libvulkan1, libfontconfig1, libfreetype6, libasound2t64, util-linux, dbus-daemon, libwebkit2gtk-4.1-0, libgtk-3-0t64';
+    const dependencies = 'libc6 (>= 2.35), libgcc-s1, libstdc++6, libx11-6, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libvulkan1, libfontconfig1, libfreetype6, libasound2, util-linux, dbus-daemon, libwebkit2gtk-4.1-0, libgtk-3-0';
     writeFileSync(join(debroot, 'DEBIAN/control'), `Package: o8\nVersion: ${channel.version}\nArchitecture: amd64\nMaintainer: o8\nSection: devel\nPriority: optional\nDepends: ${dependencies}\nDescription: o8 next with the bundled o8 server\n`);
     const rpm = join(scratch, 'rpm');
     for (const dir of ['BUILD', 'BUILDROOT', 'RPMS', 'SOURCES', 'SPECS', 'SRPMS']) mkdirSync(join(rpm, dir), { recursive: true });
     cpSync(join(appdir, 'usr'), join(rpm, 'SOURCES/usr'), { recursive: true });
     const spec = join(rpm, 'SPECS/o8.spec');
-    writeFileSync(spec, `Name: o8\nVersion: ${channel.version}\nRelease: 1\nSummary: o8 next with the bundled o8 server\nLicense: MIT\nBuildArch: x86_64\nAutoReqProv: no\nRequires: glibc >= 2.39, libgcc, libstdc++, libX11, libxcb, libxkbcommon, libxkbcommon-x11, vulkan-loader, fontconfig, freetype, alsa-lib, util-linux, dbus-daemon, webkit2gtk4.1, gtk3\n%description\no8 next and its bundled Node server.\n%prep\n%build\n%install\nmkdir -p %{buildroot}\ncp -a %{_sourcedir}/usr %{buildroot}/usr\n%files\n/usr/bin/o8\n/usr/lib/o8\n/usr/share/applications/o8.desktop\n/usr/share/icons/hicolor/256x256/apps/o8.png\n/usr/share/doc/o8\n`);
+    writeFileSync(spec, `Name: o8\nVersion: ${channel.version}\nRelease: 1\nSummary: o8 next with the bundled o8 server\nLicense: MIT\nBuildArch: x86_64\nAutoReqProv: no\nRequires: glibc >= 2.35, libgcc, libstdc++, libX11, libxcb, libxkbcommon, libxkbcommon-x11, vulkan-loader, fontconfig, freetype, alsa-lib, util-linux, dbus-daemon, webkit2gtk4.1, gtk3\n%description\no8 next and its bundled Node server.\n%prep\n%build\n%install\nmkdir -p %{buildroot}\ncp -a %{_sourcedir}/usr %{buildroot}/usr\n%files\n/usr/bin/o8\n/usr/lib/o8\n/usr/share/applications/o8.desktop\n/usr/share/icons/hicolor/256x256/apps/o8.png\n/usr/share/doc/o8\n`);
     mkdirSync(output); // Exclusive; never replace an operator's directory.
     const prefix = `o8_${channel.version}`;
     const artifacts = [
@@ -108,7 +108,7 @@ function main() {
       artifact.sha256 = createHash('sha256').update(readFileSync(file)).digest('hex');
     }
     const receipt = { schema: 'o8/linux-downloads/v1', application: 'o8-next', channel: 'beta', version: channel.version,
-      platform: 'linux-x86_64', published: false, maxGlibc: '2.39', payloadBytes, payloadId,
+      platform: 'linux-x86_64', published: false, maxGlibc: '2.35', payloadBytes, payloadId,
       budgets: { payloadBytes: PAYLOAD_BUDGET, artifactBytes: ARTIFACT_BUDGET }, artifacts };
     writeFileSync(join(output, 'linux-downloads.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify(receipt));
