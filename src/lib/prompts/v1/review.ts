@@ -1,3 +1,4 @@
+import { REVIEW_RUN_EVIDENCE_PROMPT } from '@/lib/orchestrator/review-run-evidence';
 import { formatPacketTaskContractForReview } from '@/lib/orchestrator/packet-task-contract';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
 import { REVIEWER_OUTCOME_OWNERSHIP_PROMPT_V1 } from './outcome-ownership';
@@ -178,6 +179,7 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     depthGuidance,
     '',
     'Review the diff independently. Summarize the change and its evidence for the operator approval card.',
+    REVIEW_RUN_EVIDENCE_PROMPT,
     '',
     input.mergeGateSection,
     input.mergeGateSection ? '' : null,

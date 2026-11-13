@@ -7799,6 +7799,16 @@
       ]
     },
     {
+      "path": "tests/review-run-evidence-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/review-stall-reconcile-real-path.test.ts",
       "reasons": [
         "child-process",

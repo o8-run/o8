@@ -1,3 +1,4 @@
+import { prepareRunEvidence, reviewExecution, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import { assertReviewSubmissionCurrent } from '@/lib/auth/review-submission';
 import { randomUUID } from 'node:crypto';
 
@@ -38,8 +39,7 @@ function highestReviewRisk(findings: OrchestratorPacketReviewFinding[]) {
   return 'low';
 }
 
-function buildReviewSummary(findings: OrchestratorReviewFinding[], approved: boolean) {
-  const verdict = approved ? 'Approved' : 'Changes requested';
+function buildReviewSummary(findings: OrchestratorReviewFinding[], verdict: string) {
   if (findings.length === 0) {
     return `${verdict}. No findings recorded.`;
   }
@@ -63,8 +63,10 @@ function buildPacketReview(
   auditApprovalId?: string | null,
   directivesApplied?: string[],
   directivesViolated?: SubmitReviewInput['directivesViolated'],
+  runEvidence?: ReviewRunEvidence,
 ): OrchestratorPacketReview {
   const review: OrchestratorPacketReview = {
+    ...reviewExecution(approved, reviewedHeadSha, runEvidence),
     approved,
     findings: findings.map((finding) => ({
       file: finding.file,
@@ -194,6 +196,7 @@ function recordPacketReviewAudit(
   contractCoverageEvidence: ReviewCoverageEvidence | undefined,
   missingContractWaiverReason: string | undefined,
   reviewTurn: { id: string; outcome: 'active' | 'completed' },
+  runEvidence: ReviewRunEvidence,
 ) {
   const lane = findLaneByPacket(packet.id);
   const requiresSecondPass = requiresSecondPassForLane(lane, approved);
@@ -208,6 +211,7 @@ function recordPacketReviewAudit(
     toolName: 'orchestrator_review',
     args: {
       packetId: packet.id,
+      ...reviewExecution(approved, reviewedHeadSha, runEvidence),
       approved,
       findings,
       reviewedHeadSha,
@@ -425,7 +429,14 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     outcome: 'completed' as const,
   };
   if (input.submissionPrincipal) assertReviewSubmissionCurrent(input.submissionPrincipal);
-  const summary = buildReviewSummary(input.findings, input.approved);
+  const principal = input.submissionPrincipal;
+  const evidencePrincipal = principal?.role === 'operator' ? { role: 'operator' as const, source: 'authenticated_operator' as const }
+    : principal?.role === 'assigned_reviewer' ? { role: 'assigned_reviewer' as const, source: 'assigned_credential' as const,
+      packetId: principal.packetId, reviewTurnId: principal.reviewTurnId, reviewerRuntime: principal.reviewerRuntime } : null;
+  const submittedEvidence = prepareRunEvidence(input.runEvidence, reviewedHeadSha, evidencePrincipal);
+  const execution = reviewExecution(input.approved, reviewedHeadSha, submittedEvidence);
+  const summary = buildReviewSummary(input.findings, execution.verdictLabel);
+  if (input.submissionPrincipal) assertReviewSubmissionCurrent(input.submissionPrincipal);
   const auditReview = recordPacketReviewAudit(
     packet,
     input.findings,
@@ -435,6 +446,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     input.contractCoverageEvidence,
     missingContractWaiverReason,
     reviewTurn,
+    execution.runEvidence,
   );
 
   // Only update mission state when the packet actually lives there — orphan
@@ -459,6 +471,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
         auditReview.approvalId,
         input.directivesApplied,
         input.directivesViolated,
+        execution.runEvidence,
       );
       return target.review;
     });
@@ -475,6 +488,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
       const { appendEvent } = await import('@/lib/lane/registry');
       appendEvent(verdictLane.id, 'review_recorded', 'orchestrator', {
         approved: input.approved,
+        ...execution,
         summary,
         reviewedHeadSha: reviewedHeadSha ?? null,
         auditApprovalId: resolvedAuditApprovalId,
@@ -521,6 +535,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
 
   return {
     recorded: true,
+    ...execution,
     findingsCount: input.findings.length,
     reviewedHeadSha: reviewedHeadSha ?? null,
     ...(secondPassSchedulingWarning ? {
