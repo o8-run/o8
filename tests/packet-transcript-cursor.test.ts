@@ -186,3 +186,34 @@ it('reads a long native opening snapshot once instead of rebuilding it per legac
   expect(events).toHaveLength(1001);
   expect(fixture.reads, 'native opening must normalize/hash a snapshot only once').toBe(1);
 });
+
+it('pages a native history over 16 MiB under the byte budget, then echoes the caught-up cursor', async () => {
+  const filler = 'x'.repeat(64 * 1024);
+  fixture.events = Array.from({ length: 400 }, (_, index) => answer(index + 1, `${index}:${filler}`));
+  expect(Buffer.byteLength(JSON.stringify(fixture.events))).toBeGreaterThan(24 * 1024 * 1024);
+  const budget = 8 * 1024 * 1024;
+  let cursor = 0;
+  let token = '';
+  const seqs: number[] = [];
+  const more: boolean[] = [];
+  for (let page = 0; page < 20; page++) {
+    const batch = await read(cursor, token, 100001);
+    expect(batch.cursorReset, 'each cursor and checkpoint chains from the previous page').toBe(false);
+    expect(batch.events.length).toBeGreaterThan(0);
+    expect(Buffer.byteLength(JSON.stringify(batch.events))).toBeLessThanOrEqual(budget);
+    seqs.push(...batch.events.map((e: { seq: number }) => e.seq));
+    expect(batch.nextCursor).toBe(seqs.at(-1));
+    more.push(batch.hasMore);
+    cursor = batch.nextCursor;
+    token = batch.cursorToken;
+    if (!batch.hasMore) break;
+  }
+  expect(more.length).toBeGreaterThan(2);
+  expect(more.slice(0, -1).every(Boolean)).toBe(true);
+  expect(more.at(-1)).toBe(false);
+  expect(seqs).toEqual(Array.from({ length: 400 }, (_, index) => index + 1));
+  expect(await read(cursor, token, 100001)).toMatchObject({ events: [], nextCursor: cursor, cursorToken: token, cursorReset: false, hasMore: false });
+  const legacy = await (await GET(new NextRequest('http://localhost/api/orchestrator/packet-transcript?sessionKey=fixture:worker&limit=500'))).json();
+  expect(legacy.events).toHaveLength(200);
+  expect(legacy).not.toHaveProperty('hasMore');
+});

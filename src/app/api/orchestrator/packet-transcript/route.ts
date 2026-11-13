@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { readPacketTranscriptEvents, readSessionTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
-import { transcriptWindow } from '@/lib/orchestrator/packet-transcript-window';
+import { NATIVE_PAGE_EVENTS, transcriptWindow } from '@/lib/orchestrator/packet-transcript-window';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { findLaneBySession } from '@/lib/lane/registry';
@@ -10,15 +10,14 @@ export const dynamic = 'force-dynamic';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
-// One bounded native snapshot plus the client's overflow sentinel. Legacy
-// clients retain their existing pagination limit.
-const MAX_NATIVE_LIMIT = 100_001;
 
 function parseLimit(raw: string | null, native: boolean): number {
   if (!raw) return DEFAULT_LIMIT;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIMIT;
-  return Math.min(native ? MAX_NATIVE_LIMIT : MAX_LIMIT, Math.floor(parsed));
+  // Native pages also end at a byte budget in transcriptWindow; legacy clients
+  // retain their existing pagination limit.
+  return Math.min(native ? NATIVE_PAGE_EVENTS : MAX_LIMIT, Math.floor(parsed));
 }
 
 function parseCursor(raw: string | null): number {

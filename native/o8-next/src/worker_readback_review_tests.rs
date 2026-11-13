@@ -446,3 +446,111 @@ fn a_truly_empty_log_still_clears_the_cursor_without_erasing_saved_rows() {
         "an empty log retains existing work"
     );
 }
+
+fn large_answers(count: u64, size: usize) -> Vec<Value> {
+    let filler = "x".repeat(size);
+    (1..=count)
+        .map(|seq| json!({"seq":seq,"eventId":format!("large-{seq}"),"type":"assistant","text":format!("{seq}:{filler}")}))
+        .collect()
+}
+fn large_rows(history: &History) -> usize {
+    history
+        .transcript
+        .iter()
+        .filter(|entry| entry.id.contains(":event:large-"))
+        .count()
+}
+
+#[test]
+fn a_short_native_page_with_more_remaining_continues_until_has_more_is_false() {
+    let h = Host::new(200);
+    // About 9 MiB: the first page ends at the 8 MiB budget with fewer than
+    // 200 events and hasMore true.
+    *h.events.lock().unwrap() = large_answers(130, 70 * 1024);
+    let history = h.history();
+    assert_eq!(large_rows(&history), 130, "every page must be read");
+    assert_eq!(h.reads().len(), 2, "one budgeted page plus its remainder");
+}
+
+#[test]
+fn a_history_over_16_mib_loads_in_pages_and_a_caught_up_socket_frame_keeps_the_cursor() {
+    let h = Host::new(200);
+    *h.events.lock().unwrap() = large_answers(280, 64 * 1024);
+    let history = h.history();
+    assert_eq!(large_rows(&history), 280, "a history over 16 MiB must open");
+    let opened = h.reads().len();
+    assert!(
+        opened >= 3,
+        "an 18 MiB history needs several pages: {opened}"
+    );
+    let subscription = transport::subscribe_history(h.client.clone(), &history);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while (!h.connected.load(Ordering::Acquire) || h.reads().len() <= opened)
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let before = h.reads().len();
+    h.wake.store(true, Ordering::Release);
+    while h.reads().len() <= before && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let reads = h.reads();
+    assert!(reads.len() > before, "the socket frame must read again");
+    assert!(
+        reads[opened..]
+            .iter()
+            .all(|request| !request.contains("cursor=0&")),
+        "a caught-up poll and socket frame must not re-read the snapshot: {reads:?}"
+    );
+    drop(subscription);
+}
+
+#[test]
+fn an_oversized_reply_halts_readback_instead_of_retrying_at_full_size() {
+    let h = Host::new(200);
+    *h.events.lock().unwrap() = vec![event(1, "small", "Working", "")];
+    let history = h.history();
+    let subscription = transport::subscribe_history(h.client.clone(), &history);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while (!h.connected.load(Ordering::Acquire) || h.reads().len() < 2) && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // One event over the client's 16 MiB reply limit: the route still returns
+    // it, since a page always carries at least one remaining event.
+    h.events
+        .lock()
+        .unwrap()
+        .push(event(2, "huge", &"x".repeat(17 * 1024 * 1024), ""));
+    h.wake.store(true, Ordering::Release);
+    // The halt is visible before any count is taken; a timed poll may be the
+    // read that meets the oversized event.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut truncated = false;
+    while !truncated && Instant::now() < deadline {
+        truncated = subscription.receiver.try_iter().any(|message| {
+            matches!(message, Incoming::Status(status) if status.starts_with("History truncated"))
+        });
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(truncated, "the halt must be visible: {:?}", h.reads());
+    let halted = h.reads().len();
+    assert!(
+        h.reads()[halted - 1].contains("cursor=1&"),
+        "the halting read asked past the saved event: {:?}",
+        h.reads()
+    );
+    // Timed polls run every 2 s and each socket frame invalidates.
+    for _ in 0..5 {
+        std::thread::sleep(Duration::from_millis(600));
+        h.wake.store(true, Ordering::Release);
+    }
+    assert_eq!(
+        h.reads().len(),
+        halted,
+        "the oversized read must not repeat: {:?}",
+        h.reads()
+    );
+    drop(subscription);
+}

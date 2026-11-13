@@ -390,6 +390,11 @@ struct Readback {
 
 const MAX_READBACK_BYTES: usize = 64 * 1024 * 1024;
 const MAX_READBACK_EVENTS: usize = 100_000;
+/// The native route ends a page at this many events or its byte budget, so no
+/// single reply approaches the client's 16 MiB response limit.
+const PAGE_EVENTS: usize = 5_000;
+/// Older hosts cap a page at 200 events and omit `hasMore`.
+const LEGACY_PAGE_EVENTS: usize = 200;
 
 #[derive(Debug)]
 pub(crate) enum ReadbackError {
@@ -401,6 +406,9 @@ impl ReadbackError {
     fn request(error: String) -> Self {
         if error.ends_with("HTTP 401") || error.ends_with("HTTP 403") {
             Self::Invalid(error)
+        } else if error.ends_with("exceeds 16 MiB") {
+            // Re-reading the same cursor returns the same oversized reply.
+            Self::Limit
         } else {
             Self::Unavailable(error)
         }
@@ -409,14 +417,19 @@ impl ReadbackError {
         match self {
             Self::Unavailable(_) => "Reconnecting · saved history retained",
             Self::Invalid(_) => "Invalid transcript response · saved history retained",
-            Self::Limit => "Transcript readback limit reached · saved history retained",
+            Self::Limit => "History truncated at the readback limit · saved history retained",
         }
     }
     fn reason(&self) -> &str {
         match self {
             Self::Unavailable(reason) | Self::Invalid(reason) => reason,
-            Self::Limit => "Worker transcript readback limit reached",
+            Self::Limit => "Worker transcript history truncated at the readback limit",
         }
+    }
+    /// A limit repeats on every re-read, so the caller stops reading instead
+    /// of retrying the same request.
+    pub(crate) fn halts(&self) -> bool {
+        matches!(self, Self::Limit)
     }
 }
 fn warning(mut history: History, reason: &str) -> History {
@@ -475,9 +488,8 @@ impl Client {
                         ("sessionKey", key),
                         ("cursor", &cursor.to_string()),
                         ("cursorToken", batch.token.as_deref().unwrap_or("")),
-                        // The native route can return the bounded snapshot in
-                        // one read, including a sentinel beyond the event cap.
-                        ("limit", &(MAX_READBACK_EVENTS + 1).to_string()),
+                        // The route also ends a native page at its byte budget.
+                        ("limit", &PAGE_EVENTS.to_string()),
                     ],
                 )
                 .map_err(ReadbackError::request)?;
@@ -499,7 +511,8 @@ impl Client {
                 return Ok(batch);
             }
             let next = next_cursor.unwrap_or(cursor);
-            if page["cursorReset"] == true || next < cursor {
+            let page_reset = page["cursorReset"] == true || next < cursor;
+            if page_reset {
                 resets += 1;
                 if resets > 3 {
                     return Err(ReadbackError::Unavailable(
@@ -524,12 +537,16 @@ impl Client {
             batch.earliest = timestamp(&json!({"ts":page["earliestEventTime"]})).as_u64();
             batch.token = page["cursorToken"].as_str().map(str::to_owned);
             batch.cursor = Some(next);
-            // Older hosts cap replies at 200 and omit hasMore. Keep their
-            // pagination, while a native snapshot avoids a second full read.
-            if page["hasMore"] == false || events.len() < 200 {
+            // A native host says whether more remain; a short page under the
+            // byte budget may still have more. Older hosts omit hasMore.
+            let more = match page.get("hasMore") {
+                Some(Value::Bool(more)) => *more,
+                _ => events.len() >= LEGACY_PAGE_EVENTS,
+            };
+            if !more {
                 return Ok(batch);
             }
-            if next <= cursor && !batch.reset {
+            if next <= cursor && !page_reset {
                 return Err(ReadbackError::Invalid(
                     "Worker transcript cursor did not advance".into(),
                 ));

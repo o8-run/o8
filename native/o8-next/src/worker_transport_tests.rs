@@ -185,23 +185,39 @@ impl Host {
                         .is_some_and(|t| cursor > 0 && *t != prefix(cursor as usize))
                         || cursor > all.len() as u64;
                     let from = if reset { 0 } else { cursor };
+                    // Mirror the route: native callers (any cursorToken) get
+                    // at most 5,000 events or 8 MiB of serialized events per
+                    // page, always at least one, plus hasMore; legacy callers
+                    // keep the 200-event cap and no hasMore.
+                    let native = token.is_some();
                     let limit = request_url
                         .query_pairs()
                         .find(|(key, _)| key == "limit")
                         .and_then(|(_, value)| value.parse::<usize>().ok())
-                        .unwrap_or(200)
-                        .min(if token.is_some() { 100_001 } else { 200 });
+                        .filter(|limit| *limit > 0)
+                        .unwrap_or(50)
+                        .min(if native { 5_000 } else { 200 });
+                    let mut bytes = 0;
                     let page: Vec<_> = all
                         .iter()
                         .filter(|e| e["seq"].as_u64().unwrap() > from)
                         .take(limit)
-                        .cloned()
+                        .enumerate()
+                        .take_while(|(index, event)| {
+                            bytes += event.to_string().len() + 1;
+                            !native || *index == 0 || bytes <= 8 * 1024 * 1024
+                        })
+                        .map(|(_, event)| event.clone())
                         .collect();
                     let next = page.last().and_then(|e| e["seq"].as_u64()).unwrap_or(from);
-                    (
-                        status,
-                        json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":if page.is_empty() && (token.is_none() || all.is_empty() || reset){None}else{Some(next)},"cursorToken":prefix(next as usize),"cursorReset":reset,"hasMore":all.iter().any(|event| event["seq"].as_u64().unwrap() > next),"events":page,"historyComplete":complete_response.load(Ordering::Acquire),"earliestEventTime":all.iter().filter_map(|e| e["ts"].as_str()).min().unwrap_or("1970-01-01T00:00:02.000Z")}),
-                    )
+                    let mut body = json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":if page.is_empty() && (!native || all.is_empty() || reset){None}else{Some(next)},"cursorToken":prefix(next as usize),"cursorReset":reset,"events":page,"historyComplete":complete_response.load(Ordering::Acquire),"earliestEventTime":all.iter().filter_map(|e| e["ts"].as_str()).min().unwrap_or("1970-01-01T00:00:02.000Z")});
+                    if native {
+                        body["hasMore"] = json!(
+                            all.iter()
+                                .any(|event| event["seq"].as_u64().unwrap() > next)
+                        );
+                    }
+                    (status, body)
                 } else {
                     // Host port discovery may probe this temporary listener.
                     // Reject unrelated routes without interrupting readback.

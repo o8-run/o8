@@ -250,6 +250,8 @@ pub(crate) fn subscribe_history(client: Client, history: &crate::model::History)
         let mut socket_notice = "";
         let mut read_notice = "";
         let mut notice = "";
+        // A readback limit repeats on every re-read of the same cursor.
+        let mut halted = false;
         while !stopped.is_stopped() {
             for message in updates.receiver.try_iter().take(64) {
                 match message {
@@ -268,8 +270,12 @@ pub(crate) fn subscribe_history(client: Client, history: &crate::model::History)
                     _ => {}
                 }
             }
-            if dirty
-                || (!state.done && state.active && state.cursor_available && Instant::now() >= next)
+            if !halted
+                && (dirty
+                    || (!state.done
+                        && state.active
+                        && state.cursor_available
+                        && Instant::now() >= next))
             {
                 dirty = false;
                 match state.poll(&client) {
@@ -288,7 +294,10 @@ pub(crate) fn subscribe_history(client: Client, history: &crate::model::History)
                             break;
                         }
                     }
-                    Err(error) => read_notice = error.notice(),
+                    Err(error) => {
+                        halted = error.halts();
+                        read_notice = error.notice();
+                    }
                 }
                 next = Instant::now() + Duration::from_secs(2);
             }
