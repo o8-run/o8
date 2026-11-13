@@ -1,4 +1,4 @@
-import { checkReviewRunPolicy } from './review-run-policy';
+import { checkReviewRunPolicy, reviewRunPolicy } from './review-run-policy';
 import type {
   ApprovalConflictReport,
   ApprovalGateResult,
@@ -538,7 +538,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     const candidatePreflight = await checkReviewRunPolicy(lane);
     if (!candidatePreflight.ok) return { ok: false, laneId: lane.id, reason: candidatePreflight.code, note: candidatePreflight.message };
     let reviewedSnapshotSha: string;
-    if (spokenEvidence.present && command.commitMessage) {
+    if (spokenEvidence.present && command.commitMessage && !reviewRunPolicy().enabled) {
       const commit = await commitSpokenReviewSnapshotWithDriftRecovery({
         lane,
         actor,
@@ -587,7 +587,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       }
       reviewedSnapshotSha = pinned;
     } else {
-      if (command.commitMessage) {
+      if (command.commitMessage && !reviewRunPolicy().enabled) {
         try {
           await commitDirtyWorktree(
             worktreePath,

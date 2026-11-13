@@ -45,7 +45,7 @@ Review submission is guarded in depth: middleware refuses worker credentials for
 ## Review execution evidence
 
 Saved packet reviews and durable `orchestrator_review` approval JSON carry additive
-`runEvidence`, `reviewMode` and `verdictLabel` fields. Existing `approved` and verdict
+`runEvidence`, `reviewMode`, `verdictLabel` and optional `runEvidenceWarning` fields. Existing `approved` and verdict
 enums remain compatible. Readers derive the mode and label from validated evidence,
 never trust a saved mode flag, and read old records with no evidence as
 `read_only` / `approved, not run`. No database columns or storage-version migration
@@ -79,8 +79,13 @@ A receipt has 1–20 observations. Each needs a command or launch/steps, observe
 result, safe integer exit status (a launch may use null), and an excerpt (at most
 4000 characters) or artifact reference (at most 1000). Commands/results are bounded
 to 2000 characters, the runtime to 100, and the ISO timestamp to 40. A not-run reason
-is bounded to 2000. Invalid or stale submitted evidence returns 422
-`invalid_run_evidence`. Old malformed/stale saved evidence reads as not run.
+is bounded to 2000. Invalid or stale submitted evidence is downgraded to `not_run`
+with a recorded warning; the code verdict remains valid, including when policy is off.
+Old malformed/stale saved evidence also reads as not run. A missing authenticated
+operator or assigned-reviewer principal cannot earn run credit. The server attaches
+the principal (operator, or packet/review-turn/runtime assignment); request JSON and
+model prose cannot choose it. Command, result, excerpt and artifact text is redacted
+through the existing transcript policy before persistence or output.
 A failed command is still an observation; the reviewer owns the approval judgment.
 Prose and author claims do not supply structured evidence. These are reviewer-reported
 receipts, not independently attested execution or a measured correctness guarantee.
@@ -91,23 +96,35 @@ specific not-run reason. The self-contained `POST /api/harness` `evaluate_diff` 
 verdict, including when the model claims execution. CLI packet review accepts
 `--run-evidence <JSON-file>` or `--not-run <reason>` and reports the mode in human
 and JSON output. Review-state (including the native window's data), mission status,
-and MCP outputs carry the same fields. No native UI or driver is added.
+and MCP outputs carry the same fields. The run label is
+`approved, run (reviewer-reported)`. This is data/CLI/MCP support: the native packet
+review, AuditLogPanel and ChatPacketStatusBanner still show a bare Approved label
+(#6076). No native UI or driver is added.
 
 ### Opt-in merge requirement
 
 Set **the server process environment** `O8_REVIEW_RUN_REQUIRED_PATHS` to a JSON
 array of repository-relative globs, for example `["native/o8-next/src/**"]`.
 Unset, empty, or `[]` leaves enforcement off. Patterns support `*`, `**` and `?`;
+Matching is case-insensitive and treats backslashes as forward slashes;
 absolute/traversal paths and other glob syntax are refused. The reviewed repository
 cannot set its own policy through this field; no UI setting is added.
+The environment value applies to **every registered repository**; a malformed
+value blocks merges in **every repository**. Per-project settings are tracked in
+#6075 under #5822. Merge preview and review-state expose the active paths, enabled
+state, validity and source. When off, preview omits the run-evidence check row.
 
-Merge preview and the lane merge chokepoint check the full committed change,
+Merge preview and the lane merge chokepoint check the full committed change
+at the resolved source candidate SHA after snapshot resolution and before rebase,
 including deleted paths and both sides of renames. A matching change needs a durable,
 approved review with structured run evidence at the exact reviewed HEAD. Operator
 approval does not bypass this opt-in requirement. The packet merge HTTP route returns
 409 `review_run_evidence_required`; invalid configuration returns 409
 `review_run_policy_invalid`, and an unverifiable diff returns 409
-`review_run_diff_unavailable`. Rebase-carried approvals do not inherit run evidence
+`review_run_diff_unavailable`. Dirty worktrees, merge-time source commits and
+unresolvable remote candidates refuse with `review_run_candidate_unavailable`;
+commit and review the final source first. Remote lanes check the fetched branch,
+not the canonical checkout. Rebase-carried approvals do not inherit run evidence
 for their new HEAD. Existing integration/rebase gates remain in place; these receipts
 refer to the reviewed source commit, not a claim that the eventual integration commit
 was exercised. Launching and driving the reviewed commit remains dependent on #5947.

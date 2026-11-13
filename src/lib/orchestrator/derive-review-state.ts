@@ -22,6 +22,7 @@ export interface DeriveReviewStateOrchestratorReview {
   verdict: 'approved' | 'rejected';
   reviewMode?: import('./review-run-evidence').ReviewMode;
   runEvidence?: import('./review-run-evidence').ReviewRunEvidence;
+  runEvidenceWarning?: string;
   verdictLabel?: string;
   ts: string;
   summary: string;

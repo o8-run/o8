@@ -163,6 +163,7 @@ export interface OrchestratorPacketReviewDirectiveViolation {
 
 export interface OrchestratorPacketReview {
   runEvidence?: ReviewRunEvidence;
+  runEvidenceWarning?: string;
   reviewMode?: ReviewMode;
   verdictLabel?: string;
   approved: boolean;

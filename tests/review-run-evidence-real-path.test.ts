@@ -47,7 +47,7 @@ async function fixture() {
   // Literal old saved JSON: no evidence/mode/label, even after new writers start adding them.
   const args = { packetId, approved: true, findings: [], reviewedHeadSha: head, reviewTurnOutcome: 'completed', requiresSecondPass: false };
   getSqlite()!.prepare('UPDATE approvals SET args_json = ? WHERE id = ?').run(JSON.stringify(args), approval.id);
-  return { repo, origin, worktree, packetId, head, base, approvalId: approval.id, args };
+  return { repo, origin, worktree, packetId, head, base, lane, approvalId: approval.id, args };
 }
 function request(path: string, body?: unknown) {
   return new NextRequest(`http://localhost${path}`, { method: body ? 'POST' : 'GET',
@@ -65,10 +65,10 @@ it('reads a literal old saved approval as approved, not run in storage and nativ
   expect(state.status).toBe(200);
   expect(await state.json()).toMatchObject({ orchestratorReview: { verdict: 'approved', verdictLabel: 'approved, not run', reviewMode: 'read_only' } });
 });
-it.each(['missing', 'stale'] as const)('real merge route refuses %s run evidence under a matching policy, including operator calls', async mode => {
+it.each(['missing', 'stale', 'unattributed'] as const)('real merge route refuses %s run evidence under a matching policy, including operator calls', async mode => {
   const f = await fixture();
-  if (mode === 'stale') getSqlite()!.prepare('UPDATE approvals SET args_json = ? WHERE id = ?')
-    .run(JSON.stringify({ ...f.args, runEvidence: evidence(f.base), reviewMode: 'run', verdictLabel: 'approved, run (reviewer-reported)' }), f.approvalId);
+  if (mode !== 'missing') getSqlite()!.prepare('UPDATE approvals SET args_json = ? WHERE id = ?')
+    .run(JSON.stringify({ ...f.args, runEvidence: evidence(mode === 'stale' ? f.base : f.head), reviewMode: 'run', verdictLabel: 'approved, run (reviewer-reported)' }), f.approvalId);
   vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["native/o8-next/src/**"]');
   const response = await mergeRoute.POST(request('/api/orchestrator/merge', { packetId: f.packetId, expectedHeadSha: f.head, idempotencyKey: randomUUID() }));
   expect(response.status, await response.clone().text()).toBe(409);
@@ -165,6 +165,18 @@ it('CLI and MCP submit and report the same structured review through owned HTTP 
     const response = await handleSubmitReview({ packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head, runEvidence: evidence(f.head) });
     expect(response.isError, JSON.stringify(response)).not.toBe(true);
     expect(JSON.stringify(response)).toContain('approved, run (reviewer-reported)');
+    for (const claim of [{ status: 'run', result: 'prose' }, evidence(f.base)]) {
+      const downgraded = await handleSubmitReview({ packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head, runEvidence: claim });
+      expect(downgraded.isError, JSON.stringify(downgraded)).not.toBe(true);
+      expect(JSON.stringify(downgraded)).toContain('approved, not run');
+      expect(JSON.stringify(downgraded)).toContain('runEvidenceWarning');
+    }
+    const token = 'sk-' + 'y'.repeat(48);
+    const secretReceipt = evidence(f.head);
+    secretReceipt.observations[0].excerpt = token;
+    const safe = await handleSubmitReview({ packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head, runEvidence: secretReceipt });
+    expect(safe.isError, JSON.stringify(safe)).not.toBe(true);
+    expect(JSON.stringify(safe)).not.toContain(token);
   } finally { stdout.mockRestore(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 }, 30_000);
 
@@ -200,6 +212,11 @@ it('refuses a dirty operator candidate before any merge-time commit', async () =
 it('redacts evidence before durable review storage and review-state output', async () => {
   const f = await fixture();
   const token = 'sk-' + 'x'.repeat(48);
+  const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  const { withControlPlaneLock, writeOrchestratorControlPlaneState, readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+  await withControlPlaneLock(() => writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: `mission-${randomUUID()}`, repoPath: f.repo,
+    packets: [{ id: f.packetId, title: 'Run evidence fixture', runtime: 'codex', status: 'queued', queueState: 'held', holdIntent: 'explicit-dispatch', releaseState: 'pending',
+      workspaceTargetPath: f.worktree, branchTarget: f.lane.branch } as import('@/lib/orchestrator/types').OrchestratorPacket] }));
   const receipt = evidence(f.head);
   receipt.observations[0] = { ...receipt.observations[0], command: `echo ${token}`, result: token, excerpt: token };
   const response = await reviewRoute.POST(request('/api/orchestrator/review', { packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head, runEvidence: receipt, clientMutationId: randomUUID() }));
@@ -208,6 +225,103 @@ it('redacts evidence before durable review storage and review-state output', asy
   expect(JSON.stringify(payload)).not.toContain(token);
   const raw = getSqlite().prepare('SELECT args_json, audit_json FROM approvals WHERE id = ?').get(payload.result.auditApprovalId);
   expect(JSON.stringify(raw)).not.toContain(token);
+  expect(JSON.stringify(readOrchestratorControlPlaneState().packets.find(p => p.id === f.packetId)?.review)).not.toContain(token);
+  const { getLaneEvents } = await import('@/lib/lane/registry');
+  expect(JSON.stringify(getLaneEvents(f.lane.id))).not.toContain(token);
+  const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
+  expect(JSON.stringify(await getMissionStatus({ includeCost: false }))).not.toContain(token);
   const state = await stateRoute.GET(request(`/api/orchestrator/review-state?packetId=${f.packetId}`));
   expect(await state.text()).not.toContain(token);
+}, 30_000);
+
+it('successfully merges through the real merge route with current operator evidence and policy on', async () => {
+  const f = await fixture();
+  const reviewed = await reviewRoute.POST(request('/api/orchestrator/review', { packetId: f.packetId, approved: true, findings: [], reviewedHeadSha: f.head, runEvidence: evidence(f.head), clientMutationId: randomUUID() }));
+  expect(reviewed.status).toBe(200);
+  const review = (await reviewed.json()).result;
+  expect(review.runEvidence.principal).toEqual({ role: 'operator', source: 'authenticated_operator' });
+  // The isolated fixture's one-file change has no second pass requirement.
+  expect(getApproval(review.auditApprovalId)?.args?.requiresSecondPass).toBe(false);
+  vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["native/o8-next/src/**"]');
+  const response = await mergeRoute.POST(request('/api/orchestrator/merge', { packetId: f.packetId, expectedHeadSha: f.head, idempotencyKey: randomUUID() }));
+  expect(response.status, await response.clone().text()).toBe(200);
+  expect(await response.json()).toMatchObject({ result: { merged: true } });
+  expect(git(f.repo, 'show', 'main:native/o8-next/src/fixture.rs')).toBe('// fixture');
+  expect(git(f.origin, 'rev-parse', 'main')).toBe(git(f.repo, 'rev-parse', 'main'));
+}, 30_000);
+it('matches required paths regardless of case and separator and publishes the policy source', async () => {
+  const f = await fixture();
+  vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', JSON.stringify(['NATIVE\\O8-NEXT\\SRC\\**']));
+  const state = await stateRoute.GET(request(`/api/orchestrator/review-state?packetId=${f.packetId}`));
+  expect(await state.json()).toMatchObject({ reviewRunPolicy: { enabled: true, valid: true, source: 'environment:O8_REVIEW_RUN_REQUIRED_PATHS', paths: ['NATIVE/O8-NEXT/SRC/**'] } });
+  const { previewPacketMerge } = await import('@/lib/lane/preview-merge');
+  expect(await previewPacketMerge(f.packetId)).toMatchObject({ reviewRunPolicy: { enabled: true, source: 'environment:O8_REVIEW_RUN_REQUIRED_PATHS' } });
+  const response = await mergeRoute.POST(request('/api/orchestrator/merge', { packetId: f.packetId, expectedHeadSha: f.head, idempotencyKey: randomUUID() }));
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ error: { code: 'review_run_evidence_required' } });
+}, 30_000);
+it.each(['valid', 'malformed', 'stale'] as const)('records a Codex fallback verdict with %s runEvidence without changing the code verdict', async kind => {
+  const f = await fixture();
+  const { startReviewTurn, finishReviewTurn } = await import('@/lib/lane/review-turn-state');
+  const { recordCodexAutoReviewVerdict } = await import('@/lib/lane/codex-auto-review-verdict');
+  const turn = startReviewTurn({ laneId: f.lane.id, threadId: `review-fallback-${randomUUID()}`, backend: 'codex', surface: 'auto-review', expectedHeadSha: f.head });
+  finishReviewTurn({ laneId: f.lane.id, reviewTurnId: turn, outcome: 'completed' });
+  const result = await recordCodexAutoReviewVerdict({ lane: f.lane, requiresSecondPass: false, reviewTurnId: turn, expectedHeadSha: f.head,
+    rawText: 'CODEX_AUTO_REVIEW: ' + JSON.stringify({ approved: true, findings: [], runEvidence: kind === 'malformed' ? { status: 'run', result: 'prose only' } : evidence(kind === 'stale' ? f.base : f.head) }) });
+  expect(result).toMatchObject({ reviewUnavailable: false, verdict: { approved: true } });
+  const approval = listApprovalsForContext({ packetId: f.packetId }).find(a => a.args?.reviewTurnId === turn)!;
+  expect(approval.status).toBe('approved');
+  if (kind === 'valid') expect(approval.args).toMatchObject({ reviewMode: 'run', verdictLabel: 'approved, run (reviewer-reported)', runEvidence: { principal: { role: 'assigned_reviewer', source: 'server_review_turn', packetId: f.packetId, reviewTurnId: turn } } });
+  else expect(approval.args).toMatchObject({ reviewMode: 'read_only', runEvidenceWarning: expect.any(String) });
+}, 30_000);
+it('policy checks the fetched remote-customer candidate instead of the canonical checkout', async () => {
+  const f = await fixture();
+  const { mintPacketWorkerToken, resolvePacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
+  const token = resolvePacketWorkerToken(mintPacketWorkerToken(f.packetId))!;
+  const branch = `remote/${randomUUID()}`;
+  git(f.worktree, 'push', 'origin', `HEAD:refs/heads/${branch}`);
+  getSqlite().prepare('UPDATE lanes SET runtime = ?, worktree_path = NULL, packet_id = NULL WHERE id = ?').run('remote-customer', f.lane.id);
+  getSqlite().prepare('INSERT INTO worker_runs (id, lane_id, worker_token_id, transport, status, remote_branch, started_at, last_event_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(randomUUID(), f.lane.id, token.tokenId, 'fixture', 'completed', branch, new Date().toISOString(), new Date().toISOString());
+  vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["native/o8-next/src/**"]');
+  const { POST } = await import('@/app/api/lanes/route');
+  const response = await POST(request('/api/lanes', { verb: 'merge', laneId: f.lane.id }));
+  expect(response.status, await response.clone().text()).toBe(409);
+  expect(await response.json()).toMatchObject({ ok: false, reason: 'review_run_evidence_required' });
+  expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
+  expect(git(f.origin, 'rev-parse', 'main')).toBe(f.base);
+}, 30_000);
+it('refuses a spoken snapshot with dirty edits under policy before committing it', async () => {
+  const f = await fixture();
+  git(f.worktree, 'reset', '--hard', f.base);
+  writeFileSync(join(f.worktree, 'base.txt'), 'ordinary committed change\n'); git(f.worktree, 'add', '.'); git(f.worktree, 'commit', '-qm', 'ordinary change');
+  const head = git(f.worktree, 'rev-parse', 'HEAD');
+  getSqlite().prepare('DELETE FROM approvals WHERE id = ?').run(f.approvalId);
+  writeFileSync(join(f.worktree, 'native/o8-next/src/fixture.rs'), '// spoken pending edit\n');
+  const { createApproval } = await import('@/lib/approvals/store');
+  const { POST } = await import('@/app/api/panel/approvals/route');
+  const card = createApproval({ source: 'test', runtime: 'codex', agent: 'fixture', sessionKey: f.lane.sessionKey!, title: 'Merge fixture', description: 'Fixture merge', summary: '', risk: 'low',
+    continuation: { kind: 'lane', laneId: f.lane.id, verb: 'merge', commitMessage: 'spoken fixture snapshot' } });
+  vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["native/o8-next/src/**"]');
+  const state = await stateRoute.GET(request(`/api/orchestrator/review-state?packetId=${f.packetId}&spoken=1&approvalId=${card.id}`));
+  expect(state.status, await state.clone().text()).toBe(200);
+  const receipt = (await state.json()).spokenReview.evidence;
+  const response = await POST(request('/api/panel/approvals', { action: 'approve', id: card.id, spokenReviewEvidence: { approvalId: card.id, packetId: f.packetId,
+    reviewedHeadSha: receipt.headSha, reviewedDiffFingerprint: receipt.fingerprint, reviewedGovernanceFingerprint: receipt.governanceFingerprint } }));
+  const body = await response.json();
+  expect(response.status).toBe(409);
+  expect(body).toMatchObject({ ok: false, code: 'review_run_candidate_unavailable', approval: { status: 'pending' } });
+  expect(git(f.worktree, 'rev-parse', 'HEAD')).toBe(head);
+  expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
+}, 30_000);
+
+it('refuses a remote lane whose source candidate cannot be established', async () => {
+  const f = await fixture();
+  getSqlite().prepare('UPDATE lanes SET runtime = ?, worktree_path = NULL, packet_id = NULL WHERE id = ?').run('remote-customer', f.lane.id);
+  vi.stubEnv('O8_REVIEW_RUN_REQUIRED_PATHS', '["native/o8-next/src/**"]');
+  const { POST } = await import('@/app/api/lanes/route');
+  const response = await POST(request('/api/lanes', { verb: 'merge', laneId: f.lane.id }));
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ ok: false, reason: 'review_run_candidate_unavailable' });
+  expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base);
 }, 30_000);

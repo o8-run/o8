@@ -30,7 +30,7 @@ export function reviewRunPolicy() {
     const value: unknown = JSON.parse(raw);
     if (!Array.isArray(value) || value.length > 100 || value.some(p => typeof p !== 'string' || !p || p.length > 500)) throw new Error('Invalid patterns');
     const paths = (value as string[]).map(p => p.replaceAll('\\', '/'));
-    if (paths.some(p => p.startsWith('/') || p.split('/').some(s => s === '..' || s === '.') || /[\[\]{}!\x00-\x20]/.test(p))) throw new Error('Invalid patterns');
+    if (paths.some(p => p.startsWith('/') || /^[a-z]:/i.test(p) || p.split('/').some(s => s === '..' || s === '.') || /[\[\]{}!\x00-\x20]/.test(p))) throw new Error('Invalid patterns');
     return { enabled: paths.length > 0, source, paths, valid: true };
   } catch { return { enabled: true, source, paths: [] as string[], valid: false }; }
 }
@@ -62,7 +62,9 @@ export async function checkReviewRunPolicy(lane: Lane, candidate?: { cwd: string
     const review = await assessDurableApprovedReview({ ...lane, worktreePath: cwd }, head);
     const approval = review.approvalId ? getApproval(review.approvalId) : null;
     const execution = reviewExecution(approval?.args?.approved === true, head, approval?.args?.runEvidence);
-    if (!review.approved || approval?.args?.reviewedHeadSha !== head || execution.reviewMode !== 'run') {
+    const principal = execution.runEvidence.status === 'run' ? execution.runEvidence.principal : null;
+    const assignedToPacket = principal?.role === 'operator' || principal?.role === 'assigned_reviewer' && principal.packetId === lane.packetId;
+    if (!assignedToPacket || !review.approved || approval?.args?.reviewedHeadSha !== head || execution.reviewMode !== 'run') {
       return { ok: false, code: 'review_run_evidence_required', message: `Run evidence is required for the exact reviewed HEAD ${head}; ${approval ? 'the approval is read-only or does not authorize this commit' : 'no approved review authorizes this commit'}. Matching paths: ${matched.slice(0, 5).join(', ')}. Submit structured runEvidence after exercising this commit.` };
     }
     return { ok: true, message: `Current-head run evidence is recorded for ${matched.length} matching path(s).` };

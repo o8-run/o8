@@ -98,6 +98,7 @@ export interface ApprovalReferee {
 
 export interface ApprovalAuditEvent {
   runEvidence?: import('@/lib/orchestrator/review-run-evidence').ReviewRunEvidence;
+  runEvidenceWarning?: string;
   reviewMode?: import('@/lib/orchestrator/review-run-evidence').ReviewMode;
   verdictLabel?: string;
   /** Exact structured terminal projection used for an operator decision. */
