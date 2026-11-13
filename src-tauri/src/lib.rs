@@ -8388,10 +8388,10 @@ pub fn run() {
             None,
         ));
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        builder = builder.plugin(tauri_plugin_dialog::init());
-    }
+    // macOS still needs the plugin: the native window launcher reports a
+    // start failure through a message dialog. Only the picker permission is
+    // limited to the platforms that keep the classic dashboard.
+    builder = builder.plugin(tauri_plugin_dialog::init());
 
     // ── Windows/Linux `o8://` deep-link delivery (#1742, part of #1673) ──
     // macOS is untouched: the OS hands `o8://` URLs to the running app through

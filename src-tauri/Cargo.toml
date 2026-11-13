@@ -170,9 +170,6 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 chrono = "0.4"
 tauri-plugin-clerk = "0.1.1"
 tauri-plugin-http = "2.5.9"
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-# Dashboard folder and file pickers. Voice surfaces use web file APIs.
 tauri-plugin-dialog = "2"
 
 # Shutdown safety net (issue #719). Both crates are already in the lock graph
