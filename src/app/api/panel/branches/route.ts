@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 import { NextRequest, NextResponse } from 'next/server';
 import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
 import { execFileSync } from '@/lib/providers/child-process';
@@ -265,8 +266,8 @@ export async function GET(req: NextRequest) {
 // is for tidying the local sidebar, not for force-publishing branch removal.
 export async function DELETE(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null) as { path: string; branch: string; force?: boolean; deleteRemote?: boolean };
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    const body = await readJsonObject<{ path: string; branch: string; force?: boolean; deleteRemote?: boolean }>(req);
+    if (!body) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     const { path: repoPath, branch, force, deleteRemote } = body;
@@ -353,8 +354,8 @@ export async function DELETE(req: NextRequest) {
 // ── POST: Create new branch (+ optional worktree) ──
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null) as { path: string; branch: string; baseBranch?: string; worktree?: boolean };
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    const body = await readJsonObject<{ path: string; branch: string; baseBranch?: string; worktree?: boolean }>(req);
+    if (!body) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     const { path: repoPath, branch, baseBranch, worktree } = body;

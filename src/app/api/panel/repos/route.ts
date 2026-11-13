@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 export const dynamic = 'force-dynamic';
 
@@ -253,10 +254,8 @@ export async function GET(request: Request) {
 }
 
 async function handlePOST(request: Request) {
-  let body: RepoRegistryPostBody;
-  try {
-    body = (await request.json()) as RepoRegistryPostBody;
-  } catch {
+  const body = await readJsonObject<RepoRegistryPostBody>(request);
+  if (!body) {
     return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 
@@ -405,10 +404,8 @@ async function handlePOST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  let body: RepoRegistryDeleteBody;
-  try {
-    body = (await request.json()) as RepoRegistryDeleteBody;
-  } catch {
+  const body = await readJsonObject<RepoRegistryDeleteBody>(request);
+  if (!body) {
     return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
   }
 

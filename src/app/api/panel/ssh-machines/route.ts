@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -39,10 +40,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const authError = localAuth(req);
   if (authError) return authError;
-  let body: { machineId?: unknown; sessionId?: unknown };
-  try {
-    body = await req.json() as typeof body;
-  } catch {
+  const body = await readJsonObject<{ machineId?: unknown; sessionId?: unknown }>(req);
+  if (!body) {
     return NextResponse.json({ error: { code: 'invalid_args', message: 'Choose a saved machine and terminal.' } }, { status: 400 });
   }
   try {
