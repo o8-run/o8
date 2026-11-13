@@ -1,0 +1,53 @@
+
+/* round 3 additions: logo options, grouped motion, color states, fourth face */
+.light,.win,.hero{--l-ink:var(--b-ink);--l-acc:var(--b-acc);--l-bg:var(--b-paper)}
+.dark{--l-ink:var(--b-paper);--l-acc:var(--b-acc);--l-bg:var(--b-graphite)}
+.hero-nav{--l-bg:var(--b-paper)}
+.page[data-face="gserif"]{--disp:"Geist Serif","Times New Roman",serif}
+.page[data-face="gserif"] .wm,.page[data-face="gserif"] h1,.page[data-face="gserif"] h2,.page[data-face="gserif"] h3,.page[data-face="gserif"] h4{font-synthesis:none;letter-spacing:-.02em}
+.facecard[data-f="gserif"]{--ff:"Geist Serif","Times New Roman",serif}
+.facecard[data-f="gserif"] .fc-ui *,.facecard[data-f="gserif"] .fc-label span,.facecard[data-f="gserif"] .fc-verdict{font-family:"Geist",system-ui,sans-serif}
+.facecard[data-f="gserif"] .fc-label span{font-family:var(--f-mono)}
+.facecard[data-f="gserif"] .fc-head,.facecard[data-f="gserif"] .wm{font-weight:400;font-synthesis:none;letter-spacing:-.02em}
+.faces.four{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:720px){ .faces.four{grid-template-columns:1fr} }
+
+.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:20px;font-size:14px}
+.toc a{color:#2563EB;text-decoration:none;border-bottom:1px solid rgba(37,99,235,.3)}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .toc a{color:#8FB4FF;border-color:rgba(143,180,255,.35)} }
+:root[data-theme="dark"] .toc a{color:#8FB4FF;border-color:rgba(143,180,255,.35)}
+.toc a:focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+
+.opts{display:flex;flex-direction:column;gap:20px}
+.opt{border:1px solid var(--line);border-radius:18px;padding:clamp(16px,3vw,24px);background:var(--surface);display:flex;flex-direction:column;gap:16px}
+.opt-head{display:flex;gap:14px;align-items:flex-start}
+.opt-n{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-family:var(--f-mono);font-size:13px;border:1px solid var(--line);color:var(--muted)}
+.opt-head h3{font-family:var(--disp);font-weight:500;font-size:22px;letter-spacing:-.02em;margin:2px 0 4px}
+.opt-head p{margin:0;font-size:15px;line-height:1.5;color:var(--muted);max-width:62ch}
+.opt-grid{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:stretch}
+.opt-icons{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
+.appicon .lg-in{width:62%;height:62%}
+.favs{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.favs small{font-family:var(--f-mono);font-size:11px;color:var(--faint)}
+.fav-box{display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:10px;background:var(--b-paper);border:1px solid var(--b-hair)}
+.f32{width:32px;height:32px;display:block}.f16{width:16px;height:16px;display:block}
+.opt-locks{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opt-locks .lk{padding:24px 12px}
+.opt .lockup-md{font-size:clamp(40px,6vw,56px)}
+.opt .lockup-md .mk{width:.84em;height:.84em}
+.hero.mini .hero-body{padding:clamp(22px,4vw,40px) clamp(18px,4vw,40px);gap:16px}
+.hero.mini h4{font-family:var(--disp);font-weight:400;font-size:clamp(22px,3.4vw,34px);line-height:1.1;letter-spacing:-.03em;margin:0;max-width:22ch;text-wrap:balance}
+.chip{display:inline-flex;align-items:center;gap:10px;background:var(--b-card);border:1px solid var(--b-hair);border-radius:999px;padding:6px 14px 6px 8px;font-size:14px;color:var(--b-muted);--g-eye:var(--b-card)}
+.chip b{color:var(--b-ink);font-weight:500;margin-right:4px}
+.chip .avatar{width:26px;height:26px;margin:0}
+.verdict{margin:0;font-size:14px;line-height:1.5;color:var(--muted)}
+.verdict b{color:var(--fg);font-weight:500}
+@media (max-width:820px){ .opt-grid{grid-template-columns:1fr} }
+@media (max-width:480px){ .opt-locks{grid-template-columns:1fr} .opt-icons .s120{width:88px;height:88px} }
+
+.mo-group{font-family:var(--f-mono);font-weight:400;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:8px 0 10px}
+.motions + .mo-group{margin-top:28px}
+.motions{grid-template-columns:repeat(3,minmax(0,1fr))}
+.row-label{font-family:var(--f-mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:0 0 10px}
+.states + .row-label{margin-top:22px}
+.olds{grid-template-columns:repeat(2,minmax(0,160px))}

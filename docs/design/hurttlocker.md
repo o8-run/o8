@@ -8,6 +8,8 @@ If a future surface disagrees with these tokens, the new surface should match th
 
 ## Font family
 
+> **Superseded for the typeface (2026-11-12):** o8 Branding v1 sets Inter Tight for UI and JetBrains Mono for code ([BRAND.md](BRAND.md) §9). The app keeps the system stack below until step 4 of [BRAND-IMPLEMENT.md](BRAND-IMPLEMENT.md) ships with screenshots. Everything else in this file still stands.
+
 System stack, no webfont. macOS SF Pro / SF Pro Display hinting renders the light weights used here more clearly than the imported fonts tested against it.
 
 ```css

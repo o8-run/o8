@@ -20,7 +20,7 @@ import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
-export type CanvasOrchStatus = 'idle' | 'connecting' | 'ready' | 'busy' | 'dead';
+export type CanvasOrchStatus = 'idle' | 'connecting' | 'ready' | 'busy' | 'dead' | 'unreported';
 
 /** Thread ids survive reloads — same conversation, same repo, every visit. */
 const THREADS_KEY = 'o8:canvas-threads';
@@ -58,7 +58,7 @@ export interface CanvasOrchCallbacks {
   onToolUse?: (repoPath: string, name: string, args?: Record<string, unknown>) => void;
   /** A tool finished — carries its output (the PR-card wire reads `gh pr` URLs). */
   onToolResult?: (repoPath: string, name: string, args: Record<string, unknown> | undefined, output: string | undefined) => void;
-  onStatus?: (repoPath: string, status: CanvasOrchStatus) => void;
+  onStatus?: (repoPath: string, status: CanvasOrchStatus, reason?: string) => void;
   onNotice?: (repoPath: string, message: string) => void;
   onError?: (repoPath: string, error: string) => void;
   /** A lane changed state somewhere (agent spawned, review-ready, merged…)
@@ -73,7 +73,7 @@ export type CanvasThreadEvent =
   | { type: 'output'; text: string; thinking: boolean }
   | { type: 'tool'; name: string; args?: Record<string, unknown> }
   | { type: 'tool-result'; name: string; args?: Record<string, unknown>; output?: string }
-  | { type: 'status'; status: CanvasOrchStatus }
+  | { type: 'status'; status: CanvasOrchStatus; reason?: string }
   | { type: 'notice'; message: string }
   | { type: 'error'; error: string };
 
@@ -161,9 +161,10 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
         } else if (msg.event === 'tool-result' && typeof data.name === 'string') {
           cbRef.current.onToolResult?.(repoPath, data.name, asRecord(data.args), typeof data.output === 'string' ? data.output : undefined);
         } else if (msg.event === 'status' && typeof data.status === 'string') {
-          const next = data.status === 'busy' ? 'busy' : data.status === 'dead' ? 'dead' : 'ready';
+          const next = data.status === 'unreported' ? 'unreported' : data.status === 'busy' ? 'busy' : data.status === 'dead' ? 'dead' : 'ready';
           setStatus(next);
-          cbRef.current.onStatus?.(repoPath, next);
+          cbRef.current.onStatus?.(repoPath, next, next === 'unreported'
+            ? (typeof data.reason === 'string' ? data.reason : 'turn ended without an outcome report') : undefined);
         } else if (msg.event === 'notice' && typeof data.message === 'string') {
           cbRef.current.onNotice?.(repoPath, data.message);
         } else if (msg.event === 'error' && typeof data.error === 'string') {
@@ -337,9 +338,10 @@ export function useThreadOrchestrator(
         } else if (msg.event === 'tool-result' && typeof data.name === 'string') {
           onEventRef.current({ type: 'tool-result', name: data.name, args: asRecord(data.args), output: typeof data.output === 'string' ? data.output : undefined });
         } else if (msg.event === 'status' && typeof data.status === 'string') {
-          const next: CanvasOrchStatus = data.status === 'busy' ? 'busy' : data.status === 'dead' ? 'dead' : 'ready';
+          const next: CanvasOrchStatus = data.status === 'unreported' ? 'unreported' : data.status === 'busy' ? 'busy' : data.status === 'dead' ? 'dead' : 'ready';
           setStatus(next);
-          onEventRef.current({ type: 'status', status: next });
+          onEventRef.current({ type: 'status', status: next, ...(next === 'unreported'
+            ? { reason: typeof data.reason === 'string' ? data.reason : 'turn ended without an outcome report' } : {}) });
         } else if (msg.event === 'notice' && typeof data.message === 'string') {
           onEventRef.current({ type: 'notice', message: data.message });
         } else if (msg.event === 'error' && typeof data.error === 'string') {

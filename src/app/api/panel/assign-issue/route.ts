@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 import { NextResponse } from 'next/server';
 import { addLabelsToGitHubIssue, commentOnGitHubIssue, resolveRepoSlug } from '@/lib/github-broker';
 
@@ -11,7 +12,10 @@ import { addLabelsToGitHubIssue, commentOnGitHubIssue, resolveRepoSlug } from '@
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject<{ issue: number; agent: string; repo?: string }>(request);
+    if (!body) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
     const { issue, agent, repo } = body;
 
     if (!issue || !agent) {
