@@ -386,7 +386,8 @@ impl PullRequests {
                 self.map.keeps(string(f, "path")) || self.map.keeps(string(f, "previousPath"))
             })
             .collect();
-        if files.is_empty() {
+        let filtered = !self.map.selected.is_empty();
+        if files.is_empty() && !filtered {
             return div()
                 .p(px(16.))
                 .child(muted("No file changes reported."))
@@ -395,9 +396,29 @@ impl PullRequests {
         let all_open = files
             .iter()
             .all(|f| self.open_files.contains(string(f, "path")));
-        let count = self.detail["changedFiles"]
-            .as_u64()
-            .unwrap_or(files.len() as u64);
+        let count = if filtered {
+            files.len() as u64
+        } else {
+            self.detail["changedFiles"]
+                .as_u64()
+                .unwrap_or(files.len() as u64)
+        };
+        let additions = if filtered {
+            files
+                .iter()
+                .map(|file| file["additions"].as_u64().unwrap_or(0))
+                .sum()
+        } else {
+            self.detail["additions"].as_u64().unwrap_or(0)
+        };
+        let deletions = if filtered {
+            files
+                .iter()
+                .map(|file| file["deletions"].as_u64().unwrap_or(0))
+                .sum()
+        } else {
+            self.detail["deletions"].as_u64().unwrap_or(0)
+        };
         let toolbar = div()
             .debug_selector(move || format!("pr-changes-count-{count}"))
             .px(px(18.))
@@ -407,48 +428,76 @@ impl PullRequests {
             .justify_between()
             .text_size(px(11.))
             .text_color(theme().text_muted)
-            .child(format!(
-                "{} files · +{} −{}",
-                count,
-                self.detail["additions"].as_u64().unwrap_or(0),
-                self.detail["deletions"].as_u64().unwrap_or(0)
-            ))
-            .child(
-                div()
-                    .flex()
-                    .gap(px(6.))
-                    .child(
-                        small_button(
-                            "pr-diff-view".into(),
-                            if self.split_diff { "Unified" } else { "Split" },
-                        )
-                        .on_click(cx.listener(|s, _, _, cx| {
-                            s.split_diff = !s.split_diff;
-                            s.changed(cx);
-                        })),
+            .child(format!("{count} files · +{additions} −{deletions}"));
+        if files.is_empty() {
+            return div()
+                .pb(px(18.))
+                .child(toolbar)
+                .child(
+                    div()
+                        .debug_selector(|| "pr-map-no-files".into())
+                        .p(px(16.))
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap(px(8.))
+                        .child(muted("No files match the map selection"))
+                        .child(
+                            small_button("pr-map-show-all".into(), "Show all")
+                                .focusable()
+                                .on_click(cx.listener(|s, _, _, cx| {
+                                    s.map.apply(&crate::change_map::Command::Clear);
+                                    s.changed(cx);
+                                }))
+                                .on_key_down(cx.listener(|s, e: &gpui::KeyDownEvent, _, cx| {
+                                    if matches!(e.keystroke.key.as_str(), "enter" | "space")
+                                        && !e.keystroke.modifiers.modified()
+                                    {
+                                        s.map.apply(&crate::change_map::Command::Clear);
+                                        s.changed(cx);
+                                        cx.stop_propagation();
+                                    }
+                                })),
+                        ),
+                )
+                .into_any_element();
+        }
+        let toolbar = toolbar.child(
+            div()
+                .flex()
+                .gap(px(6.))
+                .child(
+                    small_button(
+                        "pr-diff-view".into(),
+                        if self.split_diff { "Unified" } else { "Split" },
                     )
-                    .child(
-                        small_button(
-                            "pr-files-toggle".into(),
-                            if all_open {
-                                "Collapse all"
-                            } else {
-                                "Expand all"
-                            },
-                        )
-                        .on_click(cx.listener(move |s, _, _, cx| {
-                            if all_open {
-                                s.open_files.clear();
-                            } else {
-                                s.open_files = array(&s.detail, "files")
-                                    .iter()
-                                    .map(|f| string(f, "path").to_owned())
-                                    .collect();
-                            }
-                            s.changed(cx);
-                        })),
-                    ),
-            );
+                    .on_click(cx.listener(|s, _, _, cx| {
+                        s.split_diff = !s.split_diff;
+                        s.changed(cx);
+                    })),
+                )
+                .child(
+                    small_button(
+                        "pr-files-toggle".into(),
+                        if all_open {
+                            "Collapse all"
+                        } else {
+                            "Expand all"
+                        },
+                    )
+                    .on_click(cx.listener(move |s, _, _, cx| {
+                        if all_open {
+                            s.open_files.clear();
+                        } else {
+                            s.open_files = array(&s.detail, "files")
+                                .iter()
+                                .map(|f| string(f, "path").to_owned())
+                                .collect();
+                        }
+                        s.changed(cx);
+                    })),
+                ),
+        );
         let mut list = div().flex().flex_col().px(px(12.)).gap(px(6.));
         for (i, f) in files.iter().enumerate() {
             let path = string(f, "path").to_owned();
