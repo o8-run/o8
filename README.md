@@ -22,7 +22,7 @@ o8 is a free, open-source review and merge layer for coding agents. Write code w
 - **Merges you can audit.** The commit that was reviewed is the commit that merges, and every step leaves evidence. A single governed merge operation is being built.
 - **Works with your tools.** Reach o8 from the `o8` CLI or any MCP client. It runs the agent CLIs already on your machine, on your own subscriptions or keys, as reviewers and fixers.
 
-**Where this stands.** On `main`: findings go back to their author, and submitted reviews show with the commit they reviewed. Being built, in order: re-review of a fix, autonomous merge within a policy the project sets once, intake of pull requests from any tool, and reviewers that learn from past outcomes. The [roadmap](./ROADMAP.md) tracks each one.
+**Where this stands.** On `main`: findings go back to their author, submitted reviews show with the commit they reviewed, a fix is re-reviewed against the saved findings, and a pull request from another tool can be adopted into one review task. Being built, in order: one governed merge operation, autonomous merge within a policy the project sets once, and reviewers that learn from past outcomes. The [roadmap](./ROADMAP.md) tracks each one.
 
 | Platform | Status |
 |---|---|
