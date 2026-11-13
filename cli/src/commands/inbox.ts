@@ -91,6 +91,7 @@ function flag(rest: string[], name: string) {
   return value;
 }
 async function runDrafts(mode: OutputMode, action: string, rest: string[]): Promise<number> {
+  if (rest.some(arg => arg === '--comment' || arg.startsWith('--comment='))) throw new CliError('invalid_args', 'Draft decisions accept --reason, not --comment.', EXIT.INVALID_ARGS);
   const value = (name: string) => rest.includes(name) ? flag(rest, name) : undefined;
   const repo = value('--repo');
   let data: unknown;

@@ -103,3 +103,12 @@ it('returns the head and detects pending checks even when the aggregate is faili
   const page = await fetchPullRequestListPage('example/repo', 'open', 1);
   expect(page.prs[0]).toMatchObject({ headSha: 'a'.repeat(40), updatedAt: source.updated_at, checks: 'failure', checksPending: true });
 });
+
+it.each(['REQUESTED', 'WAITING', 'FUTURE_PENDING', 'SUCCESS', 'FAILURE', 'CANCELLED'])('uses the shared unfinished-check rule for summary state %s', async state => {
+  githubInstallationFetch.mockImplementation(async (_repo: string, path: string) => ({ response: path === '/graphql'
+    ? Response.json({ data: { nodes: [{ number: 7, commits: { nodes: [{ commit: { statusCheckRollup: { state: 'FAILURE', contexts: {
+      checkRunCountsByState: [{ state, count: 1 }], statusContextCountsByState: [],
+    } } } }] } }] } }) : Response.json([pull(7)]) }));
+  const page = await fetchPullRequestListPage('example/repo', 'open', 1);
+  expect(page.prs[0].checksPending).toBe(['REQUESTED', 'WAITING', 'FUTURE_PENDING'].includes(state));
+});

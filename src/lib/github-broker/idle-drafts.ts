@@ -1,4 +1,5 @@
 import 'server-only';
+import { isUnfinishedCheckRunState, isPendingStatusContext } from './check-state';
 import { DEFAULT_GITHUB_REPO, resolveRepoSlug, fetchGitHubPullRequestDetail, commentOnGitHubPullRequest, closeGitHubPullRequest } from '@/lib/github-broker';
 import { captureGitHubAccount, requireGitHubAccount, githubInstallationFetch } from './auth';
 import { githubProvider } from '@/lib/git-providers/github';
@@ -82,7 +83,8 @@ export async function recordDraftDecision(repo: string, number: number, input: R
   if (!isLiteralDraftRepo(repo)) throw new DraftDecisionError(400, 'A literal GitHub owner/repository is required.');
   const { decision } = input;
   if (!['continue', 'handoff', 'close'].includes(String(decision))) throw new DraftDecisionError(400, 'Choose continue, handoff or close.');
-  for (const name of ['reason', 'comment'] as const) {
+  if (Object.hasOwn(input, 'comment')) throw new DraftDecisionError(400, 'The comment field is not supported for draft decisions. Use reason.');
+  for (const name of ['reason'] as const) {
     if (input[name] !== undefined && typeof input[name] !== 'string') throw new DraftDecisionError(400, `${name} must be text.`);
     if (typeof input[name] === 'string' && Buffer.byteLength(input[name], 'utf8') > DRAFT_DECISION_TEXT_BYTES) throw new DraftDecisionError(400, `${name} must be at most ${DRAFT_DECISION_TEXT_BYTES} UTF-8 bytes.`);
   }
@@ -102,6 +104,7 @@ export async function recordDraftDecision(repo: string, number: number, input: R
   if (decisionsInFlight.has(key)) throw new DraftDecisionError(409, 'Another decision for this draft is already in progress. Inspect GitHub before retrying.');
   decisionsInFlight.add(key);
   try {
+    if (!(await registeredGitHubRepos()).has(repo.toLowerCase())) throw new DraftDecisionError(403, 'Draft decisions require a registered GitHub repository.');
     const account = captureGitHubAccount();
     const pr = await fetchGitHubPullRequestDetail(repo, number, undefined, 'interactive', true);
     requireGitHubAccount(account);
@@ -113,8 +116,8 @@ export async function recordDraftDecision(repo: string, number: number, input: R
     if (pr.state !== 'open' || !pr.draft || !Number.isFinite(elapsed) || elapsed < IDLE_DRAFT_DAYS * 86400000) {
       throw new DraftDecisionError(409, 'This pull request is no longer an idle open draft. Refresh before deciding.');
     }
-    const pendingChecks = (pr.statusCheckRollup ?? []).some(check => !check.conclusion || Boolean(check.status && check.status.toLowerCase() !== 'completed'))
-      || pr.requiredStatuses?.some(check => ['PENDING', 'EXPECTED'].includes(check.state.toUpperCase()));
+    const pendingChecks = (pr.statusCheckRollup ?? []).some(check => !check.conclusion || Boolean(check.status && isUnfinishedCheckRunState(check.status)))
+      || pr.requiredStatuses?.some(check => isPendingStatusContext(check.state));
     if (pr.checksUnavailable) throw new DraftDecisionError(409, 'Draft check status could not be confirmed. Refresh before deciding.');
     if (pendingChecks) throw new DraftDecisionError(409, 'This draft has pending checks. Refresh the idle-draft list after they finish.');
     let ownerAssigned = false;
@@ -127,7 +130,8 @@ export async function recordDraftDecision(repo: string, number: number, input: R
       if (!result.assignees?.some(row => row.login.toLowerCase() === owner.toLowerCase())) throw new DraftDecisionError(422, 'GitHub did not assign this owner. Choose an assignable GitHub user.');
       ownerAssigned = true;
     }
-    requireGitHubAccount(account);
+    try { requireGitHubAccount(account); }
+    catch { throw new DraftDecisionError(502, 'GitHub account changed before commenting. Inspect the pull request before retrying.', false, ownerAssigned); }
     try { await commentOnGitHubPullRequest(repo, number, comment); }
     catch { throw new DraftDecisionError(502, 'Comment outcome is unknown. Inspect the pull request before retrying.', null, ownerAssigned); }
     idleDraftCache.clear();

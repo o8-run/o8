@@ -79,9 +79,9 @@ it('Close requires a reason and records it before closing', async () => {
   expect(h.comment.mock.invocationCallOrder[0]).toBeLessThan(h.close.mock.invocationCallOrder[0]);
 });
 it('refuses a stale decision on a ready PR and invalid owners before writing', async () => {
-  h.detail.mockResolvedValue({ state: 'open', draft: false });
+  h.detail.mockResolvedValue({ ...row(), draft: false, statusCheckRollup: [] });
   expect((await post('continue')).status).toBe(409);
-  h.detail.mockResolvedValue({ state: 'open', draft: true });
+  h.detail.mockResolvedValue({ ...row(), statusCheckRollup: [] });
   expect((await post('handoff', { owner: 'bad owner' })).status).toBe(400);
   expect(h.comment).not.toHaveBeenCalled(); expect(h.assign).not.toHaveBeenCalled();
 });
@@ -117,6 +117,12 @@ it('exposes paged results through the CLI command and registered MCP tool withou
     expect(JSON.stringify(result)).toContain('Inspect');
     expect(h.comment).toHaveBeenCalledTimes(1); expect(h.close).toHaveBeenCalledTimes(1);
     await expect(runInbox({ human: false, verbose: false }, 'continue-draft', ['7', '--repo', 'example/repo', '--expected-head-sha', headSha, '--expected-updated-at', observedUpdatedAt, '--reason', '--owner', 'x'])).rejects.toMatchObject({ code: 'invalid_args' });
+    const commentsBefore = h.comment.mock.calls.length;
+    await expect(runInbox({ human: false, verbose: false }, 'continue-draft', ['7', '--repo', 'example/repo', '--expected-head-sha', headSha, '--expected-updated-at', observedUpdatedAt, '--comment', 'Removed field'])).rejects.toMatchObject({ code: 'invalid_args' });
+    const removed = await handleOperatorMcpMessage({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'o8_idle_drafts', arguments: { action: 'continue', repo: 'example/repo', number: 7, expectedHeadSha: headSha, expectedUpdatedAt: observedUpdatedAt, comment: 'Removed field' } } });
+    expect(removed?.result).toMatchObject({ isError: true });
+    expect(h.comment).toHaveBeenCalledTimes(commentsBefore);
+
   } finally {
     output.mockRestore(); vi.unstubAllEnvs();
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
@@ -172,6 +178,7 @@ it('stops later decision writes when the GitHub account changes during handoff',
   });
   const response = await post('handoff', { owner: 'fixture-owner' });
   expect(response.status).toBe(502);
+  expect(await response.json()).toMatchObject({ ownerAssigned: true, commentPosted: false });
   expect(h.comment).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
   h.comment.mockImplementationOnce(async () => { bumpSignInEpoch(); });
   const closing = await post('close', { reason: 'Superseded' });
@@ -209,7 +216,7 @@ it.each([undefined, 'repo', '/workspace/repo', 'https://github.com/example/repo'
   expect(response.status).toBe(400);
   expect(h.comment).not.toHaveBeenCalled();
 });
-it('review correction: oversized UTF-8 reason and comment return 400 before remote writes', async () => {
+it('review correction: oversized UTF-8 reason and removed comment field return 400 before remote writes', async () => {
   expect((await post('close', { reason: 'é'.repeat(2500) })).status).toBe(400);
   expect((await post('continue', { comment: 'x'.repeat(4097) })).status).toBe(400);
   expect((await post('close', { reason: 'x'.repeat(4090) })).status).toBe(400);
@@ -257,4 +264,44 @@ it('refuses missing snapshot fields and unavailable fresh checks before writing'
   h.detail.mockResolvedValue({ ...row(), statusCheckRollup: [], checksUnavailable: true });
   expect((await post('close', { reason: 'Superseded' })).status).toBe(409);
   expect(h.comment).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
+});
+
+it.each(['PENDING', 'EXPECTED'])('refuses a pending required status %s with no check runs and no write', async state => {
+  h.detail.mockResolvedValue({ ...row(), statusCheckRollup: [], requiredStatuses: [{ state }] });
+  expect((await post('close', { reason: 'Superseded' })).status).toBe(409);
+  expect(h.comment).not.toHaveBeenCalled(); expect(h.assign).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
+});
+it('refuses an unregistered literal repo without any GitHub call', async () => {
+  const response = await post('continue', { repo: 'example/unregistered' });
+  expect(response.status).toBe(403);
+  expect(h.detail).not.toHaveBeenCalled(); expect(h.list).not.toHaveBeenCalled(); expect(h.assign).not.toHaveBeenCalled();
+  expect(h.comment).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
+});
+it('rejects the removed comment field before reading or writing GitHub', async () => {
+  expect((await post('continue', { comment: 'Unused text' })).status).toBe(400);
+  expect(h.detail).not.toHaveBeenCalled(); expect(h.comment).not.toHaveBeenCalled();
+});
+it.each(['next-link', 'total-count', 'unbounded-page', 'complete-page'])('fresh detail check-page evidence: %s', async mode => {
+  const { fetchGitHubPullRequestDetail } = await vi.importActual<typeof import('@/lib/github-broker/details')>('@/lib/github-broker/details');
+  h.detail.mockImplementationOnce(fetchGitHubPullRequestDetail);
+  h.assign.mockImplementation(async (_repo: string, path: string) => ({ anonymous: true, response: path.endsWith('/pulls/7')
+    ? Response.json({ number: 7, title: 'Idle fixture', state: 'open', draft: true, updated_at: observedUpdatedAt, head: { sha: headSha }, base: { ref: 'main' }, changed_files: 0 })
+    : path.includes('/check-runs') ? Response.json({ ...(mode === 'total-count' ? { total_count: 101 } : mode === 'complete-page' ? { total_count: 100 } : {}), check_runs: Array.from({ length: 100 }, (_, i) => ({ name: `check-${i}`, status: 'completed', conclusion: 'success' })) },
+      { headers: mode === 'next-link' ? { link: '<https://api.github.com/repos/example/repo/commits/head/check-runs?page=2>; rel="next"' } : {} }) : Response.json([]) }));
+  const response = await post('close', { reason: 'Superseded' });
+  if (mode === 'complete-page') {
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(h.comment).toHaveBeenCalledTimes(1); expect(h.close).toHaveBeenCalledTimes(1);
+  } else {
+    expect(response.status, await response.clone().text()).toBe(409);
+    expect((await response.json()).error).toMatch(/check status could not be confirmed/i);
+    expect(h.comment).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
+  }
+  expect(h.assign.mock.calls.every(([, , options]) => !options?.method || options.method === 'GET')).toBe(true);
+});
+
+it('refuses an unfinished requested run even when it still carries a terminal conclusion', async () => {
+  h.detail.mockResolvedValue({ ...row(), statusCheckRollup: [{ name: 'retry', status: 'requested', conclusion: 'failure' }] });
+  expect((await post('close', { reason: 'Superseded' })).status).toBe(409);
+  expect(h.comment).not.toHaveBeenCalled(); expect(h.assign).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
 });

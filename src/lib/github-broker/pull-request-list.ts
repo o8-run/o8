@@ -1,3 +1,4 @@
+import { isUnfinishedCheckRunState, isPendingStatusContext } from './check-state';
 import 'server-only';
 
 import { githubInstallationFetch } from './auth';
@@ -77,9 +78,9 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
       const summary = stats.get(pull.number);
       const rollup = summary?.commits.nodes[0]?.commit.statusCheckRollup;
       const checksState = rollup?.state;
-      const checksPending = ['PENDING', 'EXPECTED'].includes(checksState ?? '')
-        || Boolean(rollup?.contexts?.checkRunCountsByState.some(row => row.count > 0 && ['IN_PROGRESS', 'PENDING', 'QUEUED', 'WAITING'].includes(row.state)))
-        || Boolean(rollup?.contexts?.statusContextCountsByState.some(row => row.count > 0 && ['EXPECTED', 'PENDING'].includes(row.state)));
+      const checksPending = isPendingStatusContext(checksState ?? '')
+        || Boolean(rollup?.contexts?.checkRunCountsByState.some(row => row.count > 0 && isUnfinishedCheckRunState(row.state)))
+        || Boolean(rollup?.contexts?.statusContextCountsByState.some(row => row.count > 0 && isPendingStatusContext(row.state)));
       return {
       number: pull.number, title: pull.title, author: pull.user?.login ?? 'Unknown author',
       avatarUrl: pull.user?.avatar_url ?? null, additions: summary?.additions ?? null, deletions: summary?.deletions ?? null,
