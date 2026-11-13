@@ -27,6 +27,7 @@ export function mintAssignedReviewerToken(packetId: string, reviewTurnId: string
 }
 
 export function reviewSubmissionPrincipal(principal: RequestPrincipalContext, packetId: string): ReviewSubmissionPrincipal | null {
+  // Before wiring assigned-reviewer admission, explicitly check that the reviewer is not the author's run or session.
   if (principal.role === 'operator') return { role: 'operator' };
   if (principal.role !== 'worker' || principal.readOnly || principal.packetId !== packetId || !principal.tokenId || !principal.leaseProcessMarker) return null;
   try {
