@@ -744,7 +744,8 @@ fn inbox_empty_and_server_error_never_claim_a_false_clean_state(cx: &mut TestApp
     cx.simulate_keystrokes("i n b o x enter");
     cx.run_until_parked();
     draw(cx);
-    // Audit has its own loading/error/empty contract, covered by approval_audit tests.
+    // Audit uses distinct selectors; approval_audit_empty_errors_and_long_filter_labels_are_readable
+    // verifies its empty, error, retry and filtered-empty states without claiming a clean Inbox.
     for (lane, _) in crate::inbox::VIEWS.into_iter().take(5) {
         click(cx, &format!("inbox-view-{lane}"));
         assert!(bounds(cx, "inbox-empty").is_some());

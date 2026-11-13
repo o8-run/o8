@@ -23,6 +23,10 @@ impl Task {
             .unwrap_or("")
             .to_owned()
     }
+    pub fn can_discard_missing(&self) -> bool {
+        !matches!(self.text("status").as_str(), "running" | "launching" | "recovering")
+            && !matches!(text(&self.lane, "status").as_str(), "running" | "launching" | "recovering")
+    }
     pub fn status(&self) -> &'static str {
         FILTERS[self.filter]
     }

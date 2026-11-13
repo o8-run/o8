@@ -312,11 +312,10 @@ impl Inbox {
             if self.audit.last_refresh.elapsed() >= Duration::from_secs(30) {
                 self.load_audit(cx);
             }
-            return;
         }
         self.tick_questions(cx);
         if self.last_refresh.elapsed() >= Duration::from_secs(300) {
-            self.load(cx);
+            self.load_inbox(cx);
         }
     }
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
@@ -324,6 +323,9 @@ impl Inbox {
             self.load_audit(cx);
             return;
         }
+        self.load_inbox(cx);
+    }
+    fn load_inbox(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
         }

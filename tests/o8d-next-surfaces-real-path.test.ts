@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -8,8 +8,10 @@ import { startParityReference } from './fixtures/ws-parity-server';
 import { cutoverClient } from './fixtures/ws-cutover-client';
 
 const binary = process.env.O8D_BINARY ?? process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
+const taskFixtureKeys = generateKeyPairSync('ed25519');
 // A1 reads: exercise the gate and original handler through the public socket.
 const NATIVE_READS = [
+  ['settings', '/api/plugins/task-drafts', 403],
   ['settings', '/api/cortex/codebase-memory', 200],
   ['settings', '/api/cortex/diagnostics', 200],
   ['session', '/api/tasks?includeDone=true&includeBrief=true', 200],
@@ -66,8 +68,15 @@ let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;
 beforeAll(async () => {
   if (!process.env.O8D_BINARY && !process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
-  server = await startParityReference({ o8d: true, binary, nativeHttp: true, startupTimeoutMs: 120_000,
-    preload: './tests/fixtures/ws-parity-acp-registry.cjs' });
+  const priorTaskKey = process.env.O8_LICENSE_PUBKEY;
+  process.env.O8_LICENSE_PUBKEY = taskFixtureKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  try {
+    server = await startParityReference({ o8d: true, binary, nativeHttp: true, startupTimeoutMs: 120_000,
+      preload: './tests/fixtures/ws-parity-acp-registry.cjs' });
+  } finally {
+    if (priorTaskKey === undefined) delete process.env.O8_LICENSE_PUBKEY;
+    else process.env.O8_LICENSE_PUBKEY = priorTaskKey;
+  }
   // The fixture Next server has no project route; startup must own this write.
   expect(JSON.parse(readFileSync(join(server.directory, 'projects.json'), 'utf8')))
     .toMatchObject({ activeProjectId: 'default', projects: [{ id: 'default' }] });
@@ -435,8 +444,7 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
     const refused = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}` } });
     expect(refused.status).toBe(405);
-    // Unsupported verbs use the transport's first path registration for its Allow header.
-    expect(refused.headers.get('allow')).toBe(routes[0].methods.join(', '));
+    expect(refused.headers.get('allow')).toBe(methods.join(', '));
     await refused.arrayBuffer();
   }
 });
@@ -814,6 +822,8 @@ const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> 
   ['POST', '/api/orchestrator/steer-packet', 403],
   ['POST', '/api/cortex/reingest', 403],
   ['POST', '/api/orchestrator/stop-packet', 403],
+  ['GET', '/api/orchestrator/worker-corrections?packetId=fixture-missing', 403],
+  ['POST', '/api/orchestrator/worker-corrections', 403],
   ['POST', '/api/orchestrator/rerun-with-feedback', 403],
   ['POST', '/api/orchestrator/reset-packet', 403],
   ['POST', '/api/orchestrator/spawn-prompt', 403],
@@ -845,7 +855,7 @@ it.each(WRITE_ROUTES)('refuses native %s %s without the operator bearer', async 
   const forged = { 'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged', 'content-type': 'application/json' };
   const send = (authorization?: string) => fetch(origin + path, { method,
     headers: { ...forged, ...(authorization ? { authorization } : {}) },
-    body: JSON.stringify({ action: 'dismiss_observation', id: 'fixture', threadId: 'thoughts-fixture', text: 'Denied fixture' }) });
+    body: method === 'GET' ? undefined : JSON.stringify({ action: 'dismiss_observation', id: 'fixture', threadId: 'thoughts-fixture', text: 'Denied fixture' }) });
   for (const [authorization, status] of [[undefined, 401], ['Bearer fixture-invalid', 401],
     ['Bearer o8ro_fixture-read-only', 403], [`Bearer ${worker.token}`, workerStatus]] as const) {
     const response = await send(authorization);
@@ -936,6 +946,7 @@ it('keeps proposal writes bound to the worker packet through the native transpor
 
 it.each([
   ['POST', '/api/orchestrator/handoff', {}, 400, 'invalid_handoff_request'],
+  ['POST', '/api/orchestrator/merge', {}, 400, 'packetId is required'],
   ['POST', '/api/orchestrator/compact', { repoPath: '' }, 400, 'repoPath is required'],
   ['POST', '/api/orchestrator/delegate', {}, 400, 'clientMutationId is required'],
   ['POST', '/api/orchestrator/discard-packet', { packetId: 'fixture-missing' }, 400, 'client_mutation_id_required'],
@@ -961,6 +972,220 @@ it('resets an orchestrator session through the native transport', async () => {
     body: JSON.stringify({ repoPath: server.directory, threadId: 'thoughts-native-reset' }) });
   expect(response.status).toBe(200);
   expect((await response.json()).ok).toBe(true);
+});
+
+it('serves saved-review correction availability through the native transport without Next', async () => {
+  const response = await fetch(`${origin}/api/orchestrator/worker-corrections?packetId=fixture-missing`, {
+    headers: { authorization: `Bearer ${server.token}` },
+  });
+  expect(response.status).toBe(200);
+  expect((await response.json()).reviewCorrection).toMatchObject({ available: false, reason: 'No saved review is available for this packet.' });
+});
+
+it('holds a rejected packet and replays its canonical merge receipt through native HTTP with Next stopped', async () => {
+  const port = new URL(origin).port;
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token,
+    CORTEX_REALTIME_INTERNAL_ORIGIN: origin, O8_API_PORT: port, O8_WS_PORT: port, PORT: port };
+  await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { createEmptyOrchestratorMissionState } = require('./src/lib/orchestrator/store.ts');
+    const { writeOrchestratorControlPlaneState } = require('./src/lib/orchestrator/control-plane.ts');
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'native-merge-mission',
+      repoPath: process.env.CORTEX_IDE_DATA_DIR, packets: [{ id: 'native-merge-rejected', referenceLabel: 'P1',
+        title: 'Rejected native merge fixture', summary: 'Preserve saved findings', runtime: 'codex',
+        status: 'awaiting_review', workspaceTargetPath: process.env.CORTEX_IDE_DATA_DIR, branchTarget: 'fixture',
+        dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
+        review: { approved: false, reviewedHeadSha: 'a'.repeat(40), note: 'Fixture findings remain open.' } }] });
+    require('./src/lib/db/index.ts').closeDb();
+  `], { env, encoding: 'utf8' });
+  const body = { packetId: 'native-merge-rejected', idempotencyKey: 'native-canonical-merge-fixture', expectedHeadSha: 'a'.repeat(40) };
+  const send = (value: unknown, bearer: string | null = server.token) => fetch(`${origin}/api/orchestrator/merge`, {
+    method: 'POST', headers: { ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), 'content-type': 'application/json' },
+    body: JSON.stringify(value),
+  });
+  for (const [bearer, status] of [[null, 401], ['fixture-invalid', 401], ['o8ro_fixture-read-only', 403]] as const) {
+    const response = await send(body, bearer); expect(response.status).toBe(status); await response.arrayBuffer();
+  }
+  const worker = await seedPacketWorker('native-other-packet');
+  const foreign = await send(body, worker.token);
+  expect(foreign.status).toBe(403); await foreign.arrayBuffer();
+  const first = await send(body);
+  expect(first.status).toBe(200);
+  expect(await first.json()).toMatchObject({ ok: true, result: { merged: false, note: 'Packet review is not approved. Resolve findings before merging.' } });
+  const replay = await send(body);
+  expect(replay.status).toBe(200);
+  expect(await replay.json()).toMatchObject({ ok: true, result: { merged: false, replayed: true } });
+  const conflict = await send({ ...body, expectedHeadSha: 'b'.repeat(40) });
+  expect(conflict.status).toBe(409);
+  expect(await conflict.json()).toMatchObject({ ok: false, error: { code: 'idempotency_key_conflict' } });
+  const persisted = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { getSqlite } = require('./src/lib/db/index.ts');
+    const rows = getSqlite().prepare("SELECT result_json FROM idempotency_keys WHERE verb = 'approve_and_merge' AND packet_id = ?").all('native-merge-rejected');
+    console.log(JSON.stringify(rows.map(row => JSON.parse(row.result_json))));
+    const { readOrchestratorControlPlaneState } = require('./src/lib/orchestrator/control-plane.ts');
+    console.log(JSON.stringify({ review: readOrchestratorControlPlaneState().packets.find(packet => packet.id === 'native-merge-rejected').review }));
+    require('./src/lib/db/index.ts').closeDb();
+  `], { env, encoding: 'utf8' });
+  const lines = persisted.stdout.split('\n');
+  expect(JSON.parse(lines.find(line => line.startsWith('[{'))!)).toMatchObject([{ merged: false }]);
+  const state = JSON.parse(lines.find(line => line.startsWith('{"review":'))!);
+  expect(state.review.approved).toBe(false);
+});
+
+it('refuses an approved packet with a mismatched expected HEAD without merging through native HTTP', async () => {
+  const repo = join(server.directory, 'approved-head-repo');
+  const git = (cwd: string, ...args: string[]) => promisify(execFile)('git', ['-C', cwd, ...args], { encoding: 'utf8' });
+  await promisify(execFile)('git', ['init', '-q', '-b', 'integration', repo]);
+  writeFileSync(join(repo, 'README.md'), 'Base remains unchanged.\n');
+  await git(repo, 'add', 'README.md');
+  await git(repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'Fixture base');
+  const base = (await git(repo, 'rev-parse', 'HEAD')).stdout.trim();
+  const port = new URL(origin).port;
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token,
+    CORTEX_REALTIME_INTERNAL_ORIGIN: origin, O8_API_PORT: port, O8_WS_PORT: port, PORT: port };
+  const created = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    (async () => {
+      const { getWorktreeManager } = require('./src/lib/worktree/index.ts');
+      const workspace = await getWorktreeManager(process.argv[1]).create({ agentType: 'codex', taskName: 'approved-head',
+        branchName: 'approved-work', baseBranch: 'integration', managed: true, skipSetup: true,
+        isolationPreference: 'git-worktree', packetId: 'native-approved-head' });
+      console.log('managed-path:' + workspace.path);
+      require('./src/lib/db/index.ts').closeDb();
+    })().catch(error => { console.error(error); process.exitCode = 1; });
+  `, repo], { env, encoding: 'utf8' });
+  const worktree = created.stdout.split('\n').find(line => line.startsWith('managed-path:'))!.slice('managed-path:'.length);
+  writeFileSync(join(worktree, 'README.md'), 'Approved work remains unmerged.\n');
+  await git(worktree, 'add', 'README.md');
+  await git(worktree, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'Fixture approved work');
+  const head = (await git(worktree, 'rev-parse', 'HEAD')).stdout.trim();
+  await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { createLane } = require('./src/lib/lane/registry.ts');
+    const { createEmptyOrchestratorMissionState } = require('./src/lib/orchestrator/store.ts');
+    const { writeOrchestratorControlPlaneState } = require('./src/lib/orchestrator/control-plane.ts');
+    const lane = createLane({ repoPath: process.argv[1], worktreePath: process.argv[2], branch: 'approved-work', baseBranch: 'integration',
+      runtime: 'codex', packetId: 'native-approved-head' });
+    const { createApproval, recordApprovalAudit } = require('./src/lib/approvals/store.ts');
+    const approval = createApproval({ projectId: lane.projectId, source: 'test', runtime: 'codex', agent: 'fixture',
+      sessionKey: 'fixture-approved-head', title: 'Fixture merge approval', description: 'Approved fixture merge',
+      summary: 'Approved fixture merge', risk: 'low', metadata: { Packet: 'native-approved-head', Lane: lane.id },
+      continuation: { kind: 'lane', laneId: lane.id, verb: 'merge', expectedHeadSha: process.argv[3] } });
+    require('./src/lib/db/index.ts').getSqlite().prepare("UPDATE approvals SET status = 'approved' WHERE id = ?").run(approval.id);
+    recordApprovalAudit(approval.id, 'approved', 'desktop', 'Fixture operator approved this head.');
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'native-approved-mission',
+      repoPath: process.argv[1], packets: [{ id: 'native-approved-head', referenceLabel: 'P1', title: 'Approved HEAD fixture',
+        summary: 'Retain approved work', runtime: 'codex', status: 'awaiting_review', workspaceTargetPath: process.argv[1],
+        branchTarget: 'integration', dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
+        review: { approved: true, reviewedHeadSha: process.argv[3], note: 'Fixture review approved.' } }] });
+    require('./src/lib/db/index.ts').closeDb();
+  `, repo, worktree, head], { env, encoding: 'utf8' });
+  const expected = head === 'f'.repeat(40) ? 'e'.repeat(40) : 'f'.repeat(40);
+  const response = await fetch(`${origin}/api/orchestrator/merge`, { method: 'POST',
+    headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ packetId: 'native-approved-head', expectedHeadSha: expected, idempotencyKey: 'native-approved-head-mismatch' }) });
+  const result = await response.json();
+  expect(response.status, JSON.stringify(result)).toBe(409);
+  expect(result).toMatchObject({ ok: false, error: { code: 'head_sha_mismatch' }, expectedHeadSha: expected, currentHeadSha: head });
+  expect((await git(repo, 'rev-parse', 'HEAD')).stdout.trim()).toBe(base);
+  expect((await git(repo, 'rev-parse', 'integration')).stdout.trim()).toBe(base);
+  expect((await git(worktree, 'rev-parse', 'HEAD')).stdout.trim()).toBe(head);
+  expect(readFileSync(join(repo, 'README.md'), 'utf8')).toBe('Base remains unchanged.\n');
+  expect(readFileSync(join(worktree, 'README.md'), 'utf8')).toBe('Approved work remains unmerged.\n');
+});
+
+it('discards only the missing-checkout lane through native HTTP with Next stopped', async () => {
+  const port = new URL(origin).port;
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token,
+    CORTEX_REALTIME_INTERNAL_ORIGIN: origin, O8_API_PORT: port, O8_WS_PORT: port, PORT: port };
+  const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { createLane, updateLane } = require('./src/lib/lane/registry.ts');
+    const { join } = require('node:path');
+    const root = process.env.CORTEX_IDE_DATA_DIR;
+    const missing = createLane({ repoPath: root, branch: 'fixture-orphaned', runtime: 'codex', worktreePath: join(root, 'removed-checkout') });
+    const present = createLane({ repoPath: root, branch: 'fixture-present', runtime: 'codex', worktreePath: root });
+    for (const lane of [missing, present]) updateLane(lane.id, { status: 'awaiting_orchestrator' });
+    console.log(JSON.stringify({ missing: missing.id, present: present.id }));
+    require('./src/lib/db/index.ts').closeDb();
+  `], { env });
+  const fixture = JSON.parse(seeded.stdout.split('\n').find(line => line.startsWith('{"missing":'))!) as { missing: string; present: string };
+  const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const post = (laneId: string) => fetch(`${origin}/api/lanes/discard-orphaned`, {
+    method: 'POST', headers, body: JSON.stringify({ laneId }),
+  });
+  const diff = await fetch(`${origin}/api/lanes/${fixture.missing}/diff`, { headers });
+  expect(diff.status).toBe(409);
+  expect((await diff.json()).error).toMatchObject({ code: 'worktree_missing', laneId: fixture.missing });
+  const refused = await post(fixture.present);
+  expect(refused.status).toBe(409);
+  expect((await refused.json()).error.code).toBe('worktree_present');
+  const discarded = await post(fixture.missing);
+  expect(discarded.status).toBe(200);
+  expect(await discarded.json()).toMatchObject({ ok: true, laneId: fixture.missing, status: 'archived' });
+  const again = await post(fixture.missing);
+  expect(again.status).toBe(409);
+  expect((await again.json()).error.code).toBe('already_terminal');
+  const active = await fetch(`${origin}/api/lanes?active=true`, { headers });
+  const lanes = await active.json();
+  expect(JSON.stringify(lanes)).not.toContain(fixture.missing);
+  expect(JSON.stringify(lanes)).toContain(fixture.present);
+});
+
+it('reviews a persisted plugin task and records its safety stop through native HTTP with Next stopped', async () => {
+  const port = new URL(origin).port;
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token,
+    CORTEX_REALTIME_INTERNAL_ORIGIN: origin, O8_API_PORT: port, O8_WS_PORT: port, PORT: port,
+    O8_LICENSE_PUBKEY: taskFixtureKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    O8_NATIVE_TASK_FIXTURE_KEY: Buffer.from(taskFixtureKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()).toString('base64') };
+  const fixture = async (...args: string[]) => {
+    const result = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx',
+      'tests/fixtures/native-task-draft.fixture.ts', ...args], { env });
+    return result.stdout.split('\n').find(line => line.startsWith('{'));
+  };
+  try {
+  const seeded = JSON.parse((await fixture())!) as { taskId: string; contractHash: string; attemptId: string; accountId: string };
+  const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const send = (action: string, contractHash = seeded.contractHash) => fetch(`${origin}/api/plugins/task-drafts/control`, {
+    method: 'POST', headers, body: JSON.stringify({ action, taskId: seeded.taskId, contractHash }),
+  });
+  const listed = await fetch(`${origin}/api/plugins/task-drafts`, { headers });
+  expect(listed.status).toBe(200);
+  expect(await listed.json()).toMatchObject({ ok: true, accountId: seeded.accountId, drafts: [{
+    taskId: seeded.taskId, contractHash: seeded.contractHash, sessionCurrent: true,
+    contract: { objective: 'Read the fixture and report evidence.', allowedFiles: ['README.md'] },
+    execution: { attemptId: seeded.attemptId, state: 'accepted' },
+  }] });
+  const conflict = await send('inspect', 'f'.repeat(64));
+  expect(conflict.status).toBe(409);
+  expect(await conflict.json()).toMatchObject({ error: 'contract_conflict' });
+  for (const action of ['inspect', 'launch']) {
+    const response = await send(action);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, execution: {
+      taskId: seeded.taskId, contractHash: seeded.contractHash, attemptId: seeded.attemptId,
+      state: 'accepted', replayed: true, retryAllowed: false,
+    } });
+  }
+  await fixture('sign-out');
+  const held = await fetch(`${origin}/api/plugins/task-drafts`, { headers });
+  expect(held.status).toBe(403);
+  expect(await held.json()).toMatchObject({ error: 'account_changed_or_unavailable' });
+  const launchHeld = await send('launch');
+  expect(launchHeld.status).toBe(403);
+  const stopped = await send('stop');
+  expect(stopped.status).toBe(200);
+  expect(await stopped.json()).toMatchObject({ ok: true, execution: { attemptId: seeded.attemptId, state: 'stop_requested' } });
+  const persisted = JSON.parse((await fixture('inspect', seeded.taskId))!);
+  expect(persisted).toMatchObject({ taskId: seeded.taskId, attemptId: seeded.attemptId, state: 'stop_requested' });
+  expect(persisted.stopRequestedAt).toEqual(expect.any(String));
+  } finally {
+    expect(JSON.parse((await fixture('restore-account'))!)).toEqual({ restored: true });
+  }
+  const restoredAccount = await fetch(`${origin}/api/plugins/task-drafts`, {
+    headers: { authorization: `Bearer ${server.token}` },
+  });
+  expect(restoredAccount.status).toBe(403);
 });
 
 it('reads persisted approval audit history and findings over native HTTP with Next stopped', async () => {
