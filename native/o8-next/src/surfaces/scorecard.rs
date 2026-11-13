@@ -335,6 +335,7 @@ impl Render for Scorecard {
             body = body.child(
                 div()
                     .id("scorecard-scroll")
+                    .debug_selector(|| "scorecard-scroll".into())
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
