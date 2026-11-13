@@ -18,7 +18,7 @@ function supervisorFixture(file: string) {
   chmodSync(file, 0o755);
 }
 
-it.each(['source', 'packaged'])('supervises preparation from a packet cwd using %s server resources', async kind => {
+it.each(['source', 'packaged', 'packaged-unmarked'])('supervises preparation from a packet cwd using %s server resources', async kind => {
   const server = join(root, kind);
   location.url = pathToFileURL(kind === 'source' ? join(server, 'src/lib/pi/sdk/scripts.ts') : join(server, 'Contents/Resources/server/helper.mjs')).href;
   const helper = kind === 'source' ? join(server, 'src-tauri/sidecars/pi-write/target/release/o8-pi-write') : join(server, 'Contents/MacOS/o8-pi-write');
