@@ -707,15 +707,11 @@ fn change_map_long_label_bounds(cx: &mut TestAppContext, zoom: f32) {
     }
     let first = visual.debug_bounds("change-map-node-0").expect("long node");
     let next = visual.debug_bounds("change-map-node-1").expect("next node");
-    let viewport = visual.update(|w, _| w.viewport_size());
-    assert!(
-        first.size.height <= gpui::px(32.) && first.bottom() <= next.top(),
-        "node must fit its 36px row without overlapping: zoom={zoom}, first={first:?}, next={next:?}"
-    );
-    assert!(
-        first.left() >= gpui::px(0.) && first.right() <= viewport.width,
-        "node must fit the narrow zoomed pane: zoom={zoom}, first={first:?}, viewport={viewport:?}"
-    );
+    let row = visual.debug_bounds("change-map-node-row-0").unwrap();
+    let (viewport, pixel) = visual.update(|w, _| {
+        (w.viewport_size(), gpui::px(1. / w.scale_factor()))
+    });
+    assert_change_map_bounds(zoom, pixel, first, next, row, viewport);
     let map = view.read_with(visual, |s, _| s.map.clone());
     let (_, tracked) = cx.add_window_view(|_, _| ChangeMapTrackedLabels(map));
     tracked.simulate_resize(gpui::size(gpui::px(440.), gpui::px(900.)));
@@ -728,9 +724,46 @@ fn change_map_long_label_bounds(cx: &mut TestAppContext, zoom: f32) {
     }
     let first = tracked.debug_bounds("change-map-node-0").unwrap();
     let next = tracked.debug_bounds("change-map-node-1").unwrap();
+    let row = tracked.debug_bounds("change-map-node-row-0").unwrap();
+    let (viewport, pixel) = tracked.update(|w, _| {
+        (w.viewport_size(), gpui::px(1. / w.scale_factor()))
+    });
+    assert_change_map_bounds(zoom, pixel, first, next, row, viewport);
+}
+fn assert_change_map_bounds(
+    zoom: f32,
+    pixel: gpui::Pixels,
+    first: gpui::Bounds<gpui::Pixels>,
+    next: gpui::Bounds<gpui::Pixels>,
+    row: gpui::Bounds<gpui::Pixels>,
+    viewport: gpui::Size<gpui::Pixels>,
+) {
+    // Taffy snaps absolute endpoints; an origin shift can change the rounded height.
     assert!(
-        first.size.height <= gpui::px(32.) && first.bottom() <= next.top(),
-        "tracked node must fit its row: zoom={zoom}, first={first:?}, next={next:?}"
+        first.size.height >= gpui::px(32.) - pixel && first.size.height <= gpui::px(32.) + pixel,
+        "node height must be within one device pixel of 32px: zoom={zoom}, first={first:?}, pixel={pixel:?}"
+    );
+    assert!(
+        row.size.height >= gpui::px(36.) - pixel && row.size.height <= gpui::px(36.) + pixel,
+        "row must remain 36px within device-pixel snapping: zoom={zoom}, row={row:?}"
+    );
+    assert!(
+        first.top() >= row.top()
+            && first.bottom() <= row.bottom()
+            && first.left() >= row.left()
+            && first.right() <= row.right(),
+        "node must stay inside its row: zoom={zoom}, first={first:?}, row={row:?}"
+    );
+    assert!(
+        first.bottom() <= next.top(),
+        "nodes overlap: zoom={zoom}, first={first:?}, next={next:?}"
+    );
+    assert!(
+        first.left() >= gpui::px(0.)
+            && first.right() <= viewport.width
+            && first.top() >= gpui::px(0.)
+            && first.bottom() <= viewport.height,
+        "node must fit the pane: zoom={zoom}, first={first:?}, viewport={viewport:?}"
     );
 }
 struct ChangeMapTrackedLabels(crate::change_map::ChangeMap);

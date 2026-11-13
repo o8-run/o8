@@ -300,23 +300,28 @@ impl ChangeMap {
                         .map(|(d, n)| (n, d))
                         .unwrap_or((&path, "."));
                     rows = rows.child(
-                        div().h(px(36.)).min_w_0().py(px(2.)).child(
-                            control(
-                                format!("change-map-node-{index}"),
-                                format!(
-                                    "{} · {name} · {directory}",
-                                    node["state"].as_str().unwrap_or("context"),
-                                ),
-                                Command::Select(focus),
-                                cx,
-                            )
-                            .text_size(px(13.5))
-                            .when(active, |s| s.bg(theme().selection))
-                            .when(!self.selected.is_empty() && !active, |s| s.opacity(0.6))
-                            .tooltip(move |_, cx| {
-                                cx.new(|_| crate::icon::Tip(tip.clone().into())).into()
-                            }),
-                        ),
+                        div()
+                            .debug_selector(move || format!("change-map-node-row-{index}"))
+                            .h(px(36.))
+                            .min_w_0()
+                            .py(px(2.))
+                            .child(
+                                control(
+                                    format!("change-map-node-{index}"),
+                                    format!(
+                                        "{} · {name} · {directory}",
+                                        node["state"].as_str().unwrap_or("context"),
+                                    ),
+                                    Command::Select(focus),
+                                    cx,
+                                )
+                                .text_size(px(13.5))
+                                .when(active, |s| s.bg(theme().selection))
+                                .when(!self.selected.is_empty() && !active, |s| s.opacity(0.6))
+                                .tooltip(move |_, cx| {
+                                    cx.new(|_| crate::icon::Tip(tip.clone().into())).into()
+                                }),
+                            ),
                     );
                 }
                 graph = graph.child(rows);
