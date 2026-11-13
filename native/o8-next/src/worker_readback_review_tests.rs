@@ -34,7 +34,11 @@ fn tail_normalization_keeps_older_saved_answers_and_system_entries() {
     assert!(history.transcript.iter().any(|e| e.id == "old-tool"));
     assert!(history.transcript.iter().any(|e| e.text == "Latest answer"));
 }
-fn apply_poll(h: &Host, t: &mut Transcript, state: &mut crate::shell::session::worker_transcript::State) {
+fn apply_poll(
+    h: &Host,
+    t: &mut Transcript,
+    state: &mut crate::shell::session::worker_transcript::State,
+) {
     let entries = state.poll(&h.client).unwrap();
     t.apply(&json!({"channel":"history","event":"update","data":{"sessionKey":t.key,"replace":false,"entries":entries}}));
 }
@@ -43,7 +47,8 @@ fn steer_insertion_does_not_duplicate_the_answer_or_skip_the_steer() {
     let h = Host::new(200);
     *h.events.lock().unwrap() = vec![event(1, "answer", "Final answer", "2026-01-01T00:00:02Z")];
     let history = h.history();
-    let mut state = crate::shell::session::worker_transcript::State::from_history(&history).unwrap();
+    let mut state =
+        crate::shell::session::worker_transcript::State::from_history(&history).unwrap();
     let mut t = Transcript::new(history);
     *h.events.lock().unwrap() = vec![
         json!({"seq":1,"eventId":"steer","type":"steer","text":"One more check","ts":"2026-01-01T00:00:01Z"}),
@@ -67,7 +72,8 @@ fn sliding_window_resets_cursor_and_keeps_overlap_identity() {
         event(2, "b", "Overlap answer", "2026-01-01T00:00:02Z"),
     ];
     let history = h.history();
-    let mut state = crate::shell::session::worker_transcript::State::from_history(&history).unwrap();
+    let mut state =
+        crate::shell::session::worker_transcript::State::from_history(&history).unwrap();
     let mut t = Transcript::new(history);
     *h.events.lock().unwrap() = vec![event(1, "b", "Overlap answer", "2026-01-01T00:00:02Z")];
     apply_poll(&h, &mut t, &mut state);
@@ -103,4 +109,57 @@ fn newest_page_returns_before_any_older_saved_page_is_requested() {
         "opening must not block on older saved pages"
     );
     assert!(history.page.as_ref().unwrap().has_more);
+}
+
+#[test]
+fn unstamped_worker_events_append_in_initial_and_live_history() {
+    let h = Host::new(200);
+    *h.events.lock().unwrap() = vec![
+        event(1, "dated", "Dated answer", "2026-01-01T00:00:02Z"),
+        json!({"seq":2,"eventId":"unstamped","type":"assistant","text":"Unstamped answer"}),
+    ];
+    let history = h.history();
+    let texts: Vec<_> = history
+        .transcript
+        .iter()
+        .filter(|e| e.role == "assistant" && !e.text.is_empty())
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(texts, vec!["Dated answer", "Unstamped answer"]);
+    let mut state =
+        crate::shell::session::worker_transcript::State::from_history(&history).unwrap();
+    let mut t = Transcript::new(history);
+    h.events.lock().unwrap().push(
+        json!({"seq":3,"eventId":"later","type":"assistant","text":"Later unstamped answer"}),
+    );
+    apply_poll(&h, &mut t, &mut state);
+    assert_eq!(
+        t.entries[t.entries.len() - 2].text,
+        "Later unstamped answer"
+    );
+}
+#[test]
+fn inactive_sessions_without_done_use_socket_invalidation_not_a_timer() {
+    let h = Host::new(200);
+    *h.events.lock().unwrap() = vec![event(1, "idle", "Old answer", "2026-01-01T00:00:02Z")];
+    let history = h.history();
+    let subscription = transport::subscribe_history(h.client.clone(), &history);
+    std::thread::sleep(Duration::from_millis(400));
+    let count = h.reads().len();
+    std::thread::sleep(Duration::from_millis(2300));
+    assert_eq!(
+        h.reads().len(),
+        count,
+        "an inactive session must not reread its log every two seconds"
+    );
+    h.wake.store(true, Ordering::Release);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while h.reads().len() == count && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        h.reads().len() > count,
+        "the retained socket still invalidates idle history"
+    );
+    drop(subscription);
 }
