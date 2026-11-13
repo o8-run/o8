@@ -11,7 +11,7 @@ fn empty_normalization_keeps_saved_answers_and_page() {
         history.transcript.iter().any(|e| e.id == "legacy"),
         "a successful empty readback cannot erase answers"
     );
-    assert!(history.page.as_ref().unwrap().has_more);
+
     assert!(
         !h.requests
             .lock()
@@ -87,4 +87,20 @@ fn sliding_window_resets_cursor_and_keeps_overlap_identity() {
             .count(),
         1
     );
+}
+
+#[test]
+fn newest_page_returns_before_any_older_saved_page_is_requested() {
+    let h = Host::new(200);
+    h.paged.store(true, Ordering::Release);
+    let history = h.history();
+    assert!(
+        !h.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.contains("before=")),
+        "opening must not block on older saved pages"
+    );
+    assert!(history.page.as_ref().unwrap().has_more);
 }

@@ -20,6 +20,7 @@ struct Host {
     events: Arc<Mutex<Vec<Value>>>,
     saved: Arc<Mutex<Vec<Value>>>,
     complete: Arc<AtomicBool>,
+    paged: Arc<AtomicBool>,
     key: Arc<Mutex<String>>,
     requests: Arc<Mutex<Vec<String>>>,
     wake: Arc<AtomicBool>,
@@ -56,6 +57,8 @@ impl Host {
         let saved_response = saved.clone();
         let complete = Arc::new(AtomicBool::new(true));
         let complete_response = complete.clone();
+        let paged = Arc::new(AtomicBool::new(false));
+        let paged_response = paged.clone();
         let key = Arc::new(Mutex::new("codex-owned:reviewer".to_string()));
         let response_key = key.clone();
         let requests = Arc::new(Mutex::new(vec![]));
@@ -141,7 +144,7 @@ impl Host {
                 } else if request.contains("/api/mobile/history") {
                     (
                         200,
-                        json!({"sessionKey":"codex-owned:reviewer","transcript":*saved_response.lock().unwrap(), "page":{"hasMore":true,"beforeCursor":"older"}}),
+                        json!({"sessionKey":"codex-owned:reviewer","transcript":*saved_response.lock().unwrap(), "page":{"hasMore":paged_response.load(Ordering::Acquire) && !request.contains("before="),"beforeCursor":"older"}}),
                     )
                 } else if request.contains("/api/orchestrator/packet-transcript") {
                     let cursor = request
@@ -202,6 +205,7 @@ impl Host {
             events,
             saved,
             complete,
+            paged,
             key,
             requests,
             wake,
