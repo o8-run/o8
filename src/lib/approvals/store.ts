@@ -1,3 +1,4 @@
+import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { and, desc, eq, gte, or, sql, type SQL } from 'drizzle-orm';
 import {
   buildApprovalContextMatchPredicate, extractApprovalContextIds,
@@ -68,6 +69,7 @@ function mapApprovalRow(row: ApprovalRow | undefined): ApprovalRecord | null {
     return null;
   }
 
+  const args = parseJson<ApprovalRecord['args']>(row.argsJson, undefined);
   return {
     id: row.id,
     projectId: row.projectId ?? null,
@@ -79,7 +81,8 @@ function mapApprovalRow(row: ApprovalRow | undefined): ApprovalRecord | null {
     description: row.description,
     summary: row.summary,
     toolName: row.toolName ?? undefined,
-    args: parseJson<ApprovalRecord['args']>(row.argsJson, undefined),
+    args: row.toolName === 'orchestrator_review' && args
+      ? { ...args, ...reviewExecution(args.approved === true, args.reviewedHeadSha, args.runEvidence) } : args,
     command: row.command ?? undefined,
     editable: row.editable ?? undefined,
     diff: parseJson<ApprovalRecord['diff']>(row.diffJson, undefined),
@@ -653,6 +656,7 @@ export function recordOrchestratorReview(
       // A later automated verdict cannot inherit an operator's waiver for an earlier HEAD.
       missingContractWaiverReason: undefined,
       packetId: normalizedPacketId,
+      ...reviewExecution(normalizedReview.approved, normalizedReview.reviewedHeadSha, normalizedReview.runEvidence),
       approved: normalizedReview.approved,
       findings: normalizedReview.findings,
       ...(normalizedReview.reviewedHeadSha ? { reviewedHeadSha: normalizedReview.reviewedHeadSha } : {}),

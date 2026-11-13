@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
@@ -17,6 +18,7 @@ import { fetchCorrelatedPacketMutation } from './correlated-mutation.js';
 interface ReviewArgs {
   packetId: string | null;
   approve: boolean;
+  runEvidence?: unknown;
   expectedHeadSha: string | null;
   commitMessage: string | null;
   idempotencyKey: string | null;
@@ -41,7 +43,7 @@ interface OperatorResponse<T> {
 function parseReviewArgs(rest: string[]): ReviewArgs {
   const args = parsePacketArguments(rest, {
     command: 'review',
-    valueFlags: ['expected-sha', 'commit-message', 'idempotency-key', 'contract-version', 'waive-missing-contract'],
+    valueFlags: ['expected-sha', 'commit-message', 'idempotency-key', 'contract-version', 'waive-missing-contract', 'run-evidence', 'not-run'],
     repeatableValueFlags: ['coverage', 'requirement-evidence', 'process-evidence'],
     booleanFlags: ['approve', 'supplement-process-evidence'],
   });
@@ -129,7 +131,17 @@ function parseReviewArgs(rest: string[]): ReviewArgs {
     throw new CliError('invalid_args', '--waive-missing-contract requires a reason of at most 500 characters and cannot be combined with --coverage.', EXIT.INVALID_ARGS);
   }
 
+  let runEvidence: unknown;
+  if (args.values['run-evidence'] && args.values['not-run']) throw new CliError('invalid_args', 'Choose --run-evidence or --not-run.', EXIT.INVALID_ARGS);
+  if (args.values['run-evidence']) {
+    try {
+      const raw = readFileSync(args.values['run-evidence'], 'utf8');
+      if (raw.length > 220_000) throw new Error('Evidence exceeds 220000 characters.');
+      runEvidence = JSON.parse(raw);
+    } catch { throw new CliError('invalid_args', '--run-evidence must name a bounded JSON evidence file.', EXIT.INVALID_ARGS); }
+  } else if (args.values['not-run']) runEvidence = { status: 'not_run', reason: args.values['not-run'] };
   return {
+    runEvidence,
     packetId: args.target,
     approve: args.booleans.has('approve'),
     expectedHeadSha: args.values['expected-sha']?.trim() || null,
@@ -188,6 +200,9 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
   const reviewRes = await fetchCorrelatedPacketMutation<OperatorResponse<{
     recorded: boolean;
     reviewedHeadSha?: string | null;
+    reviewMode?: string;
+    verdictLabel?: string;
+    runEvidence?: unknown;
     inProgress?: boolean;
     status?: string;
     note?: string;
@@ -204,6 +219,7 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
   }>>(cfg, '/api/orchestrator/review', {
     packetId,
     approved: true,
+    runEvidence: args.runEvidence,
     findings: [],
     ...(args.supplementProcessEvidence ? { supplementProcessEvidence: true } : {}),
     reviewedHeadSha: args.expectedHeadSha ?? undefined,
@@ -261,6 +277,9 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
     packet: {
       id: packetId,
       approved: true,
+      reviewMode: reviewResult.reviewMode ?? 'read_only',
+      verdictLabel: reviewResult.verdictLabel ?? 'approved, not run',
+      runEvidence: reviewResult.runEvidence ?? { status: 'not_run', reason: 'No run evidence was recorded.' },
       reviewedHeadSha: reviewResult.reviewedHeadSha ?? args.expectedHeadSha,
       contractCoverage: reviewResult.contractCoverage ?? null,
       mergeInProgress,
@@ -272,7 +291,7 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
     printHumanHeading('packet review');
     printHumanKv([
       ['packet', packetId],
-      ['approved', 'yes'],
+      ['verdict', payload.packet.verdictLabel],
       ['reviewed HEAD', payload.packet.reviewedHeadSha ?? '(captured by server)'],
       ['contract coverage', payload.packet.contractCoverage
         ? `${payload.packet.contractCoverage.status}: ${payload.packet.contractCoverage.reason}`

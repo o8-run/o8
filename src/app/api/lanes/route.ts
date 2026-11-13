@@ -158,7 +158,7 @@ function createPrIdempotencyBody(command: Extract<LaneCommand, { verb: 'create_p
 function commandResponse(result: LaneCommandResult) {
   const refusal = result.runtimeRefusal;
   return NextResponse.json(refusal ? { ...result, code: refusal.code, error: refusal.message } : result, {
-    status: refusal?.status ?? (result.ok ? 200 : 422), headers: { 'Cache-Control': 'no-store, max-age=0' },
+    status: refusal?.status ?? (result.ok ? 200 : result.reason?.startsWith('review_run_') ? 409 : 422), headers: { 'Cache-Control': 'no-store, max-age=0' },
   });
 }
 

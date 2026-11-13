@@ -1,3 +1,4 @@
+import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 
@@ -32,6 +33,7 @@ function readApproval(id: string): ApprovalRecord | null {
   if (!db) throw new Error('[approval-resolution] SQLite database is unavailable');
   const row = db.select().from(approvalsTable).where(eq(approvalsTable.id, id)).get() as ApprovalRow | undefined;
   if (!row) return null;
+  const args = parseJson<ApprovalRecord['args']>(row.argsJson, undefined);
   return {
     id: row.id,
     projectId: row.projectId ?? null,
@@ -43,7 +45,8 @@ function readApproval(id: string): ApprovalRecord | null {
     description: row.description,
     summary: row.summary,
     toolName: row.toolName ?? undefined,
-    args: parseJson<ApprovalRecord['args']>(row.argsJson, undefined),
+    args: row.toolName === 'orchestrator_review' && args
+      ? { ...args, ...reviewExecution(args.approved === true, args.reviewedHeadSha, args.runEvidence) } : args,
     command: row.command ?? undefined,
     editable: row.editable ?? undefined,
     diff: parseJson<ApprovalRecord['diff']>(row.diffJson, undefined),

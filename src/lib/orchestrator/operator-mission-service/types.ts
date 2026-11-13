@@ -1,3 +1,4 @@
+import type { ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type { MergeCheckResult } from '@/lib/lane/preview-merge';
 import type { ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
@@ -122,6 +123,7 @@ export interface MissionStatusInput {
 export interface SubmitReviewInput {
   /** Server-resolved caller; never read from request JSON. */
   submissionPrincipal?: import('@/lib/auth/review-submission').ReviewSubmissionPrincipal;
+  runEvidence?: ReviewRunEvidence;
   packetId: string;
   findings: OrchestratorReviewFinding[];
   approved: boolean;

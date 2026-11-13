@@ -1,3 +1,4 @@
+import { redactThreadValue } from '@/lib/threads/redaction';
 import { reviewSubmissionPrincipal, ReviewSubmissionError } from '@/lib/auth/review-submission';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -84,6 +85,7 @@ export async function POST(request: NextRequest) {
 
   const reviewInput = {
       packetId,
+      runEvidence: redactThreadValue(record.runEvidence) as import('@/lib/orchestrator/review-run-evidence').ReviewRunEvidence | undefined,
       submissionPrincipal,
       findings: parseReviewFindings(record.findings),
       approved: record.approved,
