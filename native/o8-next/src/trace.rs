@@ -779,10 +779,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
                         rail,
                         icon: Icon::Dot,
                         label,
-                        detail: atom
-                            .part
-                            .key
-                            .starts_with("git:")
+                        detail: (atom.step.worker && atom.part.key.starts_with("git:"))
                             .then(|| atom.part.text.clone()),
                         tone: if atom.running {
                             Tone::Primary
@@ -847,10 +844,7 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
             rail: Rail::Main,
             icon,
             label,
-            detail: first
-                .part
-                .key
-                .starts_with("git:")
+            detail: (first.step.worker && first.part.key.starts_with("git:"))
                 .then(|| first.part.text.clone()),
             tone: if running {
                 Tone::Primary
@@ -1424,7 +1418,15 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
                                         .whitespace_nowrap()
                                         .text_color(tone(line.tone))
                                         .opacity(0.3 + 0.7 * swap)
-                                        .child(div().min_w_0().truncate().child(label))
+                                        .child(if steps.iter().any(|step| step.worker) {
+                                            div()
+                                                .min_w_0()
+                                                .truncate()
+                                                .child(label)
+                                                .into_any_element()
+                                        } else {
+                                            div().flex_shrink_0().child(label).into_any_element()
+                                        })
                                         .when_some(line.detail.clone(), |row, detail| {
                                             row.child(
                                                 div()
@@ -1520,6 +1522,27 @@ mod tests {
 
     fn tool(id: &str, value: serde_json::Value) -> Step {
         crate::activity::activity(id, &value, "")
+    }
+
+    #[test]
+    fn git_command_details_are_worker_only() {
+        let mut command = tool(
+            "git",
+            serde_json::json!({"name":"Bash","args":{"command":"git status --short"}}),
+        );
+        command.status = "ok".into();
+        assert!(
+            lines(&[command.clone()], &Trace::default())
+                .iter()
+                .all(|line| line.detail.is_none()),
+            "chat keeps main's compact labels without git detail text"
+        );
+        command.worker = true;
+        assert!(
+            lines(&[command], &Trace::default())
+                .iter()
+                .any(|line| line.detail.as_deref() == Some("git status --short"))
+        );
     }
 
     fn labels(lines: &[Line]) -> Vec<String> {

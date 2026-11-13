@@ -245,7 +245,7 @@ pub(crate) fn subscribe_history(client: Client, history: &crate::model::History)
         // Keep the session socket after completion. Its flattened paragraphs
         // only invalidate the normalized cursor; they never enter the renderer.
         let updates = subscribe(client.clone(), key.clone());
-        let mut dirty = !state.done;
+        let mut dirty = !state.done && state.cursor_available;
         let mut next = Instant::now();
         let mut socket_notice = "";
         let mut read_notice = "";
@@ -268,7 +268,9 @@ pub(crate) fn subscribe_history(client: Client, history: &crate::model::History)
                     _ => {}
                 }
             }
-            if dirty || (!state.done && state.active && Instant::now() >= next) {
+            if dirty
+                || (!state.done && state.active && state.cursor_available && Instant::now() >= next)
+            {
                 dirty = false;
                 match state.poll(&client) {
                     Ok(entries) => {

@@ -165,15 +165,16 @@ impl Host {
                         .find(|(k, _)| k == "cursorToken")
                         .map(|(_, v)| v.into_owned());
                     let prefix = |n: usize| {
-                        all.iter()
-                            .take(n)
-                            .map(|e| e["eventId"].as_str().unwrap_or("legacy"))
-                            .collect::<Vec<_>>()
-                            .join("-")
+                        use std::hash::{Hash, Hasher};
+                        let mut hash = std::collections::hash_map::DefaultHasher::new();
+                        for event in all.iter().take(n) {
+                            event.to_string().hash(&mut hash);
+                        }
+                        format!("{:016x}", hash.finish())
                     };
                     let reset = token
                         .as_ref()
-                        .is_some_and(|t| *t != prefix(cursor as usize))
+                        .is_some_and(|t| cursor > 0 && *t != prefix(cursor as usize))
                         || cursor > all.len() as u64;
                     let from = if reset { 0 } else { cursor };
                     let page: Vec<_> = all
@@ -185,7 +186,7 @@ impl Host {
                     let next = page.last().and_then(|e| e["seq"].as_u64()).unwrap_or(from);
                     (
                         status,
-                        json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":next,"cursorToken":prefix(next as usize),"cursorReset":reset,"events":page,"historyComplete":complete_response.load(Ordering::Acquire),"earliestEventTime":"1970-01-01T00:00:02.000Z"}),
+                        json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":if page.is_empty(){None}else{Some(next)},"cursorToken":prefix(next as usize),"cursorReset":reset,"events":page,"historyComplete":complete_response.load(Ordering::Acquire),"earliestEventTime":"1970-01-01T00:00:02.000Z"}),
                     )
                 } else {
                     // Host port discovery may probe this temporary listener.

@@ -53,3 +53,22 @@ it('keeps the legacy event shape when cursorToken is absent', async () => {
   const response = await GET(new NextRequest('http://localhost/api/orchestrator/packet-transcript?sessionKey=fixture:worker'));
   expect((await response.json()).events).toEqual(fixture.events);
 });
+
+it('keeps identical unstamped calls distinct across a lane insertion', async () => {
+  const call = { type: 'tool_call' as const, tool: 'exec_command', args: '{}', summary: 'Check', ts: '' };
+  fixture.events = [{ ...call, seq: 1 }, { ...call, seq: 2 }];
+  const first = await read();
+  expect(new Set(first.events.map((e: { eventId: string }) => e.eventId)).size).toBe(2);
+  fixture.events = [{ seq: 1, ts: '2026-01-01T00:00:01Z', type: 'steer', source: 'operator', text: 'Continue' }, { ...call, seq: 2 }, { ...call, seq: 3 }];
+  const inserted = await read(first.nextCursor, first.cursorToken);
+  expect(inserted.events.slice(1).map((e: { eventId: string }) => e.eventId))
+    .toEqual(first.events.map((e: { eventId: string }) => e.eventId));
+});
+
+it('keeps null for empty and exhausted legacy readbacks', async () => {
+  fixture.events = [];
+  expect(await read()).toMatchObject({ events: [], nextCursor: null });
+  fixture.events = [answer(1, 'Done')];
+  const legacy = await GET(new NextRequest('http://localhost/api/orchestrator/packet-transcript?sessionKey=fixture:worker&cursor=1'));
+  expect(await legacy.json()).toMatchObject({ events: [], nextCursor: null });
+});

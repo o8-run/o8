@@ -239,3 +239,24 @@ fn mentioning_a_worker_reads_the_saved_page_without_normalization_or_backfill() 
             .any(|r| r.contains("before="))
     );
 }
+
+#[test]
+fn null_cursor_keeps_saved_rows_and_stops_timed_polling() {
+    let h = Host::new(200);
+    let history = h.history();
+    let mut state =
+        crate::shell::session::worker_transcript::State::from_history(&history).unwrap();
+    let mut transcript = Transcript::new(history);
+    let before = transcript.rows.clone();
+    h.events.lock().unwrap().clear();
+    apply_poll(&h, &mut transcript, &mut state);
+    assert!(
+        !state.cursor_available,
+        "null is no cursor, not numeric position zero"
+    );
+    assert!(!state.active);
+    assert_eq!(
+        transcript.rows, before,
+        "an empty readback retains existing work"
+    );
+}

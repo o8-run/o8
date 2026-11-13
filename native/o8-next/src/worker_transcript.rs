@@ -45,6 +45,8 @@ pub(crate) struct State {
     pub(crate) cursor: u64,
     #[serde(default)]
     cursor_token: Option<String>,
+    #[serde(default)]
+    pub(crate) cursor_available: bool,
     calls: HashMap<String, Entry>,
     pending: HashMap<String, Vec<String>>,
     answer: Option<Entry>,
@@ -85,6 +87,7 @@ impl State {
         row
     }
     fn apply(&mut self, events: &[Value], entries: &mut Vec<Entry>) {
+        let mut occurrences = HashMap::new();
         for event in events {
             let seq = event["seq"].as_u64().unwrap_or(0);
             if seq <= self.cursor {
@@ -104,7 +107,7 @@ impl State {
                 });
                 self.active = !self.done && recent;
             }
-            let id = format!("{}:event:{}", self.key, event_id(event));
+            let id = format!("{}:event:{}", self.key, event_id(event, &mut occurrences));
             let tool = event["tool"].as_str().unwrap_or("tool");
             match kind {
                 "tool_call" => {
@@ -244,13 +247,13 @@ impl State {
     pub(crate) fn poll(&mut self, client: &Client) -> Result<Vec<Entry>, ReadbackError> {
         // Read a complete batch before advancing state, so a later page failure
         // retries the same cursor without losing events.
-        let from = if self.cursor_token.is_some() {
+        let from = if self.cursor_available && self.cursor_token.is_some() {
             self.cursor
         } else {
             0
         };
         let batch = client.worker_events(&self.key, from, self.cursor_token.as_deref())?;
-        if batch.events.is_empty() && !batch.reset && batch.cursor == self.cursor {
+        if batch.events.is_empty() && !batch.reset && batch.cursor == Some(self.cursor) {
             return Ok(vec![]);
         }
         if batch.reset || from == 0 {
@@ -270,14 +273,19 @@ impl State {
         }
         let mut entries = vec![];
         self.apply(&batch.events, &mut entries);
-        self.cursor = batch.cursor;
+        self.cursor_available = batch.cursor.is_some();
+        self.cursor = batch.cursor.unwrap_or(0);
         self.cursor_token = batch.token;
+        if !self.cursor_available {
+            self.active = false;
+            self.cursor_token = None;
+        }
         entries.push(self.marker());
         Ok(entries)
     }
 }
 
-fn event_id(event: &Value) -> String {
+fn event_id(event: &Value, occurrences: &mut HashMap<String, usize>) -> String {
     if let Some(id) = event["eventId"].as_str() {
         return id.into();
     }
@@ -288,7 +296,11 @@ fn event_id(event: &Value) -> String {
     content.as_object_mut().unwrap().remove("seq");
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     content.to_string().hash(&mut hash);
-    format!("{:016x}", hash.finish())
+    let key = format!("{:016x}", hash.finish());
+    let occurrence = occurrences.entry(key.clone()).or_default();
+    let id = format!("{key}:{occurrence}");
+    *occurrence += 1;
+    id
 }
 
 fn adapt(mut history: History, batch: Readback) -> History {
@@ -309,18 +321,20 @@ fn adapt(mut history: History, batch: Readback) -> History {
                         .is_none_or(|(at, first)| at < first))
         })
         .collect();
+    let saved: std::collections::HashSet<_> = entries.iter().map(|e| e.id.clone()).collect();
     let mut state = State {
         key: history.session_key.clone(),
         ..Default::default()
     };
     state.apply(&batch.events, &mut entries);
-    state.cursor = batch.cursor;
+    state.cursor_available = batch.cursor.is_some();
+    state.cursor = batch.cursor.unwrap_or(0);
     state.cursor_token = batch.token;
     entries.sort_by_key(|e| {
         e.extra
             .get("timestamp")
             .and_then(Value::as_u64)
-            .unwrap_or(u64::MAX)
+            .unwrap_or(if saved.contains(&e.id) { 0 } else { u64::MAX })
     });
     entries.push(state.marker());
     history.transcript = entries;
@@ -330,7 +344,7 @@ fn adapt(mut history: History, batch: Readback) -> History {
 struct Readback {
     events: Vec<Value>,
     bytes: usize,
-    cursor: u64,
+    cursor: Option<u64>,
     token: Option<String>,
     reset: bool,
     complete: bool,
@@ -409,7 +423,7 @@ impl Client {
         let mut batch = Readback {
             events: vec![],
             bytes: 0,
-            cursor,
+            cursor: Some(cursor),
             token: token.map(str::to_owned),
             reset: false,
             complete: false,
@@ -437,7 +451,15 @@ impl Client {
             let events = page["events"]
                 .as_array()
                 .ok_or_else(|| ReadbackError::Invalid("Invalid worker transcript events".into()))?;
-            let next = page["nextCursor"].as_u64().unwrap_or(cursor);
+            let next_cursor = page["nextCursor"].as_u64();
+            // Null is the existing server's no-cursor signal, not position zero.
+            // Keep saved rows and stop timed reads until the socket invalidates.
+            if next_cursor.is_none() && events.is_empty() {
+                batch.cursor = None;
+                batch.token = None;
+                return Ok(batch);
+            }
+            let next = next_cursor.unwrap_or(cursor);
             if page["cursorReset"] == true || next < cursor {
                 resets += 1;
                 if resets > 3 {
@@ -462,7 +484,7 @@ impl Client {
             batch.complete = page["historyComplete"] == true;
             batch.earliest = timestamp(&json!({"ts":page["earliestEventTime"]})).as_u64();
             batch.token = page["cursorToken"].as_str().map(str::to_owned);
-            batch.cursor = next;
+            batch.cursor = Some(next);
             if events.len() < 200 {
                 return Ok(batch);
             }
