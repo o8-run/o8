@@ -41,6 +41,15 @@ function parse<T>(text: string | null, fallback: T, skipped?: () => void): T {
     return value as T;
   } catch { skipped?.(); return fallback; }
 }
+function objects<T extends object>(value: unknown, skipped: () => void): T[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) { skipped(); return []; }
+  return value.filter((item): item is T => {
+    const valid = item !== null && typeof item === 'object' && !Array.isArray(item);
+    if (!valid) skipped();
+    return valid;
+  });
+}
 function indexBy<T>(rows: T[], key: (row: T) => string | null): Map<string, T[]> {
   const index = new Map<string, T[]>();
   for (const row of rows) {
@@ -179,16 +188,19 @@ export function reviewScorecard(range: string, selectedSource: string, repoPath:
       FROM lanes WHERE (? IS NULL OR repo_path=?) AND julianday(created_at) <= julianday(?)
     ), cohorts AS (
       SELECT cohort FROM eligible GROUP BY cohort HAVING MIN(julianday(created_at)) >= julianday(?)
+      ORDER BY MIN(julianday(created_at)) DESC,cohort DESC LIMIT ?
     ) SELECT id,packet_id,label,branch,repo_path,session_key,created_at FROM eligible
       WHERE cohort IN (SELECT cohort FROM cohorts) ORDER BY julianday(created_at) DESC,id`)
-      .all(repoPath, repoPath, new Date(now).toISOString(), new Date(since).toISOString()) as LaneRow[];
+      .all(repoPath, repoPath, new Date(now).toISOString(), new Date(since).toISOString(), range === 'all' ? 2000 : -1) as LaneRow[];
     const laneIds = JSON.stringify(lanes.map(lane => lane.id));
     const packetIds = JSON.stringify([...new Set(lanes.flatMap(lane => lane.packet_id ? [lane.packet_id] : []))]);
     const repoPaths = JSON.stringify([...new Set(lanes.map(lane => lane.repo_path))]);
     const approvals = (db.prepare(`SELECT id,lane_id,packet_id,tool_name,args_json,audit_json,gate_result_json,created_at FROM approvals
       WHERE created_at <= ? AND (lane_id IN (SELECT value FROM json_each(?)) OR packet_id IN (SELECT value FROM json_each(?)))`)
       .all(now, laneIds, packetIds) as StoredApproval[]).map(row => ({ ...row,
-        audit: parse<ApprovalAuditEvent[]>(row.audit_json, [], skipped(`approval:${row.id}`)),
+        audit: parse<ApprovalAuditEvent[]>(row.audit_json, [], skipped(`approval:${row.id}`)).map(event => ({ ...event,
+          findings: objects<OrchestratorReviewFinding>(event.findings, skipped(`approval:${row.id}`)),
+        })),
         args: parse<Record<string, unknown>>(row.args_json, {}, skipped(`approval:${row.id}`)),
         gate: parse<{ passed?: boolean }>(row.gate_result_json, {}, skipped(`approval:${row.id}`)),
       }));
@@ -223,9 +235,22 @@ export function reviewScorecard(range: string, selectedSource: string, repoPath:
       created_at: group.at(-1)!.created_at, laneIds: new Set(group.map(lane => lane.id)),
       sessionKeys: new Set(group.flatMap(lane => lane.session_key ? [lane.session_key] : [])) }));
     const corrections = new Map<string, number>();
-    const handoffs = (db.prepare('SELECT id,payload_json,created_at FROM worker_corrections WHERE created_at BETWEEN ? AND ?')
-      .all(lanes.reduce((earliest, lane) => Math.min(earliest, Date.parse(lane.created_at)), now), now) as Array<{ id: string; payload_json: string; created_at: number }>).map(row => ({ ...row,
-        targets: parse<{ targets?: Array<{ surfaceId: string }> }>(row.payload_json, {}, skipped(`correction:${row.id}`)).targets ?? [] }));
+    const sessionKeys = JSON.stringify([...new Set(canonical.flatMap(lane => [...lane.sessionKeys]))]);
+    const correctionPrefixes = JSON.stringify(canonical.flatMap(lane => lane.packet_id
+      ? [`review-author-${createHash('sha256').update(lane.packet_id).digest('hex').slice(0, 24)}-`] : []));
+    // Restrict materialized handoffs to selected packet IDs or exact author sessions.
+    const handoffs = (db.prepare(`SELECT id,payload_json,created_at FROM worker_corrections
+      WHERE created_at BETWEEN ? AND ? AND (
+        EXISTS (SELECT 1 FROM json_each(?) prefix WHERE substr(worker_corrections.id,1,length(prefix.value))=prefix.value)
+        OR EXISTS (SELECT 1 FROM json_each(CASE
+          WHEN json_valid(payload_json) THEN CASE WHEN json_type(payload_json,'$.targets')='array'
+            THEN json_extract(payload_json,'$.targets') ELSE '[]' END ELSE '[]' END) target
+          WHERE json_extract(CASE WHEN target.type='object' THEN target.value ELSE '{}' END,'$.surfaceId')
+            IN (SELECT value FROM json_each(?))))`)
+      .all(lanes.reduce((earliest, lane) => Math.min(earliest, Date.parse(lane.created_at)), now), now,
+        correctionPrefixes, sessionKeys) as Array<{ id: string; payload_json: string; created_at: number }>).map(row => ({ ...row,
+        targets: objects<{ surfaceId: string }>(parse<{ targets?: unknown }>(row.payload_json, {},
+          skipped(`correction:${row.id}`)).targets, skipped(`correction:${row.id}`)) }));
     const delivered = db.prepare(`SELECT correction_id,surface_id FROM worker_correction_deliveries
       WHERE status='delivered' AND updated_at <= ? AND correction_id IN (SELECT value FROM json_each(?))`).all(now, JSON.stringify(handoffs.map(row => row.id))) as Array<{ correction_id: string; surface_id: string }>;
     const deliveriesByCorrection = indexBy(delivered, row => row.correction_id);
@@ -251,7 +276,7 @@ export function reviewScorecard(range: string, selectedSource: string, repoPath:
           ...[...lane.laneIds].flatMap(id => eventsByLane.get(id) ?? []).filter(event => Date.parse(event.timestamp) <= now)
             .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))] };
     });
-    return { range, source: selectedSource, basis: `${repoPath ? 'This project' : 'All projects'} · Tracked changes arriving in this range (one per packet, otherwise lane), using durable records through now. Unknown source is kept separate. Pull request records do not establish whether the author is a person.${skippedRows.size ? ` ${skippedRows.size} malformed rows skipped.` : ''}`,
+    return { range, source: selectedSource, basis: `${repoPath ? 'This project' : 'All projects'} · Tracked changes arriving in this range (one per packet, otherwise lane), using durable records through now.${range === 'all' ? ' All time is limited to the newest 2000 changes by first arrival.' : ''} Unknown source is kept separate. Pull request records do not establish whether the author is a person.${skippedRows.size ? ` ${skippedRows.size} malformed rows skipped.` : ''}`,
       sources: SOURCES.map(source => ({ ...source, count: changes.filter(change => change.source === source.id).length })),
       metrics: metrics(changes.filter(change => selectedSource === 'all' || change.source === selectedSource), corrections) };
   })();
