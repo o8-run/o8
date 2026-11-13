@@ -150,9 +150,15 @@ jobs:
           # loopback, which the bundled server and native window use locally.
           sudo --preserve-env=VK_ICD_FILENAMES unshare --net bash -euc '
             ip link set lo up
-            test "$(ls /sys/class/net)" = lo
+            ip -o link show
+            test "$(ip -o link show | cut -d: -f2 | tr -d " ")" = lo
             ip -brief address
             test -z "$(ip route show)"
+            if timeout 5 bash -c "exec 3<>/dev/tcp/1.1.1.1/443"; then
+              echo "Offline proof refused: public connection succeeded" >&2
+              exit 1
+            fi
+            echo "[offline-proof] only loopback; public connection failed as required"
             exec runuser -u "$SUDO_USER" -- env \
               LIBGL_ALWAYS_SOFTWARE=1 APPIMAGE_EXTRACT_AND_RUN=1 \
               VK_ICD_FILENAMES="$VK_ICD_FILENAMES" \
