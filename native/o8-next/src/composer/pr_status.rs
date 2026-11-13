@@ -229,6 +229,7 @@ impl Surface {
         let max_duration = rows.iter().filter_map(duration).max().unwrap_or(1).max(1);
         let list = div()
             .id("composer-pr-checks")
+            .debug_selector(|| "composer-pr-checks".into())
             .flex()
             .flex_col()
             .gap(px(4.))
@@ -248,6 +249,7 @@ impl Surface {
                 };
                 div()
                     .id(("composer-pr-check", index))
+                    .debug_selector(move || format!("composer-pr-check-{index}"))
                     .h(px(32.))
                     .flex_shrink_0()
                     .flex()
