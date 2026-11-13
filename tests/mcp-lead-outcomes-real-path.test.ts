@@ -48,6 +48,7 @@ const { writeOrchestratorControlPlaneState, readOrchestratorControlPlaneState } 
 const { recordMission } = await import('@/lib/db/missions-store');
 let sequence = 0;
 let missionReads = 0;
+let leadsUnavailable = false;
 
 beforeAll(async () => {
   mkdirSync(repoPath, { recursive: true });
@@ -64,7 +65,8 @@ beforeAll(async () => {
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const request = new NextRequest(String(input), { ...init, signal: init?.signal ?? undefined });
     switch (request.nextUrl.pathname) {
-      case '/api/orchestrator/lead': return leadHttp.GET(request);
+      case '/api/orchestrator/lead': return leadsUnavailable
+        ? Response.json({ error: 'Fixture lead store unavailable' }, { status: 400 }) : leadHttp.GET(request);
       case '/api/orchestrator/status': {
         const response = await missionHttp.GET(request);
         missionReads += 1;
@@ -120,8 +122,10 @@ async function fixture(report: boolean) {
 }
 
 type LeadView = { id: string; status: string; reason: string | null; result: unknown;
+  updatedAt: number;
   latestTurn: { id: string; status: string; reason: string | null; outcome: unknown; error: string | null } };
-async function call(name: string, args: Record<string, unknown> = {}) {
+type ToolResult = { isError?: boolean; content: Array<{ type: string; text: string }> };
+async function invoke(name: string, args: Record<string, unknown>) {
   const response = await mcpHttp.POST(new Request('http://localhost/api/mcp', {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
@@ -129,14 +133,117 @@ async function call(name: string, args: Record<string, unknown> = {}) {
   const body = await response.json();
   expect(response.status).toBe(200);
   expect(body.result?.isError, JSON.stringify(body)).not.toBe(true);
-  return JSON.parse(body.result.content[0].text) as {
-    leads?: LeadView[]; data?: { leads?: LeadView[] }; wakeReason?: string; terminalLeadId?: string;
+  return body.result as ToolResult;
+}
+async function call(name: string, args: Record<string, unknown> = {}) {
+  let result = await invoke(name, args);
+  let value = JSON.parse(result.content[0].text);
+  if (value.schema === 'o8/mcp/result-page/v1') {
+    let text = value.text;
+    while (value.nextArguments) {
+      value = JSON.parse((await invoke('o8_result_page', value.nextArguments)).content[0].text);
+      text += value.text;
+    }
+    result = JSON.parse(text) as ToolResult;
+  }
+  return JSON.parse(result.content[0].text) as {
+    leads?: LeadView[]; data?: { leads?: LeadView[]; agents?: unknown[]; leadsUnavailable?: boolean; leadsTruncated?: boolean };
+    wakeReason?: string; terminalLeadId?: string;
   };
 }
 const tools = ['get_mission_status', 'wait_for_mission_ready', 'o8_status'] as const;
 function leads(result: Awaited<ReturnType<typeof call>>) { return result.data?.leads ?? result.leads ?? []; }
 
+function seedLeads(prefix: string, count: number) {
+  const db = getSqlite();
+  const lead = db.prepare(`INSERT INTO orchestrator_leads
+    (id, start_key, request_digest, thread_id, repo_path, backend, model, effort, status,
+     result_turn_id, result_status, created_at, updated_at)
+    VALUES (?, ?, 'fixture', ?, ?, 'codex', 'fixture', 'high', 'unreported', ?, 'unreported', ?, ?)`);
+  const turn = db.prepare(`INSERT INTO orchestrator_lead_turns
+    (id, lead_id, idempotency_key, ordinal, kind, message, status, created_at, finished_at)
+    VALUES (?, ?, 'fixture', 1, 'operator', 'Fixture turn', 'unreported', ?, ?)`);
+  const now = Date.now() - 1000;
+  db.transaction(() => {
+    for (let index = 0; index < count; index += 1) {
+      const id = `${prefix}-${index}`;
+      lead.run(id, id, `${id}-thread`, repoPath, `${id}-turn`, now + index, now + index);
+      turn.run(`${id}-turn`, id, now + index, now + index);
+    }
+  })();
+}
+
 describe('durable lead outcomes through the MCP HTTP entry point', () => {
+  it('keeps runtime status available without a cached lead handback when the lead store fails', async () => {
+    const { leadId } = await fixture(true);
+    const priorNativeReads = process.env.O8D_MCP_READS;
+    process.env.O8D_MCP_READS = '1';
+    try {
+      const healthy = await call('o8_status', { sessionKey: leadId });
+      expect(leads(healthy)[0]?.status).toBe('completed');
+      const cached = (getSqlite().prepare("SELECT key, value FROM app_state WHERE key LIKE 'o8d/mcp/v1/status/%'")
+        .all() as Array<{ key: string; value: string }>).find(row => row.value.includes(leadId));
+      expect(cached).toBeDefined();
+      leadsUnavailable = true;
+      const degraded = await call('o8_status', { sessionKey: leadId });
+      expect(degraded.data).toMatchObject({ agents: healthy.data?.agents, leadsUnavailable: true });
+      expect(degraded.data?.leads).toBeUndefined();
+      expect(getSqlite().prepare('SELECT key FROM app_state WHERE key = ?').get(cached!.key)).toBeUndefined();
+      leadsUnavailable = false;
+      const recovered = await call('o8_status', { sessionKey: leadId });
+      expect(recovered.data?.leadsUnavailable).toBeUndefined();
+      expect(leads(recovered)[0]?.status).toBe('completed');
+    } finally {
+      leadsUnavailable = false;
+      if (priorNativeReads === undefined) delete process.env.O8D_MCP_READS; else process.env.O8D_MCP_READS = priorNativeReads;
+    }
+  });
+
+  it('keeps lead projection reads constant as the result grows', async () => {
+    seedLeads('batch-small', 3);
+    await call('o8_status'); // Warm runtime observations before measuring the live lead projection.
+    const measure = async () => {
+      const prepare = vi.spyOn(getSqlite(), 'prepare');
+      try {
+        await call('o8_status');
+        return prepare.mock.calls.filter(([sql]) => /^\s*SELECT\b/i.test(sql) && /orchestrator_lead/.test(sql)).length;
+      } finally { prepare.mockRestore(); }
+    };
+    const small = await measure();
+    seedLeads('batch-larger', 20);
+    expect(await measure()).toBe(small);
+    expect(small).toBeLessThanOrEqual(4);
+  });
+
+  it('bounds the overview to the 100 most recent leads and can inspect an older lead exactly', async () => {
+    seedLeads('bounded', 105);
+    const overview = await call('o8_status');
+    expect(leads(overview)).toHaveLength(100);
+    expect(overview.data?.leadsTruncated).toBe(true);
+    const updated = leads(overview).map(lead => lead.updatedAt);
+    expect(updated).toEqual([...updated].sort((a, b) => b - a));
+    expect(leads(overview).some(lead => lead.id === 'bounded-0')).toBe(false);
+    const exact = leads(await call('o8_status', { sessionKey: 'bounded-0' }));
+    expect(exact).toHaveLength(1);
+    expect(exact[0]).toMatchObject({ id: 'bounded-0', status: 'unreported',
+      reason: 'turn ended without an outcome report', latestTurn: { id: 'bounded-0-turn', outcome: null } });
+  });
+
+  it('documents repeated mission attention and overview limits through tool discovery', async () => {
+    const response = await mcpHttp.POST(new Request('http://localhost/api/mcp', { method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) }));
+    const descriptions = new Map<string, string>((await response.json()).result.tools.map(
+      (tool: { name: string; description: string }) => [tool.name, tool.description]));
+    for (const name of ['get_mission_status', 'wait_for_mission_ready']) {
+      expect(descriptions.get(name)).toContain('already-terminal');
+      expect(descriptions.get(name)).toContain('attention');
+    }
+    expect(descriptions.get('o8_status')).toContain('100');
+    expect(descriptions.get('o8_status')).toContain('leadsUnavailable');
+    expect(descriptions.get('o8_status')).toContain('leadsTruncated');
+  });
+
   it('does not wake a packet-scoped wait just because its lead changes state', async () => {
     const { leadId, missionId, packetId } = await fixture(false);
     const state = readOrchestratorControlPlaneState();
