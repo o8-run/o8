@@ -1,18 +1,13 @@
 import { readIdleDrafts } from '@/lib/github-broker/idle-drafts';
 import 'server-only';
-import { listRepos } from '@/lib/repos/registry';
-import { normalizeRepoSlug } from '@/lib/github-broker/repo';
+import { registeredGitHubRepos } from '@/lib/github-broker/repo';
 import { listGitHubAttentionThreads, listGitHubIssues, listGitHubPullRequests, readGitHubSyncState } from '@/lib/github-broker/store';
 import { findWaitingOutsiders } from '@/lib/supervisor/outsider-attention';
 import type { MaintainerContribution, MaintainerFeed } from './maintainer-types';
 
 /** Read connected mirrors and the existing paged PR summaries for idle-draft decisions. Missing or stale sync is visible, never a clean bill of health. */
 export async function readMaintainerFeed(repoPaths?: string[]): Promise<MaintainerFeed> {
-  const bySlug = new Map<string, string[]>();
-  for (const entry of await listRepos()) {
-    const slug = normalizeRepoSlug(entry.remoteUrl)?.toLowerCase();
-    if (slug) bySlug.set(slug, [...(bySlug.get(slug) ?? []), entry.localPath]);
-  }
+  const bySlug = await registeredGitHubRepos();
   if (repoPaths) for (const [slug, paths] of bySlug) if (!paths.some((path) => repoPaths.includes(path))) bySlug.delete(slug);
   const contributions: MaintainerContribution[] = [];
   const sources: MaintainerFeed['sources'] = [];
@@ -29,12 +24,12 @@ export async function readMaintainerFeed(repoPaths?: string[]): Promise<Maintain
     }
   }
   const idleDraftsUnavailable: string[] = [];
-  let draftsTruncated = false;
+  const idleDraftNextPages: Record<string, number> = {};
   await Promise.all([...bySlug].map(async ([repo, repoPaths]) => {
     try {
       const page = await readIdleDrafts(repo);
       if (page.error) { idleDraftsUnavailable.push(repo); return; }
-      draftsTruncated ||= page.nextPage !== null;
+      if (page.nextPage !== null) idleDraftNextPages[repo] = page.nextPage;
       for (const pr of page.drafts) {
         const id = `github:${repo}:pr:${pr.number}`;
         const item: MaintainerContribution = {
@@ -57,5 +52,5 @@ export async function readMaintainerFeed(repoPaths?: string[]): Promise<Maintain
     title: thread.title, author: thread.waitingLogin, authorAssociation: associationByThread.get(`${thread.repo.toLowerCase()}:${thread.kind}:${thread.number}`), assignees: [], url: thread.url,
     createdAt: thread.waitingSince, updatedAt: thread.waitingSince, waitingSince: thread.waitingSince, threadKind: thread.kind,
   })).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-  return { contributions: contributions.slice(0, 200), replies: replies.slice(0, 200), sources, truncated: draftsTruncated || contributions.length > 200, ...(idleDraftsUnavailable.length ? { idleDraftsUnavailable: idleDraftsUnavailable.sort() } : {}), repliesTruncated: replies.length > 200 };
+  return { contributions: contributions.slice(0, 200), replies: replies.slice(0, 200), sources, truncated: contributions.length > 200, idleDraftNextPages, ...(idleDraftsUnavailable.length ? { idleDraftsUnavailable: idleDraftsUnavailable.sort() } : {}), repliesTruncated: replies.length > 200 };
 }

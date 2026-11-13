@@ -1,4 +1,4 @@
-import type { IdleDraftPage } from '@/lib/github-broker/idle-drafts';
+import type { RegisteredIdleDrafts } from '@/lib/github-broker/idle-drafts';
 import type {
   AgentSummary,
   EventSeverity,
@@ -202,7 +202,7 @@ export interface MobileReviewFileDetail {
 }
 
 export interface MobileInboxSnapshot {
-  staleDrafts?: IdleDraftPage;
+  staleDrafts?: RegisteredIdleDrafts & { error?: string };
   generatedAt: string;
   mode: 'live' | 'demo' | 'stale';
   sourceLabel: string;

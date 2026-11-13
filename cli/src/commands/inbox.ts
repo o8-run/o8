@@ -85,33 +85,39 @@ async function resolveApproval(mode: OutputMode, rest: string[], action: 'approv
   return 0;
 }
 
-function flag(rest: string[], name: string) { return rest[rest.indexOf(name) + 1]; }
+function flag(rest: string[], name: string) {
+  const value = rest[rest.indexOf(name) + 1];
+  if (!value || value.startsWith('--')) throw new CliError('invalid_args', `${name} requires a value.`, EXIT.INVALID_ARGS);
+  return value;
+}
 async function runDrafts(mode: OutputMode, action: string, rest: string[]): Promise<number> {
   const value = (name: string) => rest.includes(name) ? flag(rest, name) : undefined;
   const repo = value('--repo');
   let data: unknown;
   if (action === 'drafts') {
-    data = (await apiFetch<{ drafts: Array<{ number: number; ageDays: number; checks: string | null; conflictsWithMain: boolean | null }>; nextPage: number | null }>(resolveConfig(), '/api/panel/prs', {
+    data = (await apiFetch<{ drafts: Array<{ number: number; headSha: string | null; updatedAt: string; ageDays: number; checks: string | null; conflictsWithMain: boolean | null }>; nextPage: number | null }>(resolveConfig(), '/api/panel/prs', {
       query: { view: 'idle-drafts', repo, page: value('--page') ?? '1' },
     })).data;
   } else {
     const number = Number(rest[0]);
     const decision = action.replace('-draft', '');
     const owner = value('--owner'); const reason = value('--reason');
+    const expectedHeadSha = value('--expected-head-sha'); const expectedUpdatedAt = value('--expected-updated-at');
+    if (!expectedHeadSha || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(expectedHeadSha) || !expectedUpdatedAt || !Number.isFinite(Date.parse(expectedUpdatedAt))) throw new CliError('invalid_args', 'Pass --expected-head-sha and --expected-updated-at from the draft row you reviewed.', EXIT.INVALID_ARGS);
     if (!Number.isSafeInteger(number) || number < 1 || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new CliError('invalid_args', 'A PR number and --repo owner/repository are required.', EXIT.INVALID_ARGS);
     if (decision === 'handoff' && !owner) throw new CliError('invalid_args', 'Handoff requires --owner <GitHub login>.', EXIT.INVALID_ARGS);
     if (decision === 'close' && !reason?.trim()) throw new CliError('invalid_args', 'Close requires --reason.', EXIT.INVALID_ARGS);
     data = (await apiFetch(resolveConfig(), `/api/panel/prs/${number}`, { method: 'POST',
-      body: { action: 'draft-decision', decision, repo, owner, reason },
+      body: { action: 'draft-decision', decision, repo, owner, reason, expectedHeadSha, expectedUpdatedAt },
     })).data;
   }
   if (!mode.human) printJson(data);
   else if (action !== 'drafts') printHumanKv([['decision', action], ['result', JSON.stringify(data)]]);
   else {
-    const page = data as { drafts: Array<{ number: number; ageDays: number; checks: string | null; conflictsWithMain: boolean | null }>; nextPage: number | null };
+    const page = data as { drafts: Array<{ number: number; headSha: string | null; updatedAt: string; ageDays: number; checks: string | null; conflictsWithMain: boolean | null }>; nextPage: number | null };
     printHumanHeading('Idle draft decisions (three days)');
-    printHumanKv(page.drafts.map(pr => [String(pr.number), `${pr.ageDays} days idle · checks ${pr.checks ?? 'unknown'} · conflicts with main ${pr.conflictsWithMain === null ? 'unknown' : pr.conflictsWithMain ? 'yes' : 'no'} · Continue / Handoff / Close`]));
-    printHumanKv([['commands', 'inbox continue-draft | handoff-draft | close-draft <number> --repo owner/repository [--owner login] [--reason text]'], ['next page', String(page.nextPage ?? 'none')]]);
+    printHumanKv(page.drafts.map(pr => [String(pr.number), `${pr.ageDays} days idle · head ${pr.headSha ?? 'unknown'} · updated ${pr.updatedAt} · checks ${pr.checks ?? 'unknown'} · conflicts with main ${pr.conflictsWithMain === null ? 'unknown' : pr.conflictsWithMain ? 'yes' : 'no'} · Continue / Handoff / Close`]));
+    printHumanKv([['commands', 'inbox continue-draft | handoff-draft | close-draft <number> --repo owner/repository --expected-head-sha SHA --expected-updated-at ISO [--owner login] [--reason text]'], ['next page', String(page.nextPage ?? 'none')]]);
   }
   return 0;
 }

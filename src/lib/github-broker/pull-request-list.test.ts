@@ -94,3 +94,12 @@ describe('paged pull request reads', () => {
     });
   });
 });
+it('returns the head and detects pending checks even when the aggregate is failing', async () => {
+  const source = { ...pull(7), head: { ref: 'work', sha: 'a'.repeat(40) } };
+  githubInstallationFetch.mockImplementation(async (_repo: string, path: string) => ({ response: path === '/graphql'
+    ? Response.json({ data: { nodes: [{ number: 7, additions: 1, deletions: 0, commits: { nodes: [{ commit: { statusCheckRollup: {
+      state: 'FAILURE', contexts: { checkRunCountsByState: [{ state: 'IN_PROGRESS', count: 1 }, { state: 'FAILURE', count: 1 }], statusContextCountsByState: [] },
+    } } }] } }] } }) : Response.json([source]) }));
+  const page = await fetchPullRequestListPage('example/repo', 'open', 1);
+  expect(page.prs[0]).toMatchObject({ headSha: 'a'.repeat(40), updatedAt: source.updated_at, checks: 'failure', checksPending: true });
+});

@@ -1,4 +1,5 @@
-import { DraftDecisionError, recordDraftDecision } from '@/lib/github-broker/idle-drafts';
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
+import { DraftDecisionError, recordDraftDecision, isLiteralDraftRepo } from '@/lib/github-broker/idle-drafts';
 import { viewerJson } from '@/lib/viewers/response';
 import { readPullRequestStack } from '@/lib/github-broker/pull-request-stack';
 export const dynamic = 'force-dynamic';
@@ -131,7 +132,7 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid PR number' }, { status: 400 });
   }
 
-  let body: { decision?: string; owner?: string; reason?: string; action: string; repo?: string; comment?: string; mergeMethod?: 'squash' | 'merge' | 'rebase'; commitSha?: string; expectedMergeGate?: string };
+  let body: { expectedHeadSha?: string; expectedUpdatedAt?: string; decision?: string; owner?: string; reason?: string; action: string; repo?: string; comment?: string; mergeMethod?: 'squash' | 'merge' | 'rebase'; commitSha?: string; expectedMergeGate?: string };
   try {
     body = await request.json();
   } catch {
@@ -143,8 +144,9 @@ export async function POST(
   }
 
   if (body.action === 'draft-decision') {
-    const repo = await resolveRepoSlug(body.repo ?? null, DEFAULT_GITHUB_REPO);
-    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return NextResponse.json({ error: 'Invalid repo format' }, { status: 400 });
+    if (resolveRequestPrincipalContext(request).role !== 'operator') return NextResponse.json({ error: 'Draft decisions require an operator credential.' }, { status: 403 });
+    if (!isLiteralDraftRepo(body.repo)) return NextResponse.json({ error: 'A literal GitHub owner/repository is required.' }, { status: 400 });
+    const repo = body.repo;
     try { return NextResponse.json(await recordDraftDecision(repo, prNum, body)); }
     catch (error) {
       if (error instanceof DraftDecisionError) return NextResponse.json({ error: error.message, commentPosted: error.commentPosted, ownerAssigned: error.ownerAssigned }, { status: error.status });

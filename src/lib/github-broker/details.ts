@@ -113,19 +113,19 @@ export async function fetchGitHubIssueDetail(repoFullName: string, issueNumber: 
   };
 }
 
-export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number, suppliedReviewDecision?: Promise<string | null>, priority: GitHubReadPriority = 'interactive') {
+export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number, suppliedReviewDecision?: Promise<string | null>, priority: GitHubReadPriority = 'interactive', fresh = false) {
   try {
-    return await readPullRequestDetailAttempt(repoFullName, prNumber, suppliedReviewDecision, priority);
+    return await readPullRequestDetailAttempt(repoFullName, prNumber, suppliedReviewDecision, priority, false, fresh);
   } catch (error) {
     if (!(error instanceof GitHubReadScopeChangedError) || !error.anonymous) throw error;
     // Discard every first-attempt result, including any supplied review decision.
     // The second attempt must establish anonymous authority from fresh metadata.
-    return readPullRequestDetailAttempt(repoFullName, prNumber, undefined, priority, true);
+    return readPullRequestDetailAttempt(repoFullName, prNumber, undefined, priority, true, fresh);
   }
 }
 
-async function readPullRequestDetailAttempt(repoFullName: string, prNumber: number, suppliedReviewDecision: Promise<string | null> | undefined, priority: GitHubReadPriority, requireAnonymous = false) {
-  const { response, installation, scope, anonymous } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000) }, { priority, share: true });
+async function readPullRequestDetailAttempt(repoFullName: string, prNumber: number, suppliedReviewDecision: Promise<string | null> | undefined, priority: GitHubReadPriority, requireAnonymous = false, fresh = false) {
+  const { response, installation, scope, anonymous } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000), ...(fresh ? { cache: 'reload' as const } : {}) }, { priority, share: !fresh });
   if (requireAnonymous && !anonymous) {
     void response.body?.cancel().catch(() => {});
     throw new Error('GitHub authorization changed before the anonymous pull request retry. Retry.');
