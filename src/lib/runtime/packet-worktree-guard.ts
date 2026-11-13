@@ -1,10 +1,11 @@
+import { getSqlite } from '@/lib/db';
 import { preparationFailureDetails } from '@/lib/worktree/preparation-failure';
 import { recordLaneEvent } from '@/lib/lane/events';
 import {
   releasePacketStorageAfterWorktreeProvisionFailure,
   type PacketWorktreeProvisionStorageRelease,
 } from '@/lib/lane/lane-storage-release';
-import { getLane, getLaneEvents, setLaneStatus, updateLane } from '@/lib/lane/registry';
+import { getLane, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import type { LaneStatus } from '@/lib/lane/types';
 
 export const PACKET_WORKTREE_PROVISION_FAILED = 'packet_worktree_provision_failed';
@@ -34,11 +35,16 @@ export function packetWorktreeProvisionError(
   const laneId = request.existingLaneId!;
   const packetId = request.packetId!;
   const details = preparationFailureDetails(causeInput);
-  const events = getLaneEvents(laneId, 200);
-  const start = events.findLastIndex(event => event.verb === 'worktree_provision_started');
-  const install = start < 0 ? undefined : events.slice(start + 1).findLast(event => event.actor === 'system' && event.payload.packetId === packetId && event.verb === 'worktree_preparation_timing'
-    && event.payload.stage === 'dependency_install' && event.payload.phase === 'failed');
-  const cause = typeof install?.payload.cause === 'string' ? install.payload.cause : details.cause;
+  // Read the current attempt durably; cleanup progress can exceed the recent-event window.
+  const row = getSqlite().prepare(`SELECT payload_json FROM lane_events
+    WHERE lane_id = ? AND actor = 'system' AND verb = 'worktree_preparation_timing'
+      AND json_extract(payload_json, '$.packetId') = ?
+      AND json_extract(payload_json, '$.stage') = 'dependency_install'
+      AND rowid > (SELECT MAX(rowid) FROM lane_events WHERE lane_id = ?
+        AND actor = 'system' AND verb = 'worktree_provision_started')
+    ORDER BY rowid DESC LIMIT 1`).get(laneId, packetId, laneId) as { payload_json: string } | undefined;
+  const install = row ? JSON.parse(row.payload_json) as Record<string, unknown> : null;
+  const cause = install?.phase === 'failed' && typeof install.cause === 'string' ? install.cause : details.cause;
   const lane = getLane(laneId);
   let storageRelease: PacketWorktreeProvisionStorageRelease = {
     decision: 'deferred',

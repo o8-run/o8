@@ -188,7 +188,7 @@ async function callerStatuses(packet: OrchestratorPacket) {
 }
 
 describe('launch provisioning through mission HTTP entry points', () => {
-  it('prepares a Codex packet checkout with the supervisor resolved from server resources', async () => {
+  it.each(['success', 'install-failure'])('prepares a Codex packet checkout with server resources: %s', async outcome => {
     const { pathToFileURL } = await import('node:url');
     const { buildPiWriteHelper } = await import('./helpers/pi-write-helper');
     const binary = process.env.O8_TEST_PREBUILT_WRITE_HELPER || buildPiWriteHelper();
@@ -202,9 +202,11 @@ describe('launch provisioning through mission HTTP entry points', () => {
     const keys = ['O8_PI_WRITE_BIN', 'O8_PACKAGED_APP', APFS_DEPENDENCY_IMAGES_ENV];
     const saved = keys.map(key => process.env[key]);
     const cwd = process.cwd();
+    let retire: { mockRestore(): void } | undefined;
+    let materialize: { mockRestore(): void } | undefined;
     try {
       process.env.O8_PI_WRITE_BIN = ''; process.env.O8_PACKAGED_APP = ''; process.env[APFS_DEPENDENCY_IMAGES_ENV] = '0';
-      writeFileSync(join(repoPath, 'package.json'), JSON.stringify({ name: 'empty-preparation-fixture', version: '1.0.0' }));
+      writeFileSync(join(repoPath, 'package.json'), JSON.stringify({ name: 'empty-preparation-fixture', version: '1.0.0', ...(outcome === 'install-failure' ? { scripts: { preinstall: `node -e "process.stderr.write('fixture npm install cause');process.exit(17)"` } } : {}) }));
       writeFileSync(join(repoPath, 'package-lock.json'), JSON.stringify({ name: 'empty-preparation-fixture', version: '1.0.0', lockfileVersion: 3, packages: { '': { name: 'empty-preparation-fixture', version: '1.0.0' } } }));
       writeFileSync(join(repoPath, '.gitignore'), 'node_modules/\n');
       mkdirSync(join(repoPath, 'hooks'), { recursive: true });
@@ -213,13 +215,40 @@ describe('launch provisioning through mission HTTP entry points', () => {
       execFileSync(realGit, ['-c', 'user.email=test@o8.invalid', '-c', 'user.name=o8-test', 'commit', '-m', 'empty dependency fixture'], { cwd: repoPath });
       execFileSync(realGit, ['push', 'origin', 'main'], { cwd: repoPath });
       process.chdir(repoPath);
-      const packet = persistMission('server-resource-preparation');
+      const packet = persistMission(`server-resource-preparation-${outcome}`);
+      if (outcome === 'install-failure') {
+        const module = await import('@/lib/workspace/dependency-materializer');
+        const perform = module.materializeDependencyInstall;
+        materialize = vi.spyOn(module, 'materializeDependencyInstall').mockImplementationOnce(async (...args: Parameters<typeof perform>) => {
+          try { return await perform(...args); }
+          catch { throw new Error('fixture private install runtime cleanup failed'); }
+        });
+        const { WorktreeManager } = await import('@/lib/worktree/manager');
+        const proto = WorktreeManager.prototype as unknown as { retireFailedManagedCreation(...args: unknown[]): Promise<void> };
+        retire = vi.spyOn(proto, 'retireFailedManagedCreation').mockImplementationOnce(async () => {
+          const lane = registry.findLatestLaneByPacket(packet.id)!;
+          for (let i = 0; i < 501; i++) registry.appendEvent(lane.id, 'worktree_provision_queued', 'system', { packetId: packet.id, position: 1 });
+          throw new Error('fixture exact cleanup refused');
+        });
+      }
       await dispatch(packet);
       const lane = registry.findLatestLaneByPacket(packet.id)!;
-      expect(boundary.launch, JSON.stringify(registry.getLaneEvents(lane.id, 200).filter(e => e.verb === 'worktree_provision_failed'))).toHaveBeenCalledTimes(1);
-      expect(lane.worktreePath).toBeTruthy();
-      expect(registry.getLaneEvents(lane.id, 200)).toContainEqual(expect.objectContaining({ verb: 'worktree_preparation_timing', payload: expect.objectContaining({ stage: 'dependency_install', phase: 'completed' }) }));
+      if (outcome === 'success') {
+        expect(boundary.launch, JSON.stringify(registry.getLaneEvents(lane.id, 200).filter(e => e.verb === 'worktree_provision_failed'))).toHaveBeenCalledTimes(1);
+        expect(lane.worktreePath).toBeTruthy();
+        expect(registry.getLaneEvents(lane.id, 200)).toContainEqual(expect.objectContaining({ verb: 'worktree_preparation_timing', payload: expect.objectContaining({ stage: 'dependency_install', phase: 'completed' }) }));
+      } else {
+        expect(boundary.launch).not.toHaveBeenCalled();
+        const { GET } = await import('@/app/api/tasks/[taskId]/route');
+        const response = await GET(new NextRequest(`http://localhost/api/tasks/${packet.id}`, { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } }), { params: Promise.resolve({ taskId: packet.id }) });
+        expect(response.status).toBe(200);
+        const task = (await response.json()).task;
+        expect(task.failureReason).toContain('fixture npm install cause');
+        expect(task.failureReason).not.toContain('Exact retirement');
+        expect(task.cleanup).toMatchObject({ status: 'needs_cleanup', reason: 'fixture exact cleanup refused' });
+      }
     } finally {
+      materialize?.mockRestore(); retire?.mockRestore();
       process.chdir(cwd); boundary.helperModuleUrl = undefined;
       keys.forEach((key, i) => { if (saved[i] === undefined) delete process.env[key]; else process.env[key] = saved[i]; });
       rmSync(join(repoPath, 'hooks'), { recursive: true, force: true });
