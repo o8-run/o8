@@ -194,7 +194,7 @@ impl Host {
                     let next = page.last().and_then(|e| e["seq"].as_u64()).unwrap_or(from);
                     (
                         status,
-                        json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":if page.is_empty(){None}else{Some(next)},"cursorToken":prefix(next as usize),"cursorReset":reset,"events":page,"historyComplete":complete_response.load(Ordering::Acquire),"earliestEventTime":"1970-01-01T00:00:02.000Z"}),
+                        json!({"sessionKey":*response_key.lock().unwrap(),"nextCursor":if page.is_empty(){None}else{Some(next)},"cursorToken":prefix(next as usize),"cursorReset":reset,"events":page,"historyComplete":complete_response.load(Ordering::Acquire),"earliestEventTime":all.iter().filter_map(|e| e["ts"].as_str()).min().unwrap_or("1970-01-01T00:00:02.000Z")}),
                     )
                 } else {
                     // Host port discovery may probe this temporary listener.
