@@ -48,7 +48,7 @@ impl ActivityPane {
                 this.packet_focus_editor(window, cx);
             }))
     }
-    fn button(
+    pub(super) fn button(
         &mut self,
         id: impl Into<String>,
         label: impl Into<SharedString>,
@@ -77,7 +77,7 @@ impl ActivityPane {
             .child(label.into())
     }
     /// A control that is busy: same box, dimmed, with no click or keyboard stop.
-    fn inert(id: impl Into<String>, label: impl Into<SharedString>) -> gpui::Stateful<gpui::Div> {
+    pub(super) fn inert(id: impl Into<String>, label: impl Into<SharedString>) -> gpui::Stateful<gpui::Div> {
         let id = id.into();
         start(div().id(SharedString::from(id.clone())))
             .debug_selector(move || id.clone())
