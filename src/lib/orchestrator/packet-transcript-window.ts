@@ -13,7 +13,8 @@ function content(event: TranscriptEvent, identity = true) {
   const callId = 'callId' in event ? event.callId : undefined;
   const synthetic = callId !== undefined && (/^tool-\d+$/.test(callId) || callId.includes('-synthetic-'));
   const nativeTimestamp = (event as TranscriptEvent & { nativeTimestamp?: string }).nativeTimestamp;
-  return { ...event, seq: undefined, ts: nativeTimestamp ?? event.ts, ...(identity && synthetic ? { callId: undefined } : {}) };
+  const fields = { ...event, seq: undefined, ts: nativeTimestamp ?? event.ts, ...(identity && synthetic ? { callId: undefined } : {}) };
+  return Object.fromEntries(Object.entries(fields).sort(([a], [b]) => a.localeCompare(b)));
 }
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');

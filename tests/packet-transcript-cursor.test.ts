@@ -136,3 +136,22 @@ it('marks unknown time on terminal and error records without changing legacy fie
   expect(native).toHaveLength(2);
   for (const event of native) expect(event).toHaveProperty('nativeTimestamp', '');
 });
+
+it('does not rename fallback events when JSON property order changes', async () => {
+  fixture.events = [answer(1, 'Same answer')];
+  const first = await read();
+  fixture.events = [{ text: 'Same answer', type: 'assistant', ts: '2026-01-01T00:00:02Z', seq: 1 }];
+  expect(await read(first.nextCursor, first.cursorToken)).toMatchObject({ events: [], cursorReset: false, nextCursor: null });
+});
+
+it('keeps the original fallback identity when a later stream shape supplies an item id', async () => {
+  const { normalizeCodexEvents } = await import('@/lib/orchestrator/transcript-normalizer');
+  const firstLine = JSON.stringify({ type: 'event_msg', timestamp: '2026-01-01T00:00:02Z', payload: { type: 'exec_command_begin', call_id: 'call-42', command: 'git status' } });
+  const aliasLine = JSON.stringify({ type: 'item.started', timestamp: '2026-01-01T00:00:02Z', item: { type: 'command_execution', id: 'item-42', command: 'git status' } });
+  fixture.events = normalizeCodexEvents(firstLine, undefined, true);
+  const first = await read();
+  fixture.events = normalizeCodexEvents(`${firstLine}\n${aliasLine}`, undefined, true);
+  const updated = await read();
+  expect(updated.events).toHaveLength(1);
+  expect(updated.events[0].eventId).toBe(first.events[0].eventId);
+});

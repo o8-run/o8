@@ -132,7 +132,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
   const nativeId = (kind: string, callId?: string, previous?: TranscriptEvent) => {
     if (!nativeIdentities) return {};
     const retained = previous as (TranscriptEvent & { eventId?: string; nativeTimestamp?: string }) | undefined;
-    const eventId = retained?.eventId ?? (currentSourceId ? `${currentSourceId}:${kind}${callId ? `:${callId}` : ''}` : undefined);
+    const eventId = retained?.eventId ?? (!previous && currentSourceId ? `${currentSourceId}:${kind}${callId ? `:${callId}` : ''}` : undefined);
     return { nativeTimestamp: retained?.nativeTimestamp ?? currentNativeTimestamp, ...(eventId ? { eventId } : {}) };
   };
   const nextSeq = () => (seq += 1);

@@ -73,7 +73,7 @@ function argsPreview(input: unknown): string {
 function nativeFields(enabled: boolean, sourceId: string, at: string, kind: string, callId?: string, previous?: TranscriptEvent) {
   if (!enabled) return {};
   const retained = previous as (TranscriptEvent & { eventId?: string; nativeTimestamp?: string }) | undefined;
-  const eventId = retained?.eventId ?? (sourceId ? `${sourceId}:${kind}${callId ? `:${callId}` : ''}` : undefined);
+  const eventId = retained?.eventId ?? (!previous && sourceId ? `${sourceId}:${kind}${callId ? `:${callId}` : ''}` : undefined);
   return { nativeTimestamp: retained?.nativeTimestamp ?? at, ...(eventId ? { eventId } : {}) };
 }
 
