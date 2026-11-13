@@ -2,6 +2,7 @@
 
 Refs #6040 and #6060. Source baseline: `c87d0ab6d524e5cc40556072e8f239e5bec809d6`.
 The table records behavior at that commit; follow the linked issues for subsequent fixes.
+The #6060 dispositions postdate this baseline; #6067 preserves review accepted by the callback when its follow-up throws, with a durable failure event.
 Persistent lead turn reporting is handled by #6042; MCP projections are tracked by #6054.
 This audit distinguishes a runtime turn ending, work becoming reviewable, and a packet being released.
 
@@ -31,6 +32,6 @@ that contract.
 
 This is a cross-producer compatibility decision. The audit deliberately does not invent an event
 store or change review, approval, merge, release, or ordinary conversation gates. The contained
-#6060 change handles an established failure: a thrown completion check returns a blocking verdict,
-retains the current lane for input, and cannot publish a successful handback. Existing turn guards
+#6060 change handles an established failure: a thrown check before review acceptance returns a blocking verdict
+and retains the current lane for input; #6067 retains this callback's accepted review after a follow-up failure. Existing turn guards
 continue to protect newer work from an older callback.
