@@ -289,7 +289,7 @@ it.each(['next-link', 'total-count', 'unbounded-page', 'context-next-page', 'com
     : path === '/graphql' ? Response.json({ data: { repository: { pullRequest: { isInMergeQueue: false }, object: { statusCheckRollup: { contexts: {
       pageInfo: { hasNextPage: mode === 'context-next-page' }, nodes: Array.from({ length: 100 }, (_, i) => ({ __typename: 'CheckRun', name: `check-${i}`, isRequired: false })),
     } } } } } })
-    : path.includes('/check-runs') ? Response.json({ ...(mode === 'total-count' ? { total_count: 101 } : ['complete-page', 'context-next-page'].includes(mode) ? { total_count: 100 } : {}), check_runs: Array.from({ length: 100 }, (_, i) => ({ name: `check-${i}`, status: 'completed', conclusion: 'success' })) },
+    : path.includes('/check-runs') ? Response.json({ ...(mode === 'total-count' ? { total_count: 101 } : ['next-link', 'complete-page', 'context-next-page'].includes(mode) ? { total_count: 100 } : {}), check_runs: Array.from({ length: 100 }, (_, i) => ({ name: `check-${i}`, status: 'completed', conclusion: 'success' })) },
       { headers: mode === 'next-link' ? { link: '<https://api.github.com/repos/example/repo/commits/head/check-runs?page=2>; rel="next"' } : {} }) : Response.json([]) }));
   const response = await post('close', { reason: 'Superseded' });
   if (mode === 'complete-page') {
@@ -297,7 +297,9 @@ it.each(['next-link', 'total-count', 'unbounded-page', 'context-next-page', 'com
     expect(h.comment).toHaveBeenCalledTimes(1); expect(h.close).toHaveBeenCalledTimes(1);
   } else {
     expect(response.status, await response.clone().text()).toBe(409);
-    expect((await response.json()).error).toMatch(/check status could not be confirmed/i);
+    const body = await response.json();
+    expect(body.error).toMatch(/check status could not be confirmed/i);
+    if (['next-link', 'total-count'].includes(mode)) expect(body.error).toContain('More than 100 check runs; checks unavailable.');
     expect(h.comment).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
   }
   expect(h.assign.mock.calls.every(([, path, options]) => {

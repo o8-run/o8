@@ -22,6 +22,22 @@ describe('pull request read entry point', () => {
     expect(mocks.getCachedRepoReadiness).toHaveBeenCalledTimes(1);
     expect(mocks.getRepoReadiness).not.toHaveBeenCalled();
   });
+  it('explains shared check pagination unavailability in the PR merge gate', async () => {
+    mocks.fetchGitHubPullRequestComments.mockResolvedValue({ comments: [], issueComments: [], reviews: [], reviewsIncomplete: false, githubScope: 'scope' });
+    mocks.fetchGitHubPullRequestDetail.mockResolvedValue({ number: 5, state: 'open', draft: false, mergedAt: null, mergeable: true,
+      files: [], statusCheckRollup: [], requiredChecks: ['unit'], requiredStatuses: [], reviewDecision: 'APPROVED',
+      headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40), headRefName: 'fixture', baseRefName: 'main', headRepoFullName: 'example/repo',
+      githubScope: 'scope', githubIdentity: { repositoryId: 1, pullRequestId: 2 },
+      checksUnavailable: true, checksUnavailableReason: 'More than 100 check runs; checks unavailable.' });
+    const response = await GET(new Request('http://localhost/api/panel/prs/5?repo=example/repo'), { params: Promise.resolve({ number: '5' }) });
+    expect(response.status).toBe(200);
+    const gate = (await response.json()).pr.mergeGate;
+    expect(gate).toMatchObject({ allowed: false, autoMergeAllowed: false });
+    expect(gate.checks.find((check: { name: string }) => check.name === 'pr-checks')).toMatchObject({
+      verdict: 'fail', detail: 'More than 100 check runs; checks unavailable.',
+    });
+    expect(mocks.mergeGitHubPullRequest).not.toHaveBeenCalled();
+  });
   it('returns a retryable, sanitized failure rather than saving an incomplete read', async () => {
     mocks.fetchGitHubPullRequestComments.mockRejectedValue(new Error('Private connection detail'));
     mocks.fetchGitHubPullRequestDetail.mockResolvedValue({ number: 5, files: [] });
