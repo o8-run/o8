@@ -1,3 +1,4 @@
+import { isPendingStatusContext } from './check-state';
 import 'server-only';
 
 import { githubInstallationFetch } from './auth';
@@ -5,6 +6,8 @@ import { GitHubReadScopeChangedError } from './read-scope';
 import { GitHubRequestDeferredError } from './request-budget';
 
 export interface PullRequestRequirements {
+  /** All status contexts, including optional ones; omitted when their complete read is unavailable. */
+  pendingStatusContexts?: boolean;
   /** Check-run names GitHub requires on this head; null when GitHub did not say. */
   requiredChecks: string[] | null;
   /** Required commit statuses on this head with their state, which the check-run read does not include. */
@@ -65,6 +68,7 @@ export async function readPullRequestRequirements(repo: string, number: number, 
     if (payload.errors?.length || !repository?.pullRequest || !contexts || !Array.isArray(contexts.nodes) || contexts.pageInfo?.hasNextPage) return UNKNOWN_REQUIREMENTS;
     const required = contexts.nodes.filter((node): node is NonNullable<Context> => Boolean(node?.isRequired));
     return {
+      pendingStatusContexts: contexts.nodes.some(node => node?.__typename === 'StatusContext' && isPendingStatusContext(node.state ?? 'PENDING')),
       requiredChecks: [...new Set(required.flatMap(node => node.__typename === 'CheckRun' && node.name ? [node.name] : []))].sort(),
       requiredStatuses: required.flatMap(node => node.__typename === 'StatusContext' && node.context ? [{ context: node.context, state: node.state ?? 'PENDING' }] : []),
       mergeQueue: Boolean(repository.mergeQueue?.id), inMergeQueue: Boolean(repository.pullRequest.isInMergeQueue),

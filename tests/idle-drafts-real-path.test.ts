@@ -22,7 +22,7 @@ let observedUpdatedAt = new Date(Date.now() - age).toISOString();
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 function row(overrides = {}) {
   return { number: 7, title: 'Idle fixture', draft: true, state: 'open', headSha, updatedAt: observedUpdatedAt,
-    checks: 'failure', mergeable: 'CONFLICTING', baseRefName: 'main', url: 'https://github.com/example/repo/pull/7', ...overrides };
+    checks: 'failure', statusContextsPending: false, mergeable: 'CONFLICTING', baseRefName: 'main', url: 'https://github.com/example/repo/pull/7', ...overrides };
 }
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -281,12 +281,15 @@ it('rejects the removed comment field before reading or writing GitHub', async (
   expect((await post('continue', { comment: 'Unused text' })).status).toBe(400);
   expect(h.detail).not.toHaveBeenCalled(); expect(h.comment).not.toHaveBeenCalled();
 });
-it.each(['next-link', 'total-count', 'unbounded-page', 'complete-page'])('fresh detail check-page evidence: %s', async mode => {
+it.each(['next-link', 'total-count', 'unbounded-page', 'context-next-page', 'complete-page'])('fresh detail check-page evidence: %s', async mode => {
   const { fetchGitHubPullRequestDetail } = await vi.importActual<typeof import('@/lib/github-broker/details')>('@/lib/github-broker/details');
   h.detail.mockImplementationOnce(fetchGitHubPullRequestDetail);
-  h.assign.mockImplementation(async (_repo: string, path: string) => ({ anonymous: true, response: path.endsWith('/pulls/7')
+  h.assign.mockImplementation(async (_repo: string, path: string) => ({ anonymous: false, response: path.endsWith('/pulls/7')
     ? Response.json({ number: 7, title: 'Idle fixture', state: 'open', draft: true, updated_at: observedUpdatedAt, head: { sha: headSha }, base: { ref: 'main' }, changed_files: 0 })
-    : path.includes('/check-runs') ? Response.json({ ...(mode === 'total-count' ? { total_count: 101 } : mode === 'complete-page' ? { total_count: 100 } : {}), check_runs: Array.from({ length: 100 }, (_, i) => ({ name: `check-${i}`, status: 'completed', conclusion: 'success' })) },
+    : path === '/graphql' ? Response.json({ data: { repository: { pullRequest: { isInMergeQueue: false }, object: { statusCheckRollup: { contexts: {
+      pageInfo: { hasNextPage: mode === 'context-next-page' }, nodes: Array.from({ length: 100 }, (_, i) => ({ __typename: 'CheckRun', name: `check-${i}`, isRequired: false })),
+    } } } } } })
+    : path.includes('/check-runs') ? Response.json({ ...(mode === 'total-count' ? { total_count: 101 } : ['complete-page', 'context-next-page'].includes(mode) ? { total_count: 100 } : {}), check_runs: Array.from({ length: 100 }, (_, i) => ({ name: `check-${i}`, status: 'completed', conclusion: 'success' })) },
       { headers: mode === 'next-link' ? { link: '<https://api.github.com/repos/example/repo/commits/head/check-runs?page=2>; rel="next"' } : {} }) : Response.json([]) }));
   const response = await post('close', { reason: 'Superseded' });
   if (mode === 'complete-page') {
@@ -297,11 +300,36 @@ it.each(['next-link', 'total-count', 'unbounded-page', 'complete-page'])('fresh 
     expect((await response.json()).error).toMatch(/check status could not be confirmed/i);
     expect(h.comment).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
   }
-  expect(h.assign.mock.calls.every(([, , options]) => !options?.method || options.method === 'GET')).toBe(true);
+  expect(h.assign.mock.calls.every(([, path, options]) => {
+    if (path !== '/graphql') return !options?.method || options.method === 'GET';
+    const query = JSON.parse(options.body as string).query as string;
+    return options.method === 'POST' && query.trim().startsWith('query ') && !/\bmutation\b/.test(query);
+  })).toBe(true);
 });
 
 it('refuses an unfinished requested run even when it still carries a terminal conclusion', async () => {
   h.detail.mockResolvedValue({ ...row(), statusCheckRollup: [{ name: 'retry', status: 'requested', conclusion: 'failure' }] });
   expect((await post('close', { reason: 'Superseded' })).status).toBe(409);
   expect(h.comment).not.toHaveBeenCalled(); expect(h.assign).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
+});
+it('refuses a pending optional status context through the real fresh detail read', async () => {
+  const { fetchGitHubPullRequestDetail } = await vi.importActual<typeof import('@/lib/github-broker/details')>('@/lib/github-broker/details');
+  h.detail.mockImplementationOnce(fetchGitHubPullRequestDetail);
+  h.assign.mockImplementation(async (_repo: string, path: string) => ({ anonymous: false, response: path.endsWith('/pulls/7')
+    ? Response.json({ number: 7, title: 'Idle fixture', state: 'open', draft: true, updated_at: observedUpdatedAt, head: { sha: headSha }, base: { ref: 'main' }, changed_files: 0 })
+    : path === '/graphql' ? Response.json({ data: { repository: { pullRequest: { isInMergeQueue: false }, object: { statusCheckRollup: { contexts: {
+      pageInfo: { hasNextPage: false },
+      nodes: [{ __typename: 'StatusContext', context: 'optional', state: 'PENDING', isRequired: false }],
+    } } } } } })
+    : path.includes('/check-runs') ? Response.json({ total_count: 1, check_runs: [{ name: 'unit', status: 'completed', conclusion: 'failure' }] }) : Response.json([]) }));
+  const response = await post('close', { reason: 'Superseded' });
+  expect(response.status, await response.clone().text()).toBe(409);
+  expect((await response.json()).error).toMatch(/pending checks/i);
+  expect(h.comment).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
+});
+
+it('refuses unavailable complete status-context evidence before writing', async () => {
+  h.detail.mockResolvedValue({ ...row(), statusCheckRollup: [], statusContextsPending: null });
+  expect((await post('close', { reason: 'Superseded' })).status).toBe(409);
+  expect(h.comment).not.toHaveBeenCalled(); expect(h.close).not.toHaveBeenCalled();
 });

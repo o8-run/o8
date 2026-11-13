@@ -186,11 +186,13 @@ async function readPullRequestDetailAttempt(repoFullName: string, prNumber: numb
   const changed = scopeChanges.find(result => result.status === 'rejected' && !result.reason.anonymous) ?? scopeChanges[0];
   if (changed?.status === 'rejected') throw changed.reason;
   const [files, statusCheckRollup, reviewDecision, requirements] = await Promise.all(reads);
+  const statusContextEvidence: { statusContextsPending?: boolean | null } = { statusContextsPending: requirements.pendingStatusContexts ?? null };
 
   return {
     githubScope: scope,
     ...(Number.isSafeInteger(pr.id) && Number(pr.id) > 0 && Number.isSafeInteger(pr.base?.repo?.id) && Number(pr.base?.repo?.id) > 0
       ? { githubIdentity: { repositoryId: pr.base!.repo!.id!, pullRequestId: pr.id! } } : {}),
+    ...statusContextEvidence,
     checksUnavailable,
     number: pr.number,
     title: pr.title ?? '',

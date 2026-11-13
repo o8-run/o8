@@ -116,9 +116,9 @@ export async function recordDraftDecision(repo: string, number: number, input: R
     if (pr.state !== 'open' || !pr.draft || !Number.isFinite(elapsed) || elapsed < IDLE_DRAFT_DAYS * 86400000) {
       throw new DraftDecisionError(409, 'This pull request is no longer an idle open draft. Refresh before deciding.');
     }
-    const pendingChecks = (pr.statusCheckRollup ?? []).some(check => !check.conclusion || Boolean(check.status && isUnfinishedCheckRunState(check.status)))
+    const pendingChecks = pr.statusContextsPending === true || (pr.statusCheckRollup ?? []).some(check => !check.conclusion || Boolean(check.status && isUnfinishedCheckRunState(check.status)))
       || pr.requiredStatuses?.some(check => isPendingStatusContext(check.state));
-    if (pr.checksUnavailable) throw new DraftDecisionError(409, 'Draft check status could not be confirmed. Refresh before deciding.');
+    if (pr.checksUnavailable || pr.statusContextsPending === null) throw new DraftDecisionError(409, 'Draft check status could not be confirmed. Refresh before deciding.');
     if (pendingChecks) throw new DraftDecisionError(409, 'This draft has pending checks. Refresh the idle-draft list after they finish.');
     let ownerAssigned = false;
     if (decision === 'handoff') {
