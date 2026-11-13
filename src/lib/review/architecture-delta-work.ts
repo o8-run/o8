@@ -120,3 +120,40 @@ export function architectureSnapshotCacheKey({
   hash.update(JSON.stringify(resolver));
   return hash.digest('hex');
 }
+
+/** The same bounded source snapshot reader for a workspace or immutable Git tree. */
+export async function readArchitectureSources(paths: string[], priorityPaths: Set<string>, options: {
+  maxFiles: number; maxFileBytes: number; maxTotalBytes: number; concurrency: number;
+  read: (path: string, maxBytes: number) => Promise<string | null>;
+}) {
+  const ordered = [...paths].sort((left, right) => (
+    Number(priorityPaths.has(right)) - Number(priorityPaths.has(left)) || left.localeCompare(right)
+  ));
+  const limited = ordered.slice(0, options.maxFiles);
+  const omittedPaths = ordered.slice(options.maxFiles);
+  let totalBytes = 0;
+  const contents = new Map<string, string>();
+  let truncated = ordered.length > limited.length;
+  for (let offset = 0; offset < limited.length; offset += options.concurrency) {
+    if (totalBytes >= options.maxTotalBytes) {
+      truncated = true;
+      omittedPaths.push(...limited.slice(offset));
+      break;
+    }
+    const batch = limited.slice(offset, offset + options.concurrency);
+    const maxBytes = Math.min(options.maxFileBytes, options.maxTotalBytes - totalBytes);
+    const loaded = await mapWithConcurrency(batch, options.concurrency, (filePath) => options.read(filePath, maxBytes));
+    for (const [index, filePath] of batch.entries()) {
+      const content = loaded[index] ?? null;
+      const size = content === null ? 0 : Buffer.byteLength(content, 'utf8');
+      if (content === null || totalBytes + size > options.maxTotalBytes) {
+        truncated = true;
+        omittedPaths.push(filePath);
+        continue;
+      }
+      totalBytes += size;
+      contents.set(filePath, content);
+    }
+  }
+  return { contents, truncated, omittedPaths };
+}

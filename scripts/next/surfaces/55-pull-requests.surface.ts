@@ -29,6 +29,17 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
     base: { ref: 'main', sha: 'b'.repeat(40), repo: { id: 900, allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: number === 10 } },
     additions: 1, deletions: 1, changed_files: 1, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-02T00:00:00Z',
     html_url: `https://github.com/example/repo/pull/${number}` });
+  if (process.argv.includes('--change-map')) {
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+    git('config', 'user.name', 'Review fixture'); git('config', 'user.email', 'review@example.test');
+    writeFileSync(join(repo, 'core.ts'), 'export const core = 1;\n');
+    git('add', '.'); git('commit', '-qm', 'test: architecture base');
+    const base = git('rev-parse', 'HEAD');
+    writeFileSync(join(repo, 'entry.ts'), "import { core } from './core';\nexport const entry = core;\n");
+    git('add', '.'); git('commit', '-qm', 'test: architecture head');
+    (pulls.get(7)!.head as { sha: string }).sha = git('rev-parse', 'HEAD');
+    (pulls.get(7)!.base as { sha: string }).sha = base;
+  }
   // Never fall through to an account or network. All production broker calls
   // encounter this external boundary; unknown calls fail the fixture.
   globalThis.fetch = async (input, init) => {
@@ -64,6 +75,7 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
       const page = Number(url.searchParams.get('page'));
       return Response.json(page === 2 ? [pulls.get(8), pulls.get(9), pulls.get(10)] : [pulls.get(7)], { headers: page === 1 ? { link: '<https://api.github.com/fixture?page=2>; rel="next"' } : {} });
     }
+    if (path.endsWith('/files') && process.argv.includes('--change-map') && number === 7) return Response.json([{ filename: 'entry.ts', status: 'added', additions: 2, deletions: 0, patch: "@@ -0,0 +1,2 @@\n+import { core } from './core';\n+export const entry = core;" }]);
     if (path.endsWith('/files')) return Response.json([{ filename: 'change.rs', status: 'modified', additions: 1, deletions: 1, patch: '@@ -1 +1 @@\n-before\n+after' }]);
     if (path.endsWith('/check-runs') && scenario === 'checks-unavailable') return Response.json({ message: 'Fixture checks unavailable' }, { status: 503 });
     if (path.endsWith('/check-runs')) return Response.json({ check_runs: [

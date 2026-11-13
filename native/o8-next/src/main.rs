@@ -4,6 +4,7 @@ mod activity;
 mod app_parent;
 mod brain;
 mod browser_panel;
+mod change_map;
 #[path = "shell_features/connection/client.rs"]
 mod client;
 mod clock;

@@ -16,6 +16,8 @@ use std::{
     rc::Rc,
 };
 
+#[path = "diff_ui_map.rs"]
+mod map;
 #[path = "diff_ui_init.rs"]
 mod init;
 #[path = "diff_missing_ui.rs"]
@@ -31,6 +33,7 @@ pub(crate) struct DiffSurface {
     _request_changes_observer: Option<gpui::Subscription>,
     discard_allowed: bool,
     client: Client,
+    pub(crate) map: crate::change_map::ChangeMap,
     pub(crate) target: Target,
     pub(crate) document: Rc<Document>,
     pub(crate) selected: usize,
@@ -103,6 +106,10 @@ impl DiffSurface {
         self.missing = None;
         self.pending = None;
         self.notice = "Reading diff…".into();
+        self.map = crate::change_map::ChangeMap {
+            expanded: self.map.expanded,
+            ..Default::default()
+        };
         if self.stacked() {
             self.read_scope(cx);
         }
@@ -133,6 +140,7 @@ impl DiffSurface {
                         }
                         this.state = state;
                         this.ready = true;
+                        this.load_map(generation, cx);
                         if this.stacked() {
                             // A refresh keeps the reader's place in the stack.
                             this.painted.borrow_mut().clear();
@@ -148,6 +156,8 @@ impl DiffSurface {
                             missing::State::new(checkout).with_discarded(discarded)
                         });
                         this.failed = true;
+                        this.map.error =
+                            Some("Change map unavailable until the diff can be read.".into());
                     }
                 }
                 cx.notify();
@@ -188,6 +198,14 @@ impl DiffSurface {
         cx.notify();
     }
     pub(crate) fn row_count(&self) -> usize {
+        if self
+            .document
+            .files
+            .get(self.selected)
+            .is_some_and(|f| !self.map.keeps(&f.path) && !self.map.keeps(&f.old_path))
+        {
+            return 0;
+        }
         self.document.files.get(self.selected).map_or(0, |f| {
             if self.split {
                 f.split.len()
@@ -383,7 +401,12 @@ impl Render for DiffSurface {
                             } else {
                                 theme().background
                             })
-                            .child(div().text_size(px(13.5)).child(f.path.clone()))
+                            .child(
+                                div()
+                                    .text_size(px(13.5))
+                                    .text_ellipsis()
+                                    .child(f.path.clone()),
+                            )
                             .child(
                                 div()
                                     .mt(px(4.))
@@ -495,7 +518,10 @@ impl Render for DiffSurface {
                     }
                     "home" => this.scroll_to(0, cx),
                     "end" => this.scroll_to(this.row_count().saturating_sub(1), cx),
-                    key @ ("up" | "down") if event.keystroke.modifiers.alt && this.stacked() => {
+                    key @ ("up" | "down")
+                        if event.keystroke.modifiers.alt
+                            && (this.stacked() || !this.map.selected.is_empty()) =>
+                    {
                         // Steps through the files the scope shows.
                         let shown = this.shown();
                         let at = shown.iter().position(|i| *i >= this.selected);
@@ -625,6 +651,22 @@ impl Render for DiffSurface {
                             .px(px(16.))
                             .py(px(6.))
                             .child(control),
+                    )
+                },
+            )
+            .when(
+                self.missing.is_none() && matches!(
+                    &self.target,
+                    Target::Packet(_) | Target::Worktree { file: None, .. }
+                ),
+                |view| {
+                    view.child(
+                        div()
+                            .px(px(8.))
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .child(self.change_map_view(cx)),
                     )
                 },
             )

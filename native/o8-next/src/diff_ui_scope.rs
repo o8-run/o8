@@ -154,7 +154,10 @@ impl DiffSurface {
 
     /// The files the stack and its drawer show, in document order.
     pub(crate) fn shown(&self) -> Vec<usize> {
-        let all = 0..self.document.files.len();
+        let all = (0..self.document.files.len()).filter(|i| {
+            self.map.keeps(&self.document.files[*i].path)
+                || self.map.keeps(&self.document.files[*i].old_path)
+        });
         if !self.stacked() || self.scope == Scope::All {
             return all.collect();
         }

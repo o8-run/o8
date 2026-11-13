@@ -1,5 +1,46 @@
 use super::*;
 impl ActivityPane {
+    pub(super) fn packet_map(
+        &mut self,
+        row: &Row,
+        read: &packet::Review,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let id = row.id.clone();
+        let map = read
+            .map
+            .view(&format!("packet-{id}"), cx, move |s, command, cx| {
+                let navigate = matches!(
+                    command,
+                    crate::change_map::Command::Select(_) | crate::change_map::Command::Focus(_)
+                );
+                if let Some(read) = s.packet.reads.get_mut(&id) {
+                    read.map.apply(&command);
+                    if navigate && !read.map.selected.is_empty() {
+                        s.packet.tabs.insert(id.clone(), "files");
+                    }
+                }
+                s.changed(cx);
+            });
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(map)
+            .when(
+                read.map.error.is_some() || read.map.delta["status"] == "unavailable",
+                |v| {
+                    v.child(self.button(
+                        "activity-packet-map-retry",
+                        "Retry change map",
+                        Action::Packet(Packet::Read(row.clone())),
+                        cx,
+                    ))
+                },
+            )
+            .into_any_element()
+    }
+
     pub(super) fn packet_review(
         &mut self,
         row: &Row,
@@ -81,6 +122,19 @@ impl ActivityPane {
                     Action::Packet(Packet::Diff(row.clone())),
                     cx,
                 ));
+        }
+        if !read.map.selected.is_empty() {
+            for (path, _, lines) in read
+                .patches
+                .iter()
+                .filter(|(path, old, _)| read.map.keeps(path) || read.map.keeps(old))
+            {
+                let limit = lines.len().min(300);
+                view = view.child(div().debug_selector(|| "activity-map-diff".into()).min_w_0()
+                    .child(label(path.clone()).text_ellipsis())
+                    .child(crate::files_panel::file_diff::rows(&lines[..limit], false, &format!("packet-map-{path}")))
+                    .when(lines.len() > limit, |v| v.child(label("Showing the first 300 lines. Open review diff to read the full file."))));
+            }
         }
         let directives = read
             .directives

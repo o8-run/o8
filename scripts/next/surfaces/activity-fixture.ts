@@ -1,7 +1,7 @@
 /** Disposable Activity transport. Production handlers own auth, mapping and writes;
  * only the upstream GitHub transport is authored. No account or network access. */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { NextRequest } from 'next/server';
@@ -49,6 +49,7 @@ export async function installActivityFixture(repo: string) {
   const originalFetch = globalThis.fetch;
   const token = randomBytes(32).toString('hex');
   let mode = process.argv.includes('--activity-forks') ? 'forks' : 'ready';
+  let mapHead: string | undefined;
   if (mode === 'forks') {
     const forkRepo = join(dirname(repo), 'fork-repo');
     execFileSync('git', ['clone', '--quiet', '--no-hardlinks', repo, forkRepo]);
@@ -116,6 +117,7 @@ export async function installActivityFixture(repo: string) {
   const state = await import('../../../src/app/api/orchestrator/state/route');
   const stop = await import('../../../src/app/api/orchestrator/stop-mission/route');
   const discard = await import('../../../src/app/api/orchestrator/discard-packet/route');
+  const laneDiff = await import('../../../src/app/api/lanes/[id]/diff/route');
   // Lifecycle controls are authored transport responses: this fixture never
   // kills a worker or starts a provider turn. Production-route tests own those seams.
   const recoveries: Array<{ path: string; body: Record<string, unknown> }> = [];
@@ -140,10 +142,11 @@ export async function installActivityFixture(repo: string) {
     'POST /api/orchestrator/rerun-with-feedback': request => recovery(request, true),
     [`GET /api/panel/commits/${localHash}`]: request => commitDetail.GET(request, { params: Promise.resolve({ hash: localHash }) }),
     [`GET /api/lanes/${laneId}`]: async () => { packetReads.push('lane'); return Response.json({ lane: { worktreePath: repo, repoPath: repo } }); },
-    [`GET /api/lanes/${laneId}/diff`]: async () => {
+    [`GET /api/lanes/${laneId}/diff`]: async request => {
       packetReads.push('diff'); if (mode === 'packet-refused') return Response.json({ error: 'Fixture branch read refused' }, { status: 403 });
+      if (mode === 'change-map') return laneDiff.GET(request, { params: Promise.resolve({ id: laneId }) });
       if (mode === 'packet-slow') await new Promise(resolve => setTimeout(resolve, 700));
-      return Response.json({ ok: true, laneId, headSha: 'a'.repeat(40), base: 'main', branch: 'fixture', stat: '6 files changed, 6 insertions(+)',
+      return Response.json({ ok: true, laneId, headSha: mapHead ?? 'a'.repeat(40), base: 'main', branch: 'fixture', stat: '6 files changed, 6 insertions(+)',
         diff: Array.from({ length: 6 }, (_, i) => `diff --git a/src/file-${i}.ts b/src/file-${i}.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/file-${i}.ts\n@@ -0,0 +1 @@\n+export const value${i} = ${i};\n`).join('') });
     },
     'GET /api/cortex/directives': async () => Response.json({ directives: [{ id: 'fixture-scope', title: 'Packet scope', body: 'Keep the change within the packet scope.', scope: 'repo', repoName: 'fixture-repo', priority: null, projects: [], recentMerges: [], file: null }] }),
@@ -187,6 +190,15 @@ export async function installActivityFixture(repo: string) {
     },
     'GET /api/activity-fixture': async request => {
       mode = request.nextUrl.searchParams.get('mode') ?? mode;
+      if (mode === 'change-map' && !mapHead) {
+        const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+        git('checkout', '-b', 'fixture'); git('branch', '-f', 'main', 'HEAD');
+        mkdirSync(join(repo, 'src'), { recursive: true });
+        for (let i = 0; i < 6; i++) writeFileSync(join(repo, `src/file-${i}.ts`), `export const value${i} = ${i};\n`);
+        git('add', 'src'); git('commit', '-qm', 'test: packet architecture head');
+        mapHead = git('rev-parse', 'HEAD');
+        updateLane(laneId, { worktreePath: repo });
+      }
       if (mode === 'drop-stop' || mode === 'stop-ready' || mode === 'stop-unknown') updateLane(laneId, { sessionKey: null });
       if (mode === 'stop-unknown-running') updateLane(laneId, { sessionKey: null });
       if (mode === 'lane-running' || mode === 'stop-unknown-running') setLaneStatus(laneId, 'running', 'system', 'fixture_running');

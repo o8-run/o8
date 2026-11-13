@@ -8,6 +8,7 @@ use gpui::{
 };
 use std::{cell::RefCell, collections::BTreeSet};
 
+pub(crate) mod change_map;
 mod class;
 mod er;
 mod gantt;

@@ -1,5 +1,23 @@
 # Experimental native HTTP reads
 
+## Review change map
+
+The native review disclosure reuses `GET /api/review/architecture-delta` and
+`POST /api/review/architecture-attention` through the authenticated bridge.
+Lane and workspace queries keep the existing handler authentication. Native reviews
+send `expectedRevision` from the displayed diff (the lane diff now returns a
+64-character revision covering its head, comparison base and full tracked patch).
+Both map and attention reads verify that revision before and after analysis;
+a changed revision returns HTTP 409 and requires refreshing the diff. Pinned lane
+maps exclude untracked files, matching the lane diff. Working maps retain the
+working diff's untracked files and its existing revision. Successful pinned maps
+echo `reviewRevision`; legacy callers can omit the pin. PR reviews
+send `workspace`, `expectedHead` and `base` (full SHAs). The routes compare immutable
+Git blobs at that head against its merge base, independent of the checkout and
+local edits. Missing local commit objects return an explicit unavailable map.
+Attention posts the returned analysis id and review scope; stale evidence stays
+refused. No login allowlist changes.
+
 ## Native shell transport with Next stopped
 
 Shell work for #4547: `O8_NEXT_O8D=1 O8_WS_O8D=1` on the existing WS entry
