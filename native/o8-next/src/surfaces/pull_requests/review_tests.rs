@@ -132,6 +132,13 @@ fn pull_requests_change_map_filtered_count_and_empty_recovery(cx: &mut TestAppCo
     });
     settle(visual);
     click(visual, "pr-row-7");
+    view.update(visual, |s, cx| {
+        s.detail["files"].as_array_mut().unwrap().push(json!({
+            "path":"other.ts", "additions":3, "deletions":1, "patch":"@@ -1 +1 @@\n-old\n+new"
+        }));
+        s.detail["changedFiles"] = json!(2);
+        s.changed(cx);
+    });
     let index = view.read_with(visual, |s, _| {
         s.map.delta["nodes"]
             .as_array()

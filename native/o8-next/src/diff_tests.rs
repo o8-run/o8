@@ -711,6 +711,43 @@ fn change_map_long_label_bounds(cx: &mut TestAppContext, zoom: f32) {
         first.left() >= gpui::px(0.) && first.right() <= viewport.width,
         "node must fit the narrow zoomed pane: zoom={zoom}, first={first:?}, viewport={viewport:?}"
     );
+    let map = view.read_with(visual, |s, _| s.map.clone());
+    let (_, tracked) = cx.add_window_view(|_, _| ChangeMapTrackedLabels(map));
+    tracked.simulate_resize(gpui::size(gpui::px(440.), gpui::px(900.)));
+    for _ in 0..2 {
+        tracked.update(|w, cx| {
+            w.set_zoom(zoom, cx);
+            w.refresh();
+            w.draw(cx).clear();
+        });
+    }
+    let first = tracked.debug_bounds("change-map-node-0").unwrap();
+    let next = tracked.debug_bounds("change-map-node-1").unwrap();
+    assert!(
+        first.size.height <= gpui::px(32.) && first.bottom() <= next.top(),
+        "tracked node must fit its row: zoom={zoom}, first={first:?}, next={next:?}"
+    );
+}
+struct ChangeMapTrackedLabels(crate::change_map::ChangeMap);
+impl gpui::Render for ChangeMapTrackedLabels {
+    fn render(
+        &mut self,
+        _: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use gpui::prelude::*;
+        let mut pane =
+            gpui::div()
+                .size_full()
+                .min_w_0()
+                .child(self.0.view("tracked-map", cx, |_, _, _| {}));
+        // Exercise inherited glyph spacing: ellipsis measurement alone does not
+        // guarantee the shaped label stays on one line.
+        pane.text_style()
+            .get_or_insert_with(Default::default)
+            .letter_spacing = Some(gpui::px(0.4));
+        pane
+    }
 }
 #[gpui::test]
 fn change_map_long_labels_at_zoom_140(cx: &mut TestAppContext) {
