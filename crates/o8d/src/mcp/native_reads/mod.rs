@@ -185,7 +185,8 @@ impl NativeReads {
                     }
                     "o8_task_list" => tasks::read(self, &tx, &args)?,
                     "get_mission_status" => {
-                        // Bound lead outcomes belong to the canonical TypeScript projection.
+                        // Once any lead event exists, even for another mission,
+                        // native mission reads fall back to the live TypeScript projection.
                         if lead_cursor(&tx)? != 0 {
                             return Err(());
                         }

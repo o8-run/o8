@@ -55,7 +55,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'get_mission_status',
     description:
-      'USE THIS WHEN the user asks "how\'s the mission going", "what\'s the status of my dispatch", or right before each tick of an automated review loop to see which packets are awaiting_review / running / blocked. Returns waves, packet state, active agents, blockers, bound lead turn/outcome receipts, optional cost and timing receipts.',
+      'USE THIS WHEN the user asks "how\'s the mission going", "what\'s the status of my dispatch", or right before each tick of an automated review loop to see which packets are awaiting_review / running / blocked. Returns waves, packet state, active agents, blockers, bound lead turn/outcome receipts, optional cost and timing receipts. Mission-wide wait_for_mission_ready returns already-terminal while any bound lead remains in an attention state (unreported, completed, blocked, needs_approval, failed, stopped).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -431,7 +431,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'wait_for_mission_ready',
     description:
-      'Long-poll until a bound lead hands back or needs attention, a packet needs attention, or its packet/lane/lead state changes. Reruns and packets with running/reviewing lanes remain active instead of returning already-terminal. Returns the get_mission_status payload plus `wakeReason` ("state-change" | "timeout" | "already-terminal"). Specify packetId to watch one packet. Default timeout 600000ms; cap 1800000ms.',
+      'Long-poll until a bound lead hands back or needs attention, a packet needs attention, or its packet/lane/lead state changes. Reruns and packets with running/reviewing lanes remain active instead of returning already-terminal. Returns the get_mission_status payload plus `wakeReason` ("state-change" | "timeout" | "already-terminal"). Specify packetId to watch one packet. Default timeout 600000ms; cap 1800000ms. Mission-wide calls return already-terminal while any bound lead remains in an attention state (unreported, completed, blocked, needs_approval, failed, stopped); pass packetId to scope the wait to one packet.',
     inputSchema: {
       type: 'object',
       properties: {

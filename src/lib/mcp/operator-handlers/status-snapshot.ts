@@ -105,10 +105,25 @@ export async function readStatusSnapshot(sessionKey: string | undefined, fresh: 
     value = cached;
   }
   // Runtime observations can be cached; a durable lead handback cannot survive a new turn.
-  const live = await readLeads(base, sessionKey);
+  let live: LeadStatuses | undefined;
+  try {
+    live = await readLeads(base, sessionKey);
+  } catch {
+    // A failed lead read must neither erase runtime evidence nor reuse a handback.
+    removeNativeStatus(key);
+  }
   if (Date.now() - value.capturedAt >= MAX_AGE_MS) throw new Error('Status refresh exceeded its freshness bound');
-  const data: Record<string, unknown> = { ...value.data, ...(live.leads.length ? { leads: live.leads } : {}) };
-  publishNativeStatus(base, sessionKey, { ...value, data, leadCursor: live.cursor });
+  const data: Record<string, unknown> = { ...value.data };
+  delete data.leads;
+  delete data.leadsUnavailable;
+  delete data.leadsTruncated;
+  if (live) {
+    if (live.leads.length) data.leads = live.leads;
+    if (live.truncated) data.leadsTruncated = true;
+    publishNativeStatus(base, sessionKey, { ...value, data, leadCursor: live.cursor });
+  } else {
+    data.leadsUnavailable = true;
+  }
   return {
     data,
     runtimeConnections: value.runtimeConnections,

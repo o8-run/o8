@@ -216,6 +216,7 @@ describe('durable lead outcomes through the MCP HTTP entry point', () => {
   });
 
   it('bounds the overview to the 100 most recent leads and can inspect an older lead exactly', async () => {
+    const { missionId } = await fixture(false);
     seedLeads('bounded', 105);
     const overview = await call('o8_status');
     expect(leads(overview)).toHaveLength(100);
@@ -227,6 +228,15 @@ describe('durable lead outcomes through the MCP HTTP entry point', () => {
     expect(exact).toHaveLength(1);
     expect(exact[0]).toMatchObject({ id: 'bounded-0', status: 'unreported',
       reason: 'turn ended without an outcome report', latestTurn: { id: 'bounded-0-turn', outcome: null } });
+    const state = readOrchestratorControlPlaneState();
+    try {
+      writeOrchestratorControlPlaneState({ ...state, packets: state.packets.map(packet => ({ ...packet,
+        orchestratorThreadId: 'bounded-0-thread' })) });
+      expect(leads(await call('get_mission_status', { missionId }))).toMatchObject([{ id: 'bounded-0' }]);
+      expect(await call('wait_for_mission_ready', { missionId, timeoutMs: 1000 })).toMatchObject({
+        wakeReason: 'already-terminal', terminalLeadId: 'bounded-0',
+      });
+    } finally { writeOrchestratorControlPlaneState(state); }
   });
 
   it('documents repeated mission attention and overview limits through tool discovery', async () => {

@@ -170,8 +170,10 @@ pub fn status(data: Value, runtime: Value, snapshot: Value, args: &Value) -> Val
         "recentActivity":recent,"spendCapHits":array(&data["spendCapHits"]),
         "terminalReasons":array(&data["terminalReasons"]),"terminalReasonsTruncated":data["terminalReasonsTruncated"] == true
     }});
-    if let Some(leads) = data.get("leads") {
-        result["data"]["leads"] = leads.clone();
+    for key in ["leads", "leadsUnavailable", "leadsTruncated"] {
+        if let Some(value) = data.get(key) {
+            result["data"][key] = value.clone();
+        }
     }
     result
 }
