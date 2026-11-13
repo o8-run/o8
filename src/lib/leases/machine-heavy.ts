@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { withResourceLease } from './resource-lease-guard';
+import { withResourceLeaseStore } from './resource-lease-guard-core';
 import { ResourceLeaseStore } from './resource-lease-service';
 
 /** Independent of workspace, app data-dir, branch, and current directory. */
@@ -15,7 +15,7 @@ export async function withMachineLease<T>(resource: string, action: () => Promis
     const store = new ResourceLeaseStore(sqlite);
     let lastReport = 0;
     let lastPosition: number | null | undefined;
-    const result = await withResourceLease({
+    const result = await withResourceLeaseStore({
       resource, store, signal, pollIntervalMs: 1000, actor: 'worker',
       owner: { id: `heavy-${process.pid}`, label: resource, pid: ownerPid },
       maxWaitMs: wait ? 24 * 60 * 60_000 : 0,
