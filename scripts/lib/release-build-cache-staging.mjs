@@ -119,9 +119,14 @@ export async function beginCacheStaging(cacheRoot, projectRoot, phase, source, o
       try {
         await save('populating', outputName ? { output: identity(join(path, outputName), 'file') } : {});
         const invocation = guardedWorkspaceInvocation('tar', args, record.staging);
-        const env = { ...process.env };
-        // Cache archives are uncompressed. Updater gzip options must stay with the caller.
-        delete env.TAR_WRITER_OPTIONS;
+        // Sanitize before launching the Node guard: its policy checks its own
+        // environment as well as the tar child's. Archive work needs no secrets,
+        // policy stamp, Node preload, or updater compression options.
+        const env = Object.fromEntries(
+          ['PATH', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TZ', 'SystemRoot', 'WINDIR']
+            .filter(key => process.env[key] !== undefined)
+            .map(key => [key, process.env[key]]),
+        );
         const child = spawnSync(invocation.command, invocation.args, { cwd: path,
           env, encoding: 'utf8', stdio: ['ignore', output ?? 'pipe', 'pipe'], timeout: 20 * 60_000, maxBuffer: 1024 * 1024 });
         if (child.error || child.status !== 0 || child.signal) {
