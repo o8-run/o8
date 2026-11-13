@@ -145,14 +145,15 @@ fn zoomed_ticks_keep_hit_targets_preview_bounds_and_jumps(cx: &mut TestAppContex
         });
         cx.simulate_click(screen, Modifiers::default());
         paint(cx);
-        let index = view.read_with(cx, |v, _| {
+        view.read_with(cx, |v, _| {
             let index = row(&v.0, "zoom-nav-p1");
             assert_eq!(v.0.list.logical_scroll_top().item_ix, index);
             assert_eq!(v.0.list.logical_scroll_top().offset_in_item, px(0.));
-            index
+            assert!(
+                (v.0.rows[index].borrow().painted_geometry.borrow().row.top() - px(40.)).abs()
+                    <= tolerance
+            );
         });
-        let prompt = cx.debug_bounds(&format!("transcript-row-{index}")).unwrap();
-        assert!((prompt.top() - px(40.)).abs() <= tolerance);
         assert!(cx.debug_bounds("prompt-nav-current-zoom-nav-p1").is_some());
         assert!(cx.debug_bounds("prompt-nav-preview").is_none());
     }
