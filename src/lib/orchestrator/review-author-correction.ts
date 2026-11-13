@@ -15,6 +15,8 @@ import { withPacketLifecycleMutationLock } from './lifecycle-mutation-lock';
 import { samePrRepairRepo } from './pr-repair-owner';
 import { correctWorkers, listCorrectableWorkers, readWorkerCorrection } from './worker-corrections';
 import type { ComposerQueueTarget } from './composer-queue-types';
+import { saveCorrectionReviewSource } from './correction-review';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
 
 export interface ReviewCorrectionSource {
   packetId: string;
@@ -107,7 +109,7 @@ function prepare(input: ReviewInput) {
   const maxNoteLength = Math.min(1000, Math.max(0, 2000 - baseMessage.length - `\n\n${OPERATOR_NOTE_LABEL}\n`.length));
   const note = operatorNote(input.note, maxNoteLength);
   const message = [...context, ...(note ? [boundedNote(note)] : []), REVIEW_SCOPE_LIMITS].join('\n\n');
-  return { message, maxNoteLength, currentState, checkCode };
+  return { message, maxNoteLength, currentState, checkCode, findings };
 }
 
 /** Read-only availability for the saved rejection; POST repeats every check under its lock. */
@@ -183,10 +185,13 @@ export async function correctAuthorFromReview(input: ReviewInput) {
       }
       return prior;
     }
-    const { message, currentState, checkCode } = prepare(input);
+    const { message, currentState, checkCode, findings } = prepare(input);
+    const { lane } = currentState();
+    const registeredRepo = await findRepoByLocalPath(target.repoPath);
     return correctWorkers({ ...target, id, payload: { message, mode: 'send', holdMerges: false,
       targets: [{ surfaceId: review.surfaceId, runId: review.runId }] } }, {
       state: () => { currentState(); }, code: checkCode,
+      persist: () => saveCorrectionReviewSource(id, lane, { ...review, ...target, findings, repositoryUuid: registeredRepo?.id ?? null }),
     });
   });
 }

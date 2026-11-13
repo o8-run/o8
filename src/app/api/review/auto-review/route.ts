@@ -3,6 +3,7 @@ import { getLane } from '@/lib/lane/registry';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { triggerAutoReview } from '@/lib/lane/auto-review';
 import { ensureReviewQueueDrainStarted } from '@/lib/lane/review-drain-bootstrap';
+import { CorrectionReviewBlocked } from '@/lib/orchestrator/correction-review';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,7 +41,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Lane not found' }, { status: 404 });
     }
 
-    triggerAutoReview(lane);
+    try { triggerAutoReview(lane); }
+    catch (error) {
+      if (!(error instanceof CorrectionReviewBlocked)) throw error;
+      return NextResponse.json({ ok: false, error: error.message }, { status: 409 });
+    }
     return NextResponse.json({ ok: true }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
