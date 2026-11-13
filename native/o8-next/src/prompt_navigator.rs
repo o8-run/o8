@@ -75,6 +75,11 @@ impl Navigator {
         self.aligned = false;
         self.pending = false;
     }
+    pub(crate) fn dismiss_preview(&mut self) -> bool {
+        let changed = self.hovered.take().is_some() || self.keyed;
+        self.keyed = false;
+        changed
+    }
     pub(crate) fn ready(&mut self) {
         self.pending = false;
     }
@@ -317,10 +322,11 @@ pub(crate) fn overlay(
             let current = prompts
                 .partition_point(|p| p.row <= list.logical_scroll_top().item_ix)
                 .saturating_sub(1);
-            // Virtualize prompt ticks, preserving a 12px target and access to
-            // every prompt through paging and keyboard selection.
+            // Preserve twelve screen points of invisible hit area when zoomed
+            // out; the visible stroke keeps its normal layout dimensions.
+            let pitch = 12. / window.zoom().min(1.);
             let available = (f32::from(bounds.size.height) - 32.).min(360.);
-            let capacity = (((available - 36.) / 12.).floor() as usize).clamp(1, 24);
+            let capacity = (((available - 36.) / pitch).floor() as usize).clamp(1, 24);
             let visible = prompts.len().min(capacity);
             let paged = prompts.len() > visible;
             let (start, preview_index) = {
@@ -370,13 +376,14 @@ pub(crate) fn overlay(
                     .filter(|index| *index >= start && *index < start + visible);
                 (start, preview)
             };
-            let height = visible as f32 * 12. + if paged { 36. } else { 0. };
+            let height = visible as f32 * pitch + if paged { 36. } else { 0. };
             let top = (f32::from(bounds.size.height) - height) / 2.;
             let rail_origin = point(bounds.origin.x, bounds.origin.y + px(top));
             let tick_top = if paged { 18. } else { 0. };
             let pointer_index = move |y: gpui::Pixels| {
                 let y = f32::from(y - rail_origin.y) - tick_top;
-                (y >= 0. && y < visible as f32 * 12.).then(|| start + (y / 12.).floor() as usize)
+                (y >= 0. && y < visible as f32 * pitch)
+                    .then(|| start + (y / pitch).floor() as usize)
             };
             let mouse_state = state.clone();
             let mouse_prompts = prompts.clone();
@@ -531,9 +538,9 @@ pub(crate) fn overlay(
                         .debug_selector(move || format!("prompt-nav-tick-{selector}"))
                         .absolute()
                         .left_0()
-                        .top(px(tick_top + offset as f32 * 12.))
+                        .top(px(tick_top + offset as f32 * pitch))
                         .w(px(24.))
-                        .h(px(12.))
+                        .h(px(pitch))
                         .child(
                             div()
                                 .when(active, |v| {
@@ -541,7 +548,7 @@ pub(crate) fn overlay(
                                 })
                                 .absolute()
                                 .left(px(6.))
-                                .top(px(5.))
+                                .top(px((pitch - 2.) / 2.))
                                 .w(px(if active {
                                     16.
                                 } else if selected {
@@ -693,7 +700,8 @@ pub(crate) fn overlay(
                     cx,
                 );
                 let slot = index.saturating_sub(start).min(visible - 1);
-                let y = (top + tick_top + (slot as f32 + 0.5) * 12. - f32::from(size.height) / 2.)
+                let y = (top + tick_top + (slot as f32 + 0.5) * pitch
+                    - f32::from(size.height) / 2.)
                     .clamp(0., f32::from(bounds.size.height - size.height).max(0.));
                 card.prepaint_at(bounds.origin + point(px(28.), px(y)), window, cx);
                 elements.push(card);

@@ -350,6 +350,20 @@ impl Surface {
             navigator: Default::default(),
         }
     }
+    fn reset_navigator(&mut self, cx: &mut Context<Self>) {
+        // Retain the old focus handle until reading has received its focus.
+        let previous = std::mem::take(&mut self.navigator);
+        let reading = self.focus.clone();
+        cx.defer(move |cx| {
+            for handle in cx.windows() {
+                let _ = handle.update(cx, |_, window, _| {
+                    if previous.borrow().is_focused(window) {
+                        reading.focus(window);
+                    }
+                });
+            }
+        });
+    }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
         self.select_mode(id, true, cx);
     }
@@ -529,7 +543,7 @@ impl Surface {
         self.rows = Rc::new(vec![]);
         self.images.borrow_mut().clear();
         self.list = ListState::new(0, ListAlignment::Top, px(400.));
-        self.navigator = Default::default();
+        self.reset_navigator(cx);
         self.notice = "Reading history…".into();
         cx.notify();
         let client = self.client.clone();
@@ -846,7 +860,7 @@ impl Surface {
                             this.rows = Rc::new(vec![]);
                             this.images.borrow_mut().clear();
                             this.list = ListState::new(0, ListAlignment::Top, px(400.));
-                            this.navigator = Default::default();
+                            this.reset_navigator(cx);
                             this.notice = "No saved sessions.".into();
                         }
                     }
@@ -924,6 +938,14 @@ impl Render for Surface {
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, w, cx| {
                 let key = &event.keystroke;
+                if key.key == "escape" {
+                    let at_rail = s.navigator.borrow().is_focused(w);
+                    if !at_rail && s.navigator.borrow_mut().dismiss_preview() {
+                        w.refresh();
+                    }
+                    // Continue dispatch so the composer can dismiss its picker,
+                    // suggestions or running turn with the same Escape.
+                }
                 if key.key == "k"
                     && key.modifiers.shift
                     && (key.modifiers.platform || key.modifiers.control)
