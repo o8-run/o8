@@ -20,6 +20,7 @@ mod visual_capture_packet;
 mod audio_ducker;
 mod background;
 mod browser_view;
+#[cfg(not(target_os = "macos"))]
 mod remote_preview;
 mod restart_job_drain;
 mod cli_locate;
@@ -82,6 +83,7 @@ mod speech_text;
 mod stt;
 #[cfg(target_os = "macos")]
 mod tts;
+#[cfg(not(target_os = "macos"))]
 mod window_restore;
 mod window_state_sanitizer;
 // Windows-native Node.js discovery (#1740). Compiles on Windows targets or
@@ -106,6 +108,7 @@ mod telemetry;
 mod url_scheme_handler;
 mod webview_latch;
 
+#[cfg(not(target_os = "macos"))]
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -126,8 +129,6 @@ use tauri::{
 };
 use tauri_plugin_notification::NotificationExt;
 use webview_latch::WebviewLatch;
-#[cfg(target_os = "macos")]
-use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
 // ── macOS Keychain integration ──
 //
@@ -2990,6 +2991,7 @@ fn get_app_data_dir(app: tauri::AppHandle) -> Option<String> {
 
 /// Read the repo registry from disk. Returns { repos: [...] }.
 /// Equivalent to GET /api/panel/repos but without readiness enrichment.
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_repos() -> Result<serde_json::Value, String> {
     let repos_path = format!("{}/repos.json", o8_data_dir());
@@ -3003,6 +3005,7 @@ fn read_repos() -> Result<serde_json::Value, String> {
 
 /// Read recent git commits for a local repo path.
 /// Equivalent to GET /api/panel/commits?workspace=<path>&limit=<n>
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_local_commits(repo: String, limit: Option<u32>) -> Result<serde_json::Value, String> {
     let limit = limit.unwrap_or(10).min(50);
@@ -3043,6 +3046,7 @@ fn read_local_commits(repo: String, limit: Option<u32>) -> Result<serde_json::Va
 
 /// Read git worktrees for a local repo path.
 /// Equivalent to GET /api/worktrees?repo=<path>
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_worktrees(repo: String) -> Result<serde_json::Value, String> {
     let output = Command::new("git")
@@ -3097,35 +3101,6 @@ fn read_worktrees(repo: String) -> Result<serde_json::Value, String> {
     }
 
     Ok(serde_json::json!({ "worktrees": worktrees }))
-}
-
-/// Read the current git branch for a repo.
-#[tauri::command]
-fn read_current_branch(repo: String) -> Result<serde_json::Value, String> {
-    let output = Command::new("git")
-        .no_window()
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(&repo)
-        .output()
-        .map_err(|e| format!("git rev-parse failed: {}", e))?;
-
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(serde_json::json!({ "branch": branch }))
-}
-
-/// Read git status (changed files count) for a repo.
-#[tauri::command]
-fn read_git_status(repo: String) -> Result<serde_json::Value, String> {
-    let output = Command::new("git")
-        .no_window()
-        .args(["status", "--porcelain"])
-        .current_dir(&repo)
-        .output()
-        .map_err(|e| format!("git status failed: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let changed_files: usize = stdout.lines().filter(|l| !l.is_empty()).count();
-    Ok(serde_json::json!({ "changedFiles": changed_files, "clean": changed_files == 0 }))
 }
 
 // ── MCP loop observability (issues #793, #794) ──
@@ -3228,8 +3203,10 @@ fn record_console_error(message: String, source: String, lineno: u32) {
 // Done in Rust (not behind an HTTP route) so there is no auth surface
 // to abuse — invokes are scoped to the webview origin.
 
+#[cfg(not(target_os = "macos"))]
 const DROPPED_FILE_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
+#[cfg(not(target_os = "macos"))]
 #[derive(Serialize)]
 struct DroppedFileResult {
     name: String,
@@ -3240,6 +3217,7 @@ struct DroppedFileResult {
     size: u64,
 }
 
+#[cfg(not(target_os = "macos"))]
 fn base64_encode_standard(data: &[u8]) -> String {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
@@ -3273,6 +3251,7 @@ fn base64_encode_standard(data: &[u8]) -> String {
     out
 }
 
+#[cfg(not(target_os = "macos"))]
 fn mime_for_extension(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
@@ -3305,6 +3284,7 @@ fn mime_for_extension(name: &str) -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_dropped_file(path: String) -> Result<DroppedFileResult, String> {
     // Whitelist: must be a regular file within $HOME. Blocks /etc/*,
@@ -3412,6 +3392,7 @@ fn o8_view_console_errors() -> serde_json::Value {
 /// Read the main webview's current URL via `webview.url()` and split it into
 /// pathname / search / hash. `routerState` is intentionally `null` — the
 /// Next.js segment isn't reachable without a JS-side eval, which we defer.
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn o8_view_active_route(app: AppHandle) -> Result<serde_json::Value, String> {
     let Some(window) = app.get_webview_window("main") else {
@@ -3439,6 +3420,7 @@ fn o8_view_active_route(app: AppHandle) -> Result<serde_json::Value, String> {
 
 // ── SQLite helper (read-only, WAL mode) ──
 
+#[cfg(not(target_os = "macos"))]
 fn open_cortex_db() -> Result<Connection, String> {
     let db_path = format!("{}/cortex-ide.db", o8_data_dir());
     if !std::path::Path::new(&db_path).exists() {
@@ -3454,6 +3436,7 @@ fn open_cortex_db() -> Result<Connection, String> {
 
 /// Read pending approvals from SQLite. Returns { approvals: [...] }.
 /// Equivalent to GET /api/panel/approvals (pending only, no session filter).
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_approvals(status: Option<String>) -> Result<serde_json::Value, String> {
     let conn = match open_cortex_db() {
@@ -3511,6 +3494,7 @@ fn read_approvals(status: Option<String>) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "approvals": approvals }))
 }
 
+#[cfg(not(target_os = "macos"))]
 fn map_approval_row(row: &rusqlite::Row) -> serde_json::Value {
     let id: String = row.get(0).unwrap_or_default();
     let source: String = row.get(1).unwrap_or_default();
@@ -3587,6 +3571,7 @@ fn map_approval_row(row: &rusqlite::Row) -> serde_json::Value {
 
 /// Read watched agents from SQLite. Returns { workspaces: [...] }.
 /// Lightweight IPC snapshot of durable supervisor state.
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_workspaces() -> Result<serde_json::Value, String> {
     let conn = match open_cortex_db() {
@@ -6376,90 +6361,6 @@ fn round_window_corners(win: &tauri::WebviewWindow, radius: f64) {
     }
 }
 
-/// Hide the native macOS traffic lights (close / miniaturize / zoom) on a
-/// window. The webview renders its own DOM traffic lights instead (Q ruling
-/// 2026-07-16): native buttons are drawn by the OS at a fixed PHYSICAL size
-/// and position, so they can never track the app's CSS `zoom` — every
-/// alignment between them and the scaled chrome was a per-zoom calibration
-/// (the 64px × --zoom-inverse spacer, the empirical 22.4px yNudge saga).
-/// DOM lights live in the same flex row as the sidebar toggle and scale with
-/// everything else. macOS re-shows standard buttons after some style-mask /
-/// fullscreen transitions, so this is also re-asserted from the main window's
-/// event handler (Focused + Resized), not just at setup.
-#[cfg(target_os = "macos")]
-fn hide_native_traffic_lights(win: &tauri::WebviewWindow) {
-    use objc2::{msg_send, runtime::AnyObject};
-    let ptr = match win.ns_window() {
-        Ok(p) if !p.is_null() => p as *mut AnyObject,
-        _ => return,
-    };
-    unsafe {
-        // NSWindowButton: 0 = close, 1 = miniaturize, 2 = zoom
-        for kind in 0usize..3 {
-            let btn: *mut AnyObject = msg_send![ptr, standardWindowButton: kind];
-            if !btn.is_null() {
-                let _: () = msg_send![btn, setHidden: true];
-            }
-        }
-    }
-}
-
-/// Make the native Zoom (maximize / restore-down) instant instead of animated.
-///
-/// WKWebView cannot repaint during an animated NSWindow frame change — the web
-/// content freezes at the old layout, slides/clips behind the animating frame,
-/// then snaps into place when the animation ends (operator video 2026-07-15;
-/// Electron apps repaint per animation frame, WKWebView has no public hook).
-/// The honest fix is to drop the animation: `-[NSWindow zoom:]` reads its
-/// duration from `animationResizeTime:`, so overriding that to 0 on tao's
-/// window class makes frame + content change together in a single repaint.
-/// The class is shared by every o8 window in this process — intended; zoom
-/// behaves identically everywhere. Manual drag-resize is unaffected (no
-/// animation involved).
-#[cfg(target_os = "macos")]
-fn make_window_zoom_instant(win: &tauri::WebviewWindow) {
-    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
-    let object = match win.ns_window() {
-        Ok(p) if !p.is_null() => p as *mut AnyObject,
-        _ => {
-            log::warn!("[zoom-anim] ns_window unavailable; zoom stays animated");
-            return;
-        }
-    };
-    // CGRect by value — 4 contiguous f64s; identical ABI to the nested
-    // {CGPoint,CGSize} layout on both x86_64 (memory class) and arm64 (HFA).
-    #[repr(C)]
-    struct CGRectRaw {
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-    }
-    unsafe extern "C-unwind" fn zero_resize_time(
-        _this: *mut AnyObject,
-        _cmd: Sel,
-        _target_frame: CGRectRaw,
-    ) -> f64 {
-        0.0
-    }
-    unsafe {
-        let cls = (*object).class();
-        let replaced = objc2::ffi::class_replaceMethod(
-            (cls as *const AnyClass).cast_mut(),
-            objc2::sel!(animationResizeTime:),
-            std::mem::transmute::<
-                unsafe extern "C-unwind" fn(*mut AnyObject, Sel, CGRectRaw) -> f64,
-                Imp,
-            >(zero_resize_time),
-            c"d@:{CGRect={CGPoint=dd}{CGSize=dd}}".as_ptr(),
-        );
-        log::info!(
-            "[zoom-anim] native zoom animation disabled (instant maximize/restore, replaced_existing={})",
-            replaced.is_some()
-        );
-    }
-}
-
 /// Read the voice preferences (`~/.o8/dictation.json`) for the settings panel,
 /// with API keys stripped. The config is mtime-cached, so writes apply live.
 /// macOS only — the pref store lives in the macOS-gated stt module (#1673).
@@ -7036,98 +6937,10 @@ fn o8_debug_show_dock(app: tauri::AppHandle) {
 /// mirror `CANVAS_GLASS_MATERIALS` in lib/canvas-mode/glass-settings.ts.
 /// `"default"` restores the HudWindow chrome material (follows-window
 /// state, matching the boot-time application).
-/// The chrome vibrancy material for THIS macOS version (#1543).
-///
-/// Apple degraded `HudWindow` twice in 2026: the 15.7.8 security update
-/// (2026-06-27) and the Tahoe 26.x line both stopped rendering it for our
-/// window shape — chrome fell back to raw transparency (sharp desktop, no
-/// blur). `UnderWindowBackground` renders correct glass on both, verified
-/// live on the operator iMac (26.6b3, operator-approved look) with the
-/// laptop (15.7.8) verified via bench build. 15.7.7-and-earlier keeps the
-/// original HudWindow (proven on 15.7.1 — Sydney's control machine).
-#[cfg(target_os = "macos")]
-fn chrome_vibrancy_material() -> window_vibrancy::NSVisualEffectMaterial {
-    use window_vibrancy::NSVisualEffectMaterial as M;
-    static MATERIAL: std::sync::OnceLock<window_vibrancy::NSVisualEffectMaterial> =
-        std::sync::OnceLock::new();
-    *MATERIAL.get_or_init(|| {
-        let version = std::process::Command::new("sysctl")
-            .args(["-n", "kern.osproductversion"])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .unwrap_or_default();
-        let mut parts = version.trim().split('.');
-        let major: u32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-        let minor: u32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-        let patch: u32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-        let hud_broken = major >= 26 || (major == 15 && minor == 7 && patch >= 8);
-        if hud_broken {
-            log::info!(
-                "[vibrancy] macOS {version} — HudWindow degraded on this OS; using UnderWindowBackground (#1543)"
-            );
-            M::UnderWindowBackground
-        } else {
-            M::HudWindow
-        }
-    })
-}
-
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::Manager;
-        use window_vibrancy::NSVisualEffectMaterial as M;
-        let Some(window) = voice_host::classic_window(&app) else {
-            return Err("main window not found".into());
-        };
-        let target = window.clone();
-        window
-            .run_on_main_thread(move || {
-                // apply_vibrancy stacks a new effect view per call — always clear first.
-                let _ = window_vibrancy::clear_vibrancy(&target);
-                // "none" = NO effect view at all: the window is raw transparent and
-                // the desktop reads through perfectly sharp — the liquid-clear look.
-                // macOS material blur amounts are fixed recipes, so true clarity
-                // tuning is material choice; this is the clear extreme.
-                if material == "none" {
-                    return;
-                }
-                let resolved = match material.as_str() {
-                    "popover" => M::Popover,
-                    "sidebar" => M::Sidebar,
-                    "menu" => M::Menu,
-                    "sheet" => M::Sheet,
-                    "window" => M::WindowBackground,
-                    "under-window" => M::UnderWindowBackground,
-                    "fullscreen" => M::FullScreenUI,
-                    "hud" => M::HudWindow,
-                    _ => chrome_vibrancy_material(), // "default"/unknown → per-OS chrome (#1543)
-                };
-                // ALWAYS Active — including "default". Boot applies the chrome
-                // HudWindow material with State::Active (#1267: stay glassy when
-                // the window loses key focus). `None` means follows-window, so
-                // restoring "default" on canvas exit downgraded the whole window
-                // to flatten-to-grey on blur for the rest of the session
-                // (operator-reported regression, 2026-07-06).
-                let state = Some(window_vibrancy::NSVisualEffectState::Active);
-                // Rounding is owned by the content-view clip (round_window_corners,
-                // applied at setup) which clips the effect view AND the webview
-                // together and tracks resize. Keep the effect view square (None)
-                // so it fills to the corner and the content-view mask rounds it
-                // cleanly — no sliver between two mismatched radii.
-                let radius: Option<f64> = None;
-                if let Err(e) = window_vibrancy::apply_vibrancy(&target, resolved, state, radius) {
-                    log::warn!("[canvas-material] apply_vibrancy failed: {e}");
-                }
-            })
-            .map_err(|e| format!("schedule material swap failed: {e}"))?;
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (app, material);
-    }
+    let _ = (app, material);
     Ok(())
 }
 
@@ -7135,56 +6948,15 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
 // desktop-blur knob macOS offers; NSVisualEffectMaterial blur amounts are
 // fixed recipes. Private CGS API, battle-tested for a decade (iTerm2,
 // kitty, Alacritty). Failure is logged and harmless.
-#[cfg(target_os = "macos")]
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGSMainConnectionID() -> u32;
-    fn CGSSetWindowBackgroundBlurRadius(cid: u32, wid: u32, radius: i32) -> i32;
-}
+
 
 /// Tunable desktop frost for Canvas mode (#1232): blurs whatever is behind
 /// the window's transparent regions. Pairs with the "none"/Liquid material
 /// for a continuous liquid-frost dial; radius 0 restores raw clarity.
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn set_canvas_backdrop_blur(app: tauri::AppHandle, radius: u32) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::Manager;
-        let Some(window) = voice_host::classic_window(&app) else {
-            return Err("main window not found".into());
-        };
-        let target = window.clone();
-        window
-            .run_on_main_thread(move || {
-                let Ok(ptr) = target.ns_window() else {
-                    log::warn!("[canvas-blur] ns_window unavailable");
-                    return;
-                };
-                if ptr.is_null() {
-                    return;
-                }
-                let object = ptr as *mut objc2::runtime::AnyObject;
-                let wid: isize = unsafe { objc2::msg_send![&*object, windowNumber] };
-                if wid <= 0 {
-                    return;
-                }
-                let err = unsafe {
-                    CGSSetWindowBackgroundBlurRadius(
-                        CGSMainConnectionID(),
-                        wid as u32,
-                        radius.min(64) as i32,
-                    )
-                };
-                if err != 0 {
-                    log::warn!("[canvas-blur] CGSSetWindowBackgroundBlurRadius failed: {err}");
-                }
-            })
-            .map_err(|e| format!("schedule backdrop blur failed: {e}"))?;
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (app, radius);
-    }
+    let _ = (app, radius);
     Ok(())
 }
 
@@ -8558,6 +8330,7 @@ pub fn run() {
             );
         }
     }
+    #[cfg(not(target_os = "macos"))]
     let main_window_config = context
         .config()
         .app
@@ -8593,7 +8366,6 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -8615,6 +8387,11 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ));
+
+    // macOS still needs the plugin: the native window launcher reports a
+    // start failure through a message dialog. Only the picker permission is
+    // limited to the platforms that keep the classic dashboard.
+    builder = builder.plugin(tauri_plugin_dialog::init());
 
     // ── Windows/Linux `o8://` deep-link delivery (#1742, part of #1673) ──
     // macOS is untouched: the OS hands `o8://` URLs to the running app through
@@ -8747,6 +8524,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             visual_capture::reset_on_main_navigation(webview.app_handle());
             managed_voice_window::reset_on_main_navigation(webview.app_handle());
+            #[cfg(not(target_os = "macos"))]
             remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
                 launch_updater::start_launch_update_check(webview.app_handle().clone());
@@ -8774,18 +8552,23 @@ pub fn run() {
             start_ws_server,
             cortex_available,
             get_app_data_dir,
+            #[cfg(not(target_os = "macos"))]
             read_repos,
+            #[cfg(not(target_os = "macos"))]
             read_local_commits,
+            #[cfg(not(target_os = "macos"))]
             read_worktrees,
-            read_current_branch,
-            read_git_status,
+            #[cfg(not(target_os = "macos"))]
             read_approvals,
+            #[cfg(not(target_os = "macos"))]
             read_workspaces,
             set_tray_badge,
             desktop_close_preference_get,
             desktop_close_preference_set,
             resolve_desktop_close,
+            #[cfg(not(target_os = "macos"))]
             set_canvas_material,
+            #[cfg(not(target_os = "macos"))]
             set_canvas_backdrop_blur,
             take_pending_file_opens,
             peek_pending_file_opens,
@@ -8795,9 +8578,11 @@ pub fn run() {
             presentation_quiet_mode_get,
             set_review_notifications_enabled,
             record_console_error,
+            #[cfg(not(target_os = "macos"))]
             read_dropped_file,
             mcp_result,
             o8_view_console_errors,
+            #[cfg(not(target_os = "macos"))]
             o8_view_active_route,
             #[cfg(target_os = "macos")]
             master_key_get,
@@ -8876,9 +8661,13 @@ pub fn run() {
             browser_view_hide,
             #[cfg(target_os = "macos")]
             browser_view_show,
+            #[cfg(not(target_os = "macos"))]
             remote_preview::remote_preview_supported,
+            #[cfg(not(target_os = "macos"))]
             remote_preview::remote_preview_open,
+            #[cfg(not(target_os = "macos"))]
             remote_preview::remote_preview_set_rect,
+            #[cfg(not(target_os = "macos"))]
             remote_preview::remote_preview_close,
             #[cfg(target_os = "macos")]
             open_voice_settings,
@@ -9592,40 +9381,43 @@ pub fn run() {
                 next_main::start(app.handle().clone(), Some((api_port, boot_identity.boot_id.clone())));
                 log::info!("[main-window] o8 next is the main window; the classic window is not built");
                 voice_host::start(app.handle().clone(), api_port, boot_identity.boot_id.clone());
-            } else if app.get_webview_window("main").is_none() {
-                if let Some(config) = main_window_config.as_ref() {
-                    // __O8_HTML_TRAFFIC_LIGHTS__ tells the frontend this shell
-                    // hides the native traffic lights, so it must render the
-                    // DOM ones (TrafficLights.tsx). Old shells lack the flag →
-                    // the strips keep the native-lights spacer fallback, which
-                    // keeps dev-bridge (new frontend on the old installed
-                    // binary) rendering correctly. Only the macOS shell hides
-                    // them (hide_native_traffic_lights is macOS-only); Windows
-                    // and Linux keep standard decorations, so the flag is
-                    // false there and the strips draw no controls (#1743).
-                    let html_traffic_lights = cfg!(target_os = "macos");
-                    // __O8_HOST_PLATFORM__ is the frontend's synchronous
-                    // platform read (#1743) — the pre-paint theme stamp needs
-                    // it in <head>, long before any IPC exists, to pick opaque
-                    // chrome off macOS. See lib/desktop/host-platform.ts.
-                    let init_script = format!(
-                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = {}; window.__O8_HOST_PLATFORM__ = {:?};",
-                        api_port,
-                        serde_json::to_string(&boot_identity.boot_id)
-                            .unwrap_or_else(|_| "\"\"".into()),
-                        html_traffic_lights,
-                        std::env::consts::OS,
-                    );
-                    #[cfg(target_os = "linux")]
-                    let init_script = format!(
-                        "{init_script} window.__O8_LINUX_GLASS__ = {};",
-                        std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
-                    );
-                    tauri::WebviewWindowBuilder::from_config(app, config)?
-                        .initialization_script(init_script)
-                        .build()?;
-                } else {
-                    log::warn!("[main-window] config missing; could not create main webview");
+            } else {
+                #[cfg(not(target_os = "macos"))]
+                if app.get_webview_window("main").is_none() {
+                    if let Some(config) = main_window_config.as_ref() {
+                        // __O8_HTML_TRAFFIC_LIGHTS__ tells the frontend this shell
+                        // hides the native traffic lights, so it must render the
+                        // DOM ones (TrafficLights.tsx). Old shells lack the flag →
+                        // the strips keep the native-lights spacer fallback, which
+                        // keeps dev-bridge (new frontend on the old installed
+                        // binary) rendering correctly. Only the macOS shell hides
+                        // them (hide_native_traffic_lights is macOS-only); Windows
+                        // and Linux keep standard decorations, so the flag is
+                        // false there and the strips draw no controls (#1743).
+                        let html_traffic_lights = cfg!(target_os = "macos");
+                        // __O8_HOST_PLATFORM__ is the frontend's synchronous
+                        // platform read (#1743) — the pre-paint theme stamp needs
+                        // it in <head>, long before any IPC exists, to pick opaque
+                        // chrome off macOS. See lib/desktop/host-platform.ts.
+                        let init_script = format!(
+                            "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = {}; window.__O8_HOST_PLATFORM__ = {:?};",
+                            api_port,
+                            serde_json::to_string(&boot_identity.boot_id)
+                                .unwrap_or_else(|_| "\"\"".into()),
+                            html_traffic_lights,
+                            std::env::consts::OS,
+                        );
+                        #[cfg(target_os = "linux")]
+                        let init_script = format!(
+                            "{init_script} window.__O8_LINUX_GLASS__ = {};",
+                            std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
+                        );
+                        tauri::WebviewWindowBuilder::from_config(app, config)?
+                            .initialization_script(init_script)
+                            .build()?;
+                    } else {
+                        log::warn!("[main-window] config missing; could not create main webview");
+                    }
                 }
             }
             if desktop_attached {
@@ -9644,199 +9436,204 @@ pub fn run() {
             // (0.1.597–598) the guard below skipped silently and took boot
             // vibrancy, the #1543 re-assert ladder, corner rounding, launch
             // clamps, close-to-hide, and the #1136 drag-drop bridge with it.
-            let app_handle = app.handle().clone();
-            if let Some(window) = voice_host::classic_window(app.handle()) {
-                window_restore::schedule_launch_clamps(&app_handle);
+            #[cfg(not(target_os = "macos"))]
+            {
+                let app_handle = app.handle().clone();
+                if let Some(window) = voice_host::classic_window(app.handle()) {
+                    window_restore::schedule_launch_clamps(&app_handle);
 
-                #[cfg(target_os = "macos")]
-                if let Err(err) = apply_vibrancy(
-                    &window,
-                    chrome_vibrancy_material(),
-                    // Active (not focus-following): keep the chrome glassy when the
-                    // window loses key focus instead of flattening to grey (#1267).
-                    // Mirrors what the canvas surface already does (set_canvas_material).
-                    Some(window_vibrancy::NSVisualEffectState::Active),
-                    None,
-                ) {
-                    log::warn!("Failed to apply macOS vibrancy: {}", err);
-                }
+                    #[cfg(target_os = "macos")]
+                    if let Err(err) = apply_vibrancy(
+                        &window,
+                        chrome_vibrancy_material(),
+                        // Active (not focus-following): keep the chrome glassy when the
+                        // window loses key focus instead of flattening to grey (#1267).
+                        // Mirrors what the canvas surface already does (set_canvas_material).
+                        Some(window_vibrancy::NSVisualEffectState::Active),
+                        None,
+                    ) {
+                        log::warn!("Failed to apply macOS vibrancy: {}", err);
+                    }
 
-                // Boot-timing belt-and-braces (#1543): the effect view applied
-                // during setup can silently fail to render on macOS 26 AND
-                // 15.7.8 (observed live on both operator machines — a runtime
-                // clear+re-apply always cures it). Primary re-assert is
-                // webview-driven (ThemeProvider invokes set_canvas_material
-                // 'default' on mount — the frontend being alive proves the
-                // window is ready); this Rust retry loop is the fallback for
-                // boots where the webview never mounts. v0.1.582's version of
-                // this silently never ran because the dispatch error was
-                // swallowed — every failure logs now.
-                #[cfg(target_os = "macos")]
-                {
-                    let reassert = window.clone();
-                    std::thread::spawn(move || {
-                        for (attempt, delay_ms) in [(1u32, 2_000u64), (2, 6_000), (3, 12_000)] {
-                            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                            let target = reassert.clone();
-                            let dispatched = reassert.run_on_main_thread(move || {
-                                let _ = window_vibrancy::clear_vibrancy(&target);
-                                if let Err(e) = window_vibrancy::apply_vibrancy(
-                                    &target,
-                                    chrome_vibrancy_material(),
-                                    Some(window_vibrancy::NSVisualEffectState::Active),
-                                    None,
-                                ) {
-                                    log::warn!("[vibrancy] boot re-assert apply failed: {e}");
-                                } else {
-                                    log::info!("[vibrancy] boot re-assert applied");
+                    // Boot-timing belt-and-braces (#1543): the effect view applied
+                    // during setup can silently fail to render on macOS 26 AND
+                    // 15.7.8 (observed live on both operator machines — a runtime
+                    // clear+re-apply always cures it). Primary re-assert is
+                    // webview-driven (ThemeProvider invokes set_canvas_material
+                    // 'default' on mount — the frontend being alive proves the
+                    // window is ready); this Rust retry loop is the fallback for
+                    // boots where the webview never mounts. v0.1.582's version of
+                    // this silently never ran because the dispatch error was
+                    // swallowed — every failure logs now.
+                    #[cfg(target_os = "macos")]
+                    {
+                        let reassert = window.clone();
+                        std::thread::spawn(move || {
+                            for (attempt, delay_ms) in [(1u32, 2_000u64), (2, 6_000), (3, 12_000)] {
+                                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                                let target = reassert.clone();
+                                let dispatched = reassert.run_on_main_thread(move || {
+                                    let _ = window_vibrancy::clear_vibrancy(&target);
+                                    if let Err(e) = window_vibrancy::apply_vibrancy(
+                                        &target,
+                                        chrome_vibrancy_material(),
+                                        Some(window_vibrancy::NSVisualEffectState::Active),
+                                        None,
+                                    ) {
+                                        log::warn!("[vibrancy] boot re-assert apply failed: {e}");
+                                    } else {
+                                        log::info!("[vibrancy] boot re-assert applied");
+                                    }
+                                });
+                                match dispatched {
+                                    Ok(()) => break,
+                                    Err(e) => log::warn!(
+                                        "[vibrancy] boot re-assert dispatch failed (attempt {attempt}): {e}"
+                                    ),
                                 }
-                            });
-                            match dispatched {
-                                Ok(()) => break,
-                                Err(e) => log::warn!(
-                                    "[vibrancy] boot re-assert dispatch failed (attempt {attempt}): {e}"
-                                ),
                             }
-                        }
-                    });
-                }
+                        });
+                    }
 
-                // Transparent windows lose macOS's automatic corner mask, so the
-                // webview's square corners poke past the vibrancy and read as a
-                // hard/pointed edge with the desktop showing through. Clip the
-                // content-view layer to round the vibrancy + webview together —
-                // a normal rounded Mac window. Tracks resize.
-                #[cfg(target_os = "macos")]
-                round_window_corners(&window, 12.0);
+                    // Transparent windows lose macOS's automatic corner mask, so the
+                    // webview's square corners poke past the vibrancy and read as a
+                    // hard/pointed edge with the desktop showing through. Clip the
+                    // content-view layer to round the vibrancy + webview together —
+                    // a normal rounded Mac window. Tracks resize.
+                    #[cfg(target_os = "macos")]
+                    round_window_corners(&window, 12.0);
 
-                // Zoom (maximize/restore) must be instant — WKWebView can't
-                // repaint during the animated frame change, so the animation
-                // reads as frozen-content-then-snap (2026-07-15 polish pass).
-                #[cfg(target_os = "macos")]
-                make_window_zoom_instant(&window);
+                    // Zoom (maximize/restore) must be instant — WKWebView can't
+                    // repaint during the animated frame change, so the animation
+                    // reads as frozen-content-then-snap (2026-07-15 polish pass).
+                    #[cfg(target_os = "macos")]
+                    make_window_zoom_instant(&window);
 
-                // Native traffic lights OFF — the webview draws its own so the
-                // whole titlebar cluster scales with the app's CSS zoom
-                // (Q ruling 2026-07-16). Re-asserted below on Focused/Resized
-                // because macOS un-hides standard buttons across fullscreen
-                // and style-mask transitions.
-                #[cfg(target_os = "macos")]
-                hide_native_traffic_lights(&window);
+                    // Native traffic lights OFF — the webview draws its own so the
+                    // whole titlebar cluster scales with the app's CSS zoom
+                    // (Q ruling 2026-07-16). Re-asserted below on Focused/Resized
+                    // because macOS un-hides standard buttons across fullscreen
+                    // and style-mask transitions.
+                    #[cfg(target_os = "macos")]
+                    hide_native_traffic_lights(&window);
 
-                // No blur/acrylic backdrop off macOS (#1743): the Windows and
-                // Linux windows are decorated and OPAQUE (tauri.windows /
-                // tauri.linux conf overlays set transparent=false), and the
-                // frontend pins surface=solid there, so there is no
-                // translucent chrome for a backdrop to show through.
+                    // No blur/acrylic backdrop off macOS (#1743): the Windows and
+                    // Linux windows are decorated and OPAQUE (tauri.windows /
+                    // tauri.linux conf overlays set transparent=false), and the
+                    // frontend pins surface=solid there, so there is no
+                    // translucent chrome for a backdrop to show through.
 
-                window.on_window_event(move |event| {
-                    match event {
-                        tauri::WindowEvent::CloseRequested { api, .. } => {
-                            api.prevent_close();
+                    window.on_window_event(move |event| {
+                        match event {
+                            tauri::WindowEvent::CloseRequested { api, .. } => {
+                                api.prevent_close();
 
-                            // A windowless app remains visible in the macOS
-                            // Dock, so closing the window keeps the established
-                            // macOS behavior. Windows/Linux treat X as quit when
-                            // no worker is live and ask before backgrounding
-                            // active work; the tray appears only after consent.
-                            #[cfg(target_os = "macos")]
-                            {
+                                // A windowless app remains visible in the macOS
+                                // Dock, so closing the window keeps the established
+                                // macOS behavior. Windows/Linux treat X as quit when
+                                // no worker is live and ask before backgrounding
+                                // active work; the tray appears only after consent.
+                                #[cfg(target_os = "macos")]
+                                {
+                                    if let Some(w) = voice_host::classic_window(&app_handle) {
+                                        let _ = w.hide();
+                                    }
+                                    let _ = app_handle.emit("window-hidden", ());
+                                }
+                                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                                request_desktop_close(app_handle.clone());
+                            }
+                            // #1136 — bridge OS-level drag-drop into the webview as
+                            // window CustomEvents. With dragDropEnabled: true in
+                            // tauri.conf.json, HTML5 drop events no longer fire for
+                            // EXTERNAL drags (Finder → app), so this is the only
+                            // path that lets composers receive Finder file paths.
+                            // Internal webview drags (tile reorder, etc.) still
+                            // work through normal HTML5.
+                            tauri::WindowEvent::DragDrop(drag) => match drag {
+                                tauri::DragDropEvent::Enter { paths, position } => {
+                                    let payload = serde_json::json!({
+                                        "paths": paths.iter()
+                                            .map(|p| p.to_string_lossy().into_owned())
+                                            .collect::<Vec<_>>(),
+                                        "position": { "x": position.x, "y": position.y },
+                                    });
+                                    let _ = app_handle.emit("o8:tauri-file-drop-enter", payload);
+                                }
+                                tauri::DragDropEvent::Over { position } => {
+                                    let payload = serde_json::json!({
+                                        "position": { "x": position.x, "y": position.y },
+                                    });
+                                    let _ = app_handle.emit("o8:tauri-file-drop-over", payload);
+                                }
+                                tauri::DragDropEvent::Drop { paths, position } => {
+                                    let payload = serde_json::json!({
+                                        "paths": paths.iter()
+                                            .map(|p| p.to_string_lossy().into_owned())
+                                            .collect::<Vec<_>>(),
+                                        "position": { "x": position.x, "y": position.y },
+                                    });
+                                    let _ = app_handle.emit("o8:tauri-file-drop", payload);
+                                }
+                                tauri::DragDropEvent::Leave => {
+                                    let _ = app_handle.emit("o8:tauri-file-drop-leave", ());
+                                }
+                                _ => {}
+                            },
+                            tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+                                window_restore::schedule_event_clamp(&app_handle);
+                                // Re-hide the native traffic lights — macOS
+                                // re-shows standard buttons across fullscreen
+                                // enter/exit and style-mask changes, and both
+                                // paths land here as a Resized event.
+                                #[cfg(target_os = "macos")]
                                 if let Some(w) = voice_host::classic_window(&app_handle) {
-                                    let _ = w.hide();
+                                    hide_native_traffic_lights(&w);
                                 }
-                                let _ = app_handle.emit("window-hidden", ());
-                            }
-                            #[cfg(any(target_os = "windows", target_os = "linux"))]
-                            request_desktop_close(app_handle.clone());
-                        }
-                        // #1136 — bridge OS-level drag-drop into the webview as
-                        // window CustomEvents. With dragDropEnabled: true in
-                        // tauri.conf.json, HTML5 drop events no longer fire for
-                        // EXTERNAL drags (Finder → app), so this is the only
-                        // path that lets composers receive Finder file paths.
-                        // Internal webview drags (tile reorder, etc.) still
-                        // work through normal HTML5.
-                        tauri::WindowEvent::DragDrop(drag) => match drag {
-                            tauri::DragDropEvent::Enter { paths, position } => {
-                                let payload = serde_json::json!({
-                                    "paths": paths.iter()
-                                        .map(|p| p.to_string_lossy().into_owned())
-                                        .collect::<Vec<_>>(),
-                                    "position": { "x": position.x, "y": position.y },
-                                });
-                                let _ = app_handle.emit("o8:tauri-file-drop-enter", payload);
-                            }
-                            tauri::DragDropEvent::Over { position } => {
-                                let payload = serde_json::json!({
-                                    "position": { "x": position.x, "y": position.y },
-                                });
-                                let _ = app_handle.emit("o8:tauri-file-drop-over", payload);
-                            }
-                            tauri::DragDropEvent::Drop { paths, position } => {
-                                let payload = serde_json::json!({
-                                    "paths": paths.iter()
-                                        .map(|p| p.to_string_lossy().into_owned())
-                                        .collect::<Vec<_>>(),
-                                    "position": { "x": position.x, "y": position.y },
-                                });
-                                let _ = app_handle.emit("o8:tauri-file-drop", payload);
-                            }
-                            tauri::DragDropEvent::Leave => {
-                                let _ = app_handle.emit("o8:tauri-file-drop-leave", ());
-                            }
-                            _ => {}
-                        },
-                        tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
-                            window_restore::schedule_event_clamp(&app_handle);
-                            // Re-hide the native traffic lights — macOS
-                            // re-shows standard buttons across fullscreen
-                            // enter/exit and style-mask changes, and both
-                            // paths land here as a Resized event.
-                            #[cfg(target_os = "macos")]
-                            if let Some(w) = voice_host::classic_window(&app_handle) {
-                                hide_native_traffic_lights(&w);
-                            }
-                            // A monitor crossing does not always deliver the scale event before
-                            // AppKit settles the window. Refit after move/resize as a cheap fallback.
-                            #[cfg(target_os = "macos")]
-                            macos_webview_scale::schedule_main_webview_frame_repair(&app_handle);
-                        }
-                        #[cfg(target_os = "macos")]
-                        tauri::WindowEvent::ScaleFactorChanged {
-                            scale_factor,
-                            new_inner_size,
-                            ..
-                        } => {
-                            window_restore::schedule_event_clamp(&app_handle);
-                            if let Some(w) = voice_host::classic_window(&app_handle) {
-                                log::info!(
-                                    "[display-scale] main window changed to {scale_factor:.2}x at {}x{} physical pixels",
-                                    new_inner_size.width,
-                                    new_inner_size.height
-                                );
-                                hide_native_traffic_lights(&w);
-                                macos_webview_scale::repair_main_webview_frame(&w);
+                                // A monitor crossing does not always deliver the scale event before
+                                // AppKit settles the window. Refit after move/resize as a cheap fallback.
+                                #[cfg(target_os = "macos")]
                                 macos_webview_scale::schedule_main_webview_frame_repair(&app_handle);
                             }
-                        }
-                        #[cfg(not(target_os = "macos"))]
-                        tauri::WindowEvent::ScaleFactorChanged { .. } => {
-                            window_restore::schedule_event_clamp(&app_handle);
-                        }
-                        #[cfg(target_os = "macos")]
-                        tauri::WindowEvent::Focused(_) => {
-                            if let Some(w) = voice_host::classic_window(&app_handle) {
-                                hide_native_traffic_lights(&w);
+                            #[cfg(target_os = "macos")]
+                            tauri::WindowEvent::ScaleFactorChanged {
+                                scale_factor,
+                                new_inner_size,
+                                ..
+                            } => {
+                                window_restore::schedule_event_clamp(&app_handle);
+                                if let Some(w) = voice_host::classic_window(&app_handle) {
+                                    log::info!(
+                                        "[display-scale] main window changed to {scale_factor:.2}x at {}x{} physical pixels",
+                                        new_inner_size.width,
+                                        new_inner_size.height
+                                    );
+                                    hide_native_traffic_lights(&w);
+                                    macos_webview_scale::repair_main_webview_frame(&w);
+                                    macos_webview_scale::schedule_main_webview_frame_repair(&app_handle);
+                                }
                             }
+                            #[cfg(not(target_os = "macos"))]
+                            tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                                window_restore::schedule_event_clamp(&app_handle);
+                            }
+                            #[cfg(target_os = "macos")]
+                            tauri::WindowEvent::Focused(_) => {
+                                if let Some(w) = voice_host::classic_window(&app_handle) {
+                                    hide_native_traffic_lights(&w);
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    }
-                });
-            } else {
-                // Loud, not silent — this skipping is exactly the 0.1.598
-                // glass/close-to-hide regression.
-                log::warn!("[main-window] lifecycle block skipped: main window missing at setup");
+                    });
+                } else {
+                    // Loud, not silent — this skipping is exactly the 0.1.598
+                    // glass/close-to-hide regression.
+                    log::warn!("[main-window] lifecycle block skipped: main window missing at setup");
+                }
+
             }
+
 
             // Bound the V8 compile cache. Worker thread; never on the boot path.
             prune_compile_cache();
