@@ -110,11 +110,18 @@ fn zoomed_ticks_keep_hit_targets_preview_bounds_and_jumps(cx: &mut TestAppContex
         let tick = cx.debug_bounds("prompt-nav-tick-zoom-nav-p1").unwrap();
         let tolerance = cx.update(|w, _| px(1. / w.scale_factor() + 1e-3));
         assert!((tick.size.height - px(12. / zoom.min(1.))).abs() <= tolerance);
-        assert!(f32::from(tick.size.height) * zoom >= 12. - f32::from(tolerance), "zoomed hit targets retain at least twelve screen points");
+        assert!(
+            f32::from(tick.size.height) * zoom >= 12. - f32::from(tolerance),
+            "zoomed hit targets retain at least twelve screen points"
+        );
         assert!((tick.size.width - px(24.)).abs() <= tolerance);
         // Test-platform input uses screen points; GPUI converts it to the
         // same zoomed layout units used by the rail's canvas and hit testing.
-        let hit = if zoom < 1. { point(tick.center().x, tick.bottom() - px(1.)) } else { tick.center() };
+        let hit = if zoom < 1. {
+            point(tick.center().x, tick.bottom() - px(1.))
+        } else {
+            tick.center()
+        };
         let screen = hit.map(|v| v * zoom);
         cx.simulate_mouse_move(screen, None, Modifiers::default());
         paint(cx);

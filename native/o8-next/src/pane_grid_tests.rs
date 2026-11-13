@@ -422,7 +422,7 @@ fn slot_terminal_choice_is_keyboard_reachable_and_persisted(cx: &mut TestAppCont
 mod terminals;
 
 #[gpui::test]
-fn home_and_end_keep_their_grid_behavior_with_the_prompt_rail_focused(cx: &mut TestAppContext) {
+fn home_and_end_select_prompts_with_rail_focus_and_scroll_otherwise(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (grid, cx) = cx.add_window_view(|window, cx| {
         Grid::new(fixture.client.clone(), fixture.options.clone(), window, cx)

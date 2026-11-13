@@ -317,7 +317,7 @@ impl Grid {
                 .navigator
                 .borrow()
                 .is_focused(window);
-            if at_navigator && !matches!(key, "tab" | "home" | "end") {
+            if at_navigator && key != "tab" {
                 return;
             }
             match key {
