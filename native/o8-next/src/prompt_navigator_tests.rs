@@ -337,8 +337,8 @@ fn focus_alone_never_holds_the_preview_open(cx: &mut TestAppContext) {
     });
     paint(cx);
     assert!(
-        cx.debug_bounds("prompt-nav-preview").is_none(),
-        "tabbing to the rail does not cover the transcript"
+        cx.debug_bounds("prompt-nav-preview").is_some(),
+        "keyboard entry shows its preview immediately"
     );
     let tick = cx.debug_bounds("prompt-nav-tick-focus-p1").unwrap();
     let away = point(px(300.), px(350.));
@@ -708,3 +708,6 @@ fn a_prompt_arriving_in_a_live_pane_updates_ticks_and_preserves_cached_text(
     assert_eq!(title.as_ref(), "New live prompt");
     assert_eq!(answer.as_ref(), "The new answer is ready.");
 }
+
+#[path = "prompt_navigator_entry_zoom_tests.rs"]
+mod entry_and_zoom;
