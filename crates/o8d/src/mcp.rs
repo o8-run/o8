@@ -444,7 +444,7 @@ async fn handle(
         } else {
             let name = message["params"]["name"].as_str().unwrap_or("");
             if !tools.iter().any(|tool| tool["name"] == name) {
-                json!({"isError":true,"content":[{"type":"text","text":format!("Tool unavailable in operator MCP profile {profile}: {name}")}]})
+                json!({"isError":true,"content":[{"type":"text","text":format!("Tool unavailable in operator MCP profile {profile}: {name}. Call tools/list and use an available name exactly.")}]})
             } else {
                 let args = message["params"]
                     .get("arguments")

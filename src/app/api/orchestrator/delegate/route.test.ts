@@ -262,10 +262,10 @@ it('refuses a typo and applies the saved default through the delegate API', asyn
   const send = (runtime?: string) => POST(new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST', body: JSON.stringify({ ...base, runtime, clientMutationId: runtime ?? 'saved-default' }) }));
   const invalid = await send('typo-runtime');
   expect(invalid.status).toBe(400);
-  expect(await invalid.json()).toMatchObject({ code: 'worker_not_enabled', error: expect.stringContaining('typo-runtime') });
+  expect(await invalid.json()).toMatchObject({ code: 'invalid_runtime', error: expect.stringContaining('typo-runtime') });
   const replay = await send('typo-runtime');
   expect(replay.status).toBe(400);
-  expect(await replay.json()).toMatchObject({ code: 'worker_not_enabled', error: expect.stringContaining('typo-runtime') });
+  expect(await replay.json()).toMatchObject({ code: 'invalid_runtime', error: expect.stringContaining('typo-runtime') });
   expect(launchRuntimeSurface).not.toHaveBeenCalled();
   const accepted = await send();
   expect(accepted.status).toBe(200);

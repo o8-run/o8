@@ -145,12 +145,17 @@ beforeAll(async () => {
   wsPort = await freePort();
 
   const { POST: mintTextSession } = await import('@/app/api/mobile/symon/text-session/route');
-  const { POST: runTextTurn, DELETE: interruptTextTurn } = await import('@/app/api/mobile/symon/text-turn/route');
+  const { POST: runTextTurn, DELETE: interruptTextTurn } = await import('@/lib/symon/http/text-turn');
   apiServer = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${apiPort}`);
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = Buffer.concat(chunks);
+    if (url.pathname === '/api/panel/status') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end('{}');
+      return;
+    }
     if (url.pathname === '/api/mobile/symon/text-session' && request.method === 'POST') {
       const routeResponse = await mintTextSession(new NextRequest(url, {
         method: 'POST',

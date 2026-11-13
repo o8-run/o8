@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 import { resolveProviderKey } from '@/lib/providers/key-store';
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +11,10 @@ const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GE
 
 export async function POST(request: Request) {
   const GEMINI_API_KEY = geminiKey();
-  const body = await request.json();
+  const body = await readJsonObject(request);
+    if (!body) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
   const { title, description, repo } = body as {
     title?: string;
     description?: string;

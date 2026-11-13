@@ -1,5 +1,5 @@
+import { runtimeSelectionRefusal, validateRequestedRuntime } from '@/lib/agents/routing';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
-import { validateRequestedRuntime } from '@/lib/agents/routing';
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { RepoDispatchAdmissionError } from '@/lib/lane/repo-preflight';
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
     : undefined;
   let requestedRuntime: OrchestratorRuntime | undefined;
   try { requestedRuntime = validateRequestedRuntime(record.runtime) ?? undefined; }
-  catch (error) { return operatorError('invalid_request', (error as Error).message, 400); }
+  catch (error) { const refusal = runtimeSelectionRefusal(error); return operatorError(refusal.code, refusal.message, refusal.status); }
   let targetMissionId: string;
   try {
     targetMissionId = resolveMissionDispatchTarget(missionId);

@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
@@ -12,7 +13,11 @@ export async function POST(request: Request) {
   try {
     const wsToken = getOrCreateWsToken();
     const { wsPort } = resolvePortInfo();
-    const { sessionName, command } = await request.json();
+    const body = await readJsonObject<{ sessionName: string; command: string }>(request);
+    if (!body) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
+    const { sessionName, command } = body;
 
     if (!sessionName || !command) {
       return NextResponse.json({ error: 'sessionName and command required' }, { status: 400 });
