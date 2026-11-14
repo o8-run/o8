@@ -193,7 +193,8 @@ beforeAll(async () => {
       // Server-owned windows inherit the parent pipe; CLI fallback windows do not.
       fprintf(log, "%s\\n", getenv("O8_NEXT_PARENT_PIPE") ? "|<parent-pipe>" : ""); fclose(log);
       if (getenv("O8_FIXTURE_NO_DEVICE") &&
-          (!getenv("VK_DRIVER_FILES") || getenv("O8_FIXTURE_FALLBACK_FAILS"))) {
+          (!getenv("VK_DRIVER_FILES") || !strstr(getenv("VK_DRIVER_FILES"), "lvp_icd.json")
+            || getenv("O8_FIXTURE_FALLBACK_FAILS"))) {
         fputs("Unable to init GPU context: NoSupportedDeviceFound\\n", stderr); return 101;
       }
       if (getenv("O8_FIXTURE_FAIL_SERVER_WINDOW") && getenv("O8_NEXT_PARENT_PIPE")) {
