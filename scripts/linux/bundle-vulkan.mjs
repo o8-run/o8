@@ -13,7 +13,8 @@ export function bundleVulkan(appdir) {
   const dependencies = run('ldd', [driver]);
   if (dependencies.includes('not found')) throw new Error('Incomplete lavapipe dependencies');
   const host = /^(?:ld-linux.*|lib(?:c|m|dl|rt|pthread|resolv|util|gcc_s|stdc\+\+)\.so(?:\..*)?)$/;
-  const sources = new Map([[basename(driver), driver]]);
+  const sources = new Map([[basename(driver), driver],
+    ['libvulkan.so.1', run('cc', ['-print-file-name=libvulkan.so.1'])]]);
   for (const line of dependencies.split('\n')) {
     const match = line.match(/^\s*(\S+) => (\/\S+)/);
     if (match && !host.test(match[1])) sources.set(match[1], match[2]);
@@ -21,12 +22,25 @@ export function bundleVulkan(appdir) {
   const bundled = [];
   for (const [name, source] of sources) {
     const real = realpathSync(source);
-    const owner = run('dpkg-query', ['-S', real]).split(': /')[0].split(':')[0];
+    let owner;
+    for (const candidate of [source, real, real.replace(/^\/usr\/lib\//, '/lib/')]) {
+      try { owner = run('dpkg-query', ['-S', candidate]).split(': /')[0].split(':')[0]; break; }
+      catch { /* usr-merged distributions can record the pre-merge path. */ }
+    }
+    if (!owner) throw new Error(`Missing distribution ownership for ${name}`);
     cpSync(real, join(destination, name));
+    const licenses = [
+      [/^mesa-vulkan-drivers$/, 'MIT'], [/^libvulkan1$/, 'Apache-2.0'], [/^libllvm\d+$/, 'Apache-2.0 WITH LLVM-exception'],
+      [/^(?:libdrm2|libexpat1|libxcb.*|libx11.*|libxau6|libxdmcp6|libxshmfence1|libwayland-client0|libffi8|libxml2|libz3-4|libicu\d+|libtinfo6)$/, 'MIT/X11'],
+      [/^(?:libedit2|libbsd0|libmd0|libzstd1)$/, 'BSD'],
+      [/^zlib1g$/, 'Zlib'], [/^liblzma5$/, 'public-domain/permissive'],
+    ];
+    const license = licenses.find(([pattern]) => pattern.test(owner))?.[1];
+    if (!license) throw new Error(`Review redistribution license before bundling ${owner}`);
     const notice = `${owner}-copyright`;
     cpSync(`/usr/share/doc/${owner}/copyright`, join(appdir, 'usr/share/doc/o8', notice));
     bundled.push({ name: `usr/lib/o8/vulkan/${name}`, bytes: statSync(real).size, package: owner,
-      version: run('dpkg-query', ['-W', '-f=${Version}', owner]), notice });
+      license, version: run('dpkg-query', ['-W', '-f=${Version}', owner]), notice });
   }
   descriptor.ICD.library_path = './libvulkan_lvp.so';
   writeFileSync(join(destination, 'lvp_icd.json'), JSON.stringify(descriptor, null, 2) + '\n');

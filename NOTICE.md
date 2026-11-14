@@ -418,8 +418,8 @@ native-consumed server listings. No project settlement scripts are ported.
 
 ## Linux AppImage software Vulkan fallback
 
-- Projects: Mesa lavapipe and LLVM, from the Ubuntu 22.04 build packages
-- Licenses: Mesa MIT; LLVM Apache-2.0 with LLVM exceptions (and retained
+- Projects: Mesa lavapipe, Vulkan Loader and LLVM, from the Ubuntu 22.04 build packages
+- Licenses: Mesa MIT; Vulkan Loader Apache-2.0; LLVM Apache-2.0 with LLVM exceptions (and retained
   component notices). Both permit binary redistribution with their notices.
 - Upstream: <https://docs.mesa3d.org/license.html> and
   <https://llvm.org/LICENSE.txt>
@@ -433,8 +433,6 @@ native-consumed server listings. No project settlement scripts are ported.
 Transitive runtime libraries retain their distribution licenses: libdrm,
 libexpat, libxcb, X11, libxshmfence, Wayland, libffi, libxml2, z3 and ICU
 (MIT/X11); zlib (zlib); zstd (BSD option); libedit, libbsd and libmd (BSD);
-libtinfo (MIT); xz/liblzma (public domain and permissive notices); sensors
-(LGPL-2.1); libelf (LGPL-3.0-or-later). Where a copyleft runtime is included,
-its corresponding source is available from the matching Ubuntu source package
-and it remains a separate replaceable shared library. The package copyright
-files identify component-specific terms and source provenance.
+libtinfo (MIT); xz/liblzma (public domain and permissive notices). Packaging
+refuses an unreviewed dependency package. The package copyright files identify
+component-specific terms and source provenance.

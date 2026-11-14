@@ -61,15 +61,19 @@ const NO_GRAPHICS_DEVICE = /NoSupportedDeviceFound|Unable to init GPU context/;
 // reported as a failed start.
 let interrupted = false;
 
-async function runCli(args: string[], capture = false, timeoutMs?: number, stderrProbe?: RegExp, env = process.env): Promise<CliResult> {
+async function runCli(args: string[], capture = false, timeoutMs?: number, stderrProbe?: RegExp, env = process.env, onReady?: () => void): Promise<CliResult> {
   return new Promise((done, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : stderrProbe ? ['inherit', 'inherit', 'pipe'] : 'inherit',
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : stderrProbe ? ['inherit', 'pipe', 'pipe'] : 'inherit',
       timeout: timeoutMs, killSignal: 'SIGKILL', env,
     });
     let stdout = '';
     let stderr = '';
-    child.stdout?.on('data', chunk => { stdout += String(chunk); });
+    child.stdout?.on('data', chunk => {
+      stdout = capture ? stdout + String(chunk) : (stdout + String(chunk)).slice(-8192);
+      if (!capture) process.stdout.write(chunk);
+      if (stdout.split('\n').includes('o8-next-ready')) onReady?.();
+    });
     child.stderr?.on('data', chunk => {
       // A probed run still shows its errors live; only the tail is kept to match.
       if (!capture) { process.stderr.write(chunk); stderr = (stderr + String(chunk)).slice(-8192); }
@@ -239,9 +243,10 @@ async function openDesktop(): Promise<number> {
     let env = process.env;
     for (let retry = 0; ; retry += 1) {
       let finished = false;
-      const next = runCli(['next', '--binary', binary], false, undefined, NO_GRAPHICS_DEVICE, env);
+      let ready = false;
+      const next = runCli(['next', '--binary', binary], false, undefined, NO_GRAPHICS_DEVICE, env, () => { ready = true; });
       void next.then(() => { finished = true; }, () => { finished = true; });
-      while (!finished && !windowIsOpen()) await delay(100);
+      while (!finished && !(ready && windowIsOpen())) await delay(100);
       if (!finished && !released) {
         closeSync(lock);
         released = true;
