@@ -9,14 +9,16 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
 
 import { CliError, EXIT } from '../api.js';
 
 export const SHORTCUT_ACTION = 'o8_terminals';
 const MODULE_FILE = 'o8.lua';
+/** The first line of a file this command wrote. A file without it belongs to the operator. */
+const OWNED_HEADER = '-- Written by `o8 terminal shortcut`.';
 const REQUIRE_LINE = 'require("o8") -- added by `o8 terminal shortcut`';
 /** A Rex key such as `cmd+shift+o` or `ctrl+b>o`. It is written into a Lua string. */
 const SAFE_KEY = /^[A-Za-z0-9+>,.;=\/\[\]-]{1,48}$/;
@@ -59,7 +61,7 @@ export function rexCommandDir(
 ): string | null {
   const name = platform === 'win32' ? 'rex.exe' : 'rex';
   for (const dir of (env.PATH ?? '').split(platform === 'win32' ? ';' : ':')) {
-    if (dir && !UNSAFE_WORD.test(dir) && exists(join(dir, name))) return dir;
+    if (dir && isAbsolute(dir) && !UNSAFE_WORD.test(dir) && exists(join(dir, name))) return dir;
   }
   return null;
 }
@@ -77,7 +79,7 @@ export function shortcutModule(self: string[], key: string | null, rexDir: strin
   if (key !== null && !SAFE_KEY.test(key)) throw new CliError('invalid_args', USAGE, EXIT.INVALID_ARGS);
   const argv = [...self, '--human', 'terminal', 'panes'].map(luaString).join(', ');
   return [
-    '-- Written by `o8 terminal shortcut`. Run it again to update this file,',
+    `${OWNED_HEADER} Run it again to update this file,`,
     '-- or `o8 terminal shortcut --remove` to delete it. Edits here are overwritten.',
     'rex.action{',
     `  name = "${SHORTCUT_ACTION}",`,
@@ -141,8 +143,49 @@ function reload(exec: ShortcutExec): Pick<ShortcutResult, 'reloaded' | 'hint'> {
   try {
     exec('rex', ['config', 'reload']);
     return { reloaded: true, hint: null };
-  } catch {
-    return { reloaded: false, hint: 'Run `rex config reload` on this machine to apply the change.' };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
+      return { reloaded: false, hint: 'The `rex` command is not on PATH. Rex reads the change the next time it loads its config.' };
+    }
+    // Rex prints what is wrong with the config. One short, plain line of it is worth showing.
+    const streams = error as { stdout?: unknown; stderr?: unknown } | null;
+    const printed = [streams?.stdout, streams?.stderr].filter((text): text is string => typeof text === 'string').join('\n');
+    // Rex lists each mistake on a line that starts with `error`, then a closing line.
+    const mistakes = printed.split(/\r?\n/).filter((line) => /^error\b/.test(line));
+    const said = (mistakes.length > 0 ? mistakes.join(' ') : printed)
+      .replace(/[\p{C}]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 240);
+    return {
+      reloaded: false,
+      hint: `Rex did not reload its config${said ? `: ${said}` : '.'} Run \`rex config check\`, then \`rex config reload\`, on this machine.`,
+    };
+  }
+}
+
+/** Whether the action file is absent or was written by this command. */
+function ownsFile(file: string): boolean {
+  return !existsSync(file) || readFileSync(file, 'utf8').startsWith(OWNED_HEADER);
+}
+
+function refuseUnowned(file: string): never {
+  throw new CliError(
+    'config_conflict',
+    `${file} was not written by o8, so it is left alone.`,
+    EXIT.CONFLICT,
+    'Rename or remove that file, then run the command again.',
+  );
+}
+
+/** Replace a file in one step, so a failure partway never leaves it half written. */
+function writeWhole(file: string, content: string): void {
+  // A config that is a link keeps being one: the file it points at is replaced.
+  const target = existsSync(file) ? realpathSync(file) : file;
+  const draft = `${target}.o8-tmp`;
+  writeFileSync(draft, content);
+  try {
+    renameSync(draft, target);
+  } catch (error) {
+    rmSync(draft, { force: true });
+    throw error;
   }
 }
 
@@ -155,15 +198,22 @@ export function installShortcut(input: {
 }): ShortcutResult {
   const config = rexConfigFile(input.env);
   const file = join(dirname(config), MODULE_FILE);
-  const module = shortcutModule(input.self, input.key, rexCommandDir(input.env));
+  const rexDir = rexCommandDir(input.env);
+  const lua = shortcutModule(input.self, input.key, rexDir);
   const exec = input.exec ?? defaultExec;
+  let created = false;
   try {
     mkdirSync(dirname(config), { recursive: true });
-    writeFileSync(file, module);
+    if (!ownsFile(file)) refuseUnowned(file);
+    created = !existsSync(file);
+    writeWhole(file, lua);
     const init = existsSync(config) ? readFileSync(config, 'utf8') : '';
     const next = withRequire(init);
-    if (next !== init) writeFileSync(config, next);
-  } catch {
+    if (next !== init) writeWhole(config, next);
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    // Without its line in init.lua a new action file would be an orphan.
+    if (created) rmSync(file, { force: true });
     throw new CliError('config_unwritable', `Could not write the Rex config in ${dirname(config)}.`, EXIT.CONFLICT);
   }
   return { action: 'installed', file, config, key: input.key, ...reload(exec) };
@@ -179,13 +229,15 @@ export function removeShortcut(input: {
   const exec = input.exec ?? defaultExec;
   let changed = false;
   try {
+    if (!ownsFile(file)) refuseUnowned(file);
     if (existsSync(config)) {
       const init = readFileSync(config, 'utf8');
       const next = withoutRequire(init);
-      if (next !== init) { writeFileSync(config, next); changed = true; }
+      if (next !== init) { writeWhole(config, next); changed = true; }
     }
     if (existsSync(file)) { rmSync(file); changed = true; }
-  } catch {
+  } catch (error) {
+    if (error instanceof CliError) throw error;
     throw new CliError('config_unwritable', `Could not change the Rex config in ${dirname(config)}.`, EXIT.CONFLICT);
   }
   if (!changed) return { action: 'absent', file, config, key: null, reloaded: false, hint: null };

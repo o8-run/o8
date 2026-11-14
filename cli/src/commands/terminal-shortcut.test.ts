@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -62,6 +62,7 @@ describe('the action file', () => {
     expect(rexCommandDir({ PATH: '/a:/b:/c' }, has, 'darwin')).toBe('/b');
     expect(rexCommandDir({ PATH: '/a:/c' }, has, 'darwin')).toBeNull();
     expect(rexCommandDir({}, has, 'darwin')).toBeNull();
+    expect(rexCommandDir({ PATH: 'b:.' }, () => true, 'darwin')).toBeNull();
   });
 
   it('binds a key only when asked', () => {
@@ -121,6 +122,43 @@ describe('installing and removing', () => {
     expect(result.action).toBe('installed');
     expect(result.reloaded).toBe(false);
     expect(result.hint).toContain('rex config reload');
+  });
+
+  it('reports what Rex said when the reload fails, in one plain line', () => {
+    const { env } = configDir();
+    const failed = Object.assign(new Error('exit 1'), {
+      stdout: 'path: /x/init.lua\nerror o8.lua:21: rex.bind: unknown \x1b[31mkey\n', stderr: 'Error: the configuration has errors\n',
+    });
+    const result = installShortcut({ self, key: 'cmd+shft+o', env, exec: () => { throw failed; } });
+    expect(result.reloaded).toBe(false);
+    expect(result.hint).toContain('Rex did not reload its config: error o8.lua:21: rex.bind: unknown [31mkey Run `rex config check`');
+    const plain = Object.assign(new Error('exit 1'), { stderr: 'Error: server refused\n' });
+    expect(installShortcut({ self, key: null, env, exec: () => { throw plain; } }).hint).toContain('config: Error: server refused Run');
+    expect(result.hint).toContain('rex config check');
+    const missing = Object.assign(new Error('spawn rex ENOENT'), { code: 'ENOENT' });
+    expect(installShortcut({ self, key: null, env, exec: () => { throw missing; } }).hint).toContain('not on PATH');
+  });
+
+  it('never overwrites or deletes an o8.lua it did not write', () => {
+    const { env, dir } = configDir();
+    const mine = '-- my own o8 helpers\nreturn {}\n';
+    writeFileSync(join(dir, 'o8.lua'), mine);
+    writeFileSync(env.REX_CONFIG, 'require("o8")\n');
+    expect(() => installShortcut({ self, key: null, env, exec: () => '' })).toThrow(/not written by o8/);
+    expect(() => removeShortcut({ env, exec: () => '' })).toThrow(/not written by o8/);
+    expect(readFileSync(join(dir, 'o8.lua'), 'utf8')).toBe(mine);
+    expect(readFileSync(env.REX_CONFIG, 'utf8')).toBe('require("o8")\n');
+  });
+
+  it('keeps a linked init.lua a link, and leaves no draft files behind', () => {
+    const { env, dir } = configDir();
+    const real = join(dir, 'real-init.lua');
+    writeFileSync(real, '-- mine\n');
+    symlinkSync(real, env.REX_CONFIG);
+    installShortcut({ self, key: null, env, exec: () => '' });
+    expect(lstatSync(env.REX_CONFIG).isSymbolicLink()).toBe(true);
+    expect(readFileSync(real, 'utf8')).toBe(`-- mine\n${LINE}\n`);
+    expect(readdirSync(dir).sort()).toEqual(['init.lua', 'o8.lua', 'real-init.lua']);
   });
 
   it('removes only what it added, and reports when there was nothing to remove', () => {
