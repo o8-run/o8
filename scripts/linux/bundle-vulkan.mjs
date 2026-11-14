@@ -38,7 +38,7 @@ export function bundleVulkan(appdir) {
     const license = licenses.find(([pattern]) => pattern.test(owner))?.[1];
     if (!license) throw new Error(`Review redistribution license before bundling ${owner}`);
     const notice = `${owner}-copyright`;
-    cpSync(`/usr/share/doc/${owner}/copyright`, join(appdir, 'usr/share/doc/o8', notice));
+    cpSync(`/usr/share/doc/${owner}/copyright`, join(appdir, 'usr/share/doc/o8', notice), { dereference: true });
     bundled.push({ name: `usr/lib/o8/vulkan/${name}`, bytes: statSync(real).size, package: owner,
       license, version: run('dpkg-query', ['-W', '-f=${Version}', owner]), notice });
   }
