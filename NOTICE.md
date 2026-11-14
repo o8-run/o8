@@ -448,3 +448,63 @@ not bundled for the software driver: glibc, libstdc++, libgcc_s, zlib, libzstd,
 libffi, libtinfo and liblzma. Libxml2 and libedit are absent from the minimal
 image, so their unmodified shared libraries and notices remain bundled. No GPL
 or LGPL shared library is added by the software-driver bundle.
+
+### Bundled file inventory
+
+Measured from the Ubuntu 22.04 AppImage at `4facbb4f3867c2c2c7542e2ff0ec0fee5063e221`.
+These 50 regular files total 160,245,227 bytes. Runtime licences describe the
+shipped binaries; complete package notices also cover other source-package files.
+The generated `linux-downloads.json` records each build's exact sizes and versions.
+
+| Added file | Bytes | Licence or notice |
+| --- | ---: | --- |
+| `usr/lib/o8/vulkan/libvulkan_lvp.so` | 8,063,648 | MIT |
+| `usr/lib/o8/vulkan/libvulkan.so.1` | 445,104 | Apache-2.0 |
+| `usr/lib/o8/vulkan/libLLVM-15.so.1` | 116,869,584 | Apache-2.0 WITH LLVM-exception |
+| `usr/lib/o8/vulkan/libdrm.so.2` | 84,592 | MIT/X11 |
+| `usr/lib/o8/vulkan/libexpat.so.1` | 198,968 | MIT/X11 |
+| `usr/lib/o8/vulkan/libxcb-randr.so.0` | 71,912 | MIT/X11 |
+| `usr/lib/o8/vulkan/libxcb-dri3.so.0` | 22,760 | MIT/X11 |
+| `usr/lib/o8/vulkan/libwayland-client.so.0` | 64,776 | MIT/X11 |
+| `usr/lib/o8/vulkan/libxcb.so.1` | 166,504 | MIT/X11 |
+| `usr/lib/o8/vulkan/libX11-xcb.so.1` | 14,048 | MIT/X11 |
+| `usr/lib/o8/vulkan/libxcb-present.so.0` | 14,552 | MIT/X11 |
+| `usr/lib/o8/vulkan/libxcb-xfixes.so.0` | 35,032 | MIT/X11 |
+| `usr/lib/o8/vulkan/libxcb-sync.so.1` | 35,064 | MIT/X11 |
+| `usr/lib/o8/vulkan/libxcb-shm.so.0` | 14,568 | MIT/X11 |
+| `usr/lib/o8/vulkan/libxshmfence.so.1` | 14,504 | MIT/X11 |
+| `usr/lib/o8/vulkan/libedit.so.2` | 216,376 | BSD |
+| `usr/lib/o8/vulkan/libxml2.so.2` | 1,967,384 | MIT/X11 |
+| `usr/lib/o8/vulkan/libXau.so.6` | 18,720 | MIT/X11 |
+| `usr/lib/o8/vulkan/libXdmcp.so.6` | 26,800 | MIT/X11 |
+| `usr/lib/o8/vulkan/libbsd.so.0` | 89,096 | BSD |
+| `usr/lib/o8/vulkan/libicuuc.so.70` | 2,062,664 | Unicode-DFS-2016 |
+| `usr/lib/o8/vulkan/libmd.so.0` | 47,472 | BSD |
+| `usr/lib/o8/vulkan/libicudata.so.70` | 29,476,472 | Unicode-DFS-2016 |
+| `usr/lib/o8/vulkan/lvp_icd.json` | 124 | Mesa ICD metadata (MIT) |
+| `usr/share/doc/o8/mesa-vulkan-drivers-copyright` | 14,847 | Package notice; runtime MIT |
+| `usr/share/doc/o8/libvulkan1-copyright` | 2,160 | Package notice; runtime Apache-2.0 |
+| `usr/share/doc/o8/libllvm15-copyright` | 6,897 | Package notice; runtime Apache-2.0 WITH LLVM-exception |
+| `usr/share/doc/o8/libdrm2-copyright` | 15,612 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libexpat1-copyright` | 1,756 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxcb-randr0-copyright` | 1,781 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxcb-dri3-0-copyright` | 1,781 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libwayland-client0-copyright` | 1,934 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxcb1-copyright` | 1,781 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libx11-xcb1-copyright` | 47,102 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxcb-present0-copyright` | 1,781 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxcb-xfixes0-copyright` | 1,781 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxcb-sync1-copyright` | 1,781 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxcb-shm0-copyright` | 1,781 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxshmfence1-copyright` | 1,215 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libedit2-copyright` | 1,840 | Package notice; runtime BSD |
+| `usr/share/doc/o8/libxml2-copyright` | 3,067 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxau6-copyright` | 1,224 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libxdmcp6-copyright` | 1,265 | Package notice; runtime MIT/X11 |
+| `usr/share/doc/o8/libbsd0-copyright` | 25,649 | Package notice; runtime BSD |
+| `usr/share/doc/o8/libicu70-copyright` | 2,221 | Package notice; runtime Unicode-DFS-2016 |
+| `usr/share/doc/o8/libmd0-copyright` | 8,018 | Package notice; runtime BSD |
+| `usr/share/doc/o8/common-licenses/Apache-2.0` | 11,358 | Apache-2.0 licence text |
+| `usr/share/doc/o8/common-licenses/GPL-1` | 12,632 | GPL-1 licence text |
+| `usr/share/doc/o8/common-licenses/GPL-2` | 18,092 | GPL-2 licence text |
+| `usr/share/doc/o8/common-licenses/GPL-3` | 35,147 | GPL-3 licence text |
