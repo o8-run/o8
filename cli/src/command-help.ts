@@ -22,11 +22,11 @@ const help: Record<string, CommandHelp> = {
     example: 'o8 triage --human',
   },
   'mission create': {
-    usage: '--title <text> [--repo <path>] [--dispatch] [--runtime <id>] [--effort <tier>]',
+    usage: '--title <text> [--body <text>] [--repo <path>] [--dispatch] [--runtime <id>] [--effort <tier>]',
     required: '--title <text>. Use --repo <path> to select the repository explicitly.',
     defaults: 'dispatch is false; the mission is prepared without launching. Runtime follows saved routing.',
-    details: '--dispatch starts work immediately. --effort accepts adaptive, low, medium, high, max, xhigh, ultra. --existingBranchPolicy accepts auto, reset, continue, error (default auto).',
-    example: 'o8 mission create --title "Inspect behavior" --repo /path/to/repo',
+    details: '--body is the task the worker carries out; without it the worker gets only the title. --dispatch starts work immediately. --effort accepts adaptive, low, medium, high, max, xhigh, ultra. --existingBranchPolicy accepts auto, reset, continue, error (default auto). An unknown flag is refused.',
+    example: 'o8 mission create --title "Add a health route" --body "Create /api/health returning 200." --repo /path/to/repo',
   },
   'mission dispatch': {
     usage: '[--mission <id>] [--wait | --watch] [--timeout <duration>] [--poll <ms>]',

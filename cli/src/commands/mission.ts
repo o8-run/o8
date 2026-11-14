@@ -292,7 +292,45 @@ function packetSignature(packets: MissionStatusPacket[] | undefined): string {
   return (packets ?? []).map((p) => `${p.id}:${p.status ?? ''}`).sort().join('|');
 }
 
+/** Flags `mission create` reads that take a value, and those that stand alone. */
+const CREATE_VALUE_FLAGS = new Set([
+  'title', 'body', 'repo', 'number', 'compare', 'existingBranchPolicy', 'effort', 'quality-search-contract',
+  'runtime', 'model', 'carrier', 'constraints', 'caller', 'idempotency-key',
+]);
+const CREATE_SWITCHES = new Set(['dispatch', 'read-only', 'sequential', 'huddle', 'brain']);
+
+/**
+ * Refuse what `mission create` would otherwise drop without a word: an
+ * unknown flag, or text that belongs to no flag. A dropped `--task` used to
+ * send a worker off with only the title.
+ */
+export function checkMissionCreateArgs(rest: string[]): void {
+  // The refused word is echoed back, so it is shown without control characters and kept short.
+  const shown = (word: string) => word.replace(/[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, '').slice(0, 80);
+  const knownFlag = (word: string | undefined) => word !== undefined && word.startsWith('--')
+    && (CREATE_VALUE_FLAGS.has(word.slice(2).split('=', 1)[0]) || CREATE_SWITCHES.has(word.slice(2).split('=', 1)[0]));
+  for (let i = 0; i < rest.length; i += 1) {
+    const tok = rest[i];
+    const name = tok.startsWith('--') ? tok.slice(2).split('=', 1)[0] : null;
+    if (name !== null && CREATE_VALUE_FLAGS.has(name)) {
+      if (!tok.includes('=') && knownFlag(rest[i + 1])) {
+        throw new CliError('invalid_args', `--${name} needs a value.`, EXIT.INVALID_ARGS);
+      }
+      if (!tok.includes('=')) i += 1;
+      continue;
+    }
+    if (name !== null && CREATE_SWITCHES.has(name) && !tok.includes('=')) continue;
+    throw new CliError(
+      'invalid_args',
+      name !== null ? `Unknown flag for o8 mission create: --${shown(name)}.` : `Unexpected argument for o8 mission create: ${shown(tok)}`,
+      EXIT.INVALID_ARGS,
+      'Put the task in --body, for example: o8 mission create --title "Add a health route" --body "Create /api/health returning 200." Run `o8 mission create --help` for every flag.',
+    );
+  }
+}
+
 async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<number> {
+  checkMissionCreateArgs(rest);
   const title = flag(rest, 'title');
   if (!title?.trim()) {
     throw new CliError(
