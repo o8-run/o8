@@ -83,8 +83,10 @@ function main() {
     const bundledVulkan = bundleVulkan(appdir);
     // These edits are AppImage-only, after DEB/RPM have copied their payloads.
     for (const [name] of XKB_LIBRARIES) setOriginRunpath(join(libraries, name));
+    // Keep the host loader's explicit-driver support when it is installed.
+    // GNU $LIB follows the host's multiarch directory; the private loader is last.
     for (const name of ['o8-next', 'o8-next-viz-render']) {
-      setOriginRunpath(join(appdir, 'usr/lib/o8', name), '$ORIGIN/lib:$ORIGIN/vulkan');
+      setOriginRunpath(join(appdir, 'usr/lib/o8', name), '$ORIGIN/lib:/$LIB:/usr/$LIB:$ORIGIN/vulkan');
     }
     assertVulkanInventory(readFileSync(join(repository, 'NOTICE.md'), 'utf8'), bundledVulkan);
     const appimageAbi = checkLinuxGlibc([appdir], { max: '2.35' });

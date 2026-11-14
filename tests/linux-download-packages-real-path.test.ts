@@ -149,7 +149,7 @@ it.skipIf(process.platform !== 'linux' || process.env.O8_LINUX_PACKAGE_TESTS !==
     for (const binary of ['o8-next', 'o8-next-viz-render']) {
       if (artifact.format === 'appimage') {
         expect(run('patchelf', ['--print-rpath', join(installed, 'usr/lib/o8', binary)]).stdout.trim())
-          .toBe('$ORIGIN/lib:$ORIGIN/vulkan');
+          .toBe('$ORIGIN/lib:/$LIB:/usr/$LIB:$ORIGIN/vulkan');
         continue;
       }
       expect(createHash('sha256').update(readFileSync(join(installed, 'usr/lib/o8', binary))).digest('hex'))
