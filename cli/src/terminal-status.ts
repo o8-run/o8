@@ -11,6 +11,8 @@
  * diff content, findings text, blocked reasons, or paths.
  */
 
+import { createHash } from 'node:crypto';
+
 import type { OutputMode } from './output.js';
 
 export type TerminalStatusState = 'working' | 'done' | 'error' | 'clear';
@@ -60,13 +62,23 @@ function base64(text: string): string {
 }
 
 /**
- * The record a report addresses: `o8`, or `o8/<packet>` for one packet. A
- * record id segment allows only `[A-Za-z0-9_.+-]` and 32 bytes, so other
- * characters become `_` and a long packet id keeps its last 32 characters,
- * the part that tells packets apart.
+ * The record id segment for one packet, or an empty string when the packet has
+ * no usable id. A segment allows only `[A-Za-z0-9_.+-]` and 32 bytes. An id
+ * that already fits is used as it is. Any other id keeps its last 23 safe
+ * characters and gains a hash of the whole id, so two different packet ids
+ * never share a record.
  */
+export function packetRecordSegment(packetId: string | null | undefined): string {
+  const id = packetId?.trim() ?? '';
+  if (!id) return '';
+  if (/^[A-Za-z0-9_.+-]{1,32}$/.test(id)) return id;
+  const digest = createHash('sha256').update(id).digest('hex').slice(0, 8);
+  return `${id.replace(/[^A-Za-z0-9_.+-]/g, '_').slice(-23)}.${digest}`;
+}
+
+/** The record a report addresses: `o8`, or `o8/<packet>` for one packet. */
 export function statusRecordId(packetId?: string | null): string {
-  const segment = (packetId ?? '').replace(/[^A-Za-z0-9_.+-]/g, '_').slice(-32);
+  const segment = packetRecordSegment(packetId);
   return segment ? `${RECORD_ID}/${segment}` : RECORD_ID;
 }
 
@@ -128,11 +140,17 @@ export function createTerminalStatusReporter(
     report(report) {
       if (!stream) return;
       const sequence = encodeTerminalStatus(report);
+      if (!sequence) return;
       const id = statusRecordId(report.packetId);
-      if (!sequence || last.get(id) === sequence) return;
-      // Clearing o8's own record also removes every per-packet record under it.
-      if (report.state === 'clear' && id === RECORD_ID) last.clear();
-      last.set(id, sequence);
+      if (report.state === 'clear') {
+        // A clear is always written and never remembered. Clearing o8's own
+        // record also removes every per-packet record under it.
+        if (id === RECORD_ID) last.clear();
+        else last.delete(id);
+      } else {
+        if (last.get(id) === sequence) return;
+        last.set(id, sequence);
+      }
       stream.write(sequence);
     },
   };
@@ -172,12 +190,24 @@ const PACKET_PROGRESS_PHRASES: Record<string, string> = {
   recovering: 'Recovering',
 };
 
-/** One packet's line while a mission is tailed: its own record under o8's. */
+/**
+ * The most packets that get their own record in one terminal. A terminal must
+ * keep at least 64 records and evicts the least recently updated past its cap,
+ * so a larger mission keeps the summary and marks only its first packets.
+ */
+export const PACKET_RECORD_LIMIT = 60;
+
+/**
+ * One packet's line while a mission is tailed: its own record under o8's.
+ * Returns null for a packet with no usable id, which would otherwise address
+ * o8's own record.
+ */
 export function packetTailReport(packet: {
   id: string;
   status?: string | null;
   title?: string | null;
-}): TerminalStatusReport {
+}): TerminalStatusReport | null {
+  if (!packetRecordSegment(packet.id)) return null;
   const finished = packetStatusReport(packet.status, packet.title);
   if (finished) return { ...finished, packetId: packet.id };
   const msg = (packet.status && PACKET_PROGRESS_PHRASES[packet.status]) || 'In progress';

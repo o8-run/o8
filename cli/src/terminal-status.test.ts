@@ -4,6 +4,7 @@ import {
   createTerminalStatusReporter,
   encodeTerminalStatus,
   missionTailReport,
+  packetRecordSegment,
   packetStatusReport,
   packetTailReport,
   statusRecordId,
@@ -149,18 +150,34 @@ describe('per-packet records', () => {
   it('addresses a child record under o8 with a valid id segment', () => {
     expect(statusRecordId()).toBe('o8');
     expect(statusRecordId('pkt-1')).toBe('o8/pkt-1');
-    expect(statusRecordId('pkt/with:odd chars')).toBe('o8/pkt_with_odd_chars');
-    const long = statusRecordId(`pkt-${'a'.repeat(40)}-tail`);
-    expect(long).toMatch(/^o8\/[A-Za-z0-9_.+-]{1,32}$/);
-    expect(long.endsWith('-tail')).toBe(true);
     const pairs = decodePairs(encodeTerminalStatus({ state: 'working', packetId: 'pkt-1', title: 'One' }));
     expect(pairs.id).toBe('o8/pkt-1');
     expect(encodeTerminalStatus({ state: 'clear', packetId: 'pkt-1' })).toBe('\x1b]7501;state=clear:id=o8/pkt-1\x1b\\');
   });
 
+  it('gives different packet ids different records, whatever their shape', () => {
+    const ids = [
+      'a/b', 'a:b', 'a b', 'a_b',
+      'pkt-0b9d2f6e-6a57-4c58-9a0e-3f1f2c4d5e6f',
+      'pkt-1b9d2f6e-6a57-4c58-9a0e-3f1f2c4d5e6f',
+      `x-${'a'.repeat(40)}-same-tail`,
+      `y-${'a'.repeat(40)}-same-tail`,
+    ];
+    const segments = ids.map((id) => packetRecordSegment(id));
+    expect(new Set(segments).size).toBe(ids.length);
+    for (const segment of segments) expect(segment).toMatch(/^[A-Za-z0-9_.+-]{1,32}$/);
+    expect(packetRecordSegment('a_b')).toBe('a_b');
+  });
+
+  it('never lets a packet without an id address o8 own record', () => {
+    expect(packetRecordSegment('')).toBe('');
+    expect(packetRecordSegment('   ')).toBe('');
+    expect(packetTailReport({ id: '', status: 'running', title: 'T' })).toBeNull();
+  });
+
   it('maps every packet status to a fixed phrase', () => {
     expect(packetTailReport({ id: 'p', status: 'running', title: 'T' })).toEqual({ state: 'working', packetId: 'p', title: 'T', msg: 'Running' });
-    expect(packetTailReport({ id: 'p', status: 'something_new', title: 'T' }).msg).toBe('In progress');
+    expect(packetTailReport({ id: 'p', status: 'something_new', title: 'T' })?.msg).toBe('In progress');
     expect(packetTailReport({ id: 'p', status: 'blocked', title: 'T' })).toEqual({ state: 'error', packetId: 'p', title: 'T', msg: 'Blocked: needs a decision' });
   });
 
@@ -181,5 +198,16 @@ describe('per-packet records', () => {
     reporter.report({ state: 'clear' });
     reporter.report({ state: 'working', packetId: 'a', title: 'A' });
     expect(out.writes).toHaveLength(4);
+  });
+
+  it('always writes a clear, even right after another clear', () => {
+    const out = stream(true);
+    const reporter = createTerminalStatusReporter(human, { REX_SESSION: 's' }, out, stream(true));
+    reporter.report({ state: 'clear' });
+    reporter.report({ state: 'working', packetId: 'a', title: 'A' });
+    reporter.report({ state: 'clear' });
+    reporter.report({ state: 'clear', packetId: 'a' });
+    reporter.report({ state: 'working', packetId: 'a', title: 'A' });
+    expect(out.writes).toHaveLength(5);
   });
 });
