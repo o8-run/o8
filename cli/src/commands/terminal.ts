@@ -1,10 +1,12 @@
 /** Read existing dashboard terminals through the server-owned terminal host. */
+import { execFileSync } from 'node:child_process';
 import WebSocket from 'ws';
 import { CliError, EXIT, resolveWsBase } from '../api.js';
 import { resolveConfig, type ResolvedConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
+import { openTerminalPanes, PANE_LIMIT_DEFAULT, PANE_LIMIT_MAX } from './terminal-panes.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
@@ -307,10 +309,65 @@ function observe(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
   });
 }
 
-export async function runTerminal(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
-  if (!['list', 'show', 'observe', 'control', 'wait'].includes(sub ?? '')) {
-    throw new CliError('invalid_args', 'Use `o8 terminal list|show|observe|control|wait`.', EXIT.INVALID_ARGS);
+/** Live session IDs on a saved SSH machine, read through this same CLI. */
+function listRemoteSessionIds(machineKey: string): string[] {
+  let raw: string;
+  try {
+    raw = execFileSync(process.execPath, [process.argv[1], 'terminal', 'list', '--machine', machineKey], {
+      encoding: 'utf8', timeout: 30_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch {
+    throw new CliError('remote_terminal_error', 'Could not list terminals on that SSH machine.', EXIT.CONFLICT);
   }
+  try {
+    const payload = JSON.parse(raw) as { sessions?: Array<{ id?: unknown }> };
+    return (payload.sessions ?? []).flatMap((session) => typeof session.id === 'string' ? [session.id] : []);
+  } catch {
+    throw new CliError('invalid_remote_response', 'That SSH machine returned an invalid terminal inventory.', EXIT.CONFLICT);
+  }
+}
+
+async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<number> {
+  let machineKey: string | null = null;
+  let limit = PANE_LIMIT_DEFAULT;
+  if (rest.length % 2 !== 0) {
+    throw new CliError('invalid_args', 'Use `terminal panes [--limit 1..16] [--machine <label-or-id>]`.', EXIT.INVALID_ARGS);
+  }
+  for (let i = 0; i < rest.length; i += 2) {
+    const value = rest[i + 1] ?? '';
+    if (rest[i] === '--machine' && machineKey === null && value && !value.startsWith('--')) machineKey = value;
+    else if (rest[i] === '--limit' && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= PANE_LIMIT_MAX) limit = Number(value);
+    else throw new CliError('invalid_args', 'Use `terminal panes [--limit 1..16] [--machine <label-or-id>]`.', EXIT.INVALID_ARGS);
+  }
+  const sessionIds = machineKey
+    ? listRemoteSessionIds(machineKey)
+    : (await listSessions(operatorConfig())).map((session) => session.id);
+  const result = openTerminalPanes({
+    sessionIds,
+    limit,
+    machineKey,
+    env: process.env,
+    self: [process.execPath, process.argv[1]],
+  });
+  if (mode.human) {
+    const lines = [
+      ...result.opened.map((pane) => `opened    ${pane.id}`),
+      ...result.existing.map((id) => `existing  ${id}`),
+      ...result.remaining.map((id) => `no room   ${id}`),
+      ...result.skipped.map(() => 'skipped   (unsafe session ID)'),
+    ];
+    process.stdout.write(lines.length ? `${lines.join('\n')}\n` : 'No live terminals.\n');
+  } else {
+    printJson({ schema: 'o8/cli/terminal.panes/v1', ...result });
+  }
+  return EXIT.OK;
+}
+
+export async function runTerminal(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
+  if (!['list', 'show', 'observe', 'control', 'wait', 'panes'].includes(sub ?? '')) {
+    throw new CliError('invalid_args', 'Use `o8 terminal list|show|observe|control|wait|panes`.', EXIT.INVALID_ARGS);
+  }
+  if (sub === 'panes') return runTerminalPanes(mode, rest);
   const machineAt = rest.indexOf('--machine');
   if (machineAt >= 0) {
     const key = rest[machineAt + 1];
