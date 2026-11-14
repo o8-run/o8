@@ -206,12 +206,20 @@ jobs:
           name: linux-gpui-review-packages
           path: work/linux-downloads
       - name: Capture prerequisites without a system Vulkan ICD
+        env:
+          ACCEPTANCE_OS: ${{ matrix.os }}
         run: |
           sudo apt-get update -qq
           sudo apt-get purge -y mesa-vulkan-drivers
           sudo apt-get install -y --no-install-recommends xvfb xauth x11-xserver-utils imagemagick x11-utils fonts-dejavu-core libwebkit2gtk-4.1-0 libgtk-3-0 dbus-daemon
-          sudo apt-get purge -y libvulkan1
-          test ! -e /usr/lib/x86_64-linux-gnu/libvulkan.so.1
+          # On 24.04 the display prerequisite depends on the loader package.
+          # 22.04 proves loader absence; 24.04 proves reuse of the host loader.
+          if test "$ACCEPTANCE_OS" = ubuntu-22.04; then
+            sudo apt-get purge -y libvulkan1
+            test ! -e /usr/lib/x86_64-linux-gnu/libvulkan.so.1
+          else
+            test -e /usr/lib/x86_64-linux-gnu/libvulkan.so.1
+          fi
           test "$(dpkg-query -W -f='${Status}' mesa-vulkan-drivers 2>/dev/null || true)" != 'install ok installed'
           test -z "$(find /usr/share/vulkan/icd.d /etc/vulkan/icd.d -name '*.json' 2>/dev/null)"
           chmod +x work/linux-downloads/*.AppImage
