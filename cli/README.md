@@ -67,9 +67,10 @@ that times out clears its mark.
 Reports are written only with `--human`, when stdout is an interactive terminal,
 and when the terminal is known to read the sequence. Rex is detected through
 `REX_SESSION`. Set `O8_TERMINAL_STATUS=1` to send reports in any interactive
-terminal, including with JSON output, or `O8_TERMINAL_STATUS=0` to turn them
-off. A report carries the packet title and a fixed status phrase, and nothing
-else.
+terminal, or `O8_TERMINAL_STATUS=0` to turn them off. With JSON output, forced
+reports go to stderr, so stdout stays parseable. A report carries the packet
+title and a fixed status phrase, and nothing else. o8 writes to its own record
+(`id=o8`), so it never replaces the status of the program that runs it.
 
 ## Commands
 

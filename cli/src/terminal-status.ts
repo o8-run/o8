@@ -22,13 +22,17 @@ export interface TerminalStatusReport {
 }
 
 const APP = 'o8';
+// Every report addresses o8's own record, never the root record, so o8 cannot
+// overwrite or clear what the program hosting its terminal has reported.
+const RECORD_ID = 'o8';
 const TITLE_MAX_BYTES = 192;
 const MSG_MAX_BYTES = 2048;
 const SEQUENCE_MAX_BYTES = 4096;
 
-// C0 controls, DEL, C1 controls, and the invisible direction and formatting
-// characters a terminal would otherwise have to disarm.
-const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/g;
+// C0 controls, DEL, C1 controls, and the invisible direction, joiner, and
+// formatting characters a terminal would otherwise have to disarm. Written as
+// escapes so no invisible character lives in this file.
+const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
 
 function truncateUtf8(text: string, maxBytes: number): string {
   let out = '';
@@ -55,8 +59,8 @@ function base64(text: string): string {
 
 /** Encode one report. Returns an empty string if it would break a protocol limit. */
 export function encodeTerminalStatus(report: TerminalStatusReport): string {
-  if (report.state === 'clear') return '\x1b]7501;state=clear\x1b\\';
-  const pairs = [`state=${report.state}`, `app=${APP}`];
+  if (report.state === 'clear') return `\x1b]7501;state=clear:id=${RECORD_ID}\x1b\\`;
+  const pairs = [`state=${report.state}`, `id=${RECORD_ID}`, `app=${APP}`];
   const title = sanitizeStatusText(report.title, TITLE_MAX_BYTES);
   if (title) pairs.push(`title=${base64(title)}`);
   const msg = sanitizeStatusText(report.msg, MSG_MAX_BYTES);
@@ -71,38 +75,44 @@ interface StatusStream {
 }
 
 /**
- * Whether reports should be written. `O8_TERMINAL_STATUS=0` turns them off.
- * Otherwise stdout must be an interactive terminal, and either
- * `O8_TERMINAL_STATUS=1` forces them on or the output is `--human` inside a
- * terminal known to read the sequence (Rex, detected through `REX_SESSION`).
+ * Where reports are written, or null when they are off.
+ *
+ * `O8_TERMINAL_STATUS=0` turns them off. Human output goes to stdout when it
+ * is an interactive terminal known to read the sequence (Rex, detected through
+ * `REX_SESSION`), or when `O8_TERMINAL_STATUS=1` forces it. JSON output never
+ * gains a byte on stdout: forced reports go to stderr, and only when stderr is
+ * an interactive terminal.
  */
-export function terminalStatusEnabled(
+export function terminalStatusStream(
   mode: OutputMode,
   env: NodeJS.ProcessEnv = process.env,
-  stream: StatusStream = process.stdout,
-): boolean {
+  stdout: StatusStream = process.stdout,
+  stderr: StatusStream = process.stderr,
+): StatusStream | null {
   const override = env.O8_TERMINAL_STATUS?.trim();
-  if (override === '0') return false;
-  if (!stream.isTTY) return false;
-  if (override === '1') return true;
-  return mode.human && Boolean(env.REX_SESSION?.trim());
+  if (override === '0') return null;
+  const forced = override === '1';
+  if (!mode.human) return forced && stderr.isTTY ? stderr : null;
+  if (!stdout.isTTY) return null;
+  return forced || env.REX_SESSION?.trim() ? stdout : null;
 }
 
 export interface TerminalStatusReporter {
   report(report: TerminalStatusReport): void;
 }
 
-/** A reporter that writes nothing when reports are disabled, and skips repeats. */
+/** A reporter that writes nothing when reports are off, and skips repeats. */
 export function createTerminalStatusReporter(
   mode: OutputMode,
   env: NodeJS.ProcessEnv = process.env,
-  stream: StatusStream = process.stdout,
+  stdout: StatusStream = process.stdout,
+  stderr: StatusStream = process.stderr,
 ): TerminalStatusReporter {
-  const enabled = terminalStatusEnabled(mode, env, stream);
+  const stream = terminalStatusStream(mode, env, stdout, stderr);
   let last = '';
   return {
     report(report) {
-      if (!enabled) return;
+      if (!stream) return;
       const sequence = encodeTerminalStatus(report);
       if (!sequence || sequence === last) return;
       last = sequence;

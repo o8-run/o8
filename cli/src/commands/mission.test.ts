@@ -167,8 +167,8 @@ describe('o8 mission terminal status reports (#6137)', () => {
     process.env.REX_SESSION = 'session:test';
     const out = await run({ tty: true, mode: human, statuses: ['running', 'awaiting_review'] }, 'wait', waitArgs);
     expect(reports(out)).toEqual([
-      { state: 'working', app: 'o8', title: 'Fix login redirect', msg: 'Waiting for review' },
-      { state: 'done', app: 'o8', title: 'Fix login redirect', msg: 'Awaiting review' },
+      { state: 'working', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Waiting for review' },
+      { state: 'done', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Awaiting review' },
     ]);
     // The final record is the last thing written, so it survives the exit.
     expect(out.endsWith('\x1b\\')).toBe(true);
@@ -177,7 +177,7 @@ describe('o8 mission terminal status reports (#6137)', () => {
   it('mission wait: reports error for a failed packet without leaking the blocked reason', async () => {
     process.env.REX_SESSION = 'session:test';
     const out = await run({ tty: true, mode: human, statuses: ['failed'] }, 'wait', waitArgs);
-    expect(reports(out)).toEqual([{ state: 'error', app: 'o8', title: 'Fix login redirect', msg: 'Failed' }]);
+    expect(reports(out)).toEqual([{ state: 'error', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Failed' }]);
     const decoded = reports(out).map((r) => `${r.title} ${r.msg}`).join(' ');
     expect(decoded).not.toContain('secret.ts');
   });
@@ -196,15 +196,15 @@ describe('o8 mission terminal status reports (#6137)', () => {
       ['--mission', 'mission-tab', '--watch', '--timeout', '5s', '--poll', '1000'],
     );
     expect(reports(out)).toEqual([
-      { state: 'working', app: 'o8', title: 'Fix login redirect', msg: 'Waiting for review' },
-      { state: 'error', app: 'o8', title: 'Fix login redirect', msg: 'Blocked: needs a decision' },
+      { state: 'working', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Waiting for review' },
+      { state: 'error', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Blocked: needs a decision' },
     ]);
   });
 
   it('strips control characters from a packet title', async () => {
     process.env.REX_SESSION = 'session:test';
     const out = await run({ tty: true, mode: human, statuses: ['released'], title: 'bad\x1b[31m\ntitle' }, 'wait', waitArgs);
-    expect(reports(out)).toEqual([{ state: 'done', app: 'o8', title: 'bad [31m title', msg: 'Released' }]);
+    expect(reports(out)).toEqual([{ state: 'done', id: 'o8', app: 'o8', title: 'bad [31m title', msg: 'Released' }]);
   });
 
   it.each([
@@ -236,7 +236,68 @@ describe('o8 mission terminal status reports (#6137)', () => {
     vi.restoreAllMocks();
     delete process.env.REX_SESSION;
     process.env.O8_TERMINAL_STATUS = '1';
-    const forced = await run({ tty: true, mode, statuses: ['awaiting_review'] }, 'wait', waitArgs);
+    const forced = await run({ tty: true, mode: human, statuses: ['awaiting_review'] }, 'wait', waitArgs);
     expect(reports(forced).map((r) => r.state)).toEqual(['done']);
+  });
+
+  it('forced JSON output keeps stdout parseable and writes the report to stderr', async () => {
+    process.env.O8_TERMINAL_STATUS = '1';
+    const stderrTty = Object.getOwnPropertyDescriptor(process.stderr, 'isTTY');
+    Object.defineProperty(process.stderr, 'isTTY', { value: true, configurable: true });
+    let err = '';
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      err += String(chunk);
+      return true;
+    });
+    try {
+      const out = await run({ tty: true, mode, statuses: ['running', 'awaiting_review'] }, 'wait', waitArgs);
+      expect(out).not.toContain(OSC);
+      expect((JSON.parse(out) as { schema: string }).schema).toBe('o8/cli/mission.wait/v1');
+      expect(reports(err).map((r) => r.state)).toEqual(['working', 'done']);
+    } finally {
+      if (stderrTty) Object.defineProperty(process.stderr, 'isTTY', stderrTty);
+      else delete (process.stderr as { isTTY?: boolean }).isTTY;
+    }
+  });
+
+  it('clears the working record when a status read fails mid-watch', async () => {
+    process.env.REX_SESSION = 'session:test';
+    process.env.O8_API_PORT = '47120';
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call += 1;
+      if (call > 1) return new Response(JSON.stringify({ ok: false, error: 'boom' }), { status: 500 });
+      return new Response(JSON.stringify(statusResponse('running')), { status: 200 });
+    }));
+    let out = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk);
+      return true;
+    });
+    await expect(runMission(human, 'wait', waitArgs)).rejects.toBeDefined();
+    expect(reports(out).map((r) => r.state)).toEqual(['working', 'clear']);
+  });
+
+  it('labels a mission with several packets by count and reports the one that finished', async () => {
+    process.env.REX_SESSION = 'session:test';
+    process.env.O8_API_PORT = '47120';
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call += 1;
+      const packets = [
+        { id: 'pkt-a', title: 'First', status: 'running' },
+        { id: 'pkt-b', title: 'Second', status: call > 1 ? 'released' : 'running' },
+      ];
+      return new Response(JSON.stringify({ ok: true, result: { missionId: 'mission-tab', packets } }), { status: 200 });
+    }));
+    let out = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk);
+      return true;
+    });
+    await expect(runMission(human, 'wait', waitArgs)).resolves.toBe(0);
+    expect(reports(out).map((r) => [r.state, r.title])).toEqual([['working', '2 packets'], ['done', 'Second']]);
   });
 });

@@ -5,7 +5,7 @@ import {
   encodeTerminalStatus,
   packetStatusReport,
   sanitizeStatusText,
-  terminalStatusEnabled,
+  terminalStatusStream,
   watchingStatusReport,
 } from './terminal-status';
 
@@ -36,19 +36,20 @@ describe('encodeTerminalStatus', () => {
     const pairs = decodePairs(encodeTerminalStatus({ state: 'working', title: 'Fix login', msg: 'Waiting for review' }));
     expect(pairs.state).toBe('working');
     expect(pairs.app).toBe('o8');
+    expect(pairs.id).toBe('o8');
     expect(text(pairs.title)).toBe('Fix login');
     expect(text(pairs.msg)).toBe('Waiting for review');
     for (const value of Object.values(pairs)) expect(value).toMatch(/^[A-Za-z0-9_.,+/=-]*$/);
   });
 
-  it('strips control and direction-override characters before encoding', () => {
+  it('strips control, direction-override, and zero-width characters before encoding', () => {
     const pairs = decodePairs(encodeTerminalStatus({
       state: 'done',
-      title: 'a\x1b]0;evil\x07b\nc\td‮e\u0085f',
+      title: 'a\x1b]0;evil\x07b\nc\td\u202ee\u0085f\u200bg\u2060h\ufeffi',
     }));
     const title = text(pairs.title);
-    expect(title).toBe('a ]0;evil b c d e f');
-    expect(title).not.toMatch(/[\u0000-\u001f\u007f-\u009f‪-‮]/);
+    expect(title).toBe('a ]0;evil b c d e f g h i');
+    expect(title).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/);
   });
 
   it('keeps an oversized title and message inside the protocol limits', () => {
@@ -69,8 +70,8 @@ describe('encodeTerminalStatus', () => {
   });
 
   it('omits empty text and encodes clear with no other keys', () => {
-    expect(encodeTerminalStatus({ state: 'working', title: ' \n ', msg: null })).toBe('\x1b]7501;state=working:app=o8\x1b\\');
-    expect(encodeTerminalStatus({ state: 'clear', title: 'ignored' })).toBe('\x1b]7501;state=clear\x1b\\');
+    expect(encodeTerminalStatus({ state: 'working', title: ' \n ', msg: null })).toBe('\x1b]7501;state=working:id=o8:app=o8\x1b\\');
+    expect(encodeTerminalStatus({ state: 'clear', title: 'ignored' })).toBe('\x1b]7501;state=clear:id=o8\x1b\\');
   });
 
   it('sanitizeStatusText collapses whitespace', () => {
@@ -78,36 +79,44 @@ describe('encodeTerminalStatus', () => {
   });
 });
 
-describe('terminalStatusEnabled', () => {
+describe('terminalStatusStream', () => {
   const rex = { REX_SESSION: 'session:abc' };
 
-  it('is on for human output in a Rex terminal', () => {
-    expect(terminalStatusEnabled(human, rex, stream(true))).toBe(true);
+  it('writes human output to stdout in a Rex terminal', () => {
+    const out = stream(true);
+    expect(terminalStatusStream(human, rex, out, stream(true))).toBe(out);
   });
 
   it('is off without Rex, for JSON output, and when stdout is not a terminal', () => {
-    expect(terminalStatusEnabled(human, {}, stream(true))).toBe(false);
-    expect(terminalStatusEnabled(json, rex, stream(true))).toBe(false);
-    expect(terminalStatusEnabled(human, rex, stream(false))).toBe(false);
+    expect(terminalStatusStream(human, {}, stream(true), stream(true))).toBeNull();
+    expect(terminalStatusStream(json, rex, stream(true), stream(true))).toBeNull();
+    expect(terminalStatusStream(human, rex, stream(false), stream(true))).toBeNull();
   });
 
-  it('O8_TERMINAL_STATUS=0 turns it off and =1 forces it on in a terminal', () => {
-    expect(terminalStatusEnabled(human, { ...rex, O8_TERMINAL_STATUS: '0' }, stream(true))).toBe(false);
-    expect(terminalStatusEnabled(json, { O8_TERMINAL_STATUS: '1' }, stream(true))).toBe(true);
-    expect(terminalStatusEnabled(human, { O8_TERMINAL_STATUS: '1' }, stream(false))).toBe(false);
+  it('O8_TERMINAL_STATUS=0 turns it off and =1 forces human output without Rex', () => {
+    const out = stream(true);
+    expect(terminalStatusStream(human, { ...rex, O8_TERMINAL_STATUS: '0' }, stream(true), stream(true))).toBeNull();
+    expect(terminalStatusStream(human, { O8_TERMINAL_STATUS: '1' }, out, stream(true))).toBe(out);
+    expect(terminalStatusStream(human, { O8_TERMINAL_STATUS: '1' }, stream(false), stream(true))).toBeNull();
+  });
+
+  it('forced JSON output goes to stderr, never stdout, and only to a terminal', () => {
+    const err = stream(true);
+    expect(terminalStatusStream(json, { O8_TERMINAL_STATUS: '1' }, stream(true), err)).toBe(err);
+    expect(terminalStatusStream(json, { O8_TERMINAL_STATUS: '1' }, stream(true), stream(false))).toBeNull();
   });
 });
 
 describe('createTerminalStatusReporter', () => {
   it('writes nothing when disabled', () => {
     const out = stream(true);
-    createTerminalStatusReporter(json, { REX_SESSION: 's' }, out).report({ state: 'working' });
+    createTerminalStatusReporter(json, { REX_SESSION: 's' }, out, stream(true)).report({ state: 'working' });
     expect(out.writes).toEqual([]);
   });
 
   it('writes each distinct report once', () => {
     const out = stream(true);
-    const reporter = createTerminalStatusReporter(human, { REX_SESSION: 's' }, out);
+    const reporter = createTerminalStatusReporter(human, { REX_SESSION: 's' }, out, stream(true));
     reporter.report({ state: 'working', title: 'A' });
     reporter.report({ state: 'working', title: 'A' });
     reporter.report({ state: 'done', title: 'A' });

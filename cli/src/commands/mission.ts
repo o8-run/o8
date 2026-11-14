@@ -453,7 +453,10 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
     let terminal: { id: string; status?: string; title?: string } | null = null;
     const tabStatus = createTerminalStatusReporter(mode);
     while (Date.now() < deadline) {
-      const snapshot = await fetchStatus(missionId, false);
+      const snapshot = await fetchStatus(missionId, false).catch((error: unknown) => {
+        tabStatus.report({ state: 'clear' });
+        throw error;
+      });
       terminal = (snapshot.packets ?? []).find(
         (p) => typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status),
       ) ?? null;
@@ -593,7 +596,10 @@ async function runMissionWait(mode: OutputMode, rest: string[]): Promise<number>
     while (Date.now() < deadline) {
       await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
       if (Date.now() >= deadline) break;
-      const next = await fetchStatus(missionId, false);
+      const next = await fetchStatus(missionId, false).catch((error: unknown) => {
+        tabStatus.report({ state: 'clear' });
+        throw error;
+      });
       snapshot = next;
       if (terminalOf(next) || packetSignature(next.packets) !== baselineSig) {
         wakeReason = 'state-change';
