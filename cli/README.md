@@ -113,7 +113,7 @@ title and a fixed status phrase, and nothing else. o8 writes to its own record
 | `o8 terminal list` | List live dashboard shell IDs, including detached sessions |
 | `o8 terminal show <id> [--lines N]` | Read up to 1000 lines from an existing dashboard shell |
 | `o8 terminal observe <id>` | Stream an existing shell read-only; `--human` prints terminal text |
-| `o8 terminal panes` | Inside Rex, open one read-only pane per live shell; `--limit 1..16`, `--machine <label-or-id>` |
+| `o8 terminal panes` | Inside Rex, open one read-only pane per running worker and live shell, labeled by title; `--limit 1..16`, `--machine <label-or-id>` |
 | `o8 terminal control <id>` | Claim one existing shell for input/output; refuses an active writer and releases on exit |
 | `o8 packet log <event>` | (Phase-1 stub) — will append a structured lane event once the backend route lands |
 
