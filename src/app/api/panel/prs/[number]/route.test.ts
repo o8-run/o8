@@ -10,6 +10,7 @@ beforeEach(() => {
   mocks.listRepos.mockResolvedValue([{ localPath: '/workspace/repo', remoteUrl: 'git@github.com:example/repo.git' }]);
   mocks.getCachedRepoReadiness.mockReturnValue(undefined);
   mocks.deriveWorkflowStage.mockReturnValue('review');
+  mocks.mergeGitHubPullRequest.mockResolvedValue({ merged: true, sha: 'e'.repeat(40), publication: { status: 'merged' } });
 });
 describe('pull request read entry point', () => {
   it('shares the existing reviews read and uses cached workspace readiness without starting probes', async () => {
@@ -50,8 +51,14 @@ const post = (body: unknown) => POST(new Request('http://localhost/api/panel/prs
 describe('pull request write entry point', () => {
   it.each(['merge', 'squash', 'rebase'])('keeps the branch and sends the reviewed head for %s', async (mergeMethod) => {
     const commitSha = 'b'.repeat(40);
-    expect((await post({ action: 'merge', mergeMethod, commitSha })).status).toBe(200);
-    expect(mocks.mergeGitHubPullRequest).toHaveBeenCalledWith('example/repo', 5, { deleteBranch: false, mergeMethod, expectedHeadSha: commitSha, beforePublish: expect.any(Function) });
+    const expectedMergeGate = 'd'.repeat(64);
+    expect((await post({ action: 'merge', mergeMethod, commitSha, expectedMergeGate })).status).toBe(200);
+    expect(mocks.mergeGitHubPullRequest).toHaveBeenCalledWith('example/repo', 5, { deleteBranch: false, mergeMethod, expectedHeadSha: commitSha, expectedMergeGate, principal: 'anonymous' });
+  });
+  it('reports an accepted queue entry separately from a merged commit', async () => {
+    mocks.mergeGitHubPullRequest.mockResolvedValueOnce({ merged: false, publication: { status: 'queued', mergedSha: null } });
+    const response = await post({ action: 'merge', mergeMethod: 'squash', commitSha: 'a'.repeat(40) });
+    expect(await response.json()).toMatchObject({ ok: true, action: 'queued', publication: { status: 'queued', mergedSha: null } });
   });
   it.each([{ action: 'merge' }, { action: 'merge', commitSha: 'a'.repeat(40), mergeMethod: 'bad' }, { action: 'enable-auto-merge', mergeMethod: 'squash' }])('refuses an unbound action', async (body) => {
     expect((await post(body)).status).toBe(400); expect(mocks.mergeGitHubPullRequest).not.toHaveBeenCalled(); expect(mocks.updateGitHubPullRequestMode).not.toHaveBeenCalled();
@@ -59,7 +66,7 @@ describe('pull request write entry point', () => {
   it.each(['draft', 'ready', 'enable-auto-merge', 'disable-auto-merge'])('uses the repository-bound handler for %s', async (action) => {
     const commitSha = 'c'.repeat(40);
     expect((await post({ action, commitSha, mergeMethod: 'rebase' })).status).toBe(200);
-    expect(mocks.updateGitHubPullRequestMode).toHaveBeenCalledWith('example/repo', 5, action, { expectedHeadSha: commitSha, mergeMethod: 'rebase', ...(action === 'enable-auto-merge' ? { beforePublish: expect.any(Function) } : {}) });
+    expect(mocks.updateGitHubPullRequestMode).toHaveBeenCalledWith('example/repo', 5, action, { expectedHeadSha: commitSha, mergeMethod: 'rebase', ...(action === 'enable-auto-merge' ? { expectedMergeGate: undefined, principal: 'anonymous' } : {}) });
   });
   it.each([['approve', 'APPROVE'], ['request-changes', 'REQUEST_CHANGES'], ['review-comment', 'COMMENT']])('submits %s against the supplied commit', async (action, event) => {
     const commitSha = 'a'.repeat(40);
