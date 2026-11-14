@@ -17,7 +17,11 @@ o8 is a free, open-source review and merge layer for coding agents. Write code w
 
 Featured in [Awesome Mac](https://github.com/jaywcjlove/awesome-mac) and [Awesome GPUI](https://github.com/zed-industries/awesome-gpui).
 
-https://github.com/user-attachments/assets/4dba20b4-58d6-4f1a-b65d-911e7c4ebfa4
+<p align="center">
+  <a href="https://x.com/marquisehurtt/status/2121680773774262489"><img src="https://github.com/user-attachments/assets/65b6c38f-01d0-4ad5-8405-5a7f3bf05d0a" alt="The o8 launch film: a week of commits pours past, a second agent reads the real diff and gives each change a verdict, one change is sent back, and only the approved commit merges" width="100%"></a>
+</p>
+
+[Watch the film with sound](https://x.com/marquisehurtt/status/2121680773774262489)
 
 - **Independent review.** The agent that wrote the code never approves it. A separate reviewer reads the real diff, and its approval is tied to the exact commit it reviewed.
 - **Findings go back to the author.** Rejected work returns to the agent that wrote it, with the saved findings. Each handoff has a receipt, corrections are capped at two rounds, and a stopped worker is never restarted.
