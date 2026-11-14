@@ -52,6 +52,10 @@ pub fn watch() {
             let Ok(frame) = serde_json::from_slice::<Value>(&line) else {
                 continue;
             };
+            if frame["type"] == "dictation-pill" {
+                crate::native_pill::enqueue(frame);
+                continue;
+            }
             if frame["type"] != "browser-agent" {
                 continue;
             }

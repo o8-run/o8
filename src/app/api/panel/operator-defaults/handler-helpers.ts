@@ -471,7 +471,7 @@ export function normalizeUpdate(body: Record<string, unknown>): Partial<Operator
     update.editorCommand = body.editorCommand.trim();
   }
 
-  for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'experimentalNext', 'nativeBrowserView'] as const) {
+  for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'experimentalNext', 'nativeDictationPill', 'nativeBrowserView'] as const) {
     const value = body[field];
     if (value === undefined) continue;
     if (typeof value !== 'boolean') throw new Error(`${field} must be boolean.`);

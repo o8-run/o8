@@ -12,9 +12,10 @@ interface EditApplied {
 
 interface EditRevertChipProps {
   onError: (message: string) => void;
+  onVisible?: (visible: boolean) => void;
 }
 
-export function EditRevertChip({ onError }: EditRevertChipProps) {
+export function EditRevertChip({ onError, onVisible }: EditRevertChipProps) {
   const [editApplied, setEditApplied] = useState<EditApplied | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -66,6 +67,8 @@ export function EditRevertChip({ onError }: EditRevertChipProps) {
       onError(`invoke agent_edit_revert failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }, [dismissAfter, onError]);
+
+  useEffect(() => { onVisible?.(editApplied !== null); }, [editApplied, onVisible]);
 
   if (!editApplied) return null;
 

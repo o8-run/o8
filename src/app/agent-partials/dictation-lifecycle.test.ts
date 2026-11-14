@@ -97,6 +97,14 @@ beforeEach(async () => {
   dock = host.querySelector('#dock')!;
   hud = host.querySelector('#hud')!;
 });
+async function remountSurfaces() {
+  await act(async () => root.render(null));
+  await act(async () => root.render(createElement('div', null,
+    createElement('div', { id: 'dock' }, createElement(DictationPillPage)),
+    createElement('div', { id: 'hud' }, createElement(AgentPartialsPage)))));
+  dock = host.querySelector('#dock')!;
+  hud = host.querySelector('#hud')!;
+}
 afterEach(async () => {
   await act(async () => root.unmount());
   dom.window.close();
@@ -106,6 +114,101 @@ afterEach(async () => {
 });
 
 describe('native Fn dictation surfaces', () => {
+  it('routes an acknowledged native finish only to the same listening gesture', async () => {
+    let replySession: number | undefined;
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const session = body.snapshot?.session;
+      return new Response(JSON.stringify({ native: true, ...(replySession !== undefined && session ? { finishSession: replySession } : {}) }), { headers: { 'Content-Type': 'application/json' } });
+    });
+    await wait(1000);
+    await event('system-start', { hud: false, surface: 'off', sessionId: 701 });
+    await wait(100);
+    const invoke = vi.mocked((dom.window as unknown as { __TAURI_INTERNALS__: { invoke: (command: string, args?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__.invoke);
+    const frame = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body ?? '{}'))).find(body => body.snapshot?.session);
+    replySession = frame.snapshot.session - 1;
+    await wait(100);
+    expect(invoke.mock.calls.filter(([command]) => command === 'o8_system_dictation_finish')).toHaveLength(0);
+    replySession = frame.snapshot.session;
+    await wait(100);
+    expect(invoke.mock.calls.filter(([command]) => command === 'o8_system_dictation_finish')).toHaveLength(1);
+    await event('final', { sessionId: 701, text: 'Finished words' });
+    await wait(100);
+    expect(invoke.mock.calls.filter(([command]) => command === 'o8_system_dictation_finish')).toHaveLength(1);
+  });
+  it('stops probing when the flag is off, including across a minute of idle', async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ native: false, enabled: false })));
+    await remountSurfaces();
+    await wait(1000);
+    const initial = vi.mocked(fetch).mock.calls.length;
+    await wait(60000);
+    expect(fetch).toHaveBeenCalledTimes(initial);
+    await event('system-start', { hud: false, surface: 'off', sessionId: 800 });
+    await wait(100);
+    expect(fetch).toHaveBeenCalledTimes(initial);
+    await wait(60000);
+    expect(fetch).toHaveBeenCalledTimes(initial);
+  });
+  it('flag off preserves web visibility during quiet mode', async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ native: false, enabled: false })));
+    await remountSurfaces();
+    await wait(1000);
+    await event('system-start', { hud: false, surface: 'off', sessionId: 801 });
+    await act(async () => {
+      bus.get('o8:quiet-mode-changed')?.forEach(callback => callback({ payload: { active: true } }));
+    });
+    expect((dock.firstElementChild as HTMLElement).style.display).toBe('flex');
+  });
+  it('hands pure dictation to native only after prepare, and keeps the web edit chip available', async () => {
+    const frames: Record<string, unknown>[] = [];
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      frames.push(body);
+      return new Response(JSON.stringify({ native: true }), { headers: { 'Content-Type': 'application/json' } });
+    });
+    await remountSurfaces();
+    await wait(1000);
+    const firstSession = Date.now();
+    await event('system-start', { hud: false, surface: 'off', sessionId: 501 });
+    await event('level', { sessionId: 501, level: 0.7 });
+    await wait(100);
+    expect(frames[0]?.action).toBe('prepare');
+    expect(frames.some(frame => frame.action === 'frame' && (frame.snapshot as { state?: string })?.state === 'recording')).toBe(true);
+    expect((dock.firstElementChild as HTMLElement).style.display).toBe('none');
+    expect(listeningAtNotch()).toBeNull();
+    await act(async () => {
+      bus.get('o8:edit-applied')?.forEach(callback => callback({ payload: { app: 'Fixture' } }));
+    });
+    expect((dock.firstElementChild as HTMLElement).style.display).toBe('flex');
+    expect(dock.textContent).toContain('Revert');
+    expect((dock.firstElementChild as HTMLElement).style.paddingTop).toBe('60px');
+    expect(listeningAtNotch()).toBeNull();
+    for (const [type, state] of [['final', 'transcribing'], ['audio_file', 'polishing'], ['system-pasted', 'success']] as const) {
+      await event(type, { sessionId: 501, text: 'Delivered words.' });
+      await wait(100);
+      expect(frames.some(frame => (frame.snapshot as { state?: string })?.state === state)).toBe(true);
+      expect(dock.textContent).not.toContain(state === 'success' ? 'Delivered words.' : state === 'polishing' ? 'Polishing' : 'Transcribing');
+    }
+    await event('system-start', { hud: false, surface: 'off', sessionId: 502 });
+    await event('error', { sessionId: 502, message: 'Fixture failure' });
+    await wait(100);
+    expect(frames.some(frame => (frame.snapshot as { state?: string })?.state === 'error')).toBe(true);
+    expect(dock.textContent).not.toContain('Fixture failure');
+    await act(async () => {
+      bus.get('o8:quiet-mode-changed')?.forEach(callback => callback({ payload: { active: true } }));
+    });
+    await wait(100);
+    expect((dock.firstElementChild as HTMLElement).style.display).toBe('none');
+    expect(frames.at(-1)?.action).toBe('release');
+
+    const finish = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body ?? '{}'))).find(body => body.snapshot?.session);
+    expect(finish?.action).toBe('frame');
+    expect(finish?.snapshot).toMatchObject({ state: 'recording', session: firstSession });
+    expect(listeningAtNotch()).toBeNull();
+
+
+  });
+
   it('keeps listening, measured waveform, polishing and pasted text in the caret modal', async () => {
     expect((dock.firstElementChild as HTMLElement).style.display).toBe('none');
     await event('system-start', { hud: true, surface: 'caret', mode: 'dictation' });

@@ -334,6 +334,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   experimentalChat: booleanField('experimental', 'chat_enabled'),
   experimentalCanvas: booleanField('experimental', 'canvas_enabled'),
   experimentalNext: booleanField('experimental', 'next_enabled'),
+  nativeDictationPill: booleanField('experimental', 'native_dictation_pill'),
   nativeBrowserView: booleanField('experimental', 'native_browser_view'),
   classAComposer: enumField('brain', 'class_a_composer', 'one of "auto", "haiku-cli", "sonnet-cli", or "fastest"', isClassAComposer),
   brainRoutingMode: enumField('brain', 'routing_mode', 'one of "auto" or "subscription"', isBrainRoutingMode),
