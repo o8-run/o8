@@ -875,7 +875,7 @@ mod port_allocation_tests {
     }
 }
 
-use o8_launch_core::identity::{random_uuid_v4, BootIdentity};
+use o8_launch_core::identity::BootIdentity;
 fn read_or_create_boot_identity() -> BootIdentity {
     o8_launch_core::identity::read_or_create_boot_identity(&o8_data_dir())
 }

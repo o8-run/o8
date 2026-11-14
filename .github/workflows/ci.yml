@@ -721,6 +721,9 @@ jobs:
       - name: Shared launch mechanics
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
         run: cargo test --locked --manifest-path crates/o8-launch-core/Cargo.toml
+      - name: Standalone launcher
+        if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
+        run: cargo test --locked --manifest-path crates/o8-launcher/Cargo.toml -- --test-threads=1
       # Fake-tool tests only; the whisper.cpp helper (`--features whisper`)
       # needs cmake + libclang and is not built here.
       - name: Linux voice backends

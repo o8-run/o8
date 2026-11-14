@@ -29,9 +29,13 @@ direct child of this launcher's API server; otherwise the server reopens it.
 Shutdown stops the API before WS. Each leader receives TERM before its process
 group: closing producer pipes lets GPUI and o8d drain. The launcher reaps children
 and verifies released ports before reporting successful shutdown. Surviving
-descendants receive bounded escalation. Orphan receipts require this install,
+descendants receive bounded escalation. Orphan receipts require a proven install,
 profile, kernel birth identity, server working directory, orphan parent, and
-process group; unresolved receipts are preserved and refused.
+process group. Stale identity and unproven moved-install receipts are removed
+without signalling. Adoption requires an absolute recorded launcher path with a
+file name, matching data directory and birth identity, an orphan group leader,
+the server working directory, and a `node` executable beneath that prior
+launcher directory. Other unresolved live ownership is refused.
 
 The original orphan failure came from comparing mutable command text across
 interpreter exec. A stable kernel birth identity replaces that comparison. The
@@ -51,6 +55,8 @@ logic remain step 4 work.
 ## Verification and limits
 
 Run `cargo test --locked --manifest-path crates/o8-launcher/Cargo.toml -- --test-threads=1`.
+Node.js and Python 3 must be on PATH. The moved-install fixture runs an isolated
+Node listener; the other fixture services use Python.
 The tests spawn this binary with fixture servers and windows in temporary
 directories on free ports. They cover health and boot identity, environment,
 crash/restart exhaustion, shutdown during retry/preflight, drain ordering and
@@ -66,9 +72,65 @@ the launcher forwards an existing `O8_CODEBASE_MEMORY_BIN` and bundled helper
 paths. This crate does not download helpers or implement updater, voice, menu,
 signing, or packaging changes.
 
-Current review state: WIP. The launcher passes 34 macOS and Linux fixture/unit
-tests, and the shared crate passes 19 macOS tests. Repository verification is
-blocked by the existing provider-instance encryption suite: both the full Linux
-run and an isolated rerun fail with "Master key unavailable or changed". The
-two-failure limit stops this correction round; the failure and verification
-receipts are recorded in the pull request.
+Native termination **needs live check** before bundling. Do this on an isolated
+macOS test account with no unsaved work:
+
+1. From the repository root, build with `cargo build --locked --manifest-path
+   crates/o8-launcher/Cargo.toml`. Generate an isolated fixture configuration:
+
+   ```sh
+   python3 - <<'PYFIXTURE'
+   import json, pathlib, tempfile
+   source = pathlib.Path('crates/o8-launcher/tests/support/mod.rs').read_text()
+   script = source.split('let script = r#"', 1)[1].split('"#;', 1)[0]
+   root = pathlib.Path(tempfile.mkdtemp(prefix='o8-launch-live-', dir='/tmp'))
+   for name in ['node', 'dialog', 'window', 'probe', 'focus']:
+       path = root / name
+       path.write_text(script)
+       path.chmod(0o700)
+   for name in ['server.js', 'ws-server.mjs']:
+       (root / name).write_text('fixture')
+   config = dict(data_dir=str(root), server_dir=str(root), node=str(root/'node'),
+                 window=str(root/'window'), dialog=str(root/'dialog'),
+                 probe=str(root/'probe'), focus=str(root/'focus'), version='fixture',
+                 api_port=0, ws_port=0, native_lifecycle=True)
+   (root/'config.json').write_text(json.dumps(config))
+   print(root/'config.json')
+   PYFIXTURE
+   ```
+
+   Start a new session and log to the fixture directory to keep native quit
+   checks independent of the terminal:
+
+   ```sh
+   python3 - crates/o8-launcher/target/debug/o8-launcher <printed-path> <<'PYLAUNCH'
+   import pathlib, subprocess, sys
+   binary = pathlib.Path(sys.argv[1]).expanduser().resolve()
+   config = pathlib.Path(sys.argv[2]).resolve()
+   log_path = config.with_name('launcher-stderr')
+   with log_path.open('ab') as log:
+       child = subprocess.Popen([str(binary), '--config', str(config)],
+           stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+           start_new_session=True)
+   print('Launcher PID:', child.pid, 'Log:', log_path)
+   PYLAUNCH
+   ```
+
+   If using `CARGO_TARGET_DIR`, pass that directory's `debug/o8-launcher` instead.
+2. Record the launcher PID, child PIDs from the receipt files, and published
+   temporary ports. Close the launching terminal before the system-action checks.
+3. Choose Quit from the Dock. Confirm both servers exit, both ports can be bound,
+   and the launcher exits without requiring a second Quit.
+4. Relaunch with a new temporary directory. Request logout, then repeat separately
+   for restart and shutdown. Confirm the system action proceeds after cleanup.
+5. Repeat with an injected server that ignores TERM. Confirm bounded escalation,
+   port release, and system action completion. If cleanup fails, confirm the
+   shutdown error is logged and the termination reply still permits the action.
+6. Relaunch with a fresh fixture directory, remove only that temporary directory's
+   `launcher-api.json`, then request Quit or logout. Confirm the receipt cleanup
+   error is logged before exit, both ports are released, and the action proceeds.
+
+These steps have not been run here. Headless fixtures test the same termination
+state's later/allow decision on successful and failed stop; they do not exercise
+AppKit or authorize switching packaging. Pending spawn receipts and Linux
+subreaper orphan adoption remain follow-up work in #6143.

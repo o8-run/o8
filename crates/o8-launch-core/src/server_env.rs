@@ -85,6 +85,41 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     #[test]
+    fn voice_flags_and_window_suppression_cover_all_modes() {
+        for flag in [Some("1"), Some("true"), Some("TRUE")] {
+            assert!(voice_only(flag));
+        }
+        for flag in [None, Some("0")] {
+            assert!(!voice_only(flag));
+        }
+        for (native_main, voice_only) in
+            [(false, true), (false, false), (true, false), (true, true)]
+        {
+            let env = ServerEnvironment {
+                native_main,
+                voice_only,
+                window: Some("/fixture/window".into()),
+                ..Default::default()
+            };
+            let mut command = Command::new("fixture");
+            env.api(&mut command);
+            let window = command
+                .get_envs()
+                .find(|(k, _)| *k == "O8_NEXT_BIN")
+                .unwrap()
+                .1
+                .unwrap();
+            assert_eq!(
+                window,
+                if native_main && voice_only {
+                    ""
+                } else {
+                    "/fixture/window"
+                }
+            );
+        }
+    }
+    #[test]
     fn optional_shell_resources_and_voice_suppression_match_both_child_commands() {
         let env = ServerEnvironment {
             data_dir: "/fixture/data".into(),

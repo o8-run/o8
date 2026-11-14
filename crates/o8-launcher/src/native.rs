@@ -3,6 +3,39 @@ use std::{
     path::Path,
     sync::{atomic::AtomicBool, Arc},
 };
+// Shared decision state is exercised without creating NSApplication in fixtures.
+#[cfg(target_os = "macos")]
+use objc2_app_kit::NSApplicationTerminateReply as TerminationDecision;
+#[cfg(all(not(target_os = "macos"), test))]
+#[derive(Debug, PartialEq, Eq)]
+enum TerminationDecision {
+    TerminateLater,
+}
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Default)]
+struct Termination {
+    pending: AtomicBool,
+}
+#[cfg(any(target_os = "macos", test))]
+impl Termination {
+    fn request(&self, stop: &AtomicBool) -> TerminationDecision {
+        self.pending
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        TerminationDecision::TerminateLater
+    }
+    fn after_stop(&self, result: Result<(), String>, reply: impl FnOnce(bool)) {
+        if let Err(error) = result {
+            eprintln!("Shutdown incomplete: {error}");
+        }
+        if self
+            .pending
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            reply(true);
+        }
+    }
+}
 pub fn owned_window(
     parent: Option<u32>,
     api: u32,
@@ -36,6 +69,7 @@ mod mac {
     struct State {
         stop: Arc<AtomicBool>,
         show: Arc<AtomicBool>,
+        termination: Termination,
     }
     define_class!(
         #[unsafe(super = NSObject)]
@@ -51,8 +85,7 @@ mod mac {
             }
             #[unsafe(method(applicationShouldTerminate:))]
             fn quit(&self, _: &NSApplication) -> NSApplicationTerminateReply {
-                self.ivars().stop.store(true, Ordering::SeqCst);
-                NSApplicationTerminateReply::TerminateCancel
+                self.ivars().termination.request(&self.ivars().stop)
             }
         }
     );
@@ -74,7 +107,11 @@ mod mac {
             }
             let mtm = MainThreadMarker::new().ok_or("Native lifecycle requires the main thread")?;
             let app = NSApplication::sharedApplication(mtm);
-            let allocated = LauncherDelegate::alloc(mtm).set_ivars(State { stop, show });
+            let allocated = LauncherDelegate::alloc(mtm).set_ivars(State {
+                stop,
+                show,
+                termination: Termination::default(),
+            });
             let delegate: Retained<LauncherDelegate> = unsafe { msg_send![super(allocated), init] };
             app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
             app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
@@ -149,6 +186,11 @@ mod mac {
     impl Drop for Native {
         fn drop(&mut self) {
             if let Some(app) = &self.app {
+                if let Some(delegate) = &self._delegate {
+                    delegate.ivars().termination.after_stop(Ok(()), |allowed| {
+                        app.replyToApplicationShouldTerminate(allowed);
+                    });
+                }
                 app.setDelegate(None);
             }
         }
@@ -183,6 +225,24 @@ mod tests {
             (Some(7), 7, Some(Path::new("/foreign/native-window"))),
         ] {
             assert!(!owned_window(parent, api, path, expected));
+        }
+    }
+}
+
+#[cfg(test)]
+mod termination_tests {
+    use super::*;
+    #[test]
+    fn terminate_later_replies_true_after_stop_even_on_failure() {
+        for result in [Ok(()), Err("stop deadline".into())] {
+            let state = Termination::default();
+            let stop = AtomicBool::new(false);
+            assert_eq!(state.request(&stop), TerminationDecision::TerminateLater);
+            assert!(stop.load(std::sync::atomic::Ordering::SeqCst));
+            let mut replies = Vec::new();
+            state.after_stop(result, |allowed| replies.push(allowed));
+            state.after_stop(Ok(()), |_| panic!("duplicate reply"));
+            assert_eq!(replies, [true]);
         }
     }
 }

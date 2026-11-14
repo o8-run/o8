@@ -246,16 +246,20 @@ pub fn cleanup(directory: &Path, server_dir: &Path) -> Result<(), String> {
         }
         let receipt: Receipt =
             serde_json::from_slice(&bytes).map_err(|_| "Invalid ownership receipt")?;
-        if receipt.install != std::env::current_exe().map_err(|_| "Install unavailable")?
-            || !same_directory(&receipt.directory, directory)
-        {
-            return Err("Foreign ownership receipt".into());
-        }
+        let install = std::env::current_exe().map_err(|_| "Install unavailable")?;
         let current = identity(receipt.pid);
-        if let Some(current) = current {
-            // A mismatch is unresolved evidence, never authority to signal or erase.
-            if current != receipt.identity || !matches(receipt.pid, &receipt.identity) {
-                return Err("Server identity changed".into());
+        let moved = receipt.install != install;
+        let stale = !same_directory(&receipt.directory, directory)
+            || current.as_deref() != Some(&receipt.identity);
+        // Identity mismatch (including an unreadable foreign UID) never grants
+        // signalling authority. Discard the receipt without waiting on its port.
+        if stale || (moved && !old_install_server(receipt.pid, &receipt.install, server_dir)) {
+            fs::remove_file(path).map_err(|_| "Ownership receipt unavailable")?;
+            continue;
+        }
+        if current.is_some() {
+            if !matches(receipt.pid, &receipt.identity) {
+                return Err("Server process group changed".into());
             }
             if parent(receipt.pid) != Some(1) {
                 return Err("Prior server still actively parented".into());
@@ -264,16 +268,35 @@ pub fn cleanup(directory: &Path, server_dir: &Path) -> Result<(), String> {
                 return Err("Foreign server directory".into());
             }
             stop_group(receipt.pid, Some(&receipt.identity), false, receipt.port)?;
-        } else {
-            // Unknown/uninspectable live processes are not treated as absent.
-            if unsafe { libc::kill(receipt.pid as i32, 0) } == 0
-                || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
-            {
-                return Err("Server ownership cannot be inspected".into());
-            }
         }
         wait_for_port(receipt.port)?;
         fs::remove_file(path).map_err(|_| "Ownership receipt unavailable")?;
     }
     Ok(())
+}
+
+fn old_install_server(pid: u32, install: &Path, server_dir: &Path) -> bool {
+    if !install.is_absolute() || install.file_name().is_none() {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    let executable = fs::read_link(format!("/proc/{pid}/exe")).ok();
+    #[cfg(target_os = "macos")]
+    let executable = {
+        let mut bytes = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let count = unsafe {
+            libc::proc_pidpath(pid as i32, bytes.as_mut_ptr().cast(), bytes.len() as u32)
+        };
+        (count > 0).then(|| {
+            PathBuf::from(std::ffi::OsStr::from_bytes(
+                bytes.split(|b| *b == 0).next().unwrap_or_default(),
+            ))
+        })
+    };
+    #[cfg(target_os = "macos")]
+    use std::os::unix::ffi::OsStrExt;
+    executable.is_some_and(|path| {
+        path.file_name().is_some_and(|name| name == "node")
+            && install.parent().is_some_and(|root| path.starts_with(root))
+    }) && cwd(pid).is_some_and(|path| same_directory(&path, server_dir))
 }

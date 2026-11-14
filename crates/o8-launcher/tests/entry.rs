@@ -253,7 +253,7 @@ fn actual_children_receive_the_shared_shell_environment() {
     }
 }
 #[test]
-fn mismatched_birth_identity_preserves_receipt_and_never_signals_the_process() {
+fn mismatched_birth_identity_removes_receipt_and_starts_without_signalling() {
     let mut f = Fixture::new();
     f.start();
     f.ready();
@@ -268,16 +268,13 @@ fn mismatched_birth_identity_preserves_receipt_and_never_signals_the_process() {
     let bytes = receipt.to_string();
     fs::write(&path, &bytes).unwrap();
     f.start();
-    until(|| f.root.join("dialog-reached").exists());
-    let child = f.launcher.as_mut().unwrap();
-    until(|| child.try_wait().unwrap().is_some());
-    f.launcher = None;
-    assert_eq!(fs::read_to_string(path).unwrap(), bytes);
+    until(|| f.starts("api-starts").len() == 2);
     assert!(TcpStream::connect(("127.0.0.1", port)).is_ok());
-    assert_eq!(f.starts("api-starts").len(), 1);
+    let next = fs::read_to_string(path).unwrap();
+    assert_ne!(next, bytes);
 }
 #[test]
-fn foreign_install_receipt_is_not_adopted() {
+fn unproven_moved_install_removes_receipt_without_signalling() {
     let mut f = Fixture::new();
     f.start();
     f.ready();
@@ -296,13 +293,9 @@ fn foreign_install_receipt_is_not_adopted() {
         .into();
     fs::write(&path, receipt.to_string()).unwrap();
     f.start();
-    until(|| f.root.join("dialog-reached").exists());
-    let child = f.launcher.as_mut().unwrap();
-    until(|| child.try_wait().unwrap().is_some());
-    f.launcher = None;
-    assert!(path.exists());
+    until(|| f.starts("api-starts").len() == 2);
     assert!(TcpStream::connect(("127.0.0.1", port)).is_ok());
-    assert_eq!(f.starts("api-starts").len(), 1);
+    assert_ne!(fs::read_to_string(path).unwrap(), receipt.to_string());
 }
 #[test]
 fn receipt_symlink_is_refused_without_truncating_its_target() {

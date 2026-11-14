@@ -31,6 +31,10 @@ function parseRustRange(source: string, name: string): number[] {
 }
 
 describe('headless serve production port constants', () => {
+  it('prevents shell declarations from shadowing shared production port constants', () => {
+    const shell = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8');
+    expect(shell).not.toMatch(/\b(?:const|static)\s+PROD_(?:API|WS)_[A-Z_]*PORT[A-Z_]*\s*:/);
+  });
   it('keeps the panel, CLI bundle copy, and native shell blocks equal', () => {
     const cliSource = readFileSync(join(root, CLI_PATH), 'utf8');
     const rustSource = readFileSync(join(root, RUST_PATH), 'utf8');
