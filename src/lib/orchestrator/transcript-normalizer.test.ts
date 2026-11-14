@@ -145,4 +145,24 @@ describe('normalizeCodexEvents — assistant replies', () => {
     ].join('\n'));
     expect(events.filter((event) => event.type === 'assistant').map((event) => ('text' in event ? event.text : ''))).toEqual(['Same reply.', 'Another reply.']);
   });
+
+  it('still shows the same short reply again in a later turn', () => {
+    const texts = (raw: string[]) => normalizeCodexEvents(raw.join('\n'))
+      .filter((event) => event.type === 'assistant').map((event) => ('text' in event ? event.text : ''));
+    // Older rollout: each turn writes the reply both ways.
+    expect(texts([agentMessage(TS, 'Done.'), reply(TS, 'Done.'), agentMessage(TS, 'Next.'), reply(TS, 'Next.'), reply(TS, 'Done.'), agentMessage(TS, 'Done.')]))
+      .toEqual(['Done.', 'Next.', 'Done.']);
+    // Newer rollout: only items, so every one is shown.
+    expect(texts([reply(TS, 'Done.'), reply(TS, 'Done.')])).toEqual(['Done.', 'Done.']);
+    // Older events alone: every one is shown.
+    expect(texts([agentMessage(TS, 'Done.'), agentMessage(TS, 'Done.')])).toEqual(['Done.', 'Done.']);
+  });
+
+  it('pairs a reply whose item splits it into parts', () => {
+    const split = line({ timestamp: TS, type: 'response_item', payload: { type: 'message', role: 'assistant', content: [
+      { type: 'output_text', text: 'First part.' }, { type: 'output_text', text: 'Second part.' },
+    ] } });
+    const events = normalizeCodexEvents([agentMessage(TS, 'First part.\nSecond part.'), split].join('\n'));
+    expect(events.filter((event) => event.type === 'assistant')).toHaveLength(1);
+  });
 });

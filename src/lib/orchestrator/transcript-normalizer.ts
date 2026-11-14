@@ -128,14 +128,22 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
   let seq = 0;
   let syntheticCallSeq = 0;
   /**
-   * Assistant text already shown. A rollout can carry the same reply twice, as
-   * an `agent_message` event and as an assistant `message` item; newer Codex
-   * versions write only the item.
+   * An older rollout writes each reply twice, as an `agent_message` event and
+   * as an assistant `message` item; a newer one writes only the item. Each
+   * form waiting for its twin is counted by text, so a reply is shown once
+   * while the same text in a later turn is still shown.
    */
-  const shownAssistantText = new Set<string>();
-  const pushAssistant = (ts: string, text: string) => {
-    if (!text || shownAssistantText.has(text)) return;
-    shownAssistantText.add(text);
+  const unpaired = { event: new Map<string, number>(), item: new Map<string, number>() };
+  const pushAssistant = (ts: string, text: string, form: 'event' | 'item') => {
+    if (!text) return;
+    const key = text.replace(/\s+/g, ' ').trim();
+    const twin = unpaired[form === 'event' ? 'item' : 'event'];
+    const waiting = twin.get(key) ?? 0;
+    if (waiting > 0) {
+      twin.set(key, waiting - 1);
+      return;
+    }
+    unpaired[form].set(key, (unpaired[form].get(key) ?? 0) + 1);
     out.push({ seq: nextSeq(), ts, type: 'assistant', text });
   };
   const nextSeq = () => (seq += 1);
@@ -250,12 +258,12 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
         pushAssistant(ts, clip(
           typeof payload!.message === 'string' ? payload!.message : extractText(payload!.content),
           MAX_ASSISTANT_TEXT, true,
-        ));
+        ), 'event');
         continue;
       }
 
       if (type === 'response_item' && payloadType === 'message' && readStr(payload, 'role') === 'assistant') {
-        pushAssistant(ts, clip(extractText(payload!.content), MAX_ASSISTANT_TEXT, true));
+        pushAssistant(ts, clip(extractText(payload!.content), MAX_ASSISTANT_TEXT, true), 'item');
         continue;
       }
 
