@@ -103,6 +103,9 @@ macOS test account with no unsaved work:
 5. Repeat with an injected server that ignores TERM. Confirm bounded escalation,
    port release, and system action completion. If cleanup fails, confirm the
    shutdown error is logged and the termination reply still permits the action.
+6. Relaunch with a fresh fixture directory, remove only that temporary directory's
+   `launcher-api.json`, then request Quit or logout. Confirm the receipt cleanup
+   error is logged before exit, both ports are released, and the action proceeds.
 
 These steps have not been run here. Headless fixtures test the same termination
 state's later/allow decision on successful and failed stop; they do not exercise

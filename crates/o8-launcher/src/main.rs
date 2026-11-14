@@ -52,8 +52,14 @@ impl Server {
         }
         self.stopped = true;
         // The exclusive Child handle remains unreaped until its group drains.
-        ownership::stop_child(&mut self.child, self.port)?;
-        fs::remove_file(&self.receipt).map_err(|_| "Ownership receipt unavailable")?;
+        ownership::stop_child(&mut self.child, self.port).map_err(|error| {
+            eprintln!("Server shutdown incomplete: {error}");
+            error
+        })?;
+        fs::remove_file(&self.receipt).map_err(|_| {
+            eprintln!("Server shutdown incomplete: ownership receipt unavailable");
+            "Ownership receipt unavailable"
+        })?;
         Ok(())
     }
 }

@@ -207,7 +207,34 @@ fn a_proven_server_under_the_old_install_is_stopped_after_a_move() {
     .unwrap();
     f.start();
     f.ready();
-    let status = std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "stat="]).output().unwrap();
+    let status = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "stat="])
+        .output()
+        .unwrap();
     let state = String::from_utf8_lossy(&status.stdout);
-    assert!(state.trim().is_empty() || state.trim().starts_with('Z'), "old server still running: {state}");
+    assert!(
+        state.trim().is_empty() || state.trim().starts_with('Z'),
+        "old server still running: {state}"
+    );
+}
+
+#[test]
+fn failed_shutdown_logs_the_stop_error_and_releases_both_ports() {
+    let mut f = Fixture::new();
+    f.start();
+    f.ready();
+    fs::remove_file(f.root.join("launcher-api.json")).unwrap();
+    let child = f.launcher.as_mut().unwrap();
+    unsafe {
+        libc::kill(child.id() as i32, libc::SIGTERM);
+    }
+    until(|| child.try_wait().unwrap().is_some());
+    assert!(!child.wait().unwrap().success());
+    f.launcher = None;
+    assert!(fs::read_to_string(f.root.join("launcher-stderr"))
+        .unwrap()
+        .contains("Server shutdown incomplete: ownership receipt unavailable"));
+    for port in [f.port("api-port"), f.port("ws-port")] {
+        assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok());
+    }
 }
