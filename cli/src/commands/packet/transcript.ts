@@ -411,6 +411,16 @@ export function holdOpen(terminal: HoldTerminal, options: HoldOptions = {}): Pro
   });
 }
 
+/** The packet status a lane state stands for, as the server maps it. */
+const LANE_PACKET_STATUS: Record<string, string> = {
+  reviewing: 'awaiting_review',
+  merging: 'awaiting_review',
+  awaiting_input: 'blocked',
+  awaiting_orchestrator: 'blocked',
+  awaiting_human: 'blocked',
+  completed: 'released',
+};
+
 /**
  * What a following pane reports to the multiplexer, so its tab is marked for
  * this one worker: working while it follows, then how the packet ended. It
@@ -422,8 +432,8 @@ export function transcriptStatusReport(
 ): TerminalStatusReport {
   if (phase === 'following') return { state: 'working', msg: 'Running' };
   if (phase === 'failed') return { state: 'error', msg: 'Stopped following' };
-  if (state === 'reviewing') return { state: 'done', msg: 'In review' };
-  return packetStatusReport(state, null) ?? { state: 'done', msg: 'Worker stopped' };
+  return packetStatusReport(state ? LANE_PACKET_STATUS[state] ?? state : null, null)
+    ?? { state: 'done', msg: 'Worker stopped' };
 }
 
 export async function runPacketTranscript(mode: OutputMode, rest: string[]): Promise<number> {

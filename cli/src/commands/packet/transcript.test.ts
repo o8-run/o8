@@ -425,14 +425,16 @@ describe('what a following pane marks its tab with', () => {
 
   it('marks how the packet ended', () => {
     expect(transcriptStatusReport('ended', 'awaiting_review')).toMatchObject({ state: 'done', msg: 'Awaiting review' });
-    expect(transcriptStatusReport('ended', 'reviewing')).toEqual({ state: 'done', msg: 'In review' });
+    expect(transcriptStatusReport('ended', 'reviewing')).toMatchObject({ state: 'done', msg: 'Awaiting review' });
+    expect(transcriptStatusReport('ended', 'completed')).toMatchObject({ state: 'done', msg: 'Released' });
+    expect(transcriptStatusReport('ended', 'awaiting_input')).toMatchObject({ state: 'error', msg: 'Blocked: needs a decision' });
     expect(transcriptStatusReport('ended', 'failed')).toMatchObject({ state: 'error', msg: 'Failed' });
     expect(transcriptStatusReport('ended', 'blocked')).toMatchObject({ state: 'error', msg: 'Blocked: needs a decision' });
   });
 
   it('marks a stop it cannot name as done, and a lost follow as an error', () => {
     expect(transcriptStatusReport('ended', null)).toEqual({ state: 'done', msg: 'Worker stopped' });
-    expect(transcriptStatusReport('ended', 'completed')).toEqual({ state: 'done', msg: 'Worker stopped' });
+    expect(transcriptStatusReport('ended', 'paused')).toEqual({ state: 'done', msg: 'Worker stopped' });
     expect(transcriptStatusReport('failed')).toEqual({ state: 'error', msg: 'Stopped following' });
   });
 });
