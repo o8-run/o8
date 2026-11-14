@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CliError, EXIT } from '../../api';
 
 import {
-  followIsOver, followTranscript, holdOpen, nextCursor, parseTranscriptArgs, plainText, shouldCheckState, toolDetail, transcriptLines, type TranscriptEvent,
+  followIsOver, followTranscript, holdOpen, nextCursor, parseTranscriptArgs, plainText, shouldCheckState, toolDetail, transcriptLines, transcriptStatusReport, type TranscriptEvent,
 } from './transcript';
 
 const at = () => '12:31:05';
@@ -405,15 +405,36 @@ describe('taking a follow up again', () => {
   it('reports where it ended', async () => {
     const reply = (seq: number): TranscriptEvent => ({ seq, ts: '', type: 'assistant', text: `r${seq}` });
     const first = { packetId: 'pkt-1', sessionKey: 's1', events: [reply(2), { seq: 3, ts: '', type: 'done' as const, exitCode: 0 }], nextCursor: 3, terminalReason: null };
-    const ended: Array<[number, string | null]> = [];
+    const ended: Array<[number, string | null, string | null]> = [];
     await followTranscript({
       read: async () => ({ ...first, events: [reply(4)], nextCursor: 4 }),
       state: async () => 'reviewing',
       wait: async () => undefined,
       show: () => undefined,
       say: () => undefined,
-      ended: (cursor, session) => { ended.push([cursor, session]); },
+      ended: (cursor, session, state) => { ended.push([cursor, session, state]); },
     }, first);
-    expect(ended).toEqual([[4, 's1']]);
+    expect(ended).toEqual([[4, 's1', 'reviewing']]);
+  });
+});
+
+describe('what a following pane marks its tab with', () => {
+  it('marks it working while it follows', () => {
+    expect(transcriptStatusReport('following')).toEqual({ state: 'working', msg: 'Running' });
+  });
+
+  it('marks how the packet ended', () => {
+    expect(transcriptStatusReport('ended', 'awaiting_review')).toMatchObject({ state: 'done', msg: 'Awaiting review' });
+    expect(transcriptStatusReport('ended', 'reviewing')).toMatchObject({ state: 'done', msg: 'Awaiting review' });
+    expect(transcriptStatusReport('ended', 'completed')).toMatchObject({ state: 'done', msg: 'Released' });
+    expect(transcriptStatusReport('ended', 'awaiting_input')).toMatchObject({ state: 'error', msg: 'Blocked: needs a decision' });
+    expect(transcriptStatusReport('ended', 'failed')).toMatchObject({ state: 'error', msg: 'Failed' });
+    expect(transcriptStatusReport('ended', 'blocked')).toMatchObject({ state: 'error', msg: 'Blocked: needs a decision' });
+  });
+
+  it('marks a stop it cannot name as done, and a lost follow as an error', () => {
+    expect(transcriptStatusReport('ended', null)).toEqual({ state: 'done', msg: 'Worker stopped' });
+    expect(transcriptStatusReport('ended', 'paused')).toEqual({ state: 'done', msg: 'Worker stopped' });
+    expect(transcriptStatusReport('failed')).toEqual({ state: 'error', msg: 'Stopped following' });
   });
 });
