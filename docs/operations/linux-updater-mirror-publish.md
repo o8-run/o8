@@ -96,15 +96,19 @@ that requirement.
 
 The upload has a 30-minute internal deadline and a separate five-minute cleanup
 budget within a 60-minute job. Cleanup attempts every owned asset even if one
-delete fails, and retries a failed inventory. A rerun removes only incomplete
-pairs when every target-named asset present shares one prior attempt's ownership
-label on the same release. Each complete asset must be `uploaded` and match the
-local size and, when provided, SHA-256 digest. Mixed labels or any unlabelled
-target cause refusal before any deletion. A complete pair is also refused.
+delete fails, and retries a failed inventory. A rerun removes only leftovers
+from one prior attempt: every target-named asset present shares that attempt's
+ownership label, and a member is missing or has not reached `uploaded`. A pair
+whose two members are both `uploaded` under one label is a committed release and
+is refused whatever the rerun's local files are, so a re-signed or rebuilt
+artifact never replaces it. Mixed labels or any unlabelled target cause refusal
+before any deletion. A new upload must be `uploaded` and match the local size
+and, when provided, SHA-256 digest before it is accepted.
 After a verified successful upload, both ownership labels are cleared so release
 entries display their filenames. A label-clearing error is reported without
-removing the uploaded pair. If cleanup remains unavailable, inspect the labelled
-leftovers before retrying.
+removing the uploaded pair, and a rerun does not finish the clearing: clear the
+remaining label by hand in the release editor, or with
+`gh api --method PATCH repos/<owner>/<repo>/releases/assets/<id> -f label=`.
 
 The pinned action token defaults are documented in
 [checkout](https://github.com/actions/checkout/blob/11bd71901bbe5b1630ceea73d27597364c9af683/action.yml#L11-L21)

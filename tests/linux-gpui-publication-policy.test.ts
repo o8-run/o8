@@ -92,6 +92,8 @@ it.each([
   ['completed signature replacement', [asset(1,imageName),asset(2,imageName+'.sig','')]],
   ['previous labelled success', [asset(1,imageName),asset(2,imageName+'.sig')]],
   ['mixed ownership', [asset(1,imageName),asset(2,imageName+'.sig',otherOwnership)]],
+  ['settled pair with a different size', [{...asset(1,imageName),size:1},asset(2,imageName+'.sig')]],
+  ['settled pair with a different digest', [{...asset(1,imageName),digest:'sha256:'+'0'.repeat(64)},asset(2,imageName+'.sig')]],
   ['unlabelled lone file', [asset(1,imageName,null)]],
 ] as const)('refuses %s before any deletion', (_case, assets) => {
   const f=uploadFixture([...assets]); const result=f.run();
@@ -109,11 +111,9 @@ it('recovers a labelled lone AppImage and clears both successful upload labels',
   ]);
 });
 
-it.each(['truncated','still uploading','wrong digest'])('recovers an incomplete unanimous pair: %s', mode => {
+it.each(['starter','new'])('recovers a unanimous pair with an unfinished upload: %s', state => {
   const image=asset(1,imageName);
-  if(mode==='truncated')image.size=1;
-  if(mode==='still uploading')image.state='starter';
-  if(mode==='wrong digest')image.digest='sha256:'+ '0'.repeat(64);
+  image.state=state;
   const f=uploadFixture([image,asset(2,imageName+'.sig')]); const result=f.run();
   expect(result.status,result.stderr).toBe(0);
   expect(f.deletes()).toHaveLength(2);

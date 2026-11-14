@@ -42,6 +42,12 @@ function main() {
     asset.name === file && asset.label === label && asset.state === 'uploaded'
     && asset.size === lstatSync(join('publish', file)).size
     && (asset.digest == null || asset.digest === `sha256:${[process.env.APPIMAGE_SHA256, process.env.SIGNATURE_SHA256][index]}`)));
+  // A same-label pair whose members both finished uploading is a committed
+  // release, whatever this run's local bytes are: a re-signed or rebuilt
+  // artifact must never replace it. Only a missing member or an unfinished
+  // upload is a recoverable leftover.
+  const settled = (list, label) => names.every(file => list.some(asset =>
+    asset.name === file && asset.label === label && asset.state === 'uploaded'));
   let before = assets();
   const targets = before.filter(asset => names.includes(asset.name));
   if (targets.length) {
@@ -49,7 +55,7 @@ function main() {
     // Refuse the entire inventory before any mutation, including a completed
     // pair whose signature was subsequently replaced by another publisher.
     if (!targets.every(asset => owned(asset) && asset.label === previousLabel)
-      || complete(targets, previousLabel)) throw new Error('Release asset already exists; refusing replacement');
+      || settled(targets, previousLabel)) throw new Error('Release asset already exists; refusing replacement');
     const recoveryErrors = remove(targets);
     if (recoveryErrors.length) throw new Error(`Leftover cleanup failed: ${recoveryErrors.join('; ')}`);
     before = assets();
