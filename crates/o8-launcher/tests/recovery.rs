@@ -208,6 +208,30 @@ fn pending_recovery_stops_only_the_proven_server_not_inheriting_daemons() {
 }
 
 #[test]
+fn a_pid_reused_after_the_proof_is_never_signalled() {
+    let mut f = Fixture::new();
+    let root = f.root.join("install");
+    install(&f, &root);
+    let server = crash_after_api_spawn(&f, &root);
+    // From the proof onward the launcher reads every PID as a process born at
+    // another time, as when the proven server exits and its PID is reused.
+    f.launcher = Some(launch(
+        &f,
+        &root,
+        &[("O8_LAUNCHER_FAULT", "reuse-after-proof")],
+        "launcher-stderr",
+    ));
+    running(&f, 2, 1);
+    assert!(
+        alive(server),
+        "a process proven under another identity was signalled"
+    );
+    assert!(f.log("launcher-stderr").contains(&format!(
+        "Pending server record discarded: process {server} changed identity after its proof; nothing was signalled"
+    )));
+}
+
+#[test]
 fn a_holder_with_a_live_parent_does_not_block_the_start() {
     let mut f = Fixture::new();
     let root = f.root.join("install");

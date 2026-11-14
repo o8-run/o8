@@ -332,6 +332,11 @@ pub fn birth_clock() -> u64 {
 fn ticks_per_second() -> u64 {
     (unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).max(1) as u64
 }
+/// Largest gap allowed between the recorded spawn time and the fork, so the
+/// server is born well inside the window.
+pub fn spawn_slack() -> u64 {
+    spawn_window() / 4
+}
 /// Birth-clock units in two seconds.
 fn spawn_window() -> u64 {
     #[cfg(target_os = "macos")]
@@ -422,27 +427,67 @@ fn same_user_processes() -> Vec<u32> {
 /// earliest-born same-user holder that was born at or after the spawn (within
 /// `window`, when given) and runs the recorded runtime executable. Every other
 /// holder is logged and never signalled.
-fn proven_holder(hold: &Hold, runtime: FileId, spawned: u64, window: Option<u64>) -> Option<u32> {
+/// The proven server and the identity it had while every check passed. The
+/// identity includes the kernel birth time, so a PID reused after the proof no
+/// longer matches it.
+struct Proven {
+    pid: u32,
+    cookie: String,
+}
+fn proven_holder(
+    hold: &Hold,
+    runtime: FileId,
+    spawned: u64,
+    window: Option<u64>,
+) -> Option<Proven> {
     let holders: Vec<u32> = same_user_processes()
         .into_iter()
         .filter(|pid| holds(*pid, hold))
         .collect();
     let proven = holders
         .iter()
-        .filter_map(|pid| Some((*pid, birth(*pid)?)))
-        .filter(|(pid, born)| {
-            *born >= spawned
-                && window.is_none_or(|window| *born <= spawned.saturating_add(window))
+        .filter_map(|pid| {
+            // Taken before the checks and required unchanged after them, so every
+            // check describes the process this identity names.
+            let cookie = observed(*pid)?;
+            let born = birth(*pid)?;
+            let qualifies = born >= spawned
+                && window.is_none_or(|window| born <= spawned.saturating_add(window))
                 && executable_id(*pid) == Some(runtime)
+                && holds(*pid, hold);
+            (qualifies && observed(*pid).as_deref() == Some(&cookie))
+                .then_some((born, Proven { pid: *pid, cookie }))
         })
-        .min_by_key(|(pid, born)| (*born, *pid))
-        .map(|(pid, _)| pid);
-    for pid in holders.iter().filter(|pid| Some(**pid) != proven) {
+        .min_by_key(|(born, proven)| (*born, proven.pid))
+        .map(|(_, proven)| proven);
+    for pid in holders
+        .iter()
+        .filter(|pid| Some(**pid) != proven.as_ref().map(|proven| proven.pid))
+    {
         crate::note!(
             "Process {pid} holds a server ownership file but is not the proven server; it was left running"
         );
     }
     proven
+}
+/// The identity used for every signalling decision. Debug builds can simulate
+/// a PID reused after the proof (see `fault_after_proof`).
+fn observed(pid: u32) -> Option<String> {
+    let id = identity(pid)?;
+    if cfg!(debug_assertions) && REUSED.load(std::sync::atomic::Ordering::SeqCst) {
+        return Some(format!("{id}:reused"));
+    }
+    Some(id)
+}
+static REUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Debug-build seam for the real-entry test: from here on every PID reads as
+/// another process born at another time.
+fn fault_after_proof() {
+    if cfg!(debug_assertions)
+        && std::env::var("O8_LAUNCHER_FAULT").ok().as_deref() == Some("reuse-after-proof")
+    {
+        REUSED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 fn same_directory(a: &Path, b: &Path) -> bool {
     fs::canonicalize(a)
@@ -451,7 +496,7 @@ fn same_directory(a: &Path, b: &Path) -> bool {
         .is_some_and(|(a, b)| a == b)
 }
 fn matches(pid: u32, cookie: &str) -> bool {
-    identity(pid).as_deref() == Some(cookie) && unsafe { libc::getpgid(pid as i32) } == pid as i32
+    observed(pid).as_deref() == Some(cookie) && unsafe { libc::getpgid(pid as i32) } == pid as i32
 }
 fn port_free(port: u16) -> bool {
     o8_launch_core::ports::bundled_sidecar_port_available(port)
@@ -687,7 +732,9 @@ fn recover_receipt(
         let proven = match (&receipt.hold, receipt.runtime) {
             (Some(record), Some(runtime)) => {
                 hold_intact(hold, record)
-                    && proven_holder(record, runtime, receipt.spawned, None) == Some(pid)
+                    && proven_holder(record, runtime, receipt.spawned, None).is_some_and(|proven| {
+                        proven.pid == pid && proven.cookie == receipt.identity
+                    })
             }
             _ => false,
         };
@@ -731,7 +778,7 @@ fn recover_pending(record: &Pending, directory: &Path, hold: &Path) -> Result<()
         );
         return Ok(());
     }
-    let Some(pid) = proven_holder(
+    let Some(Proven { pid, cookie }) = proven_holder(
         &record.hold,
         record.runtime,
         record.spawned,
@@ -740,17 +787,21 @@ fn recover_pending(record: &Pending, directory: &Path, hold: &Path) -> Result<()
         crate::note!("Pending server record discarded: no live process is proven to be its server");
         return Ok(());
     };
-    // Captured after the proof; stop_group re-checks it before each signal.
-    let Some(cookie) = identity(pid) else {
-        crate::note!("Pending server record discarded: process {pid} exited during inspection");
-        return Ok(());
-    };
+    fault_after_proof();
     if unsafe { libc::getpgid(pid as i32) } != pid as i32 {
         crate::note!("Process {pid} matches a pending server record but leads no process group; it was left running");
         return Ok(());
     }
     if parent(pid) != Some(1) {
         return Err("Prior server still actively parented".into());
+    }
+    // Only the identity proven above authorizes a signal; stop_group re-checks
+    // it before each one. A PID reused since the proof reads differently.
+    if observed(pid).as_deref() != Some(&cookie) {
+        crate::note!(
+            "Pending server record discarded: process {pid} changed identity after its proof; nothing was signalled"
+        );
+        return Ok(());
     }
     crate::note!(
         "Stopping process {pid} from a pending server record: it is the proven holder of this spawn's ownership file"

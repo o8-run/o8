@@ -94,6 +94,14 @@ counts), exactly one is accepted: the earliest-born process that
 - runs the recorded runtime executable, compared by device and inode so a moved
   install still matches.
 
+The proof captures the process's kernel identity (which includes its birth
+time) before these checks and requires it unchanged after them. That identity,
+and no later reading, is re-checked before every signal, so a PID reused after
+the proof is logged and never signalled. The recorded spawn time is confirmed
+against a reading taken after the hold file and the record are flushed, so slow
+storage cannot push the real server outside the window; a backward wall-clock
+step on macOS fails closed (the orphan is left and nothing is signalled).
+
 Every other holder is logged and never signalled. Descendants are born after the
 server, so the server is always the earliest; a descendant can only be chosen if
 the server is gone and the descendant runs the same runtime. Process birth comes

@@ -178,22 +178,40 @@ fn spawn(
     let (hold_file, hold) =
         ownership::create_hold(&hold_path, &token).map_err(|_| "Ownership unavailable")?;
     let runtime = ownership::file_id(&config.node).ok_or("Server runtime unavailable")?;
-    // Taken before the fork: the server is born at or after this reading.
-    let spawned = ownership::birth_clock();
-    let pending = Pending {
-        hold: hold.clone(),
-        directory: config.data_dir.clone(),
-        install: executable.clone(),
-        port,
-        spawned,
-        runtime,
+    // The record's spawn time opens a two-second proof window, so it must be
+    // read after the hold file and the record itself are flushed, right before
+    // the fork. A reading is written, then confirmed against a fresh one; a
+    // flush slower than the slack rewrites the record with the fresh reading.
+    // A backward wall-clock step between reading and fork (macOS; Linux uses the
+    // monotonic boot clock) makes the server look born too early: recovery then
+    // fails closed, leaving the orphan and signalling nothing.
+    let write_pending = |spawned: u64| {
+        let pending = Pending {
+            hold: hold.clone(),
+            directory: config.data_dir.clone(),
+            install: executable.clone(),
+            port,
+            spawned,
+            runtime,
+        };
+        serde_json::to_vec(&pending)
+            .ok()
+            .is_some_and(|bytes| private_write(&pending_path, &bytes).is_ok())
     };
-    if private_write(
-        &pending_path,
-        &serde_json::to_vec(&pending).map_err(|_| "Ownership unavailable")?,
-    )
-    .is_err()
-    {
+    let mut spawned = ownership::birth_clock();
+    let mut confirmed = false;
+    for _ in 0..3 {
+        if !write_pending(spawned) {
+            break;
+        }
+        let now = ownership::birth_clock();
+        if now.saturating_sub(spawned) <= ownership::spawn_slack() {
+            confirmed = true;
+            break;
+        }
+        spawned = now;
+    }
+    if !confirmed {
         let _ = fs::remove_file(&pending_path);
         let _ = fs::remove_file(&hold_path);
         return Err("Ownership unavailable".into());
