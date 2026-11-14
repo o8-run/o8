@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import { CliError, EXIT } from '../../api';
+
 import {
-  followIsOver, nextCursor, parseTranscriptArgs, plainText, shouldCheckState, toolDetail, transcriptLines, type TranscriptEvent,
+  followIsOver, followTranscript, nextCursor, parseTranscriptArgs, plainText, shouldCheckState, toolDetail, transcriptLines, type TranscriptEvent,
 } from './transcript';
 
 const at = () => '12:31:05';
@@ -73,15 +75,29 @@ describe('the lines an event prints', () => {
 
   it('keeps the lines of a reply, indented under the time', () => {
     expect(transcriptLines({ seq: 3, ts: '', type: 'assistant', text: 'First line.\n\x1b[2JSecond line.' }, at))
-      .toEqual(['12:31:05  First line.', '        | [2JSecond line.']);
+      .toEqual(['12:31:05  | First line.', '          | [2JSecond line.']);
     expect(transcriptLines({ seq: 3, ts: '', type: 'assistant', text: '  \n ' }, at)).toEqual([]);
   });
 
-  it('marks later reply lines so reply text cannot pass for an event', () => {
-    const lines = transcriptLines({ seq: 3, ts: '', type: 'assistant', text: 'ok\nfailed: x\n\n12:31:06  Bash  rm -rf /' }, at);
-    expect(lines).toEqual(['12:31:05  ok', '        | failed: x', '        |', '        | 12:31:06 Bash rm -rf /']);
-    const failed = transcriptLines({ seq: 2, ts: '', type: 'tool_result', tool: 'Bash', ok: false, summary: 'x' }, at);
-    expect(lines).not.toContain(failed[0]);
+  it('marks every reply line, so reply text cannot pass for any event line', () => {
+    const real = [
+      ...transcriptLines({ seq: 2, ts: '', type: 'tool_result', tool: 'Bash', ok: false, summary: 'x' }, at),
+      ...transcriptLines({ seq: 5, ts: '', type: 'error', message: 'build failed' }, at),
+      ...transcriptLines({ seq: 6, ts: '', type: 'done', exitCode: 1 }, at),
+      ...transcriptLines({ seq: 4, ts: '', type: 'steer', source: 'operator', text: 'stop' }, at),
+      ...transcriptLines(call('Bash', { command: 'rm -rf /' }), at),
+    ];
+    expect(real).toHaveLength(5);
+    for (const text of ['error: build failed', 'finished (exit 1)', 'steer from operator: stop', 'Bash  rm -rf /',
+      'ok\nfailed: x', 'ok\n\n12:31:05  error: build failed']) {
+      const lines = transcriptLines({ seq: 3, ts: '', type: 'assistant', text }, at);
+      expect(lines.length).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(line).toMatch(/^(12:31:05| {8}) {2}\|( |$)/);
+        expect(real).not.toContain(line);
+      }
+    }
+    for (const line of real) expect(line).not.toMatch(/^(12:31:05| {8}) {2}\|/);
   });
 
   it('shows steers, errors and the end', () => {
@@ -136,5 +152,106 @@ describe('where a follow reads next', () => {
   it('starts over when the packet has a new worker session', () => {
     expect(nextCursor(40, 's1', { sessionKey: 's2', nextCursor: 41 })).toEqual({ cursor: 0, session: 's2', restarted: true });
     expect(nextCursor(40, 's1', { sessionKey: null, nextCursor: null })).toEqual({ cursor: 40, session: 's1', restarted: false });
+  });
+});
+
+describe('the follow loop', () => {
+  const reply = (seq: number): TranscriptEvent => ({ seq, ts: '', type: 'assistant', text: `r${seq}` });
+  const done = (seq: number): TranscriptEvent => ({ seq, ts: '', type: 'done', exitCode: 0 });
+  const page = (events: TranscriptEvent[], sessionKey = 's1') => ({
+    packetId: 'pkt-1', sessionKey, events, nextCursor: events.length ? events[events.length - 1].seq : null, terminalReason: null,
+  });
+
+  /** Plays back pages and lane states in order, and records everything the loop did. */
+  function steps(pages: Array<ReturnType<typeof page> | Error>, states: Array<string | null | Error>) {
+    const log: string[] = [];
+    return {
+      log,
+      steps: {
+        read: async (cursor: number) => {
+          const next = pages.shift();
+          log.push(`read ${cursor}`);
+          if (!next) throw new Error('ran out of pages');
+          if (next instanceof Error) throw next;
+          return next;
+        },
+        state: async () => {
+          const next = states.shift();
+          log.push(`state ${String(next instanceof Error ? 'fails' : next)}`);
+          if (next === undefined) throw new Error('ran out of states');
+          if (next instanceof Error) throw next;
+          return next;
+        },
+        wait: async () => { log.push('wait'); },
+        show: (events: TranscriptEvent[]) => { if (events.length) log.push(`show ${events.map((event) => event.seq).join(',')}`); },
+        say: (line: string) => { log.push(`say ${line}`); },
+      },
+    };
+  }
+
+  it('shows new events, checks the packet after three quiet pages, and reads once more before it ends', async () => {
+    const run = steps([page([reply(3)]), page([]), page([]), page([]), page([reply(4)])], ['reviewing']);
+    await expect(followTranscript(run.steps, page([reply(2)]))).resolves.toBe(EXIT.OK);
+    expect(run.log).toEqual([
+      'wait', 'read 2', 'show 3',
+      'wait', 'read 3', 'wait', 'read 3', 'wait', 'read 3',
+      'state reviewing', 'read 3', 'show 4',
+      'say The worker stopped. The packet is reviewing.',
+    ]);
+  });
+
+  it('keeps following past a done event while the lane still works', async () => {
+    const run = steps([page([reply(4)]), page([]), page([]), page([]), page([])], ['running', 'awaiting_input']);
+    await followTranscript(run.steps, page([reply(2), done(3)]));
+    expect(run.log.slice(0, 4)).toEqual(['state running', 'wait', 'read 3', 'show 4']);
+    expect(run.log[run.log.length - 1]).toBe('say The worker stopped. The packet is awaiting input.');
+  });
+
+  it('ends at once after a done event when the lane has stopped, with one last read', async () => {
+    const run = steps([page([])], ['reviewing']);
+    await followTranscript(run.steps, page([reply(2), done(3)]));
+    expect(run.log).toEqual(['state reviewing', 'read 3', 'say The worker stopped. The packet is reviewing.']);
+  });
+
+  it('starts over when the packet is dispatched again, without showing the stale page', async () => {
+    const run = steps(
+      [page([reply(41)], 's2'), page([reply(1), reply(2)], 's2'), page([], 's2'), page([], 's2'), page([], 's2'), page([], 's2')],
+      [null],
+    );
+    await followTranscript(run.steps, page([reply(40)]));
+    expect(run.log.slice(0, 6)).toEqual([
+      'wait', 'read 40', 'say The packet was dispatched again. Following the new worker.', 'wait', 'read 0', 'show 1,2',
+    ]);
+    expect(run.log[run.log.length - 1]).toBe('say The worker stopped. The packet is gone.');
+  });
+
+  it('reads a full page again without a pause', async () => {
+    const full = Array.from({ length: 200 }, (_, index) => reply(index + 3));
+    const run = steps([page(full), page([done(203)]), page([])], ['failed']);
+    await followTranscript(run.steps, page([reply(2)]));
+    expect(run.log.filter((entry) => !entry.startsWith('show'))).toEqual([
+      'wait', 'read 2', 'read 202', 'state failed', 'read 203', 'say The worker stopped. The packet is failed.',
+    ]);
+  });
+
+  it('retries a connection failure with a pause, and counts only failures in a row', async () => {
+    const down = () => new CliError('connection_refused', 'down', EXIT.CONNECTION_REFUSED);
+    const run = steps(
+      [down(), down(), down(), down(), page([reply(3)]), down(), down(), down(), down(), page([done(4)]), page([])],
+      ['completed'],
+    );
+    await expect(followTranscript(run.steps, page([reply(2)]))).resolves.toBe(EXIT.OK);
+    expect(run.log.filter((entry) => entry === 'wait')).toHaveLength(10);
+    expect(run.log).toContain('show 3');
+  });
+
+  it('gives up after five connection failures in a row, and at once on any other error', async () => {
+    const down = () => new CliError('connection_refused', 'down', EXIT.CONNECTION_REFUSED);
+    const five = steps([down(), down(), down(), down(), down()], []);
+    await expect(followTranscript(five.steps, page([reply(2)]))).rejects.toThrow('down');
+    expect(five.log.filter((entry) => entry.startsWith('read'))).toHaveLength(5);
+    const refused = steps([new CliError('unauthorized', 'no', EXIT.UNAUTHORIZED)], []);
+    await expect(followTranscript(refused.steps, page([reply(2)]))).rejects.toThrow('no');
+    expect(refused.log).toEqual(['wait', 'read 2']);
   });
 });

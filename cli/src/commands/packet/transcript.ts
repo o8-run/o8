@@ -129,9 +129,9 @@ export function transcriptLines(event: TranscriptEvent, time: (ts: string) => st
     case 'assistant': {
       const text = plainText(event.text, TEXT_MAX, true);
       if (!text) return [];
-      // A bar marks every later line of a reply, so reply text can never pass for an event line.
-      const bar = `${' '.repeat(at.length)}| `;
-      return text.split('\n').map((line, index) => (index === 0 ? `${at}  ${line}` : `${bar}${line}`.trimEnd()));
+      // A bar marks every line of a reply, so reply text can never pass for an event line.
+      const bar = `${' '.repeat(at.length)}  | `;
+      return text.split('\n').map((line, index) => `${index === 0 ? `${at}  | ` : bar}${line}`.trimEnd());
     }
     case 'steer':
       return [`${at}  steer from ${plainText(event.source, 40) || 'operator'}${event.failed ? ' (not delivered)' : ''}: ${plainText(event.text, TEXT_MAX)}`];
@@ -230,7 +230,10 @@ async function laneState(cfg: ResolvedConfig, packetId: string): Promise<string 
   const response = await apiFetch<{ lanes?: Array<{ packetId?: unknown; status?: unknown }> }>(cfg, '/api/lanes', {
     query: { active: 'false' },
   });
-  const lanes = (response.data?.lanes ?? []).filter((lane) => lane.packetId === packetId);
+  if (!Array.isArray(response.data?.lanes)) {
+    throw new CliError('invalid_response', 'The lane list returned an invalid response.', EXIT.CONFLICT);
+  }
+  const lanes = response.data.lanes.filter((lane) => lane.packetId === packetId);
   const state = lanes[lanes.length - 1]?.status;
   return typeof state === 'string' ? state : null;
 }
@@ -251,45 +254,56 @@ export function nextCursor(
   };
 }
 
-/** Reads on until the worker stops. Ctrl-C ends it the usual way: no handler is installed. */
-async function follow(cfg: ResolvedConfig, packetId: string, first: TranscriptPage, mode: OutputMode): Promise<number> {
+export interface FollowSteps {
+  read(cursor: number): Promise<TranscriptPage>;
+  state(): Promise<string | null>;
+  wait(): Promise<void>;
+  show(events: TranscriptEvent[]): void;
+  say(line: string): void;
+}
+
+/**
+ * Reads on until the worker stops. Ctrl-C ends it the usual way: no handler is
+ * installed. Each round checks the packet when that is due, pauses, then
+ * reads. A stop is followed by one last read, so events written while the
+ * check ran are still shown.
+ */
+export async function followTranscript(steps: FollowSteps, first: TranscriptPage): Promise<number> {
   let cursor = first.nextCursor ?? 0;
   let session = first.sessionKey;
   let quietPages = 0;
   let failures = 0;
   let page: Pick<TranscriptPage, 'events'> = first;
   while (true) {
-    let state: string | null | undefined;
     try {
-      if (shouldCheckState(page, quietPages)) state = await laneState(cfg, packetId);
-      if (followIsOver(state)) {
-        if (mode.human) {
-          process.stdout.write(`The worker stopped. The packet is ${state ? plainText(state, 40).replace(/_/g, ' ') : 'gone'}.\n`);
-        }
-        return EXIT.OK;
-      }
+      const state = shouldCheckState(page, quietPages) ? await steps.state() : undefined;
+      const over = followIsOver(state);
       // A full page means more is waiting, so read on without a pause.
-      if (page.events.length < TRANSCRIPT_LIMIT_MAX) await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
-      const read = await fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX });
+      if (!over && page.events.length < TRANSCRIPT_LIMIT_MAX) await steps.wait();
+      const read = await steps.read(cursor);
+      failures = 0;
       const next = nextCursor(cursor, session, read);
-      if (next.restarted) {
+      ({ cursor, session } = next);
+      if (next.restarted && !over) {
         // The page was read with the old session's cursor, so it is not shown. Start the new one over.
-        if (mode.human) process.stdout.write('The packet was dispatched again. Following the new worker.\n');
-        ({ cursor, session } = next);
+        steps.say('The packet was dispatched again. Following the new worker.');
         page = { events: [] };
         quietPages = 0;
         continue;
       }
-      ({ cursor, session } = next);
-      writeEvents(read.events, mode);
+      if (!next.restarted) steps.show(read.events);
+      if (over) {
+        steps.say(`The worker stopped. The packet is ${state ? plainText(state, 40).replace(/_/g, ' ') : 'gone'}.`);
+        return EXIT.OK;
+      }
       page = read;
       quietPages = read.events.length === 0 ? quietPages + 1 : 0;
-      failures = 0;
     } catch (error) {
       failures += 1;
       const passing = error instanceof CliError && PASSING_FAILURES.has(error.code);
       if (!passing || failures >= FOLLOW_RETRIES) throw error;
-      await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
+      // The next round pauses before it reads again.
+      page = { events: [] };
     }
   }
 }
@@ -312,5 +326,11 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
   }
 
   writeEvents(recent.events, mode);
-  return follow(cfg, packetId, recent, mode);
+  return followTranscript({
+    read: (cursor) => fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX }),
+    state: () => laneState(cfg, packetId),
+    wait: () => new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS)),
+    show: (events) => writeEvents(events, mode),
+    say: (line) => { if (mode.human) process.stdout.write(`${line}\n`); },
+  }, recent);
 }
