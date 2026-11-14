@@ -23,6 +23,13 @@ Featured in [Awesome Mac](https://github.com/jaywcjlove/awesome-mac) and [Awesom
 
 [Watch the film with sound](https://x.com/marquisehurtt/status/2121680773774262489)
 
+<details>
+<summary>Play the video here</summary>
+
+https://github.com/user-attachments/assets/4dba20b4-58d6-4f1a-b65d-911e7c4ebfa4
+
+</details>
+
 - **Independent review.** The agent that wrote the code never approves it. A separate reviewer reads the real diff, and its approval is tied to the exact commit it reviewed.
 - **Findings go back to the author.** Rejected work returns to the agent that wrote it, with the saved findings. Each handoff has a receipt, corrections are capped at two rounds, and a stopped worker is never restarted.
 - **Merges you can audit.** The commit that was reviewed is the commit that merges, and every step leaves evidence. A single governed merge operation is being built.
