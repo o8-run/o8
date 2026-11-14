@@ -43,7 +43,7 @@ export function bundleVulkan(appdir) {
     cpSync(`/usr/share/doc/${owner}/copyright`, join(appdir, 'usr/share/doc/o8', notice), { dereference: true });
     notices.set(notice, { name: `usr/share/doc/o8/${notice}`, bytes: statSync(join(appdir, 'usr/share/doc/o8', notice)).size });
     for (const match of readFileSync(join(appdir, 'usr/share/doc/o8', notice), 'utf8')
-      .matchAll(/\/usr\/share\/common-licenses\/([\w.+-]+)/g)) commonLicenses.add(match[1]);
+      .matchAll(/\/usr\/share\/common-licenses\/([\w.+-]+)/g)) commonLicenses.add(match[1].replace(/\.+$/, ''));
     bundled.push({ name: `usr/lib/o8/vulkan/${name}`, bytes: statSync(real).size, package: owner,
       license, version: run('dpkg-query', ['-W', '-f=${Version}', owner]), notice });
   }
