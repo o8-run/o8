@@ -6,7 +6,7 @@ import { resolveConfig, type ResolvedConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
-import { openTerminalPanes, PANE_LIMIT_DEFAULT, PANE_LIMIT_MAX } from './terminal-panes.js';
+import { openTerminalPanes, parsePanesArgs } from './terminal-panes.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
@@ -309,15 +309,36 @@ function observe(cfg: ResolvedConfig, id: string, mode: OutputMode): Promise<num
   });
 }
 
+/** The command that starts this same CLI, for a child process or a pane. */
+function selfCommand(): string[] {
+  const script = process.argv[1];
+  if (!script) throw new CliError('invalid_args', 'Could not work out how to start o8 again.', EXIT.INVALID_ARGS);
+  return [process.execPath, script];
+}
+
 /** Live session IDs on a saved SSH machine, read through this same CLI. */
 function listRemoteSessionIds(machineKey: string): string[] {
+  const [file, ...args] = selfCommand();
   let raw: string;
   try {
-    raw = execFileSync(process.execPath, [process.argv[1], 'terminal', 'list', '--machine', machineKey], {
+    raw = execFileSync(file, [...args, 'terminal', 'list', '--machine', machineKey], {
       encoding: 'utf8', timeout: 30_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
-  } catch {
-    throw new CliError('remote_terminal_error', 'Could not list terminals on that SSH machine.', EXIT.CONFLICT);
+  } catch (error) {
+    // The child prints the same structured error this CLI would. Pass it on.
+    const failed = error as { status?: unknown; stderr?: unknown };
+    let remote: { code?: unknown; message?: unknown; hint?: unknown } | undefined;
+    try {
+      remote = (JSON.parse(String(failed.stderr ?? '')) as { error?: typeof remote }).error;
+    } catch { /* fall through to the generic error */ }
+    const exit = (Object.values(EXIT) as number[]).includes(failed.status as number)
+      ? failed.status as typeof EXIT.CONFLICT : EXIT.CONFLICT;
+    throw new CliError(
+      typeof remote?.code === 'string' ? remote.code : 'remote_terminal_error',
+      typeof remote?.message === 'string' ? remote.message : 'Could not list terminals on that SSH machine.',
+      exit,
+      typeof remote?.hint === 'string' ? remote.hint : undefined,
+    );
   }
   try {
     const payload = JSON.parse(raw) as { sessions?: Array<{ id?: unknown }> };
@@ -328,39 +349,26 @@ function listRemoteSessionIds(machineKey: string): string[] {
 }
 
 async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<number> {
-  let machineKey: string | null = null;
-  let limit = PANE_LIMIT_DEFAULT;
-  if (rest.length % 2 !== 0) {
-    throw new CliError('invalid_args', 'Use `terminal panes [--limit 1..16] [--machine <label-or-id>]`.', EXIT.INVALID_ARGS);
-  }
-  for (let i = 0; i < rest.length; i += 2) {
-    const value = rest[i + 1] ?? '';
-    if (rest[i] === '--machine' && machineKey === null && value && !value.startsWith('--')) machineKey = value;
-    else if (rest[i] === '--limit' && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= PANE_LIMIT_MAX) limit = Number(value);
-    else throw new CliError('invalid_args', 'Use `terminal panes [--limit 1..16] [--machine <label-or-id>]`.', EXIT.INVALID_ARGS);
-  }
+  const { limit, machineKey } = parsePanesArgs(rest);
+  // Both paths need the local operator credential before anything is listed or opened.
+  const cfg = operatorConfig();
   const sessionIds = machineKey
     ? listRemoteSessionIds(machineKey)
-    : (await listSessions(operatorConfig())).map((session) => session.id);
-  const result = openTerminalPanes({
-    sessionIds,
-    limit,
-    machineKey,
-    env: process.env,
-    self: [process.execPath, process.argv[1]],
-  });
+    : (await listSessions(cfg)).map((session) => session.id);
+  const result = openTerminalPanes({ sessionIds, limit, machineKey, env: process.env, self: selfCommand() });
   if (mode.human) {
     const lines = [
       ...result.opened.map((pane) => `opened    ${pane.id}`),
       ...result.existing.map((id) => `existing  ${id}`),
-      ...result.remaining.map((id) => `no room   ${id}`),
+      ...result.remaining.map((id) => `not shown ${id}`),
       ...result.skipped.map(() => 'skipped   (unsafe session ID)'),
+      ...(result.error ? [`error     ${result.error}`] : []),
     ];
     process.stdout.write(lines.length ? `${lines.join('\n')}\n` : 'No live terminals.\n');
   } else {
     printJson({ schema: 'o8/cli/terminal.panes/v1', ...result });
   }
-  return EXIT.OK;
+  return result.error ? EXIT.CONFLICT : EXIT.OK;
 }
 
 export async function runTerminal(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
