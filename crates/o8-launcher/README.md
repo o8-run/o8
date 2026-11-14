@@ -29,13 +29,72 @@ direct child of this launcher's API server; otherwise the server reopens it.
 Shutdown stops the API before WS. Each leader receives TERM before its process
 group: closing producer pipes lets GPUI and o8d drain. The launcher reaps children
 and verifies released ports before reporting successful shutdown. Surviving
-descendants receive bounded escalation. Orphan receipts require a proven install,
-profile, kernel birth identity, server working directory, orphan parent, and
-process group. Stale identity and unproven moved-install receipts are removed
-without signalling. Adoption requires an absolute recorded launcher path with a
-file name, matching data directory and birth identity, an orphan group leader,
-the server working directory, and a `node` executable beneath that prior
-launcher directory. Other unresolved live ownership is refused.
+descendants receive bounded escalation.
+
+### Bounded shutdown
+
+Every exit path (native Quit, logout, restart or shutdown; TERM, INT or HUP; an
+admitted restart; a startup error) runs the same coordinator in `src/shutdown.rs`.
+The whole cleanup is bounded to **10 seconds**, half of launchd's default
+20-second exit timeout. Servers stop within 9 seconds of the request: each group
+drains for up to 7 seconds (o8d's 5.25-second drain plus the Node leader's
+one-second TERM budget), shortened so that group SIGKILL still happens at least
+one second before that 9-second deadline. The coordinator stops waiting at 9.5
+seconds even if an inspection hangs, then releases the instance lock, removes
+`launcher.sock`, and ends and reaps any injected failure-dialog child within the
+last 0.5 seconds.
+
+On a native termination request the launcher answers "terminate later" and starts
+the coordinator on its own thread, because AppKit then waits inside `terminate:`
+and runs no more launcher code on the main thread. The coordinator replies
+`replyToApplicationShouldTerminate:YES` exactly once through the main dispatch
+queue, which AppKit still drains during that wait, after the lock and socket are
+released, including when stopping fails or overruns. AppKit exits right after the
+reply; `applicationWillTerminate:` exits with status 1 instead of 0 when stopping
+failed. The headless path runs the same coordinator inline and returns status 1
+on a failed stop.
+
+### Ownership records
+
+Before each server starts, the launcher creates a private hold file
+(`launcher-api.hold`, `launcher-ws.hold`) containing a random UUIDv4 token (122 random bits), and
+durably writes a pending record (`launcher-*.pending.json`) with that token, the
+hold file's device and inode, the data directory, the install and the port. The
+child receives the token as `O8_LAUNCH_TOKEN` and inherits the hold file as an
+open descriptor; the launcher's own copy is close-on-exec and closed right after
+spawn. Once the PID and kernel birth identity are known, the full receipt
+(`launcher-*.json`, which also carries the hold record) replaces the pending
+record.
+
+The open descriptor is the proof. Reading another process's environment on macOS
+(`KERN_PROCARGS2`) returns the exec-time copy, which the process can overwrite
+(for example when it sets its title) and which is not a documented interface, so
+the launcher does not rely on it. Open descriptors are kernel state: the launcher
+lists them with `proc_pidinfo(PROC_PIDLISTFDS)` and `proc_pidfdinfo` on macOS and
+`/proc/<pid>/fd` on Linux, and matches device and inode. The hold file must still
+exist with the recorded inode and token, so a recycled inode number never counts.
+
+At start, before choosing ports:
+
+- A full receipt is honoured only for a live process with the recorded birth
+  identity, data directory and process group, an orphan parent, and (same install)
+  the server working directory. If the receipt's install differs, the executable
+  path cannot prove anything, because the kernel reports the moved location; the
+  process must instead hold the receipt's hold file. A moved install's servers are
+  then stopped and started again from the new location. A moved-install receipt
+  without that proof is removed and logged as left running.
+- A leftover pending record means a crash between spawn and receipt. The launcher
+  looks among this user's process-group leaders for one holding that hold file. A
+  holder with an orphan parent is stopped with its birth identity re-checked before
+  every signal. A pending record with no live holder, or whose hold file is gone,
+  is removed and logged without signalling.
+- A recorded process that cannot be inspected (gone, recycled, or owned by
+  another user so its identity cannot be read) is never signalled. Its receipt is
+  removed with a log line and start continues; if that process still holds a
+  recorded port, the new servers use other ports or startup reports the conflict.
+
+Nothing is ever signalled on PID, name or port alone. Other unresolved live
+ownership, such as a recorded server whose parent is still alive, is refused.
 
 The original orphan failure came from comparing mutable command text across
 interpreter exec. A stable kernel birth identity replaces that comparison. The
@@ -61,7 +120,11 @@ The tests spawn this binary with fixture servers and windows in temporary
 directories on free ports. They cover health and boot identity, environment,
 crash/restart exhaustion, shutdown during retry/preflight, drain ordering and
 descendant pipe drain, second launch, ownership refusal and orphan cleanup,
-private files, bounded control input, voice-only suppression, and injected dialog.
+private files, bounded control input, voice-only suppression, injected dialog
+reaping, a crash between spawn and receipt (`O8_LAUNCHER_FAULT`, debug builds
+only), and a really moved install whose servers run a copied Node executable.
+Unit tests in `src/shutdown.rs` cover one reply on success, failure and timeout,
+the cleanup bound, and lock and socket release before the reply.
 `tests/launcher-binary-real-path.test.ts` runs these tests and isolated shared
 unit tests in the Linux integration lane.
 
@@ -72,8 +135,9 @@ the launcher forwards an existing `O8_CODEBASE_MEMORY_BIN` and bundled helper
 paths. This crate does not download helpers or implement updater, voice, menu,
 signing, or packaging changes.
 
-Native termination **needs live check** before bundling. Do this on an isolated
-macOS test account with no unsaved work:
+Native termination **needs live check** before bundling. It cannot run in CI.
+Do this on an isolated macOS test account with no unsaved work, never on a
+machine whose o8 is in use:
 
 1. From the repository root, build with `cargo build --locked --manifest-path
    crates/o8-launcher/Cargo.toml`. Generate an isolated fixture configuration:
@@ -117,20 +181,34 @@ macOS test account with no unsaved work:
    ```
 
    If using `CARGO_TARGET_DIR`, pass that directory's `debug/o8-launcher` instead.
-2. Record the launcher PID, child PIDs from the receipt files, and published
-   temporary ports. Close the launching terminal before the system-action checks.
-3. Choose Quit from the Dock. Confirm both servers exit, both ports can be bound,
-   and the launcher exits without requiring a second Quit.
-4. Relaunch with a new temporary directory. Request logout, then repeat separately
-   for restart and shutdown. Confirm the system action proceeds after cleanup.
-5. Repeat with an injected server that ignores TERM. Confirm bounded escalation,
-   port release, and system action completion. If cleanup fails, confirm the
-   shutdown error is logged and the termination reply still permits the action.
-6. Relaunch with a fresh fixture directory, remove only that temporary directory's
-   `launcher-api.json`, then request Quit or logout. Confirm the receipt cleanup
-   error is logged before exit, both ports are released, and the action proceeds.
+2. Record the launcher PID, the server PIDs in `api-starts` and `ws-starts`, and
+   the ports in `api-port` and `ws-port`. Close the launching terminal.
+3. Choose Quit from the Dock icon. Within 10 seconds confirm: the launcher PID is
+   gone (`ps -p <pid>`), both server PIDs are gone, both ports can be bound
+   (`nc -l 127.0.0.1 <port>` starts), `launcher.sock` is absent, and no Quit had
+   to be repeated. `launcher-stderr` has no `Shutdown incomplete` line.
+4. Relaunch with a new fixture directory. Choose Log Out from the Apple menu and
+   confirm the logout completes without a "cancelled logout" or "not responding"
+   notice; after logging back in, repeat the checks from step 3 against the
+   recorded PIDs and ports. Repeat separately for Restart and Shut Down.
+5. Relaunch with a fresh fixture directory after `touch <dir>/stubborn-child`
+   (its WS grandchild ignores TERM). Quit from the Dock. Confirm the launcher
+   exits within 10 seconds, the `held-pid` process is gone, and both ports are
+   free.
+6. Relaunch with a fresh fixture directory, remove only that directory's
+   `launcher-api.json`, then Quit from the Dock. Confirm the launcher still exits
+   within 10 seconds without a second Quit, `launcher-stderr` contains
+   `Shutdown incomplete`, and `ps`/the shell reports the launcher's exit status
+   as 1 (start it from a shell with `; echo $?` instead of step 1's detached
+   form for this check only). Both ports are released.
+7. Move check: make a separate install directory holding a copy of the built
+   `o8-launcher`, `server.js` and `ws-server.mjs`; point `server_dir` at it and
+   start that copy as in step 1. Kill it with `kill -9`, `mv` the install
+   directory, update `server_dir`, and start the moved copy. Confirm the old
+   server PIDs exit and `launcher-stderr` says `started from moved install`.
+   Repeat with the real app bundle while its servers run once it is bundled.
 
-These steps have not been run here. Headless fixtures test the same termination
-state's later/allow decision on successful and failed stop; they do not exercise
-AppKit or authorize switching packaging. Pending spawn receipts and Linux
-subreaper orphan adoption remain follow-up work in #6143.
+These steps have not been run here. Headless fixtures and unit tests exercise the
+coordinator, the bound and the reply-once rule; they do not exercise AppKit or
+authorize switching packaging. Linux subreaper orphan adoption remains follow-up
+work in #6143.

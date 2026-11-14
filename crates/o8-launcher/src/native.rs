@@ -1,41 +1,9 @@
 //! Main-thread AppKit lifecycle. Fixture runs explicitly disable native activation.
+use crate::shutdown::Shutdown;
 use std::{
     path::Path,
     sync::{atomic::AtomicBool, Arc},
 };
-// Shared decision state is exercised without creating NSApplication in fixtures.
-#[cfg(target_os = "macos")]
-use objc2_app_kit::NSApplicationTerminateReply as TerminationDecision;
-#[cfg(all(not(target_os = "macos"), test))]
-#[derive(Debug, PartialEq, Eq)]
-enum TerminationDecision {
-    TerminateLater,
-}
-#[cfg(any(target_os = "macos", test))]
-#[derive(Debug, Default)]
-struct Termination {
-    pending: AtomicBool,
-}
-#[cfg(any(target_os = "macos", test))]
-impl Termination {
-    fn request(&self, stop: &AtomicBool) -> TerminationDecision {
-        self.pending
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        stop.store(true, std::sync::atomic::Ordering::SeqCst);
-        TerminationDecision::TerminateLater
-    }
-    fn after_stop(&self, result: Result<(), String>, reply: impl FnOnce(bool)) {
-        if let Err(error) = result {
-            eprintln!("Shutdown incomplete: {error}");
-        }
-        if self
-            .pending
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
-        {
-            reply(true);
-        }
-    }
-}
 pub fn owned_window(
     parent: Option<u32>,
     api: u32,
@@ -57,7 +25,7 @@ mod mac {
         NSApplicationDelegate, NSApplicationTerminateReply, NSEventMask, NSRunningApplication,
     };
     use objc2_foundation::{
-        MainThreadMarker, NSDate, NSDefaultRunLoopMode, NSObject, NSObjectProtocol,
+        MainThreadMarker, NSDate, NSDefaultRunLoopMode, NSNotification, NSObject, NSObjectProtocol,
     };
     use std::sync::atomic::Ordering;
     use std::{
@@ -65,11 +33,38 @@ mod mac {
         os::unix::ffi::OsStrExt,
         process::Command,
     };
-    #[derive(Debug)]
     struct State {
         stop: Arc<AtomicBool>,
         show: Arc<AtomicBool>,
-        termination: Termination,
+        shutdown: Arc<Shutdown>,
+    }
+    // The main queue still drains while AppKit waits inside `terminate:`.
+    #[repr(C)]
+    struct DispatchQueue {
+        _opaque: [u8; 0],
+    }
+    extern "C" {
+        static _dispatch_main_q: DispatchQueue;
+        fn dispatch_async_f(
+            queue: *const DispatchQueue,
+            context: *mut std::ffi::c_void,
+            work: extern "C" fn(*mut std::ffi::c_void),
+        );
+    }
+    extern "C" fn reply_on_main(context: *mut std::ffi::c_void) {
+        let allowed = !context.is_null();
+        if let Some(mtm) = MainThreadMarker::new() {
+            NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(allowed);
+        }
+    }
+    fn reply_through_main_queue(allowed: bool) {
+        // The context pointer carries only the boolean; nothing is freed.
+        let context = if allowed {
+            std::ptr::NonNull::<u8>::dangling().as_ptr().cast()
+        } else {
+            std::ptr::null_mut()
+        };
+        unsafe { dispatch_async_f(&_dispatch_main_q, context, reply_on_main) };
     }
     define_class!(
         #[unsafe(super = NSObject)]
@@ -85,7 +80,19 @@ mod mac {
             }
             #[unsafe(method(applicationShouldTerminate:))]
             fn quit(&self, _: &NSApplication) -> NSApplicationTerminateReply {
-                self.ivars().termination.request(&self.ivars().stop)
+                let state = self.ivars();
+                state.stop.store(true, Ordering::SeqCst);
+                // The main thread stays inside AppKit's wait from here until the
+                // reply, so servers stop on the coordinator's thread.
+                state.shutdown.begin(reply_through_main_queue);
+                NSApplicationTerminateReply::TerminateLater
+            }
+            #[unsafe(method(applicationWillTerminate:))]
+            fn will_terminate(&self, _: &NSNotification) {
+                // AppKit exits with status 0 after this; report a failed stop instead.
+                if self.ivars().shutdown.failed() {
+                    std::process::exit(1);
+                }
             }
         }
     );
@@ -98,6 +105,7 @@ mod mac {
             enabled: bool,
             stop: Arc<AtomicBool>,
             show: Arc<AtomicBool>,
+            shutdown: Arc<Shutdown>,
         ) -> Result<Self, String> {
             if !enabled {
                 return Ok(Self {
@@ -110,7 +118,7 @@ mod mac {
             let allocated = LauncherDelegate::alloc(mtm).set_ivars(State {
                 stop,
                 show,
-                termination: Termination::default(),
+                shutdown,
             });
             let delegate: Retained<LauncherDelegate> = unsafe { msg_send![super(allocated), init] };
             app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
@@ -185,12 +193,9 @@ mod mac {
     }
     impl Drop for Native {
         fn drop(&mut self) {
+            // A pending termination never returns here: its reply comes from the
+            // shutdown coordinator and AppKit then exits the process.
             if let Some(app) = &self.app {
-                if let Some(delegate) = &self._delegate {
-                    delegate.ivars().termination.after_stop(Ok(()), |allowed| {
-                        app.replyToApplicationShouldTerminate(allowed);
-                    });
-                }
                 app.setDelegate(None);
             }
         }
@@ -202,7 +207,12 @@ pub use mac::Native;
 pub struct Native;
 #[cfg(not(target_os = "macos"))]
 impl Native {
-    pub fn new(_: bool, _: Arc<AtomicBool>, _: Arc<AtomicBool>) -> Result<Self, String> {
+    pub fn new(
+        _: bool,
+        _: Arc<AtomicBool>,
+        _: Arc<AtomicBool>,
+        _: Arc<Shutdown>,
+    ) -> Result<Self, String> {
         Ok(Self)
     }
     pub fn pump(&self) {}
@@ -225,24 +235,6 @@ mod tests {
             (Some(7), 7, Some(Path::new("/foreign/native-window"))),
         ] {
             assert!(!owned_window(parent, api, path, expected));
-        }
-    }
-}
-
-#[cfg(test)]
-mod termination_tests {
-    use super::*;
-    #[test]
-    fn terminate_later_replies_true_after_stop_even_on_failure() {
-        for result in [Ok(()), Err("stop deadline".into())] {
-            let state = Termination::default();
-            let stop = AtomicBool::new(false);
-            assert_eq!(state.request(&stop), TerminationDecision::TerminateLater);
-            assert!(stop.load(std::sync::atomic::Ordering::SeqCst));
-            let mut replies = Vec::new();
-            state.after_stop(result, |allowed| replies.push(allowed));
-            state.after_stop(Ok(()), |_| panic!("duplicate reply"));
-            assert_eq!(replies, [true]);
         }
     }
 }
