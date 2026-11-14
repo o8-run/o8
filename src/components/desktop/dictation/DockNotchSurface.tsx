@@ -31,6 +31,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { dockSurfaces } from './dockPrecedence';
 import type { DictationSnapshot, DictationState } from './types';
 import { DockAskPanel, type AskTurn } from './DockAskPanel';
 import { DockConfirmationCard } from './DockConfirmationCard';
@@ -560,50 +561,19 @@ export function DockNotchSurface({
 }: DockNotchSurfaceProps) {
   const { state, audioLevel, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
-  // The speaking capsule shows when TTS is playing/paused AND no dictation is
-  // active. The TTS engine drives the dock purely via `o8:tts-state` (it no
-  // longer emits the dictation `system-start`), so when the user holds Fn to
-  // talk OVER the TTS, real dictation sets `dictationMode` and wins the dock —
-  // they see their recording waveform, not the speaking controls.
-  const isSpeaking = dictationMode === 'idle' && (ttsState === 'playing' || ttsState === 'paused');
-  // The Ask panel renders while open, EXCEPT when a real dictation takes the
-  // dock (dictationMode !== idle wins — you can Fn-dictate over it). It DOES win
-  // over isSpeaking, because the Ask answer is itself read aloud and the panel
-  // should stay visible while its answer speaks. Chat continuity: a pending
-  // in-panel dictation (panelPending) keeps the panel through the recording —
-  // the live words render as a pending turn INSIDE it, not in the capsule.
-  const isAsking = askOpen && (dictationMode === 'idle' || !!panelPending);
+  // One precedence for the web and native docks: see dockPrecedence.ts.
+  const {
+    isSpeaking, isAsking, isConfirming, isAgentWorking, isDropTarget, isStagedChips, isWorkersInfo, isRealtimeVoice,
+  } = dockSurfaces({
+    dictationState: state, ttsState, askOpen, panelPending: !!panelPending, agentConfirm: !!agentConfirm,
+    agentWorking, dropActive, stagedFiles: !!stagedFiles?.length, showWorkers, workerCount, realtimeVoice,
+  });
   // While listening for the question (empty thread) the panel shows the compact
   // capsule + waveform; once an answer lands it's the full grown panel.
   const askListening = isAsking && askMode === 'listening' && askThread.length === 0;
   const mode = dictationMode;
   const isError = state === 'error';
   const canFinishDictation = mode === 'listening' || mode === 'thinking';
-  // Symon voice agent surfaces. A pending confirm wins over everything except a
-  // real dictation (you can Option-talk over it). The working indicator
-  // shows while the loop runs and nothing else owns the dock.
-  const isConfirming = !!agentConfirm && dictationMode === 'idle';
-  const isAgentWorking =
-    agentWorking && !isConfirming && dictationMode === 'idle' && !isAsking && !isSpeaking;
-  // Drop zone wins while a Finder drag is live (the user is mid-gesture) —
-  // but never over an active dictation, the confirm gate, or the ask panel.
-  const isDropTarget = dropActive && dictationMode === 'idle' && !isConfirming && !isAsking;
-  // Chips show right after a drop, when nothing else owns the dock.
-  const isStagedChips =
-    !isDropTarget && !!stagedFiles?.length && dictationMode === 'idle'
-    && !isConfirming && !isAsking && !isSpeaking && !isAgentWorking;
-  // Transient workers capsule (tap the sliver while the orbit is up).
-  const isWorkersInfo =
-    showWorkers && workerCount > 0 && dictationMode === 'idle' && !isConfirming
-    && !isAsking && !isSpeaking && !isAgentWorking && !isDropTarget && !isStagedChips;
-  // Realtime voice-to-voice presence — the persistent "Symon is live, listening"
-  // capsule. Ambient: it yields to any active dictation, a confirm gate, the ask
-  // panel, speaking, an agent working, a drag, and the transient
-  // staged/workers capsules — then resumes. It replaces the idle sliver while on.
-  const isRealtimeVoice =
-    realtimeVoice !== 'off' && dictationMode === 'idle' && !isConfirming
-    && !isAsking && !isSpeaking && !isAgentWorking && !isDropTarget
-    && !isStagedChips && !isWorkersInfo;
   const workerWaitingCopy = workerWaitingLabel === 'ready'
     ? `${workerWaiting} review ready`
     : `${workerWaiting} waiting on you`;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { DictationSnapshot } from '@/components/desktop/dictation/types';
+import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 import { isTauri } from '@/lib/tauri/bridge';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import timing from '@/lib/next/pill-timing.json';
@@ -13,6 +13,27 @@ export const IDLE_SNAPSHOT: DictationSnapshot = {
   error: null,
   partialTranscript: '',
 };
+
+/** Dock capsules the native panel draws besides dictation. */
+export type NativeCapsuleState = 'speaking' | 'working' | 'voice';
+/** One frame for the native panel: a dictation snapshot or one capsule. `handoff`
+ * marks an idle frame whose surface moved to a still-web dock state. */
+export type NativeDockSnapshot = Omit<DictationSnapshot, 'state'> & {
+  state: DictationState | NativeCapsuleState;
+  paused?: boolean;
+  speed?: number;
+  tool?: string;
+  startedAt?: number;
+  connecting?: boolean;
+  handoff?: boolean;
+};
+/** A click the native panel reports; the web dock runs the matching command. */
+export type NativeDockAction = { session: number; state: NativeCapsuleState; action: 'pause' | 'stop' | 'speed' | 'voice-stop' | 'interrupt'; value?: number | null };
+
+const CAPSULE_ACTIONS: Record<NativeDockAction['action'], NativeCapsuleState> = {
+  pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice',
+};
+const family = (state: NativeDockSnapshot['state']) => state === 'speaking' || state === 'working' || state === 'voice' ? state : 'dictation';
 
 /** Keep retained controls below the native capsule without reasserting a quiet window. */
 export function useNativePillDockExtent(native: boolean, active: boolean, visible: boolean, askOpen: boolean, suppressed: boolean, invoke: (command: string, args: Record<string, unknown>) => void) {
@@ -32,22 +53,31 @@ export function useNativePillDockExtent(native: boolean, active: boolean, visibl
 /** The native window acknowledges preparation before React relinquishes drawing.
  * Frames are sent only from the effect after that hidden render has committed.
  * Failed requests restore web drawing immediately and block the current session. */
-export function useNativeDictationPill(snapshot: DictationSnapshot, session: number, onFinish: () => void): { native: boolean; suppressed: boolean } {
+export function useNativeDictationPill(
+  snapshot: NativeDockSnapshot, session: number, onFinish: () => void, onAction?: (action: NativeDockAction) => void,
+): { native: boolean; suppressed: boolean } {
   const [native, setNative] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
   const active = snapshot.state !== 'idle';
-  const latest = useRef({ snapshot, session, onFinish, native, active: false, generation: 0, retirement: 0, retiredGeneration: 0 });
+  const latest = useRef({
+    snapshot, session, onFinish, onAction, native, active: false, family: family(snapshot.state),
+    generation: 0, retirement: 0, retiredGeneration: 0, retiredSession: session, retiredFamily: family(snapshot.state),
+  });
   const wake = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     const previous = latest.current;
-    const generation = active && (!previous.active || previous.session !== session) ? previous.generation + 1 : previous.generation;
+    const kind = family(snapshot.state);
+    const generation = active && (!previous.active || previous.session !== session || previous.family !== kind)
+      ? previous.generation + 1 : previous.generation;
     const retiring = previous.active && !active;
     latest.current = {
-      snapshot, session, onFinish, native, active, generation,
+      snapshot, session, onFinish, onAction, native, active, family: kind, generation,
       retirement: previous.retirement + (retiring ? 1 : 0),
       retiredGeneration: retiring ? previous.generation : previous.retiredGeneration,
+      retiredSession: retiring ? previous.session : previous.retiredSession,
+      retiredFamily: retiring ? previous.family : previous.retiredFamily,
     };
-  }, [snapshot, session, onFinish, native, active]);
+  }, [snapshot, session, onFinish, onAction, native, active]);
   useEffect(() => {
     if (!isTauri()) return;
     let disposed = false;
@@ -95,7 +125,10 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
       blocked = generation;
       setNative(false);
       // Independent best effort: a lost acknowledgement must not block retirement.
-      void request({ action: 'release' }).catch(() => undefined);
+      // It names its session, so a late arrival cannot hide the next session.
+      const now = latest.current;
+      void request({ action: 'release', ...(now.active ? { session: now.session, kind: now.family } : { session: now.retiredSession, kind: now.retiredFamily }) })
+        .catch(() => undefined);
     };
     // One request owns the transport until its reply settles. Wakes only replace
     // the latest committed snapshot; they never append work to a frame queue.
@@ -107,9 +140,12 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
       awaitingCommit = false;
       let action: 'prepare' | 'frame' | 'release';
       let generation = current.generation;
+      let releaseSession = current.session;
+      let releaseKind = current.family;
       const releasing = current.retirement !== retirementSeen && current.native;
       retirementSeen = current.retirement;
       if (releasing || releasePending) {
+        if (releasing) { releaseSession = current.retiredSession; releaseKind = current.retiredFamily; }
         releasePending = false;
         action = 'release';
         generation = current.retiredGeneration;
@@ -136,7 +172,10 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
           state: frame.state, session: current.session,
           audioLevel: frame.audioLevel, durationMs: frame.durationMs,
           pastedText: bounded(frame.pastedText ?? undefined, 4000), error: bounded(frame.error ?? undefined, 1000),
-        } : undefined });
+          paused: frame.paused, speed: frame.speed, tool: bounded(frame.tool, 200),
+          startedAt: frame.startedAt, connecting: frame.connecting,
+        } : undefined,
+        ...(action === 'release' ? { session: releaseSession, kind: releaseKind, immediate: current.snapshot.handoff === true } : {}) });
         if (disposed) return;
         if (generation !== latest.current.generation) { pending = true; return; }
         if (!reply.native) {
@@ -152,6 +191,14 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
         } else if (action === 'frame') {
           if (!quiet && latest.current.native && reply.finishSession === latest.current.session
             && latest.current.snapshot.state === 'recording') latest.current.onFinish();
+          // Each reported click runs once, only for the capsule still on screen.
+          for (const clicked of Array.isArray(reply.actions) ? reply.actions as NativeDockAction[] : []) {
+            const now = latest.current;
+            if (quiet || disposed || !now.native || clicked?.session !== now.session) continue;
+            if (CAPSULE_ACTIONS[clicked.action] !== now.snapshot.state || clicked.state !== now.snapshot.state) continue;
+            if (clicked.action === 'voice-stop' && now.snapshot.connecting) continue;
+            now.onAction?.(clicked);
+          }
           if (!pending && latest.current.active) frameTimer = setTimeout(() => { void pump(); }, 100);
         }
       } catch {
@@ -214,6 +261,6 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
       unlisten?.();
     };
   }, []);
-  useEffect(() => { wake.current?.(); }, [active, session, native, suppressed]);
+  useEffect(() => { wake.current?.(); }, [active, session, native, suppressed, snapshot.state]);
   return { native, suppressed };
 }

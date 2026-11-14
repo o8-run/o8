@@ -23,7 +23,8 @@ import { useAgentConfirmations } from '@/components/desktop/dictation/useAgentCo
 import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 import { EditRevertChip } from './EditRevertChip';
-import { IDLE_SNAPSHOT, useNativeDictationPill, useNativePillDockExtent } from './useNativeDictationPill';
+import { IDLE_SNAPSHOT } from './useNativeDictationPill';
+import { useNativeDock } from './nativeDockFrame';
 import { DockGlint } from './DockGlint';
 
 export const dynamic = 'force-dynamic';
@@ -853,15 +854,14 @@ export default function DictationPillPage() {
   // click-through except while the cursor is over the PAINTED pill. Report the
   // content wrapper's rect on every morph (ResizeObserver fires through the
   // 0.5s geometry transition; rAF-throttled so we invoke at most per-frame).
-  const { native: nativeDictation, suppressed } = useNativeDictationPill(snapshot, startTimeRef.current, finishSystemDictation);
   const [editVisible, setEditVisible] = useState(false);
-  const webSnapshot = nativeDictation ? IDLE_SNAPSHOT : snapshot;
-  const nativeActive = nativeDictation && !suppressed && snapshot.state !== 'idle';
+  const { native: nativeDictation, nativeActive, nativeCapsule, webSnapshot, webTts, webRealtime, webAgentWorking, dockVisible } = useNativeDock({
+    snapshot, dictationSession: startTimeRef.current, ttsState, askOpen, agentConfirm: !!agentConfirm, agentWorking, dropActive, showWorkers,
+    stagedFiles: !!stagedChips?.length, workerCount: parkedWorkers ? workers.working + parkedWorkers.waiting : workers.count, realtimeVoice, speechSpeed, agentTool, agentStartedAt,
+  }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, invokeCmd }, {
+    topPillEnabled, editVisible, glint: !!glint, staged: !!stagedChips, fleet: workers.count > 0 || (parkedWorkers?.waiting ?? 0) > 0,
+  });
   const hitRectHostRef = useRef<HTMLDivElement | null>(null);
-  const dockVisible = (!nativeDictation || !suppressed) && ((!nativeDictation && (topPillEnabled || snapshot.state !== 'idle')) || ttsState !== 'idle'
-    || askOpen || agentWorking || !!agentConfirm || realtimeVoice !== 'off'
-    || (nativeDictation && (editVisible || dropActive || !!stagedChips || (workers.count > 0 || (parkedWorkers?.waiting ?? 0) > 0) || !!glint)));
-  useNativePillDockExtent(nativeDictation, nativeActive, dockVisible, askOpen, suppressed, invokeCmd);
   useEffect(() => {
     if (!isTauri()) return;
     if (!dockVisible) {
@@ -964,9 +964,9 @@ export default function DictationPillPage() {
             visual-only (pointer-events none) and must not extend the
             click-accepting zone over the menu bar. */}
         <div ref={hitRectHostRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <DockNotchSurface
+          {nativeCapsule ? null : <DockNotchSurface
             snapshot={webSnapshot}
-            ttsState={ttsState}
+            ttsState={webTts}
             onTogglePause={handleTogglePause}
             onStop={handleStop}
             onInterrupt={handleInterrupt}
@@ -977,7 +977,7 @@ export default function DictationPillPage() {
             askThread={askThread}
             onCloseAsk={closeAsk}
             agentConfirm={agentConfirm}
-            agentWorking={agentWorking}
+            agentWorking={webAgentWorking}
             agentTool={agentTool}
             agentStartedAt={agentStartedAt}
             onAgentConfirm={handleAgentConfirm}
@@ -991,10 +991,10 @@ export default function DictationPillPage() {
             workerRepos={displayedWorkers.repos}
             showWorkers={showWorkers}
             panelPending={nativeDictation ? null : panelPending}
-            realtimeVoice={realtimeVoice}
+            realtimeVoice={webRealtime}
             onStopRealtime={stopRealtimeVoice}
             onFinishDictation={finishSystemDictation}
-          />
+          />}
           <EditRevertChip onError={dockLog} onVisible={setEditVisible} />
         </div>
         {glint ? <DockGlint key={glint.key} glint={glint} fading={glintFading} /> : null}
