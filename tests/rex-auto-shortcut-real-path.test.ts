@@ -17,7 +17,9 @@ const action = join(config, 'rex', 'o8.lua');
 const marker = join(data, 'rex-shortcut-removed');
 
 function env(): NodeJS.ProcessEnv {
+  // A clean environment of its own, so nothing from the test runner reaches the CLI.
   return {
+    NODE_ENV: 'test',
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: root,
     REX_SESSION: 'session:test',
