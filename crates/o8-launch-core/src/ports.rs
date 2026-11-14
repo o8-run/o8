@@ -52,4 +52,3 @@ pub fn listen_host_for(lan_access: Option<&str>) -> &'static str {
         _ => "127.0.0.1",
     }
 }
-

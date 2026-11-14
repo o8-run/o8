@@ -86,10 +86,9 @@ mod tts;
 #[cfg(not(target_os = "macos"))]
 mod window_restore;
 mod window_state_sanitizer;
-// Windows-native Node.js discovery (#1740). Compiles on Windows targets or
-// under `cfg(test)` so its pure logic gets real unit coverage from macOS —
-// see the module doc comment.
-#[cfg(any(test, target_os = "windows"))]
+// Windows-native Node.js discovery (#1740). Only Windows imports this
+// wrapper. Cross-platform locator tests live in the shared launch crate.
+#[cfg(target_os = "windows")]
 mod windows_node_locate;
 // #1741: PATH string logic is unconditional so `cargo test --lib` exercises
 // it on every host OS; only its `windows_impl` submodule is cfg-gated.

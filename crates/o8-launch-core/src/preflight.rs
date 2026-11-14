@@ -421,7 +421,6 @@ pub fn run_node_preflight(
     }
 }
 
-
 /// Platform-appropriate "how to install Node" text for the dialog bodies
 /// below. macOS/Linux point at brew/nvm; Windows has neither, so it points
 /// at the official installer / winget / nvm-windows instead (#1740).
@@ -458,4 +457,3 @@ pub fn node_install_hint() -> String {
         latest = LATEST_SUPPORTED_NODE_MAJOR
     )
 }
-

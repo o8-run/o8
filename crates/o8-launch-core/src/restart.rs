@@ -56,4 +56,3 @@ pub const NEXT_RESTART_POLICY: RestartPolicy = RestartPolicy {
     window: std::time::Duration::from_secs(5 * 60),
     delay: std::time::Duration::from_millis(750),
 };
-

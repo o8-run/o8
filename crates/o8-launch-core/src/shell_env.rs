@@ -144,18 +144,12 @@ fn parse_probe(stdout: &str) -> LoginShellEnv {
 // (path + mtime + size) so a node upgrade busts the entry but a plain relaunch
 // is free.
 
-#[cfg(not(test))]
 const NODE_CACHE_FILE: &str = "node-abi-cache";
 
 /// `<path>\t<mtime_secs>\t<size>\t<major>\t<raw_version>`
 fn node_cache_path() -> Option<String> {
-    #[cfg(test)]
-    return Some(std::env::temp_dir().join(format!("o8-launch-node-cache-{}", std::process::id())).to_string_lossy().into_owned());
-    #[cfg(not(test))]
-    {
     let home = std::env::var("HOME").ok()?;
     Some(format!("{}/.o8/{}", home, NODE_CACHE_FILE))
-    }
 }
 
 /// Identity of a node binary: (mtime, size). Cheap — two fields off one stat.
