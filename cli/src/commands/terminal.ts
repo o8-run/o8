@@ -10,6 +10,7 @@ import {
   confirmOpenedPanes, openTerminalPanes, parsePanesArgs, prepareWatcherTab, readAnswer, runningPackets, settledAfterRound, watchChanges, watchRetries, workerTerminals,
   type PaneTerminal, type TerminalPanesResult,
 } from './terminal-panes.js';
+import { forgetRemoved, rememberRemoved } from '../rex-auto-shortcut.js';
 import { installShortcut, parseShortcutArgs, removeShortcut } from './terminal-shortcut.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
 
@@ -492,6 +493,9 @@ function runTerminalShortcut(mode: OutputMode, rest: string[]): number {
   const result = remove
     ? removeShortcut({ env: process.env })
     : installShortcut({ self: selfCommand(), key, env: process.env });
+  // A removal is remembered so o8 does not add the shortcut back on its own; asking for it again forgets that.
+  if (remove) rememberRemoved();
+  else forgetRemoved();
   if (mode.human) {
     const lines = result.action === 'installed'
       ? [

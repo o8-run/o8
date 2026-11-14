@@ -40,6 +40,12 @@
       ]
     },
     {
+      "path": "cli/src/rex-auto-shortcut.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/app/api/automations/connected/route.test.ts",
       "reasons": [
         "executable-fixture"
@@ -7557,6 +7563,14 @@
       "path": "tests/revoked-packet-worker-gate-real-path.test.ts",
       "reasons": [
         "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/rex-auto-shortcut-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
         "real-path"
       ]
     },

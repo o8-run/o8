@@ -169,7 +169,7 @@ describe('installing and removing', () => {
     chmodSync(env.REX_CONFIG, 0o600);
     const victim = join(dir, 'victim.txt');
     writeFileSync(victim, 'keep me');
-    symlinkSync(victim, join(dir, 'o8.lua.o8-tmp'));
+    symlinkSync(victim, join(dir, `o8.lua.o8-tmp.${process.pid}`));
     installShortcut({ self, key: null, env, exec: () => '' });
     expect(statSync(env.REX_CONFIG).mode & 0o777).toBe(0o600);
     expect(readFileSync(victim, 'utf8')).toBe('keep me');
