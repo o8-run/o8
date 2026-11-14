@@ -48,7 +48,9 @@ export interface TerminalPanesResult {
   skipped: string[];
   /** Live terminals left without a pane, because of the limit or a failure. */
   remaining: string[];
-  /** Set when the multiplexer failed partway. Panes in `opened` still exist. */
+  /** Terminals whose new pane closed right away, because its observer could not attach. */
+  closed: string[];
+  /** Set when the multiplexer failed partway or a pane closed right away. Panes in `opened` still exist. */
   error: string | null;
 }
 
@@ -121,7 +123,9 @@ function validate(input: TerminalPanesInput): string {
       EXIT.INVALID_ARGS,
     );
   }
-  if (input.self.length === 0 || input.self.some((word) => !word || CONTROL_CHARACTER.test(word))) {
+  // `env NAME=value program` reads a program path holding `=` as one more assignment.
+  if (input.self.length === 0 || input.self[0].includes('=')
+    || input.self.some((word) => !word || CONTROL_CHARACTER.test(word))) {
     throw new CliError('invalid_args', 'Could not work out how to start o8 in a pane.', EXIT.INVALID_ARGS);
   }
   for (const name of ROUTING_ENV) {
@@ -204,7 +208,41 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
     existing,
     skipped,
     remaining: wanted.filter((id) => !placed.has(id)),
+    closed: [],
     error,
+  };
+}
+
+/**
+ * A pane closes as soon as its observer exits, so one that could not attach
+ * vanishes without a message. Call this a moment after opening: it moves every
+ * new pane that is already gone from `opened` to `closed` and says so.
+ */
+export function confirmOpenedPanes(
+  result: TerminalPanesResult,
+  env: Readonly<Record<string, string | undefined>>,
+  exec: PaneExec = defaultExec,
+): TerminalPanesResult {
+  const session = env.REX_SESSION?.trim();
+  if (!session || result.opened.length === 0) return result;
+  let alive: Set<string>;
+  try {
+    const listed = parseJson<{ blocks?: Array<{ block_id?: unknown }> }>(
+      rex(exec, ['block', 'ls', '-s', session, '--json'], 'list its panes'),
+      'pane list',
+    );
+    alive = new Set((listed.blocks ?? []).flatMap((block) => typeof block.block_id === 'string' ? [block.block_id] : []));
+  } catch {
+    return result;
+  }
+  const closed = result.opened.filter((pane) => !alive.has(pane.pane)).map((pane) => pane.id);
+  if (closed.length === 0) return result;
+  return {
+    ...result,
+    opened: result.opened.filter((pane) => alive.has(pane.pane)),
+    closed,
+    error: result.error
+      ?? `${closed.length === 1 ? 'A pane' : `${closed.length} panes`} closed right away. Run \`o8 terminal observe <id>\` to see why.`,
   };
 }
 

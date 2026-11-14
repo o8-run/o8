@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { EXIT } from '../api';
-import { observeCommand, openTerminalPanes, parsePanesArgs, type PaneExec } from './terminal-panes';
+import { confirmOpenedPanes, observeCommand, openTerminalPanes, parsePanesArgs, type PaneExec } from './terminal-panes';
 
 const self = ['/usr/bin/node', '/opt/o8 app/o8.mjs'];
 const rexEnv = { REX_SESSION: 'session:abc' };
@@ -94,6 +94,7 @@ describe('openTerminalPanes', () => {
     const base = { sessionIds: ['a'], limit: 8, self, exec };
     expect(() => openTerminalPanes({ ...base, env: rexEnv, machineKey: '--flag' })).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
     expect(() => openTerminalPanes({ ...base, env: rexEnv, self: ['/usr/bin/node', ''] })).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
+    expect(() => openTerminalPanes({ ...base, env: rexEnv, self: ['/opt/a=b/node', '/o8.mjs'] })).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
     expect(() => openTerminalPanes({ ...base, env: { ...rexEnv, O8_DATA_DIR: '/tmp/a\nb' } })).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
     expect(calls).toEqual([]);
   });
@@ -191,7 +192,7 @@ describe('openTerminalPanes', () => {
   it('does nothing but list when there are no live terminals', () => {
     const { calls, exec } = fakeRex();
     const result = openTerminalPanes({ sessionIds: [], limit: 8, env: rexEnv, self, exec });
-    expect(result).toEqual({ multiplexer: 'rex', opened: [], existing: [], skipped: [], remaining: [], error: null });
+    expect(result).toEqual({ multiplexer: 'rex', opened: [], existing: [], skipped: [], remaining: [], closed: [], error: null });
     expect(calls).toHaveLength(1);
   });
 
@@ -222,5 +223,42 @@ describe('openTerminalPanes', () => {
     const garbage: PaneExec = () => 'not json';
     expect(() => openTerminalPanes({ sessionIds: ['t1'], limit: 8, env: rexEnv, self, exec: garbage }))
       .toThrowError(expect.objectContaining({ code: 'multiplexer_error' }));
+  });
+});
+
+describe('confirmOpenedPanes', () => {
+  const started = {
+    multiplexer: 'rex' as const,
+    opened: [{ id: 't1', pane: 'block:1' }, { id: 't2', pane: 'block:2' }],
+    existing: [],
+    skipped: [],
+    remaining: [],
+    closed: [],
+    error: null,
+  };
+
+  it('keeps the result when every new pane is still there', () => {
+    const exec: PaneExec = () => JSON.stringify({ blocks: [{ block_id: 'block:1' }, { block_id: 'block:2' }] });
+    expect(confirmOpenedPanes(started, rexEnv, exec)).toBe(started);
+  });
+
+  it('reports a pane that closed right away, and sets the error', () => {
+    const exec: PaneExec = () => JSON.stringify({ blocks: [{ block_id: 'block:1' }] });
+    const result = confirmOpenedPanes(started, rexEnv, exec);
+    expect(result.opened).toEqual([{ id: 't1', pane: 'block:1' }]);
+    expect(result.closed).toEqual(['t2']);
+    expect(result.error).toContain('closed right away');
+  });
+
+  it('does not list panes when nothing was opened, and keeps the result when the list fails', () => {
+    let called = 0;
+    const exec: PaneExec = () => {
+      called += 1;
+      throw new Error('rex failed');
+    };
+    const none = { ...started, opened: [] };
+    expect(confirmOpenedPanes(none, rexEnv, exec)).toBe(none);
+    expect(called).toBe(0);
+    expect(confirmOpenedPanes(started, rexEnv, exec)).toBe(started);
   });
 });

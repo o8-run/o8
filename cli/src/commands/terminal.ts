@@ -6,7 +6,7 @@ import { resolveConfig, type ResolvedConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
-import { openTerminalPanes, parsePanesArgs } from './terminal-panes.js';
+import { confirmOpenedPanes, openTerminalPanes, parsePanesArgs } from './terminal-panes.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
@@ -333,11 +333,14 @@ function listRemoteSessionIds(machineKey: string): string[] {
     } catch { /* fall through to the generic error */ }
     const exit = (Object.values(EXIT) as number[]).includes(failed.status as number)
       ? failed.status as typeof EXIT.CONFLICT : EXIT.CONFLICT;
+    // The text may come from the remote host. Keep it one plain, bounded line.
+    const plain = (value: unknown) => typeof value === 'string'
+      ? value.replace(/[\x00-\x1f\x7f-\x9f]+/g, ' ').trim().slice(0, 400) : '';
     throw new CliError(
-      typeof remote?.code === 'string' ? remote.code : 'remote_terminal_error',
-      typeof remote?.message === 'string' ? remote.message : 'Could not list terminals on that SSH machine.',
+      typeof remote?.code === 'string' && /^[a-z_]{1,64}$/.test(remote.code) ? remote.code : 'remote_terminal_error',
+      plain(remote?.message) || 'Could not list terminals on that SSH machine.',
       exit,
-      typeof remote?.hint === 'string' ? remote.hint : undefined,
+      plain(remote?.hint) || undefined,
     );
   }
   try {
@@ -355,10 +358,14 @@ async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<numbe
   const sessionIds = machineKey
     ? listRemoteSessionIds(machineKey)
     : (await listSessions(cfg)).map((session) => session.id);
-  const result = openTerminalPanes({ sessionIds, limit, machineKey, env: process.env, self: selfCommand() });
+  const started = openTerminalPanes({ sessionIds, limit, machineKey, env: process.env, self: selfCommand() });
+  // Give each observer a moment to attach, then report any pane that is already gone.
+  if (started.opened.length > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
+  const result = confirmOpenedPanes(started, process.env);
   if (mode.human) {
     const lines = [
       ...result.opened.map((pane) => `opened    ${pane.id}`),
+      ...result.closed.map((id) => `closed    ${id}`),
       ...result.existing.map((id) => `existing  ${id}`),
       ...result.remaining.map((id) => `not shown ${id}`),
       ...result.skipped.map(() => 'skipped   (unsafe session ID)'),
