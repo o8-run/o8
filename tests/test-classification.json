@@ -471,6 +471,12 @@
       ]
     },
     {
+      "path": "src/lib/codex/default-identity-rollout.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/codex/live-capacity.test.ts",
       "reasons": [
         "executable-fixture"
