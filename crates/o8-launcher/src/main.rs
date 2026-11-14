@@ -48,6 +48,9 @@ struct Server {
     script: &'static str,
     port: u16,
     stopped: bool,
+    /// Set after a crash: the next spawn waits for the restart delay while the
+    /// main loop keeps pumping events.
+    retry_at: Option<Instant>,
 }
 impl Server {
     fn stop(&mut self, deadline: Instant) -> Result<(), String> {
@@ -57,7 +60,7 @@ impl Server {
         self.stopped = true;
         // The exclusive Child handle remains unreaped until its group drains.
         ownership::stop_child(&mut self.child, self.port, deadline).map_err(|error| {
-            eprintln!("Server shutdown incomplete: {error}");
+            o8_launcher::note!("Server shutdown incomplete: {error}");
             error
         })?;
         // Records stay on disk when stopping fails, so the next start can recover.
@@ -65,7 +68,7 @@ impl Server {
             let _ = fs::remove_file(path);
         }
         fs::remove_file(&self.receipt).map_err(|_| {
-            eprintln!("Server shutdown incomplete: ownership receipt unavailable");
+            o8_launcher::note!("Server shutdown incomplete: ownership receipt unavailable");
             "Ownership receipt unavailable"
         })?;
         Ok(())
@@ -74,19 +77,19 @@ impl Server {
 impl Drop for Server {
     fn drop(&mut self) {
         if let Err(error) = self.stop(Instant::now() + SHUTDOWN_BOUND) {
-            eprintln!("{error}");
+            o8_launcher::note!("{error}");
         }
     }
 }
 struct Servers {
-    api: Server,
-    ws: Server,
+    api: Option<Server>,
+    ws: Option<Server>,
 }
 impl Servers {
     /// API before WS, both within one shared deadline.
     fn stop(&mut self, deadline: Instant) -> Result<(), String> {
-        let api = self.api.stop(deadline);
-        let ws = self.ws.stop(deadline);
+        let api = self.api.as_mut().map_or(Ok(()), |api| api.stop(deadline));
+        let ws = self.ws.as_mut().map_or(Ok(()), |ws| ws.stop(deadline));
         api.and(ws)
     }
 }
@@ -94,7 +97,7 @@ impl Drop for Servers {
     fn drop(&mut self) {
         // Preserve the same order on every early return as on normal shutdown.
         if let Err(error) = self.stop(Instant::now() + SHUTDOWN_BOUND) {
-            eprintln!("{error}");
+            o8_launcher::note!("{error}");
         }
     }
 }
@@ -174,24 +177,52 @@ fn spawn(
     let token = uuid::Uuid::new_v4().simple().to_string();
     let (hold_file, hold) =
         ownership::create_hold(&hold_path, &token).map_err(|_| "Ownership unavailable")?;
-    let pending = Pending {
-        hold: hold.clone(),
-        directory: config.data_dir.clone(),
-        install: executable.clone(),
-        port,
+    let runtime = ownership::file_id(&config.node).ok_or("Server runtime unavailable")?;
+    // The record's spawn time opens a two-second proof window, so it must be
+    // read after the hold file and the record itself are flushed, right before
+    // the fork. A reading is written, then confirmed against a fresh one; a
+    // flush slower than the slack rewrites the record with the fresh reading.
+    // A backward wall-clock step between reading and fork (macOS; Linux uses the
+    // monotonic boot clock) makes the server look born too early: recovery then
+    // fails closed, leaving the orphan and signalling nothing.
+    let write_pending = |spawned: u64| {
+        let pending = Pending {
+            hold: hold.clone(),
+            directory: config.data_dir.clone(),
+            install: executable.clone(),
+            port,
+            spawned,
+            runtime,
+        };
+        serde_json::to_vec(&pending)
+            .ok()
+            .is_some_and(|bytes| private_write(&pending_path, &bytes).is_ok())
     };
-    if private_write(
-        &pending_path,
-        &serde_json::to_vec(&pending).map_err(|_| "Ownership unavailable")?,
-    )
-    .is_err()
-    {
+    let mut spawned = ownership::birth_clock();
+    let mut confirmed = false;
+    for _ in 0..3 {
+        if !write_pending(spawned) {
+            break;
+        }
+        let now = ownership::birth_clock();
+        if now.saturating_sub(spawned) <= ownership::spawn_slack() {
+            confirmed = true;
+            break;
+        }
+        spawned = now;
+    }
+    if !confirmed {
         let _ = fs::remove_file(&pending_path);
         let _ = fs::remove_file(&hold_path);
         return Err("Ownership unavailable".into());
     }
-    command.env("O8_LAUNCH_TOKEN", &token);
     let inherited = hold_file.as_raw_fd();
+    // The descriptor stays open in the server and anything it starts unless the
+    // server marks it close-on-exec; its number lets the server do that. Proof
+    // never depends on it: see ownership::proven_holder.
+    command
+        .env("O8_LAUNCH_TOKEN", &token)
+        .env("O8_LAUNCH_HOLD_FD", inherited.to_string());
     // Runs in the forked child only: the parent's copy stays close-on-exec.
     unsafe {
         command.pre_exec(move || {
@@ -220,6 +251,7 @@ fn spawn(
         tracker: RestartTracker::new(NEXT_RESTART_POLICY),
         port,
         stopped: false,
+        retry_at: None,
     };
     let result = (|| {
         let receipt = Receipt {
@@ -230,6 +262,8 @@ fn spawn(
             port: server.port,
             parent: std::process::id(),
             hold: Some(hold),
+            spawned,
+            runtime: Some(runtime),
         };
         private_write(
             &server.receipt,
@@ -244,6 +278,26 @@ fn spawn(
         return Err(error.into());
     }
     Ok(server)
+}
+/// Records a failure against the restart budget and sets the next attempt time.
+fn schedule_restart(config: &Config, server: &mut Server) -> Result<(), String> {
+    let (attempt, delay) = match server.tracker.record_failure(Instant::now()) {
+        RestartDecision::Exhausted { .. } => return Err("Server restart budget exhausted".into()),
+        RestartDecision::Restart { attempt, delay } => (attempt, delay),
+    };
+    let log_name = if server.script == "server.js" {
+        "next-server.log"
+    } else {
+        "ws-server.log"
+    };
+    if let Ok(mut log) = OpenOptions::new()
+        .append(true)
+        .open(config.data_dir.join("logs").join(log_name))
+    {
+        let _ = writeln!(log, "[o8-sidecar-supervisor] restart attempt {attempt}");
+    }
+    server.retry_at = Some(Instant::now() + delay);
+    Ok(())
 }
 /// Debug-build crash injection for the real-entry recovery tests.
 fn fault(point: &str, script: &str) {
@@ -314,7 +368,7 @@ fn present(config: &Config, reason: &str) {
     present_with(config, reason, false);
 }
 fn present_with(config: &Config, reason: &str, tracked: bool) {
-    eprintln!("{reason}");
+    o8_launcher::note!("{reason}");
     next_main_startup::report_failure_with_recovery(
         &config.window,
         &config.data_dir.join("logs/gpui-startup.log"),
@@ -380,7 +434,7 @@ fn native_alert(message: &str) {
 }
 #[cfg(not(target_os = "macos"))]
 fn native_alert(message: &str) {
-    eprintln!("{message}");
+    o8_launcher::note!("{message}");
 }
 fn default_api_port() -> u16 {
     ports::PROD_API_DEFAULT_PORT
@@ -495,15 +549,10 @@ fn run(config: &mut Config) -> Result<(), String> {
         reopen.clone(),
         shutdown.clone(),
     )?;
-    let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
-    let ws = spawn(
-        config,
-        "ws-server.mjs",
-        &boot,
-        &instance,
-        "launcher-ws.json",
-    )?;
-    let servers = Arc::new(Mutex::new(Some(Servers { api, ws })));
+    let servers = Arc::new(Mutex::new(Some(Servers {
+        api: None,
+        ws: None,
+    })));
     let control = Arc::new(Mutex::new(Some(instance_lock)));
     {
         let servers = servers.clone();
@@ -523,6 +572,28 @@ fn run(config: &mut Config) -> Result<(), String> {
                 reap_dialogs(Instant::now() + Duration::from_millis(400));
             },
         );
+    }
+    // A failed start stops whatever did start under the coordinator's one bound.
+    let started = (|| -> Result<(), String> {
+        let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
+        if let Some(servers) = lock(&servers).as_mut() {
+            servers.api = Some(api);
+        }
+        let ws = spawn(
+            config,
+            "ws-server.mjs",
+            &boot,
+            &instance,
+            "launcher-ws.json",
+        )?;
+        if let Some(servers) = lock(&servers).as_mut() {
+            servers.ws = Some(ws);
+        }
+        Ok(())
+    })();
+    if let Err(error) = started {
+        let _ = shutdown.run();
+        return Err(error);
     }
     let restart_stop = stopped.clone();
     let restart = o8_launch_core::restart_job_drain::guard(
@@ -580,13 +651,40 @@ fn run(config: &mut Config) -> Result<(), String> {
                 break;
             }
             let mut guard = lock(&servers);
-            let Some(Servers { api, ws }) = guard.as_mut() else {
+            let Some(Servers {
+                api: Some(api),
+                ws: Some(ws),
+            }) = guard.as_mut()
+            else {
                 break;
             };
             for (server, receipt) in [
                 (&mut *api, "launcher-api.json"),
                 (&mut *ws, "launcher-ws.json"),
             ] {
+                if let Some(at) = server.retry_at {
+                    if Instant::now() < at || stopped.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    match spawn(config, server.script, &boot, &instance, receipt) {
+                        Ok(next) => {
+                            let tracker = std::mem::replace(
+                                &mut server.tracker,
+                                RestartTracker::new(NEXT_RESTART_POLICY),
+                            );
+                            *server = next;
+                            server.tracker = tracker;
+                            if server.script == "server.js" {
+                                opened = false;
+                                window_failed = false;
+                                launch = None;
+                                deadline = Instant::now() + Duration::from_secs(90);
+                            }
+                        }
+                        Err(_) => schedule_restart(config, server)?,
+                    }
+                    continue;
+                }
                 let mut status: libc::siginfo_t = unsafe { std::mem::zeroed() };
                 if unsafe {
                     libc::waitid(
@@ -600,53 +698,9 @@ fn run(config: &mut Config) -> Result<(), String> {
                     return Err("Server status unavailable".into());
                 }
                 if unsafe { status.si_pid() } != 0 {
-                    server.stop(Instant::now() + SHUTDOWN_BOUND)?;
                     // A completed child is never signaled by Drop after reaping.
-                    loop {
-                        let (attempt, delay) = match server.tracker.record_failure(Instant::now()) {
-                            RestartDecision::Exhausted { .. } => {
-                                return Err("Server restart budget exhausted".into())
-                            }
-                            RestartDecision::Restart { attempt, delay } => (attempt, delay),
-                        };
-                        let log_name = if server.script == "server.js" {
-                            "next-server.log"
-                        } else {
-                            "ws-server.log"
-                        };
-                        if let Ok(mut log) = OpenOptions::new()
-                            .append(true)
-                            .open(config.data_dir.join("logs").join(log_name))
-                        {
-                            let _ =
-                                writeln!(log, "[o8-sidecar-supervisor] restart attempt {attempt}");
-                        }
-                        let until = Instant::now() + delay;
-                        while Instant::now() < until && !stopped.load(Ordering::SeqCst) {
-                            std::thread::sleep(Duration::from_millis(25));
-                        }
-                        if stopped.load(Ordering::SeqCst) {
-                            break;
-                        }
-                        match spawn(config, server.script, &boot, &instance, receipt) {
-                            Ok(next) => {
-                                let tracker = std::mem::replace(
-                                    &mut server.tracker,
-                                    RestartTracker::new(NEXT_RESTART_POLICY),
-                                );
-                                *server = next;
-                                server.tracker = tracker;
-                                if server.script == "server.js" {
-                                    opened = false;
-                                    window_failed = false;
-                                    launch = None;
-                                    deadline = Instant::now() + Duration::from_secs(90);
-                                }
-                                break;
-                            }
-                            Err(_) => continue,
-                        }
-                    }
+                    server.stop(Instant::now() + SHUTDOWN_BOUND)?;
+                    schedule_restart(config, server)?;
                 }
             }
             if let Some(result) = launch
@@ -727,7 +781,7 @@ fn run(config: &mut Config) -> Result<(), String> {
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
     if args.len() != 3 || args[1] != "--config" {
-        eprintln!("usage: o8-launcher --config <file>");
+        o8_launcher::note!("usage: o8-launcher --config <file>");
         std::process::exit(2);
     }
     let mut config: Config = match fs::read(&args[2])
@@ -736,7 +790,7 @@ fn main() {
     {
         Some(c) => c,
         None => {
-            eprintln!("Invalid launch configuration");
+            o8_launcher::note!("Invalid launch configuration");
             std::process::exit(2);
         }
     };
