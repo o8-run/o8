@@ -246,7 +246,7 @@ async function openDesktop(): Promise<number> {
       let ready = false;
       const next = runCli(['next', '--binary', binary], false, undefined, NO_GRAPHICS_DEVICE, env, () => { ready = true; });
       void next.then(() => { finished = true; }, () => { finished = true; });
-      while (!finished && !(ready && windowIsOpen())) await delay(100);
+      while (!finished && !((!canRetry || ready) && windowIsOpen())) await delay(100);
       if (!finished && !released) {
         closeSync(lock);
         released = true;
