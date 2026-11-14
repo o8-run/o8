@@ -89,7 +89,7 @@ pub fn private_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
         .write(true)
         .create(true)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)?;
     if file.metadata()?.uid() != unsafe { libc::getuid() }
         || file.metadata()?.nlink() != 1
@@ -219,7 +219,7 @@ pub fn cleanup(directory: &Path, server_dir: &Path) -> Result<(), String> {
         let path = directory.join(name);
         let mut file = match OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(&path)
         {
             Ok(f) => f,
@@ -229,7 +229,11 @@ pub fn cleanup(directory: &Path, server_dir: &Path) -> Result<(), String> {
         let metadata = file
             .metadata()
             .map_err(|_| "Ownership receipt unavailable")?;
-        if metadata.uid() != unsafe { libc::getuid() } || metadata.mode() & 0o077 != 0 {
+        if metadata.uid() != unsafe { libc::getuid() }
+            || metadata.mode() & 0o077 != 0
+            || !metadata.is_file()
+            || metadata.nlink() != 1
+        {
             return Err("Ownership receipt is not private".into());
         }
         let mut bytes = Vec::new();
