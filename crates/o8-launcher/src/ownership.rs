@@ -276,6 +276,9 @@ pub fn cleanup(directory: &Path, server_dir: &Path) -> Result<(), String> {
 }
 
 fn old_install_server(pid: u32, install: &Path, server_dir: &Path) -> bool {
+    if !install.is_absolute() || install.file_name().is_none() {
+        return false;
+    }
     #[cfg(target_os = "linux")]
     let executable = fs::read_link(format!("/proc/{pid}/exe")).ok();
     #[cfg(target_os = "macos")]

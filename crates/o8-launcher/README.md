@@ -32,10 +32,10 @@ and verifies released ports before reporting successful shutdown. Surviving
 descendants receive bounded escalation. Orphan receipts require a proven install,
 profile, kernel birth identity, server working directory, orphan parent, and
 process group. Stale identity and unproven moved-install receipts are removed
-without signalling. A moved install is adopted only with matching data directory
-and birth identity, an orphan group leader, the server working directory, and a
-`node` executable beneath the old launcher directory. Other unresolved live
-ownership is refused.
+without signalling. Adoption requires an absolute recorded launcher path with a
+file name, matching data directory and birth identity, an orphan group leader,
+the server working directory, and a `node` executable beneath that prior
+launcher directory. Other unresolved live ownership is refused.
 
 The original orphan failure came from comparing mutable command text across
 interpreter exec. A stable kernel birth identity replaces that comparison. The
