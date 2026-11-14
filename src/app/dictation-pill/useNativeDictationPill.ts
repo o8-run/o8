@@ -32,24 +32,143 @@ export function useNativePillDockExtent(native: boolean, active: boolean, visibl
  * Frames are sent only from the effect after that hidden render has committed.
  * On failure wait beyond the native 750ms lease and 160ms exit before restoring web drawing. */
 export function useNativeDictationPill(snapshot: DictationSnapshot, session: number, onFinish: () => void): { native: boolean; suppressed: boolean } {
-  const latest = useRef({ snapshot, session, onFinish });
-  useLayoutEffect(() => { latest.current = { snapshot, session, onFinish }; }, [snapshot, session, onFinish]);
   const [native, setNative] = useState(false);
-  const probed = useRef(false);
-  const wasActive = useRef(false);
-  const attempted = useRef<number | null>(null);
   const [suppressed, setSuppressed] = useState(false);
   const active = snapshot.state !== 'idle';
+  const latest = useRef({ snapshot, session, onFinish, native, active: false, generation: 0, retirement: 0, retiredGeneration: 0 });
+  const wake = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    const previous = latest.current;
+    const generation = active && (!previous.active || previous.session !== session) ? previous.generation + 1 : previous.generation;
+    const retiring = previous.active && !active;
+    latest.current = {
+      snapshot, session, onFinish, native, active, generation,
+      retirement: previous.retirement + (retiring ? 1 : 0),
+      retiredGeneration: retiring ? previous.generation : previous.retiredGeneration,
+    };
+  }, [snapshot, session, onFinish, native, active]);
   useEffect(() => {
     if (!isTauri()) return;
     let disposed = false;
+    let ready = false;
+    let quiet = false;
+    let busy = false;
+    let pending = false;
+    let probed = false;
+    let awaitingCommit = false;
+    let attempted = -1;
+    let checked = -1;
+    let blocked = -1;
+    let retirementSeen = 0;
+    let failureGeneration = -1;
+    let frameTimer: ReturnType<typeof setTimeout> | undefined;
+    let failureTimer: ReturnType<typeof setTimeout> | undefined;
     let unlisten: (() => void) | undefined;
-    // Observe the shell's actual presentation mode, including temporary overrides.
-    // Listen before reading so a late read cannot undo a newer event.
+    const bounded = (text: string | undefined, budget: number) => {
+      if (text === undefined) return undefined;
+      let result = '';
+      let bytes = 2;
+      const encoder = new TextEncoder();
+      for (const char of text) {
+        const size = encoder.encode(JSON.stringify(char)).length - 2;
+        if (bytes + size > budget) break;
+        result += char; bytes += size;
+      }
+      return result;
+    };
+    const fallback = (absent: boolean, generation: number) => {
+      blocked = generation;
+      clearTimeout(failureTimer);
+      failureGeneration = generation;
+      if (absent) setNative(false);
+      else failureTimer = setTimeout(() => {
+        if (!disposed && latest.current.generation === generation) setNative(false);
+      }, 1000);
+    };
+    // One request owns the transport until its reply settles. Wakes only replace
+    // the latest committed snapshot; they never append work to a frame queue.
+    const pump = async () => {
+      if (disposed || !ready) return;
+      if (busy) { pending = true; return; }
+      const current = latest.current;
+      if (failureGeneration !== current.generation) clearTimeout(failureTimer);
+      if (awaitingCommit && !current.native) return;
+      awaitingCommit = false;
+      let action: 'prepare' | 'frame' | 'release';
+      let generation = current.generation;
+      const releasing = current.retirement !== retirementSeen && current.native;
+      retirementSeen = current.retirement;
+      if (releasing) {
+        action = 'release';
+        generation = current.retiredGeneration;
+      } else if (blocked === generation) return;
+      else if (current.active) {
+        if (current.native) action = 'frame';
+        else {
+          if (attempted === generation) return;
+          attempted = generation;
+          action = 'prepare';
+        }
+      } else {
+        if (probed || current.native) return;
+        action = 'prepare';
+      }
+      probed = true;
+      const checkSettings = action === 'prepare' || action === 'frame' && checked !== generation;
+      if (checkSettings) checked = generation;
+      busy = true;
+      pending = false;
+      try {
+        const frame = current.snapshot;
+        const response = await fetch('/api/next/dictation-pill', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + getMobileWsToken() },
+          body: JSON.stringify({ action, checkSettings, snapshot: action === 'frame' ? {
+            state: quiet ? 'idle' : frame.state, session: current.session,
+            audioLevel: frame.audioLevel, durationMs: frame.durationMs,
+            pastedText: bounded(frame.pastedText ?? undefined, 4000), error: bounded(frame.error ?? undefined, 1000),
+          } : undefined }), signal: AbortSignal.timeout(10000),
+        });
+        const reply = response.ok ? await response.json() : { native: false, absent: false };
+        if (disposed) return;
+        if (generation !== latest.current.generation) { pending = true; return; }
+        if (!reply.native) {
+          blocked = generation;
+          if (latest.current.native) fallback(reply.absent === true, generation);
+          return;
+        }
+        if (action === 'prepare') {
+          // A later effect wakes the pump after the hidden web render commits.
+          awaitingCommit = true;
+          setNative(true);
+        } else if (action === 'frame') {
+          if (!quiet && latest.current.native && reply.finishSession === latest.current.session
+            && latest.current.snapshot.state === 'recording') latest.current.onFinish();
+          if (!pending && latest.current.active) frameTimer = setTimeout(() => { void pump(); }, 100);
+        }
+      } catch {
+        if (!disposed) {
+          if (generation !== latest.current.generation) pending = true;
+          else {
+            blocked = generation;
+            if (latest.current.native) fallback(false, generation);
+          }
+        }
+      } finally {
+        busy = false;
+        if (!disposed && (pending || retirementSeen !== latest.current.retirement)) void pump();
+      }
+    };
+    const notify = () => {
+      clearTimeout(frameTimer);
+      void pump();
+    };
+    wake.current = notify;
+    // Both the listener registration and initial read precede all traffic. A
+    // newer event wins over a late initial read, including temporary overrides.
     void (async () => {
       const [{ listen }, { invoke }] = await Promise.all([import('@tauri-apps/api/event'), import('@tauri-apps/api/core')]);
       let revision = 0;
-      const apply = (active: boolean) => { setSuppressed(active); };
+      const apply = (value: boolean) => { quiet = value; setSuppressed(value); };
       const off = await listen<{ active?: boolean }>('o8:quiet-mode-changed', ({ payload }) => {
         if (!disposed) { revision++; apply(payload.active === true); }
       });
@@ -59,71 +178,17 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
       const mode = await invoke<{ active?: boolean } | undefined>('presentation_quiet_mode_get');
       if (disposed) return;
       if (revision === before) apply(mode?.active === true);
-    })().catch(() => { if (!disposed) setSuppressed(false); });
-    return () => { disposed = true; unlisten?.(); };
+      ready = true;
+      notify();
+    })().catch(() => { /* Without readiness the web retains drawing ownership. */ });
+    return () => {
+      disposed = true;
+      wake.current = null;
+      clearTimeout(frameTimer);
+      clearTimeout(failureTimer);
+      unlisten?.();
+    };
   }, []);
-  useEffect(() => {
-    if (!isTauri()) return;
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const request = async (action: string, checkSettings = false) => {
-      const current = latest.current;
-      const frame = current.snapshot;
-      // Bound JSON-encoded UTF-8, including quotes/control characters.
-      const bounded = (text: string | undefined, budget: number) => {
-        if (text === undefined) return undefined;
-        let result = '';
-        let bytes = 2;
-        for (const char of text) {
-          const size = new TextEncoder().encode(JSON.stringify(char)).length - 2;
-          if (bytes + size > budget) break;
-          result += char; bytes += size;
-        }
-        return result;
-      };
-      const response = await fetch('/api/next/dictation-pill', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + getMobileWsToken() },
-        body: JSON.stringify({ action, checkSettings, snapshot: action === 'frame' ? {
-          state: suppressed ? 'idle' : frame.state, session: current.session,
-          audioLevel: frame.audioLevel, durationMs: frame.durationMs,
-          pastedText: bounded(frame.pastedText ?? undefined, 4000), error: bounded(frame.error ?? undefined, 1000),
-        } : undefined }), signal: AbortSignal.timeout(10000),
-      });
-      if (!response.ok) return { native: false, absent: false };
-      const reply = await response.json();
-      if (!disposed && !suppressed && reply.native === true && typeof reply.finishSession === 'number'
-        && latest.current.session === reply.finishSession && latest.current.snapshot.state === 'recording') latest.current.onFinish();
-      return reply;
-    };
-    const fallback = (absent: boolean) => {
-      if (absent) setNative(false);
-      else timer = setTimeout(() => { if (!disposed) setNative(false); }, 1000);
-    };
-    const send = async (first: boolean) => {
-      try {
-        const reply = await request(native ? 'frame' : 'prepare', first);
-        if (disposed) return;
-        if (!reply.native) { if (native) fallback(reply.absent === true); return; }
-        if (!native) { setNative(true); return; }
-        if (latest.current.snapshot.state !== 'idle') timer = setTimeout(() => { void send(false); }, 100);
-      } catch { if (!disposed && native) fallback(false); }
-    };
-    if (active) {
-      wasActive.current = true;
-      if (native || attempted.current !== session) {
-        attempted.current = session;
-        void send(true);
-      }
-    } else if (wasActive.current) {
-      wasActive.current = false;
-      if (native) void request('release').then(reply => {
-        if (!disposed && !reply.native) fallback(reply.absent === true);
-      }).catch(() => { if (!disposed) fallback(false); });
-    } else if (!probed.current) {
-      probed.current = true;
-      void send(true);
-    }
-    return () => { disposed = true; clearTimeout(timer); };
-  }, [native, active, session, suppressed]);
+  useEffect(() => { wake.current?.(); }, [active, session, native, suppressed]);
   return { native, suppressed };
 }

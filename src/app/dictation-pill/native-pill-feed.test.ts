@@ -17,10 +17,12 @@ let dom: JSDOM;
 let native = false;
 let snapshot: DictationSnapshot;
 let session = 1;
+let finish = vi.fn();
+let mounted = true;
 const frames: { action: string; snapshot?: Record<string, unknown> }[] = [];
 let reply: Record<string, unknown>;
 function Probe() {
-  const ownership = useNativeDictationPill(snapshot, session, () => undefined);
+  const ownership = useNativeDictationPill(snapshot, session, finish);
   useLayoutEffect(() => { native = ownership.native; }, [ownership.native]);
   return null;
 }
@@ -32,7 +34,7 @@ async function tick(ms: number) {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 }
 beforeEach(() => {
-  vi.useFakeTimers(); frames.length = 0; session = 1;
+  vi.useFakeTimers(); frames.length = 0; session = 1; finish = vi.fn(); mounted = true;
   snapshot = { state: 'idle', audioLevel: 0.5, durationMs: 123, error: null, partialTranscript: '' };
   reply = { native: true, enabled: true };
   dom = new JSDOM('', { url: 'http://localhost' });
@@ -45,8 +47,8 @@ beforeEach(() => {
   root = createRoot(document.createElement('div'));
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  dom.window.close(); vi.unstubAllGlobals(); vi.useRealTimers();
+  if (mounted) await act(async () => root.unmount());
+  dom.window.close(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers();
 });
 it('uses one disabled probe and one per session, with no idle polling', async () => {
   reply = { native: false, enabled: false };
@@ -58,8 +60,8 @@ it('uses one disabled probe and one per session, with no idle polling', async ()
 it('retains native ownership at idle, releases once, and checks the next session with its first frame', async () => {
   await render('idle'); expect(native).toBe(true);
   await tick(60000); expect(frames).toHaveLength(1);
-  await render('recording'); await tick(1000);
-  expect(frames.filter(frame => frame.action === 'frame')).toHaveLength(11);
+  await render('recording'); await tick(60000);
+  expect(frames.filter(frame => frame.action === 'frame')).toHaveLength(601);
   await render('idle');
   const count = frames.length;
   await tick(60000);
@@ -92,7 +94,10 @@ it('keeps multi-byte and escaped text below the byte cap and omits unused partia
 });
 
 it('records the opt-in feature in the next release', () => {
-  expect(SHIPPED_DARK_FLAG_MANIFEST.nativeDictationPill.landedRelease).toBe('0.1.821');
+  const entry = SHIPPED_DARK_FLAG_MANIFEST.nativeDictationPill;
+  expect(entry).toBeDefined();
+  if (!entry) throw new Error('Missing native dictation pill manifest entry');
+  expect(entry.landedRelease).toBe('0.1.821');
 });
 
 // Pair the native model/executor tests with the actual shell ingress wiring.
@@ -112,4 +117,133 @@ it('rejects unsupported-platform ingress before queueing', () => {
 it('uses the real-window predicate at the shell close entry point', () => {
   const source = readFileSync('native/o8-next/src/shell_view.rs', 'utf8');
   expect(source.split('cx.on_window_closed')[1]).toContain('!crate::native_pill::has_real_windows(cx)');
+});
+
+function controlledFetch() {
+  const pending: { body: typeof frames[number]; resolve: (reply: Record<string, unknown>) => void }[] = [];
+  vi.mocked(fetch).mockImplementation((_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    frames.push(body);
+    return new Promise<Response>(resolve => {
+      pending.push({ body, resolve: value => resolve(new Response(JSON.stringify(value))) });
+    });
+  });
+  return pending;
+}
+async function acknowledge(pending: ReturnType<typeof controlledFetch>, value = reply) {
+  await act(async () => { pending.shift()!.resolve(value); });
+}
+it('waits for listener registration and the initial quiet-mode read before frames', async () => {
+  const events = await import('@tauri-apps/api/event');
+  const core = await import('@tauri-apps/api/core');
+  let register!: (off: () => void) => void;
+  let read!: (mode: { active: boolean }) => void;
+  const listener = vi.spyOn(events, 'listen').mockImplementation(() => new Promise(resolve => { register = resolve; }));
+  const initialRead = vi.spyOn(core, 'invoke').mockImplementation(() => new Promise(resolve => { read = resolve; }));
+  await render('idle'); await render('recording');
+  expect(listener).toHaveBeenCalledOnce();
+  expect(initialRead).not.toHaveBeenCalled();
+  expect(frames).toHaveLength(0);
+  await act(async () => { register(() => undefined); });
+  expect(initialRead).toHaveBeenCalledOnce();
+  expect(frames.filter(frame => frame.action === 'frame')).toHaveLength(0);
+  await act(async () => { read({ active: true }); });
+  await tick(100);
+  expect(native).toBe(true);
+  expect(frames.some(frame => frame.action === 'frame')).toBe(true);
+  expect(frames.filter(frame => frame.action === 'frame').every(frame => frame.snapshot?.state === 'idle')).toBe(true);
+});
+it('serializes rapid session changes and replaces pending snapshots with the latest session', async () => {
+  await render('idle');
+  const pending = controlledFetch();
+  await render('recording');
+  session = 2; await render('polishing');
+  session = 3; await render('recording');
+  snapshot.audioLevel = 0.9; await render('recording');
+  expect(pending).toHaveLength(1);
+  expect(pending[0].body.snapshot?.session).toBe(1);
+  await acknowledge(pending);
+  expect(pending).toHaveLength(1);
+  expect(pending[0].body.snapshot).toMatchObject({ session: 3, state: 'recording', audioLevel: 0.9 });
+  expect(frames.some(frame => frame.snapshot?.session === 2)).toBe(false);
+  await acknowledge(pending);
+  await tick(100);
+  expect(pending).toHaveLength(1);
+  expect(pending[0].body.snapshot?.session).toBe(3);
+});
+it.each([true, false])('ignores an older session reply for ownership and finish, native=%s', async available => {
+  await render('idle');
+  const pending = controlledFetch();
+  await render('recording');
+  session = 2; await render('recording');
+  await acknowledge(pending, { native: available, absent: true, finishSession: 2 });
+  expect(native).toBe(true);
+  expect(finish).not.toHaveBeenCalled();
+  expect(pending).toHaveLength(1);
+  expect(pending[0].body.snapshot?.session).toBe(2);
+});
+it('ignores an old prepare acknowledgement after a newer session starts', async () => {
+  const pending = controlledFetch();
+  await render('recording');
+  session = 2; await render('recording');
+  await acknowledge(pending);
+  expect(native).toBe(false);
+  expect(pending).toHaveLength(1);
+  expect(pending[0].body.action).toBe('prepare');
+  await acknowledge(pending);
+  expect(native).toBe(true);
+  expect(pending[0].body.snapshot?.session).toBe(2);
+});
+it('does not update ownership or finish after unmount with a request in flight', async () => {
+  await render('idle');
+  const pending = controlledFetch();
+  await render('recording');
+  await act(async () => root.unmount()); mounted = false;
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  await acknowledge(pending, { native: false, absent: true, finishSession: 1 });
+  await tick(2000);
+  expect(native).toBe(true);
+  expect(finish).not.toHaveBeenCalled();
+  expect(pending).toHaveLength(0);
+  expect(error).not.toHaveBeenCalled();
+});
+it('serializes idle release ahead of the next session frame without delivering an old final state', async () => {
+  await render('idle');
+  const pending = controlledFetch();
+  await render('recording');
+  await render('success');
+  await render('idle');
+  session = 2; await render('recording');
+  expect(pending).toHaveLength(1);
+  await acknowledge(pending);
+  expect(pending[0].body.action).toBe('release');
+  await acknowledge(pending);
+  expect(pending[0].body.snapshot).toMatchObject({ state: 'recording', session: 2 });
+  expect(frames.some(frame => frame.snapshot?.state === 'success')).toBe(false);
+  expect(frames.filter(frame => frame.action === 'release')).toHaveLength(1);
+});
+
+it('does not let a previous session fallback timer revoke a new session owner', async () => {
+  await render('idle'); await render('recording');
+  reply = { native: false, enabled: true, absent: false };
+  await tick(100);
+  expect(native).toBe(true);
+  reply = { native: true, enabled: true };
+  session = 2; await render('recording');
+  await tick(1100);
+  expect(native).toBe(true);
+});
+
+it('still probes the latest session when an older disabled prepare spans retirement', async () => {
+  const pending = controlledFetch();
+  await render('recording');
+  await render('idle');
+  session = 2; await render('recording');
+  expect(pending).toHaveLength(1);
+  await acknowledge(pending, { native: false, enabled: false });
+  expect(pending).toHaveLength(1);
+  expect(pending[0].body.action).toBe('prepare');
+  await acknowledge(pending);
+  expect(native).toBe(true);
+  expect(pending[0].body.snapshot?.session).toBe(2);
 });
