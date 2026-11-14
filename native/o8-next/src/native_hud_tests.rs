@@ -2,7 +2,7 @@ use super::*;
 
 fn frame(state: &str, session: u64, surface: &str) -> Value {
     json!({"action":"frame","snapshot":{
-        "state": state, "session": session, "audioLevel": 0.6, "durationMs": 12000,
+        "state": state, "session": session, "audioLevel": 0.6, "durationMs": 12000, "armed": true,
         "hud": {"surface": surface, "title": "Symon · Listening", "text": "hello there",
             "dim": false, "solid": false, "reducedMotion": false,
             "placement": {"x": 100.0, "y": 50.0, "width": 460.0, "height": 138.0}}
@@ -81,7 +81,7 @@ fn a_late_release_never_hides_a_newer_session() {
 }
 
 #[test]
-fn placement_converts_to_appkit_and_falls_back_to_the_legacy_anchor() {
+fn placement_converts_to_appkit_and_is_clamped_to_the_screens() {
     let primary = [0., 0., 1440., 900.];
     let caret = Placement {
         x: 100.,
@@ -90,30 +90,92 @@ fn placement_converts_to_appkit_and_falls_back_to_the_legacy_anchor() {
         height: 138.,
     };
     assert_eq!(
-        appkit_frame(Some(caret), primary),
+        appkit_frame(Some(caret), &[primary]),
         Some([100., 712., 460., 138.])
     );
     // A secondary display above the primary has a negative top-left y.
-    let above = Placement {
+    let above = [0., 900., 1920., 1080.];
+    let on_above = Placement {
         x: 10.,
         y: -400.,
         width: 460.,
         height: 138.,
     };
     assert_eq!(
-        appkit_frame(Some(above), primary),
+        appkit_frame(Some(on_above), &[primary, above]),
         Some([10., 1162., 460., 138.])
     );
-    assert_eq!(appkit_frame(None, primary), Some([310., 48., 820., 220.]));
+    // Off every screen: pulled back inside their bounding box.
+    let far = Placement {
+        x: 90_000.,
+        y: -90_000.,
+        width: 460.,
+        height: 138.,
+    };
+    assert_eq!(
+        appkit_frame(Some(far), &[primary]),
+        Some([980., 762., 460., 138.])
+    );
+    // Oversized: capped to the screens and the largest frame the shell uses.
+    let huge = Placement {
+        x: 0.,
+        y: 0.,
+        width: 5000.,
+        height: 5000.,
+    };
+    assert_eq!(
+        appkit_frame(Some(huge), &[primary]),
+        Some([0., 0., 1440., 900.])
+    );
     let broken = Placement {
         x: f64::NAN,
         ..caret
     };
-    assert_eq!(
-        appkit_frame(Some(broken), primary),
-        Some([310., 48., 820., 220.])
-    );
-    assert_eq!(appkit_frame(None, [0., 0., 0., 0.]), None);
+    assert_eq!(appkit_frame(Some(broken), &[primary]), None);
+    assert_eq!(appkit_frame(None, &[primary]), None);
+    assert_eq!(appkit_frame(Some(caret), &[]), None);
+}
+
+#[test]
+fn unarmed_or_unplaced_frames_are_acknowledged_but_never_shown() {
+    let mut hud = Hud::default();
+    let mut unarmed = frame("recording", 1, "caret");
+    unarmed["snapshot"]["armed"] = json!(false);
+    assert_eq!(hud.control(&unarmed), Some(false));
+    let mut unplaced = frame("recording", 1, "caret");
+    unplaced["snapshot"]["hud"]["placement"] = Value::Null;
+    assert_eq!(hud.control(&unplaced), Some(false));
+    assert!(!hud.target);
+    // The armed frame takes over from the web bar at full opacity.
+    assert_eq!(hud.control(&frame("recording", 1, "caret")), Some(true));
+    let (opacity, moving) = hud.motion.value();
+    assert!(opacity > 0.999 && !moving);
+}
+
+#[test]
+fn polishing_dash_travels_like_the_web_stroke() {
+    let pieces = marks::polish_pieces();
+    assert_eq!(pieces.len(), 72);
+    assert!(pieces.first().unwrap().2 < 1. && pieces.last().unwrap().2 > 99.);
+    // dashoffset 36 at rest: the dash covers the path's last 36.
+    assert_eq!(marks::dash_start(0), -36.);
+    assert!(marks::in_dash(80., marks::dash_start(0)));
+    assert!(!marks::in_dash(20., marks::dash_start(0)));
+    // Half way through the 2.1 s cycle the offset is -36: positions 36 to 72.
+    assert_eq!(marks::dash_start(1050), 36.);
+    assert!(marks::in_dash(50., 36.) && !marks::in_dash(80., 36.));
+}
+
+#[test]
+fn level_eases_over_70_ms_unless_motion_is_reduced() {
+    let mut level = marks::LevelEase::default();
+    level.set(0.8);
+    let (now, moving) = level.value(false);
+    assert!(moving && now < 0.8);
+    assert_eq!(level.value(true), (0.8, false));
+    level.set(f32::NAN);
+    std::thread::sleep(Duration::from_millis(80));
+    assert_eq!(level.value(false), (0., false));
 }
 
 #[gpui::test]
@@ -143,6 +205,19 @@ fn hud_states_draw_offscreen_without_input(cx: &mut TestAppContext) {
             assert!(
                 visual.debug_bounds("native-dictation-hud").is_some(),
                 "{surface} {state}"
+            );
+            // The backdrop follows the painted bar.
+            let bar = hud
+                .update_in(visual, |hud, _, _| hud.bar.get())
+                .expect("bar bounds");
+            let drawn = visual.debug_bounds("native-dictation-hud").unwrap();
+            let near = |a: gpui::Pixels, b: gpui::Pixels| (f32::from(a) - f32::from(b)).abs() <= 2.;
+            assert!(
+                near(bar.origin.x, drawn.origin.x)
+                    && near(bar.origin.y, drawn.origin.y)
+                    && near(bar.size.width, drawn.size.width)
+                    && near(bar.size.height, drawn.size.height),
+                "{surface} {state}: {bar:?} vs {drawn:?}"
             );
         }
     }

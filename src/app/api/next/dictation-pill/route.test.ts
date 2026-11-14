@@ -141,3 +141,26 @@ it('forwards a fleet tap and a revert naming its chip, and drops malformed ones'
   ]);
   child.emit('exit');
 });
+
+it('rejects an out-of-range HUD placement before it reaches the native process', async () => {
+  settings.hud = true;
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
+  bindNextBrowserPipe(child as unknown as ChildProcess);
+  const frames: unknown[] = [];
+  child.stdin.on('data', data => {
+    const frame = JSON.parse(String(data));
+    frames.push(frame);
+    child.stdout.write('o8-next-browser-result:' + JSON.stringify({ id: frame.id, result: { ok: true } }) + '\n');
+  });
+  const post = (placement: unknown) => POST(new NextRequest('http://localhost/api/next/dictation-pill', { method: 'POST', body: JSON.stringify({
+    action: 'frame', checkSettings: true, surface: 'hud', snapshot: { state: 'recording', hud: { surface: 'caret', placement } },
+  }) }));
+  for (const placement of [
+    { x: 1e7, y: 0, width: 460, height: 138 }, { x: 0, y: 0, width: 5000, height: 138 },
+    { x: 0, y: 0, width: 460, height: -1 }, { x: '1', y: 0, width: 460, height: 138 }, null,
+  ]) expect((await post(placement)).status).toBe(400);
+  expect(frames).toHaveLength(0);
+  expect(await (await post({ x: -1200, y: -300, width: 460, height: 138 })).json()).toMatchObject({ native: true });
+  expect(frames).toHaveLength(1);
+  child.emit('exit');
+});

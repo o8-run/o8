@@ -84,18 +84,25 @@ export function useNativePillDockExtent(native: boolean, active: boolean, visibl
 
 /** The native window acknowledges preparation before React relinquishes drawing.
  * Frames are sent only from the effect after that hidden render has committed.
- * Failed requests restore web drawing immediately and block the current session. */
+ * Failed requests restore web drawing immediately and block the current session.
+ *
+ * The `hud` surface hands over per session: the web keeps painting until a frame
+ * of the current session is acknowledged (`drawn`), and native shows only frames
+ * sent after that hidden web render has committed (`armed`). A disabled flag is
+ * rechecked at each session instead of for the life of the page. */
 export function useNativeDictationPill(
   snapshot: NativeDockSnapshot, session: number, onFinish: () => void, onAction?: (action: NativeDockAction) => void,
   surface: NativeFeedSurface = 'dock',
-): { native: boolean; suppressed: boolean } {
+): { native: boolean; suppressed: boolean; drawn: boolean } {
   const [native, setNative] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
+  const [drawnSession, setDrawnSession] = useState<number | null>(null);
   const active = snapshot.state !== 'idle';
+  const drawn = surface === 'hud' ? native && active && drawnSession === session : native;
   // A static frame changes only on events, so each change wakes the feed.
   const staticKey = native && isStatic(snapshot.state) ? JSON.stringify(snapshot) : '';
   const latest = useRef({
-    snapshot, session, onFinish, onAction, native, active: false, family: family(snapshot.state),
+    snapshot, session, onFinish, onAction, native, drawn, active: false, family: family(snapshot.state),
     generation: 0, retirement: 0, retiredGeneration: 0, retiredSession: session, retiredFamily: family(snapshot.state),
   });
   const wake = useRef<(() => void) | null>(null);
@@ -106,13 +113,13 @@ export function useNativeDictationPill(
       ? previous.generation + 1 : previous.generation;
     const retiring = previous.active && !active;
     latest.current = {
-      snapshot, session, onFinish, onAction, native, active, family: kind, generation,
+      snapshot, session, onFinish, onAction, native, drawn, active, family: kind, generation,
       retirement: previous.retirement + (retiring ? 1 : 0),
       retiredGeneration: retiring ? previous.generation : previous.retiredGeneration,
       retiredSession: retiring ? previous.session : previous.retiredSession,
       retiredFamily: retiring ? previous.family : previous.retiredFamily,
     };
-  }, [snapshot, session, onFinish, onAction, native, active]);
+  }, [snapshot, session, onFinish, onAction, native, drawn, active]);
   useEffect(() => {
     if (!isTauri()) return;
     let disposed = false;
@@ -122,6 +129,10 @@ export function useNativeDictationPill(
     let pending = false;
     let probed = false;
     let awaitingCommit = false;
+    // HUD only: the generation whose first frame was acknowledged hidden, and
+    // whether the pump waits for the web to stop painting it.
+    let armedGeneration = -1;
+    let awaitingDrawn = false;
     let attempted = -1;
     let checked = -1;
     let blocked = -1;
@@ -166,7 +177,7 @@ export function useNativeDictationPill(
       // Independent best effort: a lost acknowledgement must not block retirement.
       // It names its session, so a late arrival cannot hide the next session.
       const now = latest.current;
-      void request({ action: 'release', ...(now.active ? { session: now.session, kind: now.family } : { session: now.retiredSession, kind: now.retiredFamily }) })
+      void request({ action: 'release', immediate: true, ...(now.active ? { session: now.session, kind: now.family } : { session: now.retiredSession, kind: now.retiredFamily }) })
         .catch(() => undefined);
     };
     // One request owns the transport until its reply settles. Wakes only replace
@@ -190,7 +201,11 @@ export function useNativeDictationPill(
         generation = current.retiredGeneration;
       } else if (blocked === generation || quiet) return;
       else if (current.active) {
-        if (current.native) action = 'frame';
+        if (current.native) {
+          if (awaitingDrawn && armedGeneration === generation && !current.drawn) return;
+          awaitingDrawn = false;
+          action = 'frame';
+        }
         else {
           if (attempted === generation || isStatic(current.snapshot.state) && !enabled) return;
           attempted = generation;
@@ -217,7 +232,7 @@ export function useNativeDictationPill(
           edit: frame.edit && { ...frame.edit, app: bounded(frame.edit.app, 120) },
           glint: frame.glint && { ...frame.glint, key: undefined, text: bounded(frame.glint.text, 200) },
           workers: frame.workers && { ...frame.workers, label: bounded(frame.workers.label, 20), repos: frame.workers.repos.slice(0, 4).map(repo => bounded(repo, 60)) },
-          expanded: frame.expanded, holdMs,
+          expanded: frame.expanded, holdMs, ...(surface === 'hud' ? { armed: armedGeneration === generation } : {}),
           hud: frame.hud && { ...frame.hud, title: bounded(frame.hud.title, 120), text: bounded(frame.hud.text, 2400) },
         } : undefined,
         ...(action === 'release' ? { session: releaseSession, kind: releaseKind, immediate: current.snapshot.handoff === true } : {}) });
@@ -225,7 +240,7 @@ export function useNativeDictationPill(
         if (reply.enabled === true) enabled = true;
         if (generation !== latest.current.generation) { pending = true; return; }
         if (!reply.native) {
-          if (reply.enabled === false) disabled = true;
+          if (reply.enabled === false && surface !== 'hud') disabled = true;
           blocked = generation;
           if (latest.current.native) fallback(generation);
           return;
@@ -235,6 +250,13 @@ export function useNativeDictationPill(
           awaitingCommit = true;
           setNative(true);
         } else if (action === 'frame') {
+          if (surface === 'hud' && current.active && armedGeneration !== generation) {
+            // Acknowledged hidden: stop web painting, then send the armed frame.
+            armedGeneration = generation;
+            awaitingDrawn = true;
+            setDrawnSession(current.session);
+            return;
+          }
           if (!quiet && latest.current.native && reply.finishSession === latest.current.session
             && latest.current.snapshot.state === 'recording') latest.current.onFinish();
           // Each reported click runs once, only for the capsule still on screen.
@@ -285,7 +307,7 @@ export function useNativeDictationPill(
       const initial = await request({ action: 'prepare', checkSettings: true }).catch(() => ({ native: false }));
       if (disposed) return;
       probed = true;
-      if (initial.enabled === false) { disabled = true; return; }
+      if (initial.enabled === false && surface !== 'hud') { disabled = true; return; }
       if (initial.enabled === true) enabled = true;
       if (!initial.native) blocked = generation;
       const [{ listen }, { invoke }] = await Promise.all([import('@tauri-apps/api/event'), import('@tauri-apps/api/core')]);
@@ -316,6 +338,6 @@ export function useNativeDictationPill(
       unlisten?.();
     };
   }, [surface]);
-  useEffect(() => { wake.current?.(); }, [active, session, native, suppressed, snapshot.state, staticKey]);
-  return { native, suppressed };
+  useEffect(() => { wake.current?.(); }, [active, session, native, drawn, suppressed, snapshot.state, staticKey]);
+  return { native, suppressed, drawn };
 }

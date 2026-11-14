@@ -696,9 +696,20 @@ mod macos {
     }
 
     /// The dock's never-key, never-main panel class, shared with the caret/HUD panel.
+    /// The subclass is registered once, from the first panel's class, so
+    /// every panel given it must be of that same GPUI class (or already it).
     pub(super) unsafe fn make_nonactivating(panel: id) {
         unsafe {
-            object_setClass(panel, nonactivating_class(panel));
+            let class = nonactivating_class(panel);
+            let current = (&*panel).class() as *const Class;
+            debug_assert!(
+                std::ptr::eq(current, class)
+                    || (&*class)
+                        .superclass()
+                        .is_some_and(|base| std::ptr::eq(base, current)),
+                "never-key panel subclass built from another window class"
+            );
+            object_setClass(panel, class);
         }
     }
 }

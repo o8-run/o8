@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { requestNextHud, requestNextPill } from '@/lib/next/browser-pipe';
+import { validPlacement } from '@/lib/next/hud-placement';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
   }
   // The caret/HUD feedback panel has its own flag and window; it reports no clicks.
   const hud = body.surface === 'hud';
+  if (hud && !hudPlacementValid(body.snapshot)) return NextResponse.json({ native: false }, { status: 400 });
   // Session boundaries refresh the flag; level frames use that decision.
   if (body.action === 'prepare' || body.checkSettings === true) {
     const values = (await getOperatorDefaults()).values;
@@ -73,4 +75,12 @@ function capsuleActions(value: unknown) {
     if (item.action === 'speed' && value === null) return [];
     return [{ session: item.session, state: item.state, action: item.action, value }];
   });
+}
+
+/** A HUD frame's placement, when present, must be a sane desktop rectangle. */
+function hudPlacementValid(snapshot: unknown) {
+  const hud = snapshot && typeof snapshot === 'object' ? (snapshot as { hud?: unknown }).hud : undefined;
+  const placement = hud && typeof hud === 'object' ? (hud as { placement?: unknown }).placement : undefined;
+  if (placement === undefined) return true;
+  return !!placement && typeof placement === 'object' && validPlacement(placement as Record<'x' | 'y' | 'width' | 'height', unknown>);
 }

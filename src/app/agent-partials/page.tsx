@@ -14,7 +14,7 @@ import { SystemDictationSession } from '@/lib/dictation/system-dictation-session
 import { SymonMark, SymonPolishMark, SymonWaveform } from '@/components/desktop/dictation/SymonVisuals';
 import { useNativeDictationPill } from '@/app/dictation-pill/useNativeDictationPill';
 import {
-  hudDisplay, hudTitle, nativeHudFrame, readPlacement, webHudPaints,
+  hudDisplay, hudTitle, nativeHudFrame, readPlacement, sessionPlacement, webHudPaints,
   type HudPlacement, type HudState, type PartialsSurface, type Phase,
 } from './nativeHudFrame';
 
@@ -187,8 +187,10 @@ export default function AgentPartialsPage() {
       }, agent ? PAINT_GRACE_MS : DICTATION_PAINT_GRACE_MS);
       sessionStartedAtRef.current = Date.now();
       setElapsedSeconds(0);
-      // The shell anchors this session right after its start event.
-      setPlacement(null);
+      // The shell anchors a session just before its start event: keep that
+      // anchor, drop one left from an earlier session.
+      const startedAt = Date.now();
+      setPlacement(current => sessionPlacement(current, startedAt));
       setHudSession(session => session + 1);
       setState({ phase: 'starting', level: 0, agent, text: '', clipboardOnly: false, surface, mode });
     };
@@ -433,7 +435,7 @@ export default function AgentPartialsPage() {
     state, claimed: suppressed, graceElapsed, elapsedSeconds,
     solid: appSurface === 'solid', reducedMotion: prefersReducedMotion === true, placement,
   }), [state, suppressed, graceElapsed, elapsedSeconds, appSurface, prefersReducedMotion, placement]);
-  const { native } = useNativeDictationPill(nativeFrame, hudSession, noop, undefined, 'hud');
+  const { drawn: nativeDrawn } = useNativeDictationPill(nativeFrame, hudSession, noop, undefined, 'hud');
   const display = state ? hudDisplay(state) : '';
   const rise = prefersReducedMotion ? 0 : 4;
   const caretLocal = state?.surface === 'caret';
@@ -455,15 +457,24 @@ export default function AgentPartialsPage() {
         pointerEvents: 'none',
       }}
     >
-      <AnimatePresence>
-        {state && webHudPaints(state, suppressed, graceElapsed, native) ? (
+      {/* Handing a session to the native panel removes the web bar at once
+          (the panel appears without its own entrance), so the two never fade
+          over each other. */}
+      <AnimatePresence custom={nativeDrawn}>
+        {state && webHudPaints(state, suppressed, graceElapsed, nativeDrawn) ? (
           <motion.div
             key={`agent-partials-bar-${state.surface}`}
             role="status"
             aria-live="polite"
-            initial={{ opacity: 0, y: rise }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: rise }}
+            custom={nativeDrawn}
+            variants={{
+              hidden: { opacity: 0, y: rise },
+              shown: { opacity: 1, y: 0 },
+              exit: (handover: boolean) => handover ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: rise },
+            }}
+            initial="hidden"
+            animate="shown"
+            exit="exit"
             transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
             style={{
               display: 'flex',
