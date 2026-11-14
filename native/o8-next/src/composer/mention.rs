@@ -397,7 +397,7 @@ pub(crate) fn thread_context(
                 });
             source.id = id;
             source.title = title;
-            thread_block(&source, client.history(&source.id))
+            thread_block(&source, client.saved_history(&source.id))
         })
         .collect::<Vec<_>>()
         .join("\n\n")

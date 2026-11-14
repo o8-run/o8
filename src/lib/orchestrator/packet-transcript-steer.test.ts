@@ -61,3 +61,11 @@ describe('packet transcript steer events', () => {
     ]);
   });
 });
+
+it('adds durable lane event identity only for an explicit native projection', async () => {
+  const { readSessionSteerTranscriptEvents } = await import('./packet-transcript');
+  expect(readSessionSteerTranscriptEvents('codex-owned:abc', true)).toMatchObject([
+    { eventId: 'evt-1', text: 'Use the new plan.' },
+    { eventId: 'evt-2', text: 'Retry startup.' },
+  ]);
+});

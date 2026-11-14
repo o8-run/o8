@@ -1,13 +1,12 @@
 //! Transcript pane uses the production native stream merger and retained rows.
-use crate::theme::current as theme;
 use crate::{
     client::{Client, Session},
     model::History,
-    retained::{RetainedRow, RowState},
+    retained::RowState,
     stream::Transcript,
     transport::{self, Incoming, Subscription},
 };
-use gpui::{AnyElement, ListAlignment, ListOffset, ListState, canvas, div, list, prelude::*, px};
+use gpui::{AnyElement, ListAlignment, ListOffset, ListState, canvas, div, prelude::*, px};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeSet,
@@ -92,6 +91,12 @@ pub struct Pane {
     /// it opens, as in the main chat.
     file_root: Option<gpui::SharedString>,
     peeks: crate::transcript_peek::Peeks,
+    action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
+    action_ends: RefCell<crate::transcript_actions::TurnEndsCache>,
+    backfill: Option<crate::worker_backfill::Backfill>,
+    prompt_actions: Rc<RefCell<crate::ui::prompt_actions::reading::Reading>>,
+    turn_files: RefCell<crate::turn_files::Cache>,
+    turn_files_open: Rc<RefCell<BTreeSet<String>>>,
 }
 impl Pane {
     pub fn new(key: Option<String>) -> Self {
@@ -116,6 +121,12 @@ impl Pane {
             terminal: None,
             file_root: None,
             peeks: Default::default(),
+            action_feedback: Default::default(),
+            action_ends: Default::default(),
+            backfill: None,
+            prompt_actions: Default::default(),
+            turn_files: Default::default(),
+            turn_files_open: Default::default(),
         }
     }
     pub fn metadata(&mut self, session: &Session) {
@@ -136,20 +147,32 @@ impl Pane {
             }
         }
     }
+    pub(crate) fn reading_root(&mut self, root: &str) {
+        self.file_root = (!root.is_empty()).then(|| gpui::SharedString::from(root.to_owned()));
+        for row in self.rows.iter() {
+            row.borrow_mut().file_root = self.file_root.clone();
+        }
+    }
     pub fn install(&mut self, history: History, client: Client) {
+        self.backfill = crate::worker_backfill::Backfill::new(client.clone(), &history);
         self.client = Some(client.clone());
         self.peeks.connect(client.clone());
-        let key = history.session_key.clone();
+        self.subscription = Some(transport::subscribe_history(client, &history));
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
-        self.subscription = Some(transport::subscribe(client, key));
         self.notice.clear();
     }
     /// A transcript with no live session behind it: a delegate call's own words.
     pub(crate) fn install_saved(&mut self, history: History) {
+        self.backfill = None;
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
         self.notice.clear();
+    }
+    pub(crate) fn install_readonly(&mut self, history: History, client: Client) {
+        self.client = Some(client.clone());
+        self.peeks.connect(client);
+        self.install_saved(history);
     }
     pub(crate) fn prepend(&mut self, history: History) {
         let anchor = self.list.logical_scroll_top();
@@ -183,8 +206,7 @@ impl Pane {
         let anchor = self.list.logical_scroll_top();
         for (index, row) in self.rows.iter().enumerate() {
             let mut row = row.borrow_mut();
-            if !crate::subagents::trace::delegates(&row.row)
-            {
+            if !crate::subagents::trace::delegates(&row.row) {
                 continue;
             }
             row.bind_subagent_focus(cx);
@@ -246,6 +268,25 @@ impl Pane {
         self.rows = Rc::new(states);
     }
     pub fn poll(&mut self) -> bool {
+        let mut backfilled = false;
+        let pages: Vec<_> = self
+            .backfill
+            .as_ref()
+            .map(|b| b.receiver.try_iter().take(1).collect())
+            .unwrap_or_default();
+        for page in pages {
+            match page {
+                Ok(history) => {
+                    self.prepend(history);
+                    backfilled = true;
+                }
+                Err(error) => {
+                    self.notice = error;
+                    self.backfill = None;
+                    backfilled = true;
+                }
+            }
+        }
         let mut visualizations_changed = false;
         for (index, row) in self.rows.iter().enumerate() {
             if row.borrow_mut().poll_visualizations() {
@@ -260,6 +301,7 @@ impl Pane {
             .map(|s| s.receiver.try_iter().take(64).collect())
             .unwrap_or_default();
         let mut changed = false;
+        let mut notice_changed = false;
         for message in messages {
             match message {
                 Incoming::Frame(frame) => {
@@ -268,7 +310,9 @@ impl Pane {
                     }
                 }
                 Incoming::Status(status) => {
-                    self.notice = status.trim_end_matches(" · read-only").into()
+                    let notice = status.trim_end_matches(" · read-only");
+                    notice_changed |= self.notice != notice;
+                    self.notice = notice.into();
                 }
             }
         }
@@ -284,7 +328,7 @@ impl Pane {
                 self.navigate(true);
             }
         }
-        changed || visualizations_changed
+        changed || visualizations_changed || notice_changed || backfilled
     }
     pub fn navigate(&mut self, end: bool) {
         if !self.rows.is_empty() {
@@ -298,6 +342,86 @@ impl Pane {
     /// Delay all child layout until bounds intersect the clip. A clipped pane
     /// never constructs a list or calls the retained row's shaping/paint path.
     pub fn content(&self) -> AnyElement {
+        self.content_with(
+            self.action_ends
+                .borrow_mut()
+                .get(&self.rows)
+                .keys()
+                .copied()
+                .collect(),
+            |_, row, _, _| row,
+        )
+    }
+    /// Finished answers use the chat's Play/Copy footer in the reading pane too.
+    pub(crate) fn content_for<V: 'static>(&self, view: gpui::Entity<V>) -> AnyElement {
+        let ends = self.action_ends.borrow_mut().get(&self.rows);
+        let client = self.client.clone();
+        let feedback = self.action_feedback.clone();
+        let files = self.turn_files.borrow_mut().get(&self.rows, &ends);
+        let open = self.turn_files_open.clone();
+        let rows = self.rows.clone();
+        let list = self.list.clone();
+        let root = self.file_root.clone();
+        let prompts = self.prompt_actions.clone();
+        if let Some(transcript) = &self.transcript {
+            prompts.borrow_mut().sync(&rows, transcript.shown_entries());
+        }
+        let source = self.key.clone().unwrap_or_default();
+        self.content_with(
+            ends.keys().copied().collect(),
+            move |index, row, window, cx| {
+                if let (Some(text), Some(client)) = (ends.get(&index), &client) {
+                    return div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .child(row)
+                        .children(files.get(&index).map(|files| {
+                            let turn = rows[index].borrow().row.id().to_owned();
+                            let expanded = open.borrow().contains(&turn);
+                            let (open, list, view) = (open.clone(), list.clone(), view.downgrade());
+                            crate::turn_files::card_with(
+                                index,
+                                files,
+                                root.as_ref().map(|root| root.as_ref()),
+                                expanded,
+                                move |cx| {
+                                    open.borrow_mut().insert(turn.clone());
+                                    let anchor = list.logical_scroll_top();
+                                    list.splice(index..index + 1, 1);
+                                    list.scroll_to(anchor);
+                                    let _ = view.update(cx, |_, cx| cx.notify());
+                                },
+                            )
+                        }))
+                        .child(crate::transcript_actions::row(
+                            view.clone(),
+                            client.clone(),
+                            feedback.clone(),
+                            index,
+                            text.clone(),
+                        ))
+                        .into_any_element();
+                }
+                crate::ui::prompt_actions::reading::Reading::decorate(
+                    prompts.clone(),
+                    view.clone(),
+                    &source,
+                    index,
+                    row,
+                    window,
+                    cx,
+                )
+            },
+        )
+    }
+
+    fn content_with(
+        &self,
+        ends: BTreeSet<usize>,
+        decorate: impl FnMut(usize, AnyElement, &mut gpui::Window, &mut gpui::App) -> AnyElement
+        + 'static,
+    ) -> AnyElement {
         let rows = self.rows.clone();
         let list_state = self.list.clone();
         let painted_rows = self.painted_rows.clone();
@@ -305,6 +429,7 @@ impl Pane {
         let painted = self.painted.clone();
         let paints = self.paints.clone();
         let notice = self.notice.clone();
+        let file_root = self.file_root.clone();
         canvas(
             move |bounds, window, cx| {
                 let clip = bounds.intersect(&window.content_mask().bounds);
@@ -316,26 +441,17 @@ impl Pane {
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .child(
-                        div()
-                            .h(px(18.))
-                            .px(px(8.))
-                            .text_size(px(9.5))
-                            .text_color(theme().text_muted)
-                            .child(notice),
-                    )
-                    .child(
-                        list(list_state.clone(), move |index, _, _| {
-                            RetainedRow {
-                                state: rows[index].clone(),
-                                index,
-                                painted: painted_rows.clone(),
-                            }
-                            .interactive(&list_state)
-                        })
-                        .flex_1()
-                        .min_h_0(),
-                    )
+                    .when(!notice.is_empty(), |view| {
+                        view.child(crate::transcript_view::notice(notice))
+                    })
+                    .child(crate::transcript_view::list_view(
+                        list_state.clone(),
+                        rows,
+                        painted_rows,
+                        file_root,
+                        ends,
+                        decorate,
+                    ))
                     .into_any_element();
                 content.layout_as_root(bounds.size.map(gpui::AvailableSpace::Definite), window, cx);
                 content.prepaint_at(bounds.origin, window, cx);
@@ -404,6 +520,138 @@ mod tests {
     #[gpui::test]
     fn a_pane_shorter_than_its_first_row_scrolls_to_the_next(cx: &mut TestAppContext) {
         assert_eq!(scrolled_to(Pane::new(None), cx), 1);
+    }
+    #[test]
+    fn normalized_worker_recovery_notifies_without_new_transcript_rows() {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            sync::{
+                Arc,
+                atomic::{AtomicBool, Ordering},
+            },
+            time::{Duration, Instant},
+        };
+        struct Host {
+            stopped: Arc<AtomicBool>,
+            server: Option<std::thread::JoinHandle<()>>,
+        }
+        impl Drop for Host {
+            fn drop(&mut self) {
+                self.stopped.store(true, Ordering::Release);
+                self.server.take().unwrap().join().unwrap();
+            }
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let stopped = Arc::new(AtomicBool::new(false));
+        let failed = Arc::new(AtomicBool::new(false));
+        let stop = stopped.clone();
+        let failing = failed.clone();
+        let recent = crate::clock::now().to_string();
+        let server = std::thread::spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                let mut stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::park_timeout(Duration::from_millis(1));
+                        continue;
+                    }
+                    Err(e) => panic!("worker fixture accept: {e}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut buf = [0; 8192];
+                let n = stream.read(&mut buf).unwrap();
+                let request = String::from_utf8_lossy(&buf[..n]);
+                let (status, body) = if request.contains("/api/panel/ws-info") {
+                    (
+                        "404 Not Found",
+                        serde_json::json!({"error":"fixture has no socket"}),
+                    )
+                } else if request.contains("/api/mobile/history") {
+                    (
+                        "200 OK",
+                        serde_json::json!({"sessionKey":"codex-owned:notice","transcript":[{"id":"prompt","role":"user","text":"Review this patch."}]}),
+                    )
+                } else if failing.load(Ordering::Acquire) {
+                    (
+                        "500 Internal Server Error",
+                        serde_json::json!({"error":"temporarily unavailable"}),
+                    )
+                } else {
+                    assert!(request.contains("/api/orchestrator/packet-transcript"));
+                    let events = if request.contains("cursor=0") {
+                        serde_json::json!([{"seq":1,"ts":recent,"type":"assistant","text":"Reviewing."}])
+                    } else {
+                        serde_json::json!([])
+                    };
+                    (
+                        "200 OK",
+                        serde_json::json!({"sessionKey":"codex-owned:notice","events":events,"nextCursor":1}),
+                    )
+                };
+                let body = body.to_string();
+                write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+            }
+        });
+        let _host = Host {
+            stopped,
+            server: Some(server),
+        };
+        let client = Client::authenticated(&origin, None).unwrap();
+        let history = client.history("codex-owned:notice").unwrap();
+        assert!(
+            crate::shell::session::worker_transcript::State::from_history(&history)
+                .unwrap()
+                .active,
+            "the HTTP retry fixture must model an active worker; idle workers wait for the socket"
+        );
+        failed.store(true, Ordering::Release);
+        let mut pane = Pane::new(Some("codex-owned:notice".into()));
+        pane.install(history, client);
+        let before: Vec<_> = pane.rows.iter().map(|r| r.borrow().row.clone()).collect();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let notified = pane.poll();
+            if !pane.notice.is_empty() {
+                assert!(
+                    notified,
+                    "a connection-only error invalidates the reading pane"
+                );
+                assert!(pane.notice.starts_with("Reconnecting"));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the worker error reaches the pane"
+            );
+            std::thread::park_timeout(Duration::from_millis(5));
+        }
+        failed.store(false, Ordering::Release);
+        loop {
+            let notified = pane.poll();
+            if pane.notice.is_empty() {
+                assert!(notified, "a recovered connection invalidates the notice");
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "a successful normalized poll clears the notice"
+            );
+            std::thread::park_timeout(Duration::from_millis(5));
+        }
+        assert_eq!(
+            before,
+            pane.rows
+                .iter()
+                .map(|r| r.borrow().row.clone())
+                .collect::<Vec<_>>(),
+            "notice recovery needs no new answer or tool row"
+        );
     }
 }
 

@@ -19,7 +19,7 @@ pub(crate) mod images;
 #[path = "lineage_view.rs"]
 mod lineage_view;
 #[path = "prompt_actions.rs"]
-mod prompt_actions;
+pub(crate) mod prompt_actions;
 #[path = "session_sidebar.rs"]
 mod session_sidebar;
 #[path = "shell_session.rs"]
@@ -35,7 +35,7 @@ use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
     model::Row,
-    retained::{RetainedRow, RowState},
+    retained::RowState,
     sidebar,
     stream::Transcript,
     transport::{self, Incoming, Subscription},
@@ -43,7 +43,7 @@ use crate::{
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Keystroke, ListAlignment,
     ListOffset, ListState, Render, Window, WindowBounds, WindowHandle, WindowOptions, canvas, div,
-    list, point, prelude::*, px, size,
+    point, prelude::*, px, size,
 };
 use serde_json::{Value, json};
 use std::{
@@ -572,6 +572,9 @@ impl Surface {
                 match result {
                     Ok((history, queue, routing)) => {
                         let key = history.session_key.clone();
+                        let readback = repo
+                            .is_none()
+                            .then(|| transport::subscribe_history(this.client.clone(), &history));
                         let transcript = Transcript::new(history);
                         let rows = transcript.rows.clone();
                         this.transcript = Some(transcript);
@@ -585,7 +588,7 @@ impl Surface {
                             Some(repo) => {
                                 transport::subscribe_live(this.client.clone(), key, repo, backend)
                             }
-                            None => transport::subscribe(this.client.clone(), key),
+                            None => readback.unwrap(),
                         });
                         this.notice = "Connecting live stream".into();
                         match (queue, routing) {
@@ -1013,12 +1016,7 @@ impl Render for Surface {
                             .when(empty, |view| {
                                 view.when(!self.notice.is_empty(), |view| {
                                     view.child(
-                                        div()
-                                            .px(px(24.))
-                                            .py(px(8.))
-                                            .text_size(px(11.))
-                                            .text_color(theme().text_muted)
-                                            .child(self.notice.clone()),
+                                        crate::transcript_view::notice(self.notice.clone()),
                                     )
                                 })
                                 .child(self.history_control(cx))

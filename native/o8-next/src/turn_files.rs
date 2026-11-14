@@ -184,6 +184,21 @@ pub(crate) fn card(
     root: Option<&str>,
     expanded: bool,
 ) -> AnyElement {
+    card_with(index, files, root, expanded, move |cx| {
+        view.update(cx, |view, cx| {
+            view.expand_turn_files(turn.clone(), index, cx)
+        });
+    })
+}
+
+/// The same file card in a reading pane; the owner retains its expansion state.
+pub(crate) fn card_with(
+    index: usize,
+    files: &[Edit],
+    root: Option<&str>,
+    expanded: bool,
+    expand: impl Fn(&mut gpui::App) + 'static,
+) -> AnyElement {
     let total = files.iter().try_fold((0, 0), |sum, file| {
         file.counts.map(|(add, del)| (sum.0 + add, sum.1 + del))
     });
@@ -307,9 +322,7 @@ pub(crate) fn card(
                     .hover(|d| d.text_color(theme().text))
                     .child(format!("Show {more} more"))
                     .on_click(move |_, _, cx| {
-                        view.update(cx, |view, cx| {
-                            view.expand_turn_files(turn.clone(), index, cx)
-                        });
+                        expand(cx);
                     }),
             )
         });
@@ -467,5 +480,28 @@ mod tests {
             ("…/demo/".into(), "a.md".into())
         );
         assert_eq!(display("/a.md"), ("/".into(), "a.md".into()));
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Cache {
+    rows: std::rc::Weak<Vec<Rc<RefCell<RowState>>>>,
+    files: Rc<HashMap<usize, Vec<Edit>>>,
+}
+impl Cache {
+    pub(crate) fn get<T>(
+        &mut self,
+        rows: &Rc<Vec<Rc<RefCell<RowState>>>>,
+        ends: &HashMap<usize, T>,
+    ) -> Rc<HashMap<usize, Vec<Edit>>> {
+        if !self
+            .rows
+            .upgrade()
+            .is_some_and(|old| Rc::ptr_eq(&old, rows))
+        {
+            self.files = Rc::new(by_turn(rows, ends));
+            self.rows = Rc::downgrade(rows);
+        }
+        self.files.clone()
     }
 }

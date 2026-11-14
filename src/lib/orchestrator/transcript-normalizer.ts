@@ -109,15 +109,15 @@ interface IdentityAlias { callId: string; shapes: Set<ToolCallShape>; }
  * malformed lines are skipped. Returns `[]` when input is empty or entirely
  * unparseable so callers can treat absence as a benign condition.
  */
-export function normalizeCodexEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString()): TranscriptEvent[] {
+export function normalizeCodexEvents(rawJsonl: string, fallbackTimestamp = new Date().toISOString(), nativeIdentities = false): TranscriptEvent[] {
   if (!rawJsonl || typeof rawJsonl !== 'string') return [];
-  const normalizer = createCodexEventNormalizer(fallbackTimestamp);
+  const normalizer = createCodexEventNormalizer(fallbackTimestamp, nativeIdentities);
   normalizer.append(rawJsonl);
   return normalizer.events;
 }
 
 /** Incremental JSONL ingestion retains call identities across file chunks and runs. */
-export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOString()) {
+export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOString(), nativeIdentities = false) {
 
   const out: TranscriptEvent[] = [];
   const pending = new Map<string, PendingCall>();
@@ -127,6 +127,14 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
   const fallbackTs = fallbackTimestamp;
   let seq = 0;
   let syntheticCallSeq = 0;
+  let currentSourceId = '';
+  let currentNativeTimestamp = '';
+  const nativeId = (kind: string, callId?: string, previous?: TranscriptEvent) => {
+    if (!nativeIdentities) return {};
+    const retained = previous as (TranscriptEvent & { eventId?: string; nativeTimestamp?: string }) | undefined;
+    const eventId = retained?.eventId ?? (!previous && currentSourceId ? `${currentSourceId}:${kind}${callId ? `:${callId}` : ''}` : undefined);
+    return { nativeTimestamp: retained?.nativeTimestamp ?? currentNativeTimestamp, ...(eventId ? { eventId } : {}) };
+  };
   const nextSeq = () => (seq += 1);
   const nextSyntheticCallId = (prefix: string) => `${prefix}-synthetic-${syntheticCallSeq += 1}`;
 
@@ -166,6 +174,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
         seq: previousCall!.seq,
         ts: previousCall!.ts,
         type: 'tool_call',
+        ...nativeId('tool_call', callId, previousCall),
         callId: previousCall.type === 'tool_call' ? previousCall.callId : callId,
         tool,
         args,
@@ -191,7 +200,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
     const thisSeq = nextSeq();
     pending.set(callId, { seq: thisSeq, tool });
     const summary = clip(args || `call ${tool}`, MAX_SUMMARY);
-    out.push({ seq: thisSeq, ts, type: 'tool_call', callId, tool, args, summary });
+    out.push({ seq: thisSeq, ts, type: 'tool_call', callId, tool, args, summary, ...nativeId('tool_call', callId) });
     emitted.set(callId, { callIndex: out.length - 1, tool });
     if (identity) {
       aliases.push({ callId, shapes: new Set([shape]) });
@@ -210,6 +219,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
     const result: TranscriptEvent = {
       seq: previousResult?.seq ?? nextSeq(), ts: previousResult?.ts ?? ts, type: 'tool_result', callId: previous && out[previous.callIndex].type === 'tool_call' ? (out[previous.callIndex] as Extract<TranscriptEvent, { type: 'tool_call' }>).callId : callId, tool, ok,
       summary: output || (ok ? 'ok' : `exit ${exitCode}`),
+      ...nativeId('tool_result', callId, previousResult),
     };
     if (previous && previous.resultIndex !== undefined) {
       out[previous.resultIndex] = result;
@@ -229,7 +239,10 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
       if (!parsed) continue;
 
       const type = readStr(parsed, 'type');
+      const sourceId = readStr(parsed, 'uuid', 'id') || readStr(safeObject(parsed.item), 'id') || readStr(safeObject(parsed.payload), 'id');
+      currentSourceId = sourceId;
       const normalizedTimestamp = normalizeTs(parsed.timestamp, fallbackTs);
+      currentNativeTimestamp = normalizedTimestamp.reliable ? normalizedTimestamp.value : '';
       const ts = normalizedTimestamp.value;
       const payload = safeObject(parsed.payload);
       const payloadType = payload ? readStr(payload, 'type') : '';
@@ -240,7 +253,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
           typeof payload!.message === 'string' ? payload!.message : extractText(payload!.content),
           MAX_ASSISTANT_TEXT, true,
         );
-        if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
+        if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...nativeId('assistant') });
         continue;
       }
 
@@ -253,7 +266,7 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
             readStr(item, 'text') || extractText(item!.content) || extractText(item!.message),
             MAX_ASSISTANT_TEXT, true,
           );
-          if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
+          if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...nativeId('assistant') });
           continue;
         }
 
@@ -363,14 +376,14 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
             || extractText(payload?.content),
           MAX_SUMMARY,
         );
-        out.push({ seq: nextSeq(), ts, type: 'error', message: message || 'Codex run error' });
+        out.push({ seq: nextSeq(), ts, type: 'error', message: message || 'Codex run error', ...nativeId('error') });
         continue;
       }
 
       // Terminal
       if (type === 'turn.completed' || (type === 'event_msg' && payloadType === 'task_complete')) {
         const exitCode = readNum(parsed, 'exit_code') ?? readNum(payload, 'exit_code') ?? 0;
-        out.push({ seq: nextSeq(), ts, type: 'done', exitCode });
+        out.push({ seq: nextSeq(), ts, type: 'done', exitCode, ...nativeId('done') });
         continue;
       }
     }

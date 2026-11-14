@@ -185,3 +185,21 @@ describe('Pi builtin persisted operator transcript', () => {
     expect(resumed.nextCursor).toBe(3);
   });
 });
+
+it('preserves legacy missing-time formatting while native mode leaves it unknown', async () => {
+  const { sessionKey } = persistSession([`${JSON.stringify({ type: 'assistant', text: 'Answer without a timestamp' })}\n`]);
+  const query = new URLSearchParams({ sessionKey });
+  const read = async () => {
+    const response = await getTranscript(new NextRequest(`${base}/api/orchestrator/packet-transcript?${query}`, {
+      headers: { host: new URL(base).host, authorization: `Bearer ${panelToken}` },
+    }));
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+  expect((await read()).events[0].ts).toBe('1970-01-01T00:00:00.000Z');
+  query.set('cursorToken', '');
+  const native = await read();
+  expect(native.events[0].ts).toBe('1970-01-01T00:00:00.000Z');
+  expect(native.events[0].nativeTimestamp).toBe('');
+  expect(native.events[0].eventId).toEqual(expect.any(String));
+});

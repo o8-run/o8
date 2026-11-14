@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { readPacketTranscriptEvents, readSessionTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
+import { NATIVE_PAGE_EVENTS, transcriptWindow } from '@/lib/orchestrator/packet-transcript-window';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { findLaneBySession } from '@/lib/lane/registry';
@@ -10,11 +11,13 @@ export const dynamic = 'force-dynamic';
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
-function parseLimit(raw: string | null): number {
+function parseLimit(raw: string | null, native: boolean): number {
   if (!raw) return DEFAULT_LIMIT;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIMIT;
-  return Math.min(MAX_LIMIT, Math.floor(parsed));
+  // Native pages also end at a byte budget in transcriptWindow; legacy clients
+  // retain their existing pagination limit.
+  return Math.min(native ? NATIVE_PAGE_EVENTS : MAX_LIMIT, Math.floor(parsed));
 }
 
 function parseCursor(raw: string | null): number {
@@ -42,7 +45,8 @@ export async function GET(request: NextRequest) {
   // dispatch, #1389). Live-hit 2026-07-04: every packet tab stuck on "Agent
   // working…" because the poll never resolved a packetId.
   const sessionKey = (params.get('sessionKey') ?? '').trim();
-  const limit = parseLimit(params.get('limit'));
+  const native = params.has('cursorToken');
+  const limit = parseLimit(params.get('limit'), native);
   const cursor = parseCursor(params.get('cursor'));
   const tail = parseTail(params.get('tail'));
   const fullHistory = !tail || params.get('history') === 'complete';
@@ -61,8 +65,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const readback = packetId
-      ? await readPacketTranscriptEvents(packetId, fullHistory)
-      : { packetId: '', ...(await readSessionTranscriptEvents(sessionKey, fullHistory)) };
+      ? await (native ? readPacketTranscriptEvents(packetId, fullHistory, true) : readPacketTranscriptEvents(packetId, fullHistory))
+      : { packetId: '', ...(await (native ? readSessionTranscriptEvents(sessionKey, fullHistory, true) : readSessionTranscriptEvents(sessionKey, fullHistory))) };
 
     if (readback.unsupportedReason) {
       return NextResponse.json(
@@ -80,24 +84,18 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    let windowed = readback.events;
-    if (tail) {
-      windowed = readback.events.slice(-limit);
-    } else {
-      const afterCursor = readback.events.filter((event) => event.seq > cursor);
-      windowed = afterCursor.slice(0, limit);
-    }
-
-    const nextCursor = windowed.length > 0
-      ? windowed[windowed.length - 1].seq
-      : null;
+    const window = transcriptWindow(readback.events, cursor, limit, tail, params.get('cursorToken'));
 
     return NextResponse.json(
       {
         packetId,
         sessionKey: readback.sessionKey || null,
-        events: windowed,
-        nextCursor,
+        ...window,
+        // Existing consumers retain their event shape; native callers opt in
+        // to identity/checkpoint fields with cursorToken, including the first read.
+        events: params.has('cursorToken') ? window.events : window.events.map(({ eventId, ...event }) => { void eventId; return event; }),
+        historyComplete: readback.historyComplete === true && (!tail || readback.events.length <= limit),
+        earliestEventTime: readback.earliestEventTime ?? null,
         terminalReason: readback.terminalReason ?? null,
         ...(readback.note ? { note: readback.note } : {}),
       },
