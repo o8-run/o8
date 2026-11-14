@@ -65,3 +65,10 @@ helpers and frontend assets. Optional helper installation remains shell-owned;
 the launcher forwards an existing `O8_CODEBASE_MEMORY_BIN` and bundled helper
 paths. This crate does not download helpers or implement updater, voice, menu,
 signing, or packaging changes.
+
+Current review state: WIP. The launcher passes 34 macOS and Linux fixture/unit
+tests, and the shared crate passes 19 macOS tests. Repository verification is
+blocked by the existing provider-instance encryption suite: both the full Linux
+run and an isolated rerun fail with "Master key unavailable or changed". The
+two-failure limit stops this correction round; the failure and verification
+receipts are recorded in the pull request.
