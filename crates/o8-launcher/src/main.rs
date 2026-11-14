@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     data_dir: PathBuf,
@@ -171,6 +171,11 @@ fn spawn(
     }
     Ok(server)
 }
+fn present_async(config: &Config, reason: &str) {
+    let config = config.clone();
+    let reason = reason.to_owned();
+    std::thread::spawn(move || present(&config, &reason));
+}
 fn present(config: &Config, reason: &str) {
     eprintln!("{reason}");
     next_main_startup::report_failure_with_recovery(
@@ -258,14 +263,14 @@ fn run(config: &mut Config) -> Result<(), String> {
         return Err("Launch paths must be absolute".into());
     }
     fs::create_dir_all(config.data_dir.join("logs")).map_err(|_| "Data directory unavailable")?;
-    let Some(instance_lock) =
-        Instance::claim(&config.data_dir).map_err(|_| "Instance unavailable")?
+    let Some(instance_lock) = Instance::claim(&config.data_dir)
+        .map_err(|error| format!("Instance unavailable: {error}"))?
     else {
         return Ok(());
     };
     ownership::cleanup(&config.data_dir, &config.server_dir)?;
     let stopped = Arc::new(AtomicBool::new(false));
-    for signal in [libc::SIGTERM, libc::SIGINT] {
+    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         signal_hook::flag::register(signal, stopped.clone())
             .map_err(|_| "Shutdown handler unavailable")?;
     }
@@ -344,6 +349,8 @@ fn run(config: &mut Config) -> Result<(), String> {
         let path = config.data_dir.join("logs").join(name);
         let _ = fs::rename(&path, path.with_file_name(format!("{name}.prev")));
     }
+    let reopen = Arc::new(AtomicBool::new(false));
+    let native = native::Native::new(config.native_lifecycle, stopped.clone(), reopen.clone())?;
     let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
     let ws = spawn(
         config,
@@ -362,8 +369,6 @@ fn run(config: &mut Config) -> Result<(), String> {
             restart_stop.store(true, Ordering::SeqCst);
         },
     );
-    let reopen = Arc::new(AtomicBool::new(false));
-    let native = native::Native::new(config.native_lifecycle, stopped.clone(), reopen.clone())?;
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .timeout(Duration::from_millis(500))
@@ -484,7 +489,7 @@ fn run(config: &mut Config) -> Result<(), String> {
                     window_failed = false;
                 }
                 Err(reason) => {
-                    present(config, &reason);
+                    present_async(config, &reason);
                     window_failed = true;
                 }
             }
@@ -518,7 +523,7 @@ fn run(config: &mut Config) -> Result<(), String> {
                     launch = Some(receive);
                     pending_show = false;
                 } else if Instant::now() >= deadline {
-                    present(config, "Server did not become healthy");
+                    present_async(config, "Server did not become healthy");
                     window_failed = true;
                     pending_show = false;
                 }

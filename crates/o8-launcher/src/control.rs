@@ -43,7 +43,26 @@ fn read_request(peer: &mut UnixStream) -> io::Result<Request> {
     peer.set_read_timeout(Some(Duration::from_millis(100)))?;
     peer.set_write_timeout(Some(Duration::from_millis(100)))?;
     let mut bytes = Vec::new();
-    Read::by_ref(peer).take(4097).read_to_end(&mut bytes)?;
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Launcher request deadline",
+            ));
+        }
+        peer.set_read_timeout(Some(remaining.min(Duration::from_millis(100))))?;
+        let mut chunk = [0u8; 512];
+        let count = peer.read(&mut chunk)?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+        if bytes.len() > 4096 {
+            break;
+        }
+    }
     if bytes.len() > 4096 {
         return Err(io::Error::other("Oversized launcher command"));
     }
@@ -102,7 +121,22 @@ impl Instance {
             }
             fs::remove_file(&socket)?;
         }
-        let listener = UnixListener::bind(&socket)?;
+        let limit =
+            std::mem::size_of_val(&unsafe { std::mem::zeroed::<libc::sockaddr_un>() }.sun_path) - 1;
+        use std::os::unix::ffi::OsStrExt;
+        if socket.as_os_str().as_bytes().len() > limit {
+            return Err(io::Error::other(format!(
+                "Control socket path {} exceeds {limit} bytes",
+                socket.display()
+            )));
+        }
+        // claim runs before this process starts any worker threads.
+        let mask = unsafe { libc::umask(0o177) };
+        let bound = UnixListener::bind(&socket);
+        unsafe {
+            libc::umask(mask);
+        }
+        let listener = bound?;
         fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
         let (send, queue) = mpsc::sync_channel::<Pending>(16);
@@ -122,6 +156,9 @@ impl Instance {
                         }
                         Err(_) => break,
                     };
+                    if !same_user(&peer) {
+                        continue;
+                    }
                     let Ok(request) = read_request(&mut peer) else {
                         continue;
                     };
@@ -167,5 +204,58 @@ impl Drop for Instance {
             let _ = worker.join();
         }
         let _ = fs::remove_file(&self.socket);
+    }
+}
+
+fn same_user(peer: &UnixStream) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let mut uid = 0;
+        let mut gid = 0;
+        unsafe {
+            libc::getpeereid(peer.as_raw_fd(), &mut uid, &mut gid) == 0 && uid == libc::getuid()
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
+        let mut size = std::mem::size_of_val(&credentials) as libc::socklen_t;
+        unsafe {
+            libc::getsockopt(
+                peer.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&mut credentials as *mut libc::ucred).cast(),
+                &mut size,
+            ) == 0
+                && credentials.uid == libc::getuid()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn accepted_socket_reports_the_current_user() {
+        let (peer, _) = UnixStream::pair().unwrap();
+        assert!(same_user(&peer));
+    }
+    #[test]
+    fn socket_limit_error_names_path_and_platform_limit() {
+        let root = std::env::temp_dir().join(format!("o8-control-{}", uuid::Uuid::new_v4()));
+        let directory = root.join("x".repeat(100));
+        fs::create_dir_all(&directory).unwrap();
+        let error = match Instance::claim(&directory) {
+            Err(error) => error,
+            Ok(_) => panic!("accepted oversized socket path"),
+        };
+        let message = error.to_string();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(
+            message.contains(directory.join("launcher.sock").to_str().unwrap()),
+            "{message}"
+        );
+        assert!(message.contains("bytes"));
     }
 }

@@ -91,3 +91,123 @@ fn hardlinked_prior_receipt_is_preserved_and_refused_before_cleanup() {
     assert_eq!(fs::read(target).unwrap(), bytes);
     assert!(!f.root.join("api-starts").exists());
 }
+
+#[test]
+fn slow_control_client_has_an_overall_deadline() {
+    use std::time::{Duration, Instant};
+    let mut f = Fixture::new();
+    f.start();
+    f.ready();
+    let mut peer = UnixStream::connect(f.root.join("launcher.sock")).unwrap();
+    let writer = std::thread::spawn(move || {
+        for _ in 0..80 {
+            if peer.write_all(b" ").is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let start = Instant::now();
+    let result = control(&f, serde_json::json!({"op":"show"}));
+    let elapsed = start.elapsed();
+    writer.join().unwrap();
+    assert_eq!(result["ok"], true);
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "slow client held worker: {elapsed:?}"
+    );
+}
+#[test]
+fn hangup_stops_servers_and_releases_ports() {
+    let mut f = Fixture::new();
+    f.start();
+    f.ready();
+    unsafe {
+        libc::kill(f.launcher.as_ref().unwrap().id() as i32, libc::SIGHUP);
+    }
+    let child = f.launcher.as_mut().unwrap();
+    until(|| child.try_wait().unwrap().is_some());
+    assert!(child.wait().unwrap().success());
+    f.launcher = None;
+    for port in [f.port("api-port"), f.port("ws-port")] {
+        assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok());
+    }
+}
+#[test]
+fn an_open_failure_dialog_does_not_block_control_or_shutdown() {
+    let mut f = Fixture::new();
+    fs::write(f.root.join("fail-window"), "1").unwrap();
+    fs::write(f.root.join("hold-dialog"), "1").unwrap();
+    f.start();
+    until(|| f.root.join("dialog-reached").exists());
+    assert_eq!(
+        control(&f, serde_json::json!({"op":"prepare-restart"}))["ok"],
+        true
+    );
+    f.stop();
+    assert!(!f.root.join("dialog-exited").exists());
+    fs::remove_file(f.root.join("hold-dialog")).unwrap();
+}
+
+#[test]
+fn an_uninspectable_other_user_receipt_does_not_block_start() {
+    let mut f = Fixture::new();
+    // The system init process belongs to another UID on non-root test runners.
+    assert!(o8_launcher::ownership::identity(1).is_none());
+    let receipt = o8_launcher::ownership::Receipt {
+        pid: 1,
+        identity: "foreign-user".into(),
+        directory: f.root.clone(),
+        install: env!("CARGO_BIN_EXE_o8-launcher").into(),
+        port: 0,
+        parent: 1,
+    };
+    o8_launcher::ownership::private_write(
+        &f.root.join("launcher-api.json"),
+        &serde_json::to_vec(&receipt).unwrap(),
+    )
+    .unwrap();
+    f.start();
+    f.ready();
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&fs::read(f.root.join("launcher-api.json")).unwrap()).unwrap();
+    assert_ne!(receipt["pid"], 1);
+}
+// Copying platform-signed executables is not supported by the macOS fixture.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_proven_server_under_the_old_install_is_stopped_after_a_move() {
+    let mut f = Fixture::new();
+    let old = f.root.join("old-install");
+    fs::create_dir(&old).unwrap();
+    fs::copy("/bin/sleep", old.join("node")).unwrap();
+    let output = std::process::Command::new("python3").args(["-c", "import subprocess,sys; p=subprocess.Popen([sys.argv[1],'60'],cwd=sys.argv[2],start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); print(p.pid)"])
+        .arg(old.join("node")).arg(&f.root).output().unwrap();
+    assert!(output.status.success());
+    let pid: u32 = String::from_utf8(output.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    // Fixture drop owns emergency cleanup, even if an assertion fails.
+    fs::write(f.root.join("api-starts"), format!("{pid}\n")).unwrap();
+    let receipt = o8_launcher::ownership::Receipt {
+        pid,
+        identity: o8_launcher::ownership::identity(pid).unwrap(),
+        directory: f.root.clone(),
+        install: old.join("o8-launcher"),
+        port: 0,
+        parent: 1,
+    };
+    o8_launcher::ownership::private_write(
+        &f.root.join("launcher-api.json"),
+        &serde_json::to_vec(&receipt).unwrap(),
+    )
+    .unwrap();
+    f.start();
+    f.ready();
+    let status = std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "stat="]).output().unwrap();
+    let state = String::from_utf8_lossy(&status.stdout);
+    assert!(state.trim().is_empty() || state.trim().starts_with('Z'), "old server still running: {state}");
+}

@@ -34,7 +34,10 @@ if '--version' in sys.argv:
   else: (root/'launcher-api.json').symlink_to(root/'trap-target')
  print('v22.0.0'); sys.exit(0)
 if '-e' in sys.argv: sys.exit(0)
-if Path(sys.argv[0]).name=='dialog': (root/'dialog-reached').write_text(sys.argv[1]); sys.exit(0)
+if Path(sys.argv[0]).name=='dialog':
+ (root/'dialog-reached').write_text(sys.argv[1])
+ while (root/'hold-dialog').exists(): time.sleep(0.02)
+ (root/'dialog-exited').write_text('1'); sys.exit(0)
 if Path(sys.argv[0]).name=='probe':
  if (root/'hold-probe').exists():
   (root/'probe-entered').write_text('1')
@@ -176,6 +179,7 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_file(self.root.join("hold-probe"));
+        let _ = fs::remove_file(self.root.join("hold-dialog"));
         if self.launcher.is_some() {
             self.stop();
         }
