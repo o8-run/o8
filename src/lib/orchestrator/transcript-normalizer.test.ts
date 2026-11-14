@@ -116,3 +116,33 @@ describe('normalizeCodexEvents — one command, one row (#1845)', () => {
     expect(normalizeCodexEvents('not json\n{oops')).toEqual([]);
   });
 });
+
+describe('normalizeCodexEvents — assistant replies', () => {
+  const reply = (ts: string, text: string, phase = 'commentary') => line({
+    timestamp: ts, type: 'response_item',
+    payload: { type: 'message', role: 'assistant', phase, content: [{ type: 'output_text', text, annotations: [] }] },
+  });
+  const agentMessage = (ts: string, text: string) => line({ timestamp: ts, type: 'event_msg', payload: { type: 'agent_message', message: text } });
+
+  it('reads a reply that a newer rollout writes only as an assistant message item', () => {
+    const events = normalizeCodexEvents([
+      reply('2026-11-14T22:09:27.068Z', 'I will inspect the repository.'),
+      line({ timestamp: '2026-11-14T22:09:27.100Z', type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'rules' }] } }),
+      reply('2026-11-14T22:10:17.918Z', 'Outcome: done.', 'final_answer'),
+    ].join('\n'));
+    expect(events.map((event) => [event.type, event.ts, 'text' in event ? event.text : ''])).toEqual([
+      ['assistant', '2026-11-14T22:09:27.068Z', 'I will inspect the repository.'],
+      ['assistant', '2026-11-14T22:10:17.918Z', 'Outcome: done.'],
+    ]);
+  });
+
+  it('shows a reply once when an older rollout writes it both ways', () => {
+    const events = normalizeCodexEvents([
+      agentMessage(TS, 'Same reply.'),
+      reply(TS, 'Same reply.'),
+      reply(TS, 'Another reply.'),
+      agentMessage(TS, 'Another reply.'),
+    ].join('\n'));
+    expect(events.filter((event) => event.type === 'assistant').map((event) => ('text' in event ? event.text : ''))).toEqual(['Same reply.', 'Another reply.']);
+  });
+});

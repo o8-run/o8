@@ -127,6 +127,17 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
   const fallbackTs = fallbackTimestamp;
   let seq = 0;
   let syntheticCallSeq = 0;
+  /**
+   * Assistant text already shown. A rollout can carry the same reply twice, as
+   * an `agent_message` event and as an assistant `message` item; newer Codex
+   * versions write only the item.
+   */
+  const shownAssistantText = new Set<string>();
+  const pushAssistant = (ts: string, text: string) => {
+    if (!text || shownAssistantText.has(text)) return;
+    shownAssistantText.add(text);
+    out.push({ seq: nextSeq(), ts, type: 'assistant', text });
+  };
   const nextSeq = () => (seq += 1);
   const nextSyntheticCallId = (prefix: string) => `${prefix}-synthetic-${syntheticCallSeq += 1}`;
 
@@ -236,11 +247,15 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
 
       // Assistant text
       if (type === 'event_msg' && payloadType === 'agent_message') {
-        const text = clip(
+        pushAssistant(ts, clip(
           typeof payload!.message === 'string' ? payload!.message : extractText(payload!.content),
           MAX_ASSISTANT_TEXT, true,
-        );
-        if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
+        ));
+        continue;
+      }
+
+      if (type === 'response_item' && payloadType === 'message' && readStr(payload, 'role') === 'assistant') {
+        pushAssistant(ts, clip(extractText(payload!.content), MAX_ASSISTANT_TEXT, true));
         continue;
       }
 
