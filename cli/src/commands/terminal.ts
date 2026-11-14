@@ -7,6 +7,7 @@ import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
 import { confirmOpenedPanes, openTerminalPanes, parsePanesArgs, workerTerminals, type PaneTerminal } from './terminal-panes.js';
+import { installShortcut, parseShortcutArgs, removeShortcut } from './terminal-shortcut.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
@@ -391,7 +392,7 @@ async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<numbe
       ...result.closed.map((id) => `closed    ${id}`),
       ...result.existing.map((id) => `existing  ${id}`),
       ...result.remaining.map((id) => `not shown ${id}`),
-      ...result.skipped.map(() => 'skipped   (unsafe session ID)'),
+      ...result.skipped.map(() => 'skipped   (session ID is unsafe or too long to label)'),
       ...warnings.map((warning) => `warning   ${warning}`),
       ...(result.error ? [`error     ${result.error}`] : []),
     ];
@@ -402,11 +403,36 @@ async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<numbe
   return result.error ? EXIT.CONFLICT : EXIT.OK;
 }
 
+/** Add or remove the Rex action that opens the terminals tab. It only edits Rex's config. */
+function runTerminalShortcut(mode: OutputMode, rest: string[]): number {
+  const { key, remove } = parseShortcutArgs(rest);
+  const result = remove
+    ? removeShortcut({ env: process.env })
+    : installShortcut({ self: selfCommand(), key, env: process.env });
+  if (mode.human) {
+    const lines = result.action === 'installed'
+      ? [
+        `Added "Show o8 Terminals" to Rex${result.key ? `, bound to ${result.key}` : ''}.`,
+        `Find it in the Rex command palette, or run \`rex do o8_terminals\`.`,
+        `File: ${result.file}`,
+      ]
+      : result.action === 'removed'
+        ? ['Removed "Show o8 Terminals" from Rex.']
+        : ['The Rex shortcut is not installed.'];
+    if (result.hint) lines.push(result.hint);
+    process.stdout.write(`${lines.join('\n')}\n`);
+  } else {
+    printJson({ schema: 'o8/cli/terminal.shortcut/v1', ...result });
+  }
+  return EXIT.OK;
+}
+
 export async function runTerminal(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
-  if (!['list', 'show', 'observe', 'control', 'wait', 'panes'].includes(sub ?? '')) {
-    throw new CliError('invalid_args', 'Use `o8 terminal list|show|observe|control|wait|panes`.', EXIT.INVALID_ARGS);
+  if (!['list', 'show', 'observe', 'control', 'wait', 'panes', 'shortcut'].includes(sub ?? '')) {
+    throw new CliError('invalid_args', 'Use `o8 terminal list|show|observe|control|wait|panes|shortcut`.', EXIT.INVALID_ARGS);
   }
   if (sub === 'panes') return runTerminalPanes(mode, rest);
+  if (sub === 'shortcut') return runTerminalShortcut(mode, rest);
   const machineAt = rest.indexOf('--machine');
   if (machineAt >= 0) {
     const key = rest[machineAt + 1];
