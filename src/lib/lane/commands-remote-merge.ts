@@ -9,7 +9,7 @@ import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-gu
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
 import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
 import { resolveGovernedMergeHistoryPlan } from '@/lib/lane/governed-merge-history';
-import { getLane, setLaneStatus } from '@/lib/lane/registry';
+import { getLane, setLaneStatus, appendEvent } from '@/lib/lane/registry';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { fetchWorkerRun } from '@/lib/worker/runs';
 import { SessionMergeRestrictionError, withSessionMergePublication } from '@/lib/orchestrator/session-merge-restriction';
@@ -61,6 +61,10 @@ export async function performRemoteCustomerMerge(
     })).stdout.trim();
 
     const sourceSha = (await laneGit(fetched.tempWorktreePath, lane.repoPath, ['rev-parse', '--verify', 'HEAD^{commit}'])).stdout.trim();
+    if (command.authorizingApprovalId && command.expectedHeadSha && sourceSha !== command.expectedHeadSha) {
+      setLaneStatus(lane.id, 'reviewing', 'system', 'review_invalidated');
+      return { ok: false, laneId: lane.id, reason: 'head_moved_since_review', expectedHeadSha: command.expectedHeadSha, currentHeadSha: sourceSha, note: 'The fetched head changed after approval. Return to review before merging.' };
+    }
     const candidateGate = await checkReviewRunPolicy(lane, { cwd: fetched.tempWorktreePath, sha: sourceSha });
     if (!candidateGate.ok) return { ok: false, laneId: lane.id, reason: candidateGate.code, note: candidateGate.message };
 
@@ -216,6 +220,12 @@ export async function performRemoteCustomerMerge(
       };
     }
 
+    if (command.authorizingPrincipal) {
+      const mergedSha = (await laneGit(lane.repoPath, lane.repoPath, ['rev-parse', 'HEAD'])).stdout.trim();
+      appendEvent(lane.id, 'merge', actor, { approvedSha: command.expectedHeadSha ?? sourceSha, mergedSha,
+        authorizingPrincipal: command.authorizingPrincipal, authorizingApprovalId: command.authorizingApprovalId ?? null,
+        checks: [{ name: 'post-rebase-typecheck', verdict: typecheckSkipped ? 'skipped' : 'pass' }] });
+    }
     let pushedToOrigin = false;
     let pushError: string | undefined;
     try {

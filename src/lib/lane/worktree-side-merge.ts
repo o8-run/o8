@@ -21,7 +21,7 @@ import {
 import { runLaneRebaseVerify } from '@/lib/lane/rebase-verify';
 import { buildCheckList } from '@/lib/lane/preview-merge';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
-import { handlePostRebaseVerifyFailure } from '@/lib/lane/worktree-side-merge-verify';
+import { handlePostRebaseVerifyFailure, recordMergePublication } from '@/lib/lane/worktree-side-merge-verify';
 import { prepareDurableMergeRelease } from '@/lib/lane/durable-merge-release';
 import { settleSuccessfulMergeWorktreeCleanup } from '@/lib/lane/successful-merge-worktree-cleanup';
 import {
@@ -574,15 +574,15 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         }
         throw error;
       }
-    } else if (reviewedHead.reviewedHeadSha) {
+    } else if (reviewedHead.reviewedHeadSha || (command.authorizingApprovalId && command.expectedHeadSha)) {
       // A review pinned this commit: merge exactly it, never what the branch
       // points at now, and no uncommitted changes the review did not cover.
-      const pinned = await resolveHeadSha(worktreePath, reviewedHead.reviewedHeadSha, lane.repoPath);
+      const pinned = await resolveHeadSha(worktreePath, reviewedHead.reviewedHeadSha ?? command.expectedHeadSha!, lane.repoPath);
       if (!pinned) {
         return {
           ok: false,
           laneId: command.laneId,
-          note: `The reviewed commit ${reviewedHead.reviewedHeadSha} could not be resolved in this lane's repository.`,
+          note: `The reviewed commit ${reviewedHead.reviewedHeadSha ?? command.expectedHeadSha} could not be resolved in this lane's repository.`,
         };
       }
       reviewedSnapshotSha = pinned;
@@ -777,7 +777,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       return { ...failure, reason: 'canonical_merge_ancestry_failed' };
     }
     const mergeSha = mergeCandidateSha;
-    appendEvent(command.laneId, 'merge', actor, { laneHeadSha: mergeSha, baseBranch: lane.baseBranch });
+    recordMergePublication(command, actor, reviewedSnapshotSha, mergeSha, lane.baseBranch, mergeChecks);
     let pushedToOrigin = false, pushError: string | undefined;
     if (originPushAvailable) {
       try {

@@ -33,20 +33,20 @@ async function readDiffForLane(lane: DiffLane) {
       args => laneGit(cwd, lane.repoPath, args));
     const base = diffBase.mergeBase ?? diffBase.comparisonRef;
     const result = await laneGit(cwd, lane.repoPath, ['diff', `${base}...${headSha}`, '--no-color'], { maxBuffer: 10 * 1024 * 1024 });
-    return { rawDiff: result.stdout.trim(), diffBase };
+    return { rawDiff: result.stdout.trim(), diffBase, headSha };
   }
 
   try {
     const result = await laneGit(cwd, lane.repoPath, ['diff', `${lane.baseBranch}...HEAD`, '--no-color'], { maxBuffer: 10 * 1024 * 1024 });
-    return { rawDiff: result.stdout.trim(), diffBase: null };
+    return { rawDiff: result.stdout.trim(), diffBase: null, headSha: undefined };
   } catch (error) {
     if (error instanceof LaneGitMetadataError) throw error;
     try {
       const fallback = await laneGit(cwd, lane.repoPath, ['diff', 'HEAD~1', '--no-color'], { maxBuffer: 10 * 1024 * 1024 });
-      return { rawDiff: fallback.stdout.trim(), diffBase: null };
+      return { rawDiff: fallback.stdout.trim(), diffBase: null, headSha: undefined };
     } catch (error) {
       if (error instanceof LaneGitMetadataError) throw error;
-      return { rawDiff: '', diffBase: null };
+      return { rawDiff: '', diffBase: null, headSha: undefined };
     }
   }
 }
@@ -159,7 +159,8 @@ export async function createLaneActionApproval(
       }
     }
   }
-  const { rawDiff, diffBase } = await readDiffForLane(lane);
+  const { rawDiff, diffBase, headSha } = await readDiffForLane(lane);
+  const expectedHeadSha = input.expectedHeadSha ?? (input.verb === 'merge' && (lane.runtime as string) !== 'remote-customer' ? headSha : undefined);
   const files = parseGitDiff(rawDiff);
   const surfaceRoute = resolveRequireApprovalSync() === 'surface' && lane.packetId
     ? resolvePacketDispatcher(lane.packetId) ?? {
@@ -202,7 +203,7 @@ export async function createLaneActionApproval(
       Base: lane.baseBranch,
       Runtime: lane.runtime,
       ...(lane.packetId ? { Packet: lane.packetId } : {}),
-      ...(input.expectedHeadSha ? { 'Expected HEAD': input.expectedHeadSha } : {}),
+      ...(expectedHeadSha ? { 'Expected HEAD': expectedHeadSha } : {}),
       ...(recovery ? {
         'Recovery Ref': recovery.preservedRef,
         'Recovery HEAD': recovery.preservedHeadSha ?? 'unknown',
@@ -225,7 +226,7 @@ export async function createLaneActionApproval(
       laneId: lane.id,
       verb: input.verb,
       commitMessage: input.commitMessage,
-      expectedHeadSha: input.expectedHeadSha,
+      expectedHeadSha,
       strategy: input.strategy,
     },
   });

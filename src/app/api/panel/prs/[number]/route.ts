@@ -1,3 +1,4 @@
+import { PublicationUnknown, PublicationRefused } from '@/lib/github-broker/publication';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { DraftDecisionError, recordDraftDecision, isLiteralDraftRepo } from '@/lib/github-broker/idle-drafts';
 import { viewerJson } from '@/lib/viewers/response';
@@ -22,7 +23,7 @@ import { deriveWorkflowStage } from '@/lib/workflows/status';
 import { GitHubRequestDeferredError } from '@/lib/github-broker/request-budget';
 import { beginPrWatchRead, recordPrWatchSnapshot } from '@/lib/github-broker/pr-watch';
 import { waitForPrRemarkWrites } from '@/lib/github-broker/pr-watch-writes';
-import { assessPrMergeGate, assertPrMergeAllowed, countPrChecks, PrMergeRefused } from '@/lib/github-broker/pr-merge-gate';
+import { assessPrMergeGate, countPrChecks, PrMergeRefused } from '@/lib/github-broker/pr-merge-gate';
 import { resolveGitLabProject } from '@/lib/git-providers/detect';
 import { gitlabProvider, readGitLabPanelDetail } from '@/lib/git-providers/gitlab';
 
@@ -208,20 +209,21 @@ export async function POST(
 
     if (action === 'merge') {
       if (!body.commitSha || !['merge', 'squash', 'rebase'].includes(body.mergeMethod || '')) return NextResponse.json({ error: 'A reviewed commit and merge method are required' }, { status: 400 });
-      await mergeGitHubPullRequest(repo, prNum, {
+      const result = await mergeGitHubPullRequest(repo, prNum, {
         deleteBranch: false,
         mergeMethod: body.mergeMethod,
         expectedHeadSha: body.commitSha,
-        beforePublish: () => assertPrMergeAllowed(repo, prNum, body.commitSha!, body.mergeMethod!, body.expectedMergeGate),
+        expectedMergeGate: body.expectedMergeGate,
+        principal: resolveRequestPrincipalContext(request).role,
       });
-      return NextResponse.json({ ok: true, action: 'merged' });
+      return NextResponse.json({ ok: true, action: result.publication?.status === 'queued' ? 'queued' : 'merged', publication: result.publication });
     }
 
     if (action === 'draft' || action === 'ready' || action === 'enable-auto-merge' || action === 'disable-auto-merge') {
       if (!body.commitSha || (action === 'enable-auto-merge' && !['merge', 'squash', 'rebase'].includes(body.mergeMethod || ''))) return NextResponse.json({ error: 'A reviewed commit and merge method are required' }, { status: 400 });
-      await updateGitHubPullRequestMode(repo, prNum, action, { expectedHeadSha: body.commitSha, mergeMethod: body.mergeMethod,
-        ...(action === 'enable-auto-merge' ? { beforePublish: () => assertPrMergeAllowed(repo, prNum, body.commitSha!, body.mergeMethod!, body.expectedMergeGate, 'enable-auto-merge') } : {}) });
-      return NextResponse.json({ ok: true, action });
+      const publication = await updateGitHubPullRequestMode(repo, prNum, action, { expectedHeadSha: body.commitSha, mergeMethod: body.mergeMethod,
+        ...(action === 'enable-auto-merge' ? { expectedMergeGate: body.expectedMergeGate, principal: resolveRequestPrincipalContext(request).role } : {}) });
+      return NextResponse.json({ ok: true, action, ...(publication ? { publication } : {}) });
     }
 
     if (action === 'close') {
@@ -231,6 +233,8 @@ export async function POST(
 
     return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
   } catch (err) {
+    if (err instanceof PublicationRefused) return NextResponse.json({ ok: false, mergeRefused: true, error: err.message, publication: err.receipt }, { status: 409 });
+    if (err instanceof PublicationUnknown) return NextResponse.json({ ok: false, outcomeUnknown: true, error: err.message, publication: err.receipt }, { status: 202 });
     if (err instanceof PrMergeRefused) return NextResponse.json({ ok: false, mergeRefused: true, error: err.message, mergeGate: err.gate }, { status: 409 });
     const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });

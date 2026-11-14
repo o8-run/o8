@@ -1,0 +1,92 @@
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NextRequest } from 'next/server';
+import { afterEach, expect, it, vi } from 'vitest';
+import '@/lib/lane/commands';
+import { POST } from '@/app/api/panel/approvals/route';
+import { createApproval, getApproval, recordOrchestratorReview } from '@/lib/approvals/store';
+import { createLane, getLane } from '@/lib/lane/registry';
+import { getWorktreeManager } from '@/lib/worktree/launch';
+import { getSqlite } from '@/lib/db';
+import { getDataDir } from '@/lib/data-dir-migration';
+
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
+const roots: string[] = [];
+const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+const token = 'device-publication-fixture-0123456789';
+async function fixture(pin = true) {
+  const root = mkdtempSync(join(tmpdir(), 'o8-device-publication-')); roots.push(root);
+  const repo = join(root, 'repo'); mkdirSync(repo);
+  const origin = join(root, 'origin.git');
+  execFileSync('git', ['init', '-q', '--bare', origin]);
+  git(repo, 'init', '-q', '-b', 'main'); git(repo, 'config', 'user.name', 'Fixture'); git(repo, 'config', 'user.email', 'fixture@example.invalid');
+  writeFileSync(join(repo, 'file.txt'), 'base\n'); git(repo, 'add', 'file.txt'); git(repo, 'commit', '-qm', 'base');
+  git(repo, 'remote', 'add', 'origin', origin); git(repo, 'push', '-qu', 'origin', 'main');
+  git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  const packetId = `device-fixture-${Date.now()}`;
+  const worktree = await getWorktreeManager(repo).create({ agentType: 'codex', taskName: packetId, branchName: `work/${packetId}`, baseBranch: 'main', packetId, skipSetup: true, isolationPreference: 'git-worktree' });
+  writeFileSync(join(worktree.path, 'file.txt'), 'approved\n'); git(worktree.path, 'add', 'file.txt'); git(worktree.path, 'commit', '-qm', 'approved change');
+  const sha = git(worktree.path, 'rev-parse', 'HEAD');
+  const lane = createLane({ repoPath: repo, worktreePath: worktree.path, branch: `work/${packetId}`, baseBranch: 'main', runtime: 'codex', packetId, label: 'Device fixture' });
+  recordOrchestratorReview(packetId, { approved: true, findings: [], reviewer: 'fixture', reviewedHeadSha: sha, requiresSecondPass: false });
+  const approval = createApproval({ source: 'test', runtime: 'codex', agent: 'fixture', sessionKey: `fixture-${packetId}`, title: 'Merge approved change', description: 'Fixture merge decision', summary: 'Merge', risk: 'low', continuation: { kind: 'lane', laneId: lane.id, verb: 'merge', ...(pin ? { expectedHeadSha: sha } : {}) } });
+  writeFileSync(join(getDataDir(), 'mobile-device-tokens'), createHash('sha256').update(token).digest('hex') + '\n');
+  return { root, repo, origin, lane, sha, approval };
+}
+const approve = (id: string) => POST(new NextRequest('http://localhost/api/panel/approvals', { method: 'POST', headers: { host: 'localhost', authorization: `Bearer ${token}` }, body: JSON.stringify({ id, action: 'approve' }) }));
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+it('device approval merges the pinned source and retains the device principal in durable evidence', async () => {
+  const f = await fixture();
+  const response = await approve(f.approval.id);
+  const body = await response.json();
+  expect(response.status, JSON.stringify(body)).toBe(200);
+  expect(git(f.origin, 'show', 'main:file.txt')).toBe('approved');
+  expect(getApproval(f.approval.id)?.resolution).toMatchObject({ authorizingPrincipal: 'device', approvedHeadSha: f.sha });
+  const events = getSqlite().prepare("SELECT payload_json FROM lane_events WHERE lane_id=? AND verb='merge'").all(f.lane.id) as Array<{ payload_json: string }>;
+  expect(events.map(e => JSON.parse(e.payload_json))).toContainEqual(expect.objectContaining({ authorizingPrincipal: 'device', approvedSha: f.sha, mergedSha: git(f.origin, 'rev-parse', 'main'), checks: expect.any(Array) }));
+});
+it('a moved device-approved head refuses and returns the lane to review', async () => {
+  const f = await fixture(); const base = git(f.origin, 'rev-parse', 'main');
+  writeFileSync(join(f.lane.worktreePath!, 'file.txt'), 'replacement\n'); git(f.lane.worktreePath!, 'add', 'file.txt'); git(f.lane.worktreePath!, 'commit', '-qm', 'replacement');
+  const response = await approve(f.approval.id);
+  expect(response.status).toBe(409);
+  expect(git(f.origin, 'rev-parse', 'main')).toBe(base);
+  expect(getLane(f.lane.id)?.status).toBe('reviewing');
+  expect(getApproval(f.approval.id)?.status).toBe('pending');
+});
+it('a device continuation without an approved SHA refuses before merge', async () => {
+  const f = await fixture(false); const base = git(f.origin, 'rev-parse', 'main');
+  const response = await approve(f.approval.id);
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ code: 'approved_head_required' });
+  expect(git(f.origin, 'rev-parse', 'main')).toBe(base);
+  expect(getLane(f.lane.id)?.status).toBe('reviewing');
+});
+
+it('new merge cards carry the exact head used for their saved diff', async () => {
+  const f = await fixture(false);
+  const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
+  const result = await createLaneActionApproval(f.lane, 'orchestrator', { verb: 'merge', title: 'Merge fixture', description: 'Review fixture', summary: 'Merge fixture', risk: 'low', policyRuleId: 'lane-merge', note: 'Held for review' });
+  expect(getApproval(result.approvalId!)?.continuation).toMatchObject({ expectedHeadSha: f.sha });
+});
+it('refuses a head moved after the device decision was durably recorded', async () => {
+  const f = await fixture(); const base = git(f.origin, 'rev-parse', 'main');
+  const commands = await import('@/lib/lane/commands');
+  const dispatch = commands.dispatch;
+  const boundary = vi.spyOn(commands, 'dispatch').mockImplementationOnce(async command => {
+    expect(getApproval(f.approval.id)?.resolution).toMatchObject({ authorizingPrincipal: 'device', approvedHeadSha: f.sha });
+    writeFileSync(join(f.lane.worktreePath!, 'file.txt'), 'late replacement\n');
+    git(f.lane.worktreePath!, 'add', 'file.txt'); git(f.lane.worktreePath!, 'commit', '-qm', 'late replacement');
+    return dispatch(command);
+  });
+  try {
+    const response = await approve(f.approval.id);
+    expect(response.status).toBe(409);
+    expect(git(f.origin, 'rev-parse', 'main')).toBe(base);
+    expect(getLane(f.lane.id)?.status).toBe('reviewing');
+    expect(getApproval(f.approval.id)?.status).toBe('pending');
+  } finally { boundary.mockRestore(); }
+});

@@ -42,7 +42,8 @@ export function countPrChecks(pr: CheckRollup) {
   const statuses = required ? pr.requiredStatuses ?? [] : [];
   const statusState = (s: { state: string }) => s.state.toUpperCase();
   return {
-    failedChecks: blocking.filter(failing).length + statuses.filter(s => ['FAILURE', 'ERROR'].includes(statusState(s))).length,
+    failedChecks: blocking.filter(failing).length + statuses.filter(s => ['FAILURE', 'ERROR'].includes(statusState(s))).length
+      + (required ? [...required].filter(name => !rollup.some(c => c.name === name) && !statuses.some(s => s.context === name)).length : 0),
     pendingChecks: blocking.filter(pending).length + statuses.filter(s => !['SUCCESS', 'FAILURE', 'ERROR'].includes(statusState(s))).length,
     optionalFailures: required ? [...new Set(rollup.filter(c => !required.has(c.name) && failed(c)).map(c => c.name))].sort() : [],
   };
@@ -132,9 +133,10 @@ export async function assertPrMergeAllowed(repo: string, number: number, head: s
   try {
   const comments = fetchGitHubPullRequestComments(repo, number);
   const [pr, discussion] = await Promise.all([fetchGitHubPullRequestDetail(repo, number,
-    comments.then(c => [...c.reviews].reverse().find(r => r.state && r.state !== 'COMMENTED')?.state ?? null)), comments]);
+    comments.then(c => [...c.reviews].reverse().find(r => r.state && r.state !== 'COMMENTED')?.state ?? null), 'interactive', true), comments]);
   const gate = await assessPrMergeGate(repo, pr, discussion);
   const changed = Boolean(expectedSnapshot && expectedSnapshot !== gate.snapshot) || head !== pr.headSha;
   if (changed || !(action === 'merge' ? gate.allowed : gate.autoMergeAllowed) || !pr.allowedMergeMethods.includes(method as 'merge' | 'squash' | 'rebase')) throw new PrMergeRefused(gate, changed);
+  return { gate, pr };
   } catch (error) { if (error instanceof PrMergeRefused) throw error; throw new PrMergeRefused(null, false); }
 }
