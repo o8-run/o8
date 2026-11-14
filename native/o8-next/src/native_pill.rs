@@ -397,8 +397,17 @@ mod macos {
         sel, sel_impl,
     };
     use std::sync::OnceLock;
-    unsafe extern "C" {
-        fn object_setClass(object: id, class: *const Class) -> *const Class;
+    // tree-sitter-rust 0.24 (theme_tests) cannot parse `unsafe extern "C"` blocks,
+    // so the declaration reaches the parser only as macro token trees.
+    macro_rules! panel_abi {
+        ({ $($declaration:tt)* }) => {
+            unsafe extern "C" { $($declaration)* }
+        };
+    }
+    panel_abi! {
+        {
+            fn object_setClass(object: id, class: *const Class) -> *const Class;
+        }
     }
     extern "C" fn never_key(_: &Object, _: Sel) -> cocoa::base::BOOL {
         NO
