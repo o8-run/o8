@@ -28,13 +28,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  attach:
-    if: inputs.publish_linux == true
+  verify:
+    if: github.ref == 'refs/heads/main' && inputs.publish_linux == true
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
       actions: read
+    outputs:
+      appimage_sha256: ${{ steps.digests.outputs.appimage_sha256 }}
+      signature_sha256: ${{ steps.digests.outputs.signature_sha256 }}
     steps:
       - name: Validate tag input
         env:
@@ -85,10 +88,53 @@ jobs:
           test -f "$image"
           test "$(find packages -maxdepth 1 -name '*.AppImage' | wc -l)" -eq 1
           node scripts/prepare-linux-release-attachment.mjs
-          chmod +x "$image"
-          node scripts/ci/check-linux-glibc.mjs --max 2.35 "$image"
+      - name: Scan authenticated pair without executing the runtime
+        run: node scripts/ci/check-linux-glibc.mjs --no-execute --max 2.35 publish/*.AppImage
+      - name: Record verified digests
+        id: digests
+        run: |
+          set -euo pipefail
+          image=$(sha256sum publish/*.AppImage | cut -d ' ' -f1)
+          signature=$(sha256sum publish/*.sig | cut -d ' ' -f1)
+          [[ "$image" =~ ^[a-f0-9]{64}$ && "$signature" =~ ^[a-f0-9]{64}$ ]]
+          echo "appimage_sha256=$image" >> "$GITHUB_OUTPUT"
+          echo "signature_sha256=$signature" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-linux-pair
+          path: publish/
+          retention-days: 1
+          if-no-files-found: error
+
+  attach:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && inputs.publish_linux == true
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - name: Validate tag input
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: '[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ inputs.release_tag }}
+          persist-credentials: false
+          sparse-checkout: scripts/upload-linux-release-assets.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: verified-linux-pair
+          path: publish
       - name: Attach new assets without replacement or updater feed changes
         env:
+          APPIMAGE_SHA256: ${{ needs.verify.outputs.appimage_sha256 }}
+          SIGNATURE_SHA256: ${{ needs.verify.outputs.signature_sha256 }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}

@@ -57,7 +57,7 @@ function elfEnd(bytes) {
   return end;
 }
 
-function squashfsOffset(bytes) {
+export function squashfsOffset(bytes) {
   const start = elfEnd(bytes);
   const candidates = [];
   for (let offset = bytes.indexOf('hsqs', start); offset !== -1; offset = bytes.indexOf('hsqs', offset + 4)) {

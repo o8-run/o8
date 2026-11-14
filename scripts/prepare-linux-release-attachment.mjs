@@ -7,6 +7,25 @@ import { join } from 'node:path';
 import { assertLinuxArtifactChannels } from './lib/linux-build-channel.mjs';
 import { withLinuxPlatform } from './lib/linux-appimage-signature.mjs';
 
+function strictBase64(value, length) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) throw new Error('Invalid signature base64');
+  const bytes = Buffer.from(value, 'base64');
+  if (bytes.toString('base64') !== value || (length !== undefined && bytes.length !== length)) throw new Error('Invalid signature decoded length');
+  return bytes;
+}
+
+function parseSignature(value) {
+  if (typeof value !== 'string' || value.length > 8192) throw new Error('Invalid signature length');
+  const text = strictBase64(value.trim()).toString('utf8');
+  const fields = text.replace(/\n$/, '').split('\n');
+  if (fields.length !== 4 || !/^untrusted comment: [\x20-\x7e]{1,512}$/.test(fields[0])
+    || !/^trusted comment: [\x20-\x7e]{1,512}$/.test(fields[2])) throw new Error('Invalid minisign signature structure');
+  const packet = strictBase64(fields[1], 74);
+  if (!['ED', 'Ed'].includes(packet.subarray(0, 2).toString('ascii'))) throw new Error('Invalid signature algorithm');
+  const global = strictBase64(fields[3], 64);
+  return Buffer.from([fields[0], packet.toString('base64'), fields[2], global.toString('base64')].join('\n') + '\n').toString('base64');
+}
+
 function main() {
   if (process.env.O8_PUBLISH_LINUX !== 'true') {
     console.log(JSON.stringify({ status: 'disabled', publishLinux: false, assets: [] }));
@@ -17,7 +36,7 @@ function main() {
   const repo = process.env.GH_REPO;
   if (!match || !/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) throw new Error('Expected release tag and source repository');
   const version = match[1];
-  const signature = process.env.UPDATER_SIGNATURE?.trim();
+  const signature = parseSignature(process.env.UPDATER_SIGNATURE);
   if (!signature) throw new Error('Public updater signature is required');
   const images = readdirSync('packages').filter(name => name.endsWith('.AppImage'));
   if (images.length !== 1 || images[0] !== `o8-${version}-x86_64.AppImage`) throw new Error('Expected exactly one GPUI AppImage');

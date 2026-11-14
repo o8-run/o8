@@ -9,10 +9,12 @@
 //
 // usage: node scripts/ci/check-linux-glibc.mjs [--max 2.35] <dir|.deb|.rpm|.AppImage>...
 import { spawnSync } from 'node:child_process';
-import { closeSync, lstatSync, mkdtempSync, openSync, readdirSync, readSync, rmSync } from 'node:fs';
+import { closeSync, lstatSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { squashfsOffset } from '../lib/linux-build-channel.mjs';
 
 export const DEFAULT_MAX_GLIBC = '2.35';
 
@@ -73,7 +75,7 @@ function run(command, args, options = {}) {
 }
 
 /** Unpack a package into a scratch directory; directories are scanned in place. */
-function unpack(target, scratch) {
+function unpack(target, scratch, noExecute) {
   const absolute = resolve(target);
   if (lstatSync(absolute).isDirectory()) return absolute;
   const destination = mkdtempSync(join(scratch, `${basename(absolute)}-`));
@@ -87,19 +89,24 @@ function unpack(target, scratch) {
     return destination;
   }
   if (absolute.endsWith('.AppImage')) {
-    run(absolute, ['--appimage-extract'], { cwd: destination });
+    if (noExecute) {
+      const offset = squashfsOffset(readFileSync(absolute));
+      run('unsquashfs', ['-no-progress', '-o', String(offset), '-d', join(destination, 'squashfs-root'), absolute]);
+    } else {
+      run(absolute, ['--appimage-extract'], { cwd: destination });
+    }
     return join(destination, 'squashfs-root');
   }
   return absolute;
 }
 
-export function checkLinuxGlibc(targets, { max = DEFAULT_MAX_GLIBC, log = console.log } = {}) {
+export function checkLinuxGlibc(targets, { max = DEFAULT_MAX_GLIBC, log = console.log, noExecute = false } = {}) {
   const scratch = mkdtempSync(join(tmpdir(), 'o8-glibc-check-'));
   const failures = [];
   let scanned = 0;
   try {
     for (const target of targets) {
-      const root = unpack(target, scratch);
+      const root = unpack(target, scratch, noExecute);
       const files = lstatSync(root).isDirectory() ? findElfFiles(root) : [root];
       if (files.length === 0) throw new Error(`no ELF files found in ${target}`);
       let packageHighest = null;
@@ -123,6 +130,8 @@ export function checkLinuxGlibc(targets, { max = DEFAULT_MAX_GLIBC, log = consol
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';
 if (invokedPath === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
+  const noExecute = args.includes('--no-execute');
+  if (noExecute) args.splice(args.indexOf('--no-execute'), 1);
   let max = DEFAULT_MAX_GLIBC;
   const maxIndex = args.indexOf('--max');
   if (maxIndex !== -1) {
@@ -134,7 +143,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     process.exit(2);
   }
   try {
-    const { failures } = checkLinuxGlibc(args, { max });
+    const { failures } = checkLinuxGlibc(args, { max, noExecute });
     if (failures.length > 0) {
       for (const failure of failures) console.error(`[glibc] FAILED ${failure} (baseline GLIBC_${max})`);
       process.exit(1);

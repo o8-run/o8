@@ -212,7 +212,7 @@ describe('GPUI release attachment preparation through the real CLI', () => {
     writeFileSync(join(f.root, 'packages/review.deb'), 'unsigned review package');
     writeFileSync(join(f.root, 'packages/review.rpm'), 'unsigned review package');
     return run(f, { O8_PUBLISH_LINUX: 'true', RELEASE_TAG: tag, GH_REPO: repos[0],
-      UPDATER_SIGNATURE: readFileSync(`${f.artifact}.sig`, 'utf8'), ...env }, `await import(${JSON.stringify(attachment)});`);
+      UPDATER_SIGNATURE: Buffer.from(Buffer.from(readFileSync(`${f.artifact}.sig`, 'utf8').trim(), 'base64').toString('utf8').trim() + '\ntrusted comment: fixture\n' + Buffer.alloc(64).toString('base64') + '\n').toString('base64'), ...env }, `await import(${JSON.stringify(attachment)});`);
   }
 
   it.each([undefined, 'false'])('defaults off before inspecting inputs or invoking providers (%s)', flag => {
@@ -257,6 +257,21 @@ describe('GPUI release attachment preparation through the real CLI', () => {
     expect(result.stderr).toContain('Published manifest channel/version');
     expect(existsSync(join(f.root, 'publish'))).toBe(false);
     expect(uploads(f)).toEqual([]);
+  });
+
+  it.each(['outer junk', 'trusted comment', 'extra line', 'packet length', 'global length'])('rejects noncanonical signature fields: %s', mode => {
+    const f = fixture();
+    const original = Buffer.from(Buffer.from(readFileSync(`${f.artifact}.sig`, 'utf8').trim(), 'base64').toString('utf8').trim() + '\ntrusted comment: fixture\n' + Buffer.alloc(64).toString('base64') + '\n').toString('base64');
+    const fields = Buffer.from(original, 'base64').toString('utf8').trim().split('\n');
+    if (mode === 'trusted comment') fields[2] = 'arbitrary comment';
+    if (mode === 'extra line') fields.push('junk');
+    if (mode === 'packet length') fields[1] += 'AAAA';
+    if (mode === 'global length') fields[3] = Buffer.alloc(65).toString('base64');
+    const signature = mode === 'outer junk' ? original + '!@' : Buffer.from(fields.join('\n')).toString('base64');
+    const result = prepare(f, { UPDATER_SIGNATURE: signature });
+    expect(result.status, result.stderr).toBe(1);
+    expect(effects(f)).toEqual([]);
+    expect(existsSync(join(f.root, 'publish'))).toBe(false);
   });
 
   it('refuses an invalid signature before reading embedded identity or destination', () => {
