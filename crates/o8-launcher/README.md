@@ -23,7 +23,10 @@ once per boot at `logs/next-server.log` and `logs/ws-server.log`.
 
 A private instance lock and Unix socket serialize launches. Reopen requests are
 coalesced even while preflight is pending. AppKit supplies Dock reopen and quit
-events without a web view. Focus requires the configured executable to be a
+events without a web view. The launcher finishes launching before the login-shell
+probe and preflight, so the system can deliver Quit during startup; that Quit
+waits for the first event pump, after both servers start, and then runs the
+normal bounded shutdown. Focus requires the configured executable to be a
 direct child of this launcher's API server; otherwise the server reopens it.
 
 Shutdown stops the API before WS. Each leader receives TERM before its process
@@ -46,14 +49,15 @@ last 0.5 seconds.
 
 On a native termination request the launcher answers "terminate later" and starts
 the coordinator on its own thread, because AppKit then waits inside `terminate:`
-and runs no more launcher code on the main thread. The coordinator replies
-`replyToApplicationShouldTerminate:YES` exactly once through the main dispatch
-queue, which AppKit still drains during that wait, after the lock and socket are
-released, including when stopping fails, overruns or panics: the release
-and the reply run from a guard that also runs while unwinding, and launcher log
-lines ignore write errors, so a closed terminal cannot stop them. AppKit exits right after the
-reply; `applicationWillTerminate:` exits with status 1 instead of 0 when stopping
-failed. The headless path runs the same coordinator inline and returns status 1
+and runs no more launcher code on the main thread. The coordinator answers
+exactly once through the main dispatch queue, which AppKit still drains during
+that wait, after the lock and socket are released, including when stopping fails,
+overruns or panics: the release and the answer run from a guard that also runs
+while unwinding, and launcher log lines ignore write errors, so a closed terminal
+cannot stop them. After a complete stop the answer is
+`replyToApplicationShouldTerminate:YES` and AppKit exits with status 0; when
+stopping failed, overran or panicked, the launcher exits with status 1 itself
+instead of replying, so a supervisor and the updater can tell the two apart. The headless path runs the same coordinator inline and returns status 1
 on a failed stop. A failed server start also stops what did start through the
 coordinator, under the same single bound. Restart backoff after a server crash
 is a timestamp checked by the main loop, so Quit is handled during the delay.
@@ -165,7 +169,9 @@ directories on free ports. They cover health and boot identity, environment,
 crash/restart exhaustion, shutdown during retry/preflight, drain ordering and
 descendant pipe drain, second launch, ownership refusal and orphan cleanup,
 private files, bounded control input, voice-only suppression, injected dialog
-reaping, a crash between spawn and receipt (`O8_LAUNCHER_FAULT`, debug builds
+reaping, native Quit while running and during startup with its exit status
+(`O8_LAUNCHER_FAKE_TERMINATE`, a debug-build stand-in for AppKit's termination
+flow), a crash between spawn and receipt (`O8_LAUNCHER_FAULT`, debug builds
 only) with daemonized descendants that inherited the hold descriptor, a holder
 with a live parent, empty and truncated records, and a really moved install.
 Unit tests in `src/shutdown.rs` cover one reply on success, failure, timeout and

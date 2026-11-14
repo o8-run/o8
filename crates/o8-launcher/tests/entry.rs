@@ -570,3 +570,96 @@ fn shutdown_during_preflight_never_publishes_a_boot_or_starts_servers() {
     assert!(f.starts("api-starts").is_empty());
     assert!(f.starts("ws-starts").is_empty());
 }
+// Platform termination (Quit, logout, restart) through the debug-build stand-in
+// for AppKit's termination flow.
+fn start_with_fake_terminate(f: &mut Fixture) {
+    let root = f.root.to_string_lossy().into_owned();
+    f.launcher = Some(f.launch_with(
+        std::path::Path::new(env!("CARGO_BIN_EXE_o8-launcher")),
+        &f.root.join("config.json"),
+        &[("O8_LAUNCHER_FAKE_TERMINATE", &root)],
+        "launcher-stderr",
+    ));
+}
+/// Sends Quit as the system would: declined until the launcher has finished launching.
+fn quit(f: &Fixture) -> bool {
+    if !f.root.join("terminate-ready").exists() {
+        return false;
+    }
+    fs::write(f.root.join("terminate-request"), "1").unwrap();
+    true
+}
+fn exited(child: &mut std::process::Child) -> std::process::ExitStatus {
+    // Startup, plus the 10 s shutdown bound, plus slack.
+    let deadline = std::time::Instant::now() + Duration::from_secs(25);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "launcher still running after Quit"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+fn assert_nothing_left(f: &Fixture, ports: [u16; 2]) {
+    for name in ["api-starts", "ws-starts"] {
+        for pid in f.starts(name) {
+            until(|| gone(pid));
+        }
+    }
+    for port in ports {
+        assert!(TcpListener::bind(("127.0.0.1", port)).is_ok());
+    }
+    assert!(!f.root.join("launcher.sock").exists());
+}
+
+#[test]
+fn quit_after_an_incomplete_stop_exits_non_zero() {
+    let mut f = Fixture::new();
+    start_with_fake_terminate(&mut f);
+    f.ready();
+    let ports = [f.port("api-port"), f.port("ws-port")];
+    fs::remove_file(f.root.join("launcher-api.json")).unwrap();
+    assert!(quit(&f));
+    let status = exited(f.launcher.as_mut().unwrap());
+    f.launcher = None;
+    assert_eq!(status.code(), Some(1));
+    assert!(f
+        .log("launcher-stderr")
+        .contains("Shutdown incomplete: Ownership receipt unavailable"));
+    assert_nothing_left(&f, ports);
+}
+
+#[test]
+fn quit_after_a_complete_stop_exits_zero() {
+    let mut f = Fixture::new();
+    start_with_fake_terminate(&mut f);
+    f.ready();
+    let ports = [f.port("api-port"), f.port("ws-port")];
+    assert!(quit(&f));
+    let status = exited(f.launcher.as_mut().unwrap());
+    f.launcher = None;
+    assert_eq!(status.code(), Some(0));
+    assert!(!f.root.join("launcher-api.json").exists());
+    assert!(!f.root.join("launcher-ws.json").exists());
+    assert_nothing_left(&f, ports);
+}
+
+#[test]
+fn quit_during_startup_is_honoured_with_a_clean_stop() {
+    let mut f = Fixture::new();
+    fs::write(f.root.join("hold-probe"), "1").unwrap();
+    start_with_fake_terminate(&mut f);
+    until(|| f.root.join("probe-entered").exists());
+    assert!(quit(&f), "Quit declined while the launcher was starting");
+    fs::remove_file(f.root.join("hold-probe")).unwrap();
+    let status = exited(f.launcher.as_mut().unwrap());
+    f.launcher = None;
+    assert_eq!(status.code(), Some(0));
+    assert!(!f.root.join("window-ready").exists());
+    assert!(!f.root.join("launcher-api.json").exists());
+    assert!(!f.root.join("launcher-ws.json").exists());
+    assert_nothing_left(&f, [f.port("api-port"), f.port("ws-port")]);
+}

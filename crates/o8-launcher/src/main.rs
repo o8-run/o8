@@ -459,8 +459,19 @@ fn run(config: &mut Config) -> Result<(), String> {
     else {
         return Ok(());
     };
-    ownership::cleanup(&config.data_dir, &config.server_dir)?;
+    // Finish launching before the slow steps below: until then the system cannot
+    // deliver Quit. A Quit that arrives during startup waits for the first pump.
+    // Native termination and the headless exit share one bounded shutdown.
     let stopped = Arc::new(AtomicBool::new(false));
+    let reopen = Arc::new(AtomicBool::new(false));
+    let shutdown = Arc::new(Shutdown::new(SHUTDOWN_BOUND));
+    let native = native::Native::new(
+        config.native_lifecycle,
+        stopped.clone(),
+        reopen.clone(),
+        shutdown.clone(),
+    )?;
+    ownership::cleanup(&config.data_dir, &config.server_dir)?;
     for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         signal_hook::flag::register(signal, stopped.clone())
             .map_err(|_| "Shutdown handler unavailable")?;
@@ -540,15 +551,6 @@ fn run(config: &mut Config) -> Result<(), String> {
         let path = config.data_dir.join("logs").join(name);
         let _ = fs::rename(&path, path.with_file_name(format!("{name}.prev")));
     }
-    // Native termination and the headless exit share one bounded shutdown.
-    let reopen = Arc::new(AtomicBool::new(false));
-    let shutdown = Arc::new(Shutdown::new(SHUTDOWN_BOUND));
-    let native = native::Native::new(
-        config.native_lifecycle,
-        stopped.clone(),
-        reopen.clone(),
-        shutdown.clone(),
-    )?;
     let servers = Arc::new(Mutex::new(Some(Servers {
         api: None,
         ws: None,
