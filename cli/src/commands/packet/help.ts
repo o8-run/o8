@@ -58,7 +58,7 @@ export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; exp
   packet capture [id]  screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
   packet mirror-proof [id] mirror the packet's before/after proof onto a GitHub PR (--pr <n> [--repo owner/repo])
   packet log [id]      read or follow packet lane events (--follow, --since)
-  packet transcript [id] read or follow what the worker is doing: tool calls, replies, steers (--follow, --limit 1..200)
+  packet transcript [id] read or follow what the worker is doing: tool calls, replies, steers (--follow, --hold, --limit 1..200)
   packet runtime-drift [id] detect and warn when a lane's bound runtime drifted`;
 
 export const OPERATOR_PACKET_COMMAND_LINES = `  packet retain [id]   hold automatic workspace retirement (--reason <text>)
