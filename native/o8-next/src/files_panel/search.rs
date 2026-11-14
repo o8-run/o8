@@ -123,7 +123,7 @@ fn listing(body: Value, workspace: &str, limit: usize) -> Result<Listing, String
 // Git command times out or exceeds 4 MB. Read the complete local index once per
 // search session, without either server limit. This runs on a background thread.
 fn git_listing(workspace: &str) -> Result<Listing, String> {
-    let output = std::process::Command::new("git")
+    let output = crate::child_command::command("git")
         .args([
             "-C",
             workspace,

@@ -559,7 +559,7 @@ impl BrowserPanel {
     }
     fn external(&self, cx: &mut Context<Self>) {
         if let Some(tab) = self.current().filter(|tab| !tab.url.is_empty()) {
-            cx.open_url(&tab.url);
+            crate::external_open::url(cx, &tab.url);
         }
     }
 }

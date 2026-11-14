@@ -228,7 +228,7 @@ impl Editor {
                                         cx.stop_propagation()
                                     })
                                     .on_click(cx.listener(move |_, _, _, cx| {
-                                        cx.open_with_system(&file)
+                                        crate::external_open::path(cx, &file)
                                     }))
                             })
                             .overflow_hidden()

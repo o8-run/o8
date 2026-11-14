@@ -214,7 +214,7 @@ impl Settings {
                 false,
                 window,
                 cx,
-                move |_, _, cx| cx.open_url(url),
+                move |_, _, cx| crate::external_open::url(cx, url),
             ));
         }
         content.child("Credits").child(div().text_size(px(11.)).text_color(theme().text_muted)

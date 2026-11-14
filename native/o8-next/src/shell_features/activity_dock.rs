@@ -1598,7 +1598,7 @@ fn branch(data: &Data, cx: &mut Context<Shell>) -> impl IntoElement {
                     )
                     .on_click(cx.listener(move |_, _, _, cx| {
                         if !url.is_empty() {
-                            cx.open_url(&url);
+                            crate::external_open::url(cx, &url);
                         }
                     })),
             )

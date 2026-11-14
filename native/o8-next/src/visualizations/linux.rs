@@ -71,9 +71,9 @@ fn command_for_bus(executable: &Path, bus: Option<std::ffi::OsString>) -> Comman
     // A minimal X11 session may have no bus. Keep its private daemon and the
     // renderer in the same process group, under the same parent watchdog.
     let mut command = if bus.is_some() {
-        Command::new(executable)
+        crate::child_command::command(executable)
     } else {
-        let mut command = Command::new("dbus-run-session");
+        let mut command = crate::child_command::command("dbus-run-session");
         command.arg("--").arg(executable);
         command
     };

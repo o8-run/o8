@@ -1311,7 +1311,7 @@ impl Setup {
                                                         14.,
                                                         1.6,
                                                     ))
-                                                    .on_click(move |_, _, cx| cx.open_url(&link)),
+                                                    .on_click(move |_, _, cx| crate::external_open::url(cx, &link)),
                                                 ),
                                             )
                                         }),

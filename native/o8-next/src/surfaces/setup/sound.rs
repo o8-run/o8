@@ -5,7 +5,7 @@
 use std::{
     cell::{Cell, RefCell},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Stdio},
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -194,7 +194,7 @@ pub(crate) fn play(cue: Cue) {
                 let _ = old.kill();
                 let _ = old.wait();
             }
-            let Ok(child) = Command::new(player)
+            let Ok(child) = crate::child_command::command(player)
                 .arg(&path)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())

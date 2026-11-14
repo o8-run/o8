@@ -109,7 +109,7 @@ pub(super) fn footer(cx: &mut Context<Setup>) -> impl IntoElement {
                 .cursor_pointer()
                 .hover(|v| v.bg(theme().hover))
                 .child("Privacy")
-                .on_click(|_, _, cx| cx.open_url("https://o8.run/privacy")),
+                .on_click(|_, _, cx| crate::external_open::url(cx, "https://o8.run/privacy")),
         )
 }
 

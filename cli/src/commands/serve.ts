@@ -209,10 +209,10 @@ async function portAcceptsConnections(port: number): Promise<boolean> {
   });
 }
 
-async function apiIsReady(port: number): Promise<boolean> {
+async function apiIsReady(port: number, timeoutMs = 500): Promise<boolean> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/setup/identity`, {
-      signal: AbortSignal.timeout(500),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) return false;
     const body = await response.json() as { product?: unknown };
@@ -500,8 +500,10 @@ async function statusServe(mode: OutputMode): Promise<number> {
   if (!pid || !state || state.pid !== pid || !processAlive(pid)) {
     return outputServeNotRunning(mode);
   }
+  // Startup polls use short probes repeatedly; status is a single decision.
+  // Allow a busy packaged API time to respond without falsely rejecting reuse.
   const healthy = state.status === 'ready'
-    && await apiIsReady(state.apiPort)
+    && await apiIsReady(state.apiPort, 2_500)
     && await portAcceptsConnections(state.wsPort);
   outputServeState(mode, state, true, healthy);
   return healthy ? EXIT.OK : EXIT.CONNECTION_REFUSED;
