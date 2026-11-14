@@ -32,6 +32,7 @@ type Dock = ReturnType<typeof useNativeDock>;
 type Frame = { action: string; session?: number; kind?: string; immediate?: boolean; snapshot?: Record<string, unknown> };
 
 let root: Root;
+let host: HTMLDivElement;
 let dom: JSDOM;
 let input: Input;
 let dock: Dock;
@@ -54,8 +55,12 @@ function Probe() {
     expandWorkers, invokeCmd: noop, onError: noop,
   }, { topPillEnabled: topPill === true, staged: input.stagedFiles });
   useLayoutEffect(() => { dock = view; showGlint = glint.showGlint; });
-  return null;
+  // The web glint exactly as page.tsx renders it.
+  return view.webGlint ? createElement(DockGlint, { key: view.webGlint.key, glint: view.webGlint, fading: glint.fading, handedBack: view.webGlintHandedBack }) : null;
 }
+/** The web glint's animation as rendered, or null when the web draws none. */
+const webGlintAnimation = () => (host.firstElementChild as HTMLElement | null)?.style.animation ?? null;
+const ORIGIN_ENTER = 'o8GlintIn 0.3s cubic-bezier(0.22, 1, 0.36, 1)';
 async function render(patch: Partial<Input>) {
   input = { ...input, ...patch };
   await act(async () => { root.render(createElement(Probe)); });
@@ -83,7 +88,8 @@ beforeEach(async () => {
     if (reply.actions) reply = { native: true, enabled: true };
     return new Response(JSON.stringify(value));
   }));
-  root = createRoot(document.createElement('div'));
+  host = document.createElement('div');
+  root = createRoot(host);
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -328,12 +334,25 @@ describe('the top-pill preference and an unknown flag', () => {
     expect(sent()).toMatchObject({ state: 'workers' });
   });
 
-  it('a glint handed back to the web mid-life does not replay its fade-in', () => {
-    const shown = { key: 'k', text: 'Remembered', tone: 'progress' as const, fadeAt: Date.now() + 4200, until: Date.now() + 4800 };
-    expect(renderToStaticMarkup(createElement(DockGlint, { glint: shown, fading: false }))).toContain('o8GlintIn 0.3s');
-    const later = { ...shown, fadeAt: Date.now() + 2000, until: Date.now() + 2600 };
-    const markup = renderToStaticMarkup(createElement(DockGlint, { glint: later, fading: false }));
-    expect(markup).toContain('animation:none');
+  it('a glint the native panel hands back to the web mid-life does not replay its fade-in', async () => {
+    await render({}); await tick(100);
+    await act(async () => { showGlint('Remembered'); });
+    await tick(100);
+    expect(sent()).toMatchObject({ state: 'extras', glint: { text: 'Remembered' } });
+    expect(webGlintAnimation()).toBeNull();
+    // The panel's next request stalls; the deadline hands the glint back to the web.
+    vi.mocked(fetch).mockImplementation((_url, init) => {
+      frames.push(JSON.parse(String(init?.body)));
+      return new Promise<Response>(() => undefined);
+    });
+    await render({ ...fleet(1) }); await tick(600);
+    expect(dock.native).toBe(false);
+    expect(dock.webGlintHandedBack).toBe(true);
+    expect(webGlintAnimation()).toBe('none');
+    // A new glint shown while the web owns it enters normally.
+    await act(async () => { showGlint('Next'); });
+    expect(dock.webGlintHandedBack).toBe(false);
+    expect(webGlintAnimation()).toBe(ORIGIN_ENTER);
   });
 });
 
@@ -351,6 +370,8 @@ describe('flag off', () => {
     return {
       native: false, nativeCapsule: false, webSnapshot: i.snapshot, webTts: i.ttsState, webRealtime: i.realtimeVoice,
       webAgentWorking: i.agentWorking, webShowWorkers: i.showWorkers, webWorkerCount: i.workerCount, webEdit: i.edit, webGlint: i.glint,
+      // DockGlint on origin/main always renders its entering animation.
+      glintAnimation: i.glint ? 'o8GlintIn 0.3s cubic-bezier(0.22, 1, 0.36, 1)' : null,
       dockVisible: i.topPill === true || i.snapshot.state !== 'idle' || i.ttsState !== 'idle' || i.askOpen || i.agentWorking
         || i.agentConfirm || i.realtimeVoice !== 'off',
     };
@@ -378,6 +399,7 @@ describe('flag off', () => {
                   native: dock.native, nativeCapsule: dock.nativeCapsule, webSnapshot: dock.webSnapshot, webTts: dock.webTts,
                   webRealtime: dock.webRealtime, webAgentWorking: dock.webAgentWorking, webShowWorkers: dock.webShowWorkers,
                   webWorkerCount: dock.webWorkerCount, webEdit: dock.webEdit !== null, webGlint: dock.webGlint !== null, dockVisible: dock.dockVisible,
+                  glintAnimation: webGlintAnimation(),
                 };
                 expect(actual, JSON.stringify(patch)).toEqual(reference({ ...patch, edit, glint: bit(7) }));
                 cases++;
@@ -391,6 +413,15 @@ describe('flag off', () => {
     expect(frames).toHaveLength(1);
     // Only the chip's own two listeners, as on origin/main; no quiet-mode listener.
     expect(bus.names.sort()).toEqual(['o8:edit-applied', 'o8:edit-revert-settled']);
+  });
+
+  it.each([0, 299, 300, 1000, 4000])('a glint committed %i ms after showGlint enters exactly as on origin/main', async (late) => {
+    reply = { native: false, enabled: false };
+    await render({}); await tick(100);
+    // showGlint and the commit in one act: a long task delays the render by `late` ms.
+    await act(async () => { showGlint('Remembered'); vi.setSystemTime(Date.now() + late); });
+    expect(dock.webGlintHandedBack).toBe(false);
+    expect(webGlintAnimation()).toBe(ORIGIN_ENTER);
   });
 
   it('keeps the web chip and glint timings and words', async () => {

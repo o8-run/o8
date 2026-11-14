@@ -208,9 +208,11 @@ them, or dictation hides them, as on the web); before batch 3 the web orbit
 could show below native dictation. On origin/main the resting orbit is never
 drawn alongside staged-file chips (they are earlier branches of the same body
 chain), so staged chips are a handoff and the orbit returns natively after
-them; a reference-test case checks both. A glint handed back to the web
-mid-life keeps its phase: the web glint does not replay its fade-in (the web
-chip still does, a 0.3 s slide). The second sweep in
+them; a reference-test case checks both. When the native panel hands a glint
+it was drawing back to the web (fallback), the native wiring marks it
+explicitly and the web glint skips its fade-in; every other web glint,
+including any with the flag off, enters exactly as on origin/main. The web chip
+still replays its 0.3 s slide on a hand-back. The second sweep in
 native-dock-capsules.test.ts states this rule without the helpers and checks
 the frame state and the chip/glint owner for every combination.
 

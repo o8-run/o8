@@ -975,7 +975,7 @@ export default function DictationPillPage() {
           />}
           <EditRevertChip edit={dock.webEdit} onRevert={dock.revertEdit} />
         </div>
-        {dock.webGlint ? <DockGlint key={dock.webGlint.key} glint={dock.webGlint} fading={glintFading} /> : null}
+        {dock.webGlint ? <DockGlint key={dock.webGlint.key} glint={dock.webGlint} fading={glintFading} handedBack={dock.webGlintHandedBack} /> : null}
       </div>
     </div>
   );

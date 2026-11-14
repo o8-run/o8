@@ -153,6 +153,10 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit'>, handlers: {
     ttsState: input.ttsState, realtimeVoice: input.realtimeVoice, agentWorking: input.agentWorking, askOpen: input.askOpen,
     showWorkers: input.showWorkers, workerCount: input.workerCount,
   });
+  // The glint the native panel last drew; if the web takes that same glint
+  // over, it is a hand-back and must not replay its fade-in.
+  const [nativeGlint, setNativeGlint] = useState<TimedGlint | null>(null);
+  if (view.nativeGlint && input.glint && nativeGlint !== input.glint) setNativeGlint(input.glint);
   const nativeActive = view.nativeDrawn && !suppressed;
   const dockVisible = webDockVisible(native, suppressed, view, input, retained);
   useNativePillDockExtent(native, nativeActive, dockVisible, input.askOpen, suppressed, handlers.invokeCmd);
@@ -162,5 +166,6 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit'>, handlers: {
     webTts: view.ttsState, webRealtime: view.realtimeVoice, webAgentWorking: view.agentWorking,
     webShowWorkers: view.showWorkers, webWorkerCount: view.workerCount,
     edit, revertEdit: revert, webEdit: view.nativeEdit ? null : edit, webGlint: view.nativeGlint ? null : input.glint ?? null,
+    webGlintHandedBack: !view.nativeGlint && !!input.glint && input.glint === nativeGlint,
   };
 }

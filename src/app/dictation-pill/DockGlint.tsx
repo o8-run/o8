@@ -37,14 +37,15 @@ export function useDockGlint() {
 }
 
 interface DockGlintProps {
-  glint: PlanProgressGlint & { fadeAt?: number };
+  glint: PlanProgressGlint;
   fading: boolean;
+  /** Set only by the native dock wiring when the native panel hands a glint it
+   * was drawing back to the web: it is already shown, so no fade-in. */
+  handedBack?: boolean;
 }
 
-/** Quiet, pointer-transparent lifecycle chip below the dock. A glint remounted
- * mid-life (native handing it back to the web) does not replay its fade-in. */
-export function DockGlint({ glint, fading }: DockGlintProps) {
-  const [entering] = useState(() => glint.fadeAt === undefined || Date.now() < glint.fadeAt - GLINT_FADE_AT_MS + 300);
+/** Quiet, pointer-transparent lifecycle chip below the dock. */
+export function DockGlint({ glint, fading, handedBack = false }: DockGlintProps) {
   return (
     <div
       style={{
@@ -77,7 +78,7 @@ export function DockGlint({ glint, fading }: DockGlintProps) {
         whiteSpace: 'nowrap',
         opacity: fading ? 0 : 1,
         transition: 'opacity 0.5s ease',
-        animation: entering ? 'o8GlintIn 0.3s cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
+        animation: handedBack ? 'none' : 'o8GlintIn 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
         pointerEvents: 'none',
       }}
     >
