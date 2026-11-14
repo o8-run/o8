@@ -1,0 +1,537 @@
+//! Caret-local dictation feedback (the HUD), behind `native_dictation_hud`.
+//! It shares the dock's frame queue, wake channel, pipe receipts and native
+//! loop, in its own click-through panel. The web HUD page keeps the session
+//! events, wording and timers; the classic shell computes the placement.
+use super::*;
+
+/// Lease without a frame before the panel hides on its own (pill-timing.json).
+const LEASE_MS: u64 = 750;
+/// The legacy HUD frame the classic shell uses when no placement arrived.
+const LEGACY: (f64, f64, f64) = (820., 220., 48.);
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HudDetail {
+    #[serde(default)]
+    pub surface: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub dim: bool,
+    #[serde(default)]
+    pub solid: bool,
+    #[serde(default)]
+    pub reduced_motion: bool,
+    #[serde(default)]
+    pub placement: Option<Placement>,
+}
+
+/// Top-left desktop points, as the classic shell applied them to its window.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+pub(crate) struct Placement {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HudSnapshot {
+    pub state: String,
+    #[serde(default)]
+    pub session: u64,
+    #[serde(default)]
+    pub audio_level: f32,
+    #[serde(default)]
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub hud: Option<HudDetail>,
+}
+impl HudSnapshot {
+    /// Only a known dictation phase with its detail ever becomes visible.
+    pub fn visible(&self) -> bool {
+        self.hud.is_some()
+            && matches!(
+                self.state.as_str(),
+                "requesting-mic" | "recording" | "transcribing" | "polishing" | "success" | "error"
+            )
+    }
+    fn caret(&self) -> bool {
+        self.hud.as_ref().is_none_or(|hud| hud.surface != "hud")
+    }
+}
+
+/// The AppKit frame (bottom-left origin) for a top-left placement. Without one,
+/// the legacy bottom-centre of the primary screen, as the classic shell's
+/// screen anchor. `primary` is the primary screen's AppKit frame.
+pub(crate) fn appkit_frame(placement: Option<Placement>, primary: [f64; 4]) -> Option<[f64; 4]> {
+    let top = primary[1] + primary[3];
+    let valid = |p: &Placement| {
+        [p.x, p.y, p.width, p.height].iter().all(|v| v.is_finite()) && p.width > 0. && p.height > 0.
+    };
+    if let Some(p) = placement.filter(valid) {
+        return Some([p.x, top - p.y - p.height, p.width, p.height]);
+    }
+    if !primary.iter().all(|v| v.is_finite()) || primary[2] <= 0. || primary[3] <= 0. {
+        return None;
+    }
+    let (width, height, margin) = LEGACY;
+    let (width, height) = (width.min(primary[2]), height.min(primary[3]));
+    Some([
+        primary[0] + (primary[2] - width) / 2.,
+        primary[1] + margin.min(primary[3] - height),
+        width,
+        height,
+    ])
+}
+
+pub(crate) struct Hud {
+    pub(super) snapshot: HudSnapshot,
+    heard: Instant,
+    motion: crate::motion::Transition,
+    shown: bool,
+    target: bool,
+    pub(super) presentation: Presentation,
+}
+impl Default for Hud {
+    fn default() -> Self {
+        Self {
+            snapshot: HudSnapshot::default(),
+            heard: Instant::now(),
+            motion: crate::motion::Transition::new(160),
+            shown: false,
+            target: false,
+            presentation: Presentation::default(),
+        }
+    }
+}
+impl Hud {
+    fn apply(&mut self, snapshot: HudSnapshot) {
+        let visible = snapshot.visible();
+        self.motion.set(visible);
+        self.target = visible;
+        if visible {
+            self.snapshot = snapshot;
+        }
+        self.heard = Instant::now();
+    }
+    /// A lost feed hides at once, without the exit fade.
+    fn expire(&mut self) {
+        if self.target && self.heard.elapsed() > Duration::from_millis(LEASE_MS) {
+            self.apply(HudSnapshot::default());
+            self.motion = crate::motion::Transition::settled(160, false);
+        }
+    }
+    /// The dock's presentation contract: prepare, frame, release. Returns
+    /// whether the panel shows, or None for a malformed control.
+    pub(crate) fn control(&mut self, args: &Value) -> Option<bool> {
+        match args["action"].as_str() {
+            Some("prepare") => {
+                self.apply(HudSnapshot::default());
+                self.motion = crate::motion::Transition::settled(160, false);
+            }
+            Some("frame") => {
+                let snapshot =
+                    serde_json::from_value::<HudSnapshot>(args["snapshot"].clone()).ok()?;
+                self.apply(snapshot);
+            }
+            Some("release") => {
+                // A late release never hides a newer session already on screen.
+                let stale = self.target
+                    && args["session"]
+                        .as_u64()
+                        .is_some_and(|session| session != self.snapshot.session);
+                if !stale {
+                    self.apply(HudSnapshot::default());
+                    if args["immediate"] == true {
+                        self.motion = crate::motion::Transition::settled(160, false);
+                    }
+                }
+            }
+            _ => return None,
+        }
+        self.shown = self.target || self.motion.value().1;
+        Some(self.shown)
+    }
+}
+
+fn white(alpha: f32) -> gpui::Rgba {
+    gpui::Rgba {
+        r: 1.,
+        g: 1.,
+        b: 1.,
+        a: alpha,
+    }
+}
+
+/// SymonVisuals' 30-bar waveform at 90 px, measured level times the live gain.
+fn waveform(level: f32) -> gpui::Div {
+    let scale = 90. / 132.5;
+    let amplitude = (level.max(0.) * 1.4).min(1.);
+    let mut bars = div()
+        .flex()
+        .items_center()
+        .gap(px(2.5 * scale))
+        .h(px(24. * scale));
+    for i in 0..30 {
+        let distance = (i as f32 - 14.5).abs() / 14.5;
+        let weight = (-1.8 * distance * distance).exp();
+        bars = bars.child(
+            div()
+                .w(px(2. * scale))
+                .h(px((amplitude * weight * 24.).max(2.) * scale))
+                .rounded(px(1.))
+                .bg(crate::theme::symon_color(i as f32 / 29.)),
+        );
+    }
+    bars
+}
+
+/// The polishing mark: a 96 px track with a travelling Symon segment (2.1 s
+/// ease in-out, as the web stroke); a full static stroke under reduced motion.
+fn polish_mark(reduced_motion: bool) -> gpui::Div {
+    let track = div().relative().w(px(96.)).h(px(4.)).rounded(px(2.));
+    if reduced_motion {
+        return track.bg(crate::theme::symon_color(0.42));
+    }
+    let cycle = (capsules::now_ms() % 2100) as f32 / 2100.;
+    let half = if cycle < 0.5 {
+        cycle * 2.
+    } else {
+        2. - cycle * 2.
+    };
+    let eased = half * half * (3. - 2. * half);
+    track.bg(gpui::rgba(0xb1b4e529)).child(
+        div()
+            .absolute()
+            .top_0()
+            .left(px(eased * 96. * 0.64))
+            .w(px(96. * 0.36))
+            .h(px(4.))
+            .rounded(px(2.))
+            .bg(crate::theme::symon_color(eased)),
+    )
+}
+
+impl Render for Hud {
+    fn render(&mut self, w: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let (opacity, moving) = self.motion.value();
+        let root = div().size_full().flex();
+        let Some(hud) = self.snapshot.hud.clone() else {
+            return root;
+        };
+        let state = self.snapshot.state.as_str();
+        let processing = matches!(state, "transcribing" | "polishing");
+        if moving || processing && !hud.reduced_motion {
+            w.request_animation_frame();
+        }
+        let caret = self.snapshot.caret();
+        let viewport = f32::from(w.viewport_size().width);
+        let rise = if hud.reduced_motion {
+            0.
+        } else {
+            4. * (1. - opacity)
+        };
+        let level = if self.snapshot.audio_level.is_finite() {
+            self.snapshot.audio_level.clamp(0., 1.)
+        } else {
+            0.
+        };
+        let seconds = self.snapshot.duration_ms / 1000;
+        let header = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .min_h(px(24.))
+            .child(crate::shell::rail::symon_mark_sized(
+                16.,
+                state == "recording",
+            ))
+            .child(
+                div()
+                    .text_size(px(10.))
+                    .font_weight(gpui::FontWeight::LIGHT)
+                    .text_color(white(0.55))
+                    .child(hud.title.to_uppercase()),
+            )
+            .child(div().flex_1())
+            .when(state == "recording", |d| d.child(waveform(level)))
+            .when(processing, |d| d.child(polish_mark(hud.reduced_motion)))
+            .when(!caret && state == "recording" && seconds >= 10, |d| {
+                d.child(
+                    div()
+                        .text_size(px(10.))
+                        .font_weight(gpui::FontWeight::LIGHT)
+                        .text_color(white(0.45))
+                        .child(format!("{}:{:02}", seconds / 60, seconds % 60)),
+                )
+            });
+        let transcript = div()
+            .max_h(px(if caret { 48. } else { 84. }))
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .justify_end()
+            .child(
+                div()
+                    .text_size(px(if caret { 14. } else { 19. }))
+                    .line_height(gpui::relative(1.4))
+                    .text_color(white(if hud.dim { 0.62 } else { 0.97 }))
+                    .child(hud.text.clone()),
+            );
+        let bar = div()
+            .id("native-dictation-hud")
+            .debug_selector(|| "native-dictation-hud".into())
+            .relative()
+            .top(px(rise))
+            .opacity(opacity)
+            .flex()
+            .flex_col()
+            .gap(px(if caret { 5. } else { 8. }))
+            .w(px(if caret {
+                420_f32.min(viewport - 12.)
+            } else {
+                680_f32.min(viewport - 56.)
+            }))
+            .py(px(if caret { 10. } else { 16. }))
+            .px(px(if caret { 14. } else { 26. }))
+            .rounded(px(if caret { 14. } else { 22. }))
+            // Dark in both palettes; only the glass/solid material flips.
+            .bg(if hud.solid {
+                gpui::rgb(0x14161c)
+            } else {
+                gpui::rgba(0x090a0dd1)
+            })
+            .border_1()
+            .border_color(white(0.12))
+            .shadow(vec![
+                gpui::BoxShadow {
+                    color: gpui::hsla(0., 0., 0., if caret { 0.38 } else { 0.55 }),
+                    offset: point(px(0.), px(if caret { 10. } else { 18. })),
+                    blur_radius: px(if caret { 30. } else { 60. }),
+                    spread_radius: px(0.),
+                },
+                gpui::BoxShadow {
+                    color: gpui::hsla(0., 0., 0., if caret { 0.32 } else { 0.4 }),
+                    offset: point(px(0.), px(if caret { 1. } else { 2. })),
+                    blur_radius: px(if caret { 5. } else { 8. }),
+                    spread_radius: px(0.),
+                },
+            ])
+            .font_family(crate::theme::current().font_ui)
+            .child(header)
+            .child(transcript);
+        if caret {
+            root.items_start().justify_start().p(px(6.)).child(bar)
+        } else {
+            root.items_end()
+                .justify_center()
+                .px(px(24.))
+                .pb(px(6.))
+                .child(bar)
+        }
+    }
+}
+
+fn open(cx: &mut gpui::AsyncApp) -> Option<WindowHandle<Hud>> {
+    cx.update(|cx| {
+        cx.open_window(
+            WindowOptions {
+                titlebar: None,
+                focus: false,
+                show: false,
+                kind: WindowKind::PopUp,
+                is_movable: false,
+                is_resizable: false,
+                is_minimizable: false,
+                window_background: WindowBackgroundAppearance::Transparent,
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    point(px(0.), px(0.)),
+                    size(px(460.), px(138.)),
+                ))),
+                ..Default::default()
+            },
+            |_, cx| cx.new(|_| Hud::default()),
+        )
+    })
+    .ok()
+    .and_then(Result::ok)
+}
+
+/// One HUD control from the shared queue, replied to over the same receipts.
+pub(super) fn deliver(
+    handle: &mut Option<WindowHandle<Hud>>,
+    frame: Value,
+    cx: &mut gpui::AsyncApp,
+) {
+    let id = frame["id"].as_str().unwrap_or_default().to_string();
+    if handle.is_none() && frame["args"]["action"] == "release" {
+        crate::app_parent::browser_result(&id, json!({"ok":true}));
+        return;
+    }
+    if handle.is_none() {
+        *handle = open(cx);
+    }
+    let Some(h) = *handle else {
+        crate::app_parent::browser_result(&id, json!({"ok":false}));
+        return;
+    };
+    let reply_id = id.clone();
+    let result = AnyWindowHandle::from(h).update(cx, move |root, window, cx| {
+        let Ok(view) = root.downcast::<Hud>() else {
+            crate::app_parent::browser_result(&reply_id, json!({"ok":false}));
+            return;
+        };
+        // As the dock: apply after any outer lease, present with it returned.
+        let view = view.downgrade();
+        window.defer(cx, move |window, cx| {
+            let reply = |ok: bool| crate::app_parent::browser_result(&reply_id, json!({"ok":ok}));
+            if expired(&frame) {
+                return reply(false);
+            }
+            let Some(view) = view.upgrade() else {
+                return reply(false);
+            };
+            let Some(show) = view.update(cx, |hud, cx| {
+                let show = hud.control(&frame["args"]);
+                cx.notify();
+                show
+            }) else {
+                return reply(false);
+            };
+            #[cfg(target_os = "macos")]
+            macos::present_hud(window, show, &view, cx);
+            #[cfg(not(target_os = "macos"))]
+            let _ = (window, show);
+            let _ = WAKE.0.try_send(());
+            reply(true);
+        });
+    });
+    if result.is_err() {
+        *handle = None;
+        crate::app_parent::browser_result(&id, json!({"ok":false}));
+    }
+}
+
+/// The loop's maintenance tick: lease expiry, exit fade. Returns whether the
+/// panel is visible, so the loop keeps its 16 ms tick only while it is.
+pub(super) fn tick(handle: &mut Option<WindowHandle<Hud>>, cx: &mut gpui::AsyncApp) -> bool {
+    let Some(h) = *handle else {
+        return false;
+    };
+    let mut visible = false;
+    let result = AnyWindowHandle::from(h).update(cx, |root, window, cx| {
+        let Ok(view) = root.downcast::<Hud>() else {
+            return;
+        };
+        let (show, was_shown) = view.update(cx, |hud, cx| {
+            let was_active = hud.target;
+            hud.expire();
+            if was_active != hud.target {
+                cx.notify();
+            }
+            let show = hud.target || hud.shown && hud.motion.value().1;
+            let was_shown = hud.shown;
+            hud.shown = show;
+            (show, was_shown)
+        });
+        visible = show;
+        #[cfg(target_os = "macos")]
+        if show || was_shown {
+            macos::present_hud(window, show, &view, cx);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (window, was_shown);
+    });
+    if result.is_err() {
+        *handle = None;
+        return false;
+    }
+    visible
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use super::*;
+    use cocoa::{
+        base::{NO, YES, id, nil},
+        foundation::{NSPoint, NSRect, NSSize},
+    };
+    use objc::{class, msg_send, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    /// The caret/HUD panel: the dock's nonactivating class and level, fully
+    /// click-through, on every Space, at the classic shell's placement.
+    pub(super) fn present_hud(window: &Window, visible: bool, view: &Entity<Hud>, cx: &mut App) {
+        let Ok(handle) = HasWindowHandle::window_handle(window) else {
+            return;
+        };
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return;
+        };
+        // GPUI owns this content view and NSPanel; calls stay on the UI thread.
+        unsafe {
+            let content: id = handle.ns_view.as_ptr() as id;
+            let panel: id = msg_send![content, window];
+            let configure = view.update(cx, |hud, _| !hud.presentation.configured);
+            if configure {
+                super::super::macos::make_nonactivating(panel);
+                let _: () = msg_send![panel, setIgnoresMouseEvents: YES];
+                let _: () = msg_send![panel, setHidesOnDeactivate: NO];
+                let _: () = msg_send![panel, setLevel: 25_i64];
+                // CanJoinAllSpaces | Stationary | IgnoresCycle | FullScreenAuxiliary,
+                // as the classic HUD window.
+                let _: () = msg_send![panel, setCollectionBehavior: 1_u64 | 16 | 64 | 256];
+            }
+            let screens: id = msg_send![class!(NSScreen), screens];
+            let count: usize = msg_send![screens, count];
+            let frame = if visible && count > 0 {
+                let primary: id = msg_send![screens, objectAtIndex: 0_usize];
+                let rect: NSRect = msg_send![primary, frame];
+                let placement = view.update(cx, |hud, _| {
+                    hud.snapshot
+                        .hud
+                        .as_ref()
+                        .and_then(|detail| detail.placement)
+                });
+                appkit_frame(
+                    placement,
+                    [
+                        rect.origin.x,
+                        rect.origin.y,
+                        rect.size.width,
+                        rect.size.height,
+                    ],
+                )
+            } else {
+                None
+            };
+            let Some([x, y, width, height]) = frame else {
+                view.update(cx, |hud, _| {
+                    hud.presentation.tick(false, None);
+                });
+                let _: () = msg_send![panel, orderOut: nil];
+                return;
+            };
+            let (_, set_frame, order_front) = view.update(cx, |hud, _| {
+                hud.presentation.tick(true, Some([x, y, width, height]))
+            });
+            if set_frame {
+                let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(width, height));
+                let _: () = msg_send![panel, setFrame: frame display: NO];
+            }
+            // Never key, never main, never takes a click.
+            let _: () = msg_send![panel, setIgnoresMouseEvents: YES];
+            if order_front {
+                let _: () = msg_send![panel, orderFrontRegardless];
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "native_hud_tests.rs"]
+mod tests;

@@ -52,7 +52,7 @@ pub fn watch() {
             let Ok(frame) = serde_json::from_slice::<Value>(&line) else {
                 continue;
             };
-            if frame["type"] == "dictation-pill" {
+            if frame["type"] == "dictation-pill" || frame["type"] == "dictation-hud" {
                 crate::native_pill::enqueue(frame);
                 continue;
             }

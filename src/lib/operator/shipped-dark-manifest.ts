@@ -72,6 +72,11 @@ export const SHIPPED_DARK_FLAG_MANIFEST: Readonly<
     lifecycle: 'deliberate-default-off',
     rationale: 'Opt-in native dictation feedback; the interactive dock stays on the web while its remaining surfaces are ported.',
   },
+  nativeDictationHud: {
+    landedRelease: '0.1.821',
+    lifecycle: 'deliberate-default-off',
+    rationale: 'Opt-in native caret-local dictation feedback; the web HUD stays the default and takes over whenever the native window stops acknowledging.',
+  },
   nativeBrowserView: {
     landedRelease: '0.1.681',
     lifecycle: 'promoted',

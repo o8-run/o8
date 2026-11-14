@@ -6,9 +6,34 @@ import type { ChildProcess } from '@/lib/providers/child-process';
 import { bindNextBrowserPipe } from '@/lib/next/browser-pipe';
 import { POST } from './route';
 
-const settings = vi.hoisted(() => ({ enabled: false, reads: 0 }));
-vi.mock('@/lib/operator/defaults', () => ({ getOperatorDefaults: async () => { settings.reads++; return { values: { nativeDictationPill: settings.enabled } }; } }));
-afterEach(() => { settings.enabled = false; settings.reads = 0; vi.useRealTimers(); });
+const settings = vi.hoisted(() => ({ enabled: false, hud: false, reads: 0 }));
+vi.mock('@/lib/operator/defaults', () => ({ getOperatorDefaults: async () => { settings.reads++; return { values: { nativeDictationPill: settings.enabled, nativeDictationHud: settings.hud } }; } }));
+afterEach(() => { settings.enabled = false; settings.hud = false; settings.reads = 0; vi.useRealTimers(); });
+
+it('drives the caret/HUD panel only under its own flag, over its own frame type', async () => {
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
+  bindNextBrowserPipe(child as unknown as ChildProcess);
+  const frames: Record<string, unknown>[] = [];
+  child.stdin.on('data', data => {
+    const frame = JSON.parse(String(data));
+    frames.push(frame);
+    child.stdout.write('o8-next-browser-result:' + JSON.stringify({ id: frame.id, result: { ok: true, finishSession: 3, actions: [{ session: 3, state: 'speaking', action: 'stop' }] } }) + '\n');
+  });
+  const post = (body: object) => POST(new NextRequest('http://localhost/api/next/dictation-pill', { method: 'POST', body: JSON.stringify(body) }));
+  // The dock flag alone never turns the HUD native.
+  settings.enabled = true;
+  expect(await (await post({ action: 'prepare', surface: 'hud' })).json()).toMatchObject({ native: false, enabled: false });
+  expect(frames).toHaveLength(0);
+  settings.enabled = false; settings.hud = true;
+  const reply = await (await post({ action: 'frame', checkSettings: true, surface: 'hud', snapshot: { state: 'recording' } })).json();
+  expect(reply).toEqual({ enabled: true, native: true, absent: false });
+  expect(frames).toHaveLength(1);
+  expect(frames[0]).toMatchObject({ type: 'dictation-hud', verb: 'present', args: { action: 'frame', surface: 'hud' } });
+  // The dock keeps reading its own flag.
+  expect(await (await post({ action: 'prepare' })).json()).toMatchObject({ native: false, enabled: false });
+  expect(frames).toHaveLength(1);
+  child.emit('exit');
+});
 it('defaults to web without sending any pipe frame when disabled', async () => {
   const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
   bindNextBrowserPipe(child as unknown as ChildProcess);

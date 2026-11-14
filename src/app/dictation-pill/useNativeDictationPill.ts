@@ -35,7 +35,17 @@ export type NativeDockSnapshot = Omit<DictationSnapshot, 'state'> & {
   glint?: { key: string; text: string; tone: string; fadeAt: number; until: number };
   workers?: DockWorkers;
   expanded?: boolean;
+  /** Caret/HUD feedback (the `hud` surface only): what the panel draws and where. */
+  hud?: NativeHudDetail;
 };
+/** Wording is chosen by the web page so both surfaces read the same. `placement`
+ * is the classic shell's anchor in top-left desktop points, or absent until known. */
+export interface NativeHudDetail {
+  surface: 'caret' | 'hud'; title: string; text: string; dim: boolean; solid: boolean; reducedMotion: boolean;
+  placement?: { x: number; y: number; width: number; height: number };
+}
+/** Which native panel a feed drives: the dock, or the caret/HUD feedback window. */
+export type NativeFeedSurface = 'dock' | 'hud';
 /** A click the native panel reports; the web dock runs the matching command. A
  * revert names the chip (`edit`) as well as the frame it was drawn under. */
 export type NativeDockAction = {
@@ -77,6 +87,7 @@ export function useNativePillDockExtent(native: boolean, active: boolean, visibl
  * Failed requests restore web drawing immediately and block the current session. */
 export function useNativeDictationPill(
   snapshot: NativeDockSnapshot, session: number, onFinish: () => void, onAction?: (action: NativeDockAction) => void,
+  surface: NativeFeedSurface = 'dock',
 ): { native: boolean; suppressed: boolean } {
   const [native, setNative] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
@@ -143,7 +154,7 @@ export function useNativeDictationPill(
         return await Promise.race([
           fetch('/api/next/dictation-pill', {
             method: 'POST', headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + getMobileWsToken() },
-            body: JSON.stringify({ ...body, deadline: Date.now() + timing.requestMs }), signal: controller.signal,
+            body: JSON.stringify({ ...body, ...(surface === 'hud' ? { surface } : {}), deadline: Date.now() + timing.requestMs }), signal: controller.signal,
           }).then(async response => response.ok ? response.json() : { native: false }),
           new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('Pill deadline')); }, timing.requestMs); }),
         ]);
@@ -207,6 +218,7 @@ export function useNativeDictationPill(
           glint: frame.glint && { ...frame.glint, key: undefined, text: bounded(frame.glint.text, 200) },
           workers: frame.workers && { ...frame.workers, label: bounded(frame.workers.label, 20), repos: frame.workers.repos.slice(0, 4).map(repo => bounded(repo, 60)) },
           expanded: frame.expanded, holdMs,
+          hud: frame.hud && { ...frame.hud, title: bounded(frame.hud.title, 120), text: bounded(frame.hud.text, 2400) },
         } : undefined,
         ...(action === 'release' ? { session: releaseSession, kind: releaseKind, immediate: current.snapshot.handoff === true } : {}) });
         if (disposed) return;
@@ -303,7 +315,7 @@ export function useNativeDictationPill(
       clearTimeout(frameTimer);
       unlisten?.();
     };
-  }, []);
+  }, [surface]);
   useEffect(() => { wake.current?.(); }, [active, session, native, suppressed, snapshot.state, staticKey]);
   return { native, suppressed };
 }

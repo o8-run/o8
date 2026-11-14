@@ -10,8 +10,9 @@ to restore web drawing. The existing server-owned native process must be running
 A standalone process without the existing parent pipe remains on the web fallback.
 Runtime panel takeover is macOS-only in this PR; other platforms retain the web
 fallback. Linux raster fixtures exercise the production renderer separately.
-Use a session routed to the dock for acceptance; caret/HUD-routed sessions retain
-their separate feedback owner until that surface is ported.
+Use a session routed to the dock for acceptance; caret/HUD-routed sessions keep
+their separate feedback surface, which has its own flag (native_dictation_hud,
+see dictation-hud.md).
 
 The dock continues receiving the original session-fenced STT events and owns the
 same snapshot lifecycle, watchdog and completion timing. It prepares the native

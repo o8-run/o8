@@ -7,11 +7,16 @@
  * This transparent, nonactivating window never changes the paste target.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { isTauri } from '@/lib/tauri/bridge';
 import { SystemDictationSession } from '@/lib/dictation/system-dictation-session';
 import { SymonMark, SymonPolishMark, SymonWaveform } from '@/components/desktop/dictation/SymonVisuals';
+import { useNativeDictationPill } from '@/app/dictation-pill/useNativeDictationPill';
+import {
+  hudDisplay, hudTitle, nativeHudFrame, readPlacement, webHudPaints,
+  type HudPlacement, type HudState, type PartialsSurface, type Phase,
+} from './nativeHudFrame';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,9 +64,6 @@ function readAppSurface(): AppSurface {
   }
 }
 
-type Phase = 'starting' | 'listening' | 'transcribing' | 'polishing' | 'final' | 'error';
-type PartialsSurface = 'caret' | 'hud';
-
 interface SttPayload {
   type?: string;
   origin?: string;
@@ -79,15 +81,8 @@ interface SttPayload {
   mode?: 'dictation' | 'smart-compose';
 }
 
-interface HudState {
-  phase: Phase;
-  level: number;
-  agent: boolean;
-  text: string;
-  clipboardOnly: boolean;
-  surface: PartialsSurface;
-  mode: 'dictation' | 'smart-compose';
-}
+/** The HUD has no click-to-finish; the native panel is click-through. */
+const noop = () => undefined;
 
 export default function AgentPartialsPage() {
   const prefersReducedMotion = useReducedMotion();
@@ -114,6 +109,10 @@ export default function AgentPartialsPage() {
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Native drawing (experimental native_dictation_hud): the classic shell's
+  // anchor for this window, and a session number per activation.
+  const [placement, setPlacement] = useState<HudPlacement | null>(null);
+  const [hudSession, setHudSession] = useState(0);
 
   // Keep the material in sync with the app's Glass/Solid preference. The main
   // window writes the theme keys; `storage` fires here (a different document),
@@ -188,6 +187,9 @@ export default function AgentPartialsPage() {
       }, agent ? PAINT_GRACE_MS : DICTATION_PAINT_GRACE_MS);
       sessionStartedAtRef.current = Date.now();
       setElapsedSeconds(0);
+      // The shell anchors this session right after its start event.
+      setPlacement(null);
+      setHudSession(session => session + 1);
       setState({ phase: 'starting', level: 0, agent, text: '', clipboardOnly: false, surface, mode });
     };
     const showText = (phase: Phase, text: string, clipboardOnly = false) => {
@@ -292,7 +294,14 @@ export default function AgentPartialsPage() {
     };
 
     import('@tauri-apps/api/event')
-      .then(({ listen }) => listen<SttPayload>('o8:stt-event', (e) => handle(e.payload ?? {})))
+      .then(async ({ listen }) => {
+        const stt = await listen<SttPayload>('o8:stt-event', (e) => handle(e.payload ?? {}));
+        const placed = await listen<unknown>('o8:agent-partials-placement', (e) => {
+          const next = readPlacement(e.payload);
+          if (next) setPlacement(next);
+        });
+        return () => { stt(); placed(); };
+      })
       .then((un) => {
         if (disposed) {
           un();
@@ -418,10 +427,14 @@ export default function AgentPartialsPage() {
     return () => clearInterval(interval);
   }, [state?.phase, state]);
 
-  const display = state
-    ? state.text || (state.phase === 'starting' ? 'Starting microphone…'
-      : state.phase === 'listening' ? 'Listening' : 'Finishing dictation…')
-    : '';
+  // With native_dictation_hud on, the native window draws this session and
+  // this page paints nothing; a lost acknowledgement hands it straight back.
+  const nativeFrame = useMemo(() => nativeHudFrame({
+    state, claimed: suppressed, graceElapsed, elapsedSeconds,
+    solid: appSurface === 'solid', reducedMotion: prefersReducedMotion === true, placement,
+  }), [state, suppressed, graceElapsed, elapsedSeconds, appSurface, prefersReducedMotion, placement]);
+  const { native } = useNativeDictationPill(nativeFrame, hudSession, noop, undefined, 'hud');
+  const display = state ? hudDisplay(state) : '';
   const rise = prefersReducedMotion ? 0 : 4;
   const caretLocal = state?.surface === 'caret';
 
@@ -443,7 +456,7 @@ export default function AgentPartialsPage() {
       }}
     >
       <AnimatePresence>
-        {state && !suppressed && graceElapsed ? (
+        {state && webHudPaints(state, suppressed, graceElapsed, native) ? (
           <motion.div
             key={`agent-partials-bar-${state.surface}`}
             role="status"
@@ -498,11 +511,7 @@ export default function AgentPartialsPage() {
                   lineHeight: 1,
                 }}
               >
-                {`Symon · ${state.phase === 'starting' ? 'Starting'
-                  : state.phase === 'listening' ? 'Listening'
-                  : state.phase === 'transcribing' ? 'Transcribing'
-                    : state.phase === 'polishing' ? (state.mode === 'smart-compose' ? 'Composing' : 'Polishing')
-                      : state.phase === 'error' ? 'Dictation stopped' : state.agent ? 'Sent to agent' : state.clipboardOnly ? 'Copied' : 'Pasted'}`}
+                {hudTitle(state)}
               </span>
               {state.phase === 'listening' ? (
                 <span aria-label="Microphone level" style={{ marginLeft: 'auto', display: 'flex' }}>
