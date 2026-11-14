@@ -68,7 +68,7 @@ export const SHIPPED_DARK_FLAG_MANIFEST: Readonly<
     rationale: 'Opt-in native app shell; the existing desktop window remains the default.',
   },
   nativeDictationPill: {
-    landedRelease: '0.1.820',
+    landedRelease: '0.1.821',
     lifecycle: 'deliberate-default-off',
     rationale: 'Opt-in native dictation feedback; the interactive dock stays on the web while its remaining surfaces are ported.',
   },

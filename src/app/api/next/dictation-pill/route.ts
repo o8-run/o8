@@ -5,6 +5,8 @@ import { requestNextPill } from '@/lib/next/browser-pipe';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+let enabled = false;
+
 /** Existing API authorization applies; this route grants no voice/control authority. */
 export async function POST(request: NextRequest) {
   if (Number(request.headers.get('content-length') ?? 0) > 8192) {
@@ -26,8 +28,14 @@ export async function POST(request: NextRequest) {
   if (!body || typeof body !== 'object' || !['prepare', 'frame', 'release'].includes(String(body.action))) {
     return NextResponse.json({ native: false }, { status: 400 });
   }
-  const { values } = await getOperatorDefaults();
-  const enabled = values.nativeDictationPill === true;
-  const reply = await requestNextPill(enabled ? body : { action: 'release' }) as { ok?: boolean; finishSession?: number | null } | null;
-  return NextResponse.json({ native: enabled && reply?.ok === true, ...(enabled && typeof reply?.finishSession === 'number' ? { finishSession: reply.finishSession } : {}) }, { headers: { 'Cache-Control': 'no-store' } });
+  // Session boundaries refresh the flag; level frames use that decision.
+  if (body.action === 'prepare' || body.checkSettings === true) {
+    enabled = (await getOperatorDefaults()).values.nativeDictationPill === true;
+  }
+  if (!enabled) return NextResponse.json({ native: false, enabled: false });
+  const pending = requestNextPill(body);
+  const reply = await pending as { ok?: boolean; absent?: boolean; finishSession?: number | null } | null;
+  return NextResponse.json({ enabled: true, native: reply?.ok === true, absent: pending === null || reply?.absent === true,
+    ...(typeof reply?.finishSession === 'number' ? { finishSession: reply.finishSession } : {})
+  }, { headers: { 'Cache-Control': 'no-store' } });
 }

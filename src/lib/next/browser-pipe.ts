@@ -24,17 +24,17 @@ export function bindNextBrowserPipe(child: ChildProcess): void {
       pending.resolve(reply.result);
     } catch { /* A malformed/unknown receipt never matches a request. */ }
   });
-  const unavailable = () => {
+  const unavailable = (absent = false) => {
     bridge.failed = true;
     for (const pending of bridge.pending.values()) {
       clearTimeout(pending.timer);
-      pending.resolve({ ok: false, error: 'The o8 next Browser action was not confirmed', actionDispatched: null, automaticReplay: false });
+      pending.resolve({ ok: false, error: 'The o8 next Browser action was not confirmed', absent, actionDispatched: null, automaticReplay: false });
     }
     bridge.pending.clear();
   };
-  child.stdin?.on('error', unavailable);
+  child.stdin?.on('error', () => unavailable());
   const closed = () => {
-    unavailable();
+    unavailable(true);
     lines.close();
     if (runtime.__o8NextBrowserPipe === bridge) delete runtime.__o8NextBrowserPipe;
   };

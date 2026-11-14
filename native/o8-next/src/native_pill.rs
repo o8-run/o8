@@ -10,15 +10,33 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
-    sync::Mutex,
+    sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
 static FRAMES: Mutex<VecDeque<Value>> = Mutex::new(VecDeque::new());
+static WAKE: LazyLock<(async_channel::Sender<()>, async_channel::Receiver<()>)> =
+    LazyLock::new(|| async_channel::bounded(1));
+
 pub(crate) fn enqueue(frame: Value) {
+    #[cfg(not(target_os = "macos"))]
+    {
+        crate::app_parent::browser_result(
+            frame["id"].as_str().unwrap_or_default(),
+            json!({"ok":false}),
+        );
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    enqueue_supported(frame);
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn enqueue_supported(frame: Value) {
     let mut queue = FRAMES.lock().unwrap();
     if queue.len() < 32 {
         queue.push_back(frame);
+        let _ = WAKE.0.try_send(());
     } else {
         crate::app_parent::browser_result(
             frame["id"].as_str().unwrap_or_default(),
@@ -38,8 +56,6 @@ pub(crate) struct Snapshot {
     pub duration_ms: u64,
     #[serde(default)]
     pub error: Option<String>,
-    #[serde(default)]
-    pub partial_transcript: String,
     #[serde(default)]
     pub pasted_text: Option<String>,
 }
@@ -285,6 +301,7 @@ fn dispatch(
             macos::present(window, show, interactive);
             #[cfg(not(target_os = "macos"))]
             let _ = (window, show, interactive);
+            let _ = WAKE.0.try_send(());
             reply(json!({"ok":true, "finishSession":finish}));
         } else {
             reply(json!({"ok":false}));
@@ -292,15 +309,33 @@ fn dispatch(
     });
 }
 
+pub(crate) fn has_real_windows(cx: &App) -> bool {
+    cx.windows()
+        .iter()
+        .any(|window| window.downcast::<Pill>().is_none())
+}
+
+async fn wait_for_work(
+    visible: bool,
+    receiver: &async_channel::Receiver<()>,
+    executor: &gpui::BackgroundExecutor,
+) {
+    if visible {
+        let mut timer = executor.timer(Duration::from_millis(16));
+        crate::wake::next(receiver, &mut timer).await;
+    } else {
+        let _ = receiver.recv().await;
+    }
+}
+
 /// One window, no activation or keyboard/input handlers. A lost feed expires locally.
 pub(crate) fn install(cx: &mut App) {
     #[cfg(target_os = "macos")]
     cx.spawn(async move |cx| {
         let mut handle: Option<WindowHandle<Pill>> = None;
+        let mut visible = false;
         loop {
-            cx.background_executor()
-                .timer(Duration::from_millis(16))
-                .await;
+            wait_for_work(visible, &WAKE.1, cx.background_executor()).await;
             let frames: Vec<_> = FRAMES.lock().unwrap().drain(..).collect();
             for frame in frames {
                 let id = frame["id"].as_str().unwrap_or_default();
@@ -350,6 +385,7 @@ pub(crate) fn install(cx: &mut App) {
                     crate::app_parent::browser_result(&id, json!({"ok":false}));
                 }
             }
+            visible = false;
             if let Some(h) = handle {
                 let _ = AnyWindowHandle::from(h).update(cx, |root, window, cx| {
                     let Ok(view) = root.downcast::<Pill>() else {
@@ -370,6 +406,7 @@ pub(crate) fn install(cx: &mut App) {
                             pill.target && pill.snapshot.state == "recording",
                         )
                     });
+                    visible = show;
                     if show || was_shown {
                         macos::present(window, show, interactive);
                     }

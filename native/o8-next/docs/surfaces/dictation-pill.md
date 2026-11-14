@@ -21,8 +21,18 @@ a running native process suppresses web drawing. No listening port is added.
 Only a session-correlated click-to-finish intent returns to the existing dock owner.
 Audio, providers, paste and approval authority retain their existing owners.
 
+The dock probes once at mount and once at a session start if native has not
+accepted ownership. Disabled probes send no pipe frames. Enabled idle ownership
+is retained without requests; the next session's first frame checks liveness and
+refreshes settings. Active feeds run at up to 10 frames per second and send one
+release at idle. The native loop sleeps on a frame channel while hidden and uses
+a 16 ms lease/animation timer only while visible. Unsupported platforms reject
+frames immediately without queueing. The retained panel does not keep the shell
+alive after the last real window closes.
+
 A stalled feed expires after 750 ms and exits over 160 ms. Web fallback waits
-one second after an unconfirmed response before drawing again. Unknown states
+one second after an unconfirmed response before drawing again. A confirmed process
+exit restores web drawing immediately. Unknown states
 never become visible. The native window is a nonactivating GPUI popup; only its listening capsule
 accepts clicks. AppKit orders it front without making it key, at the same level and
 primary-screen notch offset as the web dock. Geometry is recomputed in logical

@@ -215,6 +215,7 @@ fn pill_placement_follows_primary_changes_and_notch_without_scaling() {
     assert!(placement([0., 0., 1440., 900.], f64::NAN).is_none());
     assert!(placement([0., 0., 0., 900.], 0.).is_none());
 }
+#[cfg(target_os = "macos")]
 #[gpui::test]
 fn pill_pipe_fixture(cx: &mut TestAppContext) {
     if std::env::var("O8_PILL_PIPE_FIXTURE").as_deref() != Ok("1") {
@@ -244,6 +245,7 @@ fn pill_pipe_fixture(cx: &mut TestAppContext) {
         )
     });
 }
+#[cfg(target_os = "macos")]
 #[test]
 fn dictation_event_reaches_pill_model_through_real_parent_pipe() {
     use std::io::{BufRead, BufReader, Write};
@@ -274,4 +276,39 @@ fn dictation_event_reaches_pill_model_through_real_parent_pipe() {
     }
     assert!(child.wait().unwrap().success());
     reader.join().unwrap();
+}
+
+#[gpui::test]
+fn hidden_pill_waits_for_a_frame_without_periodic_wakes(cx: &mut TestAppContext) {
+    let (sender, receiver) = async_channel::bounded(1);
+    let wakes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = wakes.clone();
+    let executor = cx.executor();
+    let background = cx.background_executor.clone();
+    executor
+        .spawn(async move {
+            wait_for_work(false, &receiver, &background).await;
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        })
+        .detach();
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_secs(60));
+    cx.run_until_parked();
+    assert_eq!(wakes.load(std::sync::atomic::Ordering::SeqCst), 0);
+    sender.try_send(()).unwrap();
+    cx.run_until_parked();
+    assert_eq!(wakes.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[gpui::test]
+fn retained_pill_does_not_keep_the_shell_alive(cx: &mut TestAppContext) {
+    cx.add_window_view(|_, _| Pill::default());
+    cx.update(|cx| assert!(!has_real_windows(cx)));
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn unsupported_platform_rejects_without_queueing() {
+    enqueue(json!({"id":"unsupported-platform"}));
+    assert!(FRAMES.lock().unwrap().is_empty());
 }

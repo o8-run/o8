@@ -128,6 +128,18 @@ describe('native Fn dictation surfaces', () => {
     await wait(100);
     expect(invoke.mock.calls.filter(([command]) => command === 'o8_system_dictation_finish')).toHaveLength(1);
   });
+  it('stops probing when the flag is off, including across a minute of idle', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ native: false, enabled: false })));
+    await wait(1000);
+    const initial = vi.mocked(fetch).mock.calls.length;
+    await wait(60000);
+    expect(fetch).toHaveBeenCalledTimes(initial);
+    await event('system-start', { hud: false, surface: 'off', sessionId: 800 });
+    await wait(100);
+    expect(fetch).toHaveBeenCalledTimes(initial + 1);
+    await wait(60000);
+    expect(fetch).toHaveBeenCalledTimes(initial + 1);
+  });
   it('hands pure dictation to native only after prepare, and keeps the web edit chip available', async () => {
     const frames: Record<string, unknown>[] = [];
     vi.mocked(fetch).mockImplementation(async (_url, init) => {
@@ -136,6 +148,7 @@ describe('native Fn dictation surfaces', () => {
       return new Response(JSON.stringify({ native: true }), { headers: { 'Content-Type': 'application/json' } });
     });
     await wait(1000);
+    const firstSession = Date.now();
     await event('system-start', { hud: false, surface: 'off', sessionId: 501 });
     await event('level', { sessionId: 501, level: 0.7 });
     await wait(100);
@@ -170,7 +183,9 @@ describe('native Fn dictation surfaces', () => {
     expect((last?.snapshot as { state?: string })?.state).toBe('idle');
 
     const finish = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body ?? '{}'))).find(body => body.snapshot?.session);
-    expect(typeof finish?.snapshot.session).toBe('number');
+    expect(finish?.action).toBe('frame');
+    expect(finish?.snapshot).toMatchObject({ state: 'recording', session: firstSession });
+    expect(listeningAtNotch()).toBeNull();
 
 
   });
