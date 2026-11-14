@@ -1,0 +1,12 @@
+[package]
+name = "o8-launch-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+log = "0.4"
+serde_json = "1"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json"] }
+o8-restart-safety = { path = "../o8-restart-safety" }
+uuid = { version = "1", features = ["v4"] }

@@ -15,15 +15,17 @@ use std::{
     time::Duration,
 };
 
-// The parent waits only for the first paint of the open window. This channel
-// carries only fixed control signals, never diagnostics or credentials.
+// Owners opt into a first-paint receipt, never diagnostics or credentials.
+// READY_STDOUT enables only this receipt; PARENT_PIPE separately owns stdin
+// lifetime and desktop updater semantics.
 fn report_startup() {
     use std::{
         io::Write,
         sync::atomic::{AtomicBool, Ordering},
     };
     static REPORTED: AtomicBool = AtomicBool::new(false);
-    if std::env::var("O8_NEXT_PARENT_PIPE").as_deref() != Ok("1")
+    if (std::env::var("O8_NEXT_PARENT_PIPE").as_deref() != Ok("1")
+        && std::env::var("O8_NEXT_READY_STDOUT").as_deref() != Ok("1"))
         || REPORTED.swap(true, Ordering::SeqCst)
     {
         return;
@@ -451,7 +453,7 @@ impl Shell {
             .iter()
             .any(|registration| (registration.claim_link)(self, url, window, cx))
         {
-            cx.open_url(url);
+            crate::external_open::url(cx, url);
         }
     }
     /// A sent worktree pill opens its files, a script pill its line in the
@@ -508,7 +510,7 @@ impl Shell {
         } else if let Some((repo, number)) = github_item(url, "pull") {
             self.open_pr_in_panel(repo, number, window, cx);
         } else if url.starts_with("https://") || url.starts_with("http://") {
-            cx.open_url(url);
+            crate::external_open::url(cx, url);
         } else if let Some(path) = url.strip_prefix("o8-change:") {
             self.open_change_link(path.to_owned(), window, cx);
         } else if let Some(repo) = url.strip_prefix("o8-new-thread:") {

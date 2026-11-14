@@ -31,7 +31,10 @@ import { fetchCorrelatedPacketMutation } from './packet/correlated-mutation.js';
 import { resolveConfig } from '../config.js';
 import {
   createTerminalStatusReporter,
+  missionTailReport,
+  PACKET_RECORD_LIMIT,
   packetStatusReport,
+  packetTailReport,
   watchingStatusReport,
 } from '../terminal-status.js';
 import {
@@ -650,8 +653,13 @@ async function runMissionTail(mode: OutputMode, rest: string[]): Promise<number>
     }
   };
 
+  const tabStatus = createTerminalStatusReporter(mode);
+  let marked = new Set<string>();
   while (Date.now() < deadline && !allTerminal) {
-    const snapshot = await fetchStatus(missionId, false);
+    const snapshot = await fetchStatus(missionId, false).catch((error: unknown) => {
+      tabStatus.report({ state: 'clear' });
+      throw error;
+    });
     const packets = snapshot.packets ?? [];
     for (const p of packets) {
       const prev = lastStatus.get(p.id);
@@ -661,6 +669,19 @@ async function runMissionTail(mode: OutputMode, rest: string[]): Promise<number>
         lastStatus.set(p.id, cur);
       }
     }
+    // Mark each packet, and remove the mark of one that left the mission.
+    const current = new Set<string>();
+    for (const p of packets.slice(0, PACKET_RECORD_LIMIT)) {
+      const report = packetTailReport(p);
+      if (!report) continue;
+      current.add(p.id);
+      tabStatus.report(report);
+    }
+    for (const id of marked) {
+      if (!current.has(id)) tabStatus.report({ state: 'clear', packetId: id });
+    }
+    marked = current;
+    tabStatus.report(missionTailReport(packets));
     allTerminal = packets.length > 0 && packets.every(
       (p) => typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status),
     );
@@ -671,6 +692,8 @@ async function runMissionTail(mode: OutputMode, rest: string[]): Promise<number>
   if (!mode.human) {
     printJson({ schema: 'o8/cli/mission.tail/v1', done: allTerminal, reason: allTerminal ? 'all-terminal' : 'timeout' });
   }
+  // A timed-out tail clears its marks; a finished one leaves them in the tab.
+  if (!allTerminal) tabStatus.report({ state: 'clear' });
   return 0;
 }
 

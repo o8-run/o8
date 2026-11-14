@@ -300,4 +300,122 @@ describe('o8 mission terminal status reports (#6137)', () => {
     await expect(runMission(human, 'wait', waitArgs)).resolves.toBe(0);
     expect(reports(out).map((r) => [r.state, r.title])).toEqual([['working', '2 packets'], ['done', 'Second']]);
   });
+
+  describe('mission tail', () => {
+    const tailArgs = ['--mission', 'mission-tab', '--timeout', '5s', '--poll', '1000'];
+
+    async function tail(
+      opts: { tty: boolean; mode: typeof mode },
+      script: Array<Array<{ id: string; title: string; status: string }>>,
+      rest = tailArgs,
+    ): Promise<string> {
+      process.env.O8_API_PORT = '47120';
+      Object.defineProperty(process.stdout, 'isTTY', { value: opts.tty, configurable: true });
+      let call = 0;
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        const packets = script[Math.min(call, script.length - 1)];
+        call += 1;
+        return new Response(JSON.stringify({ ok: true, result: { missionId: 'mission-tab', packets } }), { status: 200 });
+      }));
+      let out = '';
+      vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+        out += String(chunk);
+        return true;
+      });
+      await expect(runMission(opts.mode, 'tail', rest)).resolves.toBe(0);
+      return out;
+    }
+
+    const a = (status: string) => ({ id: 'pkt-a', title: 'First', status });
+    const b = (status: string) => ({ id: 'pkt-b', title: 'Second', status });
+
+    it('gives each packet its own record and keeps the outcome marks', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const out = await tail({ tty: true, mode: human }, [
+        [a('running'), b('queued')],
+        [a('awaiting_review'), b('failed')],
+      ]);
+      expect(reports(out)).toEqual([
+        { state: 'working', id: 'o8/pkt-a', app: 'o8', title: 'First', msg: 'Running' },
+        { state: 'working', id: 'o8/pkt-b', app: 'o8', title: 'Second', msg: 'Queued' },
+        { state: 'working', id: 'o8', app: 'o8', title: '2 packets', msg: '0 of 2 finished' },
+        { state: 'done', id: 'o8/pkt-a', app: 'o8', title: 'First', msg: 'Awaiting review' },
+        { state: 'error', id: 'o8/pkt-b', app: 'o8', title: 'Second', msg: 'Failed' },
+        { state: 'error', id: 'o8', app: 'o8', title: '2 packets', msg: '1 of 2 failed, blocked, or archived' },
+      ]);
+    });
+
+    it('clears every mark when the tail times out', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const out = await tail({ tty: true, mode: human }, [[a('running')]], ['--mission', 'mission-tab', '--timeout', '1s', '--poll', '1000']);
+      const all = reports(out);
+      expect(all[all.length - 1]).toEqual({ state: 'clear', id: 'o8' });
+    });
+
+    it('removes the mark of a packet that leaves the mission', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const out = await tail({ tty: true, mode: human }, [
+        [a('running'), b('running')],
+        [a('released')],
+      ]);
+      const all = reports(out);
+      expect(all).toContainEqual({ state: 'clear', id: 'o8/pkt-b' });
+      expect(all[all.length - 1]).toEqual({ state: 'done', id: 'o8', app: 'o8', title: '1 packet', msg: 'All 1 ready for review or released' });
+    });
+
+    it('marks only the first packets of a very large mission and still summarizes all', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const many = Array.from({ length: 70 }, (_unused, i) => ({ id: `pkt-${i}`, title: `P${i}`, status: 'released' }));
+      const all = reports(await tail({ tty: true, mode: human }, [many]));
+      expect(all.filter((r) => r.id.startsWith('o8/'))).toHaveLength(60);
+      expect(all[all.length - 1]).toMatchObject({ state: 'done', id: 'o8', title: '70 packets' });
+    });
+
+    it('with no packets yet, reports only the mission and clears on timeout', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const all = reports(await tail({ tty: true, mode: human }, [[]], ['--mission', 'mission-tab', '--timeout', '1s', '--poll', '1000']));
+      expect(all).toEqual([
+        { state: 'working', id: 'o8', app: 'o8', title: '0 packets', msg: '0 of 0 finished' },
+        { state: 'clear', id: 'o8' },
+      ]);
+    });
+
+    it('clears every mark when a status read fails mid-tail', async () => {
+      process.env.REX_SESSION = 'session:test';
+      process.env.O8_API_PORT = '47120';
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      let call = 0;
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        call += 1;
+        if (call > 1) return new Response(JSON.stringify({ ok: false, error: 'boom' }), { status: 500 });
+        return new Response(JSON.stringify({ ok: true, result: { missionId: 'mission-tab', packets: [a('running')] } }), { status: 200 });
+      }));
+      let out = '';
+      vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+        out += String(chunk);
+        return true;
+      });
+      await expect(runMission(human, 'tail', tailArgs)).rejects.toBeDefined();
+      const all = reports(out);
+      expect(all[all.length - 1]).toEqual({ state: 'clear', id: 'o8' });
+    });
+
+    it('O8_TERMINAL_STATUS=0 writes no sequence across several polls in Rex', async () => {
+      process.env.REX_SESSION = 'session:test';
+      process.env.O8_TERMINAL_STATUS = '0';
+      const out = await tail({ tty: true, mode: human }, [[a('running')], [a('released')]]);
+      expect(out).not.toContain('\x1b]');
+    });
+
+    it.each([
+      ['JSON output', { tty: true, mode }, true],
+      ['piped stdout', { tty: false, mode: human }, true],
+      ['REX_SESSION unset', { tty: true, mode: human }, false],
+    ])('writes no sequence: %s', async (_name, opts, rex) => {
+      if (rex) process.env.REX_SESSION = 'session:test';
+      const out = await tail(opts, [[a('running'), b('queued')], [a('released'), b('failed')]]);
+      expect(out).not.toContain(OSC);
+      expect(out).not.toContain('\x1b]');
+    });
+  });
 });

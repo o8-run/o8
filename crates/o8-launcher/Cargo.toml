@@ -1,0 +1,20 @@
+[package]
+name = "o8-launcher"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+o8-launch-core = { path = "../o8-launch-core" }
+o8-restart-safety = { path = "../o8-restart-safety" }
+libc = "0.2"
+signal-hook = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSObject", "NSString", "NSDate", "NSRunLoop", "NSThread", "NSObjCRuntime"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication", "NSEvent", "libc"] }

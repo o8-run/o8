@@ -113,3 +113,12 @@ remaining label by hand in the release editor, or with
 The pinned action token defaults are documented in
 [checkout](https://github.com/actions/checkout/blob/11bd71901bbe5b1630ceea73d27597364c9af683/action.yml#L11-L21)
 and [setup-node](https://github.com/actions/setup-node/blob/49933ea5288caeca8642d1e84afbd3f7d6820020/action.yml#L20-L22).
+
+## Software Vulkan fallback
+
+The AppImage retries once with its bundled Mesa lavapipe driver after the native
+renderer reports no usable Vulkan device. System drivers run first. Explicit
+`VK_ICD_FILENAMES` or `VK_DRIVER_FILES` settings disable this automatic retry.
+Set `O8_DISABLE_BUNDLED_VULKAN=1` to disable the fallback for diagnosis. A fallback
+prints `Using bundled software Vulkan driver; performance will be lower.`
+DEB and RPM continue to require system Vulkan drivers.

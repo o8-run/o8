@@ -47,7 +47,7 @@ pub(super) fn start(handle: WindowHandle<Surface>, directory: PathBuf, cx: &mut 
         // tracking for an inactive window. Timing is measured by separate tests.
         gpui::AnyWindowHandle::from(handle).update(cx, |_, w, _| w.refresh()).unwrap();
         cx.background_executor().timer(Duration::from_millis(200)).await;
-        assert!(Command::new("screencapture").args(["-x", "-l", &window_id.to_string()]).arg(&slash_path).status().unwrap().success());
+        assert!(crate::child_command::command("screencapture").args(["-x", "-l", &window_id.to_string()]).arg(&slash_path).status().unwrap().success());
         gpui::AnyWindowHandle::from(handle).update(cx, |_, w, cx| { w.dispatch_keystroke(Keystroke::parse("escape").unwrap(), cx); }).unwrap();
         handle.update(cx, |s, w, cx| {
             assert!(s.composer.read(cx).slash_suggestions().is_empty());
@@ -64,7 +64,7 @@ pub(super) fn start(handle: WindowHandle<Surface>, directory: PathBuf, cx: &mut 
         let mode_path = directory.join(format!("{appearance}-mode.png"));
         gpui::AnyWindowHandle::from(handle).update(cx, |_, w, _| w.refresh()).unwrap();
         cx.background_executor().timer(Duration::from_millis(200)).await;
-        assert!(Command::new("screencapture").args(["-x", "-l", &window_id.to_string()]).arg(&mode_path).status().unwrap().success());
+        assert!(crate::child_command::command("screencapture").args(["-x", "-l", &window_id.to_string()]).arg(&mode_path).status().unwrap().success());
         std::fs::write(directory.join(format!("{appearance}.json")), serde_json::to_vec_pretty(&json!({
             "appearance":appearance,"pid":std::process::id(),"window":window_id,
             "slash":slash,"mode":mode,"captures":[slash_path.file_name().unwrap().to_string_lossy(), mode_path.file_name().unwrap().to_string_lossy()],

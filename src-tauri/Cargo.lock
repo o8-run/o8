@@ -3865,6 +3865,7 @@ dependencies = [
  "keyring",
  "libc",
  "log",
+ "o8-launch-core",
  "o8-linux-voice",
  "o8-restart-safety",
  "objc2",
@@ -3910,6 +3911,17 @@ dependencies = [
  "windows-sys 0.59.0",
  "winreg 0.55.0",
  "x11rb",
+]
+
+[[package]]
+name = "o8-launch-core"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "o8-restart-safety",
+ "reqwest 0.13.2",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

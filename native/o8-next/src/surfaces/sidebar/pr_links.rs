@@ -140,7 +140,7 @@ impl ThreadList {
     pub(super) fn open_pr_link(&mut self, link: &PrLink, browser: bool, cx: &mut Context<Self>) {
         self.pr_hover = None;
         if browser {
-            cx.open_url(&link.url());
+            crate::external_open::url(cx, &link.url());
         } else {
             cx.emit(Event::UiCommand(json!({
                 "type": "ui-command",
