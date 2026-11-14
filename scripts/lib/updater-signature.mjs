@@ -56,6 +56,16 @@ export function verifyUpdaterSignature(root, artifactPath, signaturePath) {
       ? createHash('blake2b512').update(artifact).digest()
       : artifact;
     verified = verifyEd25519(null, message, key, signaturePacket.subarray(10, 74));
+    const fields = Buffer.from(readFileSync(signaturePath, 'utf8').trim(), 'base64').toString('utf8').replace(/\n$/, '').split('\n');
+    if (fields.length !== 4 || !fields[2].startsWith('trusted comment: ')
+      || !/^[A-Za-z0-9+/]{86}==$/.test(fields[3])) throw new Error('Invalid minisign global signature or trusted comment');
+    const globalSignature = Buffer.from(fields[3], 'base64');
+    if (globalSignature.length !== 64 || globalSignature.toString('base64') !== fields[3]) throw new Error('Invalid minisign global signature encoding');
+    // Minisign src/minisign.c verify(): signature bytes || trusted comment,
+    // excluding the packet header, comment prefix, and terminating newline.
+    // https://github.com/jedisct1/minisign/blob/b6de4fe31b4c519887cef8b080eb1816b18795ae/src/minisign.c#L507-L513
+    const commentMessage = Buffer.concat([signaturePacket.subarray(10, 74), Buffer.from(fields[2].slice('trusted comment: '.length))]);
+    if (!verifyEd25519(null, commentMessage, key, globalSignature)) throw new Error('Minisign global signature does not authenticate the trusted comment');
   } catch (error) {
     throw new Error(
       `updater signature does not verify against the configured public key: ${error instanceof Error ? error.message : String(error)}`,

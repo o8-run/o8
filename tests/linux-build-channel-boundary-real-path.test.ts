@@ -159,6 +159,21 @@ describe('signed Linux build channel through the operator CLI', () => {
     expect(existsSync(join(f.root, 'publication.lock'))).toBe(false);
   });
 
+  it.each(['zero global', 'tampered global', 'tampered comment', 'missing global'])('authenticates the minisign trusted comment through the publisher: %s', mode => {
+    const f = fixture();
+    const fields = Buffer.from(readFileSync(`${f.artifact}.sig`, 'utf8').trim(), 'base64').toString('utf8').trim().split('\n');
+    if (mode === 'zero global') fields[3] = Buffer.alloc(64).toString('base64');
+    if (mode === 'tampered global') { const bytes = Buffer.from(fields[3], 'base64'); bytes[0] ^= 1; fields[3] = bytes.toString('base64'); }
+    if (mode === 'tampered comment') fields[2] += ' changed';
+    if (mode === 'missing global') fields.pop();
+    writeFileSync(`${f.artifact}.sig`, Buffer.from(fields.join('\n') + '\n').toString('base64'));
+    const result = run(f);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toMatch(/global|trusted comment/i);
+    expect(effects(f).some(event => event.name === 'unsquashfs')).toBe(false);
+    expect(uploads(f)).toEqual([]);
+  });
+
   it('refuses an invalid signature before extraction or upload', () => {
     const f = fixture(); const path = f.artifact + '.sig'; const standard = Buffer.from(readFileSync(path, 'utf8').trim(), 'base64').toString('utf8').trim().split('\n');
     const packet = Buffer.from(standard[1], 'base64'); packet[10] ^= 1; standard[1] = packet.toString('base64');
@@ -201,5 +216,84 @@ describe('signed Linux build channel through the operator CLI', () => {
     const code = `import {assertLinuxArtifactChannels} from ${JSON.stringify(helper)}; assertLinuxArtifactChannels(process.cwd(),${JSON.stringify(version)},'beta',${JSON.stringify([f.artifact, f.artifact + '.sig', stable, stable + '.sig'])});`;
     const result = run(f, {}, code); expect(result.status).toBe(1); expect(result.stderr).toMatch(/channel|identity/i);
     expect(effects(f).filter(event => event.name === 'unsquashfs')).toHaveLength(2);
+  });
+});
+
+describe('GPUI release attachment preparation through the real CLI', () => {
+  const attachment = pathToFileURL(join(process.cwd(), 'scripts/prepare-linux-release-attachment.mjs')).href;
+  function prepare(f: ReturnType<typeof fixture>, env: Record<string, string> = {}) {
+    mkdirSync(join(f.root, 'packages'));
+    copyFileSync(f.artifact, join(f.root, `packages/o8-${version}-x86_64.AppImage`));
+    writeFileSync(join(f.root, 'packages/review.deb'), 'unsigned review package');
+    writeFileSync(join(f.root, 'packages/review.rpm'), 'unsigned review package');
+    return run(f, { O8_PUBLISH_LINUX: 'true', RELEASE_TAG: tag, GH_REPO: repos[0],
+      UPDATER_SIGNATURE: readFileSync(`${f.artifact}.sig`, 'utf8').trim(), ...env }, `await import(${JSON.stringify(attachment)});`);
+  }
+
+  it.each([undefined, 'false'])('defaults off before inspecting inputs or invoking providers (%s)', flag => {
+    const f = fixture();
+    const result = run(f, { ...(flag ? { O8_PUBLISH_LINUX: flag } : {}), RELEASE_TAG: 'invalid' },
+      `await import(${JSON.stringify(attachment)});`);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ status: 'disabled', publishLinux: false, assets: [] });
+    expect(effects(f)).toEqual([]);
+    expect(existsSync(join(f.root, 'publish'))).toBe(false);
+  });
+
+  it('prepares only the authenticated AppImage pair and ignores channel overrides', () => {
+    const f = fixture(); const result = prepare(f, { O8_RELEASE_CHANNEL: 'stable' });
+    expect(result.status, result.stderr).toBe(0);
+    const name = `o8-${version}-x86_64.AppImage`;
+    expect(JSON.parse(result.stdout)).toEqual({ status: 'prepared', channel: 'beta', version, assets: [name, `${name}.sig`] });
+    expect(readFileSync(join(f.root, 'publish', name))).toEqual(readFileSync(f.artifact));
+    expect(existsSync(join(f.root, 'publish/review.deb'))).toBe(false);
+    expect(existsSync(join(f.root, 'publish/review.rpm'))).toBe(false);
+    const calls = effects(f);
+    expect(calls.map(event => event.name)).toEqual(['unsquashfs', 'gh']);
+    expect(calls[1].args).toContain('beta.json');
+    expect(uploads(f)).toEqual([]);
+  });
+
+  it.each([['beta', 'stable'], ['stable', 'beta']] as const)('refuses signed %s against a %s destination before preparing assets', (channel, feed) => {
+    const f = fixture(channel, feed); const result = prepare(f);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('Published manifest channel/version');
+    expect(existsSync(join(f.root, 'publish'))).toBe(false);
+    expect(uploads(f)).toEqual([]);
+  });
+
+  it('refuses a mismatched manifest version before preparing assets', () => {
+    const f = fixture(); const statePath = join(f.root, 'state.json');
+    const state = JSON.parse(readFileSync(statePath, 'utf8'));
+    state[`${repos[0]}/${tag}/beta.json`].version = '0.1.899';
+    writeFileSync(statePath, JSON.stringify(state));
+    const result = prepare(f);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('Published manifest channel/version');
+    expect(existsSync(join(f.root, 'publish'))).toBe(false);
+    expect(uploads(f)).toEqual([]);
+  });
+
+  it.each(['outer junk', 'trusted comment', 'extra line', 'packet length', 'global length'])('rejects noncanonical signature fields: %s', mode => {
+    const f = fixture();
+    const original = readFileSync(`${f.artifact}.sig`, 'utf8').trim();
+    const fields = Buffer.from(original, 'base64').toString('utf8').trim().split('\n');
+    if (mode === 'trusted comment') fields[2] = 'arbitrary comment';
+    if (mode === 'extra line') fields.push('junk');
+    if (mode === 'packet length') fields[1] += 'AAAA';
+    if (mode === 'global length') fields[3] = Buffer.alloc(65).toString('base64');
+    const signature = mode === 'outer junk' ? original + '!@' : Buffer.from(fields.join('\n')).toString('base64');
+    const result = prepare(f, { UPDATER_SIGNATURE: signature });
+    expect(result.status, result.stderr).toBe(1);
+    expect(effects(f)).toEqual([]);
+    expect(existsSync(join(f.root, 'publish'))).toBe(false);
+  });
+
+  it('refuses an invalid signature before reading embedded identity or destination', () => {
+    const f = fixture(); const result = prepare(f, { UPDATER_SIGNATURE: 'invalid' });
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toMatch(/signature|packet/i);
+    expect(effects(f)).toEqual([]);
+    expect(existsSync(join(f.root, 'publish'))).toBe(false);
   });
 });

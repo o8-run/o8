@@ -1,1 +1,3 @@
 Synthetic ELF/Squashfs-header fixtures and precomputed Ed25519 updater signatures, generated once with an ephemeral fixture key. No private key is retained. Tests never sign: fake cargo only copies these signatures; fake unsquashfs is the filesystem provider edge and emits the embedded JSON after the synthetic superblock. Production extraction must be checked against a real packaged AppImage on a release host.
+
+Signatures include the full minisign global signature over the 64-byte artifact signature followed by the trusted comment text (without its prefix or newline). The fixture comment includes tabs. Both fixture keys and signatures were regenerated together; no private key is retained.
