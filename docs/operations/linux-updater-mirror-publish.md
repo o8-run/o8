@@ -58,3 +58,10 @@ provide.
    with a `linux-x86_64` entry.
 4. No re-dispatch of step 2 is needed — step 3 uploads the `.sig` to the
    mirror itself.
+
+The AppImage retries once with its bundled Mesa lavapipe driver after the native
+renderer reports no usable Vulkan device. System drivers run first. Explicit
+`VK_ICD_FILENAMES` or `VK_DRIVER_FILES` settings disable this automatic retry.
+Set `O8_DISABLE_BUNDLED_VULKAN=1` to disable the fallback for diagnosis. A fallback
+prints `Using bundled software Vulkan driver; performance will be lower.`
+DEB and RPM continue to require system Vulkan drivers.

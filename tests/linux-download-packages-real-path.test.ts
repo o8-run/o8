@@ -158,7 +158,7 @@ it.skipIf(process.platform !== 'linux')('rejects an oversized payload before bui
   const oversized = join(root, 'oversized');
   cpSync(stage, oversized, { recursive: true });
   writeFileSync(join(oversized, 'large'), '');
-  truncateSync(join(oversized, 'large'), 513 * 1024 * 1024);
+  truncateSync(join(oversized, 'large'), 641 * 1024 * 1024);
   const output = join(root, 'oversized-output');
   const result = packagePayload(oversized, output);
   expect(result.status).toBe(1);

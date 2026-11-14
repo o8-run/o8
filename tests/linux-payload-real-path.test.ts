@@ -192,6 +192,10 @@ beforeAll(async () => {
       for (int i = 0; i < argc; i++) fprintf(log, "%s%s", i ? "|" : "", argv[i]);
       // Server-owned windows inherit the parent pipe; CLI fallback windows do not.
       fprintf(log, "%s\\n", getenv("O8_NEXT_PARENT_PIPE") ? "|<parent-pipe>" : ""); fclose(log);
+      if (getenv("O8_FIXTURE_NO_DEVICE") &&
+          (!getenv("VK_DRIVER_FILES") || getenv("O8_FIXTURE_FALLBACK_FAILS"))) {
+        fputs("Unable to init GPU context: NoSupportedDeviceFound\\n", stderr); return 101;
+      }
       if (getenv("O8_FIXTURE_FAIL_SERVER_WINDOW") && getenv("O8_NEXT_PARENT_PIPE")) {
         usleep(500000); return 2;
       }
@@ -539,3 +543,35 @@ it.skipIf(process.platform !== 'linux')('refuses to overwrite an existing stage 
   expect(bad.status).toBe(1);
   expect(existsSync(join(root, 'bad-stage'))).toBe(false);
 });
+
+
+it.skipIf(process.platform !== 'linux')('retries no-device startup once and respects explicit driver settings', async () => {
+  for (const mode of ['fallback', 'disabled', 'explicit', 'fails']) {
+    const f = installation(`vulkan-${mode}`);
+    const software = join(f.relocated, 'usr/lib/o8/vulkan');
+    mkdirSync(software);
+    writeFileSync(join(software, 'lvp_icd.json'), '{}');
+    const env: NodeJS.ProcessEnv = { ...f.env, O8_FIXTURE_NO_DEVICE: '1',
+      O8_APPIMAGE_VULKAN_DIR: software };
+    delete env.VK_ICD_FILENAMES;
+    delete env.VK_DRIVER_FILES;
+    if (mode === 'disabled') env.O8_DISABLE_BUNDLED_VULKAN = '1';
+    if (mode === 'explicit') env.VK_DRIVER_FILES = '/explicit-driver.json';
+    if (mode === 'fails') env.O8_FIXTURE_FALLBACK_FAILS = '1';
+    const app = captureLaunch(f.launcher, env);
+    if (mode === 'fallback') {
+      await until(() => existsSync(join(f.data, 'next-shell.json')));
+      await launchUnlocked(f.data, env);
+      expect(app.stderr()).toContain('Using bundled software Vulkan driver');
+      await stop(app.child);
+    } else {
+      await until(() => app.child.exitCode !== null);
+      await app.closed;
+      expect(app.child.exitCode).not.toBe(0);
+      expect(app.stderr()).toContain('NoSupportedDeviceFound');
+      expect(app.stderr()).toContain('Check that a usable Vulkan graphics device');
+      expect(app.stderr().includes('Using bundled software Vulkan driver')).toBe(mode === 'fails');
+    }
+    expect(events(env)).toHaveLength(mode === 'fallback' || mode === 'fails' ? 3 : 2);
+  }
+}, 90_000);

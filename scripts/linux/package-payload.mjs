@@ -6,10 +6,11 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readd
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { bundleVulkan } from './bundle-vulkan.mjs';
 import { checkLinuxGlibc } from '../ci/check-linux-glibc.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const PAYLOAD_BUDGET = 512 * 1024 * 1024;
+const PAYLOAD_BUDGET = 640 * 1024 * 1024;
 const ARTIFACT_BUDGET = 256 * 1024 * 1024;
 const XKB_LIBRARIES = [
   ['libxkbcommon.so.0', 'libxkbcommon0'],
@@ -69,16 +70,6 @@ function main() {
     }
     const libraryAbi = checkLinuxGlibc([libraries], { max: '2.35' });
     if (libraryAbi.failures.length) throw new Error(libraryAbi.failures.join('\n'));
-    const identity = createHash('sha256');
-    for (const file of files(join(appdir, 'usr'))) identity.update(file.path.slice(appdir.length) + '\0' + file.bytes + '\0').update(readFileSync(file.path));
-    const payloadId = identity.digest('hex');
-    writeFileSync(join(appdir, 'AppRun'), `#!/bin/sh\nset -eu\nDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec "$DIR/usr/lib/o8/node" "$DIR/usr/lib/o8/appimage-launch.mjs" ${payloadId} "$@"\n`, { mode: 0o755 });
-    chmodSync(join(appdir, 'AppRun'), 0o755);
-    cpSync(join(appdir, 'usr/share/applications/o8.desktop'), join(appdir, 'o8.desktop'));
-    cpSync(join(appdir, 'usr/share/icons/hicolor/256x256/apps/o8.png'), join(appdir, 'o8.png'));
-    cpSync(join(appdir, 'o8.png'), join(appdir, '.DirIcon'));
-    payloadBytes = files(appdir).reduce((sum, file) => sum + file.bytes, 0);
-    if (payloadBytes > PAYLOAD_BUDGET) throw new Error(`Exceeded payload size budget: ${payloadBytes} > ${PAYLOAD_BUDGET}`);
     const debroot = join(scratch, 'deb');
     mkdirSync(join(debroot, 'DEBIAN'), { recursive: true });
     cpSync(join(appdir, 'usr'), join(debroot, 'usr'), { recursive: true });
@@ -89,6 +80,19 @@ function main() {
     cpSync(join(appdir, 'usr'), join(rpm, 'SOURCES/usr'), { recursive: true });
     const spec = join(rpm, 'SPECS/o8.spec');
     writeFileSync(spec, `Name: o8\nVersion: ${channel.version}\nRelease: 1\nSummary: o8 next with the bundled o8 server\nLicense: MIT\nBuildArch: x86_64\nAutoReqProv: no\nRequires: glibc >= 2.35, libgcc, libstdc++, libX11, libxcb, libxkbcommon, libxkbcommon-x11, vulkan-loader, fontconfig, freetype, alsa-lib, util-linux, dbus-daemon, webkit2gtk4.1, gtk3\n%description\no8 next and its bundled Node server.\n%prep\n%build\n%install\nmkdir -p %{buildroot}\ncp -a %{_sourcedir}/usr %{buildroot}/usr\n%files\n/usr/bin/o8\n/usr/lib/o8\n/usr/share/applications/o8.desktop\n/usr/share/icons/hicolor/256x256/apps/o8.png\n/usr/share/doc/o8\n`);
+    const bundledVulkan = bundleVulkan(appdir);
+    const appimageAbi = checkLinuxGlibc([appdir], { max: '2.35' });
+    if (appimageAbi.failures.length) throw new Error(appimageAbi.failures.join('\n'));
+    const identity = createHash('sha256');
+    for (const file of files(join(appdir, 'usr'))) identity.update(file.path.slice(appdir.length) + '\0' + file.bytes + '\0').update(readFileSync(file.path));
+    const payloadId = identity.digest('hex');
+    writeFileSync(join(appdir, 'AppRun'), `#!/bin/sh\nset -eu\nDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexec "$DIR/usr/lib/o8/node" "$DIR/usr/lib/o8/appimage-launch.mjs" ${payloadId} "$@"\n`, { mode: 0o755 });
+    chmodSync(join(appdir, 'AppRun'), 0o755);
+    cpSync(join(appdir, 'usr/share/applications/o8.desktop'), join(appdir, 'o8.desktop'));
+    cpSync(join(appdir, 'usr/share/icons/hicolor/256x256/apps/o8.png'), join(appdir, 'o8.png'));
+    cpSync(join(appdir, 'o8.png'), join(appdir, '.DirIcon'));
+    payloadBytes = files(appdir).reduce((sum, file) => sum + file.bytes, 0);
+    if (payloadBytes > PAYLOAD_BUDGET) throw new Error(`Exceeded payload size budget: ${payloadBytes} > ${PAYLOAD_BUDGET}`);
     mkdirSync(output); // Exclusive; never replace an operator's directory.
     const prefix = `o8_${channel.version}`;
     const artifacts = [
@@ -108,7 +112,7 @@ function main() {
       artifact.sha256 = createHash('sha256').update(readFileSync(file)).digest('hex');
     }
     const receipt = { schema: 'o8/linux-downloads/v1', application: 'o8-next', channel: 'beta', version: channel.version,
-      platform: 'linux-x86_64', published: false, maxGlibc: '2.35', payloadBytes, payloadId,
+      platform: 'linux-x86_64', bundledVulkan, appimageElfCount: appimageAbi.scanned, published: false, maxGlibc: '2.35', payloadBytes, payloadId,
       budgets: { payloadBytes: PAYLOAD_BUDGET, artifactBytes: ARTIFACT_BUDGET }, artifacts };
     writeFileSync(join(output, 'linux-downloads.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify(receipt));

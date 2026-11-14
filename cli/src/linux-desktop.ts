@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { resolveCliDataDir, resolveConfig } from './config.js';
@@ -61,11 +61,11 @@ const NO_GRAPHICS_DEVICE = /NoSupportedDeviceFound|Unable to init GPU context/;
 // reported as a failed start.
 let interrupted = false;
 
-async function runCli(args: string[], capture = false, timeoutMs?: number, stderrProbe?: RegExp): Promise<CliResult> {
+async function runCli(args: string[], capture = false, timeoutMs?: number, stderrProbe?: RegExp, env = process.env): Promise<CliResult> {
   return new Promise((done, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
       stdio: capture ? ['ignore', 'pipe', 'pipe'] : stderrProbe ? ['inherit', 'inherit', 'pipe'] : 'inherit',
-      timeout: timeoutMs, killSignal: 'SIGKILL',
+      timeout: timeoutMs, killSignal: 'SIGKILL', env,
     });
     let stdout = '';
     let stderr = '';
@@ -232,19 +232,33 @@ async function openDesktop(): Promise<number> {
     }
     // A terminal daemon cannot inherit this launcher's packaged environment.
     // The existing CLI resolves its health, ports, credentials and shell state.
-    let finished = false;
-    const next = runCli(['next', '--binary', binary], false, undefined, NO_GRAPHICS_DEVICE);
-    void next.then(() => { finished = true; }, () => { finished = true; });
-    while (!finished && !windowIsOpen()) await delay(100);
-    // Keep the CLI's signal/exit lifecycle, but release launch exclusion once
-    // /proc can identify the window. Later clicks can check daemon health.
-    closeSync(lock);
-    released = true;
-    const { code, probed } = await next;
-    if (code !== 0 && probed && !interrupted) {
-      process.stderr.write('o8: Could not open the native window. Check that a usable Vulkan graphics device and driver are available. See the startup error above.\n');
+    const software = process.env.O8_APPIMAGE_VULKAN_DIR;
+    const canRetry = software && isAbsolute(software) && existsSync(join(software, 'lvp_icd.json'))
+      && process.env.O8_DISABLE_BUNDLED_VULKAN !== '1'
+      && process.env.VK_ICD_FILENAMES === undefined && process.env.VK_DRIVER_FILES === undefined;
+    let env = process.env;
+    for (let retry = 0; ; retry += 1) {
+      let finished = false;
+      const next = runCli(['next', '--binary', binary], false, undefined, NO_GRAPHICS_DEVICE, env);
+      void next.then(() => { finished = true; }, () => { finished = true; });
+      while (!finished && !windowIsOpen()) await delay(100);
+      if (!finished && !released) {
+        closeSync(lock);
+        released = true;
+      }
+      const { code, probed } = await next;
+      if (code !== 0 && probed && !interrupted) {
+        if (retry === 0 && canRetry && !released) {
+          process.stderr.write('o8: Using bundled software Vulkan driver; performance will be lower.\n');
+          env = { ...process.env, VK_ICD_FILENAMES: join(software, 'lvp_icd.json'),
+            VK_DRIVER_FILES: join(software, 'lvp_icd.json'),
+            LD_LIBRARY_PATH: [software, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') };
+          continue;
+        }
+        process.stderr.write('o8: Could not open the native window. Check that a usable Vulkan graphics device and driver are available. See the startup error above.\n');
+      }
+      return code;
     }
-    return code;
   } finally {
     // Keep unresolved claims across launcher exits and failed health probes.
     try { if (attempt) cleanFinishedAttempt(attempt); }

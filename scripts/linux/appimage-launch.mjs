@@ -30,7 +30,7 @@ if (args.length === 1 && args[0] === '--o8-appimage-root') {
 } else {
   const libraryPath = [join(installed, 'usr/lib/o8/lib'), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':');
   const child = spawn(join(installed, 'usr/bin/o8'), args, {
-    stdio: 'inherit', env: { ...process.env, LD_LIBRARY_PATH: libraryPath },
+    stdio: 'inherit', env: { ...process.env, LD_LIBRARY_PATH: libraryPath, O8_APPIMAGE_VULKAN_DIR: join(installed, 'usr/lib/o8/vulkan') },
   });
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal));
   const [code, signal] = await once(child, 'exit');
