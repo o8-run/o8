@@ -185,8 +185,12 @@ beforeAll(async () => {
     });
   `);
   writeFileSync(join(server, 'ws-server.mjs'), `
-    import { createServer } from 'node:net';
-    createServer(s => s.end()).listen(Number(process.env.O8_WS_PORT), '127.0.0.1');
+    import { createServer } from 'node:http';
+    import { writeFileSync } from 'node:fs';
+    createServer((req, res) => {
+      if (req.url === '/internal/realtime') writeFileSync(process.env.O8_DATA_DIR + '/activated', 'yes');
+      res.end('{}');
+    }).listen(Number(process.env.O8_WS_PORT), '127.0.0.1');
   `);
   const source = join(root, 'next.c');
   writeFileSync(source, `
@@ -200,7 +204,7 @@ beforeAll(async () => {
       // Server-owned windows inherit the parent pipe; CLI fallback windows do not.
       fprintf(log, "%s\\n", getenv("O8_NEXT_PARENT_PIPE") ? "|<parent-pipe>" : ""); fclose(log);
       if (getenv("O8_FIXTURE_NO_DEVICE") &&
-          (!getenv("VK_DRIVER_FILES") || !strstr(getenv("VK_DRIVER_FILES"), "lvp_icd.json")
+          (!getenv("VK_ICD_FILENAMES") || !strstr(getenv("VK_ICD_FILENAMES"), "lvp_icd.json")
             || getenv("O8_FIXTURE_FALLBACK_FAILS"))) {
         fputs("Unable to init GPU context: NoSupportedDeviceFound\\n", stderr); fflush(stderr);
         if (getenv("O8_FIXTURE_WAIT_STOP")) for (;;) pause();
@@ -218,7 +222,14 @@ beforeAll(async () => {
       for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--shell-state")) {
         FILE *state = fopen(argv[i + 1], "w"); fputs("{}", state); fclose(state);
       }
-      fputs("o8-next-ready\\n", stdout); fflush(stdout);
+      if ((getenv("O8_NEXT_PARENT_PIPE") && !strcmp(getenv("O8_NEXT_PARENT_PIPE"), "1")) ||
+          (getenv("O8_NEXT_READY_STDOUT") && !strcmp(getenv("O8_NEXT_READY_STDOUT"), "1"))) {
+        fputs("o8-next-ready\\n", stdout); fflush(stdout);
+      }
+      if (getenv("O8_FIXTURE_LATE_GPU_ERROR")) {
+        while (access(getenv("O8_FIXTURE_LATE_GPU_ERROR"), F_OK)) usleep(10000);
+        fputs("Unable to init GPU context: NoSupportedDeviceFound\\n", stderr); return 101;
+      }
       for (;;) pause();
     }
   `);
@@ -631,4 +642,39 @@ it.skipIf(process.platform !== 'linux')('suppresses the Vulkan hint when a stop 
   const after = JSON.parse(command(f.launcher, ['serve', 'status'], f.env).stdout);
   expect(after.healthy).toBe(true);
   expect(after.pid).toBe(before.pid);
+}, 60_000);
+
+
+it.skipIf(process.platform !== 'linux')('releases the software-capable launch claim at real readiness and activates on a second launch', async () => {
+  const f = installation('ready-claim');
+  expect(command(f.launcher, ['serve'], f.env).status).toBe(0);
+  const software = join(f.relocated, 'usr/lib/o8/vulkan');
+  mkdirSync(software); writeFileSync(join(software, 'lvp_icd.json'), '{}');
+  const env = { ...f.env, O8_APPIMAGE_VULKAN_DIR: software };
+  const app = launch(f.launcher, env);
+  await until(() => existsSync(join(f.data, 'next-shell.json')));
+  await delay(300);
+  expect(command('flock', ['--nonblock', join(f.data, 'linux-desktop.lock'), '/usr/bin/true'], env).status).toBe(0);
+  expect(command(f.launcher, [], env).status).toBe(0);
+  expect(existsSync(join(f.data, 'activated'))).toBe(true);
+  expect(events(env)).toHaveLength(1);
+  await stop(app);
+}, 60_000);
+
+it.skipIf(process.platform !== 'linux')('never retries a no-device error emitted after the window became ready', async () => {
+  const f = installation('late-gpu-error');
+  expect(command(f.launcher, ['serve'], f.env).status).toBe(0);
+  const software = join(f.relocated, 'usr/lib/o8/vulkan');
+  mkdirSync(software); writeFileSync(join(software, 'lvp_icd.json'), '{}');
+  const trigger = join(f.data, 'crash-now');
+  const env = { ...f.env, O8_APPIMAGE_VULKAN_DIR: software, O8_FIXTURE_LATE_GPU_ERROR: trigger };
+  const app = captureLaunch(f.launcher, env);
+  await until(() => existsSync(join(f.data, 'next-shell.json')));
+  await delay(300);
+  writeFileSync(trigger, 'crash');
+  await app.closed;
+  expect(app.child.exitCode).not.toBe(0);
+  expect(events(env)).toHaveLength(1);
+  expect(app.stderr()).not.toContain('Using bundled software Vulkan driver');
+  expect(app.stderr()).not.toContain('Could not open the native window');
 }, 60_000);

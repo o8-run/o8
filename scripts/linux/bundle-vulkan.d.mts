@@ -13,3 +13,6 @@ export function resolveVulkanLicenseFiles(copyright: string, commonRoot?: string
 };
 
 export function bundleVulkan(appdir: string): BundledVulkanFile[];
+
+export function setOriginRunpath(file: string, path?: string): void;
+export function assertVulkanInventory(notice: string, manifest: BundledVulkanFile[]): void;

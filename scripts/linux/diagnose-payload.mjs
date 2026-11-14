@@ -20,7 +20,6 @@ const clean = text => String(text).replaceAll(process.cwd(), '<work>')
 const save = (name, text) => writeFileSync(join(output, name), clean(text));
 const environment = { HOME: profile, PATH: '/usr/bin:/bin', NODE_ENV: 'production',
   DISPLAY: process.env.DISPLAY, APPIMAGE_EXTRACT_AND_RUN: '1',
-  LD_LIBRARY_PATH: join(payload, 'usr/lib/o8/lib'),
   LIBGL_ALWAYS_SOFTWARE: '1', O8_NEXT_API_TOKEN: 'diagnostic-endpoint-only' };
 for (const name of ['XAUTHORITY', 'XDG_RUNTIME_DIR', 'LANG', 'VK_ICD_FILENAMES', 'VK_DRIVER_FILES']) {
   if (process.env[name]) environment[name] = process.env[name];

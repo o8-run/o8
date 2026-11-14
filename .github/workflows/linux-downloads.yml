@@ -30,7 +30,7 @@ jobs:
         run: |
           df -h /
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends rpm cpio squashfs-tools mesa-vulkan-drivers
+          sudo apt-get install -y --no-install-recommends rpm cpio squashfs-tools mesa-vulkan-drivers patchelf
           mkdir -p work
           node scripts/linux/fetch-build-inputs.mjs "$RUNNER_TEMP/linux-dl-cache" > work/linux-inputs.json
           echo "O8_APPIMAGETOOL=$(node -p 'require("./work/linux-inputs.json").appimagetool')" >> "$GITHUB_ENV"
@@ -185,9 +185,17 @@ jobs:
           retention-days: 7
 
   bundled-driver:
-    name: Ubuntu 22.04 AppImage without system Vulkan drivers
+    name: ${{ matrix.label }} AppImage without system Vulkan drivers
     needs: build
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            label: Ubuntu 22.04
+          - os: ubuntu-24.04
+            label: Ubuntu 24.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -201,7 +209,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get purge -y mesa-vulkan-drivers
-          sudo apt-get install -y --no-install-recommends xvfb xauth x11-xserver-utils imagemagick x11-utils fonts-dejavu-core libvulkan1 libwebkit2gtk-4.1-0 libgtk-3-0 dbus-daemon
+          sudo apt-get install -y --no-install-recommends xvfb xauth x11-xserver-utils imagemagick x11-utils fonts-dejavu-core libwebkit2gtk-4.1-0 libgtk-3-0 dbus-daemon
+          sudo apt-get purge -y libvulkan1
+          test ! -e /usr/lib/x86_64-linux-gnu/libvulkan.so.1
           test "$(dpkg-query -W -f='${Status}' mesa-vulkan-drivers 2>/dev/null || true)" != 'install ok installed'
           test -z "$(find /usr/share/vulkan/icd.d /etc/vulkan/icd.d -name '*.json' 2>/dev/null)"
           chmod +x work/linux-downloads/*.AppImage
@@ -252,7 +262,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: linux-bundled-driver-proof
+          name: linux-bundled-driver-proof-${{ matrix.os }}
           path: |
             work/bundled-driver-proof/
             work/disabled-driver-proof/

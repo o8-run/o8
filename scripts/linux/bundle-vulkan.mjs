@@ -25,6 +25,27 @@ export function resolveVulkanLicenseFiles(copyright, commonRoot = '/usr/share/co
 // libxml2 and libedit are absent from the minimal image and stay bundled.
 const HOST_LIBRARIES = /^(?:ld-linux.*|lib(?:c|m|dl|rt|pthread|resolv|util|gcc_s|stdc\+\+|z|zstd|ffi|tinfo|lzma)\.so(?:\..*)?)$/;
 
+export function assertVulkanInventory(notice, manifest) {
+  const table = notice.split('### Bundled file inventory')[1] || '';
+  const rows = [...table.matchAll(/^\| `([^`]+)` \| ([\d,]+) \| ([^|]+) \|/gm)];
+  const inventory = new Map(rows.map(row => [row[1], { bytes: Number(row[2].replaceAll(',', '')), license: row[3].trim() }]));
+  if (inventory.size !== rows.length || inventory.size !== manifest.length
+    || manifest.some(file => inventory.get(file.name)?.bytes !== file.bytes
+      || (file.license && inventory.get(file.name)?.license !== file.license))) {
+    throw new Error('Bundled Vulkan inventory differs from NOTICE.md; review paths, sizes and licences.');
+  }
+}
+
+// Each ELF resolves only its own private dependencies; children inherit no
+// process-wide library search override. Verify the actual dynamic tag too.
+export function setOriginRunpath(file, path = '$ORIGIN') {
+  execFileSync('patchelf', ['--set-rpath', path, file]);
+  const tags = execFileSync('readelf', ['-d', file], { encoding: 'utf8' });
+  if (!tags.split('\n').some(line => line.includes('(RUNPATH)') && line.includes(`[${path}]`))) {
+    throw new Error(`Missing private RUNPATH for ${basename(file)}`);
+  }
+}
+
 export function bundleVulkan(appdir) {
   const run = (command, args) => execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const destination = join(appdir, 'usr/lib/o8/vulkan');
@@ -51,7 +72,9 @@ export function bundleVulkan(appdir) {
       catch { /* usr-merged distributions can record the pre-merge path. */ }
     }
     if (!owner) throw new Error(`Missing distribution ownership for ${name}`);
-    cpSync(real, join(destination, name));
+    const target = join(destination, name);
+    cpSync(real, target);
+    setOriginRunpath(target);
     const licenses = [
       [/^mesa-vulkan-drivers$/, 'MIT'], [/^libvulkan1$/, 'Apache-2.0'], [/^libllvm\d+$/, 'Apache-2.0 WITH LLVM-exception'],
       [/^(?:libdrm2|libexpat1|libxcb.*|libx11.*|libxau6|libxdmcp6|libxshmfence1|libwayland-client0|libffi8|libxml2|libz3-4|libtinfo6)$/, 'MIT/X11'],
@@ -65,7 +88,7 @@ export function bundleVulkan(appdir) {
     cpSync(legal.source, join(appdir, 'usr/share/doc/o8', notice));
     notices.set(notice, { name: `usr/share/doc/o8/${notice}`, bytes: statSync(join(appdir, 'usr/share/doc/o8', notice)).size });
     for (const file of legal.common) commonLicenses.set(file.name, file.source);
-    bundled.push({ name: `usr/lib/o8/vulkan/${name}`, bytes: statSync(real).size, package: owner,
+    bundled.push({ name: `usr/lib/o8/vulkan/${name}`, bytes: statSync(target).size, package: owner,
       license, version: run('dpkg-query', ['-W', '-f=${Version}', owner]), notice });
   }
   descriptor.ICD.library_path = './libvulkan_lvp.so';

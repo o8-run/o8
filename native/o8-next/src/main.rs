@@ -3,6 +3,8 @@ mod render_region;
 mod activity;
 mod app_parent;
 mod native_pill;
+mod child_command;
+mod external_open;
 mod brain;
 mod browser_panel;
 #[path = "shell_features/connection/client.rs"]

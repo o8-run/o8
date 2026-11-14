@@ -493,7 +493,7 @@ impl Render for DevicesPanel {
                                         false,
                                         false,
                                         cx,
-                                        move |_, _, cx| cx.open_url(guide),
+                                        move |_, _, cx| crate::external_open::url(cx, guide),
                                     )
                                     .px(px(8.))
                                     .py(px(6.)),

@@ -6,7 +6,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readd
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bundleVulkan } from './bundle-vulkan.mjs';
+import { assertVulkanInventory, bundleVulkan, setOriginRunpath } from './bundle-vulkan.mjs';
 import { checkLinuxGlibc } from '../ci/check-linux-glibc.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -81,6 +81,12 @@ function main() {
     const spec = join(rpm, 'SPECS/o8.spec');
     writeFileSync(spec, `Name: o8\nVersion: ${channel.version}\nRelease: 1\nSummary: o8 next with the bundled o8 server\nLicense: MIT\nBuildArch: x86_64\nAutoReqProv: no\nRequires: glibc >= 2.35, libgcc, libstdc++, libX11, libxcb, libxkbcommon, libxkbcommon-x11, vulkan-loader, fontconfig, freetype, alsa-lib, util-linux, dbus-daemon, webkit2gtk4.1, gtk3\n%description\no8 next and its bundled Node server.\n%prep\n%build\n%install\nmkdir -p %{buildroot}\ncp -a %{_sourcedir}/usr %{buildroot}/usr\n%files\n/usr/bin/o8\n/usr/lib/o8\n/usr/share/applications/o8.desktop\n/usr/share/icons/hicolor/256x256/apps/o8.png\n/usr/share/doc/o8\n`);
     const bundledVulkan = bundleVulkan(appdir);
+    // These edits are AppImage-only, after DEB/RPM have copied their payloads.
+    for (const [name] of XKB_LIBRARIES) setOriginRunpath(join(libraries, name));
+    for (const name of ['o8-next', 'o8-next-viz-render']) {
+      setOriginRunpath(join(appdir, 'usr/lib/o8', name), '$ORIGIN/lib:$ORIGIN/vulkan');
+    }
+    assertVulkanInventory(readFileSync(join(repository, 'NOTICE.md'), 'utf8'), bundledVulkan);
     const appimageAbi = checkLinuxGlibc([appdir], { max: '2.35' });
     if (appimageAbi.failures.length) throw new Error(appimageAbi.failures.join('\n'));
     const identity = createHash('sha256');

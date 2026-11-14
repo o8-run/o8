@@ -243,24 +243,23 @@ async function openDesktop(): Promise<number> {
     // Serve has already resolved ownership and health. Explicit attach keeps
     // next from probing or starting the daemon again, including on retry.
     const origin = resolveConfig().apiBase;
-    let env = process.env;
+    // First-paint notification only: no stdin lifeline or updater ownership.
+    let env: NodeJS.ProcessEnv = { ...process.env, O8_NEXT_READY_STDOUT: '1' };
     for (let retry = 0; ; retry += 1) {
       let finished = false;
       let ready = false;
       const next = runCli(['next', '--binary', binary, '--server', origin], false, undefined, NO_GRAPHICS_DEVICE, env, () => { ready = true; });
       void next.then(() => { finished = true; }, () => { finished = true; });
-      while (!finished && !((!canRetry || ready) && windowIsOpen())) await delay(100);
+      while (!finished && !(ready && windowIsOpen())) await delay(100);
       if (!finished && !released) {
         closeSync(lock);
         released = true;
       }
       const { code, probed } = await next;
-      if (code !== 0 && probed && !interrupted) {
-        if (retry === 0 && canRetry && !released) {
+      if (code !== 0 && probed && !interrupted && !ready) {
+        if (retry === 0 && canRetry && !ready && !released) {
           process.stderr.write('o8: Using bundled software Vulkan driver; performance will be lower.\n');
-          env = { ...process.env, VK_ICD_FILENAMES: join(software, 'lvp_icd.json'),
-            VK_DRIVER_FILES: join(software, 'lvp_icd.json'),
-            LD_LIBRARY_PATH: [software, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') };
+          env = { ...process.env, O8_NEXT_READY_STDOUT: '1', O8_APPIMAGE_SOFTWARE_VULKAN: '1', VK_ICD_FILENAMES: join(software, 'lvp_icd.json') };
           continue;
         }
         process.stderr.write('o8: Could not open the native window. Check that a usable Vulkan graphics device and driver are available. See the startup error above.\n');

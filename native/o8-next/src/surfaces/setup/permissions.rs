@@ -209,7 +209,7 @@ impl Client for Native {
                 return Ok(());
             }
             // Runs off the UI thread; `open` returns once System Settings is asked.
-            match std::process::Command::new("open")
+            match crate::child_command::command("open")
                 .arg(perm.settings())
                 .status()
             {
