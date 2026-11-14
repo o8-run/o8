@@ -7957,6 +7957,14 @@
       ]
     },
     {
+      "path": "tests/rex-auto-shortcut-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/rule-check-no-credentials-real-path.test.ts",
       "reasons": [
         "child-process",

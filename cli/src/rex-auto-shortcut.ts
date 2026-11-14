@@ -10,7 +10,8 @@
  * `O8_REX_SHORTCUT=0` turns this off.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { accessSync, constants, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
 
 import { resolveCliDataDir } from './config.js';
@@ -29,6 +30,8 @@ export interface AutoShortcutInput {
   dataDir: string;
   platform?: NodeJS.Platform;
   exists?: (path: string) => boolean;
+  /** Whether a path is a file the shell would run. */
+  runnable?: (path: string) => boolean;
 }
 
 /** Where o8 remembers that the operator removed the shortcut. */
@@ -39,14 +42,25 @@ export function declinedMarker(dataDir: string): string {
 /** The `o8` command on PATH, as an absolute path, or null. */
 export function o8OnPath(
   env: Readonly<Record<string, string | undefined>>,
-  exists: (path: string) => boolean = existsSync,
+  runnable: (path: string) => boolean = isRunnableFile,
 ): string | null {
   for (const dir of (env.PATH ?? '').split(delimiter)) {
     if (!dir || !isAbsolute(dir) || UNSAFE_WORD.test(dir)) continue;
     const candidate = join(dir, 'o8');
-    if (exists(candidate)) return candidate;
+    if (runnable(candidate)) return candidate;
   }
   return null;
+}
+
+/** A file the shell would run: a regular file this user may execute. */
+function isRunnableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -67,7 +81,7 @@ export function autoShortcutCommand(input: AutoShortcutInput): string | null {
   if (exists(declinedMarker(input.dataDir))) return null;
   // Present means it is installed already, or is the operator's own file. Either way, leave it.
   if (exists(join(dirname(rexConfigFile(env, input.platform)), MODULE_FILE))) return null;
-  return o8OnPath(env, exists);
+  return o8OnPath(env, input.runnable);
 }
 
 /**
@@ -93,10 +107,16 @@ export function maybeSetUpRexShortcut(
       dataDir: options.dataDir ?? resolveCliDataDir(),
     });
     if (!o8) return;
-    const result = installShortcut({ self: [o8], key: null, env, exec: options.exec });
+    // A Rex server that does not answer must not hold up the command for long.
+    const exec = options.exec ?? ((file: string, args: string[]) => execFileSync(file, args, {
+      encoding: 'utf8', timeout: 3_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+    }));
+    const result = installShortcut({ self: [o8], key: null, env, exec });
     if (result.action !== 'installed') return;
     const say = options.say ?? ((line: string) => { if (process.stderr.isTTY) process.stderr.write(`${line}\n`); });
-    say('Added "Show o8 Terminals" to the Rex command palette. `o8 terminal shortcut --remove` takes it out.');
+    say(result.reloaded
+      ? 'Added "Show o8 Terminals" to the Rex command palette. `o8 terminal shortcut --remove` takes it out.'
+      : 'Added "Show o8 Terminals" to Rex; it appears in the command palette once Rex reloads its config. `o8 terminal shortcut --remove` takes it out.');
   } catch {
     // Setting up a convenience must never stand in the way of the command itself.
   }
