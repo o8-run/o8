@@ -101,6 +101,57 @@ describe('shared release build cache', { timeout: 120_000 }, () => {
     expect(existsSync(directory)).toBe(false);
   });
 
+  it('keeps a receipt for a capture with thousands of compatibility inputs and hits on the next run', async () => {
+    const { root, cacheRoot } = fixture();
+    const inputs = Array.from({ length: 2_500 }, (_, index) => ({
+      path: `src-tauri/crates/component-${index}/src/module-${index}.rs`,
+      sha256: `${index}`.padStart(64, '0'),
+    }));
+    const large: ReleaseBuildCacheIdentity = {
+      ...identity('a'),
+      compatibility: { ...identity('a').compatibility, inputs },
+    };
+    expect(JSON.stringify(large).length).toBeGreaterThan(128 * 1024);
+    expect(await captureReleaseBuildCache(root, 'web', { cacheRoot, identity: large, runId: 'large-capture' }))
+      .toMatchObject({ status: 'captured', reason: 'verified' });
+    const final = await finalizeReleaseBuildCacheReceipt(cacheRoot, 'large-capture', {
+      outcome: 'PASS', source: { head: 'a' }, buildDurationMs: 1,
+    }, { projectRoot: root });
+    expect(final.receipt.staging).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'capture', state: 'cleaned', sourceSha256: 'source-a' }),
+    ]));
+    expect(existsSync(final.receiptPath)).toBe(true);
+    expect(existsSync(join(cacheRoot, 'runs/large-capture'))).toBe(false);
+
+    rmSync(join(root, '.next/cache'), { recursive: true, force: true });
+    expect(await restoreReleaseBuildCache(root, 'web', { cacheRoot, identity: large, runId: 'large-restore' }))
+      .toMatchObject({ status: 'hit_exact', reason: 'verified' });
+    const restoreReceipt = await finalizeReleaseBuildCacheReceipt(cacheRoot, 'large-restore', {
+      outcome: 'PASS', source: { head: 'a' }, buildDurationMs: 1,
+    }, { projectRoot: root });
+    expect(restoreReceipt.receipt.staging).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'restore', state: 'cleaned' }),
+    ]));
+    expect(readFileSync(join(root, '.next/cache/webpack/entry.bin'), 'utf8')).toBe('compiled-source-a');
+  });
+
+  it.each([
+    ['oversized', (record: Record<string, unknown>) => `${JSON.stringify({ ...record, padding: 'x'.repeat(200 * 1024) })}\n`, 'exceeds its bound'],
+    ['corrupt', () => '{"schema":', 'JSON'],
+  ])('refuses a %s staging journal record when finalizing', async (_mode, contents, message) => {
+    const { root, cacheRoot } = fixture();
+    await captureReleaseBuildCache(root, 'web', { cacheRoot, identity: identity('a'), runId: 'bad-journal' });
+    const directory = join(cacheRoot, 'runs/bad-journal/staging');
+    const [first] = readdirSync(directory).sort();
+    const record = JSON.parse(readFileSync(join(directory, first), 'utf8'));
+    writeFileSync(join(directory, 'zz-injected.json'), contents(record), { mode: 0o600 });
+    await expect(finalizeReleaseBuildCacheReceipt(cacheRoot, 'bad-journal', {
+      outcome: 'PASS', source: { head: 'a' }, buildDurationMs: 1,
+    }, { projectRoot: root })).rejects.toThrow(message);
+    expect(existsSync(join(directory, first))).toBe(true);
+    expect(existsSync(join(cacheRoot, 'receipts/bad-journal.json'))).toBe(false);
+  });
+
   it('retains unknown run content when completed staging is finalized', async () => {
     const { root, cacheRoot } = fixture();
     await captureReleaseBuildCache(root, 'web', { cacheRoot, identity: identity('a'), runId: 'unknown-content' });
