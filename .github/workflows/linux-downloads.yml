@@ -140,6 +140,57 @@ jobs:
         run: |
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' squashfs-root/usr/lib/o8/node scripts/linux/smoke-payload.mjs --appimage "$(find work/linux-downloads -name '*.AppImage' -print -quit)" --output work/appimage-proof
+      - name: AppImage offline fresh-server and terminal-daemon launch
+        if: matrix.format == 'appimage'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          # A private network namespace has no external interfaces. Enable only
+          # loopback, which the bundled server and native window use locally.
+          sudo --preserve-env=VK_ICD_FILENAMES unshare --net bash -euc '
+            ip link set lo up
+            ip -o link show
+            test "$(ip -o link show | cut -d: -f2 | tr -d " ")" = lo
+            ip -brief address
+            test -z "$(ip route show)"
+            if timeout 5 bash -c "exec 3<>/dev/tcp/1.1.1.1/443"; then
+              echo "Offline proof refused: public connection succeeded" >&2
+              exit 1
+            fi
+            echo "[offline-proof] only loopback; public connection failed as required"
+            exec runuser -u "$SUDO_USER" -- env \
+              LIBGL_ALWAYS_SOFTWARE=1 APPIMAGE_EXTRACT_AND_RUN=1 \
+              VK_ICD_FILENAMES="$VK_ICD_FILENAMES" \
+              xvfb-run -a -s "-screen 0 1440x1024x24 -nolisten tcp -noreset -br" \
+              squashfs-root/usr/lib/o8/node scripts/linux/smoke-payload.mjs \
+              --appimage "$(find work/linux-downloads -name "*.AppImage" -print -quit)" \
+              --output work/appimage-offline-proof
+          '
+      - name: AppImage without a usable graphics device exits with a clear error
+        if: matrix.format == 'appimage'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          proof=$(mktemp -d)
+          export O8_DATA_DIR="$proof/data" XDG_DATA_HOME="$proof/xdg"
+          export VK_ICD_FILENAMES="$proof/no-driver.json" VK_DRIVER_FILES="$proof/no-driver.json"
+          image=$(find work/linux-downloads -name '*.AppImage' -print -quit)
+          set +e
+          timeout --kill-after=5 90 xvfb-run -a "$image" > "$proof/startup.log" 2>&1
+          result=$?
+          set -e
+          cat "$proof/startup.log"
+          test "$result" -ne 0
+          test "$result" -ne 124
+          test "$result" -ne 137
+          # The renderer's own reason must be present, so another early failure cannot pass.
+          grep -F 'NoSupportedDeviceFound' "$proof/startup.log"
+          grep -F 'Check that a usable Vulkan graphics device and driver are available' "$proof/startup.log"
+          "$image" serve stop
+          mkdir -p work/appimage-no-driver-proof
+          cp "$proof/startup.log" work/appimage-no-driver-proof/
+          rm -rf "$proof"
       - name: Save first frames, launch evidence and idle RSS
         if: always()
         uses: actions/upload-artifact@v4
@@ -151,5 +202,7 @@ jobs:
             work/appimage-proof/
             work/appimage-diagnostics/
             work/stock-diagnostics/
+            work/appimage-offline-proof/
+            work/appimage-no-driver-proof/
           if-no-files-found: error
           retention-days: 7
