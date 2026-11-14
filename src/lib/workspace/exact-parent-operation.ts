@@ -23,6 +23,26 @@ function readSignal() {
     bytes.push(byte[0]);
   }
 }
+function readInput() {
+  // Read stdin to EOF without readFileSync(0): Windows throws EOF on an empty closed pipe,
+  // and an inherited non-blocking pipe can report EAGAIN before data arrives.
+  const chunks = [];
+  const chunk = Buffer.alloc(64 * 1024);
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  while (true) {
+    let count;
+    try {
+      count = fs.readSync(0, chunk, 0, chunk.length, null);
+    } catch (error) {
+      if (error.code === 'EOF') break;
+      if (error.code === 'EAGAIN') { Atomics.wait(pause, 0, 0, 5); continue; }
+      throw error;
+    }
+    if (count === 0) break;
+    chunks.push(Buffer.from(chunk.subarray(0, count)));
+  }
+  return Buffer.concat(chunks);
+}
 function kindOf(stat) {
   return stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : stat.isFile() ? 'file' : 'other';
 }
@@ -69,7 +89,7 @@ if (operation.kind === 'promote') {
   requireChildName(operation.name);
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
   // Contents arrive on stdin: a single argv string is capped (128 KiB on Linux).
-  const contents = fs.readFileSync(0);
+  const contents = readInput();
   if (contents.length !== operation.byteLength
     || require('node:crypto').createHash('sha256').update(contents).digest('hex') !== operation.sha256) {
     throw new Error('Exact parent write received unexpected contents.');

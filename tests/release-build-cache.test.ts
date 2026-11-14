@@ -135,16 +135,19 @@ describe('shared release build cache', { timeout: 120_000 }, () => {
     expect(readFileSync(join(root, '.next/cache/webpack/entry.bin'), 'utf8')).toBe('compiled-source-a');
   });
 
-  it('writes exact child files larger than any single process argument', async () => {
+  it.each([
+    ['empty', '', 0],
+    ['over the Linux single-argument cap', `${JSON.stringify({ inputs: 'x'.repeat(200 * 1024) })}\n`, 128 * 1024],
+    ['over the macOS total argument limit', `${JSON.stringify({ inputs: 'é'.repeat(1024 * 1024) })}\n`, 2 * 1024 * 1024],
+  ])('writes %s exact child file contents through stdin', async (_label, contents, floor) => {
     const { cacheRoot } = fixture();
     const parent = realpathSync(cacheRoot);
     const stat = lstatSync(parent);
-    const contents = `${JSON.stringify({ inputs: 'é'.repeat(1024 * 1024) })}\n`;
-    expect(Buffer.byteLength(contents)).toBeGreaterThan(2 * 1024 * 1024);
+    expect(Buffer.byteLength(contents)).toBeGreaterThanOrEqual(floor);
     await writeExactChildFile(parent, { canonicalPath: parent, device: stat.dev, inode: stat.ino },
-      join(parent, 'large.json'), contents, 0o600);
-    expect(readFileSync(join(parent, 'large.json'), 'utf8')).toBe(contents);
-    expect(lstatSync(join(parent, 'large.json')).mode & 0o777).toBe(0o600);
+      join(parent, 'written.json'), contents, 0o600);
+    expect(readFileSync(join(parent, 'written.json'), 'utf8')).toBe(contents);
+    expect(lstatSync(join(parent, 'written.json')).mode & 0o777).toBe(0o600);
   });
 
   it.each([
