@@ -283,6 +283,8 @@ export interface FollowSteps {
    * the packet's state then (`null` when it has no lane any more).
    */
   ended?(cursor: number, session: string | null, state: string | null): void;
+  /** Told each time the follow moves on, so a follow that fails can be taken up from there. */
+  moved?(cursor: number, session: string | null): void;
 }
 
 /**
@@ -318,6 +320,7 @@ export async function followTranscript(steps: FollowSteps, first: TranscriptPage
       failures = 0;
       const next = nextCursor(cursor, session, read);
       ({ cursor, session } = next);
+      steps.moved?.(cursor, session);
       if (next.restarted) {
         // The page was read with the old session's cursor, so it is not shown. Start the new one
         // over, even if the old worker had stopped: the new one decides when this ends.
@@ -411,6 +414,22 @@ export function holdOpen(terminal: HoldTerminal, options: HoldOptions = {}): Pro
   });
 }
 
+/**
+ * Whether a held packet has work again: its worker is working, or its
+ * transcript has grown past where the follow ended. The second catches a
+ * steered turn that starts and ends between two checks of the state.
+ */
+export async function heldWorkResumed(
+  steps: Pick<FollowSteps, 'state' | 'read'>,
+  cursor: number,
+  session: string | null,
+): Promise<boolean> {
+  if (WORKING_STATES.has(await steps.state() ?? '')) return true;
+  const page = await steps.read(cursor);
+  if (page.sessionKey && session && page.sessionKey !== session) return true;
+  return page.events.some((event) => event.seq > cursor);
+}
+
 /** The packet status a lane state stands for, as the server maps it. */
 const LANE_PACKET_STATUS: Record<string, string> = {
   reviewing: 'awaiting_review',
@@ -459,19 +478,26 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
   const terminal = { input: process.stdin, output: process.stdout };
   const tabStatus = createTerminalStatusReporter(mode);
   let from: TranscriptPage = recent;
+  const read = (cursor: number) => fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX });
+  const state = () => laneState(cfg, packetId);
+  const takeUp = (cursor: number, session: string | null) => {
+    from = { ...from, sessionKey: session, events: [], nextCursor: cursor };
+  };
+  const resumed = () => heldWorkResumed({ state, read }, from.nextCursor ?? 0, from.sessionKey);
   while (true) {
     let exit: number;
     tabStatus.report(transcriptStatusReport('following'));
     try {
       exit = await followTranscript({
-        read: (cursor) => fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX }),
-        state: () => laneState(cfg, packetId),
+        read,
+        state,
         wait: () => new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS)),
         show: (events) => writeEvents(events, mode),
         say,
-        ended: (cursor, session, state) => {
-          from = { ...from, sessionKey: session, events: [], nextCursor: cursor };
-          tabStatus.report(transcriptStatusReport('ended', state));
+        moved: takeUp,
+        ended: (cursor, session, ended) => {
+          takeUp(cursor, session);
+          tabStatus.report(transcriptStatusReport('ended', ended));
         },
       }, from);
     } catch (error) {
@@ -479,14 +505,18 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
       // In a pane the error is the thing worth reading, so it stays on screen too.
       if (holding && terminal.input.isTTY && terminal.output.isTTY) {
         say(`Stopped following: ${plainText(error instanceof Error ? error.message : String(error), 300)}`);
-        await holdOpen(terminal);
+        // A lost connection may come back, so the pane follows again once the packet has work.
+        const passing = error instanceof CliError && PASSING_FAILURES.has(error.code);
+        if (passing && await holdOpen(terminal, { runningAgain: resumed }) === 'running') {
+          say('Following again.');
+          continue;
+        }
+        if (!passing) await holdOpen(terminal);
       }
       throw error;
     }
     if (!holding) return exit;
-    const next = await holdOpen(terminal, {
-      runningAgain: async () => WORKING_STATES.has(await laneState(cfg, packetId) ?? ''),
-    });
+    const next = await holdOpen(terminal, { runningAgain: resumed });
     if (next === 'closed') return exit;
     say('The packet is running again.');
   }

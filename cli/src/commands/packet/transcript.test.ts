@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CliError, EXIT } from '../../api';
 
 import {
-  followIsOver, followTranscript, holdOpen, nextCursor, parseTranscriptArgs, plainText, shouldCheckState, toolDetail, transcriptLines, transcriptStatusReport, type TranscriptEvent,
+  followIsOver, followTranscript, heldWorkResumed, holdOpen, nextCursor, parseTranscriptArgs, plainText, shouldCheckState, toolDetail, transcriptLines, transcriptStatusReport, type TranscriptEvent,
 } from './transcript';
 
 const at = () => '12:31:05';
@@ -436,5 +436,53 @@ describe('what a following pane marks its tab with', () => {
     expect(transcriptStatusReport('ended', null)).toEqual({ state: 'done', msg: 'Worker stopped' });
     expect(transcriptStatusReport('ended', 'paused')).toEqual({ state: 'done', msg: 'Worker stopped' });
     expect(transcriptStatusReport('failed')).toEqual({ state: 'error', msg: 'Stopped following' });
+  });
+});
+
+describe('whether a held packet has work again', () => {
+  const page = (sessionKey: string | null, seqs: number[]) => ({
+    packetId: 'pkt-1', sessionKey, nextCursor: seqs.at(-1) ?? null, terminalReason: null,
+    events: seqs.map((seq): TranscriptEvent => ({ seq, ts: '', type: 'assistant', text: `r${seq}` })),
+  });
+
+  it('says yes while the worker works, without reading the transcript', async () => {
+    const read = vi.fn();
+    await expect(heldWorkResumed({ state: async () => 'running', read }, 4, 's1')).resolves.toBe(true);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('says yes when a turn ran and ended between two checks of the state', async () => {
+    await expect(heldWorkResumed({ state: async () => 'reviewing', read: async () => page('s1', [5, 6]) }, 4, 's1')).resolves.toBe(true);
+  });
+
+  it('says yes when the packet was dispatched again with a new session', async () => {
+    await expect(heldWorkResumed({ state: async () => 'reviewing', read: async () => page('s2', []) }, 4, 's1')).resolves.toBe(true);
+  });
+
+  it('says no when nothing new was written', async () => {
+    await expect(heldWorkResumed({ state: async () => 'reviewing', read: async () => page('s1', []) }, 4, 's1')).resolves.toBe(false);
+    await expect(heldWorkResumed({ state: async () => null, read: async () => page('s1', [4]) }, 4, 's1')).resolves.toBe(false);
+  });
+});
+
+describe('where a failed follow is taken up again', () => {
+  it('reports each place the follow moves to, so a later follow does not repeat events', async () => {
+    const reply = (seq: number): TranscriptEvent => ({ seq, ts: '', type: 'assistant', text: `r${seq}` });
+    const first = { packetId: 'pkt-1', sessionKey: 's1', events: [reply(1)], nextCursor: 1, terminalReason: null };
+    const moved: Array<[number, string | null]> = [];
+    let reads = 0;
+    await expect(followTranscript({
+      read: async () => {
+        reads += 1;
+        if (reads === 1) return { ...first, events: [reply(2), reply(3)], nextCursor: 3 };
+        throw new CliError('unauthorized', 'refused', EXIT.UNAUTHORIZED);
+      },
+      state: async () => 'running',
+      wait: async () => undefined,
+      show: () => undefined,
+      say: () => undefined,
+      moved: (cursor, session) => { moved.push([cursor, session]); },
+    }, first)).rejects.toMatchObject({ code: 'unauthorized' });
+    expect(moved).toEqual([[3, 's1']]);
   });
 });
