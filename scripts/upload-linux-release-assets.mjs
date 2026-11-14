@@ -19,7 +19,8 @@ function main() {
     if (!lstatSync(path).isFile() || !lstatSync(path).size) throw new Error('Invalid release asset');
     if (createHash('sha256').update(readFileSync(path)).digest('hex') !== expected) throw new Error('Verified asset digest mismatch');
   }
-  // Leave twenty minutes of job budget for bounded rollback and runner overhead.
+  // Bound upload to 30 minutes plus five for cleanup/label clearing.
+  // The 60-minute job leaves 25 minutes for setup, download and runner overhead.
   const deadline = Date.now() + 30 * 60 * 1000;
   const cleanupDeadline = deadline + 5 * 60 * 1000;
   const gh = (args, cleanup = false) => {
@@ -37,23 +38,30 @@ function main() {
     }
     return errors;
   };
+  const complete = (list, label) => names.every((file, index) => list.some(asset =>
+    asset.name === file && asset.label === label && asset.state === 'uploaded'
+    && asset.size === lstatSync(join('publish', file)).size
+    && (asset.digest == null || asset.digest === `sha256:${[process.env.APPIMAGE_SHA256, process.env.SIGNATURE_SHA256][index]}`)));
   let before = assets();
-  // Only incomplete, labelled attempts on this release can be recovered. A
-  // complete pair or any unlabelled target is never overwritten or removed.
-  const leftovers = before.filter(asset => owned(asset)
-    && !names.every(file => before.some(other => other.name === file && other.label === asset.label)));
-  const recoveryErrors = remove(leftovers);
-  if (recoveryErrors.length) throw new Error(`Leftover cleanup failed: ${recoveryErrors.join('; ')}`);
-  if (leftovers.length) before = assets();
-  if (before.some(asset => names.includes(asset.name))) throw new Error('Release asset already exists; refusing replacement');
+  const targets = before.filter(asset => names.includes(asset.name));
+  if (targets.length) {
+    const previousLabel = targets[0].label;
+    // Refuse the entire inventory before any mutation, including a completed
+    // pair whose signature was subsequently replaced by another publisher.
+    if (!targets.every(asset => owned(asset) && asset.label === previousLabel)
+      || complete(targets, previousLabel)) throw new Error('Release asset already exists; refusing replacement');
+    const recoveryErrors = remove(targets);
+    if (recoveryErrors.length) throw new Error(`Leftover cleanup failed: ${recoveryErrors.join('; ')}`);
+    before = assets();
+    if (before.some(asset => names.includes(asset.name))) throw new Error('Release asset already exists after cleanup');
+  }
   const beforeIds = new Set(before.map(asset => asset.id));
   const label = `o8-linux-upload-${randomUUID()}`;
   let observed = [];
   try {
     gh(['release', 'upload', tag, '--repo', repo, ...names.map(file => `${join('publish', file)}#${label}`)]);
     observed = assets();
-    if (!names.every(file => observed.some(asset => asset.name === file && asset.label === label
-      && asset.size === lstatSync(join('publish', file)).size))) throw new Error('Release upload pair was incomplete');
+    if (!complete(observed, label)) throw new Error('Release upload pair was incomplete');
   } catch (error) {
     const errors = [];
     // Retry listing independently; a failed inventory must not suppress deletes
@@ -64,5 +72,17 @@ function main() {
     errors.push(...remove(observed.filter(asset => owned(asset) && asset.label === label && !beforeIds.has(asset.id))));
     throw new Error([error.message, ...errors].join('; '));
   }
+  // A verified pair is committed. Label clearing is a separate, non-destructive
+  // phase: errors here must never roll back assets that clients may now use.
+  const clearErrors = [];
+  for (const asset of observed.filter(asset => names.includes(asset.name) && asset.label === label)) {
+    try { gh(['api', '--method', 'PATCH', `repos/${repo}/releases/assets/${asset.id}`, '-f', 'label='], true); }
+    catch (error) { clearErrors.push(error.message); }
+  }
+  try {
+    const final = assets(true);
+    if (!names.every(file => final.some(asset => asset.name === file && !asset.label))) clearErrors.push('Final asset labels are not empty');
+  } catch (error) { clearErrors.push(error.message); }
+  if (clearErrors.length) throw new Error(`Uploaded pair retained; label clearing failed: ${clearErrors.join('; ')}`);
 }
 try { main(); } catch (error) { console.error(`Linux attachment failed: ${error.message}`); process.exitCode = 1; }

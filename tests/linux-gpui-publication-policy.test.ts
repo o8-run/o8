@@ -1,9 +1,9 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { expect, it } from 'vitest';
+import { afterEach, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
 const workflow = parse(readFileSync('.github/workflows/linux-gpui-publish.yml', 'utf8'));
@@ -32,57 +32,126 @@ it('isolates read-only verification from digest-bound attachment', () => {
   }
 });
 
-it('rolls back its partial pair, permits a rerun, and preserves preexisting assets', () => {
-  const root = mkdtempSync(join(tmpdir(), 'linux-upload-'));
-  const name = 'o8-1.2.3-x86_64.AppImage';
-  try {
-    mkdirSync(join(root, 'publish'));
-    mkdirSync(join(root, 'bin'));
-    for (const file of [name, name + '.sig']) writeFileSync(join(root, 'publish', file), 'verified');
-    const state = join(root, 'state.json');
-    writeFileSync(state, JSON.stringify({ assets: [], fail: true }));
-    const gh = join(root, 'bin/gh');
-    writeFileSync(gh, `#!${process.execPath}
-      const fs = require('node:fs');
-      const state = JSON.parse(fs.readFileSync(process.env.FIXTURE_STATE));
-      const args = process.argv.slice(2);
-      const save = () => fs.writeFileSync(process.env.FIXTURE_STATE, JSON.stringify(state));
-      if (args[0] === 'api' && args.length === 2) console.log(JSON.stringify({assets: state.assets}));
-      else if (args[1] === 'upload') {
-        if(state.bothFail) { for(const arg of args.filter(arg=>arg.includes('#'))) { const [file,label]=arg.split('#'); state.assets.push({id:state.assets.length+1,name:file.split('/').pop(),label,size:fs.statSync(file).size}); } save(); process.exit(1); }
-        for (const arg of args.filter(arg => arg.includes('#'))) {
-          const [file, label] = arg.split('#');
-          state.assets.push({id: state.assets.length + 1, name: file.split('/').pop(), label, size: fs.statSync(file).size});
-          save();
-          if (state.fail) { state.fail = false; save(); process.exit(1); }
-        }
-      } else if (args[0] === 'api' && args[2] === 'DELETE') {
-        const id=Number(args[3].split('/').pop()); state.deletes=(state.deletes||[]).concat(id); save(); if(state.deleteFail===id)process.exit(1); state.assets = state.assets.filter(asset => asset.id !== id); save();
-      } else process.exit(9);
-    `);
-    chmodSync(gh, 0o755);
-    const run = () => spawnSync(process.execPath, [resolve('scripts/upload-linux-release-assets.mjs')], {
-      cwd: root, encoding: 'utf8', env: { ...process.env, PATH: join(root, 'bin') + ':' + process.env.PATH,
-        APPIMAGE_SHA256: createHash('sha256').update('verified').digest('hex'), SIGNATURE_SHA256: createHash('sha256').update('verified').digest('hex'), FIXTURE_STATE: state, RELEASE_TAG: 'v1.2.3', GH_REPO: 'o8-run/o8' },
-    });
-    // Digests are checked before even inventorying the destination.
-    writeFileSync(join(root, 'publish', name), 'tampered');
-    expect(run().stderr).toContain('digest mismatch');
-    writeFileSync(join(root, 'publish', name), 'verified');
-    writeFileSync(state, JSON.stringify({assets:[],bothFail:true,deleteFail:1}));
-    expect(run().status).toBe(1);
-    const partial = JSON.parse(readFileSync(state,'utf8'));
-    expect(partial.deletes).toEqual([1,2]);
-    expect(partial.assets).toHaveLength(1);
-    partial.bothFail=false; partial.deleteFail=undefined; partial.fail=false;
-    writeFileSync(state,JSON.stringify(partial));
-    const rerun = run();
-    expect(rerun.status, rerun.stderr).toBe(0);
-    const assets = JSON.parse(readFileSync(state, 'utf8')).assets;
-    expect(assets.map((asset: { name: string }) => asset.name)).toEqual([name, name + '.sig']);
-    expect(run().status).toBe(1);
-    expect(JSON.parse(readFileSync(state, 'utf8')).assets).toEqual(assets);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+type Asset = { id: number; name: string; label: string | null; size: number; state: string; digest?: string };
+const imageName = 'o8-1.2.3-x86_64.AppImage';
+const ownership = 'o8-linux-upload-00000000-0000-0000-0000-000000000001';
+const otherOwnership = 'o8-linux-upload-00000000-0000-0000-0000-000000000002';
+const digest = createHash('sha256').update('verified').digest('hex');
+const uploadRoots: string[] = [];
+afterEach(() => { for (const root of uploadRoots.splice(0)) rmSync(root, {recursive:true,force:true}); });
+function asset(id: number, name: string, label: string | null = ownership): Asset {
+  return {id,name,label,state:'uploaded',size:8};
+}
+function uploadFixture(assets: Asset[] = [], options: Record<string, unknown> = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'linux-upload-')); uploadRoots.push(root);
+  mkdirSync(join(root,'publish')); mkdirSync(join(root,'bin'));
+  for (const file of [imageName, imageName+'.sig']) writeFileSync(join(root,'publish',file),'verified');
+  const stateFile = join(root,'state.json');
+  writeFileSync(stateFile,JSON.stringify({assets,calls:[],...options}));
+  const gh = join(root,'bin/gh');
+  writeFileSync(gh, `#!${process.execPath}
+    const fs=require('node:fs');
+    const state=JSON.parse(fs.readFileSync(process.env.FIXTURE_STATE));
+    const args=process.argv.slice(2);
+    state.calls.push(args);
+    const save=()=>fs.writeFileSync(process.env.FIXTURE_STATE,JSON.stringify(state));
+    save();
+    if(args[0]==='api'&&args.length===2) {
+      if(state.listFailures>0) {state.listFailures--;save();process.exit(1);}
+      console.log(JSON.stringify({assets:state.assets}));
+    } else if(args[1]==='upload') {
+      let id=100;
+      for(const arg of args.filter(arg=>arg.includes('#'))) {
+        const [file,label]=arg.split('#');
+        state.assets.push({id:++id,name:file.split('/').pop(),label,size:fs.statSync(file).size,state:state.uploadState||'uploaded'});save();
+        if(state.partialFail) {state.partialFail=false;save();process.exit(1);}
+      }
+      if(state.bothFail)process.exit(1);
+    } else if(args[0]==='api'&&args[2]==='DELETE') {
+      const id=Number(args[3].split('/').pop());
+      if(state.deleteFail===id)process.exit(1);
+      state.assets=state.assets.filter(asset=>asset.id!==id);save();
+    } else if(args[0]==='api'&&args[2]==='PATCH') {
+      const id=Number(args[3].split('/').pop());
+      if(state.patchFail===id)process.exit(1);
+      if(!args.includes('label='))process.exit(8);
+      state.assets.find(asset=>asset.id===id).label='';save();
+    } else process.exit(9);
+  `, {mode:0o755});
+  const read = () => JSON.parse(readFileSync(stateFile,'utf8')) as {assets:Asset[];calls:string[][]} & Record<string,unknown>;
+  return {root,read,write:(state:unknown)=>writeFileSync(stateFile,JSON.stringify(state)),
+    run:()=>spawnSync(process.execPath,[resolve('scripts/upload-linux-release-assets.mjs')],{
+      cwd:root,encoding:'utf8',env:{...process.env,PATH:join(root,'bin')+':'+process.env.PATH,
+        APPIMAGE_SHA256:digest,SIGNATURE_SHA256:digest,FIXTURE_STATE:stateFile,RELEASE_TAG:'v1.2.3',GH_REPO:'o8-run/o8'},
+    }),
+    deletes:()=>read().calls.filter(args=>args.includes('DELETE')),
+  };
+}
+
+it.each([
+  ['completed signature replacement', [asset(1,imageName),asset(2,imageName+'.sig','')]],
+  ['previous labelled success', [asset(1,imageName),asset(2,imageName+'.sig')]],
+  ['mixed ownership', [asset(1,imageName),asset(2,imageName+'.sig',otherOwnership)]],
+  ['unlabelled lone file', [asset(1,imageName,null)]],
+] as const)('refuses %s before any deletion', (_case, assets) => {
+  const f=uploadFixture([...assets]); const result=f.run();
+  expect(result.status,result.stderr).toBe(1);
+  expect(f.deletes()).toEqual([]);
+  expect(f.read().assets).toEqual(assets);
+});
+
+it('recovers a labelled lone AppImage and clears both successful upload labels', () => {
+  const f=uploadFixture([asset(1,imageName)]); const result=f.run();
+  expect(result.status,result.stderr).toBe(0);
+  expect(f.deletes()).toHaveLength(1);
+  expect(f.read().assets.map(a=>({name:a.name,label:a.label,state:a.state}))).toEqual([
+    {name:imageName,label:'',state:'uploaded'}, {name:imageName+'.sig',label:'',state:'uploaded'},
+  ]);
+});
+
+it.each(['truncated','still uploading','wrong digest'])('recovers an incomplete unanimous pair: %s', mode => {
+  const image=asset(1,imageName);
+  if(mode==='truncated')image.size=1;
+  if(mode==='still uploading')image.state='starter';
+  if(mode==='wrong digest')image.digest='sha256:'+ '0'.repeat(64);
+  const f=uploadFixture([image,asset(2,imageName+'.sig')]); const result=f.run();
+  expect(result.status,result.stderr).toBe(0);
+  expect(f.deletes()).toHaveLength(2);
+  expect(f.read().assets.every(a=>a.label==='')).toBe(true);
+});
+
+it('reports label clearing failure without deleting either completed asset', () => {
+  const f=uploadFixture([], {patchFail:101}); const result=f.run();
+  expect(result.status,result.stderr).toBe(1);
+  expect(result.stderr).toMatch(/label/i);
+  expect(f.deletes()).toEqual([]);
+  expect(f.read().calls.filter(args=>args.includes('PATCH'))).toHaveLength(2);
+  expect(f.read().assets).toHaveLength(2);
+  expect(f.run().status).toBe(1);
+  expect(f.deletes()).toEqual([]);
+});
+
+it('rejects a still-uploading new pair and rolls back only owned assets', () => {
+  const f=uploadFixture([], {uploadState:'starter'}); const result=f.run();
+  expect(result.status,result.stderr).toBe(1);
+  expect(f.deletes()).toHaveLength(2);
+  expect(f.read().assets).toEqual([]);
+});
+
+it('attempts every cleanup deletion and recovers the leftover on rerun', () => {
+  const f=uploadFixture([], {bothFail:true,deleteFail:101});
+  expect(f.run().status).toBe(1);
+  expect(f.deletes()).toHaveLength(2);
+  const state=f.read(); expect(state.assets).toHaveLength(1);
+  state.bothFail=false; state.deleteFail=undefined; f.write(state);
+  const result=f.run(); expect(result.status,result.stderr).toBe(0);
+  expect(f.read().assets.every(a=>a.label==='')).toBe(true);
+  expect(f.run().status).toBe(1);
+});
+
+it('checks digests before any release API operation', () => {
+  const f=uploadFixture(); writeFileSync(join(f.root,'publish',imageName),'tampered');
+  expect(f.run().stderr).toContain('digest mismatch'); expect(f.read().calls).toEqual([]);
 });
 
 it('the explicit publish scanner path never spawns the AppImage runtime', () => {

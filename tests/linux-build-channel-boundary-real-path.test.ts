@@ -159,6 +159,21 @@ describe('signed Linux build channel through the operator CLI', () => {
     expect(existsSync(join(f.root, 'publication.lock'))).toBe(false);
   });
 
+  it.each(['zero global', 'tampered global', 'tampered comment', 'missing global'])('authenticates the minisign trusted comment through the publisher: %s', mode => {
+    const f = fixture();
+    const fields = Buffer.from(readFileSync(`${f.artifact}.sig`, 'utf8').trim(), 'base64').toString('utf8').trim().split('\n');
+    if (mode === 'zero global') fields[3] = Buffer.alloc(64).toString('base64');
+    if (mode === 'tampered global') { const bytes = Buffer.from(fields[3], 'base64'); bytes[0] ^= 1; fields[3] = bytes.toString('base64'); }
+    if (mode === 'tampered comment') fields[2] += ' changed';
+    if (mode === 'missing global') fields.pop();
+    writeFileSync(`${f.artifact}.sig`, Buffer.from(fields.join('\n') + '\n').toString('base64'));
+    const result = run(f);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toMatch(/global|trusted comment/i);
+    expect(effects(f).some(event => event.name === 'unsquashfs')).toBe(false);
+    expect(uploads(f)).toEqual([]);
+  });
+
   it('refuses an invalid signature before extraction or upload', () => {
     const f = fixture(); const path = f.artifact + '.sig'; const standard = Buffer.from(readFileSync(path, 'utf8').trim(), 'base64').toString('utf8').trim().split('\n');
     const packet = Buffer.from(standard[1], 'base64'); packet[10] ^= 1; standard[1] = packet.toString('base64');
@@ -212,7 +227,7 @@ describe('GPUI release attachment preparation through the real CLI', () => {
     writeFileSync(join(f.root, 'packages/review.deb'), 'unsigned review package');
     writeFileSync(join(f.root, 'packages/review.rpm'), 'unsigned review package');
     return run(f, { O8_PUBLISH_LINUX: 'true', RELEASE_TAG: tag, GH_REPO: repos[0],
-      UPDATER_SIGNATURE: Buffer.from(Buffer.from(readFileSync(`${f.artifact}.sig`, 'utf8').trim(), 'base64').toString('utf8').trim() + '\ntrusted comment: fixture\n' + Buffer.alloc(64).toString('base64') + '\n').toString('base64'), ...env }, `await import(${JSON.stringify(attachment)});`);
+      UPDATER_SIGNATURE: readFileSync(`${f.artifact}.sig`, 'utf8').trim(), ...env }, `await import(${JSON.stringify(attachment)});`);
   }
 
   it.each([undefined, 'false'])('defaults off before inspecting inputs or invoking providers (%s)', flag => {
@@ -261,7 +276,7 @@ describe('GPUI release attachment preparation through the real CLI', () => {
 
   it.each(['outer junk', 'trusted comment', 'extra line', 'packet length', 'global length'])('rejects noncanonical signature fields: %s', mode => {
     const f = fixture();
-    const original = Buffer.from(Buffer.from(readFileSync(`${f.artifact}.sig`, 'utf8').trim(), 'base64').toString('utf8').trim() + '\ntrusted comment: fixture\n' + Buffer.alloc(64).toString('base64') + '\n').toString('base64');
+    const original = readFileSync(`${f.artifact}.sig`, 'utf8').trim();
     const fields = Buffer.from(original, 'base64').toString('utf8').trim().split('\n');
     if (mode === 'trusted comment') fields[2] = 'arbitrary comment';
     if (mode === 'extra line') fields.push('junk');

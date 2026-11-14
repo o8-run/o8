@@ -31,6 +31,10 @@ After approval, use this order (substitute the release version and run ID):
 4. Dispatch the attachment workflow from the default branch:
    `gh workflow run linux-gpui-publish.yml --repo o8-run/o8 --ref main -f release_tag=vX.Y.Z -f build_run_id=RUN_ID -f updater_signature="$(cat packages/o8-X.Y.Z-x86_64.AppImage.sig)" -F publish_linux=true`.
    This step requires the separate operator approval described above.
+5. After the separately approved mirror and `ship:linux-sig` completion below,
+   do not re-dispatch or re-run attachment for that tag. The workflow refuses
+   an existing completed pair or any unlabelled/mixed-ownership target assets
+   before deleting anything, including a signature replaced by `ship:linux-sig`.
 
 The read-only `verify` job checks run-to-tag binding and the catalog filename,
 parses and authenticates the signature, reads the embedded channel and version,
@@ -38,7 +42,10 @@ and validates the matching published manifest. It prepares the authenticated
 pair, then scans its shipped ELF files against glibc 2.35 using `unsquashfs`,
 without executing the AppImage. It transfers only that pair and explicit SHA-256
 outputs. The separate `attach` job checks both output patterns and recomputes
-both digests before upload. Only its upload step receives the write token.
+both digests before upload. The entire `attach` job has `contents: write`.
+Its pinned actions can access `github.token`; checkout and setup-node receive it
+through their default `token` inputs. Checkout does not persist credentials.
+Only the upload command explicitly sets `GH_TOKEN` in its environment.
 The jobs share no environment or path files. No updater feed is written.
 
 DEB and RPM remain Actions review artifacts. They have no authenticated channel
@@ -90,6 +97,15 @@ that requirement.
 The upload has a 30-minute internal deadline and a separate five-minute cleanup
 budget within a 60-minute job. Cleanup attempts every owned asset even if one
 delete fails, and retries a failed inventory. A rerun removes only incomplete
-pairs carrying a prior attempt's ownership label on the same release. Complete
-pairs and unlabelled assets are never replaced or deleted. If cleanup remains
-unavailable, inspect the labelled leftovers before retrying.
+pairs when every target-named asset present shares one prior attempt's ownership
+label on the same release. Each complete asset must be `uploaded` and match the
+local size and, when provided, SHA-256 digest. Mixed labels or any unlabelled
+target cause refusal before any deletion. A complete pair is also refused.
+After a verified successful upload, both ownership labels are cleared so release
+entries display their filenames. A label-clearing error is reported without
+removing the uploaded pair. If cleanup remains unavailable, inspect the labelled
+leftovers before retrying.
+
+The pinned action token defaults are documented in
+[checkout](https://github.com/actions/checkout/blob/11bd71901bbe5b1630ceea73d27597364c9af683/action.yml#L11-L21)
+and [setup-node](https://github.com/actions/setup-node/blob/49933ea5288caeca8642d1e84afbd3f7d6820020/action.yml#L20-L22).

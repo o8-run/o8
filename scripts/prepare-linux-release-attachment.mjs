@@ -18,8 +18,8 @@ function parseSignature(value) {
   if (typeof value !== 'string' || value.length > 8192) throw new Error('Invalid signature length');
   const text = strictBase64(value.trim()).toString('utf8');
   const fields = text.replace(/\n$/, '').split('\n');
-  if (fields.length !== 4 || !/^untrusted comment: [\x20-\x7e]{1,512}$/.test(fields[0])
-    || !/^trusted comment: [\x20-\x7e]{1,512}$/.test(fields[2])) throw new Error('Invalid minisign signature structure');
+  if (fields.length !== 4 || !/^untrusted comment: [\x09\x20-\x7e]{1,512}$/.test(fields[0])
+    || !/^trusted comment: [\x09\x20-\x7e]{1,512}$/.test(fields[2])) throw new Error('Invalid minisign signature structure');
   const packet = strictBase64(fields[1], 74);
   if (!['ED', 'Ed'].includes(packet.subarray(0, 2).toString('ascii'))) throw new Error('Invalid signature algorithm');
   const global = strictBase64(fields[3], 64);
