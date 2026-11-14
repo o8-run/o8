@@ -18,6 +18,21 @@ beforeEach(async () => {
 });
 
 describe('terminal state restore without a registered repo', () => {
+  // The browser console's tab handlers are gone; these cases save the state
+  // they used to persist and read it back through the route.
+  it.each([0, 9, null])('saves and reads back an ended shell with exit status %s and its final output', async (exitCode) => {
+    const terminalExit = { exitCode, transcript: 'FINAL-PERSISTED-MARKER\nlast line' };
+    const tab = { id: 'ended-shell', label: 'Terminal 1', kind: 'terminal' as const, cliAgent: 'shell', tmuxSession: 'cortex-dash-ended-fixture', terminalExit, createdAt: 1, lastActivity: 2 };
+    const persisted = { version: 1, activeTabId: tab.id, tabs: [tab], savedAt: new Date().toISOString() };
+    const save = await POST(new Request(stateUrl, { method: 'POST', body: JSON.stringify(persisted) }));
+    expect(save.status).toBe(200);
+    const read = await GET(new Request(stateUrl));
+    expect(read.status).toBe(200);
+    const body = await read.json();
+    expect(body.activeTabId).toBe(tab.id);
+    expect(body.tabs).toEqual([expect.objectContaining({ id: tab.id, tmuxSession: tab.tmuxSession, terminalExit })]);
+  });
+
   it.each([false, true])('keeps the newer selected conversation when canonical state is newer: %s', async (canonicalIsNewer) => {
     const repoPath = path.join(dataDir, 'registered-repo');
     writeFileSync(path.join(dataDir, 'repos.json'), JSON.stringify({ version: 1,
@@ -34,6 +49,20 @@ describe('terminal state restore without a registered repo', () => {
     const response = await GET(new Request(stateUrl));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(canonicalIsNewer ? canonical : root);
+  });
+
+  it('saves and reads back a plan chat without adopting a repository or terminal', async () => {
+    const now = Date.now();
+    const tab = { id: 'chatgpt-plan-fixture', label: 'ChatGPT plan', kind: 'chatgpt-plan' as const, tmuxSession: null, createdAt: now, lastActivity: now };
+    const persisted = { version: 1, activeTabId: tab.id, tabs: [tab], savedAt: new Date().toISOString() };
+    const save = await POST(new Request(stateUrl, { method: 'POST', body: JSON.stringify(persisted) }));
+    expect(save.status).toBe(200);
+    const response = await GET(new Request(stateUrl));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.activeTabId).toBe(tab.id);
+    expect(body.tabs).toEqual([expect.objectContaining({ id: tab.id, label: 'ChatGPT plan', kind: 'chatgpt-plan', tmuxSession: null })]);
+    expect(body.tabs[0].repo).toBeUndefined();
   });
 
   it('reloads a persisted global terminal and filters an orphaned repo tab', async () => {

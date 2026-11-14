@@ -284,6 +284,18 @@ describe('cached client mission writes during stop', () => {
     });
   });
 
+  it('archives with a metadata-only PATCH and keeps the sibling stop', async () => {
+    seedMission();
+    const guard = await holdPacketLifecycleMutation({ packetId: 'b', kind: 'stop' });
+    // The browser tab handler that sent this PATCH is gone; send its request directly.
+    const response = await stateRoute.PATCH(request({ packetId: 'a', updates: { archivedAt: new Date().toISOString() } }, 'PATCH'));
+    expect(response.status).toBe(200);
+    expect(readOrchestratorControlPlaneState().packets[0]?.archivedAt).toEqual(expect.any(String));
+    expect(readOrchestratorControlPlaneState().packets[1]).toMatchObject({
+      operatorStopped: true, releaseStatePayload: { source: guard?.source },
+    });
+  });
+
   it('accepts held-packet metadata only as a targeted patch and does not undo it on the next snapshot', async () => {
     seedMission();
     await holdPacketLifecycleMutation({ packetId: 'b', kind: 'stop' });

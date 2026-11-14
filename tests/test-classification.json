@@ -240,9 +240,21 @@
       ]
     },
     {
+      "path": "src/app/api/voice/live/availability-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/voice/live/byok-real-path.test.ts",
       "reasons": [
         "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "src/app/api/voice/live/gpt-live-lifecycle-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -2518,6 +2530,15 @@
       ]
     },
     {
+      "path": "tests/codex-live-steer-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-native-worker-launch-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2600,6 +2621,12 @@
       "path": "tests/compaction-status-history-race-real-path.test.ts",
       "reasons": [
         "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/compaction-status-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -2985,6 +3012,12 @@
       "path": "tests/dependency-seed-lease-namespace-backcompat.test.ts",
       "reasons": [
         "apfs-tool"
+      ]
+    },
+    {
+      "path": "tests/desktop-handoff-provider-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
@@ -5067,6 +5100,16 @@
       ]
     },
     {
+      "path": "tests/o8-next-app-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8-next-bundle-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6124,6 +6167,12 @@
       ]
     },
     {
+      "path": "tests/owner-chat-chronology-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/owner-chat-compaction-race-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6373,6 +6422,12 @@
     },
     {
       "path": "tests/pi-forgotten-context-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/pi-inbox-approval-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -7860,6 +7915,12 @@
       ]
     },
     {
+      "path": "tests/steer-managed-run-admission-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/steer-packet-owned-resume.test.ts",
       "reasons": [
         "child-process"
@@ -8134,6 +8195,12 @@
       ]
     },
     {
+      "path": "tests/telemetry-default-on.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/terminal-checkout-storage-status-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -8147,6 +8214,14 @@
         "child-process",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/terminal-lane-approval-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
@@ -8351,7 +8426,19 @@
       ]
     },
     {
+      "path": "tests/update-apply-failure-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-auto-apply-wait-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-channel-order-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -8373,6 +8460,12 @@
     },
     {
       "path": "tests/update-fresh-apply-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-install-entry-points-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -8408,6 +8501,14 @@
       "path": "tests/update-next-window-apply-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-restart-parked-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path",
+        "terminal-host"
       ]
     },
     {

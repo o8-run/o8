@@ -4,6 +4,7 @@
   "slowFiles": {
     "tests/operator-mcp-http-route.test.ts": 4264,
     "tests/inference-entitlement-race.test.ts": 3495,
+    "tests/entitlement-sync-founder.test.ts": 3191,
     "src/lib/markdown/transport/roundtrip.test.ts": 3050
   }
 }
