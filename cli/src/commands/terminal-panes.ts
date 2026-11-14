@@ -42,6 +42,11 @@ export type PaneExec = (file: string, args: string[]) => string;
 export interface PaneTerminal {
   id: string;
   title?: string | null;
+  /**
+   * What the pane shows. A `terminal` (the default) is observed. A `packet` is
+   * a running packet whose worker has no terminal, so its transcript is followed.
+   */
+  kind?: 'terminal' | 'packet';
 }
 
 export interface TerminalPanesInput {
@@ -145,6 +150,35 @@ export function workerTerminals(fleet: unknown): PaneTerminal[] {
   });
 }
 
+/** Lane states in which a packet's worker is, or is about to be, working. */
+const WORKING_LANE_STATES = new Set(['launching', 'running']);
+
+/**
+ * Packets with a working worker in a lane list, titled as o8 titles them. A
+ * packet appears once however many lanes it has had.
+ */
+export function runningPackets(lanes: unknown): PaneTerminal[] {
+  if (!Array.isArray(lanes)) return [];
+  const packets = new Map<string, PaneTerminal>();
+  for (const entry of lanes) {
+    if (!entry || typeof entry !== 'object') continue;
+    const lane = entry as { packetId?: unknown; status?: unknown; label?: unknown };
+    if (typeof lane.packetId !== 'string' || !lane.packetId) continue;
+    if (typeof lane.status !== 'string' || !WORKING_LANE_STATES.has(lane.status)) continue;
+    packets.set(lane.packetId, { id: lane.packetId, title: typeof lane.label === 'string' ? lane.label : '', kind: 'packet' });
+  }
+  return [...packets.values()];
+}
+
+/** The command a packet's pane runs: this CLI, following that packet's transcript. */
+export function followCommand(input: Pick<TerminalPanesInput, 'self' | 'env'>, id: string): string[] {
+  const routing = ROUTING_ENV.flatMap((name) => {
+    const value = input.env[name];
+    return value ? [`${name}=${value}`] : [];
+  });
+  return [...(routing.length > 0 ? ['env', ...routing] : []), ...input.self, '--human', 'packet', 'transcript', id, '--follow'];
+}
+
 /** The command one pane runs: this CLI, observing one terminal, read-only. */
 export function observeCommand(input: Pick<TerminalPanesInput, 'self' | 'env' | 'machineKey'>, id: string): string[] {
   const routing = ROUTING_ENV.flatMap((name) => {
@@ -208,7 +242,10 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
   const key = (id: string) => paneKey(id, input.machineKey);
 
   const titles = new Map<string, string | null | undefined>();
+  const packets = new Set<string>();
   for (const terminal of input.terminals) {
+    // Packets are local to this machine. A remote machine's panes only observe its shells.
+    if (terminal.kind === 'packet' && !input.machineKey) packets.add(terminal.id);
     if (!titles.has(terminal.id) || (terminal.title && !titles.get(terminal.id))) titles.set(terminal.id, terminal.title);
   }
   const unique = [...titles.keys()];
@@ -239,7 +276,7 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
   for (const id of wanted) {
     if (panes.length >= limit) break;
     try {
-      const run = ['--label', paneLabel({ id, title: titles.get(id) }, input.machineKey), '--focus=false', '--json', '--', ...observeCommand(input, id)];
+      const run = ['--label', paneLabel({ id, title: titles.get(id) }, input.machineKey), '--focus=false', '--json', '--', ...(packets.has(id) ? followCommand(input, id) : observeCommand(input, id))];
       const first = panes.length === 0;
       const index = panes.length;
       const raw = first

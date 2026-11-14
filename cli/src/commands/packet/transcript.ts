@@ -101,7 +101,17 @@ export function toolDetail(event: Extract<TranscriptEvent, { type: 'tool_call' }
       }
     }
   }
-  // Arguments that were cut short, or that name nothing we know, fall back to the summary.
+  // The server cuts long arguments short, which leaves JSON that does not parse. A telling
+  // argument near the start can still be read out of it.
+  for (const key of DETAIL_KEYS) {
+    const found = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(event.args.slice(0, 4_000));
+    if (!found || !found[1].trim()) continue;
+    let value = found[1];
+    try { value = JSON.parse(`"${found[1]}"`) as string; } catch { /* keep the raw text */ }
+    const local = withoutWorktree(value.trim());
+    return plainText(PATH_KEYS.has(key) ? shortPath(local) : local, DETAIL_MAX);
+  }
+  // Arguments that name nothing we know fall back to the summary.
   return plainText(withoutWorktree(event.summary || event.args), DETAIL_MAX);
 }
 

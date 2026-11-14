@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { EXIT } from '../api';
-import { confirmOpenedPanes, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, workerTerminals, type PaneExec } from './terminal-panes';
+import {
+  confirmOpenedPanes, followCommand, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, runningPackets, workerTerminals,
+  type PaneExec,
+} from './terminal-panes';
 
 const self = ['/usr/bin/node', '/opt/o8 app/o8.mjs'];
 const rexEnv = { REX_SESSION: 'session:abc' };
@@ -215,6 +218,54 @@ describe('openTerminalPanes', () => {
     expect(result.skipped).toEqual([long]);
     expect(result.opened.map((pane) => pane.id)).toEqual(['t1']);
     expect(calls.filter((args) => args.includes('--label'))).toHaveLength(1);
+  });
+
+  it('reads running packets from a lane list, once each, titled as o8 titles them', () => {
+    expect(runningPackets([
+      { packetId: 'pkt-1', status: 'running', label: 'Fix login' },
+      { packetId: 'pkt-2', status: 'launching' },
+      { packetId: 'pkt-3', status: 'reviewing', label: 'Done already' },
+      { packetId: 'pkt-4', status: 'awaiting_input', label: 'Waiting' },
+      { packetId: 'pkt-1', status: 'running', label: 'Fix login, second lane' },
+      { packetId: null, status: 'running', label: 'A lane with no packet' },
+      { packetId: 7, status: 'running' },
+      { status: 'running' },
+      null,
+    ])).toEqual([
+      { id: 'pkt-1', title: 'Fix login, second lane', kind: 'packet' },
+      { id: 'pkt-2', title: '', kind: 'packet' },
+    ]);
+    expect(runningPackets(undefined)).toEqual([]);
+    expect(runningPackets({ lanes: [] })).toEqual([]);
+  });
+
+  it('follows a running packet in its pane and observes a terminal in its pane', () => {
+    const { calls, exec } = fakeRex();
+    const result = openTerminalPanes({
+      terminals: [{ id: 'pkt-1', title: 'Fix login', kind: 'packet' }, { id: 'cortex-dash-1', title: 'shell' }],
+      limit: 8, env: { ...rexEnv, O8_API_PORT: '47120' }, self, exec,
+    });
+    expect(result.opened.map((pane) => pane.id)).toEqual(['pkt-1', 'cortex-dash-1']);
+    const creations = calls.filter((args) => args.includes('--label'));
+    expect(creations[0]).toContain('o8: Fix login [pkt-1]');
+    expect(command(creations[0])).toEqual(['env', 'O8_API_PORT=47120', ...self, '--human', 'packet', 'transcript', 'pkt-1', '--follow']);
+    expect(command(creations[1])).toEqual(['env', 'O8_API_PORT=47120', ...self, '--human', 'terminal', 'observe', 'cortex-dash-1']);
+    expect(followCommand({ self, env: {} }, 'pkt-1')).toEqual([...self, '--human', 'packet', 'transcript', 'pkt-1', '--follow']);
+  });
+
+  it('finds a packet pane again by its ID, and never follows a packet on a remote machine', () => {
+    const existing = fakeRex([{ block_id: 'block:a', label: 'o8: Old title [pkt-1]' }]);
+    const again = openTerminalPanes({
+      terminals: [{ id: 'pkt-1', title: 'New title', kind: 'packet' }], limit: 8, env: rexEnv, self, exec: existing.exec,
+    });
+    expect(again.existing).toEqual(['pkt-1']);
+    expect(again.opened).toEqual([]);
+    const remote = fakeRex();
+    openTerminalPanes({
+      terminals: [{ id: 'pkt-1', kind: 'packet' }], limit: 8, machineKey: 'Build', env: rexEnv, self, exec: remote.exec,
+    });
+    expect(command(remote.calls.filter((args) => args.includes('--label'))[0]))
+      .toEqual([...self, '--human', 'terminal', 'observe', 'pkt-1', '--machine', 'Build']);
   });
 
   it('reads worker terminals from a fleet list and leaves out the ones without a live terminal', () => {

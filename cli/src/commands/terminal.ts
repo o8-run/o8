@@ -6,7 +6,9 @@ import { resolveConfig, type ResolvedConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
-import { confirmOpenedPanes, openTerminalPanes, parsePanesArgs, workerTerminals, type PaneTerminal } from './terminal-panes.js';
+import {
+  confirmOpenedPanes, openTerminalPanes, parsePanesArgs, runningPackets, workerTerminals, type PaneTerminal,
+} from './terminal-panes.js';
 import { installShortcut, parseShortcutArgs, removeShortcut } from './terminal-shortcut.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
 
@@ -71,6 +73,21 @@ async function listWorkerTerminals(cfg: ResolvedConfig): Promise<{ terminals: Pa
       query: { workspaceReview: '0' }, timeoutMs: 8_000,
     });
     return { terminals: workerTerminals(response.data?.fleetSessions), failed: false };
+  } catch {
+    return { terminals: [], failed: true };
+  }
+}
+
+/**
+ * Packets whose worker is running. Most workers have no terminal, so a pane
+ * follows the packet's transcript instead. `failed` is set when the lane list
+ * could not be read.
+ */
+async function listRunningPackets(cfg: ResolvedConfig): Promise<{ terminals: PaneTerminal[]; failed: boolean }> {
+  try {
+    const response = await apiFetch<{ lanes?: unknown }>(cfg, '/api/lanes', { query: { active: 'true' }, timeoutMs: 8_000 });
+    if (!Array.isArray(response.data?.lanes)) return { terminals: [], failed: true };
+    return { terminals: runningPackets(response.data.lanes), failed: false };
   } catch {
     return { terminals: [], failed: true };
   }
@@ -376,12 +393,17 @@ async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<numbe
   const workers = machineKey ? { terminals: [], failed: false } : await listWorkerTerminals(cfg);
   const workerIds = new Set(workers.terminals.map((worker) => worker.id));
   const shellIds = machineKey ? listRemoteSessionIds(machineKey) : (await listSessions(cfg)).map((session) => session.id);
-  // Workers first, so a short limit shows agents before idle shells. A worker keeps its own title.
+  const packets = machineKey ? { terminals: [], failed: false } : await listRunningPackets(cfg);
+  // Work first, so a short limit shows agents before idle shells. A worker keeps its own title.
   const terminals = [
+    ...packets.terminals,
     ...workers.terminals,
     ...shellIds.filter((id) => !workerIds.has(id)).map((id) => ({ id, title: 'shell' })),
   ];
-  const warnings = workers.failed ? ['Could not list worker terminals. Only shells are shown.'] : [];
+  const warnings = [
+    ...(packets.failed ? ['Could not list running packets.'] : []),
+    ...(workers.failed ? ['Could not list worker terminals.'] : []),
+  ];
   const started = openTerminalPanes({ terminals, limit, machineKey, env: process.env, self: selfCommand() });
   // Give each observer a moment to attach, then report any pane that is already gone.
   if (started.opened.length > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -396,7 +418,7 @@ async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<numbe
       ...warnings.map((warning) => `warning   ${warning}`),
       ...(result.error ? [`error     ${result.error}`] : []),
     ];
-    process.stdout.write(lines.length ? `${lines.join('\n')}\n` : 'No live terminals.\n');
+    process.stdout.write(lines.length ? `${lines.join('\n')}\n` : 'No running packets or live terminals.\n');
   } else {
     printJson({ schema: 'o8/cli/terminal.panes/v1', ...result, warnings });
   }
