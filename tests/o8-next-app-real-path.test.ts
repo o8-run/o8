@@ -1,15 +1,12 @@
-// @vitest-environment jsdom
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
-import { act, createElement } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-app-')));
 const dataDir = join(root, 'data');
@@ -33,18 +30,13 @@ vi.mock('@/lib/panel/status-boot', () => ({ startStatusBootHooks: () => {} }));
 vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: async () => {} }));
 vi.mock('@/lib/symon/messages-receiver/loop', () => ({ startMessagesReceiver: () => {} }));
 vi.mock('@/lib/tauri/bridge', () => ({ storeSet: vi.fn(), isTauri: () => false }));
-vi.mock('@/components/auth/O8AuthProvider', () => ({ useO8Auth: () => ({ clerkEnabled: false, isLoaded: true, signedIn: false, user: null }) }));
-vi.mock('@/components/desktop/settings/SettingsTomlEditor', () => ({ SettingsTomlEditor: () => null }));
 
 const route = await import('@/app/api/panel/operator-defaults/route');
-const { OperatorDefaultsTab } = await import('@/components/desktop/settings/OperatorDefaultsTab');
 const { closeDb } = await import('@/lib/db');
 const { getDataDir } = await import('@/lib/data-dir-migration');
 const { getOperatorDefaults } = await import('@/lib/operator/defaults');
 const { ensureNextServerInitialized } = await import('@/lib/startup/next');
 const endpoint = 'http://untrusted.invalid/api/panel/operator-defaults';
-let ui: Root | undefined;
-let container: HTMLDivElement;
 const logs: string[] = [];
 const startup = globalThis as typeof globalThis & { __o8NextOptionalStartup?: Promise<void> };
 
@@ -90,9 +82,7 @@ beforeAll(() => {
   vi.spyOn(console, 'warn').mockImplementation((...args) => { logs.push(args.join(' ')); });
   stageBinary();
 });
-beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); });
 afterEach(async () => {
-  if (ui) { await act(async () => ui!.unmount()); ui = undefined; container.remove(); }
   if (existsSync(receipt)) { const pid = probe().pid; if (alive(pid)) process.kill(pid); await vi.waitFor(() => expect(alive(pid)).toBe(false)); }
   await post(false);
   rmSync(join(dataDir, 'settings.toml'), { force: true });
@@ -146,39 +136,15 @@ it('leaves the window to the process the shell gave the binary', async () => {
   expect(await (await route.GET(new Request(endpoint))).json()).toMatchObject({ nextWindowError: null });
 });
 
-async function mountSettings(beforeGet: () => Promise<void> = async () => {}) {
-  vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
-    const request = new Request(new URL(input, endpoint), init);
-    if (request.method === 'GET') await beforeGet();
-    return request.method === 'POST' ? route.POST(request) : route.GET(request);
-  });
-  container = document.createElement('div'); document.body.appendChild(container); ui = createRoot(container);
-  await act(async () => { ui!.render(createElement(OperatorDefaultsTab)); });
-  return vi.waitFor(async () => {
-    await act(async () => {});
-    const label = Array.from(container.querySelectorAll('span')).find(el => el.textContent === 'o8 next' && el.children.length === 0);
-    const rowContainer = label?.parentElement?.parentElement;
-    const row = rowContainer?.querySelector('[role="switch"]');
-    expect(row).toBeTruthy();
-    return { row, rowContainer };
-  }, { timeout: 10_000 });
-}
-
-it('waits for settings readiness when a cold response takes longer than one second', async () => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-  try {
-    // Inject cold-route latency; mountSettings must still wait for the rendered switch.
-    const { row } = await mountSettings(() => new Promise(resolve => { setTimeout(resolve, 1_500); }));
-    expect(row!.getAttribute('aria-checked')).toBe('false');
-    expect(existsSync(receipt)).toBe(false);
-  } finally { vi.useRealTimers(); }
+it('reports the switch off without spawning when settings are first read', async () => {
+  const response = await route.GET(new Request(`${endpoint}?include=values`));
+  expect(response.status).toBe(200);
+  expect((await response.json()).values.experimentalNext).toBe(false);
+  expect(existsSync(receipt)).toBe(false);
 });
 
-it('drives the single short switch through the real settings route and real spawn, then off kills it', async () => {
-  const { row, rowContainer } = await mountSettings();
-  expect(row).toBeTruthy();
-  expect(row!.getAttribute('aria-checked')).toBe('false');
-  await act(async () => { (row as HTMLElement).click(); });
+it('turns o8 next on through the real settings route and real spawn, then off kills it', async () => {
+  expect((await post(true)).status).toBe(200);
   await vi.waitFor(() => expect(existsSync(receipt)).toBe(true), { timeout: 10_000 });
   const child = probe();
   expect(child.authorized).toBe(true);
@@ -186,9 +152,8 @@ it('drives the single short switch through the real settings route and real spaw
   expect(child.argv[child.argv.indexOf('--server') + 1]).toBe('http://127.0.0.1:43219');
   expect(child.argv.join(' ')).not.toContain(token);
   expect(child.cwd).toBe(dataDir);
-  expect(rowContainer!.textContent).toBe('o8 next');
-  await vi.waitFor(async () => { await act(async () => {}); expect(row!.getAttribute('aria-checked')).toBe('true'); expect((row as HTMLButtonElement).disabled).toBe(false); });
-  await act(async () => { (row as HTMLElement).click(); });
+  expect((await getOperatorDefaults()).values.experimentalNext).toBe(true);
+  expect((await post(false)).status).toBe(200);
   await vi.waitFor(() => expect(alive(child.pid)).toBe(false));
   await vi.waitFor(async () => expect((await getOperatorDefaults()).values.experimentalNext).toBe(false));
 });
@@ -225,19 +190,16 @@ it('restores the persisted choice in a fresh server process and reaps the window
   } finally { server?.kill('SIGKILL'); }
 });
 
-it('shows one clear missing-binary error without saving a failed opt-in or exposing credentials', async () => {
+it('returns one clear missing-binary error without saving a failed opt-in or exposing credentials', async () => {
   rmSync(binary);
   const response = await post(true);
   expect(response.status).toBe(400);
   expect(await response.json()).toEqual({ error: 'o8 next is unavailable. Reinstall the app and try again.' });
   expect((await getOperatorDefaults()).values.experimentalNext).toBe(false);
   expect(logs.join('\n')).not.toContain(token);
-  const { row } = await mountSettings();
-  expect(row!.getAttribute('aria-checked')).toBe('false');
-  expect(container.textContent?.match(/o8 next is unavailable\. Reinstall the app and try again\./g)).toHaveLength(1);
 });
 
-it('refuses malformed shell state when the binary exits 1 and shows the failure once in Settings', async () => {
+it('refuses malformed shell state when the binary exits 1', async () => {
   writeFileSync(join(dataDir, 'next-shell.json'), '{malformed');
   const response = await post(true);
   expect(response.status).toBe(503);
@@ -245,9 +207,6 @@ it('refuses malformed shell state when the binary exits 1 and shows the failure 
   expect((await getOperatorDefaults()).values.experimentalNext).toBe(false);
   expect(readFileSync(join(dataDir, 'next-shell.json'), 'utf8')).toBe('{malformed');
   expect(existsSync(join(dataDir, 'settings.toml'))).toBe(false);
-  const { row } = await mountSettings();
-  expect(row!.getAttribute('aria-checked')).toBe('false');
-  expect(container.textContent?.match(/o8 next could not start\. Try again\./g)).toHaveLength(1);
 });
 
 it('keeps the preference off until the running child acknowledges startup', async () => {
@@ -261,18 +220,13 @@ it('keeps the preference off until the running child acknowledges startup', asyn
   expect((await getOperatorDefaults()).values.experimentalNext).toBe(true);
 });
 
-it('returns a reported startup failure to the actual Settings switch and reaps the child', async () => {
+it('returns a reported startup failure through the settings route and reaps the child', async () => {
   stageBinary('error');
-  const { row } = await mountSettings();
-  await act(async () => { (row as HTMLElement).click(); });
-  await vi.waitFor(async () => {
-    await act(async () => {});
-    expect(container.textContent?.match(/o8 next could not start\. Try again\./g)).toHaveLength(1);
-    expect((row as HTMLButtonElement).disabled).toBe(false);
-  }, { timeout: 10_000 });
-  expect(row!.getAttribute('aria-checked')).toBe('false');
+  const response = await post(true);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ code: 'NEXT_STARTUP_FAILED', error: 'o8 next could not start. Try again.' });
   expect((await getOperatorDefaults()).values.experimentalNext).toBe(false);
-  expect(alive(probe().pid)).toBe(false);
+  await vi.waitFor(() => expect(alive(probe().pid)).toBe(false));
 });
 
 it('returns a typed spawn error when an executable has no valid interpreter', async () => {

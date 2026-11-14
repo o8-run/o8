@@ -1,6 +1,4 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
-import path from 'node:path';
 
 const root = process.cwd();
 
@@ -29,38 +27,6 @@ function nativeModuleLoads(moduleName) {
   return result.status === 0;
 }
 
-function ensureMonacoCodiconFont() {
-  const source = path.join(root, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.ttf');
-  const target = path.join(
-    root,
-    'node_modules',
-    'monaco-editor',
-    'esm',
-    'vs',
-    'base',
-    'browser',
-    'ui',
-    'codicons',
-    'codicon',
-    'codicon.ttf',
-  );
-
-  if (!existsSync(source)) {
-    console.warn('[postinstall] @vscode/codicons font not found; skipping Monaco codicon repair');
-    return;
-  }
-
-  const targetMissing = !existsSync(target);
-  const targetEmpty = existsSync(target) && statSync(target).size === 0;
-  if (!targetMissing && !targetEmpty) {
-    return;
-  }
-
-  mkdirSync(path.dirname(target), { recursive: true });
-  copyFileSync(source, target);
-  console.log('[postinstall] Repaired Monaco codicon.ttf');
-}
-
 if (nativeModuleLoads('better-sqlite3')) {
   console.log('[postinstall] better-sqlite3 native module ready');
 } else {
@@ -75,4 +41,3 @@ if (nativeModuleLoads('node-pty')) {
 // tauri-plugin-mcp patch fixes React onClick compatibility for the webview
 // click tool — see patches/tauri-plugin-mcp+0.1.0.patch.
 runStep('patch-package', 'npx', ['patch-package']);
-ensureMonacoCodiconFont();

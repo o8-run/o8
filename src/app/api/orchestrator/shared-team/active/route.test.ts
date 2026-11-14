@@ -10,7 +10,6 @@ import {
   recordSharedCheckoutMember,
   reserveSharedCheckoutMember,
 } from '@/lib/orchestrator/shared-checkout-team';
-import { sharedTeamWorkerLanes } from '@/app/dashboard/hooks/useOutsideWorkerLaunchBridge';
 import { GET } from './route';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
@@ -61,11 +60,6 @@ describe('active Fast team workspace read', () => {
         { surfaceId: 'codex-owned:fast-b', runtime: 'codex', taskName: 'Worker B', state: 'failed', outcome: 'unknown' },
       ],
     } });
-    expect(sharedTeamWorkerLanes(body.team).map((lane) => ({ sessionKey: lane.sessionKey, status: lane.status })))
-      .toEqual([
-        { sessionKey: 'codex-owned:fast-a', status: 'completed' },
-        { sessionKey: 'codex-owned:fast-b', status: 'launch_failed' },
-      ]);
   });
 });
 

@@ -47,11 +47,6 @@ const nextConfig: NextConfig = {
       '**/node_modules/@img/**/*',
       // Browserslist data is used by Next's build tools, never by the server.
       '**/node_modules/caniuse-lite/**/*',
-      // The aliased highlighter bundles common data and fetches optional data.
-      // NFT also follows the original Shiki registries, duplicating every
-      // grammar/theme. Keep the package-name indexes used by the asset route.
-      '**/node_modules/@shikijs/{langs,themes}/dist/!(index).mjs',
-      '**/node_modules/@pierre/theme/dist/!(index).mjs',
     ],
   },
   // better-sqlite3 is a native module. The Pi packages load Node built-ins
@@ -107,13 +102,6 @@ const nextConfig: NextConfig = {
   },
   turbopack: {},
   webpack: (config, { dev }) => {
-    // Pierre imports Shiki's all-language/all-theme entry points. Keep the app's
-    // common grammars local and resolve optional syntax assets on demand.
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      'shiki$': `${__dirname}/src/lib/highlighting/shiki-bundle.ts`,
-      '@pierre/theming/themes$': `${__dirname}/src/lib/highlighting/pierre-themes.ts`,
-    };
     if (dev) {
       return config;
     }

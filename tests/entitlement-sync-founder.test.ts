@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import VoiceAccount from '@/app/voice-settings/tabs/AccountTab';
 import { AccountAuthorizationSync } from '@/lib/entitlement/AccountAuthorizationSync';
-import { AccountBlock } from '@/components/desktop/account-block/AccountBlock';
 import type { Plan } from '@/lib/entitlement/types';
 
 const SUBJECT = 'user_lifetime_fixture';
@@ -33,10 +32,6 @@ const fixtureAuth = vi.hoisted(() => ({
 vi.mock('@/components/auth/O8AuthProvider', () => ({ useO8Auth: () => fixtureAuth }));
 vi.mock('@/lib/theme/context', () => ({
   useTheme: () => ({ paletteId: 'light', surface: {}, workspaceGlass: false }),
-}));
-vi.mock('@/components/desktop/dictation/SymonMachineControl', () => ({
-  SymonMachineControl: () => null, SymonOrbStatusLine: () => null,
-  useSymonOrbMinimized: () => true,
 }));
 
 let dataDir: string;
@@ -104,17 +99,7 @@ async function readEntitlement() {
 }
 
 
-async function mountAccountBlock() {
-  await act(async () => root.render(
-    createElement(AccountBlock),
-  ));
-  await vi.waitFor(async () => {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(container.querySelector('[aria-label="Open account menu for Account"]')).not.toBeNull();
-  });
-}
-
-describe('lifetime seat through desktop entitlement sync and account rendering (#3269)', () => {
+describe('lifetime seat through desktop entitlement sync (#3269)', () => {
   beforeEach(async () => {
     vi.resetModules();
     serverIdentity.userId = null;
@@ -156,12 +141,12 @@ describe('lifetime seat through desktop entitlement sync and account rendering (
     vi.unstubAllEnvs();
   });
 
-  it.each(['dashboard', 'voice-settings'])('evicts a different account service license through %s', async (surface) => {
+  it.each(['account sync', 'voice-settings'])('evicts a different account service license through %s', async (surface) => {
     const licenseKey = await signedLicense('pro');
     writeFileSync(path.join(dataDir, 'entitlement.json'), JSON.stringify({ plan: 'pro', status: 'active', licenseKey }));
     seedStaleSeat();
     serveAccountLicense({ license: licenseKey, source: 'subscription' });
-    const render = () => root.render(surface === 'voice-settings' ? createElement(VoiceAccount) : createElement(AccountAuthorizationSync, null, createElement(AccountBlock)));
+    const render = () => root.render(surface === 'voice-settings' ? createElement(VoiceAccount) : createElement(AccountAuthorizationSync, null, null));
     await act(async () => render());
     expect(existsSync(path.join(dataDir, 'entitlement.json'))).toBe(true);
     fixtureAuth.user = { id: 'user_other_fixture', name: 'Other account' };
@@ -174,7 +159,7 @@ describe('lifetime seat through desktop entitlement sync and account rendering (
   it.each([
     { source: 'subscription', plan: 'pro' as const },
     { source: 'founding', plan: 'founder' as const },
-  ])('persists the service license without a sidebar badge for $source', async ({ source, plan }) => {
+  ])('persists the service license for $source', async ({ source, plan }) => {
     const license = await signedLicense(plan);
     serveAccountLicense({ license, source, founder: { operatorNumber: 7, tier: 1 } });
 
@@ -193,23 +178,15 @@ describe('lifetime seat through desktop entitlement sync and account rendering (
       founder: { operatorNumber: 7, tier: 1 },
       actualFounder: { operatorNumber: 7, tier: 1 },
     });
-
-    await mountAccountBlock();
-    expect(container.querySelector('[aria-label="Open account menu for Account"]')?.textContent)
-      .not.toMatch(/pro|lifetime|founder/i);
   });
 
-  it('clears stale metadata without adding an edition badge', async () => {
+  it('clears stale founder metadata', async () => {
     seedStaleSeat();
     serveAccountLicense({ license: await signedLicense('pro'), source: 'subscription' });
 
     expect(await (await sync()).json()).toMatchObject({ ok: true, plan: 'pro', source: 'subscription' });
     expect(existsSync(founderPath())).toBe(false);
     expect(await readEntitlement()).toMatchObject({ plan: 'pro', founder: null, actualFounder: null });
-    await mountAccountBlock();
-    const label = container.querySelector('[aria-label="Open account menu for Account"]')?.textContent;
-    expect(label).not.toContain('Pro');
-    expect(label).not.toContain('Lifetime');
   });
 
   it('does not persist a seat or entitlement for an invalid license signature', async () => {

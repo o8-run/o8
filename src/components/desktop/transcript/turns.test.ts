@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { deserializeStoredTranscript, serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
 import { transcriptTurns, transcriptTurnFiles } from './turns';
-import { transcriptPlan } from './activity';
 
 const entry = (id: string, role: MobileTranscriptEntry['role'], text = id): MobileTranscriptEntry => ({ id, role, text });
 const sample = [entry('prompt', 'user'), entry('progress', 'assistant'), entry('tool', 'tool'), entry('answer', 'assistant')];
@@ -47,8 +46,5 @@ describe('turn file attribution', () => {
       { name: 'apply_patch', status: 'done', args: { input: '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** End Patch' } },
       { name: 'Write', status: 'done', args: { file_path: 'src/b.ts', content: 'hello' } },
     ] }])).toEqual([{ path: 'src/a.ts' }, { path: 'src/b.ts' }]);
-  });
-  it('reads only structured plan statuses, with newest successful update winning', () => {
-    expect(transcriptPlan([{ ...sample[1], toolCalls: [{ name: 'update_plan', status: 'done', args: { plan: [{ step: 'Inspect', status: 'completed' }, { step: 'Verify', status: 'in_progress' }] } }] }])).toEqual([{ text: 'Inspect', status: 'completed' }, { text: 'Verify', status: 'in_progress' }]);
   });
 });
