@@ -208,7 +208,7 @@ describe('GPUI release attachment preparation through the real CLI', () => {
   const attachment = pathToFileURL(join(process.cwd(), 'scripts/prepare-linux-release-attachment.mjs')).href;
   function prepare(f: ReturnType<typeof fixture>, env: Record<string, string> = {}) {
     mkdirSync(join(f.root, 'packages'));
-    copyFileSync(f.artifact, join(f.root, 'packages/candidate.AppImage'));
+    copyFileSync(f.artifact, join(f.root, `packages/o8-${version}-x86_64.AppImage`));
     writeFileSync(join(f.root, 'packages/review.deb'), 'unsigned review package');
     writeFileSync(join(f.root, 'packages/review.rpm'), 'unsigned review package');
     return run(f, { O8_PUBLISH_LINUX: 'true', RELEASE_TAG: tag, GH_REPO: repos[0],

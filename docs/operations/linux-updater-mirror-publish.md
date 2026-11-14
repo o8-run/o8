@@ -55,3 +55,25 @@ It reports `status: disabled` and prepares no assets. The workflow maps its
 approval input to that process variable; neither changes any saved setting.
 The enabled preparation command performs only authenticated reads and local
 copies. The workflow's separately guarded upload step is the only remote writer.
+
+
+## Build retention and channel
+
+Build artifacts expire after **7 days**. Attach them within that period or rerun
+`linux-downloads.yml` at the same release tag, then sign the new exact bytes and
+use the new run ID. The attached GPUI AppImage identifies as the **beta channel
+today**, even when attached to a stable release. This workflow does not change
+that behavior or relabel the binary. Its destination channel manifest must match.
+
+The attachment job checks out `refs/tags/<release_tag>` without persisted Git
+credentials. All verification code, the glibc gate and the updater public key
+come from that tag. Tags without the verifier scripts cannot use this path.
+It requires `o8-<version>-x86_64.AppImage` and scans every shipped ELF against
+glibc 2.35 before preparing the authenticated pair.
+
+Both files are verified locally before one upload command. A failed upload rolls
+back only assets labelled with that run's unique identifier and absent from its
+initial inventory. Existing assets are never replaced or removed. After a partial
+upload failure, confirm cleanup succeeded and rerun with the same inputs. If
+cleanup itself failed, inspect the uniquely labelled orphan before removing it;
+the next run refuses existing names rather than deleting them.

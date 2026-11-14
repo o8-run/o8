@@ -20,7 +20,7 @@ function main() {
   const signature = process.env.UPDATER_SIGNATURE?.trim();
   if (!signature) throw new Error('Public updater signature is required');
   const images = readdirSync('packages').filter(name => name.endsWith('.AppImage'));
-  if (images.length !== 1) throw new Error('Expected exactly one GPUI AppImage');
+  if (images.length !== 1 || images[0] !== `o8-${version}-x86_64.AppImage`) throw new Error('Expected exactly one GPUI AppImage');
   const source = join('packages', images[0]);
   writeFileSync(`${source}.sig`, signature + '\n', { flag: 'wx' });
   // Authenticate bytes before reading identity. Distribution installers stay
