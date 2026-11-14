@@ -244,6 +244,9 @@ describe('openTerminalPanes', () => {
       { packetId: 'pkt-1', status: 'running', label: 'Old lane still says running' },
       { packetId: 'pkt-1', status: 'reviewing', label: 'Newest lane is done' },
     ])).toEqual([]);
+    for (const ended of ['completed', 'archived', 'failed']) {
+      expect(runningPackets([{ packetId: 'pkt-1', status: 'running' }, { packetId: 'pkt-1', status: ended }])).toEqual([]);
+    }
     expect(runningPackets([
       { packetId: 'pkt-2', status: 'failed', label: 'Named once' },
       { packetId: 'pkt-2', status: 'running' },

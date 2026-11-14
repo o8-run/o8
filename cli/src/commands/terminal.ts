@@ -85,7 +85,8 @@ async function listWorkerTerminals(cfg: ResolvedConfig): Promise<{ terminals: Pa
  */
 async function listRunningPackets(cfg: ResolvedConfig): Promise<{ terminals: PaneTerminal[]; failed: boolean }> {
   try {
-    const response = await apiFetch<{ lanes?: unknown }>(cfg, '/api/lanes', { query: { active: 'true' }, timeoutMs: 8_000 });
+    // Every lane, not only active ones: a packet's newest lane decides, and a finished one must be seen to count.
+    const response = await apiFetch<{ lanes?: unknown }>(cfg, '/api/lanes', { query: { active: 'false' }, timeoutMs: 8_000 });
     if (!Array.isArray(response.data?.lanes)) return { terminals: [], failed: true };
     return { terminals: runningPackets(response.data.lanes), failed: false };
   } catch {
