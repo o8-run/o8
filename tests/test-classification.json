@@ -7844,6 +7844,12 @@
       ]
     },
     {
+      "path": "tests/review-scorecard-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-stall-reconcile-real-path.test.ts",
       "reasons": [
         "child-process",
