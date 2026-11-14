@@ -1,4 +1,6 @@
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -159,6 +161,27 @@ describe('installing and removing', () => {
     expect(lstatSync(env.REX_CONFIG).isSymbolicLink()).toBe(true);
     expect(readFileSync(real, 'utf8')).toBe(`-- mine\n${LINE}\n`);
     expect(readdirSync(dir).sort()).toEqual(['init.lua', 'o8.lua', 'real-init.lua']);
+  });
+
+  it('keeps the permissions of init.lua and never writes through a leftover draft link', () => {
+    const { env, dir } = configDir();
+    writeFileSync(env.REX_CONFIG, '-- mine\n');
+    chmodSync(env.REX_CONFIG, 0o600);
+    const victim = join(dir, 'victim.txt');
+    writeFileSync(victim, 'keep me');
+    symlinkSync(victim, join(dir, 'o8.lua.o8-tmp'));
+    installShortcut({ self, key: null, env, exec: () => '' });
+    expect(statSync(env.REX_CONFIG).mode & 0o777).toBe(0o600);
+    expect(readFileSync(victim, 'utf8')).toBe('keep me');
+    expect(readFileSync(join(dir, 'o8.lua'), 'utf8')).toContain('o8_terminals');
+    expect(readdirSync(dir).sort()).toEqual(['init.lua', 'o8.lua', 'victim.txt']);
+  });
+
+  it('takes a new action file back out when init.lua cannot be written', () => {
+    const { env, dir } = configDir();
+    mkdirSync(env.REX_CONFIG);
+    expect(() => installShortcut({ self, key: null, env, exec: () => '' })).toThrow(/Could not write the Rex config/);
+    expect(readdirSync(dir)).toEqual(['init.lua']);
   });
 
   it('removes only what it added, and reports when there was nothing to remove', () => {

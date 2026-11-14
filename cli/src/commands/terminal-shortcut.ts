@@ -9,7 +9,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
 
@@ -179,9 +181,14 @@ function refuseUnowned(file: string): never {
 function writeWhole(file: string, content: string): void {
   // A config that is a link keeps being one: the file it points at is replaced.
   const target = existsSync(file) ? realpathSync(file) : file;
+  // The file keeps its permissions, such as a config its owner made private.
+  const mode = existsSync(target) ? statSync(target).mode & 0o777 : undefined;
   const draft = `${target}.o8-tmp`;
-  writeFileSync(draft, content);
   try {
+    // A leftover draft is removed, never written through, in case it is a link.
+    rmSync(draft, { force: true });
+    writeFileSync(draft, content, { flag: 'wx', ...(mode === undefined ? {} : { mode }) });
+    if (mode !== undefined) chmodSync(draft, mode);
     renameSync(draft, target);
   } catch (error) {
     rmSync(draft, { force: true });
