@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        mpsc, Arc, Mutex, PoisonError,
     },
     time::Duration,
 };
@@ -12,10 +12,12 @@ type MainWork = Box<dyn FnOnce() + Send>;
 /// Answers a platform termination request (Quit, logout, restart): sets the stop
 /// flag and starts the bounded shutdown. The platform then waits; `allow` lets it
 /// exit with status 0. A stop that cannot be proven complete exits with status 1
-/// instead, so a supervisor and the updater can tell the two apart.
+/// instead, so a supervisor and the updater can tell the two apart. Cleanup that
+/// already ran (after a failed start, while its alert is open) answers at once:
+/// the alert's dialog is reaped and the status is 1.
 fn terminate(stop: &AtomicBool, shutdown: &Arc<Shutdown>, on_main: fn(MainWork), allow: fn()) {
     stop.store(true, Ordering::SeqCst);
-    shutdown.begin(move |complete| {
+    let begun = shutdown.begin(move |complete| {
         on_main(Box::new(move || {
             if complete {
                 allow();
@@ -24,16 +26,26 @@ fn terminate(stop: &AtomicBool, shutdown: &Arc<Shutdown>, on_main: fn(MainWork),
             }
         }))
     });
+    if !begun {
+        on_main(Box::new(|| {
+            crate::reap_dialogs(std::time::Instant::now() + Duration::from_millis(400));
+            std::process::exit(1)
+        }));
+    }
 }
+static FAKE_MAIN_QUEUE: Mutex<Option<mpsc::Sender<MainWork>>> = Mutex::new(None);
 /// Debug-build stand-in for AppKit termination, driven through files by the
-/// fixture tests. Creating it marks the launcher as finished launching: only
-/// then can the system deliver a Quit, which waits until the next pump. The pump
-/// answers it as AppKit does: the main thread waits, and an allowed termination
-/// exits with status 0.
+/// fixture tests. The system accepts Quit only once the launcher's event loop
+/// has run (live: `terminate` returned false while the main thread had not yet
+/// pumped events, true once it had), so the first pump publishes
+/// `terminate-ready`. A delivered Quit waits for the next pump, which answers it
+/// as AppKit does: the main thread waits inside termination, draining only the
+/// main queue, and an allowed termination exits with status 0.
 struct Fake {
     dir: PathBuf,
     stop: Arc<AtomicBool>,
     shutdown: Arc<Shutdown>,
+    main_queue: mpsc::Receiver<MainWork>,
 }
 impl Fake {
     fn new(enabled: bool, stop: &Arc<AtomicBool>, shutdown: &Arc<Shutdown>) -> Option<Self> {
@@ -41,23 +53,40 @@ impl Fake {
             return None;
         }
         let dir = PathBuf::from(std::env::var_os("O8_LAUNCHER_FAKE_TERMINATE")?);
-        std::fs::write(dir.join("terminate-ready"), b"1").ok()?;
+        let (send, main_queue) = mpsc::channel();
+        *FAKE_MAIN_QUEUE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(send);
         Some(Self {
             dir,
             stop: stop.clone(),
             shutdown: shutdown.clone(),
+            main_queue,
         })
     }
     fn pump(&self) {
+        let _ = std::fs::write(self.dir.join("terminate-ready"), b"1");
         if std::fs::remove_file(self.dir.join("terminate-request")).is_err() {
             return;
         }
         terminate(
             &self.stop,
             &self.shutdown,
-            |work| work(),
+            |work| {
+                if let Some(queue) = FAKE_MAIN_QUEUE
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .as_ref()
+                {
+                    let _ = queue.send(work);
+                }
+            },
             || std::process::exit(0),
         );
+        // AppKit's wait: no launcher code runs here except main-queue work.
+        while let Ok(work) = self.main_queue.recv() {
+            work();
+        }
         loop {
             std::thread::sleep(Duration::from_secs(1));
         }

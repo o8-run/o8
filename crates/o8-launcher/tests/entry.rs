@@ -648,18 +648,73 @@ fn quit_after_a_complete_stop_exits_zero() {
 }
 
 #[test]
-fn quit_during_startup_is_honoured_with_a_clean_stop() {
+fn quit_while_the_login_shell_probe_hangs_stops_within_the_bound() {
     let mut f = Fixture::new();
     fs::write(f.root.join("hold-probe"), "1").unwrap();
     start_with_fake_terminate(&mut f);
-    until(|| f.root.join("probe-entered").exists());
-    assert!(quit(&f), "Quit declined while the launcher was starting");
-    fs::remove_file(f.root.join("hold-probe")).unwrap();
+    until(|| f.log("probe-entered").parse::<u32>().is_ok());
+    let probe: u32 = f.log("probe-entered").parse().unwrap();
+    // Accepted only once the launcher's event loop runs, as the system does.
+    until(|| f.root.join("terminate-ready").exists());
+    assert!(quit(&f));
+    let asked = std::time::Instant::now();
     let status = exited(f.launcher.as_mut().unwrap());
     f.launcher = None;
+    assert!(asked.elapsed() < Duration::from_secs(10));
     assert_eq!(status.code(), Some(0));
-    assert!(!f.root.join("window-ready").exists());
-    assert!(!f.root.join("launcher-api.json").exists());
-    assert!(!f.root.join("launcher-ws.json").exists());
-    assert_nothing_left(&f, [f.port("api-port"), f.port("ws-port")]);
+    until(|| gone(probe));
+    assert!(!f.root.join("boot-id").exists());
+    assert!(f.starts("api-starts").is_empty());
+    assert!(f.starts("ws-starts").is_empty());
+    assert!(!f.root.join("launcher.sock").exists());
+    assert!(!f.root.join("dialog-reached").exists());
+}
+
+#[test]
+fn a_hung_probe_is_killed_at_the_startup_bound_and_quit_ends_its_alert() {
+    let mut f = Fixture::new();
+    fs::write(f.root.join("hold-probe"), "1").unwrap();
+    fs::write(f.root.join("hold-dialog"), "1").unwrap();
+    let root = f.root.to_string_lossy().into_owned();
+    f.launcher = Some(f.launch_with(
+        std::path::Path::new(env!("CARGO_BIN_EXE_o8-launcher")),
+        &f.root.join("config.json"),
+        &[
+            ("O8_LAUNCHER_FAKE_TERMINATE", &root),
+            ("O8_LAUNCHER_PREPARE_BOUND_MS", "4000"),
+        ],
+        "launcher-stderr",
+    ));
+    until(|| f.log("probe-entered").parse::<u32>().is_ok());
+    let probe: u32 = f.log("probe-entered").parse().unwrap();
+    until(|| f.root.join("dialog-reached").exists());
+    assert!(f
+        .log("dialog-reached")
+        .contains("Startup checks did not finish"));
+    until(|| gone(probe));
+    assert!(!f.root.join("launcher.sock").exists());
+    until(|| f.log("dialog-pid").parse::<u32>().is_ok());
+    let dialog: u32 = f.log("dialog-pid").parse().unwrap();
+    assert!(quit(&f));
+    let status = exited(f.launcher.as_mut().unwrap());
+    f.launcher = None;
+    assert_eq!(status.code(), Some(1));
+    until(|| gone(dialog));
+    assert!(f.starts("api-starts").is_empty());
+}
+
+#[test]
+fn an_incomplete_stop_after_a_signal_exits_non_zero_without_a_failure_dialog() {
+    let mut f = Fixture::new();
+    f.start();
+    f.ready();
+    fs::remove_file(f.root.join("launcher-api.json")).unwrap();
+    let child = f.launcher.as_mut().unwrap();
+    unsafe {
+        libc::kill(child.id() as i32, libc::SIGTERM);
+    }
+    let status = exited(child);
+    f.launcher = None;
+    assert_eq!(status.code(), Some(1));
+    assert!(!f.root.join("dialog-reached").exists());
 }

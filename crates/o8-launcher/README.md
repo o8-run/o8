@@ -23,10 +23,17 @@ once per boot at `logs/next-server.log` and `logs/ws-server.log`.
 
 A private instance lock and Unix socket serialize launches. Reopen requests are
 coalesced even while preflight is pending. AppKit supplies Dock reopen and quit
-events without a web view. The launcher finishes launching before the login-shell
-probe and preflight, so the system can deliver Quit during startup; that Quit
-waits for the first event pump, after both servers start, and then runs the
-normal bounded shutdown. Focus requires the configured executable to be a
+events without a web view. The launcher finishes launching right after the
+instance claim and keeps its main thread answering events through every startup
+step, because the system delivers Quit only once the event loop runs. Orphan
+cleanup, the login-shell probe and Node preflight run in a helper process
+(`--prepare`) in its own process group, bounded to 30 seconds; at the bound, or
+on any stop request, the whole group is killed. The shutdown, including release
+of the lock and socket, is armed before anything starts, and each server is
+recorded under it before the next event pump, so a Quit at any point of startup
+runs the normal bounded shutdown. A startup failure alert is shown off the main
+thread while events are still answered, never after a stop was requested, and a
+Quit while it is open ends the launcher with status 1. Focus requires the configured executable to be a
 direct child of this launcher's API server; otherwise the server reopens it.
 
 Shutdown stops the API before WS. Each leader receives TERM before its process
@@ -169,9 +176,12 @@ directories on free ports. They cover health and boot identity, environment,
 crash/restart exhaustion, shutdown during retry/preflight, drain ordering and
 descendant pipe drain, second launch, ownership refusal and orphan cleanup,
 private files, bounded control input, voice-only suppression, injected dialog
-reaping, native Quit while running and during startup with its exit status
+reaping, native Quit while running, while the login-shell probe hangs and while
+a startup failure alert is open, with its exit status
 (`O8_LAUNCHER_FAKE_TERMINATE`, a debug-build stand-in for AppKit's termination
-flow), a crash between spawn and receipt (`O8_LAUNCHER_FAULT`, debug builds
+flow that accepts Quit only after the first event pump and runs main-queue work
+on the main thread), the startup bound (`O8_LAUNCHER_PREPARE_BOUND_MS`, debug
+builds only), a crash between spawn and receipt (`O8_LAUNCHER_FAULT`, debug builds
 only) with daemonized descendants that inherited the hold descriptor, a holder
 with a live parent, empty and truncated records, and a really moved install.
 Unit tests in `src/shutdown.rs` cover one reply on success, failure, timeout and

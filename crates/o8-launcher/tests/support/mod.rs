@@ -41,7 +41,7 @@ if Path(sys.argv[0]).name=='dialog':
  (root/'dialog-exited').write_text('1'); sys.exit(0)
 if Path(sys.argv[0]).name=='probe':
  if (root/'hold-probe').exists():
-  (root/'probe-entered').write_text('1')
+  (root/'probe-entered').write_text(str(os.getpid()))
   while (root/'hold-probe').exists(): time.sleep(0.02)
  print('__O8_PATH='+os.environ['PATH']); print('__O8_NODE='+str(root/'node')); print('GEMINI_API_KEY=fixture-key'); sys.exit(0)
 if Path(sys.argv[0]).name=='focus':
