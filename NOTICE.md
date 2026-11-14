@@ -76,21 +76,6 @@ React Bits source code or implementation was used.
   `native/o8-next/src/transcript_diagram/`
 - Unmodified license text: [Pele](licenses/pele-MIT.txt)
 
-## Visual Studio Code Codicons
-
-- Package and version: `@vscode/codicons` 0.0.45
-- Copyright: Microsoft Corporation
-- License: Creative Commons Attribution 4.0 International (CC BY 4.0)
-- Upstream: <https://github.com/microsoft/vscode-codicons>
-- License text: <https://creativecommons.org/licenses/by/4.0/legalcode>
-- Use in o8: `scripts/postinstall.mjs` copies the unmodified `codicon.ttf`
-  font into Monaco when Monaco's bundled font is absent
-
-**Attribution is mandatory under CC BY 4.0.** The Codicons name, Microsoft as
-creator, the upstream URL, and the CC BY 4.0 license link above must remain
-with distributions that include the font. o8 does not claim that Microsoft
-endorses o8.
-
 ## Phosphor Icons
 
 - Packages and versions: `@phosphor-icons/core` 2.1.1 and
@@ -131,16 +116,6 @@ The ISC permission notice reproduced from the package:
 The Feather-derived portions additionally carry Cole Bemis's MIT notice; the
 MIT permission text at the end of this file applies to them.
 
-## Tabler Icons
-
-- Package and version: `@tabler/icons-react` 3.44.0
-- Copyright: Copyright (c) 2020-2026 Paweł Kuna
-- License: MIT
-- Upstream: <https://github.com/tabler/tabler-icons>
-- Use in o8: icon glyph data imported from the package and rendered through
-  `src/components/desktop/tabler-shims.tsx` using the same raw-SVG approach as
-  the Lucide shim, for specific glyphs chosen on legibility grounds
-
 ## Iconoir
 
 - Package and version: `iconoir-react` 7.11.0
@@ -148,25 +123,6 @@ MIT permission text at the end of this file applies to them.
 - License: MIT
 - Upstream: <https://github.com/iconoir-icons/iconoir>
 - Use in o8: selected interface icons
-
-## Paper Design Shaders
-
-- Packages and versions: `@paper-design/shaders` 0.0.76 and
-  `@paper-design/shaders-react` 0.0.76
-- Copyright holder: Paper Design
-- License: Apache License 2.0
-- Upstream: <https://github.com/paper-design/shaders>
-- License text: <https://www.apache.org/licenses/LICENSE-2.0>
-- Use in o8: shader backdrops in the canvas-glass preview
-
-The upstream NOTICE reads:
-
-> Powered by Paper Shaders: <https://shaders.paper.design>
-
-Apache-2.0 redistribution requires a copy of the license, prominent notices on
-modified files, retention of relevant copyright, patent, trademark, and
-attribution notices, and preservation of applicable upstream NOTICE text. The
-notice above is reproduced here for that purpose.
 
 ## DOMPurify
 
