@@ -259,8 +259,8 @@ commands:
   terminal observe <id>  read-only live stream from an existing terminal
   terminal control <id>  exclusive input/output to an existing terminal; --human for interactive mode
   terminal wait <id> --match <text> [--timeout ms]  wait read-only for output already present or arriving later
-  terminal panes [--watch] [--limit N] [--machine <label-or-id>]  open one read-only pane per running packet, worker terminal and live shell in the Rex session you are in
-  terminal shortcut [--key <key>] | --remove  add "Show o8 Terminals" to the Rex command palette, with an optional key; --remove takes it out
+  terminal panes [--watch] [--here] [--limit N] [--machine <label-or-id>]  open one read-only pane per running packet, worker terminal and live shell in the Rex session you are in; --here opens them beside this pane
+  terminal shortcut [--key <key>] | --remove  add "Show o8 Terminals" to the Rex command palette: a tab that keeps filling as work starts; optional key; --remove takes it out
   terminal ... --machine <label-or-id>  run terminal commands on a saved SSH machine
   machine add <target> --label <name>  save a verified SSH terminal machine; optional --port, --ssh-config
   machine list|check|rename|disable|enable|remove  manage saved SSH machines

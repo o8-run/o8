@@ -7,7 +7,7 @@ import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
 import {
-  confirmOpenedPanes, openTerminalPanes, parsePanesArgs, readAnswer, runningPackets, settledAfterRound, watchChanges, watchRetries, workerTerminals,
+  confirmOpenedPanes, openTerminalPanes, parsePanesArgs, prepareWatcherTab, readAnswer, runningPackets, settledAfterRound, watchChanges, watchRetries, workerTerminals,
   type PaneTerminal, type TerminalPanesResult,
 } from './terminal-panes.js';
 import { installShortcut, parseShortcutArgs, removeShortcut } from './terminal-shortcut.js';
@@ -388,11 +388,12 @@ function listRemoteSessionIds(machineKey: string): string[] {
   }
 }
 
+type PanesOptions = { limit: number; machineKey: string | null; here: boolean };
+
 /** One pass: list what is running, open a pane for each one that has none, and confirm they stayed open. */
 async function panesRound(
   cfg: ResolvedConfig,
-  limit: number,
-  machineKey: string | null,
+  { limit, machineKey, here }: PanesOptions,
   settled?: Set<string>,
 ): Promise<{ result: TerminalPanesResult; warnings: string[]; listed: string[] | null }> {
   const workers = machineKey ? { terminals: [], failed: false } : await listWorkerTerminals(cfg);
@@ -411,7 +412,7 @@ async function panesRound(
     ...(packets.failed ? ['Could not list running packets.'] : []),
     ...(workers.failed ? ['Could not list worker terminals.'] : []),
   ];
-  const started = openTerminalPanes({ terminals, limit, machineKey, env: process.env, self: selfCommand() });
+  const started = openTerminalPanes({ terminals, limit, machineKey, here, env: process.env, self: selfCommand() });
   // Give each observer a moment to attach, then report any pane that is already gone.
   if (started.opened.length > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
   return {
@@ -428,14 +429,19 @@ const WATCH_POLL_MS = 3_000;
  * started since the last pass. It runs until it is interrupted. A pass that
  * fails, such as when o8 is restarting, is said once and tried again.
  */
-async function watchTerminalPanes(mode: OutputMode, cfg: ResolvedConfig, limit: number, machineKey: string | null): Promise<number> {
+async function watchTerminalPanes(mode: OutputMode, cfg: ResolvedConfig, options: PanesOptions): Promise<number> {
   const standing = new Set<string>();
   const settled = new Set<string>();
+  if (options.here && prepareWatcherTab(process.env).duplicate) {
+    if (mode.human) process.stdout.write('o8 is already watching this session.\n');
+    else process.stdout.write(`${JSON.stringify({ schema: 'o8/cli/terminal.panes.watch/v1', opened: [], closed: [], notices: ['o8 is already watching this session.'] })}\n`);
+    return EXIT.OK;
+  }
   if (mode.human) process.stdout.write('Watching for running packets and live terminals. Press Ctrl-C to stop.\n');
   while (true) {
     let round: { result: Pick<TerminalPanesResult, 'opened' | 'closed' | 'remaining' | 'skipped' | 'error'>; warnings: string[] };
     try {
-      const done = await panesRound(cfg, limit, machineKey, settled);
+      const done = await panesRound(cfg, options, settled);
       settledAfterRound(settled, done.result, done.listed);
       round = done;
     } catch (error) {
@@ -458,11 +464,11 @@ async function watchTerminalPanes(mode: OutputMode, cfg: ResolvedConfig, limit: 
 }
 
 async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<number> {
-  const { limit, machineKey, watch } = parsePanesArgs(rest);
+  const { watch, ...options } = parsePanesArgs(rest);
   // Both paths need the local operator credential before anything is listed or opened.
   const cfg = operatorConfig();
-  if (watch) return watchTerminalPanes(mode, cfg, limit, machineKey);
-  const { result, warnings } = await panesRound(cfg, limit, machineKey);
+  if (watch) return watchTerminalPanes(mode, cfg, options);
+  const { result, warnings } = await panesRound(cfg, options);
   if (mode.human) {
     const lines = [
       ...result.opened.map((pane) => `opened    ${pane.id}`),

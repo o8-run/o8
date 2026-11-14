@@ -17,6 +17,10 @@ import { CliError, EXIT } from '../api.js';
 export const PANE_LIMIT_DEFAULT = 8;
 export const PANE_LIMIT_MAX = 16;
 const TAB_LABEL = 'o8 terminals';
+/** The label of the pane a watcher started by the Rex shortcut runs in. */
+export const WATCHER_LABEL = 'o8 watcher';
+/** How much of the tab the first pane takes from the watcher beside it. */
+const BESIDE_WATCHER_RATIO = 75;
 /**
  * A pane's label reads `o8: <title> [<id>]`, with the title first so it stays
  * visible when the pane header is cut short. Only a label of exactly this
@@ -57,6 +61,11 @@ export interface TerminalPanesInput {
   /** The command that starts this same CLI, such as `[node, /path/o8.mjs]`. */
   self: string[];
   exec?: PaneExec;
+  /**
+   * Open the first pane beside this pane (`REX_BLOCK`), in its tab, instead of
+   * in a new tab. Ignored when that pane is not in the session.
+   */
+  here?: boolean;
 }
 
 export interface TerminalPanesResult {
@@ -270,9 +279,14 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
   );
   const panes: string[] = [];
   const paneByKey = new Map<string, string>();
+  const self = input.env.REX_BLOCK;
+  let anchor: string | null = null;
   for (const block of listed.blocks ?? []) {
-    if (typeof block.block_id !== 'string' || typeof block.label !== 'string') continue;
+    if (typeof block.block_id !== 'string') continue;
     if (block.placement !== undefined && block.placement !== 'placed') continue;
+    // The caller's pane can be an anchor whatever its label, or with none.
+    if (input.here && self && block.block_id === self) anchor = self;
+    if (typeof block.label !== 'string') continue;
     const match = PANE_LABEL.exec(block.label);
     if (!match) continue;
     panes.push(block.block_id);
@@ -290,18 +304,21 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
       const run = ['--label', paneLabel({ id, title: titles.get(id) }, input.machineKey), '--focus=false', '--json', '--', ...(packets.has(id) ? followCommand(input, id) : observeCommand(input, id))];
       const first = panes.length === 0;
       const index = panes.length;
-      const raw = first
+      // With `here`, the first pane takes most of this tab beside the caller's pane.
+      const parent = first ? anchor : panes[Math.floor((index - 1) / 2)];
+      const raw = parent === null
         ? rex(exec, ['run', '-s', session, ...run], 'open a tab')
         : rex(exec, [
-          'split', '-s', session, '-b', panes[Math.floor((index - 1) / 2)],
-          `--split=${index % 2 === 1 ? 'right' : 'below'}`, ...run,
+          'split', '-s', session, '-b', parent,
+          ...(first ? ['--split=right', `--ratio=${BESIDE_WATCHER_RATIO}`] : [`--split=${index % 2 === 1 ? 'right' : 'below'}`]),
+          ...run,
         ], 'split a pane');
       const created = parseJson<{ block_ids?: unknown; window_id?: unknown }>(raw, 'pane result');
       const pane = Array.isArray(created.block_ids) && typeof created.block_ids[0] === 'string' ? created.block_ids[0] : null;
       if (!pane) throw new CliError('multiplexer_error', 'Rex did not report the pane it opened.', EXIT.CONFLICT);
       panes.push(pane);
       opened.push({ id, pane });
-      if (first && typeof created.window_id === 'string') {
+      if (first && parent === null && typeof created.window_id === 'string') {
         // Naming the tab is a courtesy. The pane already carries its label.
         try { exec('rex', ['window', 'rename', '-s', session, created.window_id, TAB_LABEL]); } catch { /* keep the default name */ }
       }
@@ -356,16 +373,21 @@ export function confirmOpenedPanes(
   };
 }
 
-const PANES_USAGE = 'Use `terminal panes [--watch] [--limit 1..16] [--machine <label-or-id>]`.';
+const PANES_USAGE = 'Use `terminal panes [--watch] [--here] [--limit 1..16] [--machine <label-or-id>]`.';
 
-/** Parse `terminal panes` flags. `--watch` takes no value. Each other flag may appear once and needs a value. */
-export function parsePanesArgs(rest: string[]): { limit: number; machineKey: string | null; watch: boolean } {
+/** Parse `terminal panes` flags. `--watch` and `--here` take no value. Each other flag may appear once and needs a value. */
+export function parsePanesArgs(rest: string[]): { limit: number; machineKey: string | null; watch: boolean; here: boolean } {
   let machineKey: string | null = null;
   let limit: number | null = null;
   let watch = false;
+  let here = false;
   for (let i = 0; i < rest.length; i += 1) {
     if (rest[i] === '--watch' && !watch) {
       watch = true;
+      continue;
+    }
+    if (rest[i] === '--here' && !here) {
+      here = true;
       continue;
     }
     const value = rest[i + 1] ?? '';
@@ -379,7 +401,7 @@ export function parsePanesArgs(rest: string[]): { limit: number; machineKey: str
     }
     i += 1;
   }
-  return { limit: limit ?? PANE_LIMIT_DEFAULT, machineKey, watch };
+  return { limit: limit ?? PANE_LIMIT_DEFAULT, machineKey, watch, here };
 }
 
 export interface WatchChanges {
@@ -453,4 +475,34 @@ export async function readAnswer<T>(response: Response): Promise<T> {
   } catch {
     throw new CliError('connection_refused', 'The o8 terminal host stopped answering.', EXIT.CONNECTION_REFUSED);
   }
+}
+
+/**
+ * Before a watcher started with `--here` begins: names its tab, and says
+ * whether another watcher already runs in this session, so a second press of
+ * the Rex shortcut does not start a second watcher. Best effort: a Rex
+ * failure here leaves the tab unnamed and lets the watcher run.
+ */
+export function prepareWatcherTab(env: Readonly<Record<string, string | undefined>>, exec: PaneExec = defaultExec): { duplicate: boolean } {
+  const session = env.REX_SESSION;
+  const self = env.REX_BLOCK;
+  if (!session || !self) return { duplicate: false };
+  let blocks: Array<{ block_id?: unknown; label?: unknown; placement?: unknown; window_id?: unknown }>;
+  try {
+    blocks = parseJson<{ blocks?: typeof blocks }>(exec('rex', ['block', 'ls', '-s', session, '--json']), 'pane list').blocks ?? [];
+  } catch {
+    return { duplicate: false };
+  }
+  const placed = blocks.filter((block) => block.placement === undefined || block.placement === 'placed');
+  const mine = placed.find((block) => block.block_id === self);
+  // Only a watcher the shortcut started owns its tab. One run by hand leaves the tab alone.
+  if (mine?.label !== WATCHER_LABEL) return { duplicate: false };
+  // Two presses at once start two watchers that each see the other: the older pane ID stays.
+  const older = (block: (typeof placed)[number]) => typeof block.block_id === 'string' && block.block_id < self;
+  if (placed.some((block) => block.label === WATCHER_LABEL && older(block))) return { duplicate: true };
+  const window = mine.window_id;
+  if (typeof window === 'string' && window) {
+    try { exec('rex', ['window', 'rename', '-s', session, window, TAB_LABEL]); } catch { /* keep the default name */ }
+  }
+  return { duplicate: false };
 }

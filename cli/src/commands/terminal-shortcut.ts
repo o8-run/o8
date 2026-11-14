@@ -13,9 +13,10 @@ import {
   chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 
 import { CliError, EXIT } from '../api.js';
+import { WATCHER_LABEL } from './terminal-panes.js';
 
 export const SHORTCUT_ACTION = 'o8_terminals';
 const MODULE_FILE = 'o8.lua';
@@ -70,37 +71,40 @@ export function rexCommandDir(
 
 /**
  * The Lua file that defines the action. `self` is the command that starts this
- * CLI. The action runs it with the session the action was called from, so the
- * tab opens where the operator is looking. `rexDir` is put first on the
- * command's PATH so o8 can call `rex` back.
+ * CLI. The action opens a tab in the session it was called from, with a
+ * watcher pane (`terminal panes --watch --here`) that keeps that tab filled.
+ * Rex runs an action's command with the server's PATH, which may lack `rex`,
+ * so `rexDir` names where `rex` is when it is known. A pane Rex opens gets
+ * `rex` on its PATH, so the watcher can call it back.
  */
 export function shortcutModule(self: string[], key: string | null, rexDir: string | null = null): string {
   if (self.length === 0 || self.some((word) => !word || UNSAFE_WORD.test(word))) {
     throw new CliError('invalid_args', 'Could not work out how to start o8 from Rex.', EXIT.INVALID_ARGS);
   }
   if (key !== null && !SAFE_KEY.test(key)) throw new CliError('invalid_args', USAGE, EXIT.INVALID_ARGS);
-  const argv = [...self, '--human', 'terminal', 'panes'].map(luaString).join(', ');
+  const rexCommand = rexDir ? join(rexDir, process.platform === 'win32' ? 'rex.exe' : 'rex') : 'rex';
+  const argv = [
+    rexCommand, 'run', '-s', '\0session', '--label', WATCHER_LABEL, '--',
+    ...self, '--human', 'terminal', 'panes', '--watch', '--here',
+  ].map((word) => (word === '\0session' ? 'ctx.session_id' : luaString(word))).join(', ');
   return [
     `${OWNED_HEADER} Run it again to update this file,`,
     '-- or `o8 terminal shortcut --remove` to delete it. Edits here are overwritten.',
     'rex.action{',
     `  name = "${SHORTCUT_ACTION}",`,
     '  title = "Show o8 Terminals",',
-    '  description = "Open a read-only pane for each running o8 worker and shell.",',
+    '  description = "Open a tab that shows each running o8 worker and shell, and keeps filling as work starts.",',
     '  category = "o8",',
     '  keywords = "o8 workers agents terminals panes",',
     '  run = function(ctx)',
     '    if ctx.session_id == nil then error("Run this from a Rex session.", 0) end',
     `    local result, err = rex.exec({ ${argv} }, {`,
-    rexDir
-      ? `      env = { REX_SESSION = ctx.session_id, PATH = ${luaString(rexDir + delimiter)} .. (os.getenv("PATH") or "") },`
-      : '      env = { REX_SESSION = ctx.session_id },',
-    '      timeout = 60,',
+    '      timeout = 15,',
     '    })',
     '    if result == nil then error(err, 0) end',
     '    local output = result.stdout ~= "" and result.stdout or result.stderr',
-    '    if not result.ok then error(output ~= "" and output or "o8 could not open the terminals.", 0) end',
-    '    return { output = output }',
+    '    if not result.ok then error(output ~= "" and output or "o8 could not open the terminals tab.", 0) end',
+    '    return { output = "o8 is watching for workers in the o8 terminals tab." }',
     '  end,',
     '}',
     ...(key ? [`rex.bind(${luaString(key)}, "${SHORTCUT_ACTION}")`] : []),

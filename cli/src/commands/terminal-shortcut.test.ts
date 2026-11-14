@@ -49,17 +49,17 @@ describe('where Rex keeps its config', () => {
 });
 
 describe('the action file', () => {
-  it('runs this CLI for the session the action was called from', () => {
+  it('opens a watcher tab in the session the action was called from', () => {
     const lua = shortcutModule(self, null);
     expect(lua).toContain('name = "o8_terminals"');
-    expect(lua).toContain('rex.exec({ "/usr/bin/node", "/opt/o8 app/o8.mjs", "--human", "terminal", "panes" }, {');
-    expect(lua).toContain('env = { REX_SESSION = ctx.session_id }');
+    expect(lua).toContain('rex.exec({ "rex", "run", "-s", ctx.session_id, "--label", "o8 watcher", "--", '
+      + '"/usr/bin/node", "/opt/o8 app/o8.mjs", "--human", "terminal", "panes", "--watch", "--here" }, {');
     expect(lua).not.toContain('rex.bind');
   });
 
-  it('puts the directory that holds rex first on the PATH the command gets', () => {
+  it('calls rex by its full path when it is known, since the action runs with the server\'s PATH', () => {
     expect(shortcutModule(self, null, '/Apps/Rex Server/MacOS'))
-      .toContain('env = { REX_SESSION = ctx.session_id, PATH = "/Apps/Rex Server/MacOS:" .. (os.getenv("PATH") or "") },');
+      .toContain('rex.exec({ "/Apps/Rex Server/MacOS/rex", "run", "-s", ctx.session_id,');
     const has = (path: string) => path === join('/b', 'rex');
     expect(rexCommandDir({ PATH: '/a:/b:/c' }, has, 'darwin')).toBe('/b');
     expect(rexCommandDir({ PATH: '/a:/c' }, has, 'darwin')).toBeNull();
