@@ -60,7 +60,7 @@ it('reports holds and unknown state as human decisions with reasons', async () =
   persist(true);
   expect((await (await read()).json()).holds.value).toEqual(expect.arrayContaining([expect.objectContaining({ source: 'merge-hold', reason: expect.any(String) })]));
   process.env.O8_REVIEW_MODE = 'invalid';
-  expect((await (await read()).json()).nextAction).toMatchObject({ value: 'human', reason: expect.stringContaining('unreadable') });
+  expect((await (await read()).json()).nextAction).toMatchObject({ value: 'human', reason: expect.stringContaining('review-mode state is unreadable') });
   delete process.env.O8_REVIEW_MODE;
 });
 it('refuses packet workers before reading policy', async () => {

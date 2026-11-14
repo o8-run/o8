@@ -29,8 +29,10 @@ export async function readEffectivePolicy(id: string) {
   };
   // Keep failure reasons bounded: parser errors and filesystem paths may contain
   // secrets. A failed read must never be mistaken for an inherited default.
+  let reading = 'review-mode';
   try {
     input.reviewMode = validateReviewMode();
+    reading = 'operator-defaults';
     const settings = await getOperatorDefaultsTomlState();
     if (settings.error) throw new Error('settings unreadable');
     // The normal startup reader deliberately tolerates malformed legacy JSON.
@@ -46,9 +48,12 @@ export async function readEffectivePolicy(id: string) {
     }
     const defaults = getOperatorDefaultsSync();
     input.approvalPosture = { value: defaults.values.requireApproval, source: defaults.sources.requireApproval };
+    reading = 'merge-mode';
     input.mergePolicy = currentLaneMergePolicy();
+    reading = 'work-revision';
     const head = await readHeadSha(lane.worktreePath || lane.repoPath, lane.repoPath);
     input.headSha = head;
+    reading = 'review-risk';
     const base = await resolveLaneAttributionBase(lane, lane.worktreePath || lane.repoPath, head);
     const comparison = base.mergeBase ?? base.comparisonRef;
     if (!comparison) throw new Error('diff base unreadable');
@@ -58,7 +63,9 @@ export async function readEffectivePolicy(id: string) {
       laneGit(lane.worktreePath || lane.repoPath, lane.repoPath, ['diff', '--no-color', '-U2', range]),
     ]);
     input.risk = classifyReviewRisk(names.stdout.split('\0').filter(Boolean), extractAddedDiffLines(diff.stdout));
+    reading = 'durable-review';
     input.review = await assessDurableApprovedReview(lane, head);
+    reading = 'packet-policy';
     const entry = lane.packetId ? findMissionRegistryEntryByPacketId(lane.packetId, { includeArchived: true }) : null;
     const packet = readOrchestratorControlPlaneState().packets.find(packet => packet.id === lane.packetId)
       ?? entry?.mission.packets.find(packet => packet.id === lane.packetId);
@@ -66,6 +73,7 @@ export async function readEffectivePolicy(id: string) {
       input.correctionBounds = readReviewCorrectionBounds(packet);
       if (packet.queueState === 'held') input.holds.push({ source: 'packet-hold', precedence: 'saved', reason: 'The packet is held.' });
     }
+    else input.errors.push('The packet correction budget could not be resolved for this work revision.');
     if (packet?.mergeHold === true || isPacketMergeHeld(lane.packetId)) input.holds.push({ source: 'merge-hold', precedence: 'saved', reason: 'Merging is held for the operator.' });
     try { assertSessionMergeAllowed(lane.packetId); }
     catch { input.holds.push({ source: 'session-restriction', precedence: 'saved', reason: 'Session merge restrictions require operator inspection.' }); }
@@ -74,7 +82,7 @@ export async function readEffectivePolicy(id: string) {
       input.errors.push('Work revision changed during the policy read; read it again.');
     }
   } catch {
-    input.errors.push('Policy state is unreadable; restore the policy and work revision before continuing.');
+    input.errors.push(`${reading} state is unreadable; maintainer inspection is required before continuing.`);
   }
   return composeEffectivePolicy(input);
 }
