@@ -9,6 +9,8 @@ import { initialChatState, receiveEvent, safeText, type ChatRoute } from './stat
 import { Composer, Transcript, Welcome, composerLines, palette, transcriptLines, type ViewLine } from './view.js';
 import { terminalInput } from './terminal-input.js';
 import { attachmentPaths, attachmentTurn, pastedAttachmentPaths, stageAttachments, type Attachment } from './attachments.js';
+import { createTerminalStatusReporter } from '../terminal-status.js';
+import { chatStatusReport, nextReplyReady } from './tab-status.js';
 
 const HELP = [
   '/help        This guide',
@@ -74,6 +76,8 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
   const savedDraft = useRef('');
   const exitArmed = useRef(0);
 
+  const tabStatus = useRef(createTerminalStatusReporter({ human: true, verbose: false }));
+  const tabTurn = useRef({ busy: false, replyReady: false });
   const turnEpoch = useRef(0);
   const historyRequest = useRef(0);
   const recovering = useRef(false);
@@ -183,6 +187,12 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
     // A ChatApp owns one route for its entire mounted lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const failed = Boolean(state.error);
+  useEffect(() => {
+    const replyReady = nextReplyReady(tabTurn.current, { busy: state.busy, connection });
+    tabTurn.current = { busy: state.busy, replyReady };
+    tabStatus.current.report(chatStatusReport({ connection, busy: state.busy, error: failed, replyReady }));
+  }, [state.busy, failed, connection]);
 
   const interrupt = () => {
     try { clientRef.current?.interrupt(); setHint('Stop requested. Waiting for o8 to confirm.'); }
@@ -341,6 +351,8 @@ export async function startChat(cfg: ResolvedConfig, route: ChatRoute, history: 
   finally {
     app.unmount(); terminal.close(); restore();
     process.off('SIGTERM', terminate); process.off('SIGHUP', terminate);
+    // Leaving chat removes its mark from the tab. Active work continues in o8.
+    createTerminalStatusReporter({ human: true, verbose: false }).report({ state: 'clear' });
   }
   process.stdout.write(`\nResume this conversation: o8 chat --resume ${route.threadId}\n`);
 }
