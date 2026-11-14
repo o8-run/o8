@@ -16,9 +16,16 @@ import { CliError, EXIT } from '../api.js';
 
 export const PANE_LIMIT_DEFAULT = 8;
 export const PANE_LIMIT_MAX = 16;
-const TAB_LABEL = 'o8 workers';
-/** Only a pane with exactly this label shape is treated as one this command opened. */
-const PANE_LABEL_PREFIX = 'o8 terminal ';
+const TAB_LABEL = 'o8 terminals';
+/**
+ * A pane's label reads `o8: <title> [<id>]`, with the title first so it stays
+ * visible when the pane header is cut short. Only a label of exactly this
+ * shape is treated as a pane this command opened, and the bracketed part
+ * identifies the terminal.
+ */
+const PANE_LABEL_PREFIX = 'o8: ';
+const PANE_LABEL = /^o8: (?:.* )?\[([A-Za-z0-9][A-Za-z0-9 _.:@+/-]*)\]$/;
+const TITLE_MAX = 48;
 /** A session ID is one command word and part of a label. This bounds what it may be. */
 const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}$/;
 /** A saved machine's label or ID: one command word that can never read as a flag. */
@@ -29,8 +36,14 @@ const CONTROL_CHARACTER = /[\x00-\x1f\x7f]/;
 
 export type PaneExec = (file: string, args: string[]) => string;
 
+/** A live terminal to show: its session ID, and a title when o8 knows one. */
+export interface PaneTerminal {
+  id: string;
+  title?: string | null;
+}
+
 export interface TerminalPanesInput {
-  sessionIds: string[];
+  terminals: PaneTerminal[];
   limit: number;
   machineKey?: string | null;
   env: Readonly<Record<string, string | undefined>>;
@@ -84,9 +97,21 @@ function rex(exec: PaneExec, args: string[], what: string): string {
   }
 }
 
-/** A pane's label names its terminal, and its machine when the terminal is remote. */
-export function paneLabel(id: string, machineKey?: string | null): string {
-  return machineKey ? `${PANE_LABEL_PREFIX}${machineKey}/${id}` : `${PANE_LABEL_PREFIX}${id}`;
+/** The part of a label that identifies a terminal: its ID, and its machine when remote. */
+function paneKey(id: string, machineKey?: string | null): string {
+  return machineKey ? `${machineKey}/${id}` : id;
+}
+
+/** One plain, short line. A title can come from a packet, so it is treated as untrusted text. */
+function paneTitle(raw: string | null | undefined): string {
+  const plain = (raw ?? '').replace(/[\x00-\x1f\x7f-\x9f\[\]]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return plain.length > TITLE_MAX ? `${plain.slice(0, TITLE_MAX - 1).trimEnd()}…` : plain;
+}
+
+/** A pane's label: the terminal's title, then the key that identifies it. */
+export function paneLabel(terminal: PaneTerminal, machineKey?: string | null): string {
+  const title = paneTitle(terminal.title);
+  return `${PANE_LABEL_PREFIX}${title ? `${title} ` : ''}[${paneKey(terminal.id, machineKey)}]`;
 }
 
 /** The command one pane runs: this CLI, observing one terminal, read-only. */
@@ -149,9 +174,13 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
   const session = validate(input);
   const exec = input.exec ?? defaultExec;
   const limit = Math.max(1, Math.min(PANE_LIMIT_MAX, Math.floor(input.limit) || PANE_LIMIT_DEFAULT));
-  const label = (id: string) => paneLabel(id, input.machineKey);
+  const key = (id: string) => paneKey(id, input.machineKey);
 
-  const unique = [...new Set(input.sessionIds)];
+  const titles = new Map<string, string | null | undefined>();
+  for (const terminal of input.terminals) {
+    if (!titles.has(terminal.id) || (terminal.title && !titles.get(terminal.id))) titles.set(terminal.id, terminal.title);
+  }
+  const unique = [...titles.keys()];
   const safe = unique.filter((id) => SAFE_SESSION_ID.test(id));
   const skipped = unique.filter((id) => !SAFE_SESSION_ID.test(id));
 
@@ -160,24 +189,25 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
     'pane list',
   );
   const panes: string[] = [];
-  const paneByLabel = new Map<string, string>();
+  const paneByKey = new Map<string, string>();
   for (const block of listed.blocks ?? []) {
     if (typeof block.block_id !== 'string' || typeof block.label !== 'string') continue;
     if (block.placement !== undefined && block.placement !== 'placed') continue;
-    if (!block.label.startsWith(PANE_LABEL_PREFIX)) continue;
+    const match = PANE_LABEL.exec(block.label);
+    if (!match) continue;
     panes.push(block.block_id);
-    paneByLabel.set(block.label, block.block_id);
+    paneByKey.set(match[1], block.block_id);
   }
 
-  const existing = safe.filter((id) => paneByLabel.has(label(id)));
-  const wanted = safe.filter((id) => !paneByLabel.has(label(id)));
+  const existing = safe.filter((id) => paneByKey.has(key(id)));
+  const wanted = safe.filter((id) => !paneByKey.has(key(id)));
   const opened: TerminalPanesResult['opened'] = [];
   let error: string | null = null;
 
   for (const id of wanted) {
     if (panes.length >= limit) break;
     try {
-      const run = ['--label', label(id), '--focus=false', '--json', '--', ...observeCommand(input, id)];
+      const run = ['--label', paneLabel({ id, title: titles.get(id) }, input.machineKey), '--focus=false', '--json', '--', ...observeCommand(input, id)];
       const first = panes.length === 0;
       const index = panes.length;
       const raw = first

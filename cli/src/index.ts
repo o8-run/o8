@@ -258,7 +258,7 @@ commands:
   terminal observe <id>  read-only live stream from an existing terminal
   terminal control <id>  exclusive input/output to an existing terminal; --human for interactive mode
   terminal wait <id> --match <text> [--timeout ms]  wait read-only for output already present or arriving later
-  terminal panes [--limit N] [--machine <label-or-id>]  open one read-only pane per live terminal in the Rex session you are in
+  terminal panes [--limit N] [--machine <label-or-id>]  open one read-only pane per running worker and live shell in the Rex session you are in
   terminal ... --machine <label-or-id>  run terminal commands on a saved SSH machine
   machine add <target> --label <name>  save a verified SSH terminal machine; optional --port, --ssh-config
   machine list|check|rename|disable|enable|remove  manage saved SSH machines
