@@ -66,4 +66,3 @@ pub fn write_port_file(dir: &str, name: &str, port: u16) -> std::io::Result<()> 
     let path = format!("{}/{}", dir, name);
     std::fs::write(path, port.to_string())
 }
-

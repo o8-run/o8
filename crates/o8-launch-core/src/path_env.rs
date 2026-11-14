@@ -31,4 +31,3 @@ pub fn augment_process_path(login_path: &str) {
     );
     std::env::set_var("PATH", merged);
 }
-
