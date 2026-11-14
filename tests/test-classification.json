@@ -4214,6 +4214,13 @@
       ]
     },
     {
+      "path": "tests/linux-gpui-publication-policy.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "tests/linux-native-addon-abis.test.ts",
       "reasons": [
         "child-process"
