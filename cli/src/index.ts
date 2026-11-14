@@ -66,6 +66,7 @@ import { runStatus } from './commands/status.js';
 import { runSession } from './commands/session.js';
 import { runRun } from './commands/run.js';
 import { runTerminal } from './commands/terminal.js';
+import { maybeSetUpRexShortcut } from './rex-auto-shortcut.js';
 import { runMachine } from './commands/machine.js';
 import { runServe } from './commands/serve.js';
 import { runVersion } from './commands/version.js';
@@ -621,6 +622,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
 }
 
 const parsed = parseArgs(process.argv.slice(2));
+// Inside Rex, the first command a person runs adds the "Show o8 Terminals" shortcut.
+if (!parsed.help && !parsed.version) maybeSetUpRexShortcut(parsed.command);
 try {
   const code = await dispatch(parsed);
   await exitAfterFlush(code);
