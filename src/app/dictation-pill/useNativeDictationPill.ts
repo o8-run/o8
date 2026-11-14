@@ -14,10 +14,15 @@ export const IDLE_SNAPSHOT: DictationSnapshot = {
   partialTranscript: '',
 };
 
-/** Dock capsules the native panel draws besides dictation. */
-export type NativeCapsuleState = 'speaking' | 'working' | 'voice';
+/** Dock capsules the native panel draws besides dictation. `workers` is the
+ * fleet orbit or its expanded capsule; `extras` is the edit chip and/or glint
+ * with no capsule above them. */
+export type NativeCapsuleState = 'speaking' | 'working' | 'voice' | 'workers' | 'extras';
+/** The fleet detail DockNotchSurface draws. */
+export interface DockWorkers { count: number; working: number; waiting: number; label: string; repos: string[] }
 /** One frame for the native panel: a dictation snapshot or one capsule. `handoff`
- * marks an idle frame whose surface moved to a still-web dock state. */
+ * marks an idle frame whose surface moved to a still-web dock state. `edit` and
+ * `glint` are drawn below whatever the frame draws. */
 export type NativeDockSnapshot = Omit<DictationSnapshot, 'state'> & {
   state: DictationState | NativeCapsuleState;
   paused?: boolean;
@@ -26,14 +31,31 @@ export type NativeDockSnapshot = Omit<DictationSnapshot, 'state'> & {
   startedAt?: number;
   connecting?: boolean;
   handoff?: boolean;
+  edit?: { id: number; app: string; status: string; until: number };
+  glint?: { key: string; text: string; tone: string; fadeAt: number; until: number };
+  workers?: DockWorkers;
+  expanded?: boolean;
 };
-/** A click the native panel reports; the web dock runs the matching command. */
-export type NativeDockAction = { session: number; state: NativeCapsuleState; action: 'pause' | 'stop' | 'speed' | 'voice-stop' | 'interrupt'; value?: number | null };
+/** A click the native panel reports; the web dock runs the matching command. A
+ * revert names the chip (`edit`) as well as the frame it was drawn under. */
+export type NativeDockAction = {
+  session: number; state: NativeDockSnapshot['state'];
+  action: 'pause' | 'stop' | 'speed' | 'voice-stop' | 'interrupt' | 'workers-expand' | 'revert'; value?: number | null; edit?: number;
+};
 
-const CAPSULE_ACTIONS: Record<NativeDockAction['action'], NativeCapsuleState> = {
-  pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice',
+const CAPSULE_ACTIONS: Record<Exclude<NativeDockAction['action'], 'revert'>, NativeCapsuleState> = {
+  pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice', 'workers-expand': 'workers',
 };
-const family = (state: NativeDockSnapshot['state']) => state === 'speaking' || state === 'working' || state === 'voice' ? state : 'dictation';
+const CAPSULES = new Set<string>(['speaking', 'working', 'voice', 'workers', 'extras']);
+const family = (state: NativeDockSnapshot['state']) => CAPSULES.has(state) ? state : 'dictation';
+/** Static frames draw nothing that changes between events, so they hold the
+ * panel for up to `staticMs` and send a keep-alive only when they outlast it. */
+const isStatic = (state: NativeDockSnapshot['state']) => state === 'workers' || state === 'extras';
+function holdFor(frame: NativeDockSnapshot, now: number) {
+  if (!isStatic(frame.state)) return undefined;
+  const ends = frame.state === 'extras' ? Math.max(frame.edit?.until ?? 0, frame.glint?.until ?? 0) - now : Infinity;
+  return Math.max(0, Math.min(timing.staticMs, ends));
+}
 
 /** Keep retained controls below the native capsule without reasserting a quiet window. */
 export function useNativePillDockExtent(native: boolean, active: boolean, visible: boolean, askOpen: boolean, suppressed: boolean, invoke: (command: string, args: Record<string, unknown>) => void) {
@@ -59,6 +81,8 @@ export function useNativeDictationPill(
   const [native, setNative] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
   const active = snapshot.state !== 'idle';
+  // A static frame changes only on events, so each change wakes the feed.
+  const staticKey = native && isStatic(snapshot.state) ? JSON.stringify(snapshot) : '';
   const latest = useRef({
     snapshot, session, onFinish, onAction, native, active: false, family: family(snapshot.state),
     generation: 0, retirement: 0, retiredGeneration: 0, retiredSession: session, retiredFamily: family(snapshot.state),
@@ -93,6 +117,10 @@ export function useNativeDictationPill(
     let retirementSeen = 0;
     let releasePending = false;
     let disabled = false;
+    // Set only by a reply that says the flag is on. Until then a fleet orbit,
+    // chip or glint never starts a request (a failed probe retries at the next
+    // dictation or capsule session, as before).
+    let enabled = false;
     let frameTimer: ReturnType<typeof setTimeout> | undefined;
 
     let unlisten: (() => void) | undefined;
@@ -153,7 +181,7 @@ export function useNativeDictationPill(
       else if (current.active) {
         if (current.native) action = 'frame';
         else {
-          if (attempted === generation) return;
+          if (attempted === generation || isStatic(current.snapshot.state) && !enabled) return;
           attempted = generation;
           action = 'prepare';
         }
@@ -168,15 +196,21 @@ export function useNativeDictationPill(
       pending = false;
       try {
         const frame = current.snapshot;
+        const holdMs = action === 'frame' ? holdFor(frame, Date.now()) : undefined;
         const reply = await request({ action, checkSettings, snapshot: action === 'frame' ? {
           state: frame.state, session: current.session,
           audioLevel: frame.audioLevel, durationMs: frame.durationMs,
           pastedText: bounded(frame.pastedText ?? undefined, 4000), error: bounded(frame.error ?? undefined, 1000),
           paused: frame.paused, speed: frame.speed, tool: bounded(frame.tool, 200),
           startedAt: frame.startedAt, connecting: frame.connecting,
+          edit: frame.edit && { ...frame.edit, app: bounded(frame.edit.app, 120) },
+          glint: frame.glint && { ...frame.glint, key: undefined, text: bounded(frame.glint.text, 200) },
+          workers: frame.workers && { ...frame.workers, label: bounded(frame.workers.label, 20), repos: frame.workers.repos.slice(0, 4).map(repo => bounded(repo, 60)) },
+          expanded: frame.expanded, holdMs,
         } : undefined,
         ...(action === 'release' ? { session: releaseSession, kind: releaseKind, immediate: current.snapshot.handoff === true } : {}) });
         if (disposed) return;
+        if (reply.enabled === true) enabled = true;
         if (generation !== latest.current.generation) { pending = true; return; }
         if (!reply.native) {
           if (reply.enabled === false) disabled = true;
@@ -192,14 +226,22 @@ export function useNativeDictationPill(
           if (!quiet && latest.current.native && reply.finishSession === latest.current.session
             && latest.current.snapshot.state === 'recording') latest.current.onFinish();
           // Each reported click runs once, only for the capsule still on screen.
+          let reverted = false;
           for (const clicked of Array.isArray(reply.actions) ? reply.actions as NativeDockAction[] : []) {
             const now = latest.current;
-            if (quiet || disposed || !now.native || clicked?.session !== now.session) continue;
-            if (CAPSULE_ACTIONS[clicked.action] !== now.snapshot.state || clicked.state !== now.snapshot.state) continue;
+            if (quiet || disposed || !now.native || clicked?.session !== now.session || clicked.state !== now.snapshot.state) continue;
+            if (clicked.action === 'revert') {
+              // The chip on screen, still offering Revert; at most one per reply.
+              if (reverted || now.snapshot.edit?.id !== clicked.edit || now.snapshot.edit?.status !== 'ready') continue;
+              reverted = true;
+            } else if (CAPSULE_ACTIONS[clicked.action] !== now.snapshot.state) continue;
             if (clicked.action === 'voice-stop' && now.snapshot.connecting) continue;
             now.onAction?.(clicked);
           }
-          if (!pending && latest.current.active) frameTimer = setTimeout(() => { void pump(); }, 100);
+          // Active frames keep the 100 ms keep-alive. A static frame needs one
+          // only if it outlasts its hold; otherwise events and retirement wake the feed.
+          const keepAlive = holdMs === undefined ? 100 : holdMs >= timing.staticMs ? timing.staticMs - 1000 : null;
+          if (!pending && latest.current.active && keepAlive !== null) frameTimer = setTimeout(() => { void pump(); }, keepAlive);
         }
       } catch {
         if (!disposed) {
@@ -232,6 +274,7 @@ export function useNativeDictationPill(
       if (disposed) return;
       probed = true;
       if (initial.enabled === false) { disabled = true; return; }
+      if (initial.enabled === true) enabled = true;
       if (!initial.native) blocked = generation;
       const [{ listen }, { invoke }] = await Promise.all([import('@tauri-apps/api/event'), import('@tauri-apps/api/core')]);
       let revision = 0;
@@ -261,6 +304,6 @@ export function useNativeDictationPill(
       unlisten?.();
     };
   }, []);
-  useEffect(() => { wake.current?.(); }, [active, session, native, suppressed, snapshot.state]);
+  useEffect(() => { wake.current?.(); }, [active, session, native, suppressed, snapshot.state, staticKey]);
   return { native, suppressed };
 }

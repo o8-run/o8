@@ -42,13 +42,21 @@ export async function POST(request: NextRequest) {
   }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
-const ACTIONS: Record<string, string> = { pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice' };
+const ACTIONS: Record<string, string> = {
+  pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice', 'workers-expand': 'workers',
+};
+/** Frames the edit chip can be drawn under; a revert names one of them and its chip. */
+const CHIP_FRAMES = new Set(['requesting-mic', 'recording', 'transcribing', 'polishing', 'success', 'error', 'speaking', 'working', 'voice', 'workers', 'extras']);
 
 /** Click intents from the native panel; only well-formed capsule intents pass. */
 function capsuleActions(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 8).flatMap((item: Record<string, unknown> | null) => {
+  return value.slice(0, 8).flatMap((item: Record<string, unknown> | null): Record<string, unknown>[] => {
     if (!item || typeof item !== 'object' || typeof item.session !== 'number' || typeof item.action !== 'string') return [];
+    if (item.action === 'revert') {
+      if (!CHIP_FRAMES.has(String(item.state)) || !Number.isSafeInteger(item.edit)) return [];
+      return [{ session: item.session, state: item.state, action: 'revert', value: null, edit: item.edit }];
+    }
     if (!Object.hasOwn(ACTIONS, item.action) || ACTIONS[item.action] !== item.state) return [];
     const value = typeof item.value === 'number' && Number.isFinite(item.value) ? item.value : null;
     if (item.action === 'speed' && value === null) return [];

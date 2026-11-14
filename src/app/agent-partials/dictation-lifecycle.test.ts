@@ -159,7 +159,7 @@ describe('native Fn dictation surfaces', () => {
     });
     expect((dock.firstElementChild as HTMLElement).style.display).toBe('flex');
   });
-  it('hands pure dictation to native only after prepare, and keeps the web edit chip available', async () => {
+  it('hands pure dictation to native only after prepare, with the edit chip drawn natively below it', async () => {
     const frames: Record<string, unknown>[] = [];
     vi.mocked(fetch).mockImplementation(async (_url, init) => {
       const body = JSON.parse(String(init?.body ?? '{}'));
@@ -179,9 +179,12 @@ describe('native Fn dictation surfaces', () => {
     await act(async () => {
       bus.get('o8:edit-applied')?.forEach(callback => callback({ payload: { app: 'Fixture' } }));
     });
-    expect((dock.firstElementChild as HTMLElement).style.display).toBe('flex');
-    expect(dock.textContent).toContain('Revert');
-    expect((dock.firstElementChild as HTMLElement).style.paddingTop).toBe('60px');
+    await wait(200);
+    // Batch 3: the chip goes with the native dictation capsule, so the web dock stays hidden.
+    expect((dock.firstElementChild as HTMLElement).style.display).toBe('none');
+    expect(dock.textContent).not.toContain('Revert');
+    expect(frames.some(frame => frame.action === 'frame' && (frame.snapshot as { state?: string; edit?: { app?: string; status?: string } })?.state === 'recording'
+      && (frame.snapshot as { edit?: { app?: string; status?: string } }).edit?.app === 'Fixture')).toBe(true);
     expect(listeningAtNotch()).toBeNull();
     for (const [type, state] of [['final', 'transcribing'], ['audio_file', 'polishing'], ['system-pasted', 'success']] as const) {
       await event(type, { sessionId: 501, text: 'Delivered words.' });

@@ -1,1 +1,1 @@
-{ "requestMs": 500, "pipeMs": 450, "expiryMs": 750 }
+{ "requestMs": 500, "pipeMs": 450, "expiryMs": 750, "staticMs": 5000 }

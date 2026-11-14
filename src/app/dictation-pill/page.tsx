@@ -17,7 +17,7 @@ import {
 } from '@/lib/presentation/parked-lanes-snapshot';
 import { useMicLevel } from '@/components/desktop/dictation/useMicLevel';
 import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurface';
-import { formatPlanProgressGlint, type PlanProgressEvent, type PlanProgressGlint } from '@/components/desktop/dictation/planPresentation';
+import { formatPlanProgressGlint, type PlanProgressEvent } from '@/components/desktop/dictation/planPresentation';
 import { useDockFileDrop, type StagedChip } from '@/components/desktop/dictation/useDockFileDrop';
 import { useAgentConfirmations } from '@/components/desktop/dictation/useAgentConfirmations';
 import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
@@ -25,7 +25,7 @@ import type { DictationSnapshot, DictationState } from '@/components/desktop/dic
 import { EditRevertChip } from './EditRevertChip';
 import { IDLE_SNAPSHOT } from './useNativeDictationPill';
 import { useNativeDock } from './nativeDockFrame';
-import { DockGlint } from './DockGlint';
+import { DockGlint, useDockGlint } from './DockGlint';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +60,6 @@ type TtsControlState = 'idle' | 'playing' | 'paused';
 type AskMode = 'idle' | 'listening' | 'answer';
 type WorkerSnapshot = { count: number; working: number; waiting: number; repos: string[] };
 type ParkedLaneSnapshot = { waiting: number; repos: string[]; tooltip: string | null; receivedAt: number };
-type DockGlint = PlanProgressGlint;
 const ASK_IDLE_COLLAPSE_MS = 45_000; // auto-collapse the panel after idle
 const ASK_RESUME_WINDOW_MS = 60_000; // preserve the thread if reopened within
 const ASK_MAX_TURNS = 16; // 8 exchanges before trimming the oldest
@@ -611,29 +610,8 @@ export default function DictationPillPage() {
     setAgentConfirm(null);
   }, [setAgentConfirm]);
 
-  // Memory glint (dossier #4): a quiet one-line chip under the dock that fades
-  // in, holds ~4s, fades out. Driven by `kind: glint` agent events.
-  const [glint, setGlint] = useState<DockGlint | null>(null);
-  const [glintFading, setGlintFading] = useState(false);
-  const glintTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const showGlint = useCallback((
-    text: string,
-    options: { key?: string; tone?: DockGlint['tone'] } = {},
-  ) => {
-    for (const t of glintTimersRef.current) clearTimeout(t);
-    glintTimersRef.current = [];
-    setGlint({
-      key: options.key ?? 'ambient',
-      text,
-      tone: options.tone ?? 'progress',
-    });
-    setGlintFading(false);
-    glintTimersRef.current.push(setTimeout(() => setGlintFading(true), 4200));
-    glintTimersRef.current.push(setTimeout(() => { setGlint(null); setGlintFading(false); }, 4800));
-  }, []);
-  useEffect(() => {
-    return () => { for (const t of glintTimersRef.current) clearTimeout(t); };
-  }, []);
+  // Memory glint (dossier #4), timed in useDockGlint.
+  const { glint, fading: glintFading, showGlint } = useDockGlint();
 
   // Fleet visibility (dossier #8): worker-pulse pushes `o8:worker-status`;
   // the idle sliver carries the orbit + count, tap expands the detail capsule.
@@ -854,13 +832,33 @@ export default function DictationPillPage() {
   // click-through except while the cursor is over the PAINTED pill. Report the
   // content wrapper's rect on every morph (ResizeObserver fires through the
   // 0.5s geometry transition; rAF-throttled so we invoke at most per-frame).
-  const [editVisible, setEditVisible] = useState(false);
-  const { native: nativeDictation, nativeActive, nativeCapsule, webSnapshot, webTts, webRealtime, webAgentWorking, dockVisible } = useNativeDock({
+  const displayedWaiting = parkedWorkers?.waiting ?? workers.waiting;
+  const displayedWorkers = {
+    count: parkedWorkers ? workers.working + displayedWaiting : workers.count,
+    working: workers.working,
+    waiting: displayedWaiting,
+    repos: parkedWorkers
+      ? Array.from(new Set([...workers.repos, ...parkedWorkers.repos])).filter(Boolean).slice(0, 4)
+      : workers.repos,
+    waitingLabel: parkedWorkers ? 'ready' : 'waiting',
+    tooltip: parkedWorkers?.tooltip ?? null,
+  };
+  // Tap the resting sliver while the worker orbit is up → transient capsule
+  // naming the in-flight packets (dossier #8). The native orbit reports the same tap.
+  const expandWorkers = useCallback(() => {
+    if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen && !agentWorking && displayedWorkers.count > 0) {
+      setShowWorkers(true);
+      if (showWorkersTimerRef.current) clearTimeout(showWorkersTimerRef.current);
+      showWorkersTimerRef.current = setTimeout(() => setShowWorkers(false), 5000);
+    }
+  }, [snapshot.state, ttsState, askOpen, agentWorking, displayedWorkers.count]);
+  const dock = useNativeDock({
     snapshot, dictationSession: startTimeRef.current, ttsState, askOpen, agentConfirm: !!agentConfirm, agentWorking, dropActive, showWorkers,
-    stagedFiles: !!stagedChips?.length, workerCount: parkedWorkers ? workers.working + parkedWorkers.waiting : workers.count, realtimeVoice, speechSpeed, agentTool, agentStartedAt,
-  }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, invokeCmd }, {
-    topPillEnabled, editVisible, glint: !!glint, staged: !!stagedChips, fleet: workers.count > 0 || (parkedWorkers?.waiting ?? 0) > 0,
-  });
+    stagedFiles: !!stagedChips?.length, workerCount: displayedWorkers.count, realtimeVoice, speechSpeed, agentTool, agentStartedAt, glint,
+    workers: { count: displayedWorkers.count, working: displayedWorkers.working, waiting: displayedWaiting, label: displayedWorkers.waitingLabel, repos: displayedWorkers.repos },
+  }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, invokeCmd, onError: dockLog },
+  { topPillEnabled, staged: !!stagedChips });
+  const { native: nativeDictation, nativeActive, nativeCapsule, webSnapshot, webTts, webRealtime, webAgentWorking, dockVisible } = dock;
   const hitRectHostRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!isTauri()) return;
@@ -904,18 +902,6 @@ export default function DictationPillPage() {
     };
   }, []);
 
-  const displayedWaiting = parkedWorkers?.waiting ?? workers.waiting;
-  const displayedWorkers = {
-    count: parkedWorkers ? workers.working + displayedWaiting : workers.count,
-    working: workers.working,
-    waiting: displayedWaiting,
-    repos: parkedWorkers
-      ? Array.from(new Set([...workers.repos, ...parkedWorkers.repos])).filter(Boolean).slice(0, 4)
-      : workers.repos,
-    waitingLabel: parkedWorkers ? 'ready' : 'waiting',
-    tooltip: parkedWorkers?.tooltip ?? null,
-  };
-
   return (
     <div
       style={{
@@ -940,15 +926,7 @@ export default function DictationPillPage() {
       <div
         style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
         onMouseMove={() => { if (askOpenRef.current) armAskIdleTimer(); }}
-        onClick={() => {
-          // Tap the resting sliver while the worker orbit is up → transient
-          // capsule naming the in-flight packets (dossier #8).
-          if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen && !agentWorking && displayedWorkers.count > 0) {
-            setShowWorkers(true);
-            if (showWorkersTimerRef.current) clearTimeout(showWorkersTimerRef.current);
-            showWorkersTimerRef.current = setTimeout(() => setShowWorkers(false), 5000);
-          }
-        }}
+        onClick={expandWorkers}
         onDoubleClick={() => {
           // Double-tap the IDLE dock to open the standalone Voice settings
           // window (Symon parity — works even with the main app closed). Gated
@@ -983,21 +961,21 @@ export default function DictationPillPage() {
             onAgentConfirm={handleAgentConfirm}
             dropActive={dropActive}
             stagedFiles={stagedChips}
-            workerCount={displayedWorkers.count}
+            workerCount={dock.webWorkerCount}
             workerWorking={displayedWorkers.working}
             workerWaiting={displayedWorkers.waiting}
             workerWaitingLabel={displayedWorkers.waitingLabel}
             workerTooltip={displayedWorkers.tooltip}
             workerRepos={displayedWorkers.repos}
-            showWorkers={showWorkers}
+            showWorkers={dock.webShowWorkers}
             panelPending={nativeDictation ? null : panelPending}
             realtimeVoice={webRealtime}
             onStopRealtime={stopRealtimeVoice}
             onFinishDictation={finishSystemDictation}
           />}
-          <EditRevertChip onError={dockLog} onVisible={setEditVisible} />
+          <EditRevertChip edit={dock.webEdit} onRevert={dock.revertEdit} />
         </div>
-        {glint ? <DockGlint key={glint.key} glint={glint} fading={glintFading} /> : null}
+        {dock.webGlint ? <DockGlint key={dock.webGlint.key} glint={dock.webGlint} fading={glintFading} handedBack={dock.webGlintHandedBack} /> : null}
       </div>
     </div>
   );
