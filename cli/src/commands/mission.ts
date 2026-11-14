@@ -380,6 +380,9 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
       cfg,
       '/api/orchestrator/dispatch',
       { missionId: result.missionId, wait: false, idempotencyKey: randomUUID() },
+      // The server answers `queued` once it has admitted the dispatch, and keeps
+      // answering that while workers launch. That is this command's answer too.
+      { acceptQueuedAdmission: true },
     );
     dispatch = unwrap(dispatchResponse.data, 'Mission dispatch was rejected.');
   }
@@ -390,7 +393,7 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
     printHumanKv([
       ['mission', result.missionId],
       ['packets', String(result.packets.length)],
-      ...(dispatch ? [['dispatch', dispatch.initiated === false ? 'not initiated' : 'initiated']] as Array<[string, string]> : []),
+      ...(dispatch ? [['dispatch', dispatch.initiated === false ? 'not initiated' : dispatch.status === 'queued' ? 'admitted, awaiting launch' : 'initiated']] as Array<[string, string]> : []),
       ...result.packets.map((p) => [`  · ${p.id}`, `${p.title} (wave ${p.wave})`] as [string, string]),
     ]);
   } else {

@@ -21,6 +21,39 @@ afterEach(() => {
   delete process.env.O8_API_PORT;
 });
 
+describe('o8 mission create --dispatch', () => {
+  it('returns as soon as the server has admitted the dispatch, without asking again', async () => {
+    process.env.O8_API_PORT = '47120';
+    const queued = { ok: true, result: { status: 'queued', initiated: true, missionId: 'mission-effort-pin', note: 'Dispatch admitted.' } };
+    const fetchMock = vi.fn(async (url: string | URL) => (String(url).includes('/api/orchestrator/dispatch')
+      ? new Response(JSON.stringify(queued), { status: 200 })
+      : new Response(JSON.stringify(missionResponse()), { status: 201 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+
+    await expect(runMission(mode, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch'])).resolves.toBe(0);
+
+    const paths = fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
+    expect(paths).toEqual(['/api/orchestrator/create-mission', '/api/orchestrator/dispatch']);
+    expect(JSON.parse(written.join('')).dispatch).toMatchObject({ status: 'queued', initiated: true });
+  });
+
+  it('says the dispatch was admitted in human output', async () => {
+    process.env.O8_API_PORT = '47120';
+    const queued = { ok: true, result: { status: 'queued', initiated: true, missionId: 'mission-effort-pin' } };
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => (String(url).includes('/api/orchestrator/dispatch')
+      ? new Response(JSON.stringify(queued), { status: 200 })
+      : new Response(JSON.stringify(missionResponse()), { status: 201 }))));
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+
+    await expect(runMission({ human: true, verbose: false }, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch']))
+      .resolves.toBe(0);
+    expect(written.join('')).toContain('admitted, awaiting launch');
+  });
+});
+
 describe('o8 mission create --effort', () => {
   it('carries a valid --effort pin into the create-mission request body', async () => {
     process.env.O8_API_PORT = '47120';
