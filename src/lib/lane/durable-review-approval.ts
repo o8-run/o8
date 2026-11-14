@@ -226,13 +226,13 @@ const UNCOMMITTED_PATHS_SHOWN = 10;
  * Paths with uncommitted changes (tracked or untracked, respecting ignores).
  * Returns null when git cannot answer, so callers fail closed.
  */
-async function listUncommittedPaths(cwd: string): Promise<string[] | null> {
+async function listUncommittedPaths(cwd: string, readOnly = false): Promise<string[] | null> {
   const { execFile } = await import('@/lib/providers/child-process');
   const { promisify } = await import('node:util');
   try {
     const { stdout } = await promisify(execFile)(
       resolveGitBinary(),
-      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+      [...(readOnly ? ['--no-optional-locks'] : []), 'status', '--porcelain=v1', '-z', '--untracked-files=all'],
       { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 },
     );
     const entries = stdout.split('\0');
@@ -261,6 +261,9 @@ function formatUncommittedPaths(paths: string[]): string {
 export async function assessDurableApprovedReview(
   lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'baseBranch' | 'runtime'>,
   candidateSha?: string,
+  // Policy projections explicitly leave coverage unevaluated. Execution callers
+  // keep the full gate, including its existing attribution-base resolution.
+  options: { readOnly?: boolean } = {},
 ): Promise<DurableReviewAssessment> {
   try {
     const [{ listApprovalsForContext }, { normalizeHeadSha, readHeadSha }] = await Promise.all([
@@ -323,7 +326,7 @@ export async function assessDurableApprovedReview(
       && latestReview.args?.approved !== false && reviewFindingsAreResolved(latestReview);
     // Coverage is independent of pending passes and dirty edits. Report it even
     // when another prerequisite withholds the review's merge authorization.
-    const coverage = reviewAuthorized ? await assessContractCoverage(lane, latestReview, currentHead) : null;
+    const coverage = reviewAuthorized && !options.readOnly ? await assessContractCoverage(lane, latestReview, currentHead) : null;
     if (
       latestReview.status === 'approved'
       && latestReview.args?.approved !== false
@@ -354,7 +357,7 @@ export async function assessDurableApprovedReview(
     // The review approves the commit at its pinned HEAD and nothing else. Edits
     // left in the worktree after that commit would be auto-committed into the
     // publication, so they withhold authorization until committed and reviewed.
-    const uncommitted = await listUncommittedPaths(cwd);
+    const uncommitted = await listUncommittedPaths(cwd, options.readOnly);
     if (uncommitted === null) {
       return { approved: false, diffBudgetWaived, highConfidence: false, approvalId: null, contractCoverage: coverage, reason: 'Uncommitted worktree changes could not be checked against the reviewed HEAD.' };
     }

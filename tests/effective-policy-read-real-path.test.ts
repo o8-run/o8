@@ -118,7 +118,8 @@ it('reports exhausted persisted correction bounds', async () => {
   writeFileSync(join(dataDir, 'settings.toml'), '[review]\nrequire_approval = "always"\n');
   persist(false, 2);
   const policy = await (await read()).json();
-  expect(policy.correctionBounds.value).toEqual({ maximum: 2, used: 2 });
+  expect(policy.correctionBounds.maximum.value).toBe(2);
+  expect(policy.correctionBounds.used.value).toBe(2);
   expect(policy.holds.value).toEqual(expect.arrayContaining([expect.objectContaining({ source: 'correction-bounds' })]));
   expect(policy.nextAction.value).toBe('human');
 });

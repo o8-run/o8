@@ -449,6 +449,8 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   const reviewRisk = classifyReviewRisk(diffSummary.changedFiles, diffSummary.addedDiffLines);
   const { appendEvent } = await import('@/lib/lane/registry');
   appendEvent(lane.id, 'review_risk_classified', 'system', {
+    reviewedHeadSha: review.head_sha,
+    diffBase: mergeGateResult.diffBase ?? null,
     tier: reviewRisk.tier,
     reasons: reviewRisk.reasons,
     responsibleFiles: reviewRisk.responsibleFiles,

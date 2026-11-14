@@ -1,7 +1,6 @@
 export const PACKET_SUBCOMMANDS = [
   'info',
   'scope',
-  'policy',
   'expand-scope',
   'diff',
   'commit',
@@ -28,6 +27,7 @@ export const PACKET_SUBCOMMANDS = [
 ] as const;
 
 export const OPERATOR_PACKET_SUBCOMMANDS = [
+  'policy',
   'retain',
   'release-retention',
   'restore-artifacts',
