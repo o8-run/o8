@@ -52,12 +52,14 @@ impl Shutdown {
         *self.job.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(job));
         *self.release.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(release));
     }
-    /// A stop failed or overran its bound. Native termination maps this to the exit status.
+    /// A stop failed or overran its bound.
+    #[cfg(test)]
     pub fn failed(&self) -> bool {
         self.failed.load(Ordering::SeqCst)
     }
-    /// Starts cleanup on its own thread. `reply(true)` runs exactly once after
-    /// release, also on failure, timeout or a panic. A repeated request is absorbed.
+    /// Starts cleanup on its own thread. `reply` runs exactly once after release,
+    /// also on failure, timeout or a panic, with `true` only when every stop was
+    /// proven complete. A repeated request is absorbed.
     pub fn begin(self: &Arc<Self>, reply: impl FnOnce(bool) + Send + 'static) -> bool {
         if self.begun.swap(true, Ordering::SeqCst) {
             return false;
@@ -171,7 +173,7 @@ impl Drop for Settle<'_> {
             }
         }
         if let Some(reply) = self.reply.take() {
-            reply(true);
+            reply(!self.shutdown.failed.load(Ordering::SeqCst));
         }
     }
 }
@@ -181,16 +183,15 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
 
-    fn replies(shutdown: &Arc<Shutdown>) -> (Arc<AtomicUsize>, mpsc::Receiver<Instant>) {
+    fn replies(shutdown: &Arc<Shutdown>) -> (Arc<AtomicUsize>, mpsc::Receiver<(Instant, bool)>) {
         let count = Arc::new(AtomicUsize::new(0));
         let (send, receive) = mpsc::channel();
         for _ in 0..2 {
             let count = count.clone();
             let send = send.clone();
-            shutdown.begin(move |allowed| {
-                assert!(allowed);
+            shutdown.begin(move |complete| {
                 count.fetch_add(1, Ordering::SeqCst);
-                let _ = send.send(Instant::now());
+                let _ = send.send((Instant::now(), complete));
             });
         }
         (count, receive)
@@ -201,7 +202,7 @@ mod tests {
         let shutdown = Arc::new(Shutdown::new(Duration::from_secs(2)));
         shutdown.arm(|_| Ok(()), || {});
         let (count, receive) = replies(&shutdown);
-        receive.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(receive.recv_timeout(Duration::from_secs(2)).unwrap().1);
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(count.load(Ordering::SeqCst), 1);
         assert!(!shutdown.failed());
@@ -212,7 +213,7 @@ mod tests {
         let shutdown = Arc::new(Shutdown::new(Duration::from_secs(2)));
         shutdown.arm(|_| Err("stop failed".into()), || {});
         let (count, receive) = replies(&shutdown);
-        receive.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(!receive.recv_timeout(Duration::from_secs(2)).unwrap().1);
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(count.load(Ordering::SeqCst), 1);
         assert!(shutdown.failed());
@@ -233,7 +234,8 @@ mod tests {
         );
         let started = Instant::now();
         let (count, receive) = replies(&shutdown);
-        let replied = receive.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (replied, complete) = receive.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(!complete);
         assert!(replied.duration_since(started) <= bound + Duration::from_millis(200));
         assert!(deadline.recv().unwrap() < started + bound);
         std::thread::sleep(Duration::from_millis(100));
@@ -314,7 +316,7 @@ mod tests {
         let shutdown = Arc::new(Shutdown::new(Duration::from_secs(2)));
         shutdown.arm(|_| Ok(()), || panic!("release panicked"));
         let (count, receive) = replies(&shutdown);
-        receive.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(!receive.recv_timeout(Duration::from_secs(3)).unwrap().1);
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(count.load(Ordering::SeqCst), 1);
         assert!(shutdown.failed());
