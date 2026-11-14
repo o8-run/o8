@@ -84,9 +84,9 @@ jobs:
           image="packages/o8-$version-x86_64.AppImage"
           test -f "$image"
           test "$(find packages -maxdepth 1 -name '*.AppImage' | wc -l)" -eq 1
+          node scripts/prepare-linux-release-attachment.mjs
           chmod +x "$image"
           node scripts/ci/check-linux-glibc.mjs --max 2.35 "$image"
-          node scripts/prepare-linux-release-attachment.mjs
       - name: Attach new assets without replacement or updater feed changes
         env:
           GH_TOKEN: ${{ github.token }}
