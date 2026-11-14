@@ -57,6 +57,9 @@ describe('what a tool call is about', () => {
 
   it('falls back to the summary when the arguments were cut short or name nothing known', () => {
     expect(toolDetail(call('Edit', '{"file_path":"/a/b/c', 'edit c'))).toBe('edit c');
+    const cut = '{"replace_all":false,"file_path":"/w/.cortex-worktrees/packet-1/docs/NOTE.md","old_string":"Because this repo exi';
+    expect(toolDetail(call('Edit', cut, cut))).toBe('…/docs/NOTE.md');
+    expect(toolDetail(call('Bash', '{"description":"Run it","command":"echo \\"hi\\" && ls","timeout":12', 'x'))).toBe('echo "hi" && ls');
     expect(toolDetail(call('Custom', { other: 1 }, 'did a thing'))).toBe('did a thing');
     expect(toolDetail(call('Custom', '[1,2]'))).toBe('[1,2]');
   });
