@@ -33,9 +33,9 @@ export function bundleVulkan(appdir) {
     cpSync(real, join(destination, name));
     const licenses = [
       [/^mesa-vulkan-drivers$/, 'MIT'], [/^libvulkan1$/, 'Apache-2.0'], [/^libllvm\d+$/, 'Apache-2.0 WITH LLVM-exception'],
-      [/^(?:libdrm2|libexpat1|libxcb.*|libx11.*|libxau6|libxdmcp6|libxshmfence1|libwayland-client0|libffi8|libxml2|libz3-4|libicu\d+|libtinfo6)$/, 'MIT/X11'],
+      [/^(?:libdrm2|libexpat1|libxcb.*|libx11.*|libxau6|libxdmcp6|libxshmfence1|libwayland-client0|libffi8|libxml2|libz3-4|libtinfo6)$/, 'MIT/X11'],
       [/^(?:libedit2|libbsd0|libmd0|libzstd1)$/, 'BSD'],
-      [/^zlib1g$/, 'Zlib'], [/^liblzma5$/, 'public-domain/permissive'],
+      [/^libicu\d+$/, 'Unicode-DFS-2016'], [/^zlib1g$/, 'Zlib'], [/^liblzma5$/, 'public-domain/permissive'],
     ];
     const license = licenses.find(([pattern]) => pattern.test(owner))?.[1];
     if (!license) throw new Error(`Review redistribution license before bundling ${owner}`);

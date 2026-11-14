@@ -431,8 +431,8 @@ native-consumed server listings. No project settlement scripts are ported.
   license texts under `usr/share/doc/o8/common-licenses`.
 
 Transitive runtime libraries retain their distribution licenses: libdrm,
-libexpat, libxcb, X11, libxshmfence, Wayland, libffi, libxml2, z3 and ICU
+libexpat, libxcb, X11, libxshmfence, Wayland, libffi, libxml2 and z3
 (MIT/X11); zlib (zlib); zstd (BSD option); libedit, libbsd and libmd (BSD);
-libtinfo (MIT); xz/liblzma (public domain and permissive notices). Packaging
+libtinfo (MIT); ICU (Unicode/ICU permissive terms); xz/liblzma (public domain and permissive notices). Packaging
 refuses an unreviewed dependency package. The package copyright files identify
 component-specific terms and source provenance.
