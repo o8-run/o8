@@ -19,8 +19,9 @@ build.
 | `/broadcast` | `o8 broadcast` spectator URLs, opened in a browser or a stream overlay | Kept (CLI feature) |
 | `/dictation-pill`, `/agent-partials`, `/point-overlay`, `/spatial-ink`, `/voice-host`, `/voice-settings`, `/managed-chat-voice` | macOS shell voice windows | Kept until native |
 
-The notice is a server-rendered page with no client code, redirect or sign-in.
-The classic window, which loads `/dashboard` on Windows and Linux, shows the
+The notice is server-rendered, with no redirect or sign-in and no client code
+of its own; the root layout still wraps it. Its text reads correctly both in a
+browser and inside the older window. The classic window, which loads `/dashboard` on Windows and Linux, shows the
 notice instead of the dashboard; its loader and the bundled-server prewarm
 still get an answer, so startup does not fail. `not-found.tsx` is unchanged.
 
@@ -107,11 +108,14 @@ removal pull request.
   `standalone-memory.mjs`, `run-terminal-workload.mjs`, `measure-browser-boot.mjs`,
   `prepare-launch-stage-build.mjs` (used by the manual
   `current-app-launch-stages` workflow), `scripts/measure-render-speed.sh`,
-  `scripts/speed/ui.mjs`, `scripts/parity/capture.mjs`, and the opt-in
+  `scripts/speed/ui.mjs`, and the opt-in
   `scripts/preship-webview-gate.mjs`. Remove or retarget them separately.
 - `scripts/next/speed-receipt.mjs` compares the native window with the
   browser chat view, whose components are removed, so its browser side no
   longer builds. It stays because changing `scripts/next` needs the native
   surface label; its test is removed.
+- The native parity captures (`scripts/parity`) now skip the web side unless
+  `--webHost` is given. The diagnostics demo (`/api/panel/diagnostics/run-demo`)
+  reports every step skipped until it targets the native window.
 - The relay browser-session path above (security review).
 - The test-only helpers listed above can move next to their tests or go.
