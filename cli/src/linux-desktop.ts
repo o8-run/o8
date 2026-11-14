@@ -240,11 +240,14 @@ async function openDesktop(): Promise<number> {
     const canRetry = software && isAbsolute(software) && existsSync(join(software, 'lvp_icd.json'))
       && process.env.O8_DISABLE_BUNDLED_VULKAN !== '1'
       && process.env.VK_ICD_FILENAMES === undefined && process.env.VK_DRIVER_FILES === undefined;
+    // Serve has already resolved ownership and health. Explicit attach keeps
+    // next from probing or starting the daemon again, including on retry.
+    const origin = resolveConfig().apiBase;
     let env = process.env;
     for (let retry = 0; ; retry += 1) {
       let finished = false;
       let ready = false;
-      const next = runCli(['next', '--binary', binary], false, undefined, NO_GRAPHICS_DEVICE, env, () => { ready = true; });
+      const next = runCli(['next', '--binary', binary, '--server', origin], false, undefined, NO_GRAPHICS_DEVICE, env, () => { ready = true; });
       void next.then(() => { finished = true; }, () => { finished = true; });
       while (!finished && !((!canRetry || ready) && windowIsOpen())) await delay(100);
       if (!finished && !released) {

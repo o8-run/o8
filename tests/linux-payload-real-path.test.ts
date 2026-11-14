@@ -154,6 +154,10 @@ beforeAll(async () => {
         fs.writeFileSync(process.env.O8_DATA_DIR + '/health-probe-failed', 'done');
       }
       res.setHeader('content-type', 'application/json');
+      const countFile = process.env.O8_DATA_DIR + '/identity-count';
+      if (req.url === '/api/setup/identity' && fs.existsSync(countFile)) {
+        fs.writeFileSync(countFile, String(Number(fs.readFileSync(countFile, 'utf8')) + 1));
+      }
       const respond = () => res.end(JSON.stringify({ product: 'o8' }));
       const delayFile = process.env.O8_DATA_DIR + '/identity-delay';
       if (fs.existsSync(delayFile)) setTimeout(respond, 750);
@@ -569,6 +573,7 @@ it.skipIf(process.platform !== 'linux')('retries no-device startup once and resp
       if (mode === 'system') delete env.O8_FIXTURE_NO_DEVICE;
       if (terminal) expect(command(f.launcher, ['serve'], env).status).toBe(0);
       const before = terminal ? JSON.parse(command(f.launcher, ['serve', 'status'], env).stdout) : undefined;
+      if (terminal) writeFileSync(join(f.data, 'identity-count'), '0');
       if (mode === 'fails') env.O8_FIXTURE_FALLBACK_FAILS = '1';
       const app = captureLaunch(f.launcher, env);
       if (mode === 'fallback' || mode === 'system') {
@@ -586,6 +591,8 @@ it.skipIf(process.platform !== 'linux')('retries no-device startup once and resp
       }
       const attempts = mode === 'system' ? 1 : mode === 'fallback' || mode === 'fails' ? 3 : 2;
       expect(events(env)).toHaveLength(attempts - (terminal && mode !== 'system' ? 1 : 0));
+      // Only the launcher's initial serve-status decision may probe the daemon.
+      if (terminal) expect(readFileSync(join(f.data, 'identity-count'), 'utf8')).toBe('1');
       const after = JSON.parse(command(f.launcher, ['serve', 'status'], env).stdout);
       expect(after.healthy).toBe(true);
       if (before) expect(after.pid).toBe(before.pid);
