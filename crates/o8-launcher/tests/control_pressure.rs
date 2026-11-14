@@ -78,6 +78,8 @@ fn hardlinked_prior_receipt_is_preserved_and_refused_before_cleanup() {
         port: 0,
         parent: 1,
         hold: None,
+        spawned: 0,
+        runtime: None,
     };
     let bytes = serde_json::to_vec(&receipt).unwrap();
     o8_launcher::ownership::private_write(&target, &bytes).unwrap();
@@ -176,6 +178,8 @@ fn an_uninspectable_other_user_receipt_does_not_block_start() {
         port: 0,
         parent: 1,
         hold: None,
+        spawned: 0,
+        runtime: None,
     };
     o8_launcher::ownership::private_write(
         &f.root.join("launcher-api.json"),

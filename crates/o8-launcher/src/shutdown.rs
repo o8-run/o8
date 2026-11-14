@@ -4,6 +4,7 @@
 //! further launcher code on the main thread. Cleanup therefore runs here, off the
 //! main thread, and the caller-supplied reply hops back through the main queue.
 use std::{
+    panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex, PoisonError,
@@ -56,7 +57,7 @@ impl Shutdown {
         self.failed.load(Ordering::SeqCst)
     }
     /// Starts cleanup on its own thread. `reply(true)` runs exactly once after
-    /// release, also on failure or timeout. A repeated request is absorbed.
+    /// release, also on failure, timeout or a panic. A repeated request is absorbed.
     pub fn begin(self: &Arc<Self>, reply: impl FnOnce(bool) + Send + 'static) -> bool {
         if self.begun.swap(true, Ordering::SeqCst) {
             return false;
@@ -67,16 +68,21 @@ impl Shutdown {
         let spawned = std::thread::Builder::new()
             .name("launcher-shutdown".into())
             .spawn(move || {
-                let _ = this.finish();
-                if let Some(reply) = worker.lock().unwrap_or_else(PoisonError::into_inner).take() {
-                    reply(true);
-                }
+                let reply = worker.lock().unwrap_or_else(PoisonError::into_inner).take();
+                let _settle = Settle {
+                    shutdown: &this,
+                    reply,
+                };
+                let _ = this.stop_servers();
             });
         if spawned.is_err() {
-            let _ = self.finish();
-            if let Some(reply) = slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
-                reply(true);
-            }
+            // The closure, and the reply it would have taken, was never run.
+            let reply = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
+            let _settle = Settle {
+                shutdown: self,
+                reply,
+            };
+            let _ = self.stop_servers();
         }
         true
     }
@@ -85,9 +91,23 @@ impl Shutdown {
         if self.begun.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
-        self.finish()
+        let _settle = Settle {
+            shutdown: self,
+            reply: None,
+        };
+        self.stop_servers()
     }
-    fn finish(&self) -> Result<(), String> {
+    /// Stops servers within the bound. Never panics; a panic in the job is a failure.
+    fn stop_servers(&self) -> Result<(), String> {
+        let result = catch_unwind(AssertUnwindSafe(|| self.bounded_job()))
+            .unwrap_or_else(|_| Err("server stop panicked".into()));
+        if let Err(error) = &result {
+            self.failed.store(true, Ordering::SeqCst);
+            o8_launcher::note!("Shutdown incomplete: {error}");
+        }
+        result
+    }
+    fn bounded_job(&self) -> Result<(), String> {
         let started = Instant::now();
         let reply_by = started + self.bound;
         let report_by = reply_by.checked_sub(RELEASE_RESERVE).unwrap_or(started);
@@ -97,50 +117,62 @@ impl Shutdown {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        let result = match job {
-            None => Ok(()),
-            Some(job) => {
-                // The job runs on its own thread so a hung inspection cannot hold the reply.
-                let (send, receive) = mpsc::sync_channel(1);
-                let slot = Arc::new(Mutex::new(Some(job)));
-                let worker = slot.clone();
-                let spawned = std::thread::Builder::new()
-                    .name("launcher-stop".into())
-                    .spawn(move || {
-                        let job = worker.lock().unwrap_or_else(PoisonError::into_inner).take();
-                        if let Some(job) = job {
-                            let _ = send.send(job(escalate_by));
-                        }
-                    });
-                match spawned {
-                    Ok(_) => receive
-                        .recv_timeout(report_by.saturating_duration_since(Instant::now()))
-                        .unwrap_or_else(|_| {
-                            Err(format!(
-                                "server stop exceeded the {} s shutdown bound",
-                                self.bound.as_secs()
-                            ))
-                        }),
-                    Err(_) => match slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
-                        Some(job) => job(escalate_by),
-                        None => Err("Shutdown worker unavailable".into()),
-                    },
+        let Some(job) = job else {
+            return Ok(());
+        };
+        // The job runs on its own thread so a hung inspection cannot hold the reply.
+        let (send, receive) = mpsc::sync_channel(1);
+        let slot = Arc::new(Mutex::new(Some(job)));
+        let worker = slot.clone();
+        let spawned = std::thread::Builder::new()
+            .name("launcher-stop".into())
+            .spawn(move || {
+                let job = worker.lock().unwrap_or_else(PoisonError::into_inner).take();
+                if let Some(job) = job {
+                    let _ = send.send(job(escalate_by));
+                }
+            });
+        match spawned {
+            Ok(_) => {
+                match receive.recv_timeout(report_by.saturating_duration_since(Instant::now())) {
+                    Ok(result) => result,
+                    Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
+                        "server stop exceeded the {} s shutdown bound",
+                        self.bound.as_secs()
+                    )),
+                    Err(mpsc::RecvTimeoutError::Disconnected) => Err("server stop panicked".into()),
                 }
             }
-        };
-        if let Err(error) = &result {
-            eprintln!("Shutdown incomplete: {error}");
-            self.failed.store(true, Ordering::SeqCst);
+            Err(_) => match slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                Some(job) => job(escalate_by),
+                None => Err("Shutdown worker unavailable".into()),
+            },
         }
+    }
+}
+
+/// Releases the lock and socket, then replies, when dropped: after a normal
+/// return and during unwinding alike, so no path ends without a reply.
+struct Settle<'a> {
+    shutdown: &'a Shutdown,
+    reply: Option<Reply>,
+}
+impl Drop for Settle<'_> {
+    fn drop(&mut self) {
         let release = self
+            .shutdown
             .release
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         if let Some(release) = release {
-            release();
+            if catch_unwind(AssertUnwindSafe(release)).is_err() {
+                self.shutdown.failed.store(true, Ordering::SeqCst);
+            }
         }
-        result
+        if let Some(reply) = self.reply.take() {
+            reply(true);
+        }
     }
 }
 
@@ -258,5 +290,79 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
         assert!(lock_free, "instance lock still held at reply");
         assert!(!socket_left, "control socket still present at reply");
+    }
+
+    #[test]
+    fn a_panicking_stop_still_releases_and_replies_once() {
+        let shutdown = Arc::new(Shutdown::new(Duration::from_secs(2)));
+        let released = Arc::new(AtomicBool::new(false));
+        let flag = released.clone();
+        shutdown.arm(
+            |_| panic!("stop step panicked"),
+            move || flag.store(true, Ordering::SeqCst),
+        );
+        let (count, receive) = replies(&shutdown);
+        receive.recv_timeout(Duration::from_secs(3)).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(released.load(Ordering::SeqCst));
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert!(shutdown.failed());
+    }
+
+    #[test]
+    fn a_panicking_release_still_replies_once() {
+        let shutdown = Arc::new(Shutdown::new(Duration::from_secs(2)));
+        shutdown.arm(|_| Ok(()), || panic!("release panicked"));
+        let (count, receive) = replies(&shutdown);
+        receive.recv_timeout(Duration::from_secs(3)).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert!(shutdown.failed());
+    }
+
+    const CLOSED_STDERR_CHILD: &str = "O8_SHUTDOWN_CLOSED_STDERR_CHILD";
+
+    /// Runs in a child test process whose standard error is a pipe with no
+    /// reader. The harness captures `eprintln!` in-process, so only a real
+    /// process shows what a closed terminal does.
+    #[test]
+    fn closed_stderr_child() {
+        if std::env::var_os(CLOSED_STDERR_CHILD).is_none() {
+            return;
+        }
+        let shutdown = Arc::new(Shutdown::new(Duration::from_secs(2)));
+        let released = Arc::new(AtomicBool::new(false));
+        let flag = released.clone();
+        shutdown.arm(
+            |_| Err("stop failed".into()),
+            move || flag.store(true, Ordering::SeqCst),
+        );
+        let (count, receive) = replies(&shutdown);
+        receive.recv_timeout(Duration::from_secs(3)).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(released.load(Ordering::SeqCst));
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_closed_stderr_pipe_does_not_stop_release_or_reply() {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "shutdown::tests::closed_stderr_child",
+                "--exact",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CLOSED_STDERR_CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Close the only reader before the child writes anything.
+        drop(child.stderr.take());
+        assert!(
+            child.wait().unwrap().success(),
+            "no reply with a closed stderr pipe"
+        );
     }
 }

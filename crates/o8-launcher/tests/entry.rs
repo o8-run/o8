@@ -446,6 +446,8 @@ fn an_actively_parented_process_is_never_reaped_as_an_orphan() {
         port,
         parent: std::process::id(),
         hold: None,
+        spawned: 0,
+        runtime: None,
     };
     o8_launcher::ownership::private_write(
         &f.root.join("launcher-api.json"),

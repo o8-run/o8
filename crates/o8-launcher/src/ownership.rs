@@ -22,6 +22,25 @@ pub struct Receipt {
     /// Absent in receipts written before the hold proof existed.
     #[serde(default)]
     pub hold: Option<Hold>,
+    /// Birth clock reading taken just before spawn (see [`birth_clock`]).
+    #[serde(default)]
+    pub spawned: u64,
+    /// The runtime executable the server was started from.
+    #[serde(default)]
+    pub runtime: Option<FileId>,
+}
+/// Device and inode. Unlike a path, this survives a move within one volume.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileId {
+    pub dev: u64,
+    pub ino: u64,
+}
+pub fn file_id(path: &Path) -> Option<FileId> {
+    let metadata = fs::metadata(path).ok()?;
+    Some(FileId {
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+    })
 }
 /// A private file the server inherits open at spawn. Its token names this
 /// spawn; device and inode let a later start find the process holding it,
@@ -40,6 +59,8 @@ pub struct Pending {
     pub directory: PathBuf,
     pub install: PathBuf,
     pub port: u16,
+    pub spawned: u64,
+    pub runtime: FileId,
 }
 pub fn pending_path(receipt: &Path) -> PathBuf {
     receipt.with_extension("pending.json")
@@ -111,25 +132,48 @@ fn cwd(pid: u32) -> Option<PathBuf> {
             .find_map(|line| line.strip_prefix('n').map(PathBuf::from))
     }
 }
+/// Replaces a private record atomically: a crash leaves either the old record
+/// or the new one, never a truncated file. An existing name that is a link, a
+/// hard-linked or foreign file is refused rather than replaced.
 pub fn private_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)?;
-    if file.metadata()?.uid() != unsafe { libc::getuid() }
-        || file.metadata()?.nlink() != 1
-        || !file.metadata()?.is_file()
-    {
-        return Err(std::io::Error::other("Foreign ownership file"));
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.file_type().is_symlink()
+                || !metadata.is_file()
+                || metadata.nlink() != 1
+                || metadata.uid() != unsafe { libc::getuid() } =>
+        {
+            return Err(std::io::Error::other("Foreign ownership file"));
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
     }
-    if unsafe { libc::fchmod(file.as_raw_fd(), 0o600) } != 0 {
-        return Err(std::io::Error::last_os_error());
+    let name = path
+        .file_name()
+        .ok_or_else(|| std::io::Error::other("Ownership file needs a name"))?;
+    let temporary = path.with_file_name(format!(
+        ".{}.{}.tmp",
+        name.to_string_lossy(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    let written = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&temporary)?;
+        if unsafe { libc::fchmod(file.as_raw_fd(), 0o600) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        file.write_all(data)?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
     }
-    file.set_len(0)?;
-    file.write_all(data)?;
-    file.sync_all()?;
+    written?;
     sync_parent(path)
 }
 /// Makes a just-created or removed name durable before the next step relies on it.
@@ -267,8 +311,85 @@ pub fn holds(pid: u32, hold: &Hold) -> bool {
             && info.vnode.vi_stat.vst_ino == hold.ino
     })
 }
-/// Same-user process group leaders other than this process.
-fn group_leaders() -> Vec<u32> {
+/// A clock in the same units and epoch as [`birth`]: microseconds since the
+/// Unix epoch on macOS, clock ticks since boot on Linux.
+#[cfg(target_os = "macos")]
+pub fn birth_clock() -> u64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    now.as_micros() as u64
+}
+#[cfg(target_os = "linux")]
+pub fn birth_clock() -> u64 {
+    let mut now: libc::timespec = unsafe { std::mem::zeroed() };
+    unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut now) };
+    let ticks = ticks_per_second();
+    // Floor like the kernel's start time, so a later fork never reads earlier.
+    now.tv_sec as u64 * ticks + now.tv_nsec as u64 * ticks / 1_000_000_000
+}
+#[cfg(target_os = "linux")]
+fn ticks_per_second() -> u64 {
+    (unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).max(1) as u64
+}
+/// Birth-clock units in two seconds.
+fn spawn_window() -> u64 {
+    #[cfg(target_os = "macos")]
+    return 2_000_000;
+    #[cfg(target_os = "linux")]
+    return 2 * ticks_per_second();
+}
+#[cfg(target_os = "macos")]
+fn birth(pid: u32) -> Option<u64> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let length = std::mem::size_of_val(&info);
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid as i32,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            length as i32,
+        )
+    };
+    (read == length as i32 && info.pbi_uid == unsafe { libc::getuid() })
+        .then(|| info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+}
+#[cfg(target_os = "linux")]
+fn birth(pid: u32) -> Option<u64> {
+    if fs::metadata(format!("/proc/{pid}")).ok()?.uid() != unsafe { libc::getuid() } {
+        return None;
+    }
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    stat.rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+/// Device and inode of the running executable, which follow the file across a move.
+#[cfg(target_os = "linux")]
+fn executable_id(pid: u32) -> Option<FileId> {
+    file_id(Path::new(&format!("/proc/{pid}/exe")))
+}
+#[cfg(target_os = "macos")]
+fn executable_id(pid: u32) -> Option<FileId> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut bytes = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let count =
+        unsafe { libc::proc_pidpath(pid as i32, bytes.as_mut_ptr().cast(), bytes.len() as u32) };
+    if count <= 0 {
+        return None;
+    }
+    // The kernel reports the current name of the text vnode; a file replaced at
+    // that name since then has another inode and simply fails the comparison.
+    file_id(Path::new(std::ffi::OsStr::from_bytes(
+        &bytes[..count as usize],
+    )))
+}
+/// Same-user processes other than this one.
+fn same_user_processes() -> Vec<u32> {
     #[cfg(target_os = "linux")]
     let pids: Vec<u32> = fs::read_dir("/proc")
         .map(|entries| {
@@ -291,12 +412,37 @@ fn group_leaders() -> Vec<u32> {
             .collect()
     };
     pids.into_iter()
-        .filter(|pid| {
-            *pid != std::process::id()
-                && unsafe { libc::getpgid(*pid as i32) } == *pid as i32
-                && identity(*pid).is_some()
-        })
+        .filter(|pid| *pid != std::process::id() && identity(*pid).is_some())
         .collect()
+}
+/// The single process proven to be the server started with `hold`.
+///
+/// Any descendant of the server may have inherited the hold descriptor, so
+/// holding it only makes a process a candidate. The proven server is the
+/// earliest-born same-user holder that was born at or after the spawn (within
+/// `window`, when given) and runs the recorded runtime executable. Every other
+/// holder is logged and never signalled.
+fn proven_holder(hold: &Hold, runtime: FileId, spawned: u64, window: Option<u64>) -> Option<u32> {
+    let holders: Vec<u32> = same_user_processes()
+        .into_iter()
+        .filter(|pid| holds(*pid, hold))
+        .collect();
+    let proven = holders
+        .iter()
+        .filter_map(|pid| Some((*pid, birth(*pid)?)))
+        .filter(|(pid, born)| {
+            *born >= spawned
+                && window.is_none_or(|window| *born <= spawned.saturating_add(window))
+                && executable_id(*pid) == Some(runtime)
+        })
+        .min_by_key(|(pid, born)| (*born, *pid))
+        .map(|(pid, _)| pid);
+    for pid in holders.iter().filter(|pid| Some(**pid) != proven) {
+        crate::note!(
+            "Process {pid} holds a server ownership file but is not the proven server; it was left running"
+        );
+    }
+    proven
 }
 fn same_directory(a: &Path, b: &Path) -> bool {
     fs::canonicalize(a)
@@ -492,16 +638,23 @@ pub fn cleanup(directory: &Path, server_dir: &Path) -> Result<(), String> {
         let path = directory.join(name);
         let hold = hold_path(&path);
         if let Some(bytes) = read_private(&path)? {
-            let receipt: Receipt =
-                serde_json::from_slice(&bytes).map_err(|_| "Invalid ownership receipt")?;
-            recover_receipt(&receipt, &install, directory, server_dir, &hold)?;
+            // An unreadable record proves nothing: discard it, signal nothing.
+            match serde_json::from_slice::<Receipt>(&bytes) {
+                Ok(receipt) => recover_receipt(&receipt, &install, directory, server_dir, &hold)?,
+                Err(_) => crate::note!(
+                    "Ownership receipt {name} discarded: it is empty or damaged; nothing was signalled"
+                ),
+            }
             fs::remove_file(&path).map_err(|_| "Ownership receipt unavailable")?;
         }
         let pending = pending_path(&path);
         if let Some(bytes) = read_private(&pending)? {
-            let record: Pending =
-                serde_json::from_slice(&bytes).map_err(|_| "Invalid ownership receipt")?;
-            recover_pending(&record, directory, &hold)?;
+            match serde_json::from_slice::<Pending>(&bytes) {
+                Ok(record) => recover_pending(&record, directory, &hold)?,
+                Err(_) => crate::note!(
+                    "Pending server record for {name} discarded: it is empty or damaged; nothing was signalled"
+                ),
+            }
             fs::remove_file(&pending).map_err(|_| "Ownership receipt unavailable")?;
         }
         remove(&hold)?;
@@ -523,7 +676,7 @@ fn recover_receipt(
     if !same_directory(&receipt.directory, directory)
         || current.as_deref() != Some(&receipt.identity)
     {
-        eprintln!(
+        crate::note!(
             "Ownership receipt for process {pid} discarded: the recorded process is gone or cannot be inspected; nothing was signalled"
         );
         return Ok(());
@@ -531,19 +684,22 @@ fn recover_receipt(
     let moved = receipt.install != install;
     if moved {
         // The executable path follows a move, so only the inherited hold file proves it.
-        let proven = receipt
-            .hold
-            .as_ref()
-            .is_some_and(|record| hold_intact(hold, record) && holds(pid, record));
+        let proven = match (&receipt.hold, receipt.runtime) {
+            (Some(record), Some(runtime)) => {
+                hold_intact(hold, record)
+                    && proven_holder(record, runtime, receipt.spawned, None) == Some(pid)
+            }
+            _ => false,
+        };
         if !proven {
-            eprintln!(
+            crate::note!(
                 "Ownership receipt for process {pid} discarded: it was started from {} and does not hold this profile's ownership file; it was left running",
                 receipt.install.display()
             );
             return Ok(());
         }
-        eprintln!(
-            "Stopping process {pid} started from moved install {}: it holds this profile's ownership file",
+        crate::note!(
+            "Stopping process {pid} started from moved install {}: it is the proven holder of this profile's ownership file",
             receipt.install.display()
         );
     }
@@ -570,38 +726,41 @@ fn recover_receipt(
 /// A prior run spawned a server but stopped before recording its identity.
 fn recover_pending(record: &Pending, directory: &Path, hold: &Path) -> Result<(), String> {
     if !same_directory(&record.directory, directory) || !hold_intact(hold, &record.hold) {
-        eprintln!(
+        crate::note!(
             "Pending server record discarded: its ownership file is missing; nothing was signalled"
         );
         return Ok(());
     }
-    let holders: Vec<u32> = group_leaders()
-        .into_iter()
-        .filter(|pid| holds(*pid, &record.hold))
-        .collect();
-    if holders.is_empty() {
-        eprintln!("Pending server record discarded: no live process holds its ownership file");
+    let Some(pid) = proven_holder(
+        &record.hold,
+        record.runtime,
+        record.spawned,
+        Some(spawn_window()),
+    ) else {
+        crate::note!("Pending server record discarded: no live process is proven to be its server");
+        return Ok(());
+    };
+    // Captured after the proof; stop_group re-checks it before each signal.
+    let Some(cookie) = identity(pid) else {
+        crate::note!("Pending server record discarded: process {pid} exited during inspection");
+        return Ok(());
+    };
+    if unsafe { libc::getpgid(pid as i32) } != pid as i32 {
+        crate::note!("Process {pid} matches a pending server record but leads no process group; it was left running");
         return Ok(());
     }
-    for pid in holders {
-        // Captured after the hold proof; stop_group re-checks it before each signal.
-        let Some(cookie) = identity(pid) else {
-            continue;
-        };
-        if !holds(pid, &record.hold) {
-            continue;
-        }
-        if parent(pid) != Some(1) {
-            return Err("Prior server still actively parented".into());
-        }
-        eprintln!("Stopping process {pid} from a pending server record: it holds this spawn's ownership file");
-        stop_group(
-            pid,
-            Some(&cookie),
-            false,
-            record.port,
-            Instant::now() + ORPHAN_BUDGET,
-        )?;
+    if parent(pid) != Some(1) {
+        return Err("Prior server still actively parented".into());
     }
+    crate::note!(
+        "Stopping process {pid} from a pending server record: it is the proven holder of this spawn's ownership file"
+    );
+    stop_group(
+        pid,
+        Some(&cookie),
+        false,
+        record.port,
+        Instant::now() + ORPHAN_BUDGET,
+    )?;
     wait_for_port(record.port)
 }

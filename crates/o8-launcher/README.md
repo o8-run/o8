@@ -49,30 +49,64 @@ the coordinator on its own thread, because AppKit then waits inside `terminate:`
 and runs no more launcher code on the main thread. The coordinator replies
 `replyToApplicationShouldTerminate:YES` exactly once through the main dispatch
 queue, which AppKit still drains during that wait, after the lock and socket are
-released, including when stopping fails or overruns. AppKit exits right after the
+released, including when stopping fails, overruns or panics: the release
+and the reply run from a guard that also runs while unwinding, and launcher log
+lines ignore write errors, so a closed terminal cannot stop them. AppKit exits right after the
 reply; `applicationWillTerminate:` exits with status 1 instead of 0 when stopping
 failed. The headless path runs the same coordinator inline and returns status 1
-on a failed stop.
+on a failed stop. A failed server start also stops what did start through the
+coordinator, under the same single bound. Restart backoff after a server crash
+is a timestamp checked by the main loop, so Quit is handled during the delay.
 
 ### Ownership records
 
 Before each server starts, the launcher creates a private hold file
-(`launcher-api.hold`, `launcher-ws.hold`) containing a random UUIDv4 token (122 random bits), and
-durably writes a pending record (`launcher-*.pending.json`) with that token, the
-hold file's device and inode, the data directory, the install and the port. The
-child receives the token as `O8_LAUNCH_TOKEN` and inherits the hold file as an
-open descriptor; the launcher's own copy is close-on-exec and closed right after
-spawn. Once the PID and kernel birth identity are known, the full receipt
-(`launcher-*.json`, which also carries the hold record) replaces the pending
-record.
+(`launcher-api.hold`, `launcher-ws.hold`) containing a random UUIDv4 token (122
+random bits). It then writes a pending record (`launcher-*.pending.json`) with
+that token, the hold file's device and inode, the data directory, the install,
+the port, the configured runtime's device and inode, and a birth-clock reading
+taken just before the fork. The child receives the token as `O8_LAUNCH_TOKEN`
+and the descriptor number as `O8_LAUNCH_HOLD_FD`, and inherits the hold file as
+that open descriptor. The launcher's own copy is close-on-exec and closed right
+after spawn. Once the PID and kernel birth identity are known, the full receipt
+(`launcher-*.json`, which also carries the hold, runtime and spawn time)
+replaces the pending record.
 
-The open descriptor is the proof. Reading another process's environment on macOS
-(`KERN_PROCARGS2`) returns the exec-time copy, which the process can overwrite
-(for example when it sets its title) and which is not a documented interface, so
-the launcher does not rely on it. Open descriptors are kernel state: the launcher
-lists them with `proc_pidinfo(PROC_PIDLISTFDS)` and `proc_pidfdinfo` on macOS and
-`/proc/<pid>/fd` on Linux, and matches device and inode. The hold file must still
-exist with the recorded inode and token, so a recycled inode number never counts.
+Every record and receipt is written to a temporary file in the same directory,
+flushed, renamed over the target, and the directory is flushed, so a crash
+leaves the old record or the new one, never a truncated file. A record that is
+empty or does not parse is removed with a log line and nothing is signalled.
+
+**What stays inheritable.** The server must keep the descriptor open, and the
+launcher cannot mark it close-on-exec for processes the server starts later. Any
+descendant may therefore hold it: a child agent, a daemonized helper, a GUI app.
+`O8_LAUNCH_HOLD_FD` lets the server close that leak itself, but nothing here
+depends on it. An advisory lock would not help, because it is inherited across
+fork too.
+
+**The single-holder proof.** Holding the descriptor only makes a process a
+candidate. Among this user's processes that hold the recorded inode (the hold
+file must still exist with that inode and token, so a recycled inode never
+counts), exactly one is accepted: the earliest-born process that
+
+- was born at or after the recorded spawn time (for a pending record, also
+  within two seconds of it), and
+- runs the recorded runtime executable, compared by device and inode so a moved
+  install still matches.
+
+Every other holder is logged and never signalled. Descendants are born after the
+server, so the server is always the earliest; a descendant can only be chosen if
+the server is gone and the descendant runs the same runtime. Process birth comes
+from `proc_pidinfo(PROC_PIDTBSDINFO)` on macOS and `/proc/<pid>/stat` with
+`CLOCK_BOOTTIME` ticks on Linux. Executable identity comes from `proc_pidpath`
+then `stat` on macOS and `/proc/<pid>/exe` on Linux.
+
+Reading another process's environment on macOS (`KERN_PROCARGS2`) returns the
+exec-time copy, which the process can overwrite and which is not a documented
+interface, so the token in the environment is never used as proof. Open
+descriptors are kernel state: the launcher lists them with
+`proc_pidinfo(PROC_PIDLISTFDS)` and `proc_pidfdinfo` on macOS and
+`/proc/<pid>/fd` on Linux.
 
 At start, before choosing ports:
 
@@ -80,14 +114,15 @@ At start, before choosing ports:
   identity, data directory and process group, an orphan parent, and (same install)
   the server working directory. If the receipt's install differs, the executable
   path cannot prove anything, because the kernel reports the moved location; the
-  process must instead hold the receipt's hold file. A moved install's servers are
-  then stopped and started again from the new location. A moved-install receipt
-  without that proof is removed and logged as left running.
-- A leftover pending record means a crash between spawn and receipt. The launcher
-  looks among this user's process-group leaders for one holding that hold file. A
-  holder with an orphan parent is stopped with its birth identity re-checked before
-  every signal. A pending record with no live holder, or whose hold file is gone,
-  is removed and logged without signalling.
+  single proven holder must instead be the receipt's process. A moved install's
+  servers are then stopped and started again from the new location. A
+  moved-install receipt without that proof is removed and logged as left running.
+- A leftover pending record means a crash between spawn and receipt. The proven
+  holder is stopped if it leads its process group and its parent has exited,
+  with its birth identity re-checked before every signal. A proven holder whose
+  parent is alive refuses the start. Holders that are not proven never block the
+  start. A pending record with no proven holder, or whose hold file is gone, is
+  removed and logged without signalling.
 - A recorded process that cannot be inspected (gone, recycled, or owned by
   another user so its identity cannot be read) is never signalled. Its receipt is
   removed with a log line and start continues; if that process still holds a
@@ -114,17 +149,20 @@ logic remain step 4 work.
 ## Verification and limits
 
 Run `cargo test --locked --manifest-path crates/o8-launcher/Cargo.toml -- --test-threads=1`.
-Node.js and Python 3 must be on PATH. The moved-install fixture runs an isolated
-Node listener; the other fixture services use Python.
+Python 3 and the Rust toolchain's `rustc` must be available. Recovery fixtures
+compile a small runtime with `rustc` so the servers' executable is a real binary,
+as the bundled Node is; the other fixture services use Python.
 The tests spawn this binary with fixture servers and windows in temporary
 directories on free ports. They cover health and boot identity, environment,
 crash/restart exhaustion, shutdown during retry/preflight, drain ordering and
 descendant pipe drain, second launch, ownership refusal and orphan cleanup,
 private files, bounded control input, voice-only suppression, injected dialog
 reaping, a crash between spawn and receipt (`O8_LAUNCHER_FAULT`, debug builds
-only), and a really moved install whose servers run a copied Node executable.
-Unit tests in `src/shutdown.rs` cover one reply on success, failure and timeout,
-the cleanup bound, and lock and socket release before the reply.
+only) with daemonized descendants that inherited the hold descriptor, a holder
+with a live parent, empty and truncated records, and a really moved install.
+Unit tests in `src/shutdown.rs` cover one reply on success, failure, timeout and
+panic, a closed standard-error pipe, the cleanup bound, and lock and socket
+release before the reply.
 `tests/launcher-binary-real-path.test.ts` runs these tests and isolated shared
 unit tests in the Linux integration lane.
 
