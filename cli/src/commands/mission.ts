@@ -305,17 +305,24 @@ const CREATE_SWITCHES = new Set(['dispatch', 'read-only', 'sequential', 'huddle'
  * send a worker off with only the title.
  */
 export function checkMissionCreateArgs(rest: string[]): void {
+  // The refused word is echoed back, so it is shown without control characters and kept short.
+  const shown = (word: string) => word.replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 80);
+  const knownFlag = (word: string | undefined) => word !== undefined && word.startsWith('--')
+    && (CREATE_VALUE_FLAGS.has(word.slice(2)) || CREATE_SWITCHES.has(word.slice(2)));
   for (let i = 0; i < rest.length; i += 1) {
     const tok = rest[i];
     const name = tok.startsWith('--') ? tok.slice(2).split('=', 1)[0] : null;
     if (name !== null && CREATE_VALUE_FLAGS.has(name)) {
+      if (!tok.includes('=') && knownFlag(rest[i + 1])) {
+        throw new CliError('invalid_args', `--${name} needs a value.`, EXIT.INVALID_ARGS);
+      }
       if (!tok.includes('=')) i += 1;
       continue;
     }
     if (name !== null && CREATE_SWITCHES.has(name) && !tok.includes('=')) continue;
     throw new CliError(
       'invalid_args',
-      name !== null ? `Unknown flag for o8 mission create: --${name}.` : `Unexpected argument for o8 mission create: ${tok.slice(0, 80)}`,
+      name !== null ? `Unknown flag for o8 mission create: --${shown(name)}.` : `Unexpected argument for o8 mission create: ${shown(tok)}`,
       EXIT.INVALID_ARGS,
       'Put the task in --body, for example: o8 mission create --title "Add a health route" --body "Create /api/health returning 200." Run `o8 mission create --help` for every flag.',
     );

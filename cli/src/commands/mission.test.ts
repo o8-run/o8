@@ -473,6 +473,22 @@ describe('o8 mission create refuses what it would drop', () => {
     expect(() => checkMissionCreateArgs(['--title', 'x', '--dispatch=yes'])).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
   });
 
+  it('takes --flag=value and a value flag left last without a value, as before', () => {
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--effort=low', '--body'])).not.toThrow();
+  });
+
+  it('says a value flag needs a value when another flag follows it', () => {
+    expect(() => checkMissionCreateArgs(['--effort', '--title', 'x']))
+      .toThrowError(expect.objectContaining({ message: '--effort needs a value.' }));
+  });
+
+  it('echoes a refused word without control characters, and short', () => {
+    let message = '';
+    try { checkMissionCreateArgs(['--title', 'x', `--a\x1b]0;pwn\x07${'b'.repeat(200)}`]); } catch (error) { message = (error as Error).message; }
+    expect(message).not.toMatch(/[\x00-\x1f]/);
+    expect(message.length).toBeLessThan(140);
+  });
+
   it('refuses before anything reaches the server', async () => {
     process.env.O8_API_PORT = '47120';
     const fetchMock = vi.fn();
