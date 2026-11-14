@@ -22,6 +22,32 @@ const QUIET: DockPrecedenceInput = {
 };
 
 describe('dock precedence', () => {
+  /**
+   * Independent reference, transcribed by hand from DockNotchSurface.tsx at
+   * 7a3572414423cb6f95f4e98e0b42b8e81bb7d9b4 (origin/main before this PR): the
+   * flag guards at :568-606 and the body if/else chain at :843-1304. It is
+   * written as "first branch in body order whose own guard holds", without the
+   * helper under test.
+   */
+  function reference(i: DockPrecedenceInput): DockOwner {
+    const idle = i.dictationState === 'idle';
+    const speaking = idle && i.ttsState !== 'idle'; // :568
+    const asking = i.askOpen && (idle || i.panelPending); // :575
+    const confirming = i.agentConfirm && idle; // :585
+    const working = i.agentWorking && !confirming && idle && !asking && !speaking; // :586
+    const drop = i.dropActive && idle && !confirming && !asking; // :590
+    const staged = !drop && i.stagedFiles && idle && !confirming && !asking && !speaking && !working; // :592
+    const workersInfo = i.showWorkers && i.workerCount > 0 && idle && !confirming && !asking && !speaking && !working && !drop && !staged; // :596
+    const voice = i.realtimeVoice !== 'off' && idle && !confirming && !asking && !speaking && !working && !drop && !staged && !workersInfo; // :603
+    // Body order :843 confirm, :847 drop, :888 staged, :971 working, :1015 workers,
+    // :1064 voice, :1144 ask, :1210 speaking, then the dictation modes.
+    const chain: [boolean, DockOwner][] = [
+      [confirming, 'confirm'], [drop, 'drop'], [staged, 'staged'], [working, 'working'], [workersInfo, 'workers'],
+      [voice, 'voice'], [asking, 'ask'], [speaking, 'speaking'], [!idle, 'dictation'],
+    ];
+    return chain.find(([holds]) => holds)?.[1] ?? 'idle';
+  }
+
   /** The surface DockNotchSurface actually draws for these inputs. */
   function drawn(input: DockPrecedenceInput): DockOwner {
     const markup = renderToStaticMarkup(createElement(DockNotchSurface, {
@@ -42,29 +68,36 @@ describe('dock precedence', () => {
     }));
     const markers: [DockOwner, string][] = [
       ['confirm', 'for confirmation"'], ['drop', 'They ride your next question'], ['staged', 'Staged — hold'],
-      ['working', 'aria-label="Stop (Esc)"'], ['workers', '1 packet in flight'], ['voice', 'Voice live — tap to stop'],
-      ['ask', 'aria-label="Close"'], ['speaking', '>Speaking<'], ['dictation', 'aria-label="Finish listening"'],
+      ['working', 'aria-label="Stop (Esc)"'], ['workers', '2 packets in flight'], ['voice', 'Voice live — tap to stop'],
+      ['voice', 'aria-label="Connecting voice"'], ['ask', 'aria-label="Close"'], ['speaking', '>Speaking<'], ['speaking', '>Paused<'],
     ];
     const found = markers.filter(([, marker]) => markup.includes(marker)).map(([owner]) => owner);
     expect(found.length).toBeLessThanOrEqual(1);
-    return found[0] ?? 'idle';
+    if (found[0]) return found[0];
+    // The listening capsule is a waveform; the done capsule shows the pasted text.
+    return markup.includes('aria-label="Finish listening"') || markup.includes('>Pasted</p>') ? 'dictation' : 'idle';
   }
 
-  it('matches what the web dock draws for every combination of dock states', () => {
-    const flags = ['askOpen', 'agentConfirm', 'agentWorking', 'dropActive', 'stagedFiles', 'showWorkers', 'speaking', 'voice', 'recording'] as const;
+  it('the helper and the rendered dock match an independent reference for every combination', () => {
     const owners = new Set<DockOwner>();
-    for (let mask = 0; mask < 1 << flags.length; mask++) {
-      const on = (flag: typeof flags[number]) => (mask & (1 << flags.indexOf(flag))) !== 0;
-      const input: DockPrecedenceInput = {
-        ...QUIET, askOpen: on('askOpen'), agentConfirm: on('agentConfirm'), agentWorking: on('agentWorking'),
-        dropActive: on('dropActive'), stagedFiles: on('stagedFiles'), showWorkers: on('showWorkers'), workerCount: on('showWorkers') ? 1 : 0,
-        ttsState: on('speaking') ? 'playing' : 'idle', realtimeVoice: on('voice') ? 'live' : 'off',
-        dictationState: on('recording') ? 'recording' : 'idle',
-      };
-      const owner = dockOwner(input);
-      owners.add(owner);
-      expect(drawn(input), JSON.stringify(input)).toBe(owner);
-    }
+    let cases = 0;
+    for (const dictationState of ['idle', 'recording', 'success'] as const)
+      for (const ttsState of ['idle', 'playing', 'paused'] as const)
+        for (const realtimeVoice of ['off', 'connecting', 'live'] as const)
+          for (const workerCount of [0, 2])
+            for (let mask = 0; mask < 1 << 7; mask++) {
+              const bit = (n: number) => (mask & (1 << n)) !== 0;
+              const input: DockPrecedenceInput = {
+                dictationState, ttsState, realtimeVoice, workerCount, askOpen: bit(0), panelPending: bit(1), agentConfirm: bit(2),
+                agentWorking: bit(3), dropActive: bit(4), stagedFiles: bit(5), showWorkers: bit(6),
+              };
+              const expected = reference(input);
+              owners.add(expected);
+              cases++;
+              expect(dockOwner(input), JSON.stringify(input)).toBe(expected);
+              expect(drawn(input), JSON.stringify(input)).toBe(expected);
+            }
+    expect(cases).toBe(6912);
     expect(owners.size).toBe(10);
   });
 
@@ -145,7 +178,7 @@ describe('native dock capsules through the real hook', () => {
     await render(QUIET);
     await tick(2000);
     const releases = frames.filter(frame => frame.action === 'release');
-    expect(releases).toEqual([expect.objectContaining({ session, immediate: false })]);
+    expect(releases).toEqual([expect.objectContaining({ session, kind: _name, immediate: false })]);
     expect(frames.at(-1)?.action).toBe('release');
   });
 
@@ -231,7 +264,7 @@ describe('native dock capsules through the real hook', () => {
     expect(native).toBe(true);
     await tick(1);
     expect(native).toBe(false);
-    expect(frames.at(-1)).toMatchObject({ action: 'release', session });
+    expect(frames.at(-1)).toMatchObject({ action: 'release', session, kind: 'speaking' });
     expect(webDockView(native, { ...IDLE, state: 'speaking' }, 'idle', { ttsState: 'playing', realtimeVoice: 'off', agentWorking: false, askOpen: false }))
       .toMatchObject({ nativeCapsule: false, ttsState: 'playing' });
   });

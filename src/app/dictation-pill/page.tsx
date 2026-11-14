@@ -23,8 +23,8 @@ import { useAgentConfirmations } from '@/components/desktop/dictation/useAgentCo
 import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 import { EditRevertChip } from './EditRevertChip';
-import { IDLE_SNAPSHOT, useNativeDictationPill, useNativePillDockExtent, type NativeDockAction } from './useNativeDictationPill';
-import { useNativeDockFrame, webDockView } from './nativeDockFrame';
+import { IDLE_SNAPSHOT } from './useNativeDictationPill';
+import { useNativeDock } from './nativeDockFrame';
 import { DockGlint } from './DockGlint';
 
 export const dynamic = 'force-dynamic';
@@ -854,32 +854,14 @@ export default function DictationPillPage() {
   // click-through except while the cursor is over the PAINTED pill. Report the
   // content wrapper's rect on every morph (ResizeObserver fires through the
   // 0.5s geometry transition; rAF-throttled so we invoke at most per-frame).
-  // The native panel draws dictation and the speech, live voice and working
-  // capsules; it reports their clicks and these web controls run the commands.
-  const nativeFrame = useNativeDockFrame({
-    snapshot, dictationSession: startTimeRef.current, ttsState, askOpen, agentConfirm: !!agentConfirm, agentWorking,
-    dropActive, stagedFiles: !!stagedChips?.length, showWorkers, workerCount: parkedWorkers ? workers.working + parkedWorkers.waiting : workers.count,
-    realtimeVoice, speechSpeed, agentTool, agentStartedAt,
-  });
-  const onNativeAction = useCallback((clicked: NativeDockAction) => {
-    if (clicked.action === 'pause') handleTogglePause();
-    else if (clicked.action === 'stop') handleStop();
-    else if (clicked.action === 'interrupt') handleInterrupt();
-    else if (clicked.action === 'voice-stop') stopRealtimeVoice();
-    else if (typeof clicked.value === 'number' && clicked.value >= 0.7 && clicked.value <= 1.2) handleSpeechSpeed(clicked.value);
-  }, [handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed]);
-  const { native: nativeDictation, suppressed } = useNativeDictationPill(nativeFrame.frame, nativeFrame.session, finishSystemDictation, onNativeAction);
   const [editVisible, setEditVisible] = useState(false);
-  const webSnapshot = nativeDictation ? IDLE_SNAPSHOT : snapshot;
-  const {
-    nativeDrawn, nativeCapsule, ttsState: webTts, realtimeVoice: webRealtime, agentWorking: webAgentWorking,
-  } = webDockView(nativeDictation, nativeFrame.frame, snapshot.state, { ttsState, realtimeVoice, agentWorking, askOpen });
-  const nativeActive = nativeDrawn && !suppressed;
+  const { native: nativeDictation, nativeActive, nativeCapsule, webSnapshot, webTts, webRealtime, webAgentWorking, dockVisible } = useNativeDock({
+    snapshot, dictationSession: startTimeRef.current, ttsState, askOpen, agentConfirm: !!agentConfirm, agentWorking, dropActive, showWorkers,
+    stagedFiles: !!stagedChips?.length, workerCount: parkedWorkers ? workers.working + parkedWorkers.waiting : workers.count, realtimeVoice, speechSpeed, agentTool, agentStartedAt,
+  }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, invokeCmd }, {
+    topPillEnabled, editVisible, glint: !!glint, staged: !!stagedChips, fleet: workers.count > 0 || (parkedWorkers?.waiting ?? 0) > 0,
+  });
   const hitRectHostRef = useRef<HTMLDivElement | null>(null);
-  const dockVisible = (!nativeDictation || !suppressed) && ((!nativeDictation && (topPillEnabled || snapshot.state !== 'idle')) || webTts !== 'idle'
-    || askOpen || webAgentWorking || !!agentConfirm || webRealtime !== 'off'
-    || (nativeDictation && (editVisible || (!nativeCapsule && (dropActive || !!stagedChips || (workers.count > 0 || (parkedWorkers?.waiting ?? 0) > 0))) || !!glint)));
-  useNativePillDockExtent(nativeDictation, nativeActive, dockVisible, askOpen, suppressed, invokeCmd);
   useEffect(() => {
     if (!isTauri()) return;
     if (!dockVisible) {

@@ -356,9 +356,14 @@ fn dispatch(
                 Some("release") => {
                     // A release names the session it retires; a late one never
                     // hides a newer session that is already on screen.
-                    let stale = args["session"]
-                        .as_u64()
-                        .is_some_and(|session| pill.target && session != pill.snapshot.session);
+                    // Capsule kinds number sessions independently, so the kind
+                    // is part of the identity.
+                    let kind = capsules::kind(&pill.snapshot.state);
+                    let stale = pill.target
+                        && (args["session"]
+                            .as_u64()
+                            .is_some_and(|session| session != pill.snapshot.session)
+                            || args["kind"].as_str().is_some_and(|named| named != kind));
                     if !stale {
                         pill.apply(Snapshot::default());
                         if args["immediate"] == true {

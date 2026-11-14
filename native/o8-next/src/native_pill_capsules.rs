@@ -28,6 +28,15 @@ pub(crate) fn is_capsule(state: &str) -> bool {
     matches!(state, "speaking" | "working" | "voice")
 }
 
+/// The session kind a release names: each capsule, or dictation for every dictation state.
+pub(crate) fn kind(state: &str) -> &str {
+    if is_capsule(state) {
+        state
+    } else {
+        "dictation"
+    }
+}
+
 /// The web capsule footprint for each state (DockNotchSurface geometry).
 pub(crate) fn size(snapshot: &Snapshot) -> (f64, f64) {
     match snapshot.state.as_str() {

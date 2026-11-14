@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 import { dockOwner, type DockPrecedenceInput } from '@/components/desktop/dictation/dockPrecedence';
-import { IDLE_SNAPSHOT, type NativeDockSnapshot } from './useNativeDictationPill';
+import { IDLE_SNAPSHOT, useNativeDictationPill, useNativePillDockExtent, type NativeDockAction, type NativeDockSnapshot } from './useNativeDictationPill';
 
 export interface NativeDockInput extends Omit<DockPrecedenceInput, 'dictationState' | 'panelPending'> {
   snapshot: DictationSnapshot;
@@ -63,5 +63,38 @@ export function webDockView(native: boolean, frame: NativeDockSnapshot, dictatio
     realtimeVoice: nativeDrawn ? 'off' as const : live.realtimeVoice,
     // The open Ask panel keeps its pending working row under native dictation.
     agentWorking: nativeDrawn && !live.askOpen ? false : live.agentWorking,
+  };
+}
+
+/** The dock page's native wiring: the frame, the hook, and the clicks it reports
+ * routed to the same handlers the web controls call. */
+export function useNativeDock(input: NativeDockInput, handlers: {
+  finishSystemDictation: () => void; handleTogglePause: () => void; handleStop: () => void; handleInterrupt: () => void;
+  stopRealtimeVoice: () => void; handleSpeechSpeed: (rate: number) => void;
+  invokeCmd: (command: string, args: Record<string, unknown>) => void;
+}, retained: { topPillEnabled: boolean; editVisible: boolean; glint: boolean; staged: boolean; fleet: boolean }) {
+  const nativeFrame = useNativeDockFrame(input);
+  const { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed } = handlers;
+  const onNativeAction = useCallback((clicked: NativeDockAction) => {
+    if (clicked.action === 'pause') handleTogglePause();
+    else if (clicked.action === 'stop') handleStop();
+    else if (clicked.action === 'interrupt') handleInterrupt();
+    else if (clicked.action === 'voice-stop') stopRealtimeVoice();
+    else if (typeof clicked.value === 'number' && clicked.value >= 0.7 && clicked.value <= 1.2) handleSpeechSpeed(clicked.value);
+  }, [handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed]);
+  const { native, suppressed } = useNativeDictationPill(nativeFrame.frame, nativeFrame.session, finishSystemDictation, onNativeAction);
+  const view = webDockView(native, nativeFrame.frame, input.snapshot.state, {
+    ttsState: input.ttsState, realtimeVoice: input.realtimeVoice, agentWorking: input.agentWorking, askOpen: input.askOpen,
+  });
+  const nativeActive = view.nativeDrawn && !suppressed;
+  // Retained web surfaces keep the dock visible under native ownership.
+  const dockVisible = (!native || !suppressed) && ((!native && (retained.topPillEnabled || input.snapshot.state !== 'idle'))
+    || view.ttsState !== 'idle' || input.askOpen || view.agentWorking || input.agentConfirm || view.realtimeVoice !== 'off'
+    || (native && (retained.editVisible || (!view.nativeCapsule && (input.dropActive || retained.staged || retained.fleet)) || retained.glint)));
+  useNativePillDockExtent(native, nativeActive, dockVisible, input.askOpen, suppressed, handlers.invokeCmd);
+  return {
+    native, suppressed, dockVisible, nativeCapsule: view.nativeCapsule, nativeActive,
+    webSnapshot: native ? IDLE_SNAPSHOT : input.snapshot,
+    webTts: view.ttsState, webRealtime: view.realtimeVoice, webAgentWorking: view.agentWorking,
   };
 }

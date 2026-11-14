@@ -595,3 +595,48 @@ fn release_names_its_session_and_a_web_takeover_hides_at_once(cx: &mut TestAppCo
         "an untagged release still hides"
     );
 }
+
+#[gpui::test]
+fn a_late_release_for_another_kind_with_the_same_session_number_keeps_the_capsule(
+    cx: &mut TestAppContext,
+) {
+    let (pill, visual) = cx.add_window_view(|_, _| Pill::default());
+    let release = |args: Value, visual: &mut gpui::VisualTestContext| {
+        visual.update(|window, cx| {
+            dispatch(
+                &pill,
+                json!({"expiresAt":future(), "args":args}),
+                window,
+                cx,
+                |_| {},
+            )
+        });
+        visual.run_until_parked();
+    };
+    // Speaking and live voice number their sessions independently from 1.
+    show(&pill, capsule("voice", 1), visual);
+    release(
+        json!({"action":"release","session":1,"kind":"speaking"}),
+        visual,
+    );
+    assert!(
+        pill.read_with(visual, |p, _| p.target),
+        "a speaking release must not hide voice session 1"
+    );
+    release(
+        json!({"action":"release","session":1,"kind":"voice"}),
+        visual,
+    );
+    assert!(!pill.read_with(visual, |p, _| p.target));
+    show(&pill, capsule("recording", 1), visual);
+    release(
+        json!({"action":"release","session":1,"kind":"working"}),
+        visual,
+    );
+    assert!(pill.read_with(visual, |p, _| p.target));
+    release(
+        json!({"action":"release","session":1,"kind":"dictation"}),
+        visual,
+    );
+    assert!(!pill.read_with(visual, |p, _| p.target));
+}

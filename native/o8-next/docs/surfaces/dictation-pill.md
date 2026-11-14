@@ -44,8 +44,19 @@ resume `tts_toggle_pause`, stop `tts_stop`, speed `tts_set_speed`, working stop
 `agent_interrupt`, live voice stop the `o8:realtime-toggle` emit (ignored while
 connecting, as on the web). The API route forwards only well-formed intents.
 
-Releases now name the session they retire, so a late fallback release can no
-longer hide a newer session that is already drawn (closes that #6145 item).
+Releases now name the session and kind (dictation, speaking, working or voice)
+they retire, so a late fallback release can no longer hide a newer session that
+is already drawn, including another kind with the same session number (closes
+that #6145 item).
+
+A reported click is dropped, never delayed or replayed, when the reply that
+would carry it is a release, or arrives after the hook moved to a new
+generation (a new session, kind or owner); it is also dropped on fallback,
+quiet mode and lease expiry. When a frame is dropped (deadline), there can be a
+window of up to the 500 ms request deadline with no capsule drawn before the
+web capsule returns. When a still-web surface takes the dock, the web draws it
+immediately and the native capsule hides when the immediate release lands, so
+both can be visible for about one pipe round trip.
 When a still-web surface takes the dock, the release is marked immediate and
 the native capsule hides without the 160 ms exit fade.
 

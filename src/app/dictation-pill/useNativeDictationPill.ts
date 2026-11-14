@@ -61,7 +61,7 @@ export function useNativeDictationPill(
   const active = snapshot.state !== 'idle';
   const latest = useRef({
     snapshot, session, onFinish, onAction, native, active: false, family: family(snapshot.state),
-    generation: 0, retirement: 0, retiredGeneration: 0, retiredSession: session,
+    generation: 0, retirement: 0, retiredGeneration: 0, retiredSession: session, retiredFamily: family(snapshot.state),
   });
   const wake = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
@@ -75,6 +75,7 @@ export function useNativeDictationPill(
       retirement: previous.retirement + (retiring ? 1 : 0),
       retiredGeneration: retiring ? previous.generation : previous.retiredGeneration,
       retiredSession: retiring ? previous.session : previous.retiredSession,
+      retiredFamily: retiring ? previous.family : previous.retiredFamily,
     };
   }, [snapshot, session, onFinish, onAction, native, active]);
   useEffect(() => {
@@ -125,7 +126,9 @@ export function useNativeDictationPill(
       setNative(false);
       // Independent best effort: a lost acknowledgement must not block retirement.
       // It names its session, so a late arrival cannot hide the next session.
-      void request({ action: 'release', session: latest.current.session }).catch(() => undefined);
+      const now = latest.current;
+      void request({ action: 'release', ...(now.active ? { session: now.session, kind: now.family } : { session: now.retiredSession, kind: now.retiredFamily }) })
+        .catch(() => undefined);
     };
     // One request owns the transport until its reply settles. Wakes only replace
     // the latest committed snapshot; they never append work to a frame queue.
@@ -138,10 +141,11 @@ export function useNativeDictationPill(
       let action: 'prepare' | 'frame' | 'release';
       let generation = current.generation;
       let releaseSession = current.session;
+      let releaseKind = current.family;
       const releasing = current.retirement !== retirementSeen && current.native;
       retirementSeen = current.retirement;
       if (releasing || releasePending) {
-        if (releasing) releaseSession = current.retiredSession;
+        if (releasing) { releaseSession = current.retiredSession; releaseKind = current.retiredFamily; }
         releasePending = false;
         action = 'release';
         generation = current.retiredGeneration;
@@ -171,7 +175,7 @@ export function useNativeDictationPill(
           paused: frame.paused, speed: frame.speed, tool: bounded(frame.tool, 200),
           startedAt: frame.startedAt, connecting: frame.connecting,
         } : undefined,
-        ...(action === 'release' ? { session: releaseSession, immediate: current.snapshot.handoff === true } : {}) });
+        ...(action === 'release' ? { session: releaseSession, kind: releaseKind, immediate: current.snapshot.handoff === true } : {}) });
         if (disposed) return;
         if (generation !== latest.current.generation) { pending = true; return; }
         if (!reply.native) {
