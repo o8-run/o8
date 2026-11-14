@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CliError, EXIT } from '../../api';
 
 import {
-  followIsOver, followTranscript, nextCursor, parseTranscriptArgs, plainText, shouldCheckState, toolDetail, transcriptLines, type TranscriptEvent,
+  followIsOver, followTranscript, holdOpen, nextCursor, parseTranscriptArgs, plainText, shouldCheckState, toolDetail, transcriptLines, type TranscriptEvent,
 } from './transcript';
 
 const at = () => '12:31:05';
@@ -13,9 +13,11 @@ const call = (tool: string, args: unknown, summary = ''): Extract<TranscriptEven
 
 describe('packet transcript arguments', () => {
   it('takes an optional packet, --follow or -f, and a bounded --limit', () => {
-    expect(parseTranscriptArgs([])).toEqual({ target: null, follow: false, limit: 50 });
-    expect(parseTranscriptArgs(['pkt-1', '-f'])).toEqual({ target: 'pkt-1', follow: true, limit: 50 });
-    expect(parseTranscriptArgs(['pkt-1', '--follow', '--limit', '200'])).toEqual({ target: 'pkt-1', follow: true, limit: 200 });
+    expect(parseTranscriptArgs([])).toEqual({ target: null, follow: false, hold: false, limit: 50 });
+    expect(parseTranscriptArgs(['pkt-1', '-f'])).toEqual({ target: 'pkt-1', follow: true, hold: false, limit: 50 });
+    expect(parseTranscriptArgs(['pkt-1', '--follow', '--limit', '200'])).toEqual({ target: 'pkt-1', follow: true, hold: false, limit: 200 });
+    expect(parseTranscriptArgs(['pkt-1', '--follow', '--hold'])).toEqual({ target: 'pkt-1', follow: true, hold: true, limit: 50 });
+    expect(() => parseTranscriptArgs(['pkt-1', '--hold'])).toThrow(/--hold only applies with --follow/);
   });
 
   it('refuses a limit outside 1..200', () => {
@@ -306,5 +308,54 @@ describe('the follow loop', () => {
       'state reviewing', 'read 3', 'state reviewing', 'read 203', 'say The worker stopped. The packet is reviewing.',
     ]);
     expect(run.log).toContain('show 204');
+  });
+});
+
+describe('holding the pane open', () => {
+  function terminal(inputTty: boolean, outputTty: boolean) {
+    const listeners: Record<string, Array<() => void>> = {};
+    const log: string[] = [];
+    return {
+      log,
+      fire: (event: string) => { for (const listener of listeners[event] ?? []) listener(); },
+      terminal: {
+        input: {
+          isTTY: inputTty,
+          once: (event: 'data' | 'end', listener: () => void) => { (listeners[event] ??= []).push(listener); },
+          resume: () => { log.push('resume'); },
+          pause: () => { log.push('pause'); },
+        },
+        output: { isTTY: outputTty, write: (text: string) => { log.push(text.trim()); } },
+      },
+    };
+  }
+
+  it('waits for a key, and says how to close', async () => {
+    const held = terminal(true, true);
+    let closed = false;
+    const waiting = holdOpen(held.terminal).then(() => { closed = true; });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    expect(held.log).toEqual(['Press Enter to close.', 'resume']);
+    held.fire('data');
+    held.fire('end');
+    await waiting;
+    expect(closed).toBe(true);
+    expect(held.log).toEqual(['Press Enter to close.', 'resume', 'pause']);
+  });
+
+  it('ends when the input closes', async () => {
+    const held = terminal(true, true);
+    const waiting = holdOpen(held.terminal);
+    held.fire('end');
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  it('returns at once when there is no terminal to press a key in', async () => {
+    for (const [input, output] of [[false, true], [true, false], [false, false]] as const) {
+      const piped = terminal(input, output);
+      await holdOpen(piped.terminal);
+      expect(piped.log).toEqual([]);
+    }
   });
 });

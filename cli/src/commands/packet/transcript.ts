@@ -39,13 +39,13 @@ const TEXT_MAX = 1_200;
 const DETAIL_KEYS = ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt'] as const;
 const PATH_KEYS = new Set(['file_path', 'path']);
 
-export interface TranscriptArgs { target: string | null; follow: boolean; limit: number }
+export interface TranscriptArgs { target: string | null; follow: boolean; hold: boolean; limit: number }
 
 export function parseTranscriptArgs(rest: string[]): TranscriptArgs {
   const args = parsePacketArguments(rest, {
     command: 'transcript',
     valueFlags: ['limit'],
-    booleanFlags: ['follow'],
+    booleanFlags: ['follow', 'hold'],
     aliases: { '-f': '--follow' },
   });
   let limit = TRANSCRIPT_LIMIT_DEFAULT;
@@ -55,7 +55,10 @@ export function parseTranscriptArgs(rest: string[]): TranscriptArgs {
     }
     limit = Number(args.values.limit);
   }
-  return { target: args.target, follow: args.booleans.has('follow'), limit };
+  const follow = args.booleans.has('follow');
+  const hold = args.booleans.has('hold');
+  if (hold && !follow) throw new CliError('invalid_args', '--hold only applies with --follow.', EXIT.INVALID_ARGS);
+  return { target: args.target, follow, hold, limit };
 }
 
 /**
@@ -336,6 +339,34 @@ export async function followTranscript(steps: FollowSteps, first: TranscriptPage
   }
 }
 
+/** What `--hold` needs from the terminal: a key press to wait for, and a place to say so. */
+export interface HoldTerminal {
+  input: { isTTY?: boolean; once(event: 'data' | 'end', listener: () => void): unknown; resume(): unknown; pause(): unknown };
+  output: { isTTY?: boolean; write(text: string): unknown };
+}
+
+/**
+ * Keeps the command, and so its pane, open after the worker stopped, until a
+ * key is pressed. Without a terminal on both ends there is no one to press
+ * one, so it returns at once.
+ */
+export function holdOpen(terminal: HoldTerminal): Promise<void> {
+  if (!terminal.input.isTTY || !terminal.output.isTTY) return Promise.resolve();
+  terminal.output.write('Press Enter to close.\n');
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      terminal.input.pause();
+      resolve();
+    };
+    terminal.input.once('data', finish);
+    terminal.input.once('end', finish);
+    terminal.input.resume();
+  });
+}
+
 export async function runPacketTranscript(mode: OutputMode, rest: string[]): Promise<number> {
   const args = parseTranscriptArgs(rest);
   const packetId = requirePacketId(await resolvePacketTarget(args.target), 'transcript');
@@ -354,11 +385,13 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
   }
 
   writeEvents(recent.events, mode);
-  return followTranscript({
+  const exit = await followTranscript({
     read: (cursor) => fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX }),
     state: () => laneState(cfg, packetId),
     wait: () => new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS)),
     show: (events) => writeEvents(events, mode),
     say: (line) => { if (mode.human) process.stdout.write(`${line}\n`); },
   }, recent);
+  if (args.hold && mode.human) await holdOpen({ input: process.stdin, output: process.stdout });
+  return exit;
 }

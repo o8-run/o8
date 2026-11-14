@@ -176,13 +176,17 @@ export function runningPackets(lanes: unknown): PaneTerminal[] {
   return [...newest].flatMap(([id, lane]) => (lane.working ? [{ id, title: lane.title, kind: 'packet' as const }] : []));
 }
 
-/** The command a packet's pane runs: this CLI, following that packet's transcript. */
+/**
+ * The command a packet's pane runs: this CLI, following that packet's
+ * transcript. `--hold` keeps the pane open after the worker stops, so its
+ * final report stays on screen until the operator closes it.
+ */
 export function followCommand(input: Pick<TerminalPanesInput, 'self' | 'env'>, id: string): string[] {
   const routing = ROUTING_ENV.flatMap((name) => {
     const value = input.env[name];
     return value ? [`${name}=${value}`] : [];
   });
-  return [...(routing.length > 0 ? ['env', ...routing] : []), ...input.self, '--human', 'packet', 'transcript', id, '--follow'];
+  return [...(routing.length > 0 ? ['env', ...routing] : []), ...input.self, '--human', 'packet', 'transcript', id, '--follow', '--hold'];
 }
 
 /** The command one pane runs: this CLI, observing one terminal, read-only. */

@@ -117,7 +117,7 @@ title and a fixed status phrase, and nothing else. o8 writes to its own record
 | `o8 terminal shortcut` | Add a "Show o8 Terminals" action to Rex that runs `o8 terminal panes`; `--key <key>` binds a key, `--remove` takes it out |
 | `o8 terminal control <id>` | Claim one existing shell for input/output; refuses an active writer and releases on exit |
 | `o8 packet log <event>` | (Phase-1 stub) — will append a structured lane event once the backend route lands |
-| `o8 packet transcript [id]` | Read what a packet's worker is doing: tool calls, replies, steers and how it ended. `--follow` keeps reading until the worker stops; `--limit 1..200` sets how many recent events to show first |
+| `o8 packet transcript [id]` | Read what a packet's worker is doing: tool calls, replies, steers and how it ended. `--follow` keeps reading until the worker stops, and `--hold` then keeps the command open until you press Enter; `--limit 1..200` sets how many recent events to show first |
 
 ## Configuration
 
