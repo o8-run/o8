@@ -15,6 +15,9 @@ export interface NativeDockInput extends Omit<DockPrecedenceInput, 'dictationSta
   speechSpeed: number;
   agentTool: string;
   agentStartedAt: number;
+  /** The web dock's top-pill preference (dictation_top_pill): without it the
+   * web shows nothing at idle, so neither does the native panel. */
+  topPill?: boolean;
   /** The siblings drawn below the dock surface, and the fleet detail. */
   edit?: EditChipState | null;
   glint?: TimedGlint | null;
@@ -61,6 +64,12 @@ export function nativeDockFrame(input: NativeDockInput, sessions: Sessions): { f
     const carried = input.realtimeVoice === 'live' && workers.working > 0 ? { workers } : {};
     return { frame: below({ ...IDLE_SNAPSHOT, state: 'voice', connecting: input.realtimeVoice === 'connecting', ...carried }), session: sessions.voice };
   }
+  // The web dock shows the fleet or a lone chip/glint only while it is visible
+  // for another reason (page.tsx dockVisible): the top-pill preference or, under
+  // the expanded fleet capsule, live voice. Otherwise neither dock draws them.
+  const webShown = input.topPill === true || input.ttsState !== 'idle' || input.askOpen || input.agentWorking
+    || input.agentConfirm || input.realtimeVoice !== 'off';
+  if (!webShown && (owner === 'workers' || owner === 'idle')) return { frame: IDLE_SNAPSHOT, session: input.dictationSession };
   if (owner === 'workers' || owner === 'idle' && input.workerCount > 0) {
     return { frame: below({ ...IDLE_SNAPSHOT, state: 'workers', expanded: owner === 'workers', workers }), session: sessions.workers ?? 0 };
   }
@@ -73,7 +82,7 @@ export function useNativeDockFrame(input: NativeDockInput) {
   const voice = useEdgeSession(input.realtimeVoice !== 'off');
   const workerSession = useEdgeSession(input.workerCount > 0);
   const extras = useEdgeSession(!!input.edit || !!input.glint);
-  const { snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint } = input;
+  const { snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, topPill } = input;
   // The page builds the fleet detail per render; its values, not its identity, change the frame.
   const { count, working, waiting, label } = input.workers ?? {};
   const repos = input.workers?.repos.join('\n');
@@ -81,8 +90,8 @@ export function useNativeDockFrame(input: NativeDockInput) {
     count, working: working ?? 0, waiting: waiting ?? 0, label: label ?? 'waiting', repos: repos ? repos.split('\n') : [],
   }), [count, working, waiting, label, repos]);
   return useMemo(() => nativeDockFrame({
-    snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers,
-  }, { speaking, voice, workers: workerSession, extras }), [snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, speaking, voice, workerSession, extras]);
+    snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill,
+  }, { speaking, voice, workers: workerSession, extras }), [snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, speaking, voice, workerSession, extras]);
 }
 
 /** What the web dock draws beside the native panel. With native off this is the
@@ -110,6 +119,16 @@ export function webDockView(native: boolean, frame: NativeDockSnapshot, dictatio
   };
 }
 
+/** Whether the web dock window shows. Retained still-web surfaces keep it
+ * visible under native ownership; the chip and glint never do on their own
+ * (native draws them, or a still-web surface they sit under is already shown). */
+export function webDockVisible(native: boolean, suppressed: boolean, view: ReturnType<typeof webDockView>,
+  input: Pick<NativeDockInput, 'snapshot' | 'askOpen' | 'agentConfirm' | 'dropActive'>, retained: { topPillEnabled: boolean; staged: boolean }) {
+  return (!native || !suppressed) && ((!native && (retained.topPillEnabled || input.snapshot.state !== 'idle'))
+    || view.ttsState !== 'idle' || input.askOpen || view.agentWorking || input.agentConfirm || view.realtimeVoice !== 'off'
+    || (native && !view.nativeCapsule && (input.dropActive || retained.staged)));
+}
+
 /** The dock page's native wiring: the frame, the hook, and the clicks it reports
  * routed to the same handlers the web controls call. */
 export function useNativeDock(input: Omit<NativeDockInput, 'edit'>, handlers: {
@@ -118,7 +137,7 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit'>, handlers: {
   invokeCmd: (command: string, args: Record<string, unknown>) => void; onError: (message: string) => void;
 }, retained: { topPillEnabled: boolean; staged: boolean }) {
   const { edit, revert } = useEditRevert(handlers.onError);
-  const nativeFrame = useNativeDockFrame({ ...input, edit });
+  const nativeFrame = useNativeDockFrame({ ...input, edit, topPill: retained.topPillEnabled });
   const { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers } = handlers;
   const onNativeAction = useCallback((clicked: NativeDockAction) => {
     if (clicked.action === 'revert') void revert();
@@ -135,10 +154,7 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit'>, handlers: {
     showWorkers: input.showWorkers, workerCount: input.workerCount,
   });
   const nativeActive = view.nativeDrawn && !suppressed;
-  // Retained web surfaces keep the dock visible under native ownership.
-  const dockVisible = (!native || !suppressed) && ((!native && (retained.topPillEnabled || input.snapshot.state !== 'idle'))
-    || view.ttsState !== 'idle' || input.askOpen || view.agentWorking || input.agentConfirm || view.realtimeVoice !== 'off'
-    || (native && ((!!edit && !view.nativeEdit) || (!view.nativeCapsule && (input.dropActive || retained.staged)) || (!!input.glint && !view.nativeGlint))));
+  const dockVisible = webDockVisible(native, suppressed, view, input, retained);
   useNativePillDockExtent(native, nativeActive, dockVisible, input.askOpen, suppressed, handlers.invokeCmd);
   return {
     native, suppressed, dockVisible, nativeCapsule: view.nativeCapsule, nativeActive,

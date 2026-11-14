@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DockPrecedenceInput } from '@/components/desktop/dictation/dockPrecedence';
 import type { DictationSnapshot } from '@/components/desktop/dictation/types';
 import { useNativeDock, type NativeDockInput } from './nativeDockFrame';
-import { useDockGlint } from './DockGlint';
+import { DockGlint, useDockGlint, type TimedGlint } from './DockGlint';
 import { EditRevertChip } from './EditRevertChip';
 
 const bus = vi.hoisted(() => ({ handlers: new Map<string, (event: { payload: unknown }) => void>(), names: [] as string[] }));
@@ -27,7 +27,7 @@ const QUIET: Omit<DockPrecedenceInput, 'dictationState' | 'panelPending'> = {
   ttsState: 'idle', askOpen: false, agentConfirm: false, agentWorking: false,
   dropActive: false, stagedFiles: false, showWorkers: false, workerCount: 0, realtimeVoice: 'off',
 };
-type Input = Omit<NativeDockInput, 'edit' | 'glint'> & { topPill?: boolean };
+type Input = Omit<NativeDockInput, 'edit' | 'glint' | 'topPill'> & { topPill?: boolean; glint?: TimedGlint | null };
 type Dock = ReturnType<typeof useNativeDock>;
 type Frame = { action: string; session?: number; kind?: string; immediate?: boolean; snapshot?: Record<string, unknown> };
 
@@ -47,8 +47,8 @@ const fleet = (working: number, waiting = 0) => ({
 const noop = () => undefined;
 function Probe() {
   const glint = useDockGlint();
-  const { topPill, ...rest } = input;
-  const view = useNativeDock({ ...rest, glint: glint.glint }, {
+  const { topPill, glint: fixed, ...rest } = input;
+  const view = useNativeDock({ ...rest, glint: fixed === undefined ? glint.glint : fixed }, {
     finishSystemDictation: () => undefined, handleTogglePause: () => undefined, handleStop: () => undefined,
     handleInterrupt: () => undefined, stopRealtimeVoice: () => undefined, handleSpeechSpeed: () => undefined,
     expandWorkers, invokeCmd: noop, onError: noop,
@@ -72,7 +72,7 @@ const after = (count: number) => frames.slice(count);
 beforeEach(async () => {
   vi.useFakeTimers(); vi.setSystemTime(1_000_000);
   frames.length = 0; bus.handlers.clear(); bus.names.length = 0; invoke.mockClear(); expandWorkers = vi.fn();
-  input = { ...QUIET, snapshot: IDLE, dictationSession: 0, speechSpeed: 1, agentTool: '', agentStartedAt: 0 };
+  input = { ...QUIET, snapshot: IDLE, dictationSession: 0, speechSpeed: 1, agentTool: '', agentStartedAt: 0, topPill: true };
   reply = { native: true, enabled: true };
   dom = new JSDOM('', { url: 'http://localhost' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
@@ -275,6 +275,68 @@ describe('native glints, chip and fleet through the real dock hook', () => {
   });
 });
 
+describe('the top-pill preference and an unknown flag', () => {
+  it('with the top-pill preference off, the orbit, chip and glint alone draw nothing anywhere', async () => {
+    await render({ topPill: false }); await tick(100);
+    const mounted = frames.length;
+    await render(fleet(2)); await tick(100);
+    await render({ showWorkers: true }); await tick(100);
+    await emit('o8:edit-applied', { app: 'Notes' });
+    await act(async () => { showGlint('Remembered'); });
+    await tick(30_000);
+    expect(after(mounted)).toEqual([]);
+    expect(dock.nativeActive).toBe(false);
+    expect(dock.dockVisible).toBe(false);
+    // Beside a capsule the dock is visible on the web too, so the chip and glint draw with it.
+    await render({ ttsState: 'playing', showWorkers: false });
+    await emit('o8:edit-applied', { app: 'Notes' });
+    await act(async () => { showGlint('Again'); });
+    await tick(150);
+    expect(sent()).toMatchObject({ state: 'speaking', edit: { app: 'Notes' }, glint: { text: 'Again' } });
+    // The preference on: the same idle surfaces draw natively.
+    await render({ ttsState: 'idle', topPill: true }); await tick(150);
+    expect(sent()).toMatchObject({ state: 'workers', edit: { app: 'Notes' } });
+  });
+
+  it.each([
+    ['times out', () => new Promise<Response>(() => undefined)],
+    ['errors', () => Promise.reject(new Error('route down'))],
+    ['returns a server error', () => Promise.resolve(new Response('{}', { status: 500 }))],
+  ] as const)('when the startup probe %s, the orbit, chip and glint send nothing; dictation retries as before', async (_name, probe) => {
+    let first = true;
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      frames.push(JSON.parse(String(init?.body)));
+      if (first) { first = false; return probe(); }
+      return new Response(JSON.stringify(reply));
+    });
+    await render({}); await tick(600);
+    expect(frames).toHaveLength(1);
+    for (const patch of [fleet(2), { showWorkers: true }, fleet(3), { showWorkers: false }, { workerCount: 0, workers: undefined }]) {
+      await render(patch); await tick(500);
+      await emit('o8:edit-applied', { app: 'Notes' });
+      await act(async () => { showGlint('Remembered'); });
+      await tick(6000);
+    }
+    expect(frames).toHaveLength(1);
+    expect(dock.native).toBe(false);
+    expect(dock.webWorkerCount).toBe(0);
+    // A dictation session prepares once, as origin/main does after a failed probe;
+    // once a reply says the flag is on, the orbit may go native.
+    await render({ snapshot: { ...IDLE, state: 'recording' }, dictationSession: 9 }); await tick(150);
+    expect(frames[1]).toMatchObject({ action: 'prepare', checkSettings: true });
+    await render({ snapshot: IDLE, ...fleet(2) }); await tick(150);
+    expect(sent()).toMatchObject({ state: 'workers' });
+  });
+
+  it('a glint handed back to the web mid-life does not replay its fade-in', () => {
+    const shown = { key: 'k', text: 'Remembered', tone: 'progress' as const, fadeAt: Date.now() + 4200, until: Date.now() + 4800 };
+    expect(renderToStaticMarkup(createElement(DockGlint, { glint: shown, fading: false }))).toContain('o8GlintIn 0.3s');
+    const later = { ...shown, fadeAt: Date.now() + 2000, until: Date.now() + 2600 };
+    const markup = renderToStaticMarkup(createElement(DockGlint, { glint: later, fading: false }));
+    expect(markup).toContain('animation:none');
+  });
+});
+
 describe('flag off', () => {
   /**
    * Independent statement of origin/main (fc3e50f986652f73cbba27b7456faa57f69f7bae)
@@ -285,7 +347,7 @@ describe('flag off', () => {
    * the top-pill preference, any dictation, speech, Ask, working, a
    * confirmation or live voice.
    */
-  function reference(i: Input & { glint: boolean; edit: boolean }) {
+  function reference(i: Omit<Input, 'glint'> & { glint: boolean; edit: boolean }) {
     return {
       native: false, nativeCapsule: false, webSnapshot: i.snapshot, webTts: i.ttsState, webRealtime: i.realtimeVoice,
       webAgentWorking: i.agentWorking, webShowWorkers: i.showWorkers, webWorkerCount: i.workerCount, webEdit: i.edit, webGlint: i.glint,
@@ -304,11 +366,12 @@ describe('flag off', () => {
         for (const ttsState of ['idle', 'playing'] as const)
           for (const realtimeVoice of ['off', 'live'] as const)
             for (const workers of [0, 2])
-              for (let mask = 0; mask < 1 << 7; mask++) {
+              for (let mask = 0; mask < 1 << 8; mask++) {
                 const bit = (n: number) => (mask & (1 << n)) !== 0;
                 const patch: Input = {
                   ...input, snapshot: { ...IDLE, state: dictation }, ttsState, realtimeVoice, ...fleet(workers),
                   askOpen: bit(0), agentConfirm: bit(1), agentWorking: bit(2), dropActive: bit(3), stagedFiles: bit(4), showWorkers: bit(5), topPill: bit(6),
+                  glint: bit(7) ? { key: 'k', text: 'Remembered', tone: 'progress', fadeAt: 1, until: 2 } : null,
                 };
                 await render(patch);
                 const actual = {
@@ -316,11 +379,12 @@ describe('flag off', () => {
                   webRealtime: dock.webRealtime, webAgentWorking: dock.webAgentWorking, webShowWorkers: dock.webShowWorkers,
                   webWorkerCount: dock.webWorkerCount, webEdit: dock.webEdit !== null, webGlint: dock.webGlint !== null, dockVisible: dock.dockVisible,
                 };
-                expect(actual, JSON.stringify(patch)).toEqual(reference({ ...patch, edit, glint: false }));
+                expect(actual, JSON.stringify(patch)).toEqual(reference({ ...patch, edit, glint: bit(7) }));
                 cases++;
               }
     }
-    expect(cases).toBe(4096);
+    expect(cases).toBe(8192);
+    await render({ glint: undefined });
     await act(async () => { showGlint('Remembered'); });
     expect(dock.webGlint).toMatchObject({ text: 'Remembered' });
     await tick(60_000);

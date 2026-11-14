@@ -117,6 +117,10 @@ export function useNativeDictationPill(
     let retirementSeen = 0;
     let releasePending = false;
     let disabled = false;
+    // Set only by a reply that says the flag is on. Until then a fleet orbit,
+    // chip or glint never starts a request (a failed probe retries at the next
+    // dictation or capsule session, as before).
+    let enabled = false;
     let frameTimer: ReturnType<typeof setTimeout> | undefined;
 
     let unlisten: (() => void) | undefined;
@@ -177,7 +181,7 @@ export function useNativeDictationPill(
       else if (current.active) {
         if (current.native) action = 'frame';
         else {
-          if (attempted === generation) return;
+          if (attempted === generation || isStatic(current.snapshot.state) && !enabled) return;
           attempted = generation;
           action = 'prepare';
         }
@@ -206,6 +210,7 @@ export function useNativeDictationPill(
         } : undefined,
         ...(action === 'release' ? { session: releaseSession, kind: releaseKind, immediate: current.snapshot.handoff === true } : {}) });
         if (disposed) return;
+        if (reply.enabled === true) enabled = true;
         if (generation !== latest.current.generation) { pending = true; return; }
         if (!reply.native) {
           if (reply.enabled === false) disabled = true;
@@ -269,6 +274,7 @@ export function useNativeDictationPill(
       if (disposed) return;
       probed = true;
       if (initial.enabled === false) { disabled = true; return; }
+      if (initial.enabled === true) enabled = true;
       if (!initial.native) blocked = generation;
       const [{ listen }, { invoke }] = await Promise.all([import('@tauri-apps/api/event'), import('@tauri-apps/api/core')]);
       let revision = 0;

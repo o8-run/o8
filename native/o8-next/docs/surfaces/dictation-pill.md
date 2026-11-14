@@ -70,6 +70,17 @@ frame at once. The native loop is unchanged: it parks while hidden and ticks
 every 16 ms while visible, which also keeps mouse pass-through current, so a
 long-lived orbit keeps that tick running (see the #6145 CPU follow-up).
 
+Visibility and an unknown flag. The fleet orbit or capsule and a chip or
+glint with nothing above them show only when origin/main would show the web
+dock for them: with the top-pill preference (dictation_top_pill), or while live
+voice (or another visibility reason) keeps the dock up. Otherwise neither dock
+draws them; beside any capsule or dictation they show as before. These static
+states never start a request until a reply has said the flag is on. If the
+startup probe times out, errors or returns a server error, they send nothing
+(as with the flag off); the next dictation or capsule session retries the
+preparation exactly as origin/main does, and once that reply says the flag is
+on they may go native.
+
 Clicks. The fleet capsule and orbit report `workers-expand`; the web runs the
 same handler as its own sliver tap (show the capsule for 5 s, re-armed by
 another tap; there is no collapse click on the web either). The chip reports
@@ -194,7 +205,12 @@ belong under:
 
 While native, the web never draws the fleet orbit or capsule (native draws
 them, or dictation hides them, as on the web); before batch 3 the web orbit
-could show below native dictation. The second sweep in
+could show below native dictation. On origin/main the resting orbit is never
+drawn alongside staged-file chips (they are earlier branches of the same body
+chain), so staged chips are a handoff and the orbit returns natively after
+them; a reference-test case checks both. A glint handed back to the web
+mid-life keeps its phase: the web glint does not replay its fade-in (the web
+chip still does, a 0.3 s slide). The second sweep in
 native-dock-capsules.test.ts states this rule without the helpers and checks
 the frame state and the chip/glint owner for every combination.
 
@@ -218,7 +234,7 @@ The idle sliver alone does not make it visible under native ownership.
 | Speaking capsule | 280×40, radius 20, label, speed track, pause/resume and stop buttons | Speed is set by clicking one of 11 steps on the 58 pt track; dragging the knob is not ported. Theme surface instead of the frosted glass and blur |
 | Working capsule | 248×40, radius 20, ring, Working…/Synthesizing…, elapsed timer; hover shows Stop | Static ring instead of the spinning orbit; hover swap needs the live check on a non-key panel |
 | Live voice capsule | 268×40, radius 20, success dot and Voice live; ring and Connecting…; 348 wide with · ring · N working while live with workers in flight | No ambient waveform or pulsing dot |
-| Fleet orbit (resting) | 128×16 sliver, ring (or warning dot when all are waiting), count (99+) and fleet/work/ready/waiting | Theme surface instead of the brand gradient; static ring; no hover tooltip |
+| Fleet orbit (resting) | Only with the top-pill preference, as on the web; 128×16 sliver, ring (or warning dot when all are waiting), count (99+) and fleet/work/ready/waiting | Theme surface instead of the brand gradient; static ring; no hover tooltip |
 | Fleet capsule (expanded) | 320×44, ring or dot, DockNotchSurface wording, repos dimmed; tap re-arms the 5 s timer | No hover tooltip; static ring |
 | Edit/revert chip | 248×24 below the capsule (alone at the capsule position otherwise), Rewrote in App — Revert, Reverting…, Reverted, Original copied | Fixed width with truncation (the web chip sizes to its text); no enter slide |
 | Glint | Below the chip, uppercase, tone colour from theme tokens, 0.5 s fade from `fadeAt`, gone at `until` | Theme surface instead of the dark gradient; no enter slide |

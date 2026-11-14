@@ -37,12 +37,14 @@ export function useDockGlint() {
 }
 
 interface DockGlintProps {
-  glint: PlanProgressGlint;
+  glint: PlanProgressGlint & { fadeAt?: number };
   fading: boolean;
 }
 
-/** Quiet, pointer-transparent lifecycle chip below the dock. */
+/** Quiet, pointer-transparent lifecycle chip below the dock. A glint remounted
+ * mid-life (native handing it back to the web) does not replay its fade-in. */
 export function DockGlint({ glint, fading }: DockGlintProps) {
+  const [entering] = useState(() => glint.fadeAt === undefined || Date.now() < glint.fadeAt - GLINT_FADE_AT_MS + 300);
   return (
     <div
       style={{
@@ -75,7 +77,7 @@ export function DockGlint({ glint, fading }: DockGlintProps) {
         whiteSpace: 'nowrap',
         opacity: fading ? 0 : 1,
         transition: 'opacity 0.5s ease',
-        animation: 'o8GlintIn 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
+        animation: entering ? 'o8GlintIn 0.3s cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
         pointerEvents: 'none',
       }}
     >
