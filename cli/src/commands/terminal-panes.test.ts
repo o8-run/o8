@@ -273,9 +273,9 @@ describe('openTerminalPanes', () => {
     expect(result.opened.map((pane) => pane.id)).toEqual(['pkt-1', 'cortex-dash-1']);
     const creations = calls.filter((args) => args.includes('--label'));
     expect(creations[0]).toContain('o8: Fix login [pkt-1]');
-    expect(command(creations[0])).toEqual(['env', 'O8_API_PORT=47120', ...self, '--human', 'packet', 'transcript', 'pkt-1', '--follow']);
+    expect(command(creations[0])).toEqual(['env', 'O8_API_PORT=47120', ...self, '--human', 'packet', 'transcript', 'pkt-1', '--follow', '--hold']);
     expect(command(creations[1])).toEqual(['env', 'O8_API_PORT=47120', ...self, '--human', 'terminal', 'observe', 'cortex-dash-1']);
-    expect(followCommand({ self, env: {} }, 'pkt-1')).toEqual([...self, '--human', 'packet', 'transcript', 'pkt-1', '--follow']);
+    expect(followCommand({ self, env: {} }, 'pkt-1')).toEqual([...self, '--human', 'packet', 'transcript', 'pkt-1', '--follow', '--hold']);
   });
 
   it('finds a packet pane again by its ID, and never follows a packet on a remote machine', () => {

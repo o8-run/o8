@@ -39,13 +39,13 @@ const TEXT_MAX = 1_200;
 const DETAIL_KEYS = ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt'] as const;
 const PATH_KEYS = new Set(['file_path', 'path']);
 
-export interface TranscriptArgs { target: string | null; follow: boolean; limit: number }
+export interface TranscriptArgs { target: string | null; follow: boolean; hold: boolean; limit: number }
 
 export function parseTranscriptArgs(rest: string[]): TranscriptArgs {
   const args = parsePacketArguments(rest, {
     command: 'transcript',
     valueFlags: ['limit'],
-    booleanFlags: ['follow'],
+    booleanFlags: ['follow', 'hold'],
     aliases: { '-f': '--follow' },
   });
   let limit = TRANSCRIPT_LIMIT_DEFAULT;
@@ -55,7 +55,10 @@ export function parseTranscriptArgs(rest: string[]): TranscriptArgs {
     }
     limit = Number(args.values.limit);
   }
-  return { target: args.target, follow: args.booleans.has('follow'), limit };
+  const follow = args.booleans.has('follow');
+  const hold = args.booleans.has('hold');
+  if (hold && !follow) throw new CliError('invalid_args', '--hold only applies with --follow.', EXIT.INVALID_ARGS);
+  return { target: args.target, follow, hold, limit };
 }
 
 /**
@@ -272,6 +275,8 @@ export interface FollowSteps {
   wait(): Promise<void>;
   show(events: TranscriptEvent[]): void;
   say(line: string): void;
+  /** Told where the follow ended, so a later follow can take up from there. */
+  ended?(cursor: number, session: string | null): void;
 }
 
 /**
@@ -320,6 +325,7 @@ export async function followTranscript(steps: FollowSteps, first: TranscriptPage
       quietPages = read.events.length === 0 ? quietPages + 1 : 0;
       if (over && read.events.length < TRANSCRIPT_LIMIT_MAX) {
         steps.say(`The worker stopped. The packet is ${state ? plainText(state, 40).replace(/_/g, ' ') : 'gone'}.`);
+        steps.ended?.(cursor, session);
         return EXIT.OK;
       }
       // More was waiting behind the last read, so look again before ending.
@@ -334,6 +340,69 @@ export async function followTranscript(steps: FollowSteps, first: TranscriptPage
       page = { events: [] };
     }
   }
+}
+
+/** What `--hold` needs from the terminal: a key press to wait for, and a place to say so. */
+export interface HoldTerminal {
+  input: {
+    isTTY?: boolean;
+    on(event: 'data' | 'end', listener: () => void): unknown;
+    off(event: 'data' | 'end', listener: () => void): unknown;
+    resume(): unknown;
+    pause(): unknown;
+  };
+  output: { isTTY?: boolean; write(text: string): unknown };
+}
+
+export interface HoldOptions {
+  /** Whether the packet's worker is working again, asked every `pollMs`. */
+  runningAgain?: () => Promise<boolean>;
+  pollMs?: number;
+  now?: () => number;
+}
+
+/** Input that arrives this soon was typed before the prompt, while the worker ran. */
+const TYPED_AHEAD_MS = 400;
+const HOLD_POLL_MS = 5_000;
+
+/**
+ * Keeps the command, and so its pane, open after the worker stopped. It ends
+ * as `closed` when a key is pressed, or as `running` when the packet's worker
+ * is working again, so the caller can go back to following it. Without a
+ * terminal on both ends there is no one to press a key, so it ends at once.
+ */
+export function holdOpen(terminal: HoldTerminal, options: HoldOptions = {}): Promise<'closed' | 'running'> {
+  if (!terminal.input.isTTY || !terminal.output.isTTY) return Promise.resolve('closed');
+  const now = options.now ?? Date.now;
+  terminal.output.write('Press Enter to close.\n');
+  return new Promise((resolve) => {
+    const started = now();
+    let settled = false;
+    let asking = false;
+    const finish = (how: 'closed' | 'running') => {
+      if (settled) return;
+      settled = true;
+      clearInterval(poll);
+      terminal.input.off('data', onData);
+      terminal.input.off('end', onEnd);
+      terminal.input.pause();
+      resolve(how);
+    };
+    // A line typed while the worker ran is still waiting to be read. It must not close the pane.
+    const onData = () => { if (now() - started >= TYPED_AHEAD_MS) finish('closed'); };
+    const onEnd = () => finish('closed');
+    const poll = setInterval(() => {
+      if (!options.runningAgain || asking) return;
+      asking = true;
+      options.runningAgain()
+        .then((running) => { if (running) finish('running'); })
+        .catch(() => { /* a failed check is asked again on the next round */ })
+        .finally(() => { asking = false; });
+    }, options.pollMs ?? HOLD_POLL_MS);
+    terminal.input.on('data', onData);
+    terminal.input.on('end', onEnd);
+    terminal.input.resume();
+  });
 }
 
 export async function runPacketTranscript(mode: OutputMode, rest: string[]): Promise<number> {
@@ -354,11 +423,34 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
   }
 
   writeEvents(recent.events, mode);
-  return followTranscript({
-    read: (cursor) => fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX }),
-    state: () => laneState(cfg, packetId),
-    wait: () => new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS)),
-    show: (events) => writeEvents(events, mode),
-    say: (line) => { if (mode.human) process.stdout.write(`${line}\n`); },
-  }, recent);
+  const say = (line: string) => { if (mode.human) process.stdout.write(`${line}\n`); };
+  const holding = args.hold && mode.human;
+  const terminal = { input: process.stdin, output: process.stdout };
+  let from: TranscriptPage = recent;
+  while (true) {
+    let exit: number;
+    try {
+      exit = await followTranscript({
+        read: (cursor) => fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX }),
+        state: () => laneState(cfg, packetId),
+        wait: () => new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS)),
+        show: (events) => writeEvents(events, mode),
+        say,
+        ended: (cursor, session) => { from = { ...from, sessionKey: session, events: [], nextCursor: cursor }; },
+      }, from);
+    } catch (error) {
+      // In a pane the error is the thing worth reading, so it stays on screen too.
+      if (holding && terminal.input.isTTY && terminal.output.isTTY) {
+        say(`Stopped following: ${plainText(error instanceof Error ? error.message : String(error), 300)}`);
+        await holdOpen(terminal);
+      }
+      throw error;
+    }
+    if (!holding) return exit;
+    const next = await holdOpen(terminal, {
+      runningAgain: async () => WORKING_STATES.has(await laneState(cfg, packetId) ?? ''),
+    });
+    if (next === 'closed') return exit;
+    say('The packet is running again.');
+  }
 }
