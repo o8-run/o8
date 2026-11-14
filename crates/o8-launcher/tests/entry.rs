@@ -291,6 +291,8 @@ fn unproven_moved_install_removes_receipt_without_signalling() {
         .to_string_lossy()
         .to_string()
         .into();
+    // A token the held file does not carry proves nothing after a move.
+    receipt["hold"]["token"] = "forged-token".into();
     fs::write(&path, receipt.to_string()).unwrap();
     f.start();
     until(|| f.starts("api-starts").len() == 2);
@@ -443,6 +445,7 @@ fn an_actively_parented_process_is_never_reaped_as_an_orphan() {
         install: PathBuf::from(env!("CARGO_BIN_EXE_o8-launcher")),
         port,
         parent: std::process::id(),
+        hold: None,
     };
     o8_launcher::ownership::private_write(
         &f.root.join("launcher-api.json"),

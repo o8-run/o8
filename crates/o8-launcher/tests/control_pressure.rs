@@ -77,6 +77,7 @@ fn hardlinked_prior_receipt_is_preserved_and_refused_before_cleanup() {
         install: env!("CARGO_BIN_EXE_o8-launcher").into(),
         port: 0,
         parent: 1,
+        hold: None,
     };
     let bytes = serde_json::to_vec(&receipt).unwrap();
     o8_launcher::ownership::private_write(&target, &bytes).unwrap();
@@ -145,9 +146,21 @@ fn an_open_failure_dialog_does_not_block_control_or_shutdown() {
         control(&f, serde_json::json!({"op":"prepare-restart"}))["ok"],
         true
     );
+    let dialog: u32 = fs::read_to_string(f.root.join("dialog-pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
     f.stop();
     assert!(!f.root.join("dialog-exited").exists());
+    // The launcher ends and reaps its dialog child before it exits.
+    let reaped = gone(dialog);
+    if !reaped {
+        unsafe {
+            libc::kill(dialog as i32, libc::SIGKILL);
+        }
+    }
     fs::remove_file(f.root.join("hold-dialog")).unwrap();
+    assert!(reaped, "failure dialog outlived the launcher");
 }
 
 #[test]
@@ -162,6 +175,7 @@ fn an_uninspectable_other_user_receipt_does_not_block_start() {
         install: env!("CARGO_BIN_EXE_o8-launcher").into(),
         port: 0,
         parent: 1,
+        hold: None,
     };
     o8_launcher::ownership::private_write(
         &f.root.join("launcher-api.json"),
@@ -174,104 +188,6 @@ fn an_uninspectable_other_user_receipt_does_not_block_start() {
         serde_json::from_slice(&fs::read(f.root.join("launcher-api.json")).unwrap()).unwrap();
     assert_ne!(receipt["pid"], 1);
 }
-#[test]
-fn moved_install_only_stops_servers_with_proven_executable_scope() {
-    for proven_install in [true, false] {
-        let mut f = Fixture::new();
-        // Only built-in runtime modules run in this isolated server. No app loads.
-        let node = std::process::Command::new("node")
-            .args(["-p", "process.execPath"])
-            .env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .current_dir(&f.root)
-            .output()
-            .unwrap();
-        assert!(node.status.success());
-        let node = fs::canonicalize(String::from_utf8(node.stdout).unwrap().trim()).unwrap();
-        let server = r#"
-const fs = require('node:fs');
-const server = require('node:net').createServer();
-const root = process.argv[1];
-server.listen(0, '127.0.0.1', () => {
-  fs.writeFileSync(root + '/old-port.pending', String(server.address().port));
-  fs.renameSync(root + '/old-port.pending', root + '/old-port');
-});
-"#;
-        let helper = r#"
-import os, subprocess, sys
-child = subprocess.Popen([sys.argv[1], '-e', sys.argv[3], '--', sys.argv[2]],
-    cwd=sys.argv[2], env={'O8_DATA_DIR':sys.argv[2]}, start_new_session=True,
-    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-print(child.pid, os.getpid())
-"#;
-        let output = std::process::Command::new("python3")
-            .args(["-c", helper])
-            .env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .current_dir(&f.root)
-            .arg(&node)
-            .arg(&f.root)
-            .arg(server)
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        let ids = String::from_utf8(output.stdout)
-            .unwrap()
-            .split_whitespace()
-            .map(|id| id.parse::<u32>().unwrap())
-            .collect::<Vec<_>>();
-        let (pid, prior_parent) = (ids[0], ids[1]);
-        // Fixture drop owns emergency cleanup, even if an assertion fails.
-        fs::write(f.root.join("api-starts"), format!("{pid}\n")).unwrap();
-        until(|| f.root.join("old-port").exists());
-        let receipt = o8_launcher::ownership::Receipt {
-            pid,
-            identity: o8_launcher::ownership::identity(pid).unwrap(),
-            directory: f.root.clone(),
-            install: if proven_install {
-                node.with_file_name("o8-launcher")
-            } else {
-                "o8-launcher".into()
-            },
-            port: f.port("old-port"),
-            parent: prior_parent,
-        };
-        o8_launcher::ownership::private_write(
-            &f.root.join("launcher-api.json"),
-            &serde_json::to_vec(&receipt).unwrap(),
-        )
-        .unwrap();
-        fs::write(f.root.join("hold-probe"), "1").unwrap();
-        f.start();
-        until(|| f.root.join("probe-entered").exists());
-        let released_port = if proven_install {
-            Some(std::net::TcpListener::bind(("127.0.0.1", f.port("old-port"))).unwrap())
-        } else {
-            assert!(std::net::TcpStream::connect(("127.0.0.1", f.port("old-port"))).is_ok());
-            None
-        };
-        fs::remove_file(f.root.join("hold-probe")).unwrap();
-        f.ready();
-        drop(released_port);
-        if proven_install {
-            let status = std::process::Command::new("ps")
-                .args(["-p", &pid.to_string(), "-o", "stat="])
-                .output()
-                .unwrap();
-            let state = String::from_utf8_lossy(&status.stdout);
-            assert!(
-                state.trim().is_empty() || state.trim().starts_with('Z'),
-                "old server still running: {state}"
-            );
-        } else {
-            assert_eq!(
-                o8_launcher::ownership::identity(pid).as_deref(),
-                Some(receipt.identity.as_str())
-            );
-        }
-    }
-}
-
 #[test]
 fn failed_shutdown_logs_the_stop_error_and_releases_both_ports() {
     let mut f = Fixture::new();

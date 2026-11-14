@@ -35,6 +35,7 @@ if '--version' in sys.argv:
  print('v22.0.0'); sys.exit(0)
 if '-e' in sys.argv: sys.exit(0)
 if Path(sys.argv[0]).name=='dialog':
+ (root/'dialog-pid').write_text(str(os.getpid()))
  (root/'dialog-reached').write_text(sys.argv[1])
  while (root/'hold-dialog').exists(): time.sleep(0.02)
  (root/'dialog-exited').write_text('1'); sys.exit(0)
@@ -118,8 +119,26 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
         }
     }
     pub fn launch(&self) -> Child {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_o8-launcher"));
+        self.launch_with(
+            std::path::Path::new(env!("CARGO_BIN_EXE_o8-launcher")),
+            &self.root.join("config.json"),
+            &[],
+            "launcher-stderr",
+        )
+    }
+    /// Starts a launcher binary with extra environment, logging to `stderr` in the root.
+    pub fn launch_with(
+        &self,
+        binary: &std::path::Path,
+        config: &std::path::Path,
+        extra: &[(&str, &str)],
+        stderr: &str,
+    ) -> Child {
+        let mut command = Command::new(binary);
         command.env_clear();
+        for (key, value) in extra {
+            command.env(key, value);
+        }
         if self.root.join("memory-helper").exists() {
             command.env("O8_CODEBASE_MEMORY_BIN", self.root.join("memory-helper"));
         }
@@ -128,7 +147,7 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
         }
         command
             .arg("--config")
-            .arg(self.root.join("config.json"))
+            .arg(config)
             .env(
                 "PATH",
                 if self.root.join("minimal-path").exists() {
@@ -140,7 +159,7 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
             .env("HOME", &self.root)
             .env("LANG", "C")
             .stdout(Stdio::null())
-            .stderr(fs::File::create(self.root.join("launcher-stderr")).unwrap())
+            .stderr(fs::File::create(self.root.join(stderr)).unwrap())
             .spawn()
             .unwrap()
     }
@@ -167,6 +186,10 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
         }
         until(|| child.try_wait().unwrap().is_some());
         self.launcher = None;
+    }
+    #[allow(dead_code)]
+    pub fn log(&self, name: &str) -> String {
+        fs::read_to_string(self.root.join(name)).unwrap_or_default()
     }
     pub fn starts(&self, name: &str) -> Vec<u32> {
         fs::read_to_string(self.root.join(name))
@@ -221,4 +244,10 @@ pub fn control(f: &Fixture, request: serde_json::Value) -> serde_json::Value {
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes).unwrap();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+/// The process has exited and been reaped by whoever owned it.
+#[allow(dead_code)]
+pub fn gone(pid: u32) -> bool {
+    (unsafe { libc::kill(pid as i32, 0) }) != 0
 }
