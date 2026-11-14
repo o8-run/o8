@@ -1,7 +1,7 @@
 // @ts-expect-error jsdom is a test dependency without bundled declarations.
 import { JSDOM } from 'jsdom';
 import { readFileSync } from 'node:fs';
-import { act, createElement } from 'react';
+import { act, createElement, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useNativeDictationPill } from './useNativeDictationPill';
@@ -20,7 +20,8 @@ let session = 1;
 const frames: { action: string; snapshot?: Record<string, unknown> }[] = [];
 let reply: Record<string, unknown>;
 function Probe() {
-  native = useNativeDictationPill(snapshot, session, () => undefined).native;
+  const ownership = useNativeDictationPill(snapshot, session, () => undefined);
+  useLayoutEffect(() => { native = ownership.native; }, [ownership.native]);
   return null;
 }
 async function render(state: DictationSnapshot['state']) {
