@@ -356,14 +356,18 @@ export function confirmOpenedPanes(
   };
 }
 
-const PANES_USAGE = 'Use `terminal panes [--limit 1..16] [--machine <label-or-id>]`.';
+const PANES_USAGE = 'Use `terminal panes [--watch] [--limit 1..16] [--machine <label-or-id>]`.';
 
-/** Parse `terminal panes` flags. Each flag may appear once and needs a value. */
-export function parsePanesArgs(rest: string[]): { limit: number; machineKey: string | null } {
+/** Parse `terminal panes` flags. `--watch` takes no value. Each other flag may appear once and needs a value. */
+export function parsePanesArgs(rest: string[]): { limit: number; machineKey: string | null; watch: boolean } {
   let machineKey: string | null = null;
   let limit: number | null = null;
-  if (rest.length % 2 !== 0) throw new CliError('invalid_args', PANES_USAGE, EXIT.INVALID_ARGS);
-  for (let i = 0; i < rest.length; i += 2) {
+  let watch = false;
+  for (let i = 0; i < rest.length; i += 1) {
+    if (rest[i] === '--watch' && !watch) {
+      watch = true;
+      continue;
+    }
     const value = rest[i + 1] ?? '';
     if (rest[i] === '--machine' && machineKey === null && SAFE_MACHINE_KEY.test(value)) {
       machineKey = value;
@@ -373,6 +377,80 @@ export function parsePanesArgs(rest: string[]): { limit: number; machineKey: str
     } else {
       throw new CliError('invalid_args', PANES_USAGE, EXIT.INVALID_ARGS);
     }
+    i += 1;
   }
-  return { limit: limit ?? PANE_LIMIT_DEFAULT, machineKey };
+  return { limit: limit ?? PANE_LIMIT_DEFAULT, machineKey, watch };
+}
+
+export interface WatchChanges {
+  opened: string[];
+  closed: string[];
+  /** Standing conditions, such as a terminal left without a pane, said once while they last. */
+  notices: string[];
+}
+
+/**
+ * What one round of `--watch` is worth saying. A pane that opened or closed
+ * is always news. A standing condition is said when it appears and not again
+ * until it has gone away and come back. `standing` holds what was standing
+ * after the last round and is updated in place.
+ */
+export function watchChanges(
+  result: Pick<TerminalPanesResult, 'opened' | 'closed' | 'remaining' | 'skipped' | 'error'>,
+  warnings: readonly string[],
+  standing: Set<string>,
+): WatchChanges {
+  const now = [
+    ...result.remaining.map((id) => `not shown ${id}`),
+    ...(result.skipped.length > 0 ? ['skipped   (session ID is unsafe or too long to label)'] : []),
+    ...warnings.map((warning) => `warning   ${warning}`),
+    ...(result.error ? [`error     ${result.error}`] : []),
+  ];
+  const notices = now.filter((notice) => !standing.has(notice));
+  standing.clear();
+  for (const notice of now) standing.add(notice);
+  return { opened: result.opened.map((pane) => pane.id), closed: [...result.closed], notices };
+}
+
+/**
+ * A watcher opens a pane once for each packet or terminal it finds. After a
+ * round, everything it opened, and everything whose pane closed at once, is
+ * settled: it is not opened again while it stays listed. So a pane that
+ * cannot attach is not opened over and over, and a pane the operator closed
+ * stays closed. Once a thing is no longer listed it is forgotten, so a packet
+ * that runs again later gets a pane again. `settled` is updated in place.
+ * `listed` is `null` when a list failed this round.
+ */
+export function settledAfterRound(
+  settled: Set<string>,
+  result: Pick<TerminalPanesResult, 'opened' | 'closed'>,
+  listed: readonly string[] | null,
+): void {
+  for (const pane of result.opened) settled.add(pane.id);
+  for (const id of result.closed) settled.add(id);
+  // `null` means a list could not be read this round. Forgetting then would
+  // re-open every pane the operator closed, so nothing is forgotten.
+  if (listed === null) return;
+  const live = new Set(listed);
+  for (const id of [...settled]) if (!live.has(id)) settled.delete(id);
+}
+
+/** Mistakes in how the command was run. Waiting will not fix them, so `--watch` stops on them. */
+const WATCH_FATAL = new Set([
+  'invalid_args', 'multiplexer_required', 'operator_required', 'unauthorized',
+  'machine_not_found', 'machine_disabled', 'machine_usage_only',
+]);
+
+/** Whether a watcher should try again after a failed round, rather than stop. */
+export function watchRetries(error: unknown): error is CliError {
+  return error instanceof CliError && !WATCH_FATAL.has(error.code);
+}
+
+/** Reads a JSON answer. A body cut off mid-read, as when o8 restarts, counts as no answer. */
+export async function readAnswer<T>(response: Response): Promise<T> {
+  try {
+    return await response.json() as T;
+  } catch {
+    throw new CliError('connection_refused', 'The o8 terminal host stopped answering.', EXIT.CONNECTION_REFUSED);
+  }
 }

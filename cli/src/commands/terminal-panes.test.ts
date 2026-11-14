@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { EXIT } from '../api';
+import { CliError, EXIT } from '../api';
 import {
-  confirmOpenedPanes, followCommand, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, runningPackets, workerTerminals,
+  confirmOpenedPanes, followCommand, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, readAnswer, runningPackets, settledAfterRound, watchChanges, watchRetries, workerTerminals,
   type PaneExec,
 } from './terminal-panes';
 
@@ -65,8 +65,14 @@ describe('observeCommand', () => {
 
 describe('parsePanesArgs', () => {
   it('defaults to 8 panes on this machine', () => {
-    expect(parsePanesArgs([])).toEqual({ limit: 8, machineKey: null });
-    expect(parsePanesArgs(['--limit', '16', '--machine', 'Build box'])).toEqual({ limit: 16, machineKey: 'Build box' });
+    expect(parsePanesArgs([])).toEqual({ limit: 8, machineKey: null, watch: false });
+    expect(parsePanesArgs(['--limit', '16', '--machine', 'Build box'])).toEqual({ limit: 16, machineKey: 'Build box', watch: false });
+  });
+
+  it('takes --watch anywhere, with no value', () => {
+    expect(parsePanesArgs(['--watch'])).toEqual({ limit: 8, machineKey: null, watch: true });
+    expect(parsePanesArgs(['--limit', '4', '--watch'])).toEqual({ limit: 4, machineKey: null, watch: true });
+    expect(parsePanesArgs(['--watch', '--machine', 'Build', '--limit', '2'])).toEqual({ limit: 2, machineKey: 'Build', watch: true });
   });
 
   it.each([
@@ -80,6 +86,10 @@ describe('parsePanesArgs', () => {
     [['--machine', 'Build; reboot']],
     [['--machine', '$(reboot)']],
     [['--control', 'yes']],
+    [['--watch', '--watch']],
+    [['--watch', 'yes']],
+    [['--limit', '--watch']],
+    [['--machine', '--watch']],
   ])('rejects %j', (rest) => {
     expect(() => parsePanesArgs(rest)).toThrowError(expect.objectContaining({ code: 'invalid_args', exit: EXIT.INVALID_ARGS }));
   });
@@ -421,5 +431,116 @@ describe('confirmOpenedPanes', () => {
     expect(confirmOpenedPanes(none, rexEnv, exec)).toBe(none);
     expect(called).toBe(0);
     expect(confirmOpenedPanes(started, rexEnv, exec)).toBe(started);
+  });
+});
+
+describe('what a watch round says', () => {
+  const quiet = { opened: [], closed: [], remaining: [], skipped: [], error: null };
+
+  it('always reports a pane that opened or closed', () => {
+    const standing = new Set<string>();
+    const round = { ...quiet, opened: [{ id: 'pkt-1', pane: 'block:a' }], closed: ['cortex-dash-1'] };
+    expect(watchChanges(round, [], standing)).toEqual({ opened: ['pkt-1'], closed: ['cortex-dash-1'], notices: [] });
+    expect(watchChanges(round, [], standing)).toEqual({ opened: ['pkt-1'], closed: ['cortex-dash-1'], notices: [] });
+  });
+
+  it('says a standing condition once, and again only after it went away and came back', () => {
+    const standing = new Set<string>();
+    const full = { ...quiet, remaining: ['pkt-9'], error: 'Rex could not split a pane.' };
+    expect(watchChanges(full, ['Could not list running packets.'], standing).notices).toEqual([
+      'not shown pkt-9', 'warning   Could not list running packets.', 'error     Rex could not split a pane.',
+    ]);
+    expect(watchChanges(full, ['Could not list running packets.'], standing).notices).toEqual([]);
+    expect(watchChanges({ ...quiet, remaining: ['pkt-9'] }, [], standing).notices).toEqual([]);
+    expect(watchChanges(quiet, [], standing).notices).toEqual([]);
+    expect(watchChanges(full, [], standing).notices).toEqual(['not shown pkt-9', 'error     Rex could not split a pane.']);
+  });
+
+  it('mentions skipped terminals once, however many there are', () => {
+    const standing = new Set<string>();
+    expect(watchChanges({ ...quiet, skipped: ['-rf', 'a b'] }, [], standing).notices)
+      .toEqual(['skipped   (session ID is unsafe or too long to label)']);
+    expect(watchChanges({ ...quiet, skipped: ['-rf'] }, [], standing).notices).toEqual([]);
+  });
+
+  it('says nothing on a round where nothing changed', () => {
+    expect(watchChanges(quiet, [], new Set())).toEqual({ opened: [], closed: [], notices: [] });
+  });
+});
+
+describe('what a watcher opens only once', () => {
+  it('settles what it opened and what closed at once, while they stay listed', () => {
+    const settled = new Set<string>();
+    settledAfterRound(settled, { opened: [{ id: 'pkt-1', pane: 'block:a' }], closed: ['cortex-dash-dead'] }, ['pkt-1', 'cortex-dash-dead', 'cortex-dash-2']);
+    expect([...settled].sort()).toEqual(['cortex-dash-dead', 'pkt-1']);
+    settledAfterRound(settled, { opened: [], closed: [] }, ['pkt-1', 'cortex-dash-dead', 'cortex-dash-2']);
+    expect([...settled].sort()).toEqual(['cortex-dash-dead', 'pkt-1']);
+  });
+
+  it('forgets a thing once it is no longer listed, so it gets a pane when it comes back', () => {
+    const settled = new Set(['pkt-1', 'cortex-dash-dead']);
+    settledAfterRound(settled, { opened: [], closed: [] }, ['cortex-dash-dead']);
+    expect([...settled]).toEqual(['cortex-dash-dead']);
+    settledAfterRound(settled, { opened: [], closed: [] }, []);
+    expect([...settled]).toEqual([]);
+  });
+
+  it('keeps a closed pane closed through a round whose list failed', () => {
+    const settled = new Set(['pkt-1']);
+    // The lane list timed out this round, so nothing is known to have stopped.
+    settledAfterRound(settled, { opened: [], closed: [] }, null);
+    expect([...settled]).toEqual(['pkt-1']);
+    settledAfterRound(settled, { opened: [{ id: 'pkt-2', pane: 'block:b' }], closed: [] }, null);
+    expect([...settled].sort()).toEqual(['pkt-1', 'pkt-2']);
+  });
+
+  it('stops a pane that dies at once from being opened every round', () => {
+    const settled = new Set<string>();
+    let runs = 0;
+    for (let round = 0; round < 4; round += 1) {
+      const listed = [{ id: 'gone-term' }].filter((terminal) => !settled.has(terminal.id));
+      const { exec } = fakeRex();
+      const started = openTerminalPanes({ terminals: listed, limit: 8, env: rexEnv, self, exec });
+      runs += started.opened.length;
+      // The pane is already gone when the round looks again.
+      const result = confirmOpenedPanes(started, rexEnv, () => JSON.stringify({ blocks: [] }));
+      settledAfterRound(settled, result, ['gone-term']);
+    }
+    expect(runs).toBe(1);
+  });
+});
+
+describe('when a watcher stops', () => {
+  it('stops on a mistake that waiting will not fix', () => {
+    for (const code of ['machine_not_found', 'machine_disabled', 'machine_usage_only', 'unauthorized', 'invalid_args']) {
+      expect(watchRetries(new CliError(code, 'x', EXIT.CONFLICT))).toBe(false);
+    }
+  });
+
+  it('tries again while o8 is away', () => {
+    for (const code of ['connection_refused', 'remote_terminal_error', 'terminal_unavailable']) {
+      expect(watchRetries(new CliError(code, 'x', EXIT.CONFLICT))).toBe(true);
+    }
+  });
+
+  it('stops on an error that is not the CLI\'s own', () => {
+    expect(watchRetries(new TypeError('boom'))).toBe(false);
+  });
+});
+
+describe('reading an answer', () => {
+  it('reads a whole answer', async () => {
+    await expect(readAnswer(new Response('{"ok":true}'))).resolves.toEqual({ ok: true });
+  });
+
+  it('treats an answer cut off mid-read as no answer', async () => {
+    const cut = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"sessions":['));
+        controller.error(new Error('socket closed'));
+      },
+    });
+    await expect(readAnswer(new Response(cut))).rejects.toMatchObject({ code: 'connection_refused' });
+    await expect(readAnswer(new Response('{"sessions":['))).rejects.toMatchObject({ code: 'connection_refused' });
   });
 });
