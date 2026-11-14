@@ -9,6 +9,9 @@
 import { apiFetch, CliError, EXIT } from '../../api.js';
 import { resolveConfig, type ResolvedConfig } from '../../config.js';
 import { printHumanHeading, printJson, type OutputMode } from '../../output.js';
+import {
+  createTerminalStatusReporter, packetStatusReport, type TerminalStatusReport,
+} from '../../terminal-status.js';
 import { parsePacketArguments, requirePacketId, resolvePacketTarget } from './target.js';
 
 export type TranscriptEvent =
@@ -275,8 +278,11 @@ export interface FollowSteps {
   wait(): Promise<void>;
   show(events: TranscriptEvent[]): void;
   say(line: string): void;
-  /** Told where the follow ended, so a later follow can take up from there. */
-  ended?(cursor: number, session: string | null): void;
+  /**
+   * Told where the follow ended, so a later follow can take up from there, and
+   * the packet's state then (`null` when it has no lane any more).
+   */
+  ended?(cursor: number, session: string | null, state: string | null): void;
 }
 
 /**
@@ -325,7 +331,7 @@ export async function followTranscript(steps: FollowSteps, first: TranscriptPage
       quietPages = read.events.length === 0 ? quietPages + 1 : 0;
       if (over && read.events.length < TRANSCRIPT_LIMIT_MAX) {
         steps.say(`The worker stopped. The packet is ${state ? plainText(state, 40).replace(/_/g, ' ') : 'gone'}.`);
-        steps.ended?.(cursor, session);
+        steps.ended?.(cursor, session, state ?? null);
         return EXIT.OK;
       }
       // More was waiting behind the last read, so look again before ending.
@@ -405,6 +411,21 @@ export function holdOpen(terminal: HoldTerminal, options: HoldOptions = {}): Pro
   });
 }
 
+/**
+ * What a following pane reports to the multiplexer, so its tab is marked for
+ * this one worker: working while it follows, then how the packet ended. It
+ * uses o8's own record: the pane follows a single packet.
+ */
+export function transcriptStatusReport(
+  phase: 'following' | 'ended' | 'failed',
+  state: string | null = null,
+): TerminalStatusReport {
+  if (phase === 'following') return { state: 'working', msg: 'Running' };
+  if (phase === 'failed') return { state: 'error', msg: 'Stopped following' };
+  if (state === 'reviewing') return { state: 'done', msg: 'In review' };
+  return packetStatusReport(state, null) ?? { state: 'done', msg: 'Worker stopped' };
+}
+
 export async function runPacketTranscript(mode: OutputMode, rest: string[]): Promise<number> {
   const args = parseTranscriptArgs(rest);
   const packetId = requirePacketId(await resolvePacketTarget(args.target), 'transcript');
@@ -426,9 +447,11 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
   const say = (line: string) => { if (mode.human) process.stdout.write(`${line}\n`); };
   const holding = args.hold && mode.human;
   const terminal = { input: process.stdin, output: process.stdout };
+  const tabStatus = createTerminalStatusReporter(mode);
   let from: TranscriptPage = recent;
   while (true) {
     let exit: number;
+    tabStatus.report(transcriptStatusReport('following'));
     try {
       exit = await followTranscript({
         read: (cursor) => fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX }),
@@ -436,9 +459,13 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
         wait: () => new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS)),
         show: (events) => writeEvents(events, mode),
         say,
-        ended: (cursor, session) => { from = { ...from, sessionKey: session, events: [], nextCursor: cursor }; },
+        ended: (cursor, session, state) => {
+          from = { ...from, sessionKey: session, events: [], nextCursor: cursor };
+          tabStatus.report(transcriptStatusReport('ended', state));
+        },
       }, from);
     } catch (error) {
+      tabStatus.report(transcriptStatusReport('failed'));
       // In a pane the error is the thing worth reading, so it stays on screen too.
       if (holding && terminal.input.isTTY && terminal.output.isTTY) {
         say(`Stopped following: ${plainText(error instanceof Error ? error.message : String(error), 300)}`);
