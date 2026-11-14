@@ -76,7 +76,7 @@ describe('the Rex shortcut through the o8 command', () => {
     expect(existsSync(marker)).toBe(false);
   });
 
-  it('keeps JSON output clean and adds nothing without a person at the terminal', () => {
+  it('adds nothing without a person at the terminal', () => {
     o8(['terminal', 'list']);
     expect(existsSync(action)).toBe(false);
   });
