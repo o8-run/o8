@@ -20,6 +20,8 @@ export function bundleVulkan(appdir) {
     if (match && !host.test(match[1])) sources.set(match[1], match[2]);
   }
   const bundled = [];
+  const notices = new Map();
+  const commonLicenses = new Set();
   for (const [name, source] of sources) {
     const real = realpathSync(source);
     let owner;
@@ -39,6 +41,9 @@ export function bundleVulkan(appdir) {
     if (!license) throw new Error(`Review redistribution license before bundling ${owner}`);
     const notice = `${owner}-copyright`;
     cpSync(`/usr/share/doc/${owner}/copyright`, join(appdir, 'usr/share/doc/o8', notice), { dereference: true });
+    notices.set(notice, { name: `usr/share/doc/o8/${notice}`, bytes: statSync(join(appdir, 'usr/share/doc/o8', notice)).size });
+    for (const match of readFileSync(join(appdir, 'usr/share/doc/o8', notice), 'utf8')
+      .matchAll(/\/usr\/share\/common-licenses\/([\w.+-]+)/g)) commonLicenses.add(match[1]);
     bundled.push({ name: `usr/lib/o8/vulkan/${name}`, bytes: statSync(real).size, package: owner,
       license, version: run('dpkg-query', ['-W', '-f=${Version}', owner]), notice });
   }
@@ -46,6 +51,12 @@ export function bundleVulkan(appdir) {
   writeFileSync(join(destination, 'lvp_icd.json'), JSON.stringify(descriptor, null, 2) + '\n');
   bundled.push({ name: 'usr/lib/o8/vulkan/lvp_icd.json', bytes: statSync(join(destination, 'lvp_icd.json')).size });
   // Debian copyright files reference these common license texts.
-  cpSync('/usr/share/common-licenses', join(appdir, 'usr/share/doc/o8/common-licenses'), { recursive: true, dereference: true });
-  return bundled;
+  const licenseRoot = join(appdir, 'usr/share/doc/o8/common-licenses');
+  mkdirSync(licenseRoot);
+  for (const name of [...commonLicenses].sort()) {
+    const source = `/usr/share/common-licenses/${name}`;
+    cpSync(source, join(licenseRoot, name), { dereference: true });
+    notices.set(`common-licenses/${name}`, { name: `usr/share/doc/o8/common-licenses/${name}`, bytes: statSync(source).size });
+  }
+  return [...bundled, ...notices.values()];
 }
