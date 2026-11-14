@@ -73,6 +73,7 @@ import { runWorkerLogin } from './commands/worker-login.js';
 import { runPacketInfo } from './commands/packet/info.js';
 import { runPacketHeartbeat } from './commands/packet/heartbeat.js';
 import { runPacketLog } from './commands/packet/log.js';
+import { runPacketTranscript } from './commands/packet/transcript.js';
 import { runPacketReport } from './commands/packet/report.js';
 import { runPacketCapture } from './commands/packet/capture.js';
 import { runPacketMirrorProof } from './commands/packet/mirror-proof.js';
@@ -601,6 +602,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'receipt') return runPacketReceipt(args.mode, args.rest);
       if (secondary === 'receipts') return runPacketReceipts(args.mode, args.rest);
       if (secondary === 'log') return runPacketLog(args.mode, args.rest);
+      if (secondary === 'transcript') return runPacketTranscript(args.mode, args.rest);
       if (secondary === 'runtime-drift') return runPacketRuntimeDrift(args.mode, args.rest);
       throw unknownSubcommandError('packet', secondary);
     }

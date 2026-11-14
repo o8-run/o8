@@ -15,6 +15,12 @@
       ]
     },
     {
+      "path": "cli/src/commands/packet/transcript.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
       "path": "cli/src/commands/serve-processes.test.ts",
       "reasons": [
         "child-process"
