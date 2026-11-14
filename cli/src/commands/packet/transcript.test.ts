@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CliError, EXIT } from '../../api';
 
@@ -313,15 +313,17 @@ describe('the follow loop', () => {
 
 describe('holding the pane open', () => {
   function terminal(inputTty: boolean, outputTty: boolean) {
-    const listeners: Record<string, Array<() => void>> = {};
+    const listeners: Record<string, Array<() => void>> = { data: [], end: [] };
     const log: string[] = [];
     return {
       log,
-      fire: (event: string) => { for (const listener of listeners[event] ?? []) listener(); },
+      listening: () => listeners.data.length + listeners.end.length,
+      fire: (event: 'data' | 'end') => { for (const listener of [...listeners[event]]) listener(); },
       terminal: {
         input: {
           isTTY: inputTty,
-          once: (event: 'data' | 'end', listener: () => void) => { (listeners[event] ??= []).push(listener); },
+          on: (event: 'data' | 'end', listener: () => void) => { listeners[event].push(listener); },
+          off: (event: 'data' | 'end', listener: () => void) => { listeners[event] = listeners[event].filter((item) => item !== listener); },
           resume: () => { log.push('resume'); },
           pause: () => { log.push('pause'); },
         },
@@ -330,32 +332,88 @@ describe('holding the pane open', () => {
     };
   }
 
-  it('waits for a key, and says how to close', async () => {
+  it('waits for a key, says how to close, and leaves no listener behind', async () => {
     const held = terminal(true, true);
-    let closed = false;
-    const waiting = holdOpen(held.terminal).then(() => { closed = true; });
-    await Promise.resolve();
-    expect(closed).toBe(false);
+    let time = 1_000;
+    const waiting = holdOpen(held.terminal, { now: () => time });
     expect(held.log).toEqual(['Press Enter to close.', 'resume']);
+    time += 5_000;
     held.fire('data');
-    held.fire('end');
-    await waiting;
-    expect(closed).toBe(true);
+    await expect(waiting).resolves.toBe('closed');
     expect(held.log).toEqual(['Press Enter to close.', 'resume', 'pause']);
+    expect(held.listening()).toBe(0);
+  });
+
+  it('is not closed by a line typed before the prompt', async () => {
+    const held = terminal(true, true);
+    let time = 1_000;
+    let result: string | null = null;
+    const waiting = holdOpen(held.terminal, { now: () => time }).then((how) => { result = how; });
+    time += 50;
+    held.fire('data');
+    await Promise.resolve();
+    expect(result).toBeNull();
+    time += 1_000;
+    held.fire('data');
+    await waiting;
+    expect(result).toBe('closed');
   });
 
   it('ends when the input closes', async () => {
     const held = terminal(true, true);
     const waiting = holdOpen(held.terminal);
     held.fire('end');
-    await expect(waiting).resolves.toBeUndefined();
+    await expect(waiting).resolves.toBe('closed');
+  });
+
+  it('ends as running when the packet works again, and keeps asking after a failed check', async () => {
+    vi.useFakeTimers();
+    try {
+      const held = terminal(true, true);
+      const answers: Array<boolean | Error> = [false, new Error('down'), true];
+      const asked: number[] = [];
+      const waiting = holdOpen(held.terminal, {
+        pollMs: 100,
+        runningAgain: async () => {
+          asked.push(asked.length);
+          const answer = answers.shift();
+          if (answer instanceof Error) throw answer;
+          return answer === true;
+        },
+      });
+      await vi.advanceTimersByTimeAsync(350);
+      await expect(waiting).resolves.toBe('running');
+      expect(asked).toHaveLength(3);
+      expect(held.listening()).toBe(0);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(asked).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('returns at once when there is no terminal to press a key in', async () => {
     for (const [input, output] of [[false, true], [true, false], [false, false]] as const) {
       const piped = terminal(input, output);
-      await holdOpen(piped.terminal);
+      await expect(holdOpen(piped.terminal)).resolves.toBe('closed');
       expect(piped.log).toEqual([]);
     }
+  });
+});
+
+describe('taking a follow up again', () => {
+  it('reports where it ended', async () => {
+    const reply = (seq: number): TranscriptEvent => ({ seq, ts: '', type: 'assistant', text: `r${seq}` });
+    const first = { packetId: 'pkt-1', sessionKey: 's1', events: [reply(2), { seq: 3, ts: '', type: 'done' as const, exitCode: 0 }], nextCursor: 3, terminalReason: null };
+    const ended: Array<[number, string | null]> = [];
+    await followTranscript({
+      read: async () => ({ ...first, events: [reply(4)], nextCursor: 4 }),
+      state: async () => 'reviewing',
+      wait: async () => undefined,
+      show: () => undefined,
+      say: () => undefined,
+      ended: (cursor, session) => { ended.push([cursor, session]); },
+    }, first);
+    expect(ended).toEqual([[4, 's1']]);
   });
 });
