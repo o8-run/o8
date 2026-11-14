@@ -21,6 +21,8 @@ export type TranscriptEvent =
 
 interface TranscriptPage {
   packetId: string;
+  /** The worker session the events belong to. It changes when a packet is dispatched again. */
+  sessionKey: string | null;
   events: TranscriptEvent[];
   nextCursor: number | null;
   terminalReason: { code?: string | null; cause?: string | null } | null;
@@ -75,7 +77,8 @@ export function plainText(raw: unknown, max: number, lines = false): string {
  * path it reads as `.`, which is where the worker is.
  */
 function withoutWorktree(text: string): string {
-  return text.replace(/[^\s"'=:]*[\\/]\.cortex-worktrees[\\/][^\\/\s"']+/g, '.');
+  // Arguments are short. The bound keeps a huge one from stalling the match.
+  return text.slice(0, 4_000).replace(/[^\s"'=:]*[\\/]\.cortex-worktrees[\\/][^\\/\s"']+/g, '.');
 }
 
 /** The last two parts of a path: enough to recognise the file without the worktree prefix. */
@@ -126,7 +129,9 @@ export function transcriptLines(event: TranscriptEvent, time: (ts: string) => st
     case 'assistant': {
       const text = plainText(event.text, TEXT_MAX, true);
       if (!text) return [];
-      return text.split('\n').map((line, index) => (index === 0 ? `${at}  ${line}` : `${indent}${line}`));
+      // A bar marks every later line of a reply, so reply text can never pass for an event line.
+      const bar = `${' '.repeat(at.length)}| `;
+      return text.split('\n').map((line, index) => (index === 0 ? `${at}  ${line}` : `${bar}${line}`.trimEnd()));
     }
     case 'steer':
       return [`${at}  steer from ${plainText(event.source, 40) || 'operator'}${event.failed ? ' (not delivered)' : ''}: ${plainText(event.text, TEXT_MAX)}`];
@@ -150,7 +155,7 @@ async function fetchPage(
   packetId: string,
   query: { recent?: true; cursor?: number; limit: number },
 ): Promise<TranscriptPage> {
-  const response = await apiFetch<{ events?: unknown; nextCursor?: unknown; terminalReason?: unknown }>(
+  const response = await apiFetch<{ events?: unknown; nextCursor?: unknown; terminalReason?: unknown; sessionKey?: unknown }>(
     cfg,
     '/api/orchestrator/packet-transcript',
     {
@@ -174,6 +179,7 @@ async function fetchPage(
     : null;
   return {
     packetId,
+    sessionKey: typeof data.sessionKey === 'string' && data.sessionKey ? data.sessionKey : null,
     events: data.events.filter(isEvent),
     nextCursor: typeof data.nextCursor === 'number' ? data.nextCursor : null,
     terminalReason: reason,
@@ -195,21 +201,27 @@ function writeEvents(events: TranscriptEvent[], mode: OutputMode): void {
 const WORKING_STATES = new Set(['launching', 'running']);
 /** Quiet pages before the packet's state is checked, and between checks. */
 const QUIET_PAGES_PER_CHECK = 3;
+/** Failures worth trying again. Anything else, such as a refused credential, will not get better. */
+const PASSING_FAILURES = new Set(['connection_refused', 'network_error', 'server_timeout']);
 
 /**
- * Whether a follow should stop after this page. The worker's own `done` event
- * ends it at once. Otherwise it ends when the transcript has gone quiet and
- * the packet's lane is no longer working, so the last events are never cut
- * off. `state` is the lane's state when it was just checked, `null` when the
- * packet has no lane any more, and `undefined` when it was not checked.
+ * Whether the packet's state is worth checking after this page: the transcript
+ * has gone quiet, or the page ends with the worker saying a turn is done.
  */
-export function followIsOver(
-  page: Pick<TranscriptPage, 'events'>,
-  quietPages: number,
-  state?: string | null,
-): boolean {
-  if (page.events.some((event) => event.type === 'done')) return true;
-  if (page.events.length > 0 || quietPages < QUIET_PAGES_PER_CHECK || state === undefined) return false;
+export function shouldCheckState(page: Pick<TranscriptPage, 'events'>, quietPages: number): boolean {
+  const last = page.events[page.events.length - 1];
+  if (last) return last.type === 'done';
+  return quietPages > 0 && quietPages % QUIET_PAGES_PER_CHECK === 0;
+}
+
+/**
+ * Whether a follow should stop after this page. Only the packet's lane says
+ * so: a `done` event ends a turn, and a steered worker starts another. `state`
+ * is the lane's state when it was just checked, `null` when the packet has no
+ * lane any more, and `undefined` when it was not checked.
+ */
+export function followIsOver(state: string | null | undefined): boolean {
+  if (state === undefined) return false;
   return state === null || !WORKING_STATES.has(state);
 }
 
@@ -223,45 +235,63 @@ async function laneState(cfg: ResolvedConfig, packetId: string): Promise<string 
   return typeof state === 'string' ? state : null;
 }
 
-async function follow(cfg: ResolvedConfig, packetId: string, start: number, mode: OutputMode): Promise<number> {
-  let cursor = start;
+/** Where to read from next. A new worker session numbers its events from the start again. */
+export function nextCursor(
+  cursor: number,
+  session: string | null,
+  page: Pick<TranscriptPage, 'sessionKey' | 'nextCursor'>,
+): { cursor: number; session: string | null; restarted: boolean } {
+  if (page.sessionKey && session && page.sessionKey !== session) {
+    return { cursor: 0, session: page.sessionKey, restarted: true };
+  }
+  return {
+    cursor: page.nextCursor === null ? cursor : Math.max(cursor, page.nextCursor),
+    session: page.sessionKey ?? session,
+    restarted: false,
+  };
+}
+
+/** Reads on until the worker stops. Ctrl-C ends it the usual way: no handler is installed. */
+async function follow(cfg: ResolvedConfig, packetId: string, first: TranscriptPage, mode: OutputMode): Promise<number> {
+  let cursor = first.nextCursor ?? 0;
+  let session = first.sessionKey;
   let quietPages = 0;
   let failures = 0;
-  let stopped = false;
-  const stop = () => { stopped = true; };
-  process.once('SIGINT', stop);
-  process.once('SIGTERM', stop);
-  try {
-    while (!stopped) {
-      let page: TranscriptPage;
-      let state: string | null | undefined;
-      try {
-        page = await fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX });
-        quietPages = page.events.length === 0 ? quietPages + 1 : 0;
-        if (quietPages > 0 && quietPages % QUIET_PAGES_PER_CHECK === 0) state = await laneState(cfg, packetId);
-        failures = 0;
-      } catch (error) {
-        failures += 1;
-        if (failures >= FOLLOW_RETRIES) throw error;
-        await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
-        continue;
-      }
-      writeEvents(page.events, mode);
-      if (page.nextCursor !== null) cursor = Math.max(cursor, page.nextCursor);
-      if (followIsOver(page, quietPages, state)) {
-        if (mode.human && state !== undefined) {
+  let page: Pick<TranscriptPage, 'events'> = first;
+  while (true) {
+    let state: string | null | undefined;
+    try {
+      if (shouldCheckState(page, quietPages)) state = await laneState(cfg, packetId);
+      if (followIsOver(state)) {
+        if (mode.human) {
           process.stdout.write(`The worker stopped. The packet is ${state ? plainText(state, 40).replace(/_/g, ' ') : 'gone'}.\n`);
         }
-        break;
+        return EXIT.OK;
       }
       // A full page means more is waiting, so read on without a pause.
       if (page.events.length < TRANSCRIPT_LIMIT_MAX) await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
+      const read = await fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX });
+      const next = nextCursor(cursor, session, read);
+      if (next.restarted) {
+        // The page was read with the old session's cursor, so it is not shown. Start the new one over.
+        if (mode.human) process.stdout.write('The packet was dispatched again. Following the new worker.\n');
+        ({ cursor, session } = next);
+        page = { events: [] };
+        quietPages = 0;
+        continue;
+      }
+      ({ cursor, session } = next);
+      writeEvents(read.events, mode);
+      page = read;
+      quietPages = read.events.length === 0 ? quietPages + 1 : 0;
+      failures = 0;
+    } catch (error) {
+      failures += 1;
+      const passing = error instanceof CliError && PASSING_FAILURES.has(error.code);
+      if (!passing || failures >= FOLLOW_RETRIES) throw error;
+      await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
     }
-  } finally {
-    process.off('SIGINT', stop);
-    process.off('SIGTERM', stop);
   }
-  return EXIT.OK;
 }
 
 export async function runPacketTranscript(mode: OutputMode, rest: string[]): Promise<number> {
@@ -282,6 +312,5 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
   }
 
   writeEvents(recent.events, mode);
-  if (followIsOver(recent, 0)) return EXIT.OK;
-  return follow(cfg, packetId, recent.nextCursor ?? 0, mode);
+  return follow(cfg, packetId, recent, mode);
 }

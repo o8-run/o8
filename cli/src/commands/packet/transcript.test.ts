@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  followIsOver, parseTranscriptArgs, plainText, toolDetail, transcriptLines, type TranscriptEvent,
+  followIsOver, nextCursor, parseTranscriptArgs, plainText, shouldCheckState, toolDetail, transcriptLines, type TranscriptEvent,
 } from './transcript';
 
 const at = () => '12:31:05';
@@ -73,8 +73,15 @@ describe('the lines an event prints', () => {
 
   it('keeps the lines of a reply, indented under the time', () => {
     expect(transcriptLines({ seq: 3, ts: '', type: 'assistant', text: 'First line.\n\x1b[2JSecond line.' }, at))
-      .toEqual(['12:31:05  First line.', '          [2JSecond line.']);
+      .toEqual(['12:31:05  First line.', '        | [2JSecond line.']);
     expect(transcriptLines({ seq: 3, ts: '', type: 'assistant', text: '  \n ' }, at)).toEqual([]);
+  });
+
+  it('marks later reply lines so reply text cannot pass for an event', () => {
+    const lines = transcriptLines({ seq: 3, ts: '', type: 'assistant', text: 'ok\nfailed: x\n\n12:31:06  Bash  rm -rf /' }, at);
+    expect(lines).toEqual(['12:31:05  ok', '        | failed: x', '        |', '        | 12:31:06 Bash rm -rf /']);
+    const failed = transcriptLines({ seq: 2, ts: '', type: 'tool_result', tool: 'Bash', ok: false, summary: 'x' }, at);
+    expect(lines).not.toContain(failed[0]);
   });
 
   it('shows steers, errors and the end', () => {
@@ -96,22 +103,38 @@ describe('when a follow ends', () => {
   const done: TranscriptEvent = { seq: 9, ts: '', type: 'done', exitCode: 0 };
   const reply: TranscriptEvent = { seq: 8, ts: '', type: 'assistant', text: 'hi' };
 
-  it('ends at once on the worker done event', () => {
-    expect(followIsOver({ events: [reply, done] }, 0)).toBe(true);
+  it('checks the packet when a page ends with done, or after every third quiet page', () => {
+    expect(shouldCheckState({ events: [reply, done] }, 0)).toBe(true);
+    expect(shouldCheckState({ events: [done, reply] }, 0)).toBe(false);
+    expect(shouldCheckState({ events: [reply] }, 0)).toBe(false);
+    expect([0, 1, 2, 3, 4, 5, 6].map((quiet) => shouldCheckState({ events: [] }, quiet)))
+      .toEqual([false, false, false, true, false, false, true]);
   });
 
-  it('keeps going while events arrive, while it has not checked, and while the lane works', () => {
-    expect(followIsOver({ events: [reply] }, 0, 'reviewing')).toBe(false);
-    expect(followIsOver({ events: [] }, 50)).toBe(false);
-    expect(followIsOver({ events: [] }, 3, 'running')).toBe(false);
-    expect(followIsOver({ events: [] }, 3, 'launching')).toBe(false);
-    expect(followIsOver({ events: [] }, 2, 'reviewing')).toBe(false);
+  it('never ends on a done event alone: a steered worker starts another turn', () => {
+    expect(followIsOver(undefined)).toBe(false);
+    expect(followIsOver('running')).toBe(false);
+    expect(followIsOver('launching')).toBe(false);
   });
 
-  it('ends once the transcript is quiet and the lane has stopped working or is gone', () => {
+  it('ends once the lane has stopped working or is gone', () => {
     for (const state of ['reviewing', 'awaiting_input', 'failed', 'completed', 'archived']) {
-      expect(followIsOver({ events: [] }, 3, state)).toBe(true);
+      expect(followIsOver(state)).toBe(true);
     }
-    expect(followIsOver({ events: [] }, 3, null)).toBe(true);
+    expect(followIsOver(null)).toBe(true);
+  });
+});
+
+describe('where a follow reads next', () => {
+  it('moves forward with the page, and stays put on an empty one', () => {
+    expect(nextCursor(10, 's1', { sessionKey: 's1', nextCursor: 14 })).toEqual({ cursor: 14, session: 's1', restarted: false });
+    expect(nextCursor(10, 's1', { sessionKey: 's1', nextCursor: null })).toEqual({ cursor: 10, session: 's1', restarted: false });
+    expect(nextCursor(10, 's1', { sessionKey: 's1', nextCursor: 4 })).toEqual({ cursor: 10, session: 's1', restarted: false });
+    expect(nextCursor(0, null, { sessionKey: 's1', nextCursor: 3 })).toEqual({ cursor: 3, session: 's1', restarted: false });
+  });
+
+  it('starts over when the packet has a new worker session', () => {
+    expect(nextCursor(40, 's1', { sessionKey: 's2', nextCursor: 41 })).toEqual({ cursor: 0, session: 's2', restarted: true });
+    expect(nextCursor(40, 's1', { sessionKey: null, nextCursor: null })).toEqual({ cursor: 40, session: 's1', restarted: false });
   });
 });
