@@ -30,6 +30,11 @@ import { apiFetch, CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../api.js';
 import { fetchCorrelatedPacketMutation } from './packet/correlated-mutation.js';
 import { resolveConfig } from '../config.js';
 import {
+  createTerminalStatusReporter,
+  packetStatusReport,
+  watchingStatusReport,
+} from '../terminal-status.js';
+import {
   printHumanHeading,
   printHumanKv,
   printJson,
@@ -446,12 +451,17 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
     const pollMs = Math.max(1000, Number(flag(rest, 'poll')) || 5000);
     const deadline = Date.now() + watchMs;
     let terminal: { id: string; status?: string; title?: string } | null = null;
+    const tabStatus = createTerminalStatusReporter(mode);
     while (Date.now() < deadline) {
-      const snapshot = await fetchStatus(missionId, false);
+      const snapshot = await fetchStatus(missionId, false).catch((error: unknown) => {
+        tabStatus.report({ state: 'clear' });
+        throw error;
+      });
       terminal = (snapshot.packets ?? []).find(
         (p) => typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status),
       ) ?? null;
       if (terminal) break;
+      tabStatus.report(watchingStatusReport(snapshot.packets ?? []));
       await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
     }
     const watchPayload = {
@@ -468,6 +478,8 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
     } else {
       printJson(watchPayload);
     }
+    // Printed last so a finished or failed record stays in the tab after exit.
+    tabStatus.report(packetStatusReport(terminal?.status, terminal?.title) ?? { state: 'clear' });
   }
   return 0;
 }
@@ -568,6 +580,7 @@ async function runMissionWait(mode: OutputMode, rest: string[]): Promise<number>
     (p) => (!packetFilter || p.id === packetFilter) && typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status),
   ) ?? null;
 
+  const tabStatus = createTerminalStatusReporter(mode);
   const baseline = await fetchStatus(missionId, false);
   let snapshot = baseline;
   let wakeReason: 'already-terminal' | 'state-change' | 'timeout' = 'timeout';
@@ -577,10 +590,16 @@ async function runMissionWait(mode: OutputMode, rest: string[]): Promise<number>
   } else {
     const baselineSig = packetSignature(baseline.packets);
     const deadline = Date.now() + timeoutMs;
+    tabStatus.report(watchingStatusReport(
+      (baseline.packets ?? []).filter((p) => !packetFilter || p.id === packetFilter),
+    ));
     while (Date.now() < deadline) {
       await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
       if (Date.now() >= deadline) break;
-      const next = await fetchStatus(missionId, false);
+      const next = await fetchStatus(missionId, false).catch((error: unknown) => {
+        tabStatus.report({ state: 'clear' });
+        throw error;
+      });
       snapshot = next;
       if (terminalOf(next) || packetSignature(next.packets) !== baselineSig) {
         wakeReason = 'state-change';
@@ -607,6 +626,8 @@ async function runMissionWait(mode: OutputMode, rest: string[]): Promise<number>
   } else {
     printJson(payload);
   }
+  // Printed last so a finished or failed record stays in the tab after exit.
+  tabStatus.report(packetStatusReport(terminalPacket?.status, terminalPacket?.title) ?? { state: 'clear' });
   // Timeout is a soft outcome, not an error — exit 0 with wakeReason so the
   // caller branches on the field, not the code.
   return 0;
