@@ -123,6 +123,10 @@ Each desktop update check sends a random device identifier, app version, target,
 
 o8 is MIT licensed and free, and there is nothing to buy. The agents run on your own subscriptions or API keys, and you can use o8 without an account.
 
+## Sponsor
+
+o8 is free and open source, and we aren't selling anything. If you want to help, sponsorships go straight to compute for o8's autonomous development, which runs 24/7. [Sponsor o8](https://github.com/sponsors/hurttlocker)
+
 ## Voice
 
 Symon is the voice layer. Ask "what needs me?" without turning around, approve the one thing that is blocking, and dictate anywhere on the Mac. Anything with a side effect goes through a spoken confirm card, so voice never becomes a way around governance. Controls, setup, and tiers: [Voice](./docs/user/voice.md).
