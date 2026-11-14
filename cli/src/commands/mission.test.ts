@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { runMission } from './mission';
+import { checkMissionCreateArgs, runMission } from './mission';
 import { EXIT } from '../api';
 
 const mode = { human: false, verbose: false };
@@ -450,5 +450,34 @@ describe('o8 mission terminal status reports (#6137)', () => {
       expect(out).not.toContain(OSC);
       expect(out).not.toContain('\x1b]');
     });
+  });
+});
+
+describe('o8 mission create refuses what it would drop', () => {
+  it('takes every flag it reads, with values that look like flags', () => {
+    expect(() => checkMissionCreateArgs([
+      '--title', 'Add a route', '--body', '-- leading dashes are fine', '--repo=/r', '--dispatch', '--effort', 'low',
+      '--runtime', 'codex', '--read-only', '--existingBranchPolicy', 'reset', '--idempotency-key', 'k1',
+    ])).not.toThrow();
+  });
+
+  it('refuses an unknown flag and points at --body', () => {
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--task', 'run the tests']))
+      .toThrowError(expect.objectContaining({ code: 'invalid_args', exit: EXIT.INVALID_ARGS, message: expect.stringContaining('--task') }));
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--task=run']))
+      .toThrowError(expect.objectContaining({ hint: expect.stringContaining('--body') }));
+  });
+
+  it('refuses text that belongs to no flag, and a switch given a value', () => {
+    expect(() => checkMissionCreateArgs(['--title', 'x', 'run the tests'])).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--dispatch=yes'])).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
+  });
+
+  it('refuses before anything reaches the server', async () => {
+    process.env.O8_API_PORT = '47120';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(runMission(mode, 'create', ['--title', 'x', '--task', 'y'])).rejects.toMatchObject({ code: 'invalid_args' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
