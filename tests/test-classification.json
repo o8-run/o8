@@ -3155,6 +3155,14 @@
       ]
     },
     {
+      "path": "tests/effective-policy-read-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/empty-project-projection-real-path.test.ts",
       "reasons": [
         "child-process",

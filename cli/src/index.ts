@@ -1,3 +1,4 @@
+import { runPacketPolicy } from './commands/packet/policy.js';
 import { runHeavy } from './commands/run-heavy.js';
 import { runPrStack } from './commands/pr-stack.js';
 import { runBrainSources } from './commands/brain-sources.js';
@@ -573,6 +574,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     }
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode, args.rest);
+      if (secondary === 'policy') return runPacketPolicy(args.mode, args.rest);
       if (secondary === 'scope') return runPacketScope(args.mode, args.rest);
       if (secondary === 'expand-scope') return runPacketExpandScope(args.mode, args.rest);
       if (secondary === 'diff') return runPacketDiff(args.mode, args.rest);
