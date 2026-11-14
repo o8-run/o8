@@ -14,6 +14,8 @@ tmux must be available on the host for a terminal to survive the owning process.
 
 ## Recovery checks
 
+For watching workers from a Rex terminal end to end, see [o8 inside Rex](o8-in-rex.md).
+
 - `tmux ls` shows the live terminal sessions independently of the app.
 - `o8 run --list` shows long-running commands launched through the managed-run surface.
 - `o8 run --last` shows the latest command, start time, durable exit receipt, and retained log path.
