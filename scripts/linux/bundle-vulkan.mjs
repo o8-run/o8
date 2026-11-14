@@ -3,8 +3,30 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
+// The copyright covers the whole source package, including build tools. A
+// directory reference is not a licence text. Resolve aliases before copying so
+// fs.cp never receives a directory or a symlink, and retain each text once.
+export function resolveVulkanLicenseFiles(copyright, commonRoot = '/usr/share/common-licenses') {
+  const source = realpathSync(copyright);
+  if (!statSync(source).isFile()) throw new Error('Expected a regular package copyright file');
+  const common = new Map();
+  for (const match of readFileSync(source, 'utf8')
+    .matchAll(/\/usr\/share\/common-licenses\/([\w.+-]+)/g)) {
+    const name = match[1].replace(/\.+$/, '');
+    if (!name) continue;
+    const target = realpathSync(join(commonRoot, name));
+    if (statSync(target).isFile()) common.set(basename(target), { name: basename(target), source: target });
+  }
+  return { source, common: [...common.values()] };
+}
+
+// Present in both the pinned ubuntu:22.04 minimal image and its desktop
+// package set. Keep these ABI-compatible base runtimes on the host. LLVM,
+// libxml2 and libedit are absent from the minimal image and stay bundled.
+const HOST_LIBRARIES = /^(?:ld-linux.*|lib(?:c|m|dl|rt|pthread|resolv|util|gcc_s|stdc\+\+|z|zstd|ffi|tinfo|lzma)\.so(?:\..*)?)$/;
+
 export function bundleVulkan(appdir) {
-  const run = (command, args) => execFileSync(command, args, { encoding: 'utf8' }).trim();
+  const run = (command, args) => execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const destination = join(appdir, 'usr/lib/o8/vulkan');
   mkdirSync(destination);
   const icd = '/usr/share/vulkan/icd.d/lvp_icd.x86_64.json';
@@ -12,16 +34,15 @@ export function bundleVulkan(appdir) {
   const driver = descriptor.ICD.library_path;
   const dependencies = run('ldd', [driver]);
   if (dependencies.includes('not found')) throw new Error('Incomplete lavapipe dependencies');
-  const host = /^(?:ld-linux.*|lib(?:c|m|dl|rt|pthread|resolv|util|gcc_s|stdc\+\+)\.so(?:\..*)?)$/;
   const sources = new Map([[basename(driver), driver],
     ['libvulkan.so.1', run('cc', ['-print-file-name=libvulkan.so.1'])]]);
   for (const line of dependencies.split('\n')) {
     const match = line.match(/^\s*(\S+) => (\/\S+)/);
-    if (match && !host.test(match[1])) sources.set(match[1], match[2]);
+    if (match && !HOST_LIBRARIES.test(match[1])) sources.set(match[1], match[2]);
   }
   const bundled = [];
   const notices = new Map();
-  const commonLicenses = new Set();
+  const commonLicenses = new Map();
   for (const [name, source] of sources) {
     const real = realpathSync(source);
     let owner;
@@ -40,10 +61,10 @@ export function bundleVulkan(appdir) {
     const license = licenses.find(([pattern]) => pattern.test(owner))?.[1];
     if (!license) throw new Error(`Review redistribution license before bundling ${owner}`);
     const notice = `${owner}-copyright`;
-    cpSync(`/usr/share/doc/${owner}/copyright`, join(appdir, 'usr/share/doc/o8', notice), { dereference: true });
+    const legal = resolveVulkanLicenseFiles(`/usr/share/doc/${owner}/copyright`);
+    cpSync(legal.source, join(appdir, 'usr/share/doc/o8', notice));
     notices.set(notice, { name: `usr/share/doc/o8/${notice}`, bytes: statSync(join(appdir, 'usr/share/doc/o8', notice)).size });
-    for (const match of readFileSync(join(appdir, 'usr/share/doc/o8', notice), 'utf8')
-      .matchAll(/\/usr\/share\/common-licenses\/([\w.+-]+)/g)) commonLicenses.add(match[1].replace(/\.+$/, ''));
+    for (const file of legal.common) commonLicenses.set(file.name, file.source);
     bundled.push({ name: `usr/lib/o8/vulkan/${name}`, bytes: statSync(real).size, package: owner,
       license, version: run('dpkg-query', ['-W', '-f=${Version}', owner]), notice });
   }
@@ -53,9 +74,8 @@ export function bundleVulkan(appdir) {
   // Debian copyright files reference these common license texts.
   const licenseRoot = join(appdir, 'usr/share/doc/o8/common-licenses');
   mkdirSync(licenseRoot);
-  for (const name of [...commonLicenses].sort()) {
-    const source = `/usr/share/common-licenses/${name}`;
-    cpSync(source, join(licenseRoot, name), { dereference: true });
+  for (const [name, source] of [...commonLicenses].sort()) {
+    cpSync(source, join(licenseRoot, name));
     notices.set(`common-licenses/${name}`, { name: `usr/share/doc/o8/common-licenses/${name}`, bytes: statSync(source).size });
   }
   return [...bundled, ...notices.values()];

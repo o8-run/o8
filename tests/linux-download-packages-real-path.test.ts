@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { parse } from 'yaml';
+import { resolveVulkanLicenseFiles } from '../scripts/linux/bundle-vulkan.mjs';
 import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-download-packages-'));
@@ -62,6 +63,24 @@ beforeAll(() => {
   expect(staged.status, staged.stderr).toBe(0);
 }, 60_000);
 afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+it('collects regular licence texts, resolves aliases and ignores directory references', () => {
+  const common = join(root, 'common-licenses');
+  mkdirSync(join(common, 'GPL'), { recursive: true });
+  writeFileSync(join(common, 'Apache-2.0'), 'Apache text fixture');
+  symlinkSync('Apache-2.0', join(common, 'Apache-alias'));
+  symlinkSync('GPL', join(common, 'directory-alias'));
+  const copyright = join(root, 'copyright');
+  writeFileSync(copyright, `/usr/share/common-licenses/Apache-2.0.
+    /usr/share/common-licenses/Apache-alias
+    /usr/share/common-licenses/GPL/
+    /usr/share/common-licenses/directory-alias/
+    /usr/share/common-licenses/.`);
+  symlinkSync('copyright', join(root, 'copyright-alias'));
+  const legal = resolveVulkanLicenseFiles(join(root, 'copyright-alias'), common);
+  expect(legal.source).toBe(realpathSync(copyright));
+  expect(legal.common).toEqual([{ name: 'Apache-2.0', source: realpathSync(join(common, 'Apache-2.0')) }]);
+});
 
 it('stages the executable visualization helper beside the app', () => {
   const helper = join(stage, 'usr/lib/o8/o8-next-viz-render');

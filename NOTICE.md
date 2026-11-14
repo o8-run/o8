@@ -436,5 +436,15 @@ Transitive runtime libraries retain their distribution licenses: libdrm,
 libexpat, libxcb, X11, libxshmfence, Wayland, libffi, libxml2 and z3
 (MIT/X11); zlib (zlib); zstd (BSD option); libedit, libbsd and libmd (BSD);
 libtinfo (MIT); ICU (Unicode/ICU permissive terms); xz/liblzma (public domain
-and permissive notices). Packaging refuses an unreviewed dependency package. The package copyright files identify
-component-specific terms and source provenance.
+and permissive notices). Packaging refuses an unreviewed dependency package.
+The package copyright files identify component-specific terms and source
+provenance. Full source-package copyright notices can also describe GPL build
+tools; those tools are not included in the software-driver binary closure.
+Only explicitly referenced regular common-licence files are copied, with aliases
+resolved and directory references ignored.
+
+Host runtimes present in the minimal Ubuntu 22.04 image and desktop system are
+not bundled for the software driver: glibc, libstdc++, libgcc_s, zlib, libzstd,
+libffi, libtinfo and liblzma. Libxml2 and libedit are absent from the minimal
+image, so their unmodified shared libraries and notices remain bundled. No GPL
+or LGPL shared library is added by the software-driver bundle.
