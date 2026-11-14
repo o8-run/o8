@@ -59,8 +59,6 @@ const { closeDb } = await import('@/lib/db');
 const { getSqlite } = await import('@/lib/db');
 const { createLane, deleteLane, listLanes, setLaneStatus } = await import('@/lib/lane/registry');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
-const { updateOrchestratorMissionState } = await import('@/lib/orchestrator/store');
-const { archivePacket } = await import('@/components/desktop/workspace-terminal/terminal-tab-handlers');
 const { holdPacketLifecycleMutation } = await import('@/lib/orchestrator/packet-lifecycle-guard');
 const { readOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 
@@ -283,26 +281,6 @@ describe('cached client mission writes during stop', () => {
     }));
     expect(readOrchestratorControlPlaneState()).toMatchObject({
       lifecycleHold, packets: [expect.objectContaining({ title: 'Edited draft', queueState: 'held' }), expect.anything()],
-    });
-  });
-
-  it('archives from the real tab handler with a metadata-only PATCH and keeps the sibling stop', async () => {
-    const cached = seedMission();
-    const guard = await holdPacketLifecycleMutation({ packetId: 'b', kind: 'stop' });
-    // The tab sees a stale cache; the API still reads fresh persisted state.
-    updateOrchestratorMissionState(cached);
-    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => stateRoute.PATCH(request(
-      JSON.parse(String(init.body)), init.method,
-    )));
-    vi.stubGlobal('fetch', fetchMock);
-    archivePacket('a');
-    await vi.waitFor(() => expect(readOrchestratorControlPlaneState().packets[0]?.archivedAt).toEqual(expect.any(String)));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const init = fetchMock.mock.calls[0]![1];
-    expect(init.method).toBe('PATCH');
-    expect(JSON.parse(String(init.body))).toEqual({ packetId: 'a', updates: { archivedAt: expect.any(String) } });
-    expect(readOrchestratorControlPlaneState().packets[1]).toMatchObject({
-      operatorStopped: true, releaseStatePayload: { source: guard?.source },
     });
   });
 

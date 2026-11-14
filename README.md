@@ -99,7 +99,7 @@ Managed source builds register generated output before the compiler runs. The [g
 
 `npm run tauri:dev` builds the native shell (a much longer first build). After a hard kill, `node scripts/dev.mjs cleanup` recovers the ports. Bring at least one agent CLI you already use (`claude`, `codex`, `grok`, `opencode`, `gemini`); no API keys are needed to start, and [`.env.example`](./.env.example) documents every optional one.
 
-- **Phone:** pair by QR. The mobile web surface ships in this repo and works from any phone on your network; the iPhone app is below.
+- **Phone:** pair the iPhone app by QR; see below.
 - **Headless:** `o8 serve` runs the control plane on a machine with no screen, same gates. Pair a phone or attach the desktop later.
 - **MCP:** Settings → MCP → Install exposes the operator tools (`create_mission`, `submit_review`, `approve_and_merge`, `cortex_ask`, and the webview controls) to Claude Desktop, Claude Code, or any MCP client.
 
