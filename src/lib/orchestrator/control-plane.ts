@@ -348,7 +348,6 @@ function hasUnreconciledRuntimeExit(lane: Lane, events: LaneEvent[]): boolean {
 
 export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): DomainLaneSummary[] {
   if (packetIds?.size === 0) return [];
-  const mergePolicy = currentLaneMergePolicy();
   return listLanes(packetIds)
     .filter((lane) => lane.packetId)
     .map((lane) => {
@@ -388,8 +387,8 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
         authRecoveryRequired: Boolean(currentAuthExit),
         recovery,
         contextObservation: contextEvent ? packetContextObservationFromEvent(contextEvent) : undefined,
-        mergeMode: mergePolicy.mode,
-        mergeModeNote: mergePolicy.note,
+        mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
+        mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
       };
     });
 }

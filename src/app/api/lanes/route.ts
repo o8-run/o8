@@ -103,7 +103,6 @@ export async function GET(req: NextRequest) {
   // Stamp the memorable codename (same pure fn that labels the canvas card and
   // resolves voice "[Name], [task]") so every lane consumer — the canvas, voice
   // status, mobile — sees the agent by the SAME name. Additive, deterministic.
-  const mergePolicy = currentLaneMergePolicy();
   const launchContexts = resolvePacketLaunchContexts(
     resolvedLanes.flatMap((lane) => lane.packetId ? [lane.packetId] : []),
   );
@@ -117,8 +116,8 @@ export async function GET(req: NextRequest) {
         ? launchContexts.get(lane.packetId)?.launchContext ?? null
         : null,
       codename: codename(lane.id),
-      mergeMode: mergePolicy.mode,
-      mergeModeNote: mergePolicy.note,
+      mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
+      mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
       archiveSummary: retired ? summarizeLaneArchive(lane, archiveEvents) : null,
       // #2154 — the rail needs to tell an operator's dismissal apart from the
       // headless loop's auto-archive: the first clears the row, the second

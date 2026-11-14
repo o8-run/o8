@@ -542,7 +542,6 @@ export async function getMissionStatus(input: MissionStatusInput) {
   const completionContextByPacketId = new Map(await Promise.all(state.packets.map(async (packet) => (
     [packet.id, await readPacketCompletionContext(packet.id)] as const
   ))));
-  const mergePolicy = currentLaneMergePolicy();
   const agents = state.packets
     .map((packet) => {
       const lane = laneByPacketId.get(packet.id);
@@ -571,8 +570,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
         transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
         lastEventLabel: lane.lastEventLabel,
         terminalReason: readLaneTerminalReason(lane),
-        mergeMode: mergePolicy.mode,
-        mergeModeNote: mergePolicy.note,
+        mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
+        mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
       };
     })
     .filter((agent): agent is NonNullable<typeof agent> => agent !== null);
@@ -666,8 +665,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
           transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
           lastEventLabel: lane.lastEventLabel,
           terminalReason: readLaneTerminalReason(lane),
-          mergeMode: mergePolicy.mode,
-          mergeModeNote: mergePolicy.note,
+          mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
+          mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
         } : packet.lane ? {
           ...packet.lane,
           lastEventAt: lastActivityAt ?? packet.lane.lastEventAt ?? null,
@@ -676,8 +675,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
           lastActivityAt,
           lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, packet.lane.lastEventLabel),
           transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
-          mergeMode: mergePolicy.mode,
-          mergeModeNote: mergePolicy.note,
+          mergeMode: currentLaneMergePolicy(packet.projectId).mode,
+          mergeModeNote: currentLaneMergePolicy(packet.projectId).note,
         } : null,
         review: packet.review ? {
           ...reviewExecution(packet.review.approved, packet.review.reviewedHeadSha, packet.review.runEvidence),

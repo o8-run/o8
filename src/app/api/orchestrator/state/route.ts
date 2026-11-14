@@ -46,7 +46,6 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
   // Merge policy (#1367) — this rebuild is the LAST shape the desktop provider
   // sees; dropping the policy here left the chat banner rendering a doomed
   // Approve & merge in PR-only mode (live-hit 2026-07-04).
-  const mergePolicy = currentLaneMergePolicy();
   const packets = mission.packets.map((packet) => {
     const lane = findLaneByPacket(packet.id);
     if (!lane) return packet;
@@ -60,8 +59,8 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
           ...packet.lane,
           lastEventAt: packet.lane.laneId === lane.id ? lane.lastEventAt : packet.lane.lastEventAt,
           lastEventLabel: packet.lane.laneId === lane.id ? lane.lastEventLabel : packet.lane.lastEventLabel,
-          mergeMode: mergePolicy.mode,
-          mergeModeNote: mergePolicy.note,
+          mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
+          mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
         },
       };
     }
@@ -78,8 +77,8 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
         lastHeartbeatAt: packet.lane?.lastHeartbeatAt ?? null,
         lastEventAt: lane.lastEventAt,
         lastEventLabel: lane.lastEventLabel,
-        mergeMode: mergePolicy.mode,
-        mergeModeNote: mergePolicy.note,
+        mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
+        mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
       },
     };
   });

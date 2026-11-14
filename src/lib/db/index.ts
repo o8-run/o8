@@ -3,14 +3,13 @@ import { addColumnTolerant, tableColumnExists } from '@/lib/db/schema-columns';
  * Database Connection — SQLite via Drizzle ORM
  *
  * Single connection per process (Next.js server).
- * Database file lives at DATA_DIR/cortex-ide.db (defaults to ~/.o8/).
- * Ensures tables on first connection until a schema marker is written.
+ * Database file: DATA_DIR/cortex-ide.db. Tables are ensured before use.
  *
- * For production multi-tenant: swap better-sqlite3 for @neondatabase/serverless
- * or postgres.js — Drizzle supports both with minimal changes.
+ * Drizzle wraps the local SQLite connection.
  */
 
 import Database from 'better-sqlite3';
+import { carryOverProjectMergeModes } from '@/lib/lane/project-merge-mode-migration';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -115,6 +114,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
     }
     ensureIdempotentColumnAdds(sqlite);
     ensureOutcomeExclusionStorage(sqlite);
+    carryOverProjectMergeModes(sqlite, DATA_DIR, dbFilePreviouslyExisted);
     writeAllMissingMigrationMarkers();
   } catch (error) {
     // Never publish a half-initialized singleton. A later request must retry
