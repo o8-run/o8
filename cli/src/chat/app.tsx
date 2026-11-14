@@ -9,6 +9,8 @@ import { initialChatState, receiveEvent, safeText, type ChatRoute } from './stat
 import { Composer, Transcript, Welcome, composerLines, palette, transcriptLines, type ViewLine } from './view.js';
 import { terminalInput } from './terminal-input.js';
 import { attachmentPaths, attachmentTurn, pastedAttachmentPaths, stageAttachments, type Attachment } from './attachments.js';
+import { createTerminalStatusReporter } from '../terminal-status.js';
+import { chatStatusReport, initialTurnTracker, trackTurn, type TurnSignal } from './tab-status.js';
 
 const HELP = [
   '/help        This guide',
@@ -74,6 +76,9 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
   const savedDraft = useRef('');
   const exitArmed = useRef(0);
 
+  const tabStatus = useMemo(() => createTerminalStatusReporter({ human: true, verbose: false }), []);
+  const [turn, setTurn] = useState(initialTurnTracker);
+  const signalTurn = (signal: TurnSignal) => setTurn((previous) => trackTurn(previous, signal));
   const turnEpoch = useRef(0);
   const historyRequest = useRef(0);
   const recovering = useRef(false);
@@ -119,6 +124,7 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
     setConnection('connecting');
     const epoch = ++generation.current;
     recovering.current = reload || Boolean(history.repoPath);
+    signalTurn('reset');
     setState((previous) => ({ ...previous, busy: false, cursor: 0, error: null, notice: null }));
     try {
       const client = new ChatClient(cfg, route, (event) => {
@@ -140,6 +146,12 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
           }, 2000);
         }
         if (wire.event === 'status' && !wire.data?.snapshot && wire.data?.status === 'busy') turnEpoch.current += 1;
+        // Only a turn sent from this chat can become "Reply ready". Opening a
+        // conversation replays its recent events, and those must not mark an
+        // old reply as new. A turn this chat reattached to shows as working,
+        // then idle.
+        if (wire.event === 'status' && wire.data?.status === 'ready' && !wire.data.snapshot) signalTurn('ready');
+        else if (wire.event === 'error' || (wire.event === 'status' && wire.data?.status === 'dead')) signalTurn('failed');
         if ((wire.event === 'status' && ['ready', 'dead'].includes(wire.data?.status ?? '')) || wire.event === 'error') {
           stopRefresh(); recovering.current = false;
           setHint('');
@@ -149,6 +161,7 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
         if (!alive.current || epoch !== generation.current) return;
         stopRefresh();
         setConnection('disconnected');
+        signalTurn('reset');
         setState((previous) => ({ ...previous, busy: false, activity: 'Connection lost',
           notice: 'Delivery and turn state may be unknown. /reconnect checks saved history. Nothing is resent automatically.' }));
       });
@@ -183,9 +196,13 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
     // A ChatApp owns one route for its entire mounted lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const failed = Boolean(state.error);
+  useEffect(() => {
+    tabStatus.report(chatStatusReport({ connection, busy: state.busy, error: failed, replyReady: turn.replyReady }));
+  }, [tabStatus, state.busy, failed, connection, turn.replyReady]);
 
   const interrupt = () => {
-    try { clientRef.current?.interrupt(); setHint('Stop requested. Waiting for o8 to confirm.'); }
+    try { clientRef.current?.interrupt(); signalTurn('stop-requested'); setHint('Stop requested. Waiting for o8 to confirm.'); }
     catch (error) { setHint(safeText(error instanceof Error ? error.message : String(error))); }
   };
   const leave = () => {
@@ -228,6 +245,7 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
       const turn = attachmentTurn(text, attachments);
       turnEpoch.current += 1; recovering.current = false; stopRefresh();
       clientRef.current!.send(turn.message, id, turn);
+      signalTurn('started');
       setState((previous) => ({ ...previous, busy: true, error: null, notice: null, activity: 'Sending', activeMessageId: null,
         messages: [...previous.messages, { id, role: 'user', text: turn.displayMessage, tools: [] }],
       }));
@@ -341,6 +359,8 @@ export async function startChat(cfg: ResolvedConfig, route: ChatRoute, history: 
   finally {
     app.unmount(); terminal.close(); restore();
     process.off('SIGTERM', terminate); process.off('SIGHUP', terminate);
+    // Leaving chat removes its mark from the tab. Active work continues in o8.
+    createTerminalStatusReporter({ human: true, verbose: false }).report({ state: 'clear' });
   }
   process.stdout.write(`\nResume this conversation: o8 chat --resume ${route.threadId}\n`);
 }
