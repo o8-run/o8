@@ -204,7 +204,7 @@ fn polish_mark(reduced_motion: bool) -> gpui::Div {
         2. - cycle * 2.
     };
     let eased = half * half * (3. - 2. * half);
-    track.bg(gpui::rgba(0xb1b4e529)).child(
+    track.bg(crate::theme::symon_track()).child(
         div()
             .absolute()
             .top_0()
@@ -300,11 +300,7 @@ impl Render for Hud {
             .px(px(if caret { 14. } else { 26. }))
             .rounded(px(if caret { 14. } else { 22. }))
             // Dark in both palettes; only the glass/solid material flips.
-            .bg(if hud.solid {
-                gpui::rgb(0x14161c)
-            } else {
-                gpui::rgba(0x090a0dd1)
-            })
+            .bg(crate::theme::dictation_hud_fill(hud.solid))
             .border_1()
             .border_color(white(0.12))
             .shadow(vec![
