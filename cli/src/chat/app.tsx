@@ -146,8 +146,11 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
           }, 2000);
         }
         if (wire.event === 'status' && !wire.data?.snapshot && wire.data?.status === 'busy') turnEpoch.current += 1;
-        if (wire.event === 'status' && wire.data?.status === 'busy') signalTurn('started');
-        else if (wire.event === 'status' && wire.data?.status === 'ready' && !wire.data.snapshot) signalTurn('ready');
+        // Only a turn sent from this chat can become "Reply ready". Opening a
+        // conversation replays its recent events, and those must not mark an
+        // old reply as new. A turn this chat reattached to shows as working,
+        // then idle.
+        if (wire.event === 'status' && wire.data?.status === 'ready' && !wire.data.snapshot) signalTurn('ready');
         else if (wire.event === 'error' || (wire.event === 'status' && wire.data?.status === 'dead')) signalTurn('failed');
         if ((wire.event === 'status' && ['ready', 'dead'].includes(wire.data?.status ?? '')) || wire.event === 'error') {
           stopRefresh(); recovering.current = false;

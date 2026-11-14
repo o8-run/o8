@@ -38,7 +38,8 @@ export const initialTurnTracker: TurnTracker = { running: false, stopRequested: 
 
 /**
  * What the chat learned about the turn:
- * - `started`: a message was sent, or the thread reported it is busy.
+ * - `started`: a message was sent from this chat. A busy report from the
+ *   thread is not enough, because opening a conversation replays old events.
  * - `stop-requested`: the operator asked to stop the turn.
  * - `ready`: the thread reported the turn finished.
  * - `failed`: the turn ended in an error, or the agent stopped.

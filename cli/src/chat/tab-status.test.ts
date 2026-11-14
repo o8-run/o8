@@ -56,8 +56,12 @@ describe('trackTurn', () => {
     expect(after('started', 'ready', 'reset').replyReady).toBe(true);
   });
 
-  it('counts a reply that finishes right after reattaching to a busy thread', () => {
-    expect(after('reset', 'started', 'ready').replyReady).toBe(true);
+  it('ignores replayed events when a conversation is opened: nothing was sent from this chat', () => {
+    // Opening a conversation replays its tail, which can hold a finished turn.
+    expect(after('reset', 'ready').replyReady).toBe(false);
+    expect(after('reset', 'failed', 'ready').replyReady).toBe(false);
+    // A turn sent after the connection opened still counts.
+    expect(after('reset', 'ready', 'started', 'ready').replyReady).toBe(true);
   });
 
   it('treats a repeated busy report as the same turn', () => {

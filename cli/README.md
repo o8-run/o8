@@ -71,7 +71,7 @@ failed mark once all of them have. A mission with more than 60 packets marks
 its first 60 and still counts all of them in the summary.
 
 `o8 chat` reports too: working while a turn runs, a finished mark when a reply
-is ready to read, and a failed mark when the connection drops or the chat shows
+to a message sent from that chat is ready to read, and a failed mark when the connection drops or the chat shows
 an error. Leaving chat removes its mark. Chat is always interactive, so it needs
 no `--human`; the terminal check and `O8_TERMINAL_STATUS` apply as above.
 
