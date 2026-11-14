@@ -42,7 +42,8 @@ describe('native shutdown registration boundary for detached packet workers', ()
     const shell = read('src-tauri/src/lib.rs');
     expect(shell.slice(shell.lastIndexOf('RunEvent::ExitRequested'))).toContain('sidecar_lifecycle::kill_tracked_children()');
     expect(shell).toMatch(/api_port, sidecar_lifecycle::kill_tracked_children/);
-    expect(read('src-tauri/src/restart_job_drain.rs')).toContain('cleanup();');
+    expect(read('src-tauri/src/restart_job_drain.rs')).toContain('pub use o8_launch_core::restart_job_drain::*;');
+    expect(read('crates/o8-launch-core/src/restart_job_drain.rs')).toContain('cleanup();');
     const worker = read('src/lib/runtimes/shared/owned-session/run-controller.ts');
     const launch = read('src/lib/runtimes/shared/owned-session/credential-spawn.ts');
     expect(worker).toMatch(/const child = [^\n]*spawnCredentialCheckedChild\(launchInput\)/);

@@ -10,11 +10,16 @@ no Tauri or web view dependency. It does not change bundle selection.
 - `restart`: the existing three-restart budget over five minutes, with 750 ms delay.
 - `next_main_startup`: the authenticated server-owned window request and failure reporting.
 - `no_window`, `windows_node_locate`: existing cross-platform support.
+- `server_env`, `cli_locate`, `path_env`: explicit server environment and PATH setup.
+- `identity`: existing instance/boot identity and port-file formats.
+- `restart_job_drain`: admitted restart inspection and cloud-job drain before cleanup.
 
-Run `cargo test --locked --manifest-path crates/o8-launch-core/Cargo.toml`.
-The macOS extraction run passed all 16 tests. The classic shell cannot be checked
-in a source-only checkout without its generated helpers and frontend assets.
+Compile tests with `cargo test --locked --no-run --manifest-path crates/o8-launch-core/Cargo.toml`.
+Run the emitted test executable with an isolated temporary home directory: the
+unchanged Node probe uses a home-relative version cache. The macOS run passes
+19 tests. The classic shell cannot be checked in a source-only checkout without
+its generated helpers and frontend assets.
 
-This is the first layer of a split change. The launcher binary and its real-entry
-fixtures belong to the next layer. Launch ownership, shutdown and native Dock
-handling are not provided by this library alone.
+The launcher binary and its real-entry fixtures live in `../o8-launcher`.
+Launch ownership, shutdown and native Dock handling are not provided by this
+library alone.

@@ -718,6 +718,9 @@ jobs:
       - name: Experimental o8d delivery bus
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
         run: cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
+      - name: Shared launch mechanics
+        if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
+        run: cargo test --locked --manifest-path crates/o8-launch-core/Cargo.toml
       # Fake-tool tests only; the whisper.cpp helper (`--features whisper`)
       # needs cmake + libclang and is not built here.
       - name: Linux voice backends

@@ -115,7 +115,7 @@ pub fn probe_login_shell() -> LoginShellEnv {
 }
 
 /// Split the probe's stdout back into PATH / node / keys.
-fn parse_probe(stdout: &str) -> LoginShellEnv {
+pub fn parse_probe(stdout: &str) -> LoginShellEnv {
     let mut env = LoginShellEnv::default();
     for line in stdout.lines() {
         if let Some(path) = line.strip_prefix(PATH_MARKER) {

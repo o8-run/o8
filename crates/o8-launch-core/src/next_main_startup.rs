@@ -38,6 +38,13 @@ pub fn report_failure(
     reason: &str,
     present: impl FnOnce(String),
 ) {
+    report_failure_with_recovery(binary, log_path, reason, "Details are also in the shell's o8.log.", "Reinstall o8 or check the GPUI binary, then use Show o8 to retry. Voice and the menu bar remain available.", present);
+}
+
+pub fn report_failure_with_recovery(
+    binary: &Path, log_path: &Path, reason: &str, fallback: &str, recovery: &str,
+    present: impl FnOnce(String),
+) {
     use std::io::Write;
     let details = format!("{reason}\nGPUI binary: {}", binary.display());
     let saved = log_path
@@ -57,11 +64,11 @@ pub fn report_failure(
         format!("Startup log: {}", log_path.display())
     } else {
         format!(
-            "Could not write the startup log at {}. Details are also in the shell's o8.log.",
+            "Could not write the startup log at {}. {fallback}",
             log_path.display()
         )
     };
-    present(format!("{details}\n\n{log_hint}\n\nReinstall o8 or check the GPUI binary, then use Show o8 to retry. Voice and the menu bar remain available."));
+    present(format!("{details}\n\n{log_hint}\n\n{recovery}"));
 }
 
 #[cfg(test)]
