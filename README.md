@@ -15,6 +15,8 @@ o8 is a free, open-source review and merge layer for coding agents. Write code w
 
 [**Download for macOS**](https://o8.run/download) · [Linux](#linux) · [Build from source](#from-source) · [Follow @o8dotrun for updates](https://x.com/o8dotrun)
 
+Featured in [Awesome Mac](https://github.com/jaywcjlove/awesome-mac) and [Awesome GPUI](https://github.com/zed-industries/awesome-gpui).
+
 ![A session reviews the working tree, gives its verdict, commits when asked, and shows the log](./assets/review-and-commit.gif)
 
 - **Independent review.** The agent that wrote the code never approves it. A separate reviewer reads the real diff, and its approval is tied to the exact commit it reviewed.
