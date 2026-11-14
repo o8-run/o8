@@ -6,7 +6,7 @@ import { resolveConfig, type ResolvedConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
-import { confirmOpenedPanes, openTerminalPanes, parsePanesArgs } from './terminal-panes.js';
+import { confirmOpenedPanes, openTerminalPanes, parsePanesArgs, workerTerminals, type PaneTerminal } from './terminal-panes.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
@@ -59,35 +59,26 @@ async function listSessions(cfg: ResolvedConfig): Promise<TerminalSession[]> {
   return result.sessions.filter((id): id is string => typeof id === 'string').map((id) => ({ id }));
 }
 
-interface WorkerTerminal { id: string; title: string }
-
 /**
- * Terminals of running workers, with the title o8 shows for each. They come
- * from the fleet list, not the dashboard shell inventory, and can only be read.
+ * Terminals of running workers. They come from the fleet list, not the
+ * dashboard shell inventory, and can only be read. `failed` is set when the
+ * fleet list could not be read, so the caller can say workers are missing.
  */
-async function listWorkerTerminals(cfg: ResolvedConfig): Promise<WorkerTerminal[]> {
-  let fleet: unknown;
+async function listWorkerTerminals(cfg: ResolvedConfig): Promise<{ terminals: PaneTerminal[]; failed: boolean }> {
   try {
     const response = await apiFetch<{ fleetSessions?: unknown }>(cfg, '/api/mobile/inbox', {
       query: { workspaceReview: '0' }, timeoutMs: 8_000,
     });
-    fleet = response.data?.fleetSessions;
+    return { terminals: workerTerminals(response.data?.fleetSessions), failed: false };
   } catch {
-    // The fleet list is a courtesy. Dashboard shells still work without it.
-    return [];
+    return { terminals: [], failed: true };
   }
-  if (!Array.isArray(fleet)) return [];
-  return fleet.flatMap((entry) => {
-    const worker = entry as { terminalSessionName?: unknown; terminalAvailable?: unknown; title?: unknown };
-    if (typeof worker.terminalSessionName !== 'string' || !worker.terminalSessionName || worker.terminalAvailable === false) return [];
-    return [{ id: worker.terminalSessionName, title: typeof worker.title === 'string' ? worker.title : '' }];
-  });
 }
 
 /** A dashboard shell is live, or, for read-only commands, a running worker's terminal is. */
 async function requireLiveSession(cfg: ResolvedConfig, id: string, workersToo = false): Promise<void> {
   if ((await listSessions(cfg)).some((session) => session.id === id)) return;
-  if (workersToo && (await listWorkerTerminals(cfg)).some((worker) => worker.id === id)) return;
+  if (workersToo && (await listWorkerTerminals(cfg)).terminals.some((worker) => worker.id === id)) return;
   throw new CliError('terminal_not_found', `Terminal ${id} is not live.`, EXIT.NOT_FOUND);
 }
 
@@ -381,13 +372,15 @@ async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<numbe
   const { limit, machineKey } = parsePanesArgs(rest);
   // Both paths need the local operator credential before anything is listed or opened.
   const cfg = operatorConfig();
-  // Workers first, so a short limit shows agents before idle shells.
-  const terminals = machineKey
-    ? listRemoteSessionIds(machineKey).map((id) => ({ id, title: 'shell' }))
-    : [
-      ...await listWorkerTerminals(cfg),
-      ...(await listSessions(cfg)).map((session) => ({ id: session.id, title: 'shell' })),
-    ];
+  const workers = machineKey ? { terminals: [], failed: false } : await listWorkerTerminals(cfg);
+  const workerIds = new Set(workers.terminals.map((worker) => worker.id));
+  const shellIds = machineKey ? listRemoteSessionIds(machineKey) : (await listSessions(cfg)).map((session) => session.id);
+  // Workers first, so a short limit shows agents before idle shells. A worker keeps its own title.
+  const terminals = [
+    ...workers.terminals,
+    ...shellIds.filter((id) => !workerIds.has(id)).map((id) => ({ id, title: 'shell' })),
+  ];
+  const warnings = workers.failed ? ['Could not list worker terminals. Only shells are shown.'] : [];
   const started = openTerminalPanes({ terminals, limit, machineKey, env: process.env, self: selfCommand() });
   // Give each observer a moment to attach, then report any pane that is already gone.
   if (started.opened.length > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -399,11 +392,12 @@ async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<numbe
       ...result.existing.map((id) => `existing  ${id}`),
       ...result.remaining.map((id) => `not shown ${id}`),
       ...result.skipped.map(() => 'skipped   (unsafe session ID)'),
+      ...warnings.map((warning) => `warning   ${warning}`),
       ...(result.error ? [`error     ${result.error}`] : []),
     ];
     process.stdout.write(lines.length ? `${lines.join('\n')}\n` : 'No live terminals.\n');
   } else {
-    printJson({ schema: 'o8/cli/terminal.panes/v1', ...result });
+    printJson({ schema: 'o8/cli/terminal.panes/v1', ...result, warnings });
   }
   return result.error ? EXIT.CONFLICT : EXIT.OK;
 }

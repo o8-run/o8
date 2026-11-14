@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { EXIT } from '../api';
-import { confirmOpenedPanes, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, type PaneExec } from './terminal-panes';
+import { confirmOpenedPanes, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, workerTerminals, type PaneExec } from './terminal-panes';
 
 const self = ['/usr/bin/node', '/opt/o8 app/o8.mjs'];
 const rexEnv = { REX_SESSION: 'session:abc' };
@@ -190,6 +190,49 @@ describe('openTerminalPanes', () => {
     expect(paneLabel({ id: 't1', title: 'x'.repeat(200) })).toBe(`o8: ${'x'.repeat(47)}… [t1]`);
     expect(paneLabel({ id: 't1' })).toBe('o8: [t1]');
     expect(paneLabel({ id: 't1', title: 'shell' }, 'Build')).toBe('o8: shell [Build/t1]');
+  });
+
+  it('drops invisible and text-direction characters and never splits a character in two', () => {
+    const hidden = String.fromCodePoint(0x202e, 0x2066, 0x2069, 0x200b, 0x200d, 0xfeff);
+    expect(paneLabel({ id: 't1', title: `a${hidden}b` })).toBe('o8: a b [t1]');
+    const emoji = String.fromCodePoint(0x1f600);
+    const label = paneLabel({ id: 't1', title: emoji.repeat(60) });
+    expect(label).toBe(`o8: ${emoji.repeat(47)}… [t1]`);
+  });
+
+  it('shortens the title, never the ID, to stay inside the label limit', () => {
+    const id = `a${'i'.repeat(109)}`;
+    const label = paneLabel({ id, title: 'A long worker title here' });
+    expect([...label]).toHaveLength(128);
+    expect(label.endsWith(`… [${id}]`)).toBe(true);
+    expect(paneLabel({ id: `a${'i'.repeat(119)}`, title: 'Title' })).toBe(`o8: [a${'i'.repeat(119)}]`);
+  });
+
+  it('skips a terminal whose ID cannot fit in a label', () => {
+    const { calls, exec } = fakeRex();
+    const long = `a${'i'.repeat(127)}`;
+    const result = openTerminalPanes({ terminals: t(long, 't1'), limit: 8, machineKey: 'Build', env: rexEnv, self, exec });
+    expect(result.skipped).toEqual([long]);
+    expect(result.opened.map((pane) => pane.id)).toEqual(['t1']);
+    expect(calls.filter((args) => args.includes('--label'))).toHaveLength(1);
+  });
+
+  it('reads worker terminals from a fleet list and leaves out the ones without a live terminal', () => {
+    expect(workerTerminals([
+      { terminalSessionName: 'cortex-codex-abc', terminalAvailable: true, title: 'Fix login' },
+      { terminalSessionName: 'cortex-claude-def' },
+      { terminalSessionName: 'cortex-codex-gone', terminalAvailable: false, title: 'Ended' },
+      { terminalSessionName: '', title: 'No terminal' },
+      { title: 'No terminal either' },
+      { terminalSessionName: 7 },
+      null,
+      'text',
+    ])).toEqual([
+      { id: 'cortex-codex-abc', title: 'Fix login' },
+      { id: 'cortex-claude-def', title: '' },
+    ]);
+    expect(workerTerminals(undefined)).toEqual([]);
+    expect(workerTerminals({ fleetSessions: [] })).toEqual([]);
   });
 
   it('keeps one pane and the known title when a terminal is listed twice', () => {
