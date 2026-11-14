@@ -8,7 +8,7 @@ import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurfac
 import { dockOwner, type DockOwner, type DockPrecedenceInput } from '@/components/desktop/dictation/dockPrecedence';
 import type { DictationSnapshot } from '@/components/desktop/dictation/types';
 import { useNativeDictationPill, type NativeDockAction } from './useNativeDictationPill';
-import { useNativeDockFrame, webDockView, type NativeDockInput } from './nativeDockFrame';
+import { nativeDockFrame, useNativeDockFrame, webDockView, type NativeDockInput } from './nativeDockFrame';
 
 vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => true }));
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'fixture' }));
@@ -99,6 +99,53 @@ describe('dock precedence', () => {
             }
     expect(cases).toBe(6912);
     expect(owners.size).toBe(10);
+  });
+
+  /**
+   * The edit chip and glints are not in the order: page.tsx draws them below
+   * whatever the dock shows. Batch 3 composition, stated without the helpers:
+   * the native frame is dictation when active, else the reference owner's
+   * capsule, the fleet orbit when nothing owns the dock and workers exist, or
+   * the chip/glint alone; any other owner is a handoff to the web. The chip and
+   * glint go native with a drawn frame, except beside native dictation while
+   * the web draws Ask, a confirmation, a drop or staged files.
+   */
+  it('composes the chip and glint with every dock state, native and web', () => {
+    const edit = { id: 1, app: 'Notes', status: 'ready' as const, until: 1 };
+    const glint = { key: 'k', text: 'Remembered', tone: 'progress' as const, fadeAt: 1, until: 2 };
+    const seen = new Set<string>();
+    for (const dictationState of ['idle', 'recording', 'success'] as const)
+      for (const ttsState of ['idle', 'playing', 'paused'] as const)
+        for (const realtimeVoice of ['off', 'connecting', 'live'] as const)
+          for (const workerCount of [0, 2])
+            for (let mask = 0; mask < 1 << 7; mask++) {
+              const bit = (n: number) => (mask & (1 << n)) !== 0;
+              const input: DockPrecedenceInput = {
+                dictationState, ttsState, realtimeVoice, workerCount, askOpen: bit(0), panelPending: bit(1), agentConfirm: bit(2),
+                agentWorking: bit(3), dropActive: bit(4), stagedFiles: bit(5), showWorkers: bit(6),
+              };
+              const owner = reference(input);
+              const active = dictationState !== 'idle';
+              const state = active ? dictationState
+                : owner === 'speaking' || owner === 'working' || owner === 'voice' ? owner
+                  : owner === 'workers' || owner === 'idle' && workerCount > 0 ? 'workers'
+                    : owner === 'idle' ? 'extras' : 'idle';
+              const webBeside = active && (input.askOpen || input.agentConfirm || input.dropActive || input.stagedFiles);
+              const siblings = state !== 'idle' && !webBeside ? 'native' : 'web';
+              const { frame } = nativeDockFrame({
+                ...input, snapshot: { ...IDLE, state: dictationState }, dictationSession: 1, speechSpeed: 1, agentTool: '', agentStartedAt: 1, edit, glint,
+              }, { speaking: 1, voice: 1, workers: 1, extras: 1 });
+              const view = webDockView(true, frame, dictationState, { ...input, showWorkers: input.showWorkers, workerCount });
+              const label = JSON.stringify(input);
+              expect(frame.state, label).toBe(state);
+              expect(view.nativeEdit && view.nativeGlint ? 'native' : !view.nativeEdit && !view.nativeGlint ? 'web' : 'split', label).toBe(siblings);
+              expect(view.workerCount, label).toBe(0);
+              seen.add(`${state}:${siblings}`);
+            }
+    expect([...seen].sort()).toEqual([
+      'extras:native', 'idle:web', 'recording:native', 'recording:web', 'speaking:native', 'success:native', 'success:web',
+      'voice:native', 'workers:native', 'working:native',
+    ]);
   });
 
   it('orders dictation, confirm, ask, drop, speaking, working, staged, workers, voice', () => {
@@ -284,6 +331,7 @@ describe('native dock capsules through the real hook', () => {
       const live = { ttsState: 'paused', realtimeVoice: 'live', agentWorking: true, askOpen: false } as const;
       expect(webDockView(false, { ...IDLE, state }, 'idle', live)).toEqual({
         nativeDrawn: false, nativeCapsule: false, ttsState: 'paused', realtimeVoice: 'live', agentWorking: true,
+        showWorkers: false, workerCount: 0, nativeEdit: false, nativeGlint: false,
       });
     }
   });

@@ -1,4 +1,40 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlanProgressGlint } from '@/components/desktop/dictation/planPresentation';
+
+/** A glint with its fade start and end (epoch ms), so the native panel can fade it too. */
+export type TimedGlint = PlanProgressGlint & { fadeAt: number; until: number };
+const GLINT_FADE_AT_MS = 4200;
+const GLINT_GONE_MS = 4800;
+
+/** Memory glint (dossier #4): a quiet one-line chip under the dock that fades
+ * in, holds ~4s, fades out. Driven by `kind: glint` agent events. */
+export function useDockGlint() {
+  const [glint, setGlint] = useState<TimedGlint | null>(null);
+  const [fading, setFading] = useState(false);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const showGlint = useCallback((
+    text: string,
+    options: { key?: string; tone?: PlanProgressGlint['tone'] } = {},
+  ) => {
+    for (const t of timersRef.current) clearTimeout(t);
+    timersRef.current = [];
+    const now = Date.now();
+    setGlint({
+      key: options.key ?? 'ambient',
+      text,
+      tone: options.tone ?? 'progress',
+      fadeAt: now + GLINT_FADE_AT_MS,
+      until: now + GLINT_GONE_MS,
+    });
+    setFading(false);
+    timersRef.current.push(setTimeout(() => setFading(true), GLINT_FADE_AT_MS));
+    timersRef.current.push(setTimeout(() => { setGlint(null); setFading(false); }, GLINT_GONE_MS));
+  }, []);
+  useEffect(() => {
+    return () => { for (const t of timersRef.current) clearTimeout(t); };
+  }, []);
+  return { glint, fading, showGlint };
+}
 
 interface DockGlintProps {
   glint: PlanProgressGlint;

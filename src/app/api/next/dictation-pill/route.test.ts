@@ -89,3 +89,30 @@ it('forwards well-formed capsule clicks from the native panel and drops anything
   ]);
   child.emit('exit');
 });
+
+it('forwards a fleet tap and a revert naming its chip, and drops malformed ones', async () => {
+  settings.enabled = true;
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
+  bindNextBrowserPipe(child as unknown as ChildProcess);
+  const actions = [
+    { session: 2, state: 'workers', action: 'workers-expand', value: null },
+    { session: 2, state: 'voice', action: 'workers-expand', value: null },
+    { session: 3, state: 'success', action: 'revert', value: null, edit: 7 },
+    { session: 3, state: 'extras', action: 'revert', value: 9, edit: 8 },
+    { session: 3, state: 'success', action: 'revert', value: null },
+    { session: 3, state: 'success', action: 'revert', value: null, edit: '7' },
+    { session: 3, state: 'idle', action: 'revert', value: null, edit: 7 },
+    { session: 3, state: 'constructor', action: 'revert', value: null, edit: 7 },
+  ];
+  child.stdin.on('data', data => {
+    const frame = JSON.parse(String(data));
+    child.stdout.write('o8-next-browser-result:' + JSON.stringify({ id: frame.id, result: { ok: true, actions } }) + '\n');
+  });
+  const response = await POST(new NextRequest('http://localhost/api/next/dictation-pill', { method: 'POST', body: '{"action":"frame","checkSettings":true}' }));
+  expect((await response.json()).actions).toEqual([
+    { session: 2, state: 'workers', action: 'workers-expand', value: null },
+    { session: 3, state: 'success', action: 'revert', value: null, edit: 7 },
+    { session: 3, state: 'extras', action: 'revert', value: null, edit: 8 },
+  ]);
+  child.emit('exit');
+});

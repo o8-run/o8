@@ -1,5 +1,6 @@
-//! Passive dock drawing: dictation plus the speech, live voice and agent working
-//! capsules. Capture, voice and agent commands keep their web owners.
+//! Passive dock drawing: dictation, the speech, live voice, agent working and
+//! fleet capsules, and the edit chip and glints below them. Capture, voice,
+//! agent and edit commands keep their web owners.
 #[cfg(test)]
 use gpui::TestAppContext;
 use gpui::{
@@ -70,6 +71,17 @@ pub(crate) struct Snapshot {
     pub started_at: u64,
     #[serde(default)]
     pub connecting: bool,
+    #[serde(default)]
+    pub edit: Option<extras::EditChip>,
+    #[serde(default)]
+    pub glint: Option<extras::Glint>,
+    #[serde(default)]
+    pub workers: Option<capsules::Workers>,
+    #[serde(default)]
+    pub expanded: bool,
+    /// Static frames only: how long this frame holds the panel (capped).
+    #[serde(default)]
+    pub hold_ms: u64,
 }
 impl Snapshot {
     pub fn visible(&self) -> bool {
@@ -84,7 +96,8 @@ impl Snapshot {
                 | "speaking"
                 | "working"
                 | "voice"
-        )
+                | "workers"
+        ) || self.state == "extras" && self.extras_live(capsules::now_ms())
     }
     fn label(&self) -> &str {
         match self.state.as_str() {
@@ -159,6 +172,9 @@ pub(crate) struct Pill {
     actions: Vec<Value>,
     hover: bool,
     second: Option<u64>,
+    lease: u64,
+    revert_sent: Option<u64>,
+    extras_phase: (bool, u8),
     presentation: Presentation,
 }
 impl Default for Pill {
@@ -174,21 +190,23 @@ impl Default for Pill {
             actions: Vec::new(),
             hover: false,
             second: None,
+            lease: 750,
+            revert_sent: None,
+            extras_phase: (false, 2),
             presentation: Presentation::default(),
         }
     }
 }
 impl Pill {
     fn expire(&mut self) {
-        if self.heard.elapsed() > Duration::from_millis(750) && self.target {
+        if self.heard.elapsed() > Duration::from_millis(self.lease) && self.target {
             self.apply(Snapshot::default());
             self.motion = crate::motion::Transition::settled(160, false);
         }
     }
-    /// The clickable capsule footprint while a clickable state is on screen.
-    fn hit(&self) -> Option<(f64, f64)> {
-        (self.target && capsules::interactive(&self.snapshot))
-            .then(|| capsules::size(&self.snapshot))
+    /// The clickable footprints (capsule and chip) while they are on screen.
+    fn hit(&self) -> Vec<[f64; 3]> {
+        self.hit_rects(capsules::now_ms())
     }
     fn finish(&mut self) {
         if self.target && self.snapshot.state == "recording" && !self.finish_sent {
@@ -203,7 +221,17 @@ impl Pill {
             self.actions.clear();
             self.hover = false;
             self.second = None;
+            self.revert_sent = None;
         }
+        // A revert stays sent until the web shows the chip's next status.
+        if snapshot
+            .edit
+            .as_ref()
+            .is_none_or(|edit| edit.status != "ready")
+        {
+            self.revert_sent = None;
+        }
+        self.lease = Self::lease_for(&snapshot);
         self.motion.set(snapshot.visible());
         self.target = snapshot.visible();
         if self.target {
@@ -228,9 +256,14 @@ impl Render for Pill {
         let root = div()
             .size_full()
             .flex()
-            .justify_center()
-            .items_start()
+            .flex_col()
+            .items_center()
+            .justify_start()
             .pt(px(8.));
+        let extras = self.render_extras(opacity, w, cx);
+        if self.snapshot.state == "extras" {
+            return root.children(extras);
+        }
         if capsules::is_capsule(&self.snapshot.state) {
             let capsule = div()
                 .id("native-dock-capsule")
@@ -240,7 +273,9 @@ impl Render for Pill {
                     pill.capsule_click();
                     cx.notify();
                 }));
-            return root.child(self.render_capsule(capsule, cx));
+            return root
+                .child(self.render_capsule(capsule, cx))
+                .children(extras);
         }
         root.child(
             div()
@@ -308,6 +343,7 @@ impl Render for Pill {
                     ))
                 }),
         )
+        .children(extras)
     }
 }
 
@@ -490,7 +526,9 @@ pub(crate) fn install(cx: &mut App) {
                     let (show, was_shown, hit) = view.update(cx, |pill, cx| {
                         let was_active = pill.target;
                         pill.expire();
-                        if was_active != pill.target || pill.timer_tick(capsules::now_ms()) {
+                        let now = capsules::now_ms();
+                        let redraw = pill.timer_tick(now) | pill.extras_tick(now);
+                        if was_active != pill.target || redraw {
                             cx.notify();
                         }
                         let show = pill.target || pill.shown && pill.motion.value().1;
@@ -578,7 +616,7 @@ mod macos {
     pub(super) fn present(
         window: &Window,
         visible: bool,
-        hit: Option<(f64, f64)>,
+        hit: Vec<[f64; 3]>,
         pill: &Entity<Pill>,
         cx: &mut App,
     ) {
@@ -635,12 +673,12 @@ mod macos {
                     let _: () = msg_send![panel, setFrame: frame display: NO];
                 }
                 let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
-                // The capsule sits 8 points below the panel top, centered.
-                let hit = hit.is_some_and(|(w, h)| {
+                // Each footprint is centered, `top` points below the panel top.
+                let hit = hit.iter().any(|&[w, top, h]| {
                     mouse.x >= x + (width - w) / 2.
                         && mouse.x <= x + (width + w) / 2.
-                        && mouse.y >= y + height - 8. - h
-                        && mouse.y <= y + height - 8.
+                        && mouse.y >= y + height - top - h
+                        && mouse.y <= y + height - top
                 });
                 let _: () = msg_send![panel, setIgnoresMouseEvents: if hit { NO } else { YES }];
                 if order_front {
@@ -653,7 +691,12 @@ mod macos {
 
 #[path = "native_pill_capsules.rs"]
 mod capsules;
+#[path = "native_pill_extras.rs"]
+mod extras;
 
+#[cfg(test)]
+#[path = "native_pill_extras_tests.rs"]
+mod extras_tests;
 #[cfg(test)]
 #[path = "native_pill_tests.rs"]
 mod tests;

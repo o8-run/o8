@@ -44,6 +44,42 @@ resume `tts_toggle_pause`, stop `tts_stop`, speed `tts_set_speed`, working stop
 `agent_interrupt`, live voice stop the `o8:realtime-toggle` emit (ignored while
 connecting, as on the web). The API route forwards only well-formed intents.
 
+Batch 3 adds the fleet capsule (the resting worker orbit and its expanded
+worker/ready capsule, state `workers`), the live voice capsule's in-flight
+worker count, and the edit/revert chip and glints drawn below the capsule
+(native_pill_extras.rs). A frame may carry `edit` (`id`, `app`, `status`,
+`until`), `glint` (`text`, `tone`, `fadeAt`, `until`) and `workers` (`count`,
+`working`, `waiting`, `label`, `repos`), plus `expanded` for the fleet capsule.
+Timestamps are epoch ms from the web timers that already dismiss these
+surfaces, sent unchanged on every frame; the native panel hides the chip at
+`until` and fades the glint from `fadeAt` to `until` on its own visible tick,
+so no frame carries progress. A frame with only the chip and/or glint has the
+state `extras`.
+
+Static frames. `workers` and `extras` draw nothing that changes between events,
+so they do not use the 100 ms keep-alive. Each carries `holdMs`, and the native
+lease for that frame is `holdMs` clamped to 750 ms..5 s (staticMs in
+pill-timing.json); every other state keeps the 750 ms lease and ignores it. A
+static frame whose content ends inside 5 s (a glint, 4.8 s) is sent once and
+retired by one release; one that outlasts it (the orbit, or a 20 s chip on its
+own) is refreshed every 4 s. A content change (count, expansion, chip status, a
+new glint) wakes the feed at once. Measured through the real hook with fake
+timers: a lone glint is 1 frame and 1 release; a lone orbit is 15 to 16 frames
+a minute (0.25 per second) instead of 600; a tap that expands it sends one
+frame at once. The native loop is unchanged: it parks while hidden and ticks
+every 16 ms while visible, which also keeps mouse pass-through current, so a
+long-lived orbit keeps that tick running (see the #6145 CPU follow-up).
+
+Clicks. The fleet capsule and orbit report `workers-expand`; the web runs the
+same handler as its own sliver tap (show the capsule for 5 s, re-armed by
+another tap; there is no collapse click on the web either). The chip reports
+`revert` with the frame's session and state plus the chip's `edit` id; the web
+runs the chip's own revert (`agent_edit_revert`) at most once per reply and
+only while that chip is on screen and still offers Revert. The native side
+queues one revert per chip until the web shows its next status. Both are
+allow-listed in the API route and dropped, never replayed, on any mismatch,
+fallback, quiet mode or expiry, like the batch 2 clicks.
+
 Releases now name the session and kind (dictation, speaking, working or voice)
 they retire, so a late fallback release can no longer hide a newer session that
 is already drawn, including another kind with the same session number (closes
@@ -59,6 +95,10 @@ immediately and the native capsule hides when the immediate release lands, so
 both can be visible for about one pipe round trip.
 When a still-web surface takes the dock, the release is marked immediate and
 the native capsule hides without the 160 ms exit fade.
+For a static frame (fleet orbit, chip or glint) the same windows apply, except
+that if both the frame and its fallback release are lost, the native panel can
+stay up beside the web one until its hold ends (at most 5 s, the chip or glint
+also at its own `until`), instead of 750 ms.
 
 The dock reads the flag once at mount. A disabled dock adds one HTTP probe,
 no per-session probes, and no native quiet-mode listener or read. Enabling the
@@ -96,15 +136,15 @@ port order; source references name the current implementation.
 | Surface | Source | Trigger | Shell commands | Disposition |
 | --- | --- | --- | --- | --- |
 | Dictation requesting/listening/levels, transcribing, polishing, done, error | src/app/dictation-pill/page.tsx:196; native/o8-next/src/native_pill.rs:1 | System STT events and existing session fence | Presentation API only; capture/finish stay with their existing owners | native (batch 1) |
-| Edit/revert chip | src/app/dictation-pill/EditRevertChip.tsx:25 | edit-applied and edit-revert-settled; timed dismissal | agent_edit_revert | still web |
+| Edit/revert chip | src/app/dictation-pill/EditRevertChip.tsx:19; native/o8-next/src/native_pill_extras.rs:1 | edit-applied and edit-revert-settled; timed dismissal from `until` | agent_edit_revert, run by the web dock from a reported click | native (batch 3) |
 | Action and plan confirmation cards | src/components/desktop/dictation/useAgentConfirmations.ts:47; src/components/desktop/dictation/DockNotchSurface.tsx:843 | agent-confirm and agent-confirm-dismissed, exact confirmation/task identity | agent_confirm_exact | still web |
 | Ask conversation, pending user turn, answers, errors and sources | src/app/dictation-pill/page.tsx:530; src/components/desktop/dictation/DockAskPanel.tsx:214 | ask-open/answer/error and agent-task-event; pending agent dictation while panel is open | dock_set_expanded; agent_interrupt via shared stop control; clipboard copy and source links use browser APIs | still web |
 | Speech playback, pause, stop and speed | src/app/dictation-pill/page.tsx:399; native/o8-next/src/native_pill_capsules.rs:1 | tts-state playing/paused | tts_toggle_pause, tts_stop, tts_set_speed, run by the web dock from a reported click | native (batch 2) |
 | Live voice presence and stop | src/app/dictation-pill/page.tsx:427; native/o8-next/src/native_pill_capsules.rs:1 | realtime-status connecting/live/off; safety timer stays in the web dock | Emits o8:realtime-toggle (dock-tap) from a reported click; no direct shell command | native (batch 2) |
 | Agent working/synthesizing capsule, current tool and elapsed timer | src/app/dictation-pill/page.tsx:700; native/o8-next/src/native_pill_capsules.rs:1 | running task set and tool_call/done/failed task events stay in the web dock | agent_interrupt, run by the web dock from a reported click | native (batch 2) |
 | File drop target and staged-file chips | src/components/desktop/dictation/useDockFileDrop.ts:33; src/app/dictation-pill/page.tsx:830 | drag/drop over dock, staged chip timeout | agent_files_stage | still web |
-| Worker orbit and expanded worker/ready capsule | src/app/dictation-pill/page.tsx:638; src/components/desktop/dictation/DockNotchSurface.tsx:1304 | worker-status, parked-lanes-status; idle tap; stale-snapshot expiry | No direct action command | still web |
-| Memory/progress/task-result glints | src/app/dictation-pill/page.tsx:614; src/app/dictation-pill/DockGlint.tsx:9 | agent-task-event glint/plan progress/handoff, timed fade | No direct action command | still web |
+| Worker orbit and expanded worker/ready capsule (and the live voice worker count) | src/app/dictation-pill/page.tsx:616; native/o8-next/src/native_pill_capsules.rs:1 | worker-status, parked-lanes-status and the stale-snapshot sweep stay in the web dock; idle tap reported as `workers-expand` | No direct action command | native (batch 3) |
+| Memory/progress/task-result glints | src/app/dictation-pill/DockGlint.tsx:11; native/o8-next/src/native_pill_extras.rs:1 | agent-task-event glint/plan progress/handoff; fade from `fadeAt` to `until` | No direct action command | native (batch 3) |
 | Idle sliver and Voice settings shortcut | src/app/dictation-pill/page.tsx:495,955; src/components/desktop/dictation/DockNotchSurface.tsx:783 | top-pill preference, resting dock double click | open_voice_settings | still web |
 | Window hit testing, expanded geometry and presentation suppression | src/app/dictation-pill/page.tsx:855; src-tauri/src/dock_window.rs:366 | ResizeObserver, dock visibility, Ask open/close | dock_set_hit_rect, dock_set_expanded, presentation_quiet_mode_get; o8_dock_log instrumentation | still web |
 
@@ -127,14 +167,36 @@ src/components/desktop/dictation/dockPrecedence.ts, is:
 10. Idle sliver
 
 The native frame follows the same order: dictation when it is active,
-otherwise the winning capsule (5, 6 or 9). When a still-web surface (2, 3, 4,
-7 or 8) wins, the frame is idle with an immediate release and the web draws
-that surface. While the native panel draws the winner, the web dock does not
+otherwise the winning capsule (5, 6, 8 or 9). When a still-web surface (2, 3, 4
+or 7) wins, the frame is idle with an immediate release and the web draws
+that surface. When nothing wins (10) and workers exist, the frame is the
+resting fleet orbit; with no workers but a chip or glint, it is `extras`. While the native panel draws the winner, the web dock does not
 draw speech, working or live voice under it; with a native capsule the web
 notch surface is not drawn at all (the edit/revert chip and glints remain,
 below the capsule). On fallback the web dock draws everything as before.
 A test renders DockNotchSurface for every combination of these states and
 checks it draws the surface the shared order names.
+
+The edit/revert chip and glints are not in the order: the web draws them below
+whatever the dock shows (chip first, then glint). They go with the dock
+surface, so they are never drawn twice and never hidden by a surface they
+belong under:
+
+| Dock state | Drawn by | Chip and glint |
+| --- | --- | --- |
+| Dictation, nothing still-web beside it | native | native, below the dictation capsule |
+| Dictation with Ask, a confirmation, a drop or staged files beside it (web, below the native capsule) | native and web | web, below the web surface |
+| Speaking, working, live voice | native | native, below the capsule |
+| Fleet orbit or capsule | native | native, below it |
+| Nothing (10) | native `extras` | native, alone at the capsule position |
+| Confirmation, Ask, drop, staged files (handoff) | web | web, as today |
+| Flag off, fallback, quiet mode | web | web, as today |
+
+While native, the web never draws the fleet orbit or capsule (native draws
+them, or dictation hides them, as on the web); before batch 3 the web orbit
+could show below native dictation. The second sweep in
+native-dock-capsules.test.ts states this rule without the helpers and checks
+the frame state and the chip/glint owner for every combination.
 
 When native owns dictation, the web snapshot is idle and its pending dictation
 waveform is suppressed. Other controls can still make the web dock visible. While native dictation is
@@ -153,10 +215,13 @@ The idle sliver alone does not make it visible under native ownership.
 | Error | Bounded error label | Existing web error timeout drives retirement |
 | Enter/exit | 160 ms interruptible native ease-out; full-size opacity | No web spring geometry morph |
 | Placement | Primary-screen top center in points, safe-area inset plus notch gap | Physical display/focus acceptance remains for the lead |
-| Edit/revert | Retained web chip | Ported separately |
 | Speaking capsule | 280×40, radius 20, label, speed track, pause/resume and stop buttons | Speed is set by clicking one of 11 steps on the 58 pt track; dragging the knob is not ported. Theme surface instead of the frosted glass and blur |
 | Working capsule | 248×40, radius 20, ring, Working…/Synthesizing…, elapsed timer; hover shows Stop | Static ring instead of the spinning orbit; hover swap needs the live check on a non-key panel |
-| Live voice capsule | 268×40, radius 20, success dot and Voice live; ring and Connecting… | No ambient waveform or pulsing dot; the in-flight worker count (348 wide) stays web-only |
+| Live voice capsule | 268×40, radius 20, success dot and Voice live; ring and Connecting…; 348 wide with · ring · N working while live with workers in flight | No ambient waveform or pulsing dot |
+| Fleet orbit (resting) | 128×16 sliver, ring (or warning dot when all are waiting), count (99+) and fleet/work/ready/waiting | Theme surface instead of the brand gradient; static ring; no hover tooltip |
+| Fleet capsule (expanded) | 320×44, ring or dot, DockNotchSurface wording, repos dimmed; tap re-arms the 5 s timer | No hover tooltip; static ring |
+| Edit/revert chip | 248×24 below the capsule (alone at the capsule position otherwise), Rewrote in App — Revert, Reverting…, Reverted, Original copied | Fixed width with truncation (the web chip sizes to its text); no enter slide |
+| Glint | Below the chip, uppercase, tone colour from theme tokens, 0.5 s fade from `fadeAt`, gone at `until` | Theme surface instead of the dark gradient; no enter slide |
 
 Raster fixtures use the production Pill renderer under an isolated Linux Xvfb
 display, matching the repository's parity capture approach. They establish
@@ -181,6 +246,9 @@ to return NO. GPUI's existing nonactivating PopUp panel and acceptsFirstMouse
 implementation remain unchanged. Only the capsule hit rectangle takes clicks
 while listening, speaking, working or live (not while connecting), sized to the
 capsule on screen; other states and transparent margins remain click-through.
+In batch 3 the fleet orbit and capsule take clicks at their footprint, and the
+chip takes clicks at its 248×24 footprint below the capsule whatever its
+status, as the web hit rectangle does; glints never take clicks.
 Physical focus retention is reserved for the lead's live check.
 
 ## Live acceptance
@@ -222,7 +290,23 @@ Physical focus retention is reserved for the lead's live check.
 11. Toggle quiet mode during each capsule: it hides and returns on exit. Quit
     the native window process mid-capsule: the web capsule returns within
     about half a second and its controls work.
-12. Set the flag false and repeat a dock-routed session and steps 7 to 10 to
+12. Fleet: start agent work that reports workers (or parked review lanes). The
+    native orbit shows the count and fleet/work/ready at the dock position with
+    no web sliver. Click it: the 320 capsule names the work and repos and
+    returns to the orbit after 5 s; a second click inside that time keeps it.
+    Start live voice while workers run: the voice capsule widens to 348 and
+    shows N working.
+13. Edit chip: run a voice edit that rewrites text in another app. The chip
+    shows below whatever the dock shows (or alone) for 20 s. Click Revert once:
+    the text is restored once, the chip reads Reverted and leaves after 1.8 s.
+    Keyboard focus stays in that app. Open Ask (or hold Fn with Ask open) while
+    the chip is up: the chip moves to the web below the Ask panel, never both.
+14. Glint: trigger a memory glint or plan progress with nothing else showing.
+    It shows alone, fades for half a second and is gone at about 4.8 s; repeat
+    during speech and dictation to see it below the capsule.
+15. Quit the native window process with each of steps 12 to 14 showing: the web
+    orbit, chip or glint returns within about half a second.
+16. Set the flag false and repeat a dock-routed session and steps 7 to 14 to
     verify web behavior.
 
 Gradient/shimmer, the squiggle loader and the spring geometry morph are follow-up

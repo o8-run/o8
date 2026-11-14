@@ -1,9 +1,66 @@
-//! Speech playback, live voice and agent working capsules in the dictation panel.
+//! Speech playback, live voice, agent working and fleet capsules in the dictation panel.
 //! Clicks are queued as intents for the web dock, which remains the owner of the
 //! voice and agent commands; nothing here calls those commands.
 use super::{Pill, Snapshot};
 use gpui::{AnyElement, Context, Div, Stateful, div, prelude::*, px};
+use serde::Deserialize;
 use serde_json::{Value, json};
+
+/// The fleet snapshot DockNotchSurface draws (worker-status and parked lanes).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Workers {
+    #[serde(default)]
+    pub count: u64,
+    #[serde(default)]
+    pub working: u64,
+    #[serde(default)]
+    pub waiting: u64,
+    /// `ready` for parked review lanes, otherwise `waiting`.
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub repos: Vec<String>,
+}
+
+impl Workers {
+    fn waiting_copy(&self) -> String {
+        if self.label == "ready" {
+            format!("{} review ready", self.waiting)
+        } else {
+            format!("{} waiting on you", self.waiting)
+        }
+    }
+    /// The expanded capsule's line, worded as DockNotchSurface words it.
+    pub(crate) fn detail(&self) -> String {
+        let s = if self.working == 1 { "" } else { "s" };
+        if self.working > 0 && self.waiting > 0 {
+            format!("{} in flight · {}", self.working, self.waiting_copy())
+        } else if self.working > 0 {
+            format!("{} packet{s} in flight", self.working)
+        } else {
+            self.waiting_copy()
+        }
+    }
+    /// The resting orbit's count and word.
+    pub(crate) fn sliver(&self) -> (String, String) {
+        let count = if self.count > 99 {
+            "99+".into()
+        } else {
+            self.count.to_string()
+        };
+        let word = if self.working > 0 && self.waiting > 0 {
+            "fleet".into()
+        } else if self.working > 0 {
+            "work".into()
+        } else if self.label.is_empty() {
+            "waiting".into()
+        } else {
+            self.label.clone()
+        };
+        (count, word)
+    }
+}
 
 /// The web dock's speed band and 0.05 step (DockNotchSurface SPEED_MIN/MAX).
 pub(crate) const SPEEDS: [f32; 11] = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2];
@@ -22,15 +79,16 @@ const SPEED_SELECTORS: [&str; 11] = [
 ];
 const SPEED_TRACK: f32 = 58.;
 /// Clicks between two frames are kept, in order, up to this bound.
-const ACTION_LIMIT: usize = 8;
+pub(crate) const ACTION_LIMIT: usize = 8;
 
 pub(crate) fn is_capsule(state: &str) -> bool {
-    matches!(state, "speaking" | "working" | "voice")
+    matches!(state, "speaking" | "working" | "voice" | "workers")
 }
 
-/// The session kind a release names: each capsule, or dictation for every dictation state.
+/// The session kind a release names: each capsule, the chip/glint-only
+/// frame, or dictation for every dictation state.
 pub(crate) fn kind(state: &str) -> &str {
-    if is_capsule(state) {
+    if is_capsule(state) || state == "extras" {
         state
     } else {
         "dictation"
@@ -42,7 +100,10 @@ pub(crate) fn size(snapshot: &Snapshot) -> (f64, f64) {
     match snapshot.state.as_str() {
         "success" | "error" => (420., 44.),
         "speaking" => (280., 40.),
+        "voice" if voice_workers(snapshot) > 0 => (348., 40.),
         "voice" => (268., 40.),
+        "workers" if snapshot.expanded => (320., 44.),
+        "workers" => (128., 16.),
         "working" => (248., 40.),
         _ => (248., 44.),
     }
@@ -50,7 +111,7 @@ pub(crate) fn size(snapshot: &Snapshot) -> (f64, f64) {
 
 pub(crate) fn interactive(snapshot: &Snapshot) -> bool {
     match snapshot.state.as_str() {
-        "recording" | "speaking" | "working" => true,
+        "recording" | "speaking" | "working" | "workers" => true,
         "voice" => !snapshot.connecting,
         _ => false,
     }
@@ -64,6 +125,17 @@ pub(crate) fn elapsed_label(started_at: u64, now: u64) -> String {
     } else {
         format!("{}:{:02}", seconds / 60, seconds % 60)
     }
+}
+
+/// The in-flight worker count the live voice capsule carries (348 wide).
+fn voice_workers(snapshot: &Snapshot) -> u64 {
+    if snapshot.connecting {
+        return 0;
+    }
+    snapshot
+        .workers
+        .as_ref()
+        .map_or(0, |workers| workers.working)
 }
 
 pub(crate) fn now_ms() -> u64 {
@@ -84,6 +156,7 @@ impl Pill {
                 "speed" => state == "speaking" && value.is_some_and(|v| SPEEDS.contains(&v)),
                 "interrupt" => state == "working",
                 "voice-stop" => state == "voice" && !self.snapshot.connecting,
+                "workers-expand" => state == "workers",
                 _ => false,
             };
         if !allowed || self.actions.len() >= ACTION_LIMIT {
@@ -108,6 +181,9 @@ impl Pill {
             }
             "voice" => {
                 self.act("voice-stop", None);
+            }
+            "workers" => {
+                self.act("workers-expand", None);
             }
             _ => {}
         }
@@ -142,7 +218,7 @@ impl Pill {
         let base = capsule
             .w(px(width as f32))
             .h(px(height as f32))
-            .rounded(px(20.))
+            .rounded(px(if height < 20. { 8. } else { 20. }))
             .px(px(14.))
             .flex()
             .items_center()
@@ -254,7 +330,55 @@ impl Pill {
                 })
                 .when(snapshot.connecting, |d| d.child(orbit()))
                 .child(label(snapshot.label().into(), 11., t.text))
+                .when(voice_workers(snapshot) > 0, |d| {
+                    d.child(div().size(px(3.)).rounded_full().bg(t.text_muted))
+                        .child(orbit().size(px(12.)))
+                        .child(label(
+                            format!("{} working", voice_workers(snapshot)),
+                            10.5,
+                            t.text_secondary,
+                        ))
+                })
                 .into_any_element(),
+            "workers" => {
+                let workers = snapshot.workers.clone().unwrap_or_default();
+                let mark = if workers.working > 0 {
+                    orbit()
+                        .size(px(if snapshot.expanded { 13. } else { 9. }))
+                        .into_any_element()
+                } else {
+                    let dot = if snapshot.expanded { 6. } else { 5. };
+                    div()
+                        .size(px(dot))
+                        .flex_shrink_0()
+                        .rounded_full()
+                        .bg(t.warning)
+                        .into_any_element()
+                };
+                let body = base.cursor_pointer().hover(|s| s.bg(t.hover)).child(mark);
+                if snapshot.expanded {
+                    let repos = workers.repos.join(", ");
+                    body.gap(px(9.))
+                        .px(px(16.))
+                        .child(
+                            div()
+                                .flex()
+                                .min_w_0()
+                                .truncate()
+                                .child(label(workers.detail(), 11.5, t.text))
+                                .when(!repos.is_empty(), |d| {
+                                    d.child(label(format!(" · {repos}"), 11.5, t.text_secondary))
+                                }),
+                        )
+                        .into_any_element()
+                } else {
+                    let (count, word) = workers.sliver();
+                    body.gap(px(4.))
+                        .child(label(count, 9.5, t.text).font_weight(gpui::FontWeight::MEDIUM))
+                        .child(label(word, 9., t.text_secondary))
+                        .into_any_element()
+                }
+            }
             _ => {
                 let hover = self.hover;
                 let mut body = base
