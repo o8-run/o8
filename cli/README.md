@@ -56,6 +56,21 @@ Use `--no-motion` or `O8_REDUCED_MOTION=1` for a static activity indicator. Stan
 terminal color settings apply. The minimum terminal size is 36 columns by 12 rows.
 From a source checkout, run `npm run build:cli` then `node cli/dist/o8.mjs chat`.
 
+## Tab status in the terminal
+
+`o8 mission dispatch --watch` and `o8 mission wait` report the packet's state to
+terminals that read the Program Status Protocol (`OSC 7501`). The tab shows that
+the watcher is working, then keeps a finished mark when a packet reaches review
+or release, or a failed mark when it fails, blocks, or is archived. A watcher
+that times out clears its mark.
+
+Reports are written only with `--human`, when stdout is an interactive terminal,
+and when the terminal is known to read the sequence. Rex is detected through
+`REX_SESSION`. Set `O8_TERMINAL_STATUS=1` to send reports in any interactive
+terminal, including with JSON output, or `O8_TERMINAL_STATUS=0` to turn them
+off. A report carries the packet title and a fixed status phrase, and nothing
+else.
+
 ## Commands
 
 | Command | Purpose |
