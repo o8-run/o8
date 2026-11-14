@@ -4216,8 +4216,7 @@
     {
       "path": "tests/linux-gpui-publication-policy.test.ts",
       "reasons": [
-        "child-process",
-        "executable-fixture"
+        "child-process"
       ]
     },
     {
