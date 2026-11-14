@@ -174,39 +174,75 @@ fn an_uninspectable_other_user_receipt_does_not_block_start() {
         serde_json::from_slice(&fs::read(f.root.join("launcher-api.json")).unwrap()).unwrap();
     assert_ne!(receipt["pid"], 1);
 }
-// Copying platform-signed executables is not supported by the macOS fixture.
-#[cfg(target_os = "linux")]
 #[test]
 fn a_proven_server_under_the_old_install_is_stopped_after_a_move() {
     let mut f = Fixture::new();
-    let old = f.root.join("old-install");
-    fs::create_dir(&old).unwrap();
-    fs::copy("/bin/sleep", old.join("node")).unwrap();
-    let output = std::process::Command::new("python3").args(["-c", "import subprocess,sys; p=subprocess.Popen([sys.argv[1],'60'],cwd=sys.argv[2],start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); print(p.pid)"])
-        .arg(old.join("node")).arg(&f.root).output().unwrap();
-    assert!(output.status.success());
-    let pid: u32 = String::from_utf8(output.stdout)
-        .unwrap()
-        .trim()
-        .parse()
+    // Only built-in runtime modules run in this isolated server. No app loads.
+    let node = std::process::Command::new("node")
+        .args(["-p", "process.execPath"])
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .current_dir(&f.root)
+        .output()
         .unwrap();
+    assert!(node.status.success());
+    let node = fs::canonicalize(String::from_utf8(node.stdout).unwrap().trim()).unwrap();
+    let server = r#"
+const fs = require('node:fs');
+const server = require('node:net').createServer();
+const root = process.argv[1];
+server.listen(0, '127.0.0.1', () => {
+  fs.writeFileSync(root + '/old-port.pending', String(server.address().port));
+  fs.renameSync(root + '/old-port.pending', root + '/old-port');
+});
+"#;
+    let helper = r#"
+import os, subprocess, sys
+child = subprocess.Popen([sys.argv[1], '-e', sys.argv[3], '--', sys.argv[2]],
+    cwd=sys.argv[2], env={'O8_DATA_DIR':sys.argv[2]}, start_new_session=True,
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+print(child.pid, os.getpid())
+"#;
+    let output = std::process::Command::new("python3")
+        .args(["-c", helper])
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .current_dir(&f.root)
+        .arg(&node)
+        .arg(&f.root)
+        .arg(server)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let ids = String::from_utf8(output.stdout)
+        .unwrap()
+        .split_whitespace()
+        .map(|id| id.parse::<u32>().unwrap())
+        .collect::<Vec<_>>();
+    let (pid, prior_parent) = (ids[0], ids[1]);
     // Fixture drop owns emergency cleanup, even if an assertion fails.
     fs::write(f.root.join("api-starts"), format!("{pid}\n")).unwrap();
+    until(|| f.root.join("old-port").exists());
     let receipt = o8_launcher::ownership::Receipt {
         pid,
         identity: o8_launcher::ownership::identity(pid).unwrap(),
         directory: f.root.clone(),
-        install: old.join("o8-launcher"),
-        port: 0,
-        parent: 1,
+        install: node.with_file_name("o8-launcher"),
+        port: f.port("old-port"),
+        parent: prior_parent,
     };
     o8_launcher::ownership::private_write(
         &f.root.join("launcher-api.json"),
         &serde_json::to_vec(&receipt).unwrap(),
     )
     .unwrap();
+    fs::write(f.root.join("hold-probe"), "1").unwrap();
     f.start();
+    until(|| f.root.join("probe-entered").exists());
+    let released_port = std::net::TcpListener::bind(("127.0.0.1", f.port("old-port"))).unwrap();
+    fs::remove_file(f.root.join("hold-probe")).unwrap();
     f.ready();
+    drop(released_port);
     let status = std::process::Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "stat="])
         .output()

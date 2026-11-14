@@ -130,13 +130,7 @@ impl Instance {
                 socket.display()
             )));
         }
-        // claim runs before this process starts any worker threads.
-        let mask = unsafe { libc::umask(0o177) };
-        let bound = UnixListener::bind(&socket);
-        unsafe {
-            libc::umask(mask);
-        }
-        let listener = bound?;
+        let listener = bind_private(&socket)?;
         fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
         let (send, queue) = mpsc::sync_channel::<Pending>(16);
@@ -156,7 +150,7 @@ impl Instance {
                         }
                         Err(_) => break,
                     };
-                    if !same_user(&peer) {
+                    if !same_user(&peer, unsafe { libc::getuid() }) {
                         continue;
                     }
                     let Ok(request) = read_request(&mut peer) else {
@@ -207,13 +201,24 @@ impl Drop for Instance {
     }
 }
 
-fn same_user(peer: &UnixStream) -> bool {
+// claim calls this before starting worker threads. Restore the caller's mask
+// even when bind fails; children keep the original process mask.
+fn bind_private(socket: &Path) -> io::Result<UnixListener> {
+    let mask = unsafe { libc::umask(0o177) };
+    let bound = UnixListener::bind(socket);
+    unsafe {
+        libc::umask(mask);
+    }
+    bound
+}
+
+fn same_user(peer: &UnixStream, expected_uid: libc::uid_t) -> bool {
     #[cfg(target_os = "macos")]
     {
         let mut uid = 0;
         let mut gid = 0;
         unsafe {
-            libc::getpeereid(peer.as_raw_fd(), &mut uid, &mut gid) == 0 && uid == libc::getuid()
+            libc::getpeereid(peer.as_raw_fd(), &mut uid, &mut gid) == 0 && uid == expected_uid
         }
     }
     #[cfg(target_os = "linux")]
@@ -228,7 +233,7 @@ fn same_user(peer: &UnixStream) -> bool {
                 (&mut credentials as *mut libc::ucred).cast(),
                 &mut size,
             ) == 0
-                && credentials.uid == libc::getuid()
+                && credentials.uid == expected_uid
         }
     }
 }
@@ -239,7 +244,25 @@ mod tests {
     #[test]
     fn accepted_socket_reports_the_current_user() {
         let (peer, _) = UnixStream::pair().unwrap();
-        assert!(same_user(&peer));
+        let uid = unsafe { libc::getuid() };
+        assert!(same_user(&peer, uid));
+        assert!(!same_user(&peer, uid.wrapping_add(1)));
+    }
+    #[test]
+    fn bind_is_owner_only_before_any_chmod() {
+        let root = PathBuf::from("/tmp").join(format!("o8-control-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let socket = root.join("launcher.sock");
+        let previous = unsafe { libc::umask(0o022) };
+        let bound = bind_private(&socket);
+        unsafe {
+            libc::umask(previous);
+        }
+        let listener = bound.unwrap();
+        let mode = fs::metadata(&socket).unwrap().permissions().mode() & 0o777;
+        drop(listener);
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(mode, 0o600);
     }
     #[test]
     fn socket_limit_error_names_path_and_platform_limit() {

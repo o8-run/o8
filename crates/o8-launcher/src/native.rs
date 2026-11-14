@@ -4,16 +4,25 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 // Shared decision state is exercised without creating NSApplication in fixtures.
+#[cfg(target_os = "macos")]
+use objc2_app_kit::NSApplicationTerminateReply as TerminationDecision;
+#[cfg(all(not(target_os = "macos"), test))]
+#[derive(Debug, PartialEq, Eq)]
+enum TerminationDecision {
+    TerminateLater,
+}
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Default)]
 struct Termination {
     pending: AtomicBool,
 }
+#[cfg(any(target_os = "macos", test))]
 impl Termination {
-    fn request(&self, stop: &AtomicBool) -> bool {
+    fn request(&self, stop: &AtomicBool) -> TerminationDecision {
         self.pending
             .store(true, std::sync::atomic::Ordering::SeqCst);
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
-        true // NSTerminateLater
+        TerminationDecision::TerminateLater
     }
     fn after_stop(&self, result: Result<(), String>, reply: impl FnOnce(bool)) {
         if let Err(error) = result {
@@ -76,8 +85,7 @@ mod mac {
             }
             #[unsafe(method(applicationShouldTerminate:))]
             fn quit(&self, _: &NSApplication) -> NSApplicationTerminateReply {
-                self.ivars().termination.request(&self.ivars().stop);
-                NSApplicationTerminateReply::TerminateLater
+                self.ivars().termination.request(&self.ivars().stop)
             }
         }
     );
@@ -229,7 +237,7 @@ mod termination_tests {
         for result in [Ok(()), Err("stop deadline".into())] {
             let state = Termination::default();
             let stop = AtomicBool::new(false);
-            assert!(state.request(&stop));
+            assert_eq!(state.request(&stop), TerminationDecision::TerminateLater);
             assert!(stop.load(std::sync::atomic::Ordering::SeqCst));
             let mut replies = Vec::new();
             state.after_stop(result, |allowed| replies.push(allowed));

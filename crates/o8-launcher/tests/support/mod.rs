@@ -193,7 +193,7 @@ impl Drop for Fixture {
         for name in ["api-starts", "ws-starts"] {
             for pid in self.starts(name) {
                 let output = Command::new("ps")
-                    .args(["-p", &pid.to_string(), "-o", "command="])
+                    .args(["-ww", "-p", &pid.to_string(), "-o", "command="])
                     .output()
                     .unwrap();
                 if String::from_utf8_lossy(&output.stdout)

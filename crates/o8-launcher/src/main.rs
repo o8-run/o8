@@ -355,6 +355,8 @@ fn run(config: &mut Config) -> Result<(), String> {
         let path = config.data_dir.join("logs").join(name);
         let _ = fs::rename(&path, path.with_file_name(format!("{name}.prev")));
     }
+    // Declaring native before the servers makes its termination reply follow
+    // server cleanup on normal shutdown and every early return.
     let reopen = Arc::new(AtomicBool::new(false));
     let native = native::Native::new(config.native_lifecycle, stopped.clone(), reopen.clone())?;
     let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
