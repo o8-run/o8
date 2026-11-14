@@ -7,7 +7,8 @@ import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
 import {
-  confirmOpenedPanes, openTerminalPanes, parsePanesArgs, runningPackets, workerTerminals, type PaneTerminal,
+  confirmOpenedPanes, openTerminalPanes, parsePanesArgs, readAnswer, runningPackets, settledAfterRound, watchChanges, watchRetries, workerTerminals,
+  type PaneTerminal, type TerminalPanesResult,
 } from './terminal-panes.js';
 import { installShortcut, parseShortcutArgs, removeShortcut } from './terminal-shortcut.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
@@ -51,7 +52,7 @@ async function terminalGet<T>(cfg: ResolvedConfig, url: URL): Promise<T> {
   if (!response.ok) {
     throw new CliError('terminal_unavailable', `Terminal host returned ${response.status}.`, EXIT.CONFLICT);
   }
-  return response.json() as Promise<T>;
+  return readAnswer<T>(response);
 }
 
 async function listSessions(cfg: ResolvedConfig): Promise<TerminalSession[]> {
@@ -387,20 +388,25 @@ function listRemoteSessionIds(machineKey: string): string[] {
   }
 }
 
-async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<number> {
-  const { limit, machineKey } = parsePanesArgs(rest);
-  // Both paths need the local operator credential before anything is listed or opened.
-  const cfg = operatorConfig();
+/** One pass: list what is running, open a pane for each one that has none, and confirm they stayed open. */
+async function panesRound(
+  cfg: ResolvedConfig,
+  limit: number,
+  machineKey: string | null,
+  settled?: Set<string>,
+): Promise<{ result: TerminalPanesResult; warnings: string[]; listed: string[] | null }> {
   const workers = machineKey ? { terminals: [], failed: false } : await listWorkerTerminals(cfg);
   const workerIds = new Set(workers.terminals.map((worker) => worker.id));
   const shellIds = machineKey ? listRemoteSessionIds(machineKey) : (await listSessions(cfg)).map((session) => session.id);
   const packets = machineKey ? { terminals: [], failed: false } : await listRunningPackets(cfg);
   // Work first, so a short limit shows agents before idle shells. A worker keeps its own title.
-  const terminals = [
+  const listed = [
     ...packets.terminals,
     ...workers.terminals,
     ...shellIds.filter((id) => !workerIds.has(id)).map((id) => ({ id, title: 'shell' })),
   ];
+  // A watcher opens a pane once for each thing it finds. See `settledAfterRound`.
+  const terminals = settled ? listed.filter((terminal) => !settled.has(terminal.id)) : listed;
   const warnings = [
     ...(packets.failed ? ['Could not list running packets.'] : []),
     ...(workers.failed ? ['Could not list worker terminals.'] : []),
@@ -408,7 +414,55 @@ async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<numbe
   const started = openTerminalPanes({ terminals, limit, machineKey, env: process.env, self: selfCommand() });
   // Give each observer a moment to attach, then report any pane that is already gone.
   if (started.opened.length > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
-  const result = confirmOpenedPanes(started, process.env);
+  return {
+    result: confirmOpenedPanes(started, process.env),
+    warnings,
+    // A list that failed would look like everything stopped; report it as unknown.
+    listed: packets.failed || workers.failed ? null : listed.map((terminal) => terminal.id),
+  };
+}
+
+const WATCH_POLL_MS = 3_000;
+/**
+ * Keeps the tab filled: every few seconds, opens a pane for anything that
+ * started since the last pass. It runs until it is interrupted. A pass that
+ * fails, such as when o8 is restarting, is said once and tried again.
+ */
+async function watchTerminalPanes(mode: OutputMode, cfg: ResolvedConfig, limit: number, machineKey: string | null): Promise<number> {
+  const standing = new Set<string>();
+  const settled = new Set<string>();
+  if (mode.human) process.stdout.write('Watching for running packets and live terminals. Press Ctrl-C to stop.\n');
+  while (true) {
+    let round: { result: Pick<TerminalPanesResult, 'opened' | 'closed' | 'remaining' | 'skipped' | 'error'>; warnings: string[] };
+    try {
+      const done = await panesRound(cfg, limit, machineKey, settled);
+      settledAfterRound(settled, done.result, done.listed);
+      round = done;
+    } catch (error) {
+      if (!watchRetries(error)) throw error;
+      round = { result: { opened: [], closed: [], remaining: [], skipped: [], error: error.message }, warnings: [] };
+    }
+    const changes = watchChanges(round.result, round.warnings, standing);
+    if (mode.human) {
+      const lines = [
+        ...changes.opened.map((id) => `opened    ${id}`),
+        ...changes.closed.map((id) => `closed    ${id}`),
+        ...changes.notices,
+      ];
+      if (lines.length > 0) process.stdout.write(`${lines.join('\n')}\n`);
+    } else if (changes.opened.length + changes.closed.length + changes.notices.length > 0) {
+      process.stdout.write(`${JSON.stringify({ schema: 'o8/cli/terminal.panes.watch/v1', ...changes })}\n`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, WATCH_POLL_MS));
+  }
+}
+
+async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<number> {
+  const { limit, machineKey, watch } = parsePanesArgs(rest);
+  // Both paths need the local operator credential before anything is listed or opened.
+  const cfg = operatorConfig();
+  if (watch) return watchTerminalPanes(mode, cfg, limit, machineKey);
+  const { result, warnings } = await panesRound(cfg, limit, machineKey);
   if (mode.human) {
     const lines = [
       ...result.opened.map((pane) => `opened    ${pane.id}`),
