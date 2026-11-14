@@ -3918,8 +3918,10 @@ name = "o8-launch-core"
 version = "0.1.0"
 dependencies = [
  "log",
+ "o8-restart-safety",
  "reqwest 0.13.2",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

@@ -9,9 +9,7 @@ pub(crate) fn enabled() -> bool {
     cfg!(target_os = "macos")
 }
 
-fn voice_only(value: Option<&str>) -> bool {
-    value.is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-}
+use o8_launch_core::server_env::voice_only;
 
 /// Suppress automatic GPUI startup in voice-only boots, including a saved opt-in.
 /// The hidden voice host still runs; no classic dashboard is created.

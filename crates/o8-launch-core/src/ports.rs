@@ -1,3 +1,8 @@
+pub const PROD_API_DEFAULT_PORT: u16 = 47100;
+pub const PROD_WS_DEFAULT_PORT: u16 = 47105;
+pub const PROD_API_PORT_RANGE: std::ops::Range<u16> = 47100..47105;
+pub const PROD_WS_PORT_RANGE: std::ops::Range<u16> = 47105..47110;
+
 pub fn bundled_sidecar_port_available(port: u16) -> bool {
     if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
         return false;

@@ -4120,6 +4120,14 @@
       ]
     },
     {
+      "path": "tests/launcher-binary-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lead-background-agents-real-path.test.ts",
       "reasons": [
         "child-process",

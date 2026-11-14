@@ -1,4 +1,4 @@
-# Opt-in launcher, work in progress
+# Opt-in macOS launcher
 
 Part of #6130. Nothing in packaging or the shipped app selects this binary.
 The separate crate keeps application launch ownership separate from the Linux
@@ -7,45 +7,61 @@ are imported from `o8-launch-core` rather than depending on Tauri.
 
 The experimental entry point is `o8-launcher --config <absolute-json-file>`.
 Configuration requires absolute `data_dir`, `server_dir`, `node`, and `window`
-paths, `api_port`, `ws_port` (zero selects free ports), `version`, and optional
-`dialog` (an executable failure presenter for fixtures). Use temporary data and
-free ports for fixtures. The production bundle is not wired to this entry point.
+paths plus `version`. Omitted ports use the shell's default ranges; zero selects
+free ports. Always supply zero ports and a temporary data directory for fixtures.
+Optional executable injections `dialog`, `probe`, and `focus`, and
+`native_lifecycle: false`, allow headless tests without displaying windows.
+The production bundle is not wired to this entry point.
 
-## Evidence and blocker
+## Lifecycle
 
-The macOS check passed. Real-entry tests spawn fixture server and window
-executables, without displaying a window. After shortening the fixture Unix
-socket path, four of five tests passed: cold start and health waiting; shutdown
-and port release; child crash/restart and shutdown during retry; second instance;
-and injected startup failure are covered across those four tests.
+The launcher uses the shared login-shell probe, PATH augmentation, runtime
+preflight, port/identity files, explicit child environment, restart policy, and
+authenticated server-owned GPUI request. Node continues to create its credential
+files and owns the window arguments and optional o8d bridge. Server logs rotate
+once per boot at `logs/next-server.log` and `logs/ws-server.log`.
 
-The orphan-cleanup test still failed on its second suite run:
+A private instance lock and Unix socket serialize launches. Reopen requests are
+coalesced even while preflight is pending. AppKit supplies Dock reopen and quit
+events without a web view. Focus requires the configured executable to be a
+direct child of this launcher's API server; otherwise the server reopens it.
 
-```text
-crashed_parent_orphans_are_cleaned_without_touching_foreign_listener ... FAILED
-assertion failed: TcpListener::bind(("127.0.0.1", port)).is_ok()
-test result: FAILED. 4 passed; 1 failed
-```
+Shutdown stops the API before WS. Each leader receives TERM before its process
+group: closing producer pipes lets GPUI and o8d drain. The launcher reaps children
+and verifies released ports before reporting successful shutdown. Surviving
+descendants receive bounded escalation. Orphan receipts require this install,
+profile, kernel birth identity, server working directory, orphan parent, and
+process group; unresolved receipts are preserved and refused.
 
-Fixture server processes survived the crashed-parent test. Their exact fixture
-process groups were cleaned after the test. A possible cause is that a receipt
-captures an interpreter command before it finishes exec and later rejects the
-changed identity. This needs investigation through the entry point. A mismatched
-receipt must never be discarded while an unresolved owned child can survive.
-The two-failure stop rule ended this implementation attempt.
+The original orphan failure came from comparing mutable command text across
+interpreter exec. A stable kernel birth identity replaces that comparison. The
+original port-release assertion remains in the real-entry test.
 
-## Remaining work before review
+## Restart handoff for step 4
 
-- Repair and prove orphan ownership across exec, PID reuse and foreign receipts.
-- Share the bundled server environment construction instead of duplicating it.
-- Restore the login-shell PATH, provider-key and helper-path setup from the shell.
-- Add native application lifecycle and Dock reopen/focus handling.
-- Connect the existing admitted restart/drain protocol. Step 4 must receive the
-  admitted restart reservation, drain before stopping servers, and retain child
-  ownership and instance locking through updater handoff.
-- Verify restart exhaustion, failed respawn, foreign receipt refusal, permissions,
-  window restart after server restart, long socket paths and all new guards.
-- Wire Linux executable tests into hosted verification and run the full gates.
-- Check the shell against the moved library in a checkout with generated assets.
+`launcher.sock` accepts newline-terminated JSON followed by write-side EOF:
+`{"op":"prepare-restart"}`, `{"op":"cancel-restart","reservation":"…"}`,
+and `{"op":"restart","reservation":"…"}`. Preparation returns a reservation.
+Restart uses the shared final work inspection and cloud-job drain before stopping
+children. An `admitted` response is admission, not a shutdown receipt; an updater
+must wait for process exit and port release, then retain ownership and instance
+exclusion across its handoff. Feed, signature, download, replacement, and relaunch
+logic remain step 4 work.
 
-The binary is not ready for a packaging switch or daily use.
+## Verification and limits
+
+Run `cargo test --locked --manifest-path crates/o8-launcher/Cargo.toml -- --test-threads=1`.
+The tests spawn this binary with fixture servers and windows in temporary
+directories on free ports. They cover health and boot identity, environment,
+crash/restart exhaustion, shutdown during retry/preflight, drain ordering and
+descendant pipe drain, second launch, ownership refusal and orphan cleanup,
+private files, bounded control input, voice-only suppression, and injected dialog.
+`tests/launcher-binary-real-path.test.ts` runs these tests and isolated shared
+unit tests in the Linux integration lane.
+
+Dock reopen, unhide/focus, native quit, and native failure-alert appearance need a
+live macOS check before a packaging switch. The shell check also needs generated
+helpers and frontend assets. Optional helper installation remains shell-owned;
+the launcher forwards an existing `O8_CODEBASE_MEMORY_BIN` and bundled helper
+paths. This crate does not download helpers or implement updater, voice, menu,
+signing, or packaging changes.

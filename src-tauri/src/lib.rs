@@ -782,11 +782,6 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
 // `/api/setup/mcp-config`, the orchestrator session config writer) all
 // agree on where the backend actually lives.
 
-const PROD_API_DEFAULT_PORT: u16 = 47100;
-const PROD_WS_DEFAULT_PORT: u16 = 47105;
-const PROD_API_PORT_RANGE: std::ops::Range<u16> = 47100..47105;
-const PROD_WS_PORT_RANGE: std::ops::Range<u16> = 47105..47110;
-
 /// Take at most `max` bytes from the head of `s`, floored to a char boundary.
 /// `&s[..n]` panics when byte `n` lands mid-UTF-8-sequence — error bodies from
 /// provider APIs routinely contain multibyte characters, and the panic fires
@@ -880,67 +875,9 @@ mod port_allocation_tests {
     }
 }
 
-fn random_uuid_v4() -> String {
-    use std::io::Read;
-    let mut bytes = [0u8; 16];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut bytes);
-    } else {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        bytes[..8].copy_from_slice(&(now as u64).to_be_bytes());
-        bytes[8..12].copy_from_slice(&std::process::id().to_be_bytes());
-    }
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0],
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-        bytes[8],
-        bytes[9],
-        bytes[10],
-        bytes[11],
-        bytes[12],
-        bytes[13],
-        bytes[14],
-        bytes[15]
-    )
-}
-
-#[derive(Clone, Debug)]
-struct BootIdentity {
-    boot_id: String,
-    instance_id: String,
-}
-
+use o8_launch_core::identity::{random_uuid_v4, BootIdentity};
 fn read_or_create_boot_identity() -> BootIdentity {
-    let dir = o8_data_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let instance_path = format!("{}/instance-id", dir);
-    let instance_id = std::fs::read_to_string(&instance_path)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            let id = random_uuid_v4();
-            let _ = std::fs::write(&instance_path, &id);
-            id
-        });
-    let boot_id = random_uuid_v4();
-    let _ = std::fs::write(format!("{}/boot-id", dir), &boot_id);
-    BootIdentity {
-        boot_id,
-        instance_id,
-    }
+    o8_launch_core::identity::read_or_create_boot_identity(&o8_data_dir())
 }
 
 fn export_boot_identity(identity: &BootIdentity) {
@@ -1732,10 +1669,7 @@ fn allocate_ws_port(api_port: u16) -> u16 {
 /// Persist the chosen ports to the data dir so child processes (MCP server,
 /// generators) can read the same values without guessing.
 fn write_port_file(name: &str, port: u16) -> std::io::Result<()> {
-    let dir = o8_data_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let path = format!("{}/{}", dir, name);
-    std::fs::write(path, port.to_string())
+    o8_launch_core::identity::write_port_file(&o8_data_dir(), name, port)
 }
 
 // ── Orphan bundled-server detection (issue #509) ──
@@ -2240,38 +2174,7 @@ use o8_launch_core::preflight::*;
 ///
 /// `login_path` comes from the single `shell_env::probe_login_shell()` call the
 /// boot path already made — we do NOT re-source the user's profile to ask again.
-fn augment_process_path(login_path: &str) {
-    if login_path.is_empty() {
-        log::warn!(
-            "Could not resolve login-shell PATH; falling back to the well-known \
-             CLI dirs + minimal Finder PATH for sidecar children"
-        );
-    }
-    let current = std::env::var("PATH").unwrap_or_default();
-    let well_known = cli_locate::well_known_cli_bin_dirs();
-    // PATH entries are ':'-delimited on Unix, ';'-delimited on Windows —
-    // `current` is a real inherited PATH on both platforms, so this has to
-    // match the OS or every Windows PATH collapses into one bogus entry.
-    let path_sep = if cfg!(windows) { ';' } else { ':' };
-    let mut merged: Vec<String> = Vec::new();
-    for entry in login_path
-        .split(path_sep)
-        .chain(current.split(path_sep))
-        .map(str::to_string)
-        .chain(well_known.into_iter())
-    {
-        if !entry.is_empty() && !merged.contains(&entry) {
-            merged.push(entry);
-        }
-    }
-    let entry_count = merged.len();
-    let merged = merged.join(&path_sep.to_string());
-    log::info!(
-        "Augmented PATH from login shell + well-known CLI dirs ({} entries) for sidecar children",
-        entry_count
-    );
-    std::env::set_var("PATH", merged);
-}
+use o8_launch_core::path_env::augment_process_path;
 
 fn show_node_error_and_exit(err: NodePreflightError) -> ! {
     #[cfg(target_os = "linux")]
@@ -6721,50 +6624,30 @@ struct BundledNextSpawn {
 impl BundledNextSpawn {
     fn spawn(&self, log_file: Option<&std::fs::File>) -> std::io::Result<std::process::Child> {
         let mut command = Command::new(&self.node_bin);
-        command
-            .arg(&self.server_js)
-            .current_dir(&self.server_dir)
-            .env("O8_DATA_DIR", &self.data_dir)
-            .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
-            .no_window()
-            .env("PORT", self.api_port.to_string())
-            .env("HOSTNAME", sidecar_listen_host())
-            .env("NODE_ENV", "production")
-            .env("O8_PACKAGED_APP", "1")
-            .env("O8_NODE_BIN", &self.node_bin)
-            .env("O8_API_PORT", self.api_port.to_string())
-            .env("O8_WS_PORT", self.ws_port.to_string())
-            .env("O8_BOOT_ID", &self.boot_identity.boot_id)
-            .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
-            .env("WS_PORT", self.ws_port.to_string())
-            .env("O8_SIDECAR_PID", std::process::id().to_string())
-            .env("NODE_COMPILE_CACHE", compile_cache_dir());
-        if let Some(path) = pi_write_helper() {
-            command.env("O8_PI_WRITE_BIN", path);
+        command.arg(&self.server_js).current_dir(&self.server_dir);
+        o8_launch_core::server_env::ServerEnvironment {
+            data_dir: self.data_dir.clone(),
+            node_bin: self.node_bin.clone(),
+            server_dir: self.server_dir.clone(),
+            ws_port: self.ws_port,
+            boot_id: self.boot_identity.boot_id.clone(),
+            instance_id: self.boot_identity.instance_id.clone(),
+            compile_cache: compile_cache_dir(),
+            pi_write: pi_write_helper(),
+            mcp: self.bundled_operator_mcp.clone(),
+            ai_keys: self.ai_keys.clone(),
+            native_main: next_main::enabled(),
+            api_port: self.api_port,
+            window: std::env::current_exe().ok().and_then(|executable| {
+                executable.parent().map(|directory| directory.join("o8-next"))
+            }),
+            codebase_memory: self.codebase_memory_bin.clone(),
+            voice_only: o8_launch_core::server_env::voice_only(
+                std::env::var("O8_VOICE_ONLY").ok().as_deref(),
+            ),
+            ..Default::default()
         }
-        if let Some(path) = self.bundled_operator_mcp.as_ref() {
-            command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
-            command.env("O8_BUNDLED_MCP_PATH", path);
-        }
-        // Tauri externalBin lives beside the app executable. Pass only its path;
-        // the local server supplies its own operator credential at spawn time.
-        if let Ok(executable) = std::env::current_exe() {
-            if let Some(directory) = executable.parent() {
-                command.env("O8_NEXT_BIN", directory.join("o8-next"));
-            }
-        }
-        // The server keeps o8 next open as the main window instead of
-        // following the old Settings switch.
-        if next_main::enabled() {
-            command.env(next_main::SERVER_ENV, "1");
-        }
-        next_main::configure_server(&mut command);
-        if let Some(path) = self.codebase_memory_bin.as_ref() {
-            command.env("O8_CODEBASE_MEMORY_BIN", path);
-        }
-        for (key, value) in &self.ai_keys {
-            command.env(key, value);
-        }
+        .api(&mut command);
         command
             .stdout(child_stdio(log_file))
             .stderr(child_stdio(log_file))
@@ -6805,36 +6688,24 @@ struct BundledWsSpawn {
 impl BundledWsSpawn {
     fn spawn(&self, log_file: Option<&std::fs::File>) -> std::io::Result<std::process::Child> {
         let mut command = Command::new(&self.node_bin);
-        command
-            .arg(&self.server_js)
-            .current_dir(&self.server_dir)
-            .env("O8_DATA_DIR", &self.data_dir)
-            .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
-            .no_window()
-            .env("O8_NODE_BIN", &self.node_bin)
-            .env("WS_PORT", self.ws_port.to_string())
-            .env("NEXT_ORIGIN", &self.next_origin)
-            .env("O8_PACKAGED_APP", "1")
-            .env("O8_APP_VERSION", crate::app_version::app_version())
-            .env("O8_BOOT_ID", &self.boot_identity.boot_id)
-            .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
-            .env("O8_SIDECAR_PID", std::process::id().to_string())
-            .env("NODE_COMPILE_CACHE", compile_cache_dir());
-        if let Some(path) = pi_write_helper() {
-            command.env("O8_PI_WRITE_BIN", path);
+        command.arg(&self.server_js).current_dir(&self.server_dir);
+        o8_launch_core::server_env::ServerEnvironment {
+            data_dir: self.data_dir.clone(),
+            node_bin: self.node_bin.clone(),
+            server_dir: self.server_dir.clone(),
+            ws_port: self.ws_port,
+            boot_id: self.boot_identity.boot_id.clone(),
+            instance_id: self.boot_identity.instance_id.clone(),
+            compile_cache: compile_cache_dir(),
+            pi_write: pi_write_helper(),
+            mcp: self.bundled_operator_mcp.clone(),
+            ai_keys: self.ai_keys.clone(),
+            native_main: next_main::enabled(),
+            version: crate::app_version::app_version().into(),
+            next_origin: self.next_origin.clone(),
+            ..Default::default()
         }
-        if let Some(path) = self.bundled_operator_mcp.as_ref() {
-            command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
-            command.env("O8_BUNDLED_MCP_PATH", path);
-        }
-        // Update apply runs here when the native transport owns updater state,
-        // and must ask the native updater rather than a webview that is absent.
-        if next_main::enabled() {
-            command.env(next_main::SERVER_ENV, "1");
-        }
-        for (key, value) in &self.ai_keys {
-            command.env(key, value);
-        }
+        .ws(&mut command);
         let mut child = command
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
