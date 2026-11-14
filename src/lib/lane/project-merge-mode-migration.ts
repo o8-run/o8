@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const projectMergeModeKey = (id: string) => `project-merge-mode:${id}`;
-const marker = 'project-merge-mode:carry-over-v1';
+const marker = 'migration:project-merge-mode:carry-over-v1';
 
 /** Runs before the DB singleton is published. Values and marker commit together. */
 export function carryOverProjectMergeModes(sqlite: Database.Database, dataDir: string, existingDb: boolean) {

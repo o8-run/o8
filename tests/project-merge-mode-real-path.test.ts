@@ -91,7 +91,7 @@ it('operator opt-in persists only for the selected project; worker and device ca
 it('existing project without a saved mode retains direct through database startup', async () => {
   const old = createProject({ name: 'Existing before upgrade' });
   const sqlite = getSqlite();
-  sqlite.prepare("DELETE FROM app_state WHERE key = 'project-merge-mode:carry-over-v1'").run();
+  sqlite.prepare("DELETE FROM app_state WHERE key = 'migration:project-merge-mode:carry-over-v1'").run();
   sqlite.exec(`CREATE TRIGGER interrupt_carry_over BEFORE INSERT ON app_state
     WHEN NEW.key = 'project-merge-mode:default' BEGIN SELECT RAISE(ABORT, 'upgrade interruption'); END;`);
   const { closeDb } = await import('@/lib/db'); closeDb();
