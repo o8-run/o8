@@ -10,7 +10,7 @@ import { Composer, Transcript, Welcome, composerLines, palette, transcriptLines,
 import { terminalInput } from './terminal-input.js';
 import { attachmentPaths, attachmentTurn, pastedAttachmentPaths, stageAttachments, type Attachment } from './attachments.js';
 import { createTerminalStatusReporter } from '../terminal-status.js';
-import { chatStatusReport, nextReplyReady } from './tab-status.js';
+import { chatStatusReport, initialTurnTracker, trackTurn, type TurnSignal } from './tab-status.js';
 
 const HELP = [
   '/help        This guide',
@@ -76,8 +76,9 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
   const savedDraft = useRef('');
   const exitArmed = useRef(0);
 
-  const tabStatus = useRef(createTerminalStatusReporter({ human: true, verbose: false }));
-  const tabTurn = useRef({ busy: false, replyReady: false });
+  const tabStatus = useMemo(() => createTerminalStatusReporter({ human: true, verbose: false }), []);
+  const [turn, setTurn] = useState(initialTurnTracker);
+  const signalTurn = (signal: TurnSignal) => setTurn((previous) => trackTurn(previous, signal));
   const turnEpoch = useRef(0);
   const historyRequest = useRef(0);
   const recovering = useRef(false);
@@ -123,6 +124,7 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
     setConnection('connecting');
     const epoch = ++generation.current;
     recovering.current = reload || Boolean(history.repoPath);
+    signalTurn('reset');
     setState((previous) => ({ ...previous, busy: false, cursor: 0, error: null, notice: null }));
     try {
       const client = new ChatClient(cfg, route, (event) => {
@@ -144,6 +146,9 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
           }, 2000);
         }
         if (wire.event === 'status' && !wire.data?.snapshot && wire.data?.status === 'busy') turnEpoch.current += 1;
+        if (wire.event === 'status' && wire.data?.status === 'busy') signalTurn('started');
+        else if (wire.event === 'status' && wire.data?.status === 'ready' && !wire.data.snapshot) signalTurn('ready');
+        else if (wire.event === 'error' || (wire.event === 'status' && wire.data?.status === 'dead')) signalTurn('failed');
         if ((wire.event === 'status' && ['ready', 'dead'].includes(wire.data?.status ?? '')) || wire.event === 'error') {
           stopRefresh(); recovering.current = false;
           setHint('');
@@ -153,6 +158,7 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
         if (!alive.current || epoch !== generation.current) return;
         stopRefresh();
         setConnection('disconnected');
+        signalTurn('reset');
         setState((previous) => ({ ...previous, busy: false, activity: 'Connection lost',
           notice: 'Delivery and turn state may be unknown. /reconnect checks saved history. Nothing is resent automatically.' }));
       });
@@ -189,13 +195,11 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
   }, []);
   const failed = Boolean(state.error);
   useEffect(() => {
-    const replyReady = nextReplyReady(tabTurn.current, { busy: state.busy, connection });
-    tabTurn.current = { busy: state.busy, replyReady };
-    tabStatus.current.report(chatStatusReport({ connection, busy: state.busy, error: failed, replyReady }));
-  }, [state.busy, failed, connection]);
+    tabStatus.report(chatStatusReport({ connection, busy: state.busy, error: failed, replyReady: turn.replyReady }));
+  }, [tabStatus, state.busy, failed, connection, turn.replyReady]);
 
   const interrupt = () => {
-    try { clientRef.current?.interrupt(); setHint('Stop requested. Waiting for o8 to confirm.'); }
+    try { clientRef.current?.interrupt(); signalTurn('stop-requested'); setHint('Stop requested. Waiting for o8 to confirm.'); }
     catch (error) { setHint(safeText(error instanceof Error ? error.message : String(error))); }
   };
   const leave = () => {
@@ -238,6 +242,7 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
       const turn = attachmentTurn(text, attachments);
       turnEpoch.current += 1; recovering.current = false; stopRefresh();
       clientRef.current!.send(turn.message, id, turn);
+      signalTurn('started');
       setState((previous) => ({ ...previous, busy: true, error: null, notice: null, activity: 'Sending', activeMessageId: null,
         messages: [...previous.messages, { id, role: 'user', text: turn.displayMessage, tools: [] }],
       }));

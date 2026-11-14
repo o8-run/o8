@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { encodeTerminalStatus } from '../terminal-status';
-import { chatStatusReport, nextReplyReady, type ChatTabState } from './tab-status';
+import { chatStatusReport, initialTurnTracker, trackTurn, type ChatTabState, type TurnSignal } from './tab-status';
 
 const base: ChatTabState = { connection: 'connected', busy: false, error: false, replyReady: false };
 
@@ -26,19 +26,41 @@ describe('chatStatusReport', () => {
   });
 });
 
-describe('nextReplyReady', () => {
-  it('turns on when a turn ends and off when the next one starts', () => {
-    const idle = { busy: false, replyReady: false };
-    expect(nextReplyReady(idle, { busy: false, connection: 'connected' })).toBe(false);
-    expect(nextReplyReady(idle, { busy: true, connection: 'connected' })).toBe(false);
-    expect(nextReplyReady({ busy: true, replyReady: false }, { busy: false, connection: 'connected' })).toBe(true);
-    expect(nextReplyReady({ busy: false, replyReady: true }, { busy: false, connection: 'connected' })).toBe(true);
-    expect(nextReplyReady({ busy: false, replyReady: true }, { busy: true, connection: 'connected' })).toBe(false);
+describe('trackTurn', () => {
+  const after = (...signals: TurnSignal[]) => signals.reduce(trackTurn, initialTurnTracker);
+
+  it('marks a reply ready only after a turn it saw start finishes cleanly', () => {
+    expect(after().replyReady).toBe(false);
+    expect(after('ready').replyReady).toBe(false);
+    expect(after('started').replyReady).toBe(false);
+    expect(after('started', 'ready')).toEqual({ running: false, stopRequested: false, replyReady: true });
+    // The mark holds until the next message is sent.
+    expect(after('started', 'ready', 'ready').replyReady).toBe(true);
+    expect(after('started', 'ready', 'started').replyReady).toBe(false);
   });
 
-  it('does not treat a reconnect that resets the turn as a finished reply', () => {
-    expect(nextReplyReady({ busy: true, replyReady: false }, { busy: false, connection: 'connecting' })).toBe(false);
-    expect(nextReplyReady({ busy: true, replyReady: false }, { busy: false, connection: 'disconnected' })).toBe(false);
-    expect(nextReplyReady({ busy: false, replyReady: true }, { busy: false, connection: 'connecting' })).toBe(true);
+  it('does not claim a reply for a turn the operator stopped', () => {
+    expect(after('started', 'stop-requested', 'ready').replyReady).toBe(false);
+    expect(after('stop-requested', 'started', 'ready').replyReady).toBe(true);
+  });
+
+  it('does not claim a reply for a failed turn, even after a reconnect', () => {
+    expect(after('started', 'failed').replyReady).toBe(false);
+    expect(after('started', 'failed', 'reset', 'ready').replyReady).toBe(false);
+    // A failure also withdraws an earlier reply mark: the tab now needs attention.
+    expect(after('started', 'ready', 'failed').replyReady).toBe(false);
+  });
+
+  it('drops a running turn on a reconnect but keeps a reply that already arrived', () => {
+    expect(after('started', 'reset', 'ready').replyReady).toBe(false);
+    expect(after('started', 'ready', 'reset').replyReady).toBe(true);
+  });
+
+  it('counts a reply that finishes right after reattaching to a busy thread', () => {
+    expect(after('reset', 'started', 'ready').replyReady).toBe(true);
+  });
+
+  it('treats a repeated busy report as the same turn', () => {
+    expect(after('started', 'stop-requested', 'started', 'ready').replyReady).toBe(false);
   });
 });

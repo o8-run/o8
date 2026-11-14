@@ -25,16 +25,44 @@ export function chatStatusReport(state: ChatTabState): TerminalStatusReport {
   return { state: 'idle', msg: 'Ready' };
 }
 
+export interface TurnTracker {
+  /** A turn is running, as far as this chat has been told. */
+  running: boolean;
+  /** The operator asked to stop the running turn. */
+  stopRequested: boolean;
+  /** A turn finished with a reply and nothing was sent since. */
+  replyReady: boolean;
+}
+
+export const initialTurnTracker: TurnTracker = { running: false, stopRequested: false, replyReady: false };
+
 /**
- * Tracks whether a reply is waiting to be read. A turn that ends sets it; the
- * next turn that starts clears it. Reconnecting resets `busy` without a turn
- * ending, so a drop to idle only counts while the connection is up.
+ * What the chat learned about the turn:
+ * - `started`: a message was sent, or the thread reported it is busy.
+ * - `stop-requested`: the operator asked to stop the turn.
+ * - `ready`: the thread reported the turn finished.
+ * - `failed`: the turn ended in an error, or the agent stopped.
+ * - `reset`: the connection was reopened or lost, so the turn's fate is unknown.
  */
-export function nextReplyReady(
-  previous: { busy: boolean; replyReady: boolean },
-  current: { busy: boolean; connection: ChatTabState['connection'] },
-): boolean {
-  if (current.busy) return false;
-  if (previous.busy && current.connection === 'connected') return true;
-  return previous.replyReady;
+export type TurnSignal = 'started' | 'stop-requested' | 'ready' | 'failed' | 'reset';
+
+/**
+ * Decides whether a reply is waiting to be read. Only a turn this chat saw
+ * running and then finishing cleanly counts. A stopped turn, a failed turn,
+ * and a turn cut off by a reconnect do not, so the tab never claims a reply
+ * that did not arrive.
+ */
+export function trackTurn(turn: TurnTracker, signal: TurnSignal): TurnTracker {
+  switch (signal) {
+    case 'started':
+      return turn.running ? turn : { running: true, stopRequested: false, replyReady: false };
+    case 'stop-requested':
+      return turn.running ? { ...turn, stopRequested: true } : turn;
+    case 'ready':
+      return turn.running ? { running: false, stopRequested: false, replyReady: !turn.stopRequested } : turn;
+    case 'failed':
+      return initialTurnTracker;
+    case 'reset':
+      return turn.running ? initialTurnTracker : turn;
+  }
 }
