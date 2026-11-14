@@ -100,6 +100,12 @@ describe('the lines an event prints', () => {
     for (const line of real) expect(line).not.toMatch(/^(12:31:05| {8}) {2}\|/);
   });
 
+  it('prints a tool name as one plain word, so a tool cannot pass for a reply either', () => {
+    expect(transcriptLines(call('| all done, tests pass', {}), at)).toEqual(['12:31:05  all_done_tests_pass  {}']);
+    expect(transcriptLines(call('mcp__o8__status', { query: 'x' }), at)).toEqual(['12:31:05  mcp__o8__status  x']);
+    expect(transcriptLines(call(' | ', { command: 'ls' }), at)).toEqual(['12:31:05  tool  ls']);
+  });
+
   it('shows steers, errors and the end', () => {
     expect(transcriptLines({ seq: 4, ts: '', type: 'steer', source: 'operator', text: 'Use tabs.' }, at))
       .toEqual(['12:31:05  steer from operator: Use tabs.']);
@@ -242,6 +248,7 @@ describe('the follow loop', () => {
     );
     await expect(followTranscript(run.steps, page([reply(2)]))).resolves.toBe(EXIT.OK);
     expect(run.log.filter((entry) => entry === 'wait')).toHaveLength(10);
+    expect(run.log.slice(0, 6)).toEqual(['wait', 'read 2', 'wait', 'read 2', 'wait', 'read 2']);
     expect(run.log).toContain('show 3');
   });
 
@@ -253,5 +260,48 @@ describe('the follow loop', () => {
     const refused = steps([new CliError('unauthorized', 'no', EXIT.UNAUTHORIZED)], []);
     await expect(followTranscript(refused.steps, page([reply(2)]))).rejects.toThrow('no');
     expect(refused.log).toEqual(['wait', 'read 2']);
+  });
+
+  it('follows the new worker when the packet is dispatched again just as the old one stopped', async () => {
+    const run = steps(
+      [page([reply(1), reply(2)], 's2'), page([reply(1), reply(2)], 's2'), page([], 's2'), page([], 's2'), page([], 's2'), page([], 's2')],
+      ['failed', 'reviewing'],
+    );
+    await followTranscript(run.steps, page([reply(2), done(3)]));
+    expect(run.log.slice(0, 6)).toEqual([
+      'state failed', 'read 3', 'say The packet was dispatched again. Following the new worker.', 'wait', 'read 0', 'show 1,2',
+    ]);
+    expect(run.log[run.log.length - 1]).toBe('say The worker stopped. The packet is reviewing.');
+  });
+
+  it('pauses between failed packet checks, and takes the check up again', async () => {
+    const down = () => new CliError('network_error', 'down', EXIT.CONNECTION_REFUSED);
+    const run = steps([page([])], [down(), down(), 'reviewing']);
+    await followTranscript(run.steps, page([reply(2), done(3)]));
+    expect(run.log).toEqual([
+      'state fails', 'wait', 'state fails', 'wait', 'state reviewing', 'read 3', 'say The worker stopped. The packet is reviewing.',
+    ]);
+    const always = steps([], [down(), down(), down(), down(), down()]);
+    await expect(followTranscript(always.steps, page([done(3)]))).rejects.toThrow('down');
+    expect(always.log.filter((entry) => entry === 'wait')).toHaveLength(4);
+  });
+
+  it('checks the packet again when the last read after a stop fails', async () => {
+    const down = () => new CliError('server_timeout', 'slow', EXIT.CONNECTION_REFUSED);
+    const run = steps([down(), page([reply(4)])], ['reviewing', 'reviewing']);
+    await followTranscript(run.steps, page([reply(2), done(3)]));
+    expect(run.log).toEqual([
+      'state reviewing', 'read 3', 'wait', 'state reviewing', 'read 3', 'show 4', 'say The worker stopped. The packet is reviewing.',
+    ]);
+  });
+
+  it('keeps reading after a stop while the last read is a full page', async () => {
+    const full = Array.from({ length: 200 }, (_, index) => reply(index + 4));
+    const run = steps([page(full), page([reply(204)])], ['reviewing', 'reviewing']);
+    await followTranscript(run.steps, page([reply(2), done(3)]));
+    expect(run.log.filter((entry) => !entry.startsWith('show'))).toEqual([
+      'state reviewing', 'read 3', 'state reviewing', 'read 203', 'say The worker stopped. The packet is reviewing.',
+    ]);
+    expect(run.log).toContain('show 204');
   });
 });

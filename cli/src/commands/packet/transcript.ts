@@ -122,7 +122,9 @@ export function transcriptLines(event: TranscriptEvent, time: (ts: string) => st
   switch (event.type) {
     case 'tool_call': {
       const detail = toolDetail(event);
-      return [`${at}  ${plainText(event.tool, 32) || 'tool'}${detail ? `  ${detail}` : ''}`];
+      // A tool's name is one plain word, so it can never start with the bar that marks a reply.
+      const tool = plainText(event.tool, 32).replace(/[^\w.:-]+/g, '_').replace(/^_+|_+$/g, '');
+      return [`${at}  ${tool || 'tool'}${detail ? `  ${detail}` : ''}`];
     }
     case 'tool_result':
       return event.ok ? [] : [`${indent}failed: ${plainText(event.summary, DETAIL_MAX * 2) || 'no details'}`];
@@ -266,43 +268,59 @@ export interface FollowSteps {
  * Reads on until the worker stops. Ctrl-C ends it the usual way: no handler is
  * installed. Each round checks the packet when that is due, pauses, then
  * reads. A stop is followed by one last read, so events written while the
- * check ran are still shown.
+ * check ran are still shown, and it only ends once that read is not a full
+ * page. A check or a stop that a failure interrupted is taken up again after
+ * a pause, never dropped.
  */
 export async function followTranscript(steps: FollowSteps, first: TranscriptPage): Promise<number> {
   let cursor = first.nextCursor ?? 0;
   let session = first.sessionKey;
   let quietPages = 0;
   let failures = 0;
+  let checkDue = false;
+  let paused = false;
   let page: Pick<TranscriptPage, 'events'> = first;
   while (true) {
+    let over = false;
     try {
-      const state = shouldCheckState(page, quietPages) ? await steps.state() : undefined;
-      const over = followIsOver(state);
+      checkDue = checkDue || shouldCheckState(page, quietPages);
+      let state: string | null | undefined;
+      if (checkDue) {
+        state = await steps.state();
+        checkDue = false;
+      }
+      over = followIsOver(state);
       // A full page means more is waiting, so read on without a pause.
-      if (!over && page.events.length < TRANSCRIPT_LIMIT_MAX) await steps.wait();
+      if (!over && !paused && page.events.length < TRANSCRIPT_LIMIT_MAX) await steps.wait();
+      paused = false;
       const read = await steps.read(cursor);
       failures = 0;
       const next = nextCursor(cursor, session, read);
       ({ cursor, session } = next);
-      if (next.restarted && !over) {
-        // The page was read with the old session's cursor, so it is not shown. Start the new one over.
+      if (next.restarted) {
+        // The page was read with the old session's cursor, so it is not shown. Start the new one
+        // over, even if the old worker had stopped: the new one decides when this ends.
         steps.say('The packet was dispatched again. Following the new worker.');
         page = { events: [] };
         quietPages = 0;
         continue;
       }
-      if (!next.restarted) steps.show(read.events);
-      if (over) {
+      steps.show(read.events);
+      page = read;
+      quietPages = read.events.length === 0 ? quietPages + 1 : 0;
+      if (over && read.events.length < TRANSCRIPT_LIMIT_MAX) {
         steps.say(`The worker stopped. The packet is ${state ? plainText(state, 40).replace(/_/g, ' ') : 'gone'}.`);
         return EXIT.OK;
       }
-      page = read;
-      quietPages = read.events.length === 0 ? quietPages + 1 : 0;
+      // More was waiting behind the last read, so look again before ending.
+      if (over) checkDue = true;
     } catch (error) {
       failures += 1;
       const passing = error instanceof CliError && PASSING_FAILURES.has(error.code);
       if (!passing || failures >= FOLLOW_RETRIES) throw error;
-      // The next round pauses before it reads again.
+      if (over) checkDue = true;
+      await steps.wait();
+      paused = true;
       page = { events: [] };
     }
   }
