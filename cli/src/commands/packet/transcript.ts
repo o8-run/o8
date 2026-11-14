@@ -483,7 +483,9 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
   const takeUp = (cursor: number, session: string | null) => {
     from = { ...from, sessionKey: session, events: [], nextCursor: cursor };
   };
-  const resumed = () => heldWorkResumed({ state, read }, from.nextCursor ?? 0, from.sessionKey);
+  // A held pane only needs to know whether anything came after the cursor, so it reads one event.
+  const peek = (cursor: number) => fetchPage(cfg, packetId, { cursor, limit: 1 });
+  const resumed = () => heldWorkResumed({ state, read: peek }, from.nextCursor ?? 0, from.sessionKey);
   while (true) {
     let exit: number;
     tabStatus.report(transcriptStatusReport('following'));
