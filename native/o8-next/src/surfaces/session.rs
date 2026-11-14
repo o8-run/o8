@@ -75,6 +75,9 @@ fn create(
     let navigation = shell.surfaces.sidebar.generation.clone();
     Some(Content::Session(cx.new(|cx| {
         let mut surface = Surface::shell_new(client, sessions, id, window, cx);
+        if let Some(sidebar) = shell.surfaces.sidebar.view.clone() {
+            surface.bind_pr_links(sidebar, cx);
+        }
         surface.shell_navigation = Some(navigation);
         surface.shell_overview(&all, &snoozes, cx);
         surface

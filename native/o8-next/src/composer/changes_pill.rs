@@ -1,4 +1,7 @@
 use super::*;
+#[path = "pr_status.rs"]
+mod pr_status;
+use pr_status::PrStatus;
 
 /// Height of the pill row; the file list opens flush above it so the pointer
 /// can move from the pill into the list without closing it.
@@ -12,6 +15,7 @@ pub(crate) const PILL_INSET: f32 = PILL_HEIGHT + 16.;
 /// file's diff in Files › Changes.
 #[derive(Default)]
 pub(crate) struct ChangesPill {
+    pr: PrStatus,
     files: Vec<(String, u64, u64)>,
     /// The workspace and turn state the files were read for. A finished turn
     /// or another thread reads them again.
@@ -87,6 +91,7 @@ impl Surface {
         let Some(workspace) = self.changes_workspace() else {
             self.changes_pill = ChangesPill {
                 generation: self.changes_pill.generation,
+                pr: std::mem::take(&mut self.changes_pill.pr),
                 ..Default::default()
             };
             return;
@@ -137,7 +142,8 @@ impl Surface {
     /// Whether the floating changes pill is showing; it then carries the
     /// jump arrow beside it.
     pub(crate) fn changes_pill_shown(&self) -> bool {
-        !self.changes_pill.files.is_empty() && self.empty_chat_project().is_none()
+        (!self.changes_pill.files.is_empty() || self.changes_pill.pr.detail.is_some())
+            && self.empty_chat_project().is_none()
     }
     /// The jump-to-latest arrow: a glass circle the pill's height, so the two
     /// read as one row of floating controls.
@@ -173,8 +179,16 @@ impl Surface {
                 2.2,
             ))
     }
-    pub(super) fn changes_pill(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+    pub(super) fn changes_pill(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
         self.sync_changes_pill(cx);
+        self.sync_pr_status(cx);
+        if self.changes_pill.pr.detail.is_some() && self.empty_chat_project().is_none() {
+            return Some(self.pr_status_pill(window, cx));
+        }
         let pill = &self.changes_pill;
         // A new chat has no changes of its own yet (Q 2026-11-09).
         if pill.files.is_empty() || self.empty_chat_project().is_some() {

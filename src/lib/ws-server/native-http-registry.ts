@@ -213,6 +213,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
     route('/api/panel/prs', 'GET', () => import('@/app/api/panel/prs/route')),
     route('/api/panel/prs/[number]', 'GET POST', () => import('@/app/api/panel/prs/[number]/route')),
+    route('/api/panel/prs/[number]/checks', 'GET', () => import('@/app/api/panel/prs/[number]/checks/route')),
     route('/api/panel/prs/[number]/timeline', 'GET', () => import('@/app/api/panel/prs/[number]/timeline/route')),
     route('/api/panel/github-status', 'GET', () => import('@/app/api/panel/github-status/route')),
     route('/api/orchestrator/merge-preview', 'GET', () => import('@/app/api/orchestrator/merge-preview/route')),
