@@ -169,7 +169,7 @@ describe.sequential('worker MCP injection real path', () => {
     process.env.O8_CLAUDE_CODE_BIN = process.execPath;
     process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
     process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
-    delete process.env.O8_WORKER_SANDBOX;
+    process.env.O8_WORKER_SANDBOX = 'off';
     process.env.ANTHROPIC_API_KEY = '';
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'synthetic-mcp-fixture';
 
@@ -382,7 +382,7 @@ describe.sequential('worker MCP injection real path', () => {
       expect(skippedLaunch.ok).toBe(false);
       expect(skippedLaunch.note).toContain('Worker sandbox is macOS-only');
       expect(spawnMock.mock.calls.length).toBe(skippedCall);
-      delete process.env.O8_WORKER_SANDBOX;
+      process.env.O8_WORKER_SANDBOX = 'off';
       return;
     }
     expect(skippedLaunch.ok, JSON.stringify(skippedLaunch)).toBe(true);
@@ -398,7 +398,7 @@ describe.sequential('worker MCP injection real path', () => {
         }),
       }),
     ]));
-    delete process.env.O8_WORKER_SANDBOX;
+    process.env.O8_WORKER_SANDBOX = 'off';
   }, 120_000);
 
   it('ignores mission-supplied server fields at the real handler boundary', async () => {
