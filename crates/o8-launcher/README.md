@@ -99,9 +99,26 @@ macOS test account with no unsaved work:
    PYFIXTURE
    ```
 
-   Run `crates/o8-launcher/target/debug/o8-launcher --config <printed-path>`.
-   If using `CARGO_TARGET_DIR`, use that directory's `debug/o8-launcher` instead.
-2. Launch from a terminal. Record child PIDs and the published temporary ports.
+   Start a new session and log to the fixture directory to keep native quit
+   checks independent of the terminal:
+
+   ```sh
+   python3 - crates/o8-launcher/target/debug/o8-launcher <printed-path> <<'PYLAUNCH'
+   import pathlib, subprocess, sys
+   binary = pathlib.Path(sys.argv[1]).expanduser().resolve()
+   config = pathlib.Path(sys.argv[2]).resolve()
+   log_path = config.with_name('launcher-stderr')
+   with log_path.open('ab') as log:
+       child = subprocess.Popen([str(binary), '--config', str(config)],
+           stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+           start_new_session=True)
+   print('Launcher PID:', child.pid, 'Log:', log_path)
+   PYLAUNCH
+   ```
+
+   If using `CARGO_TARGET_DIR`, pass that directory's `debug/o8-launcher` instead.
+2. Record the launcher PID, child PIDs from the receipt files, and published
+   temporary ports. Close the launching terminal before the system-action checks.
 3. Choose Quit from the Dock. Confirm both servers exit, both ports can be bound,
    and the launcher exits without requiring a second Quit.
 4. Relaunch with a new temporary directory. Request logout, then repeat separately
