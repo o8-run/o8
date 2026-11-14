@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CliError, EXIT } from '../api';
 import {
-  confirmOpenedPanes, followCommand, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, readAnswer, runningPackets, settledAfterRound, watchChanges, watchRetries, workerTerminals,
+  confirmOpenedPanes, followCommand, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, prepareWatcherTab, readAnswer, runningPackets, settledAfterRound, watchChanges, watchRetries, workerTerminals,
   type PaneExec,
 } from './terminal-panes';
 
@@ -10,7 +10,7 @@ const self = ['/usr/bin/node', '/opt/o8 app/o8.mjs'];
 const rexEnv = { REX_SESSION: 'session:abc' };
 const t = (...ids: string[]) => ids.map((id) => ({ id }));
 
-interface FakeBlock { block_id: string; label: string; placement?: string }
+interface FakeBlock { block_id: string; label: string; placement?: string; window_id?: string }
 
 /** A fake `rex` that records every call and hands out pane IDs in order. */
 function fakeRex(blocks: FakeBlock[] = [], failOn?: (args: string[], creations: number) => boolean) {
@@ -65,14 +65,20 @@ describe('observeCommand', () => {
 
 describe('parsePanesArgs', () => {
   it('defaults to 8 panes on this machine', () => {
-    expect(parsePanesArgs([])).toEqual({ limit: 8, machineKey: null, watch: false });
-    expect(parsePanesArgs(['--limit', '16', '--machine', 'Build box'])).toEqual({ limit: 16, machineKey: 'Build box', watch: false });
+    expect(parsePanesArgs([])).toEqual({ limit: 8, machineKey: null, watch: false, here: false });
+    expect(parsePanesArgs(['--limit', '16', '--machine', 'Build box'])).toEqual({ limit: 16, machineKey: 'Build box', watch: false, here: false });
+  });
+
+  it('takes --here with or without --watch', () => {
+    expect(parsePanesArgs(['--watch', '--here'])).toEqual({ limit: 8, machineKey: null, watch: true, here: true });
+    expect(parsePanesArgs(['--here'])).toEqual({ limit: 8, machineKey: null, watch: false, here: true });
+    expect(() => parsePanesArgs(['--here', '--here'])).toThrow();
   });
 
   it('takes --watch anywhere, with no value', () => {
-    expect(parsePanesArgs(['--watch'])).toEqual({ limit: 8, machineKey: null, watch: true });
-    expect(parsePanesArgs(['--limit', '4', '--watch'])).toEqual({ limit: 4, machineKey: null, watch: true });
-    expect(parsePanesArgs(['--watch', '--machine', 'Build', '--limit', '2'])).toEqual({ limit: 2, machineKey: 'Build', watch: true });
+    expect(parsePanesArgs(['--watch'])).toEqual({ limit: 8, machineKey: null, watch: true, here: false });
+    expect(parsePanesArgs(['--limit', '4', '--watch'])).toEqual({ limit: 4, machineKey: null, watch: true, here: false });
+    expect(parsePanesArgs(['--watch', '--machine', 'Build', '--limit', '2'])).toEqual({ limit: 2, machineKey: 'Build', watch: true, here: false });
   });
 
   it.each([
@@ -542,5 +548,99 @@ describe('reading an answer', () => {
     });
     await expect(readAnswer(new Response(cut))).rejects.toMatchObject({ code: 'connection_refused' });
     await expect(readAnswer(new Response('{"sessions":['))).rejects.toMatchObject({ code: 'connection_refused' });
+  });
+});
+
+describe('opening panes beside the caller', () => {
+  const env = { ...rexEnv, REX_BLOCK: 'block:me' };
+  const me = { block_id: 'block:me', label: 'o8 watcher', window_id: 'window:w' };
+
+  it('splits the first pane off the caller, in its tab, and tiles the rest as before', () => {
+    const { calls, exec } = fakeRex([me]);
+    const result = openTerminalPanes({ terminals: t('a', 'b', 'c'), limit: 8, env, self, exec, here: true });
+    expect(result.opened.map((pane) => pane.pane)).toEqual(['block:new-1', 'block:new-2', 'block:new-3']);
+    const created = calls.filter((args) => args[0] === 'run' || args[0] === 'split');
+    expect(created.map((args) => args.slice(0, 6))).toEqual([
+      ['split', '-s', 'session:abc', '-b', 'block:me', '--split=right'],
+      ['split', '-s', 'session:abc', '-b', 'block:new-1', '--split=right'],
+      ['split', '-s', 'session:abc', '-b', 'block:new-1', '--split=below'],
+    ]);
+    expect(created[0]).toContain('--ratio=75');
+    // The caller's tab keeps its name; only a tab this command opens is named.
+    expect(calls.some((args) => args[0] === 'window')).toBe(false);
+  });
+
+  it('opens a new tab when the caller is not a pane in this session', () => {
+    for (const blocks of [[], [{ ...me, placement: 'detached' }]]) {
+      const { calls, exec } = fakeRex(blocks);
+      openTerminalPanes({ terminals: t('a'), limit: 8, env, self, exec, here: true });
+      expect(calls.find((args) => args[0] === 'run' || args[0] === 'split')?.[0]).toBe('run');
+    }
+  });
+
+  it('uses the caller as an anchor even when its pane has no label', () => {
+    const { calls, exec } = fakeRex([{ block_id: 'block:me' } as unknown as FakeBlock]);
+    openTerminalPanes({ terminals: t('a'), limit: 8, env, self, exec, here: true });
+    expect(calls.find((args) => args[0] === 'run' || args[0] === 'split')?.slice(0, 5)).toEqual(['split', '-s', 'session:abc', '-b', 'block:me']);
+  });
+
+  it('never uses the caller as an anchor without --here', () => {
+    const { calls, exec } = fakeRex([me]);
+    openTerminalPanes({ terminals: t('a'), limit: 8, env, self, exec });
+    expect(calls.find((args) => args[0] === 'run' || args[0] === 'split')?.[0]).toBe('run');
+  });
+
+  it('adds to existing o8 panes rather than the caller once there are some', () => {
+    const { calls, exec } = fakeRex([me, { block_id: 'block:old', label: 'o8: shell [x]' }]);
+    openTerminalPanes({ terminals: t('x', 'y'), limit: 8, env, self, exec, here: true });
+    expect(calls.find((args) => args[0] === 'split')?.slice(3, 6)).toEqual(['-b', 'block:old', '--split=right']);
+  });
+});
+
+describe('preparing a watcher tab', () => {
+  const env = { ...rexEnv, REX_BLOCK: 'block:me' };
+
+  it('names the watcher\'s tab', () => {
+    const { calls, exec } = fakeRex([{ block_id: 'block:me', label: 'o8 watcher', window_id: 'window:w' }]);
+    expect(prepareWatcherTab(env, exec)).toEqual({ duplicate: false });
+    expect(calls).toContainEqual(['window', 'rename', '-s', 'session:abc', 'window:w', 'o8 terminals']);
+  });
+
+  it('finds a watcher already running in another pane', () => {
+    const { calls, exec } = fakeRex([
+      { block_id: 'block:me', label: 'o8 watcher', window_id: 'window:w2' },
+      { block_id: 'block:first', label: 'o8 watcher', window_id: 'window:w1' },
+    ]);
+    expect(prepareWatcherTab(env, exec)).toEqual({ duplicate: true });
+    expect(calls.some((args) => args[0] === 'window')).toBe(false);
+  });
+
+  it('keeps exactly one of two watchers started at the same moment', () => {
+    const blocks = [
+      { block_id: 'block:a', label: 'o8 watcher', window_id: 'window:1' },
+      { block_id: 'block:b', label: 'o8 watcher', window_id: 'window:2' },
+    ];
+    const outcomes = ['block:a', 'block:b'].map((me) => prepareWatcherTab({ ...rexEnv, REX_BLOCK: me }, fakeRex(blocks).exec).duplicate);
+    expect(outcomes).toEqual([false, true]);
+  });
+
+  it('leaves the tab of a watcher run by hand alone', () => {
+    const { calls, exec } = fakeRex([
+      { block_id: 'block:me', label: 'shell', window_id: 'window:main' },
+      { block_id: 'block:a', label: 'o8 watcher', window_id: 'window:1' },
+    ]);
+    expect(prepareWatcherTab(env, exec)).toEqual({ duplicate: false });
+    expect(calls.some((args) => args[0] === 'window')).toBe(false);
+  });
+
+  it('ignores a closed watcher, and lets the watcher run when Rex fails', () => {
+    const closed = fakeRex([
+      { block_id: 'block:me', label: 'o8 watcher' },
+      { block_id: 'block:old', label: 'o8 watcher', placement: 'detached' },
+    ]);
+    expect(prepareWatcherTab(env, closed.exec)).toEqual({ duplicate: false });
+    const failing = fakeRex([], () => true);
+    expect(prepareWatcherTab(env, failing.exec)).toEqual({ duplicate: false });
+    expect(prepareWatcherTab(rexEnv, failing.exec)).toEqual({ duplicate: false });
   });
 });
