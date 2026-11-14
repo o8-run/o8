@@ -1,4 +1,5 @@
 import { execFile, spawn } from '@/lib/providers/child-process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -67,9 +68,15 @@ if (operation.kind === 'promote') {
 } else if (operation.kind === 'write') {
   requireChildName(operation.name);
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
+  // Contents arrive on stdin: a single argv string is capped (128 KiB on Linux).
+  const contents = fs.readFileSync(0);
+  if (contents.length !== operation.byteLength
+    || require('node:crypto').createHash('sha256').update(contents).digest('hex') !== operation.sha256) {
+    throw new Error('Exact parent write received unexpected contents.');
+  }
   const fd = fs.openSync(operation.name, flags, operation.mode);
   try {
-    fs.writeFileSync(fd, operation.contents, 'utf8');
+    fs.writeFileSync(fd, contents);
     fs.fsyncSync(fd);
   } finally {
     fs.closeSync(fd);
@@ -254,19 +261,27 @@ async function runExactParentOperation(
   parentPath: string,
   parentIdentity: WorktreeMaterializationIdentity,
   operation: object,
+  input?: Buffer,
 ): Promise<string> {
   const invocation = guardedWorkspaceInvocation(
     process.execPath,
     ['-e', EXACT_PARENT_OPERATION, JSON.stringify(operation)],
     parentIdentity,
   );
-  const { stdout } = await execFileAsync(invocation.command, invocation.args, {
-    cwd: parentPath,
-    windowsHide: true,
-    timeout: 10_000,
-    maxBuffer: 1024 * 1024,
+  const options = { cwd: parentPath, windowsHide: true, timeout: 10_000, maxBuffer: 1024 * 1024 };
+  if (input === undefined) {
+    const { stdout } = await execFileAsync(invocation.command, invocation.args, options);
+    return stdout;
+  }
+  return new Promise((resolve, reject) => {
+    const child = execFile(invocation.command, invocation.args, { ...options, encoding: 'utf8' }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(error, { stdout, stderr }));
+      else resolve(stdout);
+    });
+    // A child that exits early closes the pipe; its exit status carries the failure.
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(input);
   });
-  return stdout;
 }
 
 export async function readExactChildFile(
@@ -317,12 +332,14 @@ export async function writeExactChildFile(
   contents: string,
   mode: number,
 ): Promise<void> {
+  const bytes = Buffer.from(contents, 'utf8');
   await runExactParentOperation(parentPath, parentIdentity, {
     kind: 'write',
     name: childName(parentPath, filePath),
-    contents,
+    byteLength: bytes.length,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
     mode,
-  });
+  }, bytes);
 }
 
 export async function createExactChildDirectory(

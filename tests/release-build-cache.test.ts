@@ -28,7 +28,7 @@ import {
   type ReleaseBuildCacheIdentity,
 } from '../scripts/lib/release-build-cache.mjs';
 
-import { promoteExactChild } from '../src/lib/workspace/exact-parent-operation';
+import { promoteExactChild, writeExactChildFile } from '../src/lib/workspace/exact-parent-operation';
 
 const roots: string[] = [];
 
@@ -133,6 +133,18 @@ describe('shared release build cache', { timeout: 120_000 }, () => {
       expect.objectContaining({ action: 'restore', state: 'cleaned' }),
     ]));
     expect(readFileSync(join(root, '.next/cache/webpack/entry.bin'), 'utf8')).toBe('compiled-source-a');
+  });
+
+  it('writes exact child files larger than any single process argument', async () => {
+    const { cacheRoot } = fixture();
+    const parent = realpathSync(cacheRoot);
+    const stat = lstatSync(parent);
+    const contents = `${JSON.stringify({ inputs: 'é'.repeat(1024 * 1024) })}\n`;
+    expect(Buffer.byteLength(contents)).toBeGreaterThan(2 * 1024 * 1024);
+    await writeExactChildFile(parent, { canonicalPath: parent, device: stat.dev, inode: stat.ino },
+      join(parent, 'large.json'), contents, 0o600);
+    expect(readFileSync(join(parent, 'large.json'), 'utf8')).toBe(contents);
+    expect(lstatSync(join(parent, 'large.json')).mode & 0o777).toBe(0o600);
   });
 
   it.each([
