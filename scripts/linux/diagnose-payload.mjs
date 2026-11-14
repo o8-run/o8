@@ -105,7 +105,16 @@ function snapshot(name) {
   return Number(command('identify', ['-format', '%k', file]).stdout);
 }
 async function probe(name, binary, args, env) {
-  const child = spawn(binary, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // An extract-and-run AppImage has an outer runtime and a launcher-owned
+  // window. Own a process group so stopping the runtime also stops that window
+  // and closes its inherited output pipes. Detached serve daemons are stopped
+  // separately through their private profile's CLI below.
+  const child = spawn(binary, args, { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  const signalProbe = signal => {
+    if (!child.pid) return;
+    try { process.kill(-child.pid, signal); }
+    catch (error) { if (error.code !== 'ESRCH') throw error; }
+  };
   let stdout = ''; let stderr = '';
   child.stdout.on('data', chunk => { stdout += String(chunk); });
   child.stderr.on('data', chunk => { stderr += String(chunk); });
@@ -119,9 +128,10 @@ async function probe(name, binary, args, env) {
   recordCommand(`${name}-xrefresh`, 'xrefresh', ['-none']);
   const refreshedColors = snapshot(`${name}-refreshed`);
   const beforeStop = { exitCode: child.exitCode, signal: child.signalCode };
-  child.kill('SIGTERM');
+  signalProbe('SIGTERM');
   await delay(500);
-  if (child.exitCode === null && !child.signalCode) child.kill('SIGKILL');
+  // Descendants can retain the group and pipes after the outer runtime exits.
+  signalProbe('SIGKILL');
   await delay(200);
   save(`${name}-stdout.log`, stdout); save(`${name}-stderr.log`, stderr);
   return { name, ...beforeStop, earlyColors, middleColors, lateColors, refreshedColors };
