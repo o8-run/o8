@@ -512,8 +512,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.experimentalCanvas === 'boolean') {
     result.experimentalCanvas = stored.experimentalCanvas;
-  } if (typeof stored.experimentalNext === 'boolean') result.experimentalNext = stored.experimentalNext;
-  if (typeof stored.nativeDictationPill === 'boolean') result.nativeDictationPill = stored.nativeDictationPill;
+  } if (typeof stored.experimentalNext === 'boolean') result.experimentalNext = stored.experimentalNext; if (typeof stored.nativeDictationPill === 'boolean') result.nativeDictationPill = stored.nativeDictationPill;
   if (typeof stored.nativeBrowserView === 'boolean') {
     result.nativeBrowserView = stored.nativeBrowserView;
   }
@@ -1002,8 +1001,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   }
   if (update.experimentalCanvas !== undefined) {
     stored.experimentalCanvas = Boolean(update.experimentalCanvas);
-  } if (update.experimentalNext !== undefined) stored.experimentalNext = Boolean(update.experimentalNext);
-  if (update.nativeDictationPill !== undefined) stored.nativeDictationPill = Boolean(update.nativeDictationPill);
+  } if (update.experimentalNext !== undefined) stored.experimentalNext = Boolean(update.experimentalNext); if (update.nativeDictationPill !== undefined) stored.nativeDictationPill = Boolean(update.nativeDictationPill);
   if (update.nativeBrowserView !== undefined) {
     stored.nativeBrowserView = Boolean(update.nativeBrowserView);
   }

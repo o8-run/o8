@@ -23,7 +23,7 @@ import { useAgentConfirmations } from '@/components/desktop/dictation/useAgentCo
 import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 import { EditRevertChip } from './EditRevertChip';
-import { useNativeDictationPill } from './useNativeDictationPill';
+import { IDLE_SNAPSHOT, useNativeDictationPill, useNativePillDockExtent } from './useNativeDictationPill';
 import { DockGlint } from './DockGlint';
 
 export const dynamic = 'force-dynamic';
@@ -69,14 +69,6 @@ const ERROR_FLASH_MS = 2500;
 // Polish (Whisper/LLM cleanup + paste) normally lands in 1–4s; past this the
 // session is considered hung and the pill frees itself.
 const POLISH_WATCHDOG_MS = 20_000;
-
-const IDLE_SNAPSHOT: DictationSnapshot = {
-  state: 'idle',
-  audioLevel: 0,
-  durationMs: 0,
-  error: null,
-  partialTranscript: '',
-};
 
 interface SttEventPayload {
   type:
@@ -861,13 +853,15 @@ export default function DictationPillPage() {
   // click-through except while the cursor is over the PAINTED pill. Report the
   // content wrapper's rect on every morph (ResizeObserver fires through the
   // 0.5s geometry transition; rAF-throttled so we invoke at most per-frame).
-  const nativeDictation = useNativeDictationPill(snapshot);
+  const { native: nativeDictation, suppressed } = useNativeDictationPill(snapshot, startTimeRef.current, finishSystemDictation);
   const [editVisible, setEditVisible] = useState(false);
   const webSnapshot = nativeDictation ? IDLE_SNAPSHOT : snapshot;
+  const nativeActive = nativeDictation && !suppressed && snapshot.state !== 'idle';
   const hitRectHostRef = useRef<HTMLDivElement | null>(null);
-  const dockVisible = (!nativeDictation && (topPillEnabled || snapshot.state !== 'idle')) || ttsState !== 'idle'
+  const dockVisible = !suppressed && ((!nativeDictation && (topPillEnabled || snapshot.state !== 'idle')) || ttsState !== 'idle'
     || askOpen || agentWorking || !!agentConfirm || realtimeVoice !== 'off'
-    || (nativeDictation && (editVisible || dropActive || !!stagedChips || (workers.count > 0 || (parkedWorkers?.waiting ?? 0) > 0) || !!glint));
+    || (nativeDictation && (editVisible || dropActive || !!stagedChips || (workers.count > 0 || (parkedWorkers?.waiting ?? 0) > 0) || !!glint)));
+  useNativePillDockExtent(nativeDictation, nativeActive, dockVisible, askOpen, suppressed, invokeCmd);
   useEffect(() => {
     if (!isTauri()) return;
     if (!dockVisible) {
@@ -932,7 +926,7 @@ export default function DictationPillPage() {
         justifyContent: 'center',
         // Keep a small internal inset so the rounded top corners are visible
         // when the dock window is floating instead of flush to a screen notch.
-        paddingTop: 8,
+        paddingTop: nativeActive ? 60 : 8,
         paddingLeft: 28,
         paddingRight: 28,
         boxSizing: 'border-box',

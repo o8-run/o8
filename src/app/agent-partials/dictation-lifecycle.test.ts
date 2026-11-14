@@ -106,6 +106,28 @@ afterEach(async () => {
 });
 
 describe('native Fn dictation surfaces', () => {
+  it('routes an acknowledged native finish only to the same listening gesture', async () => {
+    let replySession: number | undefined;
+    vi.mocked(fetch).mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      const session = body.snapshot?.session;
+      return new Response(JSON.stringify({ native: true, ...(replySession !== undefined && session ? { finishSession: replySession } : {}) }), { headers: { 'Content-Type': 'application/json' } });
+    });
+    await wait(1000);
+    await event('system-start', { hud: false, surface: 'off', sessionId: 701 });
+    await wait(100);
+    const invoke = vi.mocked((dom.window as unknown as { __TAURI_INTERNALS__: { invoke: (command: string, args?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__.invoke);
+    const frame = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body ?? '{}'))).find(body => body.snapshot?.session);
+    replySession = frame.snapshot.session - 1;
+    await wait(100);
+    expect(invoke.mock.calls.filter(([command]) => command === 'o8_system_dictation_finish')).toHaveLength(0);
+    replySession = frame.snapshot.session;
+    await wait(100);
+    expect(invoke.mock.calls.filter(([command]) => command === 'o8_system_dictation_finish')).toHaveLength(1);
+    await event('final', { sessionId: 701, text: 'Finished words' });
+    await wait(100);
+    expect(invoke.mock.calls.filter(([command]) => command === 'o8_system_dictation_finish')).toHaveLength(1);
+  });
   it('hands pure dictation to native only after prepare, and keeps the web edit chip available', async () => {
     const frames: Record<string, unknown>[] = [];
     vi.mocked(fetch).mockImplementation(async (_url, init) => {
@@ -126,6 +148,7 @@ describe('native Fn dictation surfaces', () => {
     });
     expect((dock.firstElementChild as HTMLElement).style.display).toBe('flex');
     expect(dock.textContent).toContain('Revert');
+    expect((dock.firstElementChild as HTMLElement).style.paddingTop).toBe('60px');
     expect(listeningAtNotch()).toBeNull();
     for (const [type, state] of [['final', 'transcribing'], ['audio_file', 'polishing'], ['system-pasted', 'success']] as const) {
       await event(type, { sessionId: 501, text: 'Delivered words.' });
@@ -138,6 +161,17 @@ describe('native Fn dictation surfaces', () => {
     await wait(100);
     expect(frames.some(frame => (frame.snapshot as { state?: string })?.state === 'error')).toBe(true);
     expect(dock.textContent).not.toContain('Fixture failure');
+    await act(async () => {
+      bus.get('o8:quiet-mode-changed')?.forEach(callback => callback({ payload: { active: true } }));
+    });
+    await wait(100);
+    expect((dock.firstElementChild as HTMLElement).style.display).toBe('none');
+    const last = frames.filter(frame => frame.action === 'frame').at(-1);
+    expect((last?.snapshot as { state?: string })?.state).toBe('idle');
+
+    const finish = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body ?? '{}'))).find(body => body.snapshot?.session);
+    expect(typeof finish?.snapshot.session).toBe('number');
+
 
   });
 

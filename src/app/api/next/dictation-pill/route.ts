@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ native: false }, { status: 400 });
   }
   const { values } = await getOperatorDefaults();
-  const enabled = values.nativeDictationPill === true && !values.presentationQuietMode;
-  const reply = await requestNextPill(enabled ? body : { action: 'release' }) as { ok?: boolean } | null;
-  return NextResponse.json({ native: enabled && reply?.ok === true }, { headers: { 'Cache-Control': 'no-store' } });
+  const enabled = values.nativeDictationPill === true;
+  const reply = await requestNextPill(enabled ? body : { action: 'release' }) as { ok?: boolean; finishSession?: number | null } | null;
+  return NextResponse.json({ native: enabled && reply?.ok === true, ...(enabled && typeof reply?.finishSession === 'number' ? { finishSession: reply.finishSession } : {}) }, { headers: { 'Cache-Control': 'no-store' } });
 }

@@ -2,8 +2,9 @@
 #[cfg(test)]
 use gpui::TestAppContext;
 use gpui::{
-    App, Application, Bounds, Context, IntoElement, Render, Window, WindowBackgroundAppearance,
-    WindowBounds, WindowHandle, WindowKind, WindowOptions, div, point, prelude::*, px, size,
+    AnyWindowHandle, App, Application, Bounds, Context, Entity, IntoElement, Render, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, div, point,
+    prelude::*, px, size,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -29,6 +30,8 @@ pub(crate) fn enqueue(frame: Value) {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Snapshot {
     pub state: String,
+    #[serde(default)]
+    pub session: u64,
     #[serde(default)]
     pub audio_level: f32,
     #[serde(default)]
@@ -89,6 +92,8 @@ pub(crate) struct Pill {
     motion: crate::motion::Transition,
     shown: bool,
     target: bool,
+    finish_pending: bool,
+    finish_sent: bool,
 }
 impl Default for Pill {
     fn default() -> Self {
@@ -98,6 +103,8 @@ impl Default for Pill {
             motion: crate::motion::Transition::new(160),
             shown: false,
             target: false,
+            finish_pending: false,
+            finish_sent: false,
         }
     }
 }
@@ -107,7 +114,17 @@ impl Pill {
             self.apply(Snapshot::default());
         }
     }
+    fn finish(&mut self) {
+        if self.target && self.snapshot.state == "recording" && !self.finish_sent {
+            self.finish_pending = true;
+            self.finish_sent = true;
+        }
+    }
     fn apply(&mut self, snapshot: Snapshot) {
+        if snapshot.session != self.snapshot.session || snapshot.state != self.snapshot.state {
+            self.finish_pending = false;
+            self.finish_sent = false;
+        }
         self.motion.set(snapshot.visible());
         self.target = snapshot.visible();
         if self.target {
@@ -117,7 +134,7 @@ impl Pill {
     }
 }
 impl Render for Pill {
-    fn render(&mut self, w: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = crate::theme::current();
         let (opacity, moving) = self.motion.value();
         let listening = self.target && self.snapshot.state == "recording";
@@ -139,6 +156,15 @@ impl Render for Pill {
                 div()
                     .id("native-dictation-pill")
                     .debug_selector(|| "native-dictation-pill".into())
+                    .on_click(cx.listener(|pill, _, _, cx| {
+                        pill.finish();
+                        cx.notify();
+                    }))
+                    .when(listening, |d| {
+                        d.cursor_pointer()
+                            .hover(|s| s.bg(t.hover))
+                            .active(|s| s.opacity(0.85))
+                    })
                     .w(px(
                         if self.snapshot.state == "success" || self.snapshot.state == "error" {
                             420.
@@ -153,9 +179,14 @@ impl Render for Pill {
                     .bg(t.surface_raised)
                     .border_1()
                     .border_color(t.border)
-                    .text_color(t.text)
+                    .text_color(match self.snapshot.state.as_str() {
+                        "error" => t.danger,
+                        "success" => t.success,
+                        _ => t.text,
+                    })
                     .text_size(px(12.))
                     .font_family(t.font_ui)
+                    .font_weight(gpui::FontWeight::LIGHT)
                     .opacity(opacity)
                     .flex()
                     .items_center()
@@ -190,6 +221,77 @@ impl Render for Pill {
     }
 }
 
+fn expired(frame: &Value) -> bool {
+    frame["expiresAt"].as_u64().unwrap_or(0)
+        < std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+}
+
+/// Queue events even if delivered by an observer while Pill is already leased.
+/// AppKit presentation runs after the model lease is returned: setFrame can
+/// synchronously invoke drawing, which needs to lease the same root entity.
+fn dispatch(
+    view: &Entity<Pill>,
+    frame: Value,
+    window: &Window,
+    cx: &mut App,
+    reply: impl FnOnce(Value) + 'static,
+) {
+    let view = view.downgrade();
+    window.defer(cx, move |window, cx| {
+        if expired(&frame) {
+            reply(json!({"ok":false}));
+            return;
+        }
+        let args = &frame["args"];
+        let Some(view) = view.upgrade() else {
+            reply(json!({"ok":false}));
+            return;
+        };
+        let result = view.update(cx, |pill, cx| {
+            match args["action"].as_str() {
+                Some("prepare") => {
+                    pill.apply(Snapshot::default());
+                    pill.motion = crate::motion::Transition::settled(160, false);
+                }
+                Some("frame") => {
+                    let Ok(snapshot) = serde_json::from_value::<Snapshot>(args["snapshot"].clone())
+                    else {
+                        return None;
+                    };
+                    pill.apply(snapshot);
+                }
+                Some("release") => pill.apply(Snapshot::default()),
+                _ => return None,
+            }
+            let show = pill.target || pill.motion.value().1;
+            pill.shown = show;
+            cx.notify();
+            let finish = if std::mem::take(&mut pill.finish_pending) {
+                Some(pill.snapshot.session)
+            } else {
+                None
+            };
+            Some((
+                show,
+                pill.target && pill.snapshot.state == "recording",
+                finish,
+            ))
+        });
+        if let Some((show, interactive, finish)) = result {
+            #[cfg(target_os = "macos")]
+            macos::present(window, show, interactive);
+            #[cfg(not(target_os = "macos"))]
+            let _ = (window, show, interactive);
+            reply(json!({"ok":true, "finishSession":finish}));
+        } else {
+            reply(json!({"ok":false}));
+        }
+    });
+}
+
 /// One window, no activation or keyboard/input handlers. A lost feed expires locally.
 pub(crate) fn install(cx: &mut App) {
     #[cfg(target_os = "macos")]
@@ -202,12 +304,7 @@ pub(crate) fn install(cx: &mut App) {
             let frames: Vec<_> = FRAMES.lock().unwrap().drain(..).collect();
             for frame in frames {
                 let id = frame["id"].as_str().unwrap_or_default();
-                let expired = frame["expiresAt"].as_u64().unwrap_or(0)
-                    < std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
-                if expired {
+                if expired(&frame) {
                     crate::app_parent::browser_result(id, json!({"ok":false}));
                     continue;
                 }
@@ -240,46 +337,42 @@ pub(crate) fn install(cx: &mut App) {
                         .ok()
                         .and_then(Result::ok);
                 }
-                let ok = handle.is_some_and(|h| {
-                    h.update(cx, |pill, w, cx| {
-                        match frame["args"]["action"].as_str() {
-                            Some("prepare") => {
-                                pill.apply(Snapshot::default());
-                                pill.motion = crate::motion::Transition::settled(160, false);
-                            }
-                            Some("frame") => {
-                                let Ok(snapshot) = serde_json::from_value::<Snapshot>(
-                                    frame["args"]["snapshot"].clone(),
-                                ) else {
-                                    return false;
-                                };
-                                pill.apply(snapshot);
-                            }
-                            Some("release") => pill.apply(Snapshot::default()),
-                            _ => return false,
+                let id = id.to_string();
+                if let Some(h) = handle {
+                    let _ = AnyWindowHandle::from(h).update(cx, |root, window, cx| {
+                        if let Ok(view) = root.downcast::<Pill>() {
+                            dispatch(&view, frame.clone(), window, cx, move |ok| {
+                                crate::app_parent::browser_result(&id, ok);
+                            });
                         }
-                        let show = pill.target || pill.motion.value().1;
-                        macos::present(w, show);
-                        pill.shown = show;
-                        cx.notify();
-                        true
-                    })
-                    .unwrap_or(false)
-                });
-                crate::app_parent::browser_result(id, json!({"ok":ok}));
+                    });
+                } else {
+                    crate::app_parent::browser_result(&id, json!({"ok":false}));
+                }
             }
             if let Some(h) = handle {
-                let _ = h.update(cx, |pill, w, cx| {
-                    let was_active = pill.target;
-                    pill.expire();
-                    if was_active != pill.target {
-                        cx.notify();
+                let _ = AnyWindowHandle::from(h).update(cx, |root, window, cx| {
+                    let Ok(view) = root.downcast::<Pill>() else {
+                        return;
+                    };
+                    let (show, was_shown, interactive) = view.update(cx, |pill, cx| {
+                        let was_active = pill.target;
+                        pill.expire();
+                        if was_active != pill.target {
+                            cx.notify();
+                        }
+                        let show = pill.target || pill.shown && pill.motion.value().1;
+                        let was_shown = pill.shown;
+                        pill.shown = show;
+                        (
+                            show,
+                            was_shown,
+                            pill.target && pill.snapshot.state == "recording",
+                        )
+                    });
+                    if show || was_shown {
+                        macos::present(window, show, interactive);
                     }
-                    let show = pill.target || pill.shown && pill.motion.value().1;
-                    if show || pill.shown {
-                        macos::present(w, show);
-                    }
-                    pill.shown = show;
                 });
             }
         }
@@ -296,7 +389,36 @@ mod macos {
         base::{NO, YES, id, nil},
         foundation::{NSPoint, NSRect, NSSize},
     };
-    use objc::{class, msg_send, sel, sel_impl};
+    use objc::{
+        class,
+        declare::ClassDecl,
+        msg_send,
+        runtime::{Class, Object, Sel},
+        sel, sel_impl,
+    };
+    use std::sync::OnceLock;
+    unsafe extern "C" {
+        fn object_setClass(object: id, class: *const Class) -> *const Class;
+    }
+    extern "C" fn never_key(_: &Object, _: Sel) -> cocoa::base::BOOL {
+        NO
+    }
+    fn nonactivating_class(panel: id) -> *const Class {
+        static CLASS: OnceLock<usize> = OnceLock::new();
+        *CLASS.get_or_init(|| unsafe {
+            let mut class =
+                ClassDecl::new("O8DictationPanel", (&*panel).class()).expect("unique panel class");
+            class.add_method(
+                sel!(canBecomeKeyWindow),
+                never_key as extern "C" fn(&Object, Sel) -> cocoa::base::BOOL,
+            );
+            class.add_method(
+                sel!(canBecomeMainWindow),
+                never_key as extern "C" fn(&Object, Sel) -> cocoa::base::BOOL,
+            );
+            class.register() as *const Class as usize
+        }) as *const Class
+    }
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -311,7 +433,7 @@ mod macos {
             unsafe { objc::Encoding::from_str("{NSEdgeInsets=dddd}") }
         }
     }
-    pub(super) fn present(window: &Window, visible: bool) {
+    pub(super) fn present(window: &Window, visible: bool, interactive: bool) {
         let Ok(handle) = HasWindowHandle::window_handle(window) else {
             return;
         };
@@ -322,6 +444,7 @@ mod macos {
         unsafe {
             let view = handle.ns_view.as_ptr() as id;
             let panel: id = msg_send![view, window];
+            object_setClass(panel, nonactivating_class(panel));
             let _: () = msg_send![panel, setIgnoresMouseEvents: YES];
             let _: () = msg_send![panel, setHidesOnDeactivate: NO];
             let _: () = msg_send![panel, setLevel: 25_i64];
@@ -349,6 +472,13 @@ mod macos {
             ) {
                 let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(width, height));
                 let _: () = msg_send![panel, setFrame: frame display: YES];
+                let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
+                let hit = interactive
+                    && mouse.x >= x + (width - 248.) / 2.
+                    && mouse.x <= x + (width + 248.) / 2.
+                    && mouse.y >= y + height - 52.
+                    && mouse.y <= y + height - 8.;
+                let _: () = msg_send![panel, setIgnoresMouseEvents: if hit { NO } else { YES }];
                 let _: () = msg_send![panel, orderFrontRegardless];
             }
         }
@@ -356,170 +486,8 @@ mod macos {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn pill_feed_lease_and_idle_retire_drawing() {
-        let mut pill = Pill::default();
-        pill.apply(Snapshot {
-            state: "recording".into(),
-            ..Default::default()
-        });
-        pill.expire();
-        assert!(pill.target);
-        pill.heard = Instant::now() - Duration::from_secs(1);
-        pill.expire();
-        assert!(!pill.target);
-        pill.apply(Snapshot {
-            state: "polishing".into(),
-            ..Default::default()
-        });
-        assert!(pill.target);
-        pill.apply(Snapshot {
-            state: "idle".into(),
-            ..Default::default()
-        });
-        assert!(!pill.target);
-    }
-    #[gpui::test]
-    fn pill_states_draw_offscreen_without_input(cx: &mut TestAppContext) {
-        let (pill, visual) = cx.add_window_view(|_, _| Pill::default());
-        for state in [
-            "requesting-mic",
-            "recording",
-            "transcribing",
-            "polishing",
-            "success",
-            "error",
-        ] {
-            pill.update_in(visual, |pill, _, cx| {
-                pill.apply(Snapshot {
-                    state: state.into(),
-                    audio_level: 0.6,
-                    ..Default::default()
-                });
-                pill.motion = crate::motion::Transition::settled(160, true);
-                cx.notify();
-            });
-            visual.update(|window, cx| {
-                window.refresh();
-                window.draw(cx).clear();
-            });
-            assert!(
-                visual.debug_bounds("native-dictation-pill").is_some(),
-                "{state}"
-            );
-        }
-    }
-    #[test]
-    fn pill_states_and_idle_visibility() {
-        for (state, label) in [
-            ("requesting-mic", "Connecting…"),
-            ("recording", "Listening"),
-            ("transcribing", "Transcribing"),
-            ("polishing", "Polishing"),
-            ("success", "Pasted"),
-            ("error", "Mic error"),
-        ] {
-            let snapshot = Snapshot {
-                state: state.into(),
-                ..Default::default()
-            };
-            assert!(snapshot.visible(), "{state}");
-            assert_eq!(snapshot.label(), label);
-        }
-        assert!(!Snapshot::default().visible());
-        assert!(
-            !Snapshot {
-                state: "idle".into(),
-                ..Default::default()
-            }
-            .visible()
-        );
-        assert!(
-            !Snapshot {
-                state: "foreign".into(),
-                ..Default::default()
-            }
-            .visible()
-        );
-        let delivered = Snapshot {
-            state: "success".into(),
-            pasted_text: Some("Delivered words".into()),
-            ..Default::default()
-        };
-        assert_eq!(delivered.label(), "Delivered words");
-        let failed = Snapshot {
-            state: "error".into(),
-            error: Some("Microphone denied".into()),
-            ..Default::default()
-        };
-        assert_eq!(failed.label(), "Microphone denied");
-    }
-    #[test]
-    fn pill_placement_follows_primary_changes_and_notch_without_scaling() {
-        assert_eq!(
-            placement([0., 0., 1440., 900.], 0.),
-            Some([460., 780., 520., 120.])
-        );
-        assert_eq!(
-            placement([-1920., -200., 1920., 1080.], 32.),
-            Some([-1220., 724., 520., 120.])
-        );
-        assert_eq!(
-            placement([0., 0., 300., 100.], 0.),
-            Some([0., 0., 300., 100.])
-        );
-        assert!(placement([0., 0., f64::NAN, 900.], 0.).is_none());
-        assert!(placement([0., 0., 1440., 900.], f64::NAN).is_none());
-        assert!(placement([0., 0., 0., 900.], 0.).is_none());
-    }
-    #[test]
-    fn pill_pipe_fixture() {
-        if std::env::var("O8_PILL_PIPE_FIXTURE").as_deref() != Ok("1") {
-            return;
-        }
-        crate::app_parent::watch();
-        loop {
-            if let Some(frame) = FRAMES.lock().unwrap().pop_front() {
-                let snapshot: Snapshot =
-                    serde_json::from_value(frame["args"]["snapshot"].clone()).unwrap();
-                let mut pill = Pill::default();
-                pill.apply(snapshot);
-                println!(
-                    "pill-model:{}:{}",
-                    pill.snapshot.state, pill.snapshot.audio_level
-                );
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-    }
-    #[test]
-    fn dictation_event_reaches_pill_model_through_real_parent_pipe() {
-        use std::io::{BufRead, BufReader, Write};
-        use std::process::{Command, Stdio};
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .args(["pill_pipe_fixture", "--nocapture"])
-            .env("O8_PILL_PIPE_FIXTURE", "1")
-            .env("O8_NEXT_PARENT_PIPE", "1")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        writeln!(child.stdin.as_mut().unwrap(), "{}", json!({"type":"dictation-pill","id":"fixture","args":{"action":"frame","snapshot":{"state":"recording","audioLevel":0.625}}})).unwrap();
-        let out = BufReader::new(child.stdout.take().unwrap());
-        let mut received = false;
-        for line in out.lines() {
-            if line.unwrap().contains("pill-model:recording:0.625") {
-                received = true;
-                break;
-            }
-        }
-        assert!(child.wait().unwrap().success());
-        assert!(received);
-    }
-}
+#[path = "native_pill_tests.rs"]
+mod tests;
 
 /// Explicit fixture entry point for the isolated Linux display capture harness.
 /// It uses the production renderer, no server, capture device or input simulation.
