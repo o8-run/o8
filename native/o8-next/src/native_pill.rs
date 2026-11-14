@@ -1,4 +1,5 @@
-//! Passive dictation drawing. Capture and all interactive dock surfaces keep their owners.
+//! Passive dock drawing: dictation plus the speech, live voice and agent working
+//! capsules. Capture, voice and agent commands keep their web owners.
 #[cfg(test)]
 use gpui::TestAppContext;
 use gpui::{
@@ -58,12 +59,31 @@ pub(crate) struct Snapshot {
     pub error: Option<String>,
     #[serde(default)]
     pub pasted_text: Option<String>,
+    #[serde(default)]
+    pub paused: bool,
+    #[serde(default)]
+    pub speed: f32,
+    #[serde(default)]
+    pub tool: Option<String>,
+    /// Epoch milliseconds, sent once per working session; the timer ticks here.
+    #[serde(default)]
+    pub started_at: u64,
+    #[serde(default)]
+    pub connecting: bool,
 }
 impl Snapshot {
     pub fn visible(&self) -> bool {
         matches!(
             self.state.as_str(),
-            "requesting-mic" | "recording" | "transcribing" | "polishing" | "success" | "error"
+            "requesting-mic"
+                | "recording"
+                | "transcribing"
+                | "polishing"
+                | "success"
+                | "error"
+                | "speaking"
+                | "working"
+                | "voice"
         )
     }
     fn label(&self) -> &str {
@@ -78,6 +98,12 @@ impl Snapshot {
                 .filter(|s| !s.is_empty())
                 .unwrap_or("Pasted"),
             "error" => self.error.as_deref().unwrap_or("Mic error"),
+            "speaking" if self.paused => "Paused",
+            "speaking" => "Speaking",
+            "working" if self.tool.as_deref() == Some("o8_ask") => "Synthesizing…",
+            "working" => "Working…",
+            "voice" if self.connecting => "Connecting…",
+            "voice" => "Voice live",
             _ => "",
         }
     }
@@ -130,6 +156,9 @@ pub(crate) struct Pill {
     target: bool,
     finish_pending: bool,
     finish_sent: bool,
+    actions: Vec<Value>,
+    hover: bool,
+    second: Option<u64>,
     presentation: Presentation,
 }
 impl Default for Pill {
@@ -142,6 +171,9 @@ impl Default for Pill {
             target: false,
             finish_pending: false,
             finish_sent: false,
+            actions: Vec::new(),
+            hover: false,
+            second: None,
             presentation: Presentation::default(),
         }
     }
@@ -153,6 +185,11 @@ impl Pill {
             self.motion = crate::motion::Transition::settled(160, false);
         }
     }
+    /// The clickable capsule footprint while a clickable state is on screen.
+    fn hit(&self) -> Option<(f64, f64)> {
+        (self.target && capsules::interactive(&self.snapshot))
+            .then(|| capsules::size(&self.snapshot))
+    }
     fn finish(&mut self) {
         if self.target && self.snapshot.state == "recording" && !self.finish_sent {
             self.finish_pending = true;
@@ -163,6 +200,9 @@ impl Pill {
         if snapshot.session != self.snapshot.session || snapshot.state != self.snapshot.state {
             self.finish_pending = false;
             self.finish_sent = false;
+            self.actions.clear();
+            self.hover = false;
+            self.second = None;
         }
         self.motion.set(snapshot.visible());
         self.target = snapshot.visible();
@@ -185,78 +225,89 @@ impl Render for Pill {
         } else {
             0.
         };
-        div()
+        let root = div()
             .size_full()
             .flex()
             .justify_center()
             .items_start()
-            .pt(px(8.))
-            .child(
-                div()
-                    .id("native-dictation-pill")
-                    .debug_selector(|| "native-dictation-pill".into())
-                    .on_click(cx.listener(|pill, _, _, cx| {
-                        pill.finish();
-                        cx.notify();
-                    }))
-                    .when(listening, |d| {
-                        d.cursor_pointer()
-                            .hover(|s| s.bg(t.hover))
-                            .active(|s| s.opacity(0.85))
-                    })
-                    .w(px(
-                        if self.snapshot.state == "success" || self.snapshot.state == "error" {
-                            420.
-                        } else {
-                            248.
-                        },
-                    ))
-                    .h(px(44.))
-                    .px(px(16.))
-                    .rounded(px(22.))
-                    .overflow_hidden()
-                    .bg(t.surface_raised)
-                    .border_1()
-                    .border_color(t.border)
-                    .text_color(match self.snapshot.state.as_str() {
-                        "error" => t.danger,
-                        "success" => t.success,
-                        _ => t.text,
-                    })
-                    .text_size(px(12.))
-                    .font_family(t.font_ui)
-                    .font_weight(gpui::FontWeight::LIGHT)
-                    .opacity(opacity)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(8.))
-                    .child(if listening {
-                        let mut bars = div().flex().items_center().gap(px(3.)).h(px(22.));
-                        for i in 0..26 {
-                            let weight = 1. - ((i as f32 - 12.5) / 13.).abs();
-                            bars = bars.child(
-                                div()
-                                    .w(px(2.))
-                                    .h(px(2. + 18. * level * weight))
-                                    .rounded(px(1.))
-                                    .bg(t.accent),
-                            );
-                        }
-                        bars.into_any_element()
+            .pt(px(8.));
+        if capsules::is_capsule(&self.snapshot.state) {
+            let capsule = div()
+                .id("native-dock-capsule")
+                .debug_selector(|| "native-dock-capsule".into())
+                .opacity(opacity)
+                .on_click(cx.listener(|pill, _, _, cx| {
+                    pill.capsule_click();
+                    cx.notify();
+                }));
+            return root.child(self.render_capsule(capsule, cx));
+        }
+        root.child(
+            div()
+                .id("native-dictation-pill")
+                .debug_selector(|| "native-dictation-pill".into())
+                .on_click(cx.listener(|pill, _, _, cx| {
+                    pill.capsule_click();
+                    cx.notify();
+                }))
+                .when(listening, |d| {
+                    d.cursor_pointer()
+                        .hover(|s| s.bg(t.hover))
+                        .active(|s| s.opacity(0.85))
+                })
+                .w(px(
+                    if self.snapshot.state == "success" || self.snapshot.state == "error" {
+                        420.
                     } else {
-                        div()
-                            .child(self.snapshot.label().chars().take(100).collect::<String>())
-                            .into_any_element()
-                    })
-                    .when(listening, |d| {
-                        d.child(format!(
-                            "{:02}:{:02}",
-                            self.snapshot.duration_ms / 60000,
-                            self.snapshot.duration_ms / 1000 % 60
-                        ))
-                    }),
-            )
+                        248.
+                    },
+                ))
+                .h(px(44.))
+                .px(px(16.))
+                .rounded(px(22.))
+                .overflow_hidden()
+                .bg(t.surface_raised)
+                .border_1()
+                .border_color(t.border)
+                .text_color(match self.snapshot.state.as_str() {
+                    "error" => t.danger,
+                    "success" => t.success,
+                    _ => t.text,
+                })
+                .text_size(px(12.))
+                .font_family(t.font_ui)
+                .font_weight(gpui::FontWeight::LIGHT)
+                .opacity(opacity)
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(8.))
+                .child(if listening {
+                    let mut bars = div().flex().items_center().gap(px(3.)).h(px(22.));
+                    for i in 0..26 {
+                        let weight = 1. - ((i as f32 - 12.5) / 13.).abs();
+                        bars = bars.child(
+                            div()
+                                .w(px(2.))
+                                .h(px(2. + 18. * level * weight))
+                                .rounded(px(1.))
+                                .bg(t.accent),
+                        );
+                    }
+                    bars.into_any_element()
+                } else {
+                    div()
+                        .child(self.snapshot.label().chars().take(100).collect::<String>())
+                        .into_any_element()
+                })
+                .when(listening, |d| {
+                    d.child(format!(
+                        "{:02}:{:02}",
+                        self.snapshot.duration_ms / 60000,
+                        self.snapshot.duration_ms / 1000 % 60
+                    ))
+                }),
+        )
     }
 }
 
@@ -302,7 +353,19 @@ fn dispatch(
                     };
                     pill.apply(snapshot);
                 }
-                Some("release") => pill.apply(Snapshot::default()),
+                Some("release") => {
+                    // A release names the session it retires; a late one never
+                    // hides a newer session that is already on screen.
+                    let stale = args["session"]
+                        .as_u64()
+                        .is_some_and(|session| pill.target && session != pill.snapshot.session);
+                    if !stale {
+                        pill.apply(Snapshot::default());
+                        if args["immediate"] == true {
+                            pill.motion = crate::motion::Transition::settled(160, false);
+                        }
+                    }
+                }
                 _ => return None,
             }
             let show = pill.target || pill.motion.value().1;
@@ -313,19 +376,15 @@ fn dispatch(
             } else {
                 None
             };
-            Some((
-                show,
-                pill.target && pill.snapshot.state == "recording",
-                finish,
-            ))
+            Some((show, pill.hit(), finish, pill.take_actions()))
         });
-        if let Some((show, interactive, finish)) = result {
+        if let Some((show, hit, finish, actions)) = result {
             #[cfg(target_os = "macos")]
-            macos::present(window, show, interactive, &view, cx);
+            macos::present(window, show, hit, &view, cx);
             #[cfg(not(target_os = "macos"))]
-            let _ = (window, show, interactive);
+            let _ = (window, show, hit);
             let _ = WAKE.0.try_send(());
-            reply(json!({"ok":true, "finishSession":finish}));
+            reply(json!({"ok":true, "finishSession":finish, "actions":actions}));
         } else {
             reply(json!({"ok":false}));
         }
@@ -423,24 +482,20 @@ pub(crate) fn install(cx: &mut App) {
                     let Ok(view) = root.downcast::<Pill>() else {
                         return;
                     };
-                    let (show, was_shown, interactive) = view.update(cx, |pill, cx| {
+                    let (show, was_shown, hit) = view.update(cx, |pill, cx| {
                         let was_active = pill.target;
                         pill.expire();
-                        if was_active != pill.target {
+                        if was_active != pill.target || pill.timer_tick(capsules::now_ms()) {
                             cx.notify();
                         }
                         let show = pill.target || pill.shown && pill.motion.value().1;
                         let was_shown = pill.shown;
                         pill.shown = show;
-                        (
-                            show,
-                            was_shown,
-                            pill.target && pill.snapshot.state == "recording",
-                        )
+                        (show, was_shown, pill.hit())
                     });
                     visible = show;
                     if show || was_shown {
-                        macos::present(window, show, interactive, &view, cx);
+                        macos::present(window, show, hit, &view, cx);
                     }
                 });
                 if result.is_err() {
@@ -518,7 +573,7 @@ mod macos {
     pub(super) fn present(
         window: &Window,
         visible: bool,
-        interactive: bool,
+        hit: Option<(f64, f64)>,
         pill: &Entity<Pill>,
         cx: &mut App,
     ) {
@@ -575,11 +630,13 @@ mod macos {
                     let _: () = msg_send![panel, setFrame: frame display: NO];
                 }
                 let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
-                let hit = interactive
-                    && mouse.x >= x + (width - 248.) / 2.
-                    && mouse.x <= x + (width + 248.) / 2.
-                    && mouse.y >= y + height - 52.
-                    && mouse.y <= y + height - 8.;
+                // The capsule sits 8 points below the panel top, centered.
+                let hit = hit.is_some_and(|(w, h)| {
+                    mouse.x >= x + (width - w) / 2.
+                        && mouse.x <= x + (width + w) / 2.
+                        && mouse.y >= y + height - 8. - h
+                        && mouse.y <= y + height - 8.
+                });
                 let _: () = msg_send![panel, setIgnoresMouseEvents: if hit { NO } else { YES }];
                 if order_front {
                     let _: () = msg_send![panel, orderFrontRegardless];
@@ -588,6 +645,9 @@ mod macos {
         }
     }
 }
+
+#[path = "native_pill_capsules.rs"]
+mod capsules;
 
 #[cfg(test)]
 #[path = "native_pill_tests.rs"]

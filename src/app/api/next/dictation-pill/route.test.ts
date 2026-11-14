@@ -63,3 +63,29 @@ it('does not reread settings for level frames and distinguishes an acknowledgeme
   expect(await (await pending).json()).toMatchObject({ native: false, absent: false });
   child.emit('exit');
 });
+
+it('forwards well-formed capsule clicks from the native panel and drops anything else', async () => {
+  settings.enabled = true;
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
+  bindNextBrowserPipe(child as unknown as ChildProcess);
+  const actions = [
+    { session: 4, state: 'speaking', action: 'pause', value: null },
+    { session: 4, state: 'speaking', action: 'speed', value: 0.85 },
+    { session: 4, state: 'speaking', action: 'speed', value: null },
+    { session: 4, state: 'working', action: 'pause', value: null },
+    { session: 4, state: 'working', action: '__proto__', value: null },
+    { session: '4', state: 'voice', action: 'voice-stop', value: null },
+    { session: 4, state: 'voice', action: 'voice-stop', value: null },
+  ];
+  child.stdin.on('data', data => {
+    const frame = JSON.parse(String(data));
+    child.stdout.write('o8-next-browser-result:' + JSON.stringify({ id: frame.id, result: { ok: true, actions } }) + '\n');
+  });
+  const response = await POST(new NextRequest('http://localhost/api/next/dictation-pill', { method: 'POST', body: '{"action":"frame","checkSettings":true}' }));
+  expect((await response.json()).actions).toEqual([
+    { session: 4, state: 'speaking', action: 'pause', value: null },
+    { session: 4, state: 'speaking', action: 'speed', value: 0.85 },
+    { session: 4, state: 'voice', action: 'voice-stop', value: null },
+  ]);
+  child.emit('exit');
+});

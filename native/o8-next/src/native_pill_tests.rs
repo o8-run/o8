@@ -366,3 +366,232 @@ fn invalid_window_delivery_returns_an_error_immediately(cx: &mut TestAppContext)
     );
     assert!(result.is_err());
 }
+
+fn capsule(state: &str, session: u64) -> Snapshot {
+    Snapshot {
+        state: state.into(),
+        session,
+        speed: 1.,
+        ..Default::default()
+    }
+}
+fn show(pill: &Entity<Pill>, snapshot: Snapshot, visual: &mut gpui::VisualTestContext) {
+    pill.update_in(visual, |pill, _, cx| {
+        pill.apply(snapshot);
+        pill.motion = crate::motion::Transition::settled(160, true);
+        cx.notify();
+    });
+    visual.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+}
+/// The receipt the web dock reads after its next frame for the same session.
+fn frame_reply(
+    pill: &Entity<Pill>,
+    snapshot: Value,
+    visual: &mut gpui::VisualTestContext,
+) -> Value {
+    let reply = std::rc::Rc::new(std::cell::RefCell::new(Value::Null));
+    let received = reply.clone();
+    visual.update(|window, cx| {
+        dispatch(
+            pill,
+            json!({"expiresAt":future(), "args":{"action":"frame","snapshot":snapshot}}),
+            window,
+            cx,
+            move |value| *received.borrow_mut() = value,
+        )
+    });
+    visual.run_until_parked();
+    reply.take()
+}
+fn click(selector: &'static str, visual: &mut gpui::VisualTestContext) {
+    let bounds = visual.debug_bounds(selector).expect(selector);
+    visual.simulate_click(bounds.center(), gpui::Modifiers::default());
+}
+
+#[gpui::test]
+fn capsule_states_draw_and_retire(cx: &mut TestAppContext) {
+    let (pill, visual) = cx.add_window_view(|_, _| Pill::default());
+    for (state, label) in [
+        ("speaking", "Speaking"),
+        ("working", "Working…"),
+        ("voice", "Voice live"),
+    ] {
+        show(&pill, capsule(state, 3), visual);
+        assert!(
+            visual.debug_bounds("native-dock-capsule").is_some(),
+            "{state}"
+        );
+        assert!(
+            visual.debug_bounds("native-dictation-pill").is_none(),
+            "{state}"
+        );
+        assert_eq!(
+            pill.read_with(visual, |p, _| p.snapshot.label().to_string()),
+            label
+        );
+        let reply = frame_reply(&pill, json!({"state":"idle","session":3}), visual);
+        assert_eq!(reply["ok"], true);
+        assert!(
+            !pill.read_with(visual, |p, _| p.target),
+            "{state} retires on idle"
+        );
+    }
+    let paused = Snapshot {
+        paused: true,
+        ..capsule("speaking", 4)
+    };
+    assert_eq!(paused.label(), "Paused");
+    let synth = Snapshot {
+        tool: Some("o8_ask".into()),
+        ..capsule("working", 4)
+    };
+    assert_eq!(synth.label(), "Synthesizing…");
+    let connecting = Snapshot {
+        connecting: true,
+        ..capsule("voice", 4)
+    };
+    assert_eq!(connecting.label(), "Connecting…");
+    assert!(!capsules::interactive(&connecting));
+    assert_eq!(capsules::size(&capsule("speaking", 1)), (280., 40.));
+    assert_eq!(capsules::size(&capsule("voice", 1)), (268., 40.));
+    assert_eq!(capsules::size(&capsule("working", 1)), (248., 40.));
+    assert_eq!(capsules::size(&capsule("recording", 1)), (248., 44.));
+}
+
+#[gpui::test]
+fn each_capsule_control_reports_exactly_one_action(cx: &mut TestAppContext) {
+    let (pill, visual) = cx.add_window_view(|_, _| Pill::default());
+    let speaking = json!({"state":"speaking","session":7,"speed":1.0});
+    for (selector, action, value) in [
+        ("native-speech-pause", "pause", Value::Null),
+        ("native-speech-stop", "stop", Value::Null),
+        ("native-speech-speed-3", "speed", json!(0.85)),
+    ] {
+        show(&pill, capsule("speaking", 7), visual);
+        click(selector, visual);
+        let reply = frame_reply(&pill, speaking.clone(), visual);
+        assert_eq!(
+            reply["actions"],
+            json!([{"session":7,"state":"speaking","action":action,"value":value}]),
+            "{selector}"
+        );
+        let again = frame_reply(&pill, speaking.clone(), visual);
+        assert_eq!(again["actions"], json!([]), "{selector} is reported once");
+    }
+    show(&pill, capsule("working", 8), visual);
+    click("native-dock-capsule", visual);
+    let reply = frame_reply(&pill, json!({"state":"working","session":8}), visual);
+    assert_eq!(reply["actions"][0]["action"], "interrupt");
+    assert_eq!(reply["actions"].as_array().unwrap().len(), 1);
+    show(&pill, capsule("voice", 9), visual);
+    click("native-dock-capsule", visual);
+    let reply = frame_reply(&pill, json!({"state":"voice","session":9}), visual);
+    assert_eq!(
+        reply["actions"],
+        json!([{"session":9,"state":"voice","action":"voice-stop","value":null}])
+    );
+    show(
+        &pill,
+        Snapshot {
+            connecting: true,
+            ..capsule("voice", 10)
+        },
+        visual,
+    );
+    click("native-dock-capsule", visual);
+    let reply = frame_reply(
+        &pill,
+        json!({"state":"voice","session":10,"connecting":true}),
+        visual,
+    );
+    assert_eq!(
+        reply["actions"],
+        json!([]),
+        "connecting is not a stop control"
+    );
+}
+
+#[gpui::test]
+fn capsule_clicks_after_expiry_or_a_new_session_do_nothing(cx: &mut TestAppContext) {
+    let (pill, visual) = cx.add_window_view(|_, _| Pill::default());
+    show(&pill, capsule("working", 11), visual);
+    pill.update(visual, |pill, _| {
+        pill.heard = Instant::now() - Duration::from_millis(751);
+        pill.expire();
+    });
+    click("native-dock-capsule", visual);
+    assert!(pill.read_with(visual, |p, _| p.actions.is_empty()));
+    show(&pill, capsule("speaking", 12), visual);
+    click("native-speech-stop", visual);
+    // The web moved to another session before its next frame: the click is dropped.
+    let reply = frame_reply(
+        &pill,
+        json!({"state":"speaking","session":13,"speed":1.0}),
+        visual,
+    );
+    assert_eq!(reply["actions"], json!([]));
+}
+
+#[test]
+fn working_timer_derives_from_the_start_timestamp() {
+    assert_eq!(capsules::elapsed_label(1_000, 1_000), "0s");
+    assert_eq!(capsules::elapsed_label(1_000, 60_999), "59s");
+    assert_eq!(capsules::elapsed_label(1_000, 66_000), "1:05");
+    assert_eq!(capsules::elapsed_label(5_000, 1_000), "0s");
+    let mut pill = Pill::default();
+    let start = 1_000_000;
+    pill.apply(Snapshot {
+        started_at: start,
+        ..capsule("working", 1)
+    });
+    // No frame arrives between these ticks; only the second boundary redraws.
+    assert!(pill.timer_tick(start + 5_000));
+    assert!(!pill.timer_tick(start + 5_900));
+    assert!(pill.timer_tick(start + 6_000));
+    pill.apply(capsule("speaking", 2));
+    assert!(!pill.timer_tick(start + 9_000));
+}
+
+#[gpui::test]
+fn release_names_its_session_and_a_web_takeover_hides_at_once(cx: &mut TestAppContext) {
+    let (pill, visual) = cx.add_window_view(|_, _| Pill::default());
+    let release = |args: Value, visual: &mut gpui::VisualTestContext| {
+        visual.update(|window, cx| {
+            dispatch(
+                &pill,
+                json!({"expiresAt":future(), "args":args}),
+                window,
+                cx,
+                |_| {},
+            )
+        });
+        visual.run_until_parked();
+    };
+    show(&pill, capsule("speaking", 21), visual);
+    release(json!({"action":"release","session":20}), visual);
+    assert!(
+        pill.read_with(visual, |p, _| p.target),
+        "a late release keeps the newer session"
+    );
+    release(json!({"action":"release","session":21}), visual);
+    assert!(!pill.read_with(visual, |p, _| p.target));
+    assert!(
+        pill.read_with(visual, |p, _| p.motion.value().1),
+        "a normal retirement fades"
+    );
+    show(&pill, capsule("working", 22), visual);
+    release(
+        json!({"action":"release","session":22,"immediate":true}),
+        visual,
+    );
+    assert!(!pill.read_with(visual, |p, _| p.target || p.motion.value().1));
+    show(&pill, capsule("voice", 23), visual);
+    release(json!({"action":"release"}), visual);
+    assert!(
+        !pill.read_with(visual, |p, _| p.target),
+        "an untagged release still hides"
+    );
+}

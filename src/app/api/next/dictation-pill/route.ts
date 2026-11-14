@@ -34,8 +34,24 @@ export async function POST(request: NextRequest) {
   }
   if (!enabled) return NextResponse.json({ native: false, enabled: false });
   const pending = requestNextPill(body);
-  const reply = await pending as { ok?: boolean; absent?: boolean; finishSession?: number | null } | null;
+  const reply = await pending as { ok?: boolean; absent?: boolean; finishSession?: number | null; actions?: unknown } | null;
+  const actions = capsuleActions(reply?.actions);
   return NextResponse.json({ enabled: true, native: reply?.ok === true, absent: pending === null || reply?.absent === true,
-    ...(typeof reply?.finishSession === 'number' ? { finishSession: reply.finishSession } : {})
+    ...(typeof reply?.finishSession === 'number' ? { finishSession: reply.finishSession } : {}),
+    ...(actions.length ? { actions } : {}),
   }, { headers: { 'Cache-Control': 'no-store' } });
+}
+
+const ACTIONS: Record<string, string> = { pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice' };
+
+/** Click intents from the native panel; only well-formed capsule intents pass. */
+function capsuleActions(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 8).flatMap((item: Record<string, unknown> | null) => {
+    if (!item || typeof item !== 'object' || typeof item.session !== 'number' || typeof item.action !== 'string') return [];
+    if (!Object.hasOwn(ACTIONS, item.action) || ACTIONS[item.action] !== item.state) return [];
+    const value = typeof item.value === 'number' && Number.isFinite(item.value) ? item.value : null;
+    if (item.action === 'speed' && value === null) return [];
+    return [{ session: item.session, state: item.state, action: item.action, value }];
+  });
 }
