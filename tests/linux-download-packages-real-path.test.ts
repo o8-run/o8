@@ -104,6 +104,8 @@ it.skipIf(process.platform !== 'linux' || process.env.O8_LINUX_PACKAGE_TESTS !==
   expect(receipt).toMatchObject({ application: 'o8-next', channel: 'beta', version, published: false,
     platform: 'linux-x86_64', maxGlibc: '2.35' });
   expect(receipt.artifacts).toHaveLength(3);
+  expect(receipt.artifacts.find((a: { format: string }) => a.format === 'appimage').name)
+    .toBe(`o8-${version}-x86_64.AppImage`);
   for (const artifact of receipt.artifacts) {
     const file = join(output, artifact.name);
     const bytes = readFileSync(file);

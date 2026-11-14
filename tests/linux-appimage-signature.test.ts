@@ -126,7 +126,7 @@ describe('linux AppImage updater signature', () => {
       fetchRelease: () => ({ isDraft: false, assets: [publishedLinuxAssetName('0.1.723')] }),
     });
     await expect(signLinuxAppImage({ tag: TAG, repos: ['o/r'], workDir: '/work', deps: wrongVersion.deps }))
-      .rejects.toThrow(/has no o8_0\.1\.724_linux_amd64_preview\.AppImage asset/);
+      .rejects.toThrow(/has no o8-0\.1\.724-x86_64\.AppImage asset/);
 
     expect(missing.calls.some((call) => call.name === 'downloadAsset')).toBe(false);
     expect(draft.calls.some((call) => call.name === 'signAppImage')).toBe(false);

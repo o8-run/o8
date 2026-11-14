@@ -11,7 +11,7 @@ const entry = join(process.cwd(), 'scripts/sign-linux-appimage.mjs');
 const helper = pathToFileURL(join(process.cwd(), 'scripts/lib/linux-build-channel.mjs')).href;
 const version = '0.1.900';
 const tag = `v${version}`;
-const asset = `o8_${version}_linux_amd64_preview.AppImage`;
+const asset = `o8-${version}-x86_64.AppImage`;
 const repos = ['fixture/source', 'fixture/mirror'];
 type Channel = 'stable' | 'beta' | 'preview';
 

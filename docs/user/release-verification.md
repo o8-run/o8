@@ -9,11 +9,13 @@ GPG signature made by the o8 Linux release key.
 Download an installer, install the GitHub CLI, and run:
 
 ```bash
-gh attestation verify ./o8_0.1.663_linux_amd64_preview.AppImage \
+gh attestation verify ./o8-X.Y.Z-x86_64.AppImage \
   --repo o8-run/o8
 ```
 
-Use the same command for the Windows MSI or EXE and the Linux DEB or RPM. A
+Replace `X.Y.Z` with the downloaded version and use the actual downloaded basename
+for historical releases. Existing assets are not renamed. Use the same command
+for the Windows MSI or EXE and the Linux DEB or RPM. A
 successful result ties the exact downloaded bytes to the public o8 repository,
 workflow, and commit recorded by GitHub's Sigstore-backed attestation service.
 
