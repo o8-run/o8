@@ -44,6 +44,19 @@ describe('Next Browser parent pipe', () => {
     expect(await two).toEqual({ ok: true, clicked: '#link' });
     process.emit('exit');
   });
+  it('bounds pill delivery below its lease and carries the caller deadline', async () => {
+    vi.useFakeTimers();
+    const process = child();
+    bindNextBrowserPipe(process as unknown as ChildProcess);
+    let frame: { expiresAt: number } | undefined;
+    process.stdin.on('data', chunk => { frame = JSON.parse(chunk.toString()); });
+    const deadline = Date.now() + 300;
+    const pending = requestNextPill({ action: 'frame', deadline });
+    expect(frame?.expiresAt).toBe(deadline);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(await pending).toMatchObject({ ok: false, timedOut: true });
+    process.emit('exit');
+  });
   it('never replays an unconfirmed mutation or falls back after child death', async () => {
     const process = child();
     bindNextBrowserPipe(process as unknown as ChildProcess);

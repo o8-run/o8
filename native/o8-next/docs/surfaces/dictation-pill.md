@@ -21,18 +21,29 @@ a running native process suppresses web drawing. No listening port is added.
 Only a session-correlated click-to-finish intent returns to the existing dock owner.
 Audio, providers, paste and approval authority retain their existing owners.
 
-The dock probes once at mount and once at a session start if native has not
-accepted ownership. Disabled probes send no pipe frames. Enabled idle ownership
-is retained without requests; the next session's first frame checks liveness and
-refreshes settings. Active feeds run at up to 10 frames per second and send one
-release at idle. The native loop sleeps on a frame channel while hidden and uses
-a 16 ms lease/animation timer only while visible. Unsupported platforms reject
-frames immediately without queueing. The retained panel does not keep the shell
-alive after the last real window closes.
+The dock reads the flag once at mount. A disabled dock adds one HTTP probe,
+no per-session probes, and no native quiet-mode listener or read. Enabling the
+flag requires reopening the dock. Enabled sessions check settings and liveness;
+a failed session keeps web ownership until the next session's short preparation.
+Idle ownership sends no traffic. Active feeds wait 100 ms after a reply, at most
+10 frames per second. Quiet mode sends one release, pauses frames and resumes on
+exit. The native loop parks while hidden and ticks every 16 ms while visible.
+Unsupported platforms reject frames immediately. The panel does not keep the
+shell alive after the last real window closes.
 
-A stalled feed expires after 750 ms and exits over 160 ms. Web fallback waits
-one second after an unconfirmed response before drawing again. A confirmed process
-exit restores web drawing immediately. Unknown states
+Requests carry an absolute deadline of 500 ms; the pipe caps it at 450 ms.
+The unchanged native lease is 750 ms, so cadence plus the request deadline is
+600 ms, leaving 150 ms before expiry. Timeout or failure restores web ownership
+with zero added delay and sends a best-effort release. Native expiry hides even
+an active last frame immediately, without the 160 ms normal exit animation.
+If release is lost, a responsive native loop hides by the 750 ms lease plus one
+16 ms maintenance tick. A native main thread hung with a frame already on screen
+cannot be hidden by web code: the compositor can retain it until that thread
+recovers (then expiry runs) or the process exits. There is no finite wall-clock
+bound during that hang. Window class/configuration is installed once; geometry
+changes alone set the frame, without forced display, and only show transitions
+order the panel front. Invalid window delivery returns an error immediately and
+clears the handle so a later request can recreate it. Unknown states
 never become visible. The native window is a nonactivating GPUI popup; only its listening capsule
 accepts clicks. AppKit orders it front without making it key, at the same level and
 primary-screen notch offset as the web dock. Geometry is recomputed in logical

@@ -102,6 +102,26 @@ pub(crate) fn placement(screen: [f64; 4], notch: f64) -> Option<[f64; 4]> {
     ])
 }
 
+#[derive(Default)]
+struct Presentation {
+    configured: bool,
+    visible: bool,
+    geometry: Option<[f64; 4]>,
+}
+impl Presentation {
+    fn tick(&mut self, visible: bool, geometry: Option<[f64; 4]>) -> (bool, bool, bool) {
+        let configure = !self.configured;
+        self.configured = true;
+        let set_frame = visible && geometry.is_some() && geometry != self.geometry;
+        let order_front = visible && !self.visible;
+        self.visible = visible;
+        if visible && geometry.is_some() {
+            self.geometry = geometry;
+        }
+        (configure, set_frame, order_front)
+    }
+}
+
 pub(crate) struct Pill {
     snapshot: Snapshot,
     heard: Instant,
@@ -110,6 +130,7 @@ pub(crate) struct Pill {
     target: bool,
     finish_pending: bool,
     finish_sent: bool,
+    presentation: Presentation,
 }
 impl Default for Pill {
     fn default() -> Self {
@@ -121,6 +142,7 @@ impl Default for Pill {
             target: false,
             finish_pending: false,
             finish_sent: false,
+            presentation: Presentation::default(),
         }
     }
 }
@@ -128,6 +150,7 @@ impl Pill {
     fn expire(&mut self) {
         if self.heard.elapsed() > Duration::from_millis(750) && self.target {
             self.apply(Snapshot::default());
+            self.motion = crate::motion::Transition::settled(160, false);
         }
     }
     fn finish(&mut self) {
@@ -298,7 +321,7 @@ fn dispatch(
         });
         if let Some((show, interactive, finish)) = result {
             #[cfg(target_os = "macos")]
-            macos::present(window, show, interactive);
+            macos::present(window, show, interactive, &view, cx);
             #[cfg(not(target_os = "macos"))]
             let _ = (window, show, interactive);
             let _ = WAKE.0.try_send(());
@@ -307,6 +330,18 @@ fn dispatch(
             reply(json!({"ok":false}));
         }
     });
+}
+
+fn deliver(handle: WindowHandle<Pill>, frame: Value, cx: &mut gpui::AsyncApp) -> gpui::Result<()> {
+    let id = frame["id"].as_str().unwrap_or_default().to_string();
+    let result = AnyWindowHandle::from(handle).update(cx, |root, window, cx| {
+        if let Ok(view) = root.downcast::<Pill>() {
+            dispatch(&view, frame, window, cx, move |ok| {
+                crate::app_parent::browser_result(&id, ok);
+            });
+        }
+    });
+    result
 }
 
 pub(crate) fn has_real_windows(cx: &App) -> bool {
@@ -374,20 +409,17 @@ pub(crate) fn install(cx: &mut App) {
                 }
                 let id = id.to_string();
                 if let Some(h) = handle {
-                    let _ = AnyWindowHandle::from(h).update(cx, |root, window, cx| {
-                        if let Ok(view) = root.downcast::<Pill>() {
-                            dispatch(&view, frame.clone(), window, cx, move |ok| {
-                                crate::app_parent::browser_result(&id, ok);
-                            });
-                        }
-                    });
+                    if deliver(h, frame.clone(), cx).is_err() {
+                        handle = None;
+                        crate::app_parent::browser_result(&id, json!({"ok":false}));
+                    }
                 } else {
                     crate::app_parent::browser_result(&id, json!({"ok":false}));
                 }
             }
             visible = false;
             if let Some(h) = handle {
-                let _ = AnyWindowHandle::from(h).update(cx, |root, window, cx| {
+                let result = AnyWindowHandle::from(h).update(cx, |root, window, cx| {
                     let Ok(view) = root.downcast::<Pill>() else {
                         return;
                     };
@@ -408,9 +440,13 @@ pub(crate) fn install(cx: &mut App) {
                     });
                     visible = show;
                     if show || was_shown {
-                        macos::present(window, show, interactive);
+                        macos::present(window, show, interactive, &view, cx);
                     }
                 });
+                if result.is_err() {
+                    handle = None;
+                    visible = false;
+                }
             }
         }
     })
@@ -479,7 +515,13 @@ mod macos {
             unsafe { objc::Encoding::from_str("{NSEdgeInsets=dddd}") }
         }
     }
-    pub(super) fn present(window: &Window, visible: bool, interactive: bool) {
+    pub(super) fn present(
+        window: &Window,
+        visible: bool,
+        interactive: bool,
+        pill: &Entity<Pill>,
+        cx: &mut App,
+    ) {
         let Ok(handle) = HasWindowHandle::window_handle(window) else {
             return;
         };
@@ -490,17 +532,26 @@ mod macos {
         unsafe {
             let view = handle.ns_view.as_ptr() as id;
             let panel: id = msg_send![view, window];
-            object_setClass(panel, nonactivating_class(panel));
-            let _: () = msg_send![panel, setIgnoresMouseEvents: YES];
-            let _: () = msg_send![panel, setHidesOnDeactivate: NO];
-            let _: () = msg_send![panel, setLevel: 25_i64];
+            let configure = pill.update(cx, |pill, _| !pill.presentation.configured);
+            if configure {
+                object_setClass(panel, nonactivating_class(panel));
+                let _: () = msg_send![panel, setIgnoresMouseEvents: YES];
+                let _: () = msg_send![panel, setHidesOnDeactivate: NO];
+                let _: () = msg_send![panel, setLevel: 25_i64];
+            }
             if !visible {
+                pill.update(cx, |pill, _| {
+                    pill.presentation.tick(false, None);
+                });
                 let _: () = msg_send![panel, orderOut: nil];
                 return;
             }
             let screens: id = msg_send![class!(NSScreen), screens];
             let count: usize = msg_send![screens, count];
             if count == 0 {
+                pill.update(cx, |pill, _| {
+                    pill.presentation.tick(false, None);
+                });
                 let _: () = msg_send![panel, orderOut: nil];
                 return;
             }
@@ -516,8 +567,13 @@ mod macos {
                 ],
                 insets.top,
             ) {
+                let (_, set_frame, order_front) = pill.update(cx, |pill, _| {
+                    pill.presentation.tick(true, Some([x, y, width, height]))
+                });
                 let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(width, height));
-                let _: () = msg_send![panel, setFrame: frame display: YES];
+                if set_frame {
+                    let _: () = msg_send![panel, setFrame: frame display: NO];
+                }
                 let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
                 let hit = interactive
                     && mouse.x >= x + (width - 248.) / 2.
@@ -525,7 +581,9 @@ mod macos {
                     && mouse.y >= y + height - 52.
                     && mouse.y <= y + height - 8.;
                 let _: () = msg_send![panel, setIgnoresMouseEvents: if hit { NO } else { YES }];
-                let _: () = msg_send![panel, orderFrontRegardless];
+                if order_front {
+                    let _: () = msg_send![panel, orderFrontRegardless];
+                }
             }
         }
     }

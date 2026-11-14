@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DictationSnapshot } from '@/components/desktop/dictation/types';
 import { isTauri } from '@/lib/tauri/bridge';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
+import timing from '@/lib/next/pill-timing.json';
 
 export const IDLE_SNAPSHOT: DictationSnapshot = {
   state: 'idle',
@@ -30,7 +31,7 @@ export function useNativePillDockExtent(native: boolean, active: boolean, visibl
 
 /** The native window acknowledges preparation before React relinquishes drawing.
  * Frames are sent only from the effect after that hidden render has committed.
- * On failure wait beyond the native 750ms lease and 160ms exit before restoring web drawing. */
+ * Failed requests restore web drawing immediately and block the current session. */
 export function useNativeDictationPill(snapshot: DictationSnapshot, session: number, onFinish: () => void): { native: boolean; suppressed: boolean } {
   const [native, setNative] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
@@ -60,9 +61,10 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
     let checked = -1;
     let blocked = -1;
     let retirementSeen = 0;
-    let failureGeneration = -1;
+    let releasePending = false;
+    let disabled = false;
     let frameTimer: ReturnType<typeof setTimeout> | undefined;
-    let failureTimer: ReturnType<typeof setTimeout> | undefined;
+
     let unlisten: (() => void) | undefined;
     const bounded = (text: string | undefined, budget: number) => {
       if (text === undefined) return undefined;
@@ -76,32 +78,42 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
       }
       return result;
     };
-    const fallback = (absent: boolean, generation: number) => {
+    const request = async (body: Record<string, unknown>) => {
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          fetch('/api/next/dictation-pill', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + getMobileWsToken() },
+            body: JSON.stringify({ ...body, deadline: Date.now() + timing.requestMs }), signal: controller.signal,
+          }).then(async response => response.ok ? response.json() : { native: false }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('Pill deadline')); }, timing.requestMs); }),
+        ]);
+      } finally { clearTimeout(timer); }
+    };
+    const fallback = (generation: number) => {
       blocked = generation;
-      clearTimeout(failureTimer);
-      failureGeneration = generation;
-      if (absent) setNative(false);
-      else failureTimer = setTimeout(() => {
-        if (!disposed && latest.current.generation === generation) setNative(false);
-      }, 1000);
+      setNative(false);
+      // Independent best effort: a lost acknowledgement must not block retirement.
+      void request({ action: 'release' }).catch(() => undefined);
     };
     // One request owns the transport until its reply settles. Wakes only replace
     // the latest committed snapshot; they never append work to a frame queue.
     const pump = async () => {
-      if (disposed || !ready) return;
+      if (disposed || !ready || disabled) return;
       if (busy) { pending = true; return; }
       const current = latest.current;
-      if (failureGeneration !== current.generation) clearTimeout(failureTimer);
       if (awaitingCommit && !current.native) return;
       awaitingCommit = false;
       let action: 'prepare' | 'frame' | 'release';
       let generation = current.generation;
       const releasing = current.retirement !== retirementSeen && current.native;
       retirementSeen = current.retirement;
-      if (releasing) {
+      if (releasing || releasePending) {
+        releasePending = false;
         action = 'release';
         generation = current.retiredGeneration;
-      } else if (blocked === generation) return;
+      } else if (blocked === generation || quiet) return;
       else if (current.active) {
         if (current.native) action = 'frame';
         else {
@@ -120,20 +132,17 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
       pending = false;
       try {
         const frame = current.snapshot;
-        const response = await fetch('/api/next/dictation-pill', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + getMobileWsToken() },
-          body: JSON.stringify({ action, checkSettings, snapshot: action === 'frame' ? {
-            state: quiet ? 'idle' : frame.state, session: current.session,
-            audioLevel: frame.audioLevel, durationMs: frame.durationMs,
-            pastedText: bounded(frame.pastedText ?? undefined, 4000), error: bounded(frame.error ?? undefined, 1000),
-          } : undefined }), signal: AbortSignal.timeout(10000),
-        });
-        const reply = response.ok ? await response.json() : { native: false, absent: false };
+        const reply = await request({ action, checkSettings, snapshot: action === 'frame' ? {
+          state: frame.state, session: current.session,
+          audioLevel: frame.audioLevel, durationMs: frame.durationMs,
+          pastedText: bounded(frame.pastedText ?? undefined, 4000), error: bounded(frame.error ?? undefined, 1000),
+        } : undefined });
         if (disposed) return;
         if (generation !== latest.current.generation) { pending = true; return; }
         if (!reply.native) {
+          if (reply.enabled === false) disabled = true;
           blocked = generation;
-          if (latest.current.native) fallback(reply.absent === true, generation);
+          if (latest.current.native) fallback(generation);
           return;
         }
         if (action === 'prepare') {
@@ -147,10 +156,15 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
         }
       } catch {
         if (!disposed) {
-          if (generation !== latest.current.generation) pending = true;
-          else {
+          if (generation !== latest.current.generation) {
+            // A deadline proves the shared transport is stalled even if a new
+            // session arrived while it was in flight. Do not hide web for a
+            // second deadline while the last native frame expires.
+            if (latest.current.native) fallback(latest.current.generation);
+            else pending = true;
+          } else {
             blocked = generation;
-            if (latest.current.native) fallback(false, generation);
+            if (latest.current.native) fallback(generation);
           }
         }
       } finally {
@@ -163,12 +177,21 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
       void pump();
     };
     wake.current = notify;
-    // Both the listener registration and initial read precede all traffic. A
+    // Listener registration and the initial quiet read precede all frames. A
     // newer event wins over a late initial read, including temporary overrides.
     void (async () => {
+      const generation = latest.current.generation;
+      const initial = await request({ action: 'prepare', checkSettings: true }).catch(() => ({ native: false }));
+      if (disposed) return;
+      probed = true;
+      if (initial.enabled === false) { disabled = true; return; }
+      if (!initial.native) blocked = generation;
       const [{ listen }, { invoke }] = await Promise.all([import('@tauri-apps/api/event'), import('@tauri-apps/api/core')]);
       let revision = 0;
-      const apply = (value: boolean) => { quiet = value; setSuppressed(value); };
+      const apply = (value: boolean) => {
+        if (value && !quiet && latest.current.native) releasePending = true;
+        quiet = value; setSuppressed(value); if (ready) notify();
+      };
       const off = await listen<{ active?: boolean }>('o8:quiet-mode-changed', ({ payload }) => {
         if (!disposed) { revision++; apply(payload.active === true); }
       });
@@ -179,13 +202,15 @@ export function useNativeDictationPill(snapshot: DictationSnapshot, session: num
       if (disposed) return;
       if (revision === before) apply(mode?.active === true);
       ready = true;
-      notify();
+      if (initial.native && generation === latest.current.generation) {
+        awaitingCommit = true;
+        setNative(true);
+      } else notify();
     })().catch(() => { /* Without readiness the web retains drawing ownership. */ });
     return () => {
       disposed = true;
       wake.current = null;
       clearTimeout(frameTimer);
-      clearTimeout(failureTimer);
       unlisten?.();
     };
   }, []);

@@ -858,7 +858,7 @@ export default function DictationPillPage() {
   const webSnapshot = nativeDictation ? IDLE_SNAPSHOT : snapshot;
   const nativeActive = nativeDictation && !suppressed && snapshot.state !== 'idle';
   const hitRectHostRef = useRef<HTMLDivElement | null>(null);
-  const dockVisible = !suppressed && ((!nativeDictation && (topPillEnabled || snapshot.state !== 'idle')) || ttsState !== 'idle'
+  const dockVisible = (!nativeDictation || !suppressed) && ((!nativeDictation && (topPillEnabled || snapshot.state !== 'idle')) || ttsState !== 'idle'
     || askOpen || agentWorking || !!agentConfirm || realtimeVoice !== 'off'
     || (nativeDictation && (editVisible || dropActive || !!stagedChips || (workers.count > 0 || (parkedWorkers?.waiting ?? 0) > 0) || !!glint)));
   useNativePillDockExtent(nativeDictation, nativeActive, dockVisible, askOpen, suppressed, invokeCmd);

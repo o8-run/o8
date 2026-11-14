@@ -97,6 +97,14 @@ beforeEach(async () => {
   dock = host.querySelector('#dock')!;
   hud = host.querySelector('#hud')!;
 });
+async function remountSurfaces() {
+  await act(async () => root.render(null));
+  await act(async () => root.render(createElement('div', null,
+    createElement('div', { id: 'dock' }, createElement(DictationPillPage)),
+    createElement('div', { id: 'hud' }, createElement(AgentPartialsPage)))));
+  dock = host.querySelector('#dock')!;
+  hud = host.querySelector('#hud')!;
+}
 afterEach(async () => {
   await act(async () => root.unmount());
   dom.window.close();
@@ -129,16 +137,27 @@ describe('native Fn dictation surfaces', () => {
     expect(invoke.mock.calls.filter(([command]) => command === 'o8_system_dictation_finish')).toHaveLength(1);
   });
   it('stops probing when the flag is off, including across a minute of idle', async () => {
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ native: false, enabled: false })));
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ native: false, enabled: false })));
+    await remountSurfaces();
     await wait(1000);
     const initial = vi.mocked(fetch).mock.calls.length;
     await wait(60000);
     expect(fetch).toHaveBeenCalledTimes(initial);
     await event('system-start', { hud: false, surface: 'off', sessionId: 800 });
     await wait(100);
-    expect(fetch).toHaveBeenCalledTimes(initial + 1);
+    expect(fetch).toHaveBeenCalledTimes(initial);
     await wait(60000);
-    expect(fetch).toHaveBeenCalledTimes(initial + 1);
+    expect(fetch).toHaveBeenCalledTimes(initial);
+  });
+  it('flag off preserves web visibility during quiet mode', async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ native: false, enabled: false })));
+    await remountSurfaces();
+    await wait(1000);
+    await event('system-start', { hud: false, surface: 'off', sessionId: 801 });
+    await act(async () => {
+      bus.get('o8:quiet-mode-changed')?.forEach(callback => callback({ payload: { active: true } }));
+    });
+    expect((dock.firstElementChild as HTMLElement).style.display).toBe('flex');
   });
   it('hands pure dictation to native only after prepare, and keeps the web edit chip available', async () => {
     const frames: Record<string, unknown>[] = [];
@@ -147,6 +166,7 @@ describe('native Fn dictation surfaces', () => {
       frames.push(body);
       return new Response(JSON.stringify({ native: true }), { headers: { 'Content-Type': 'application/json' } });
     });
+    await remountSurfaces();
     await wait(1000);
     const firstSession = Date.now();
     await event('system-start', { hud: false, surface: 'off', sessionId: 501 });
@@ -179,8 +199,7 @@ describe('native Fn dictation surfaces', () => {
     });
     await wait(100);
     expect((dock.firstElementChild as HTMLElement).style.display).toBe('none');
-    const last = frames.filter(frame => frame.action === 'frame').at(-1);
-    expect((last?.snapshot as { state?: string })?.state).toBe('idle');
+    expect(frames.at(-1)?.action).toBe('release');
 
     const finish = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body ?? '{}'))).find(body => body.snapshot?.session);
     expect(finish?.action).toBe('frame');

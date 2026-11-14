@@ -312,3 +312,57 @@ fn unsupported_platform_rejects_without_queueing() {
     enqueue(json!({"id":"unsupported-platform"}));
     assert!(FRAMES.lock().unwrap().is_empty());
 }
+
+#[test]
+fn identical_ticks_configure_and_present_only_once() {
+    let mut pill = Pill::default();
+    let mut counts = [0; 3];
+    for _ in 0..100 {
+        let (configure, frame, front) = pill.presentation.tick(true, Some([0., 0., 520., 120.]));
+        counts[0] += usize::from(configure);
+        counts[1] += usize::from(frame);
+        counts[2] += usize::from(front);
+    }
+    assert_eq!(counts, [1, 1, 1]);
+    assert_eq!(
+        pill.presentation.tick(true, Some([1., 0., 520., 120.])),
+        (false, true, false)
+    );
+    pill.presentation.tick(false, None);
+    assert_eq!(
+        pill.presentation.tick(true, Some([1., 0., 520., 120.])),
+        (false, false, true)
+    );
+}
+#[test]
+fn active_frame_expires_without_waiting_for_exit_animation() {
+    let mut pill = Pill::default();
+    pill.apply(Snapshot {
+        state: "recording".into(),
+        ..Default::default()
+    });
+    pill.motion = crate::motion::Transition::settled(160, true);
+    pill.shown = true;
+    pill.heard = Instant::now() - Duration::from_millis(751);
+    pill.expire();
+    assert!(!pill.target);
+    assert!(!pill.motion.value().1);
+    let timing: Value =
+        serde_json::from_str(include_str!("../../../src/lib/next/pill-timing.json")).unwrap();
+    assert!(timing["requestMs"].as_u64().unwrap() + 100 < 750);
+    assert_eq!(timing["expiryMs"], 750);
+}
+
+#[gpui::test]
+fn invalid_window_delivery_returns_an_error_immediately(cx: &mut TestAppContext) {
+    let handle = cx.add_window(|_, _| Pill::default());
+    handle
+        .update(cx, |_, window, _| window.remove_window())
+        .unwrap();
+    let result = deliver(
+        handle,
+        json!({"id":"invalid", "expiresAt":future(), "args":{"action":"frame"}}),
+        &mut cx.to_async(),
+    );
+    assert!(result.is_err());
+}
