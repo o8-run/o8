@@ -17,7 +17,7 @@ o8 is a free, open-source review and merge layer for coding agents. Write code w
 
 Featured in [Awesome Mac](https://github.com/jaywcjlove/awesome-mac) and [Awesome GPUI](https://github.com/zed-industries/awesome-gpui).
 
-![An agent explains the o8 review loop and draws it inside the conversation; each step is clicked to show what happens there](./assets/review-loop.gif)
+https://github.com/user-attachments/assets/4dba20b4-58d6-4f1a-b65d-911e7c4ebfa4
 
 - **Independent review.** The agent that wrote the code never approves it. A separate reviewer reads the real diff, and its approval is tied to the exact commit it reviewed.
 - **Findings go back to the author.** Rejected work returns to the agent that wrote it, with the saved findings. Each handoff has a receipt, corrections are capped at two rounds, and a stopped worker is never restarted.
@@ -43,8 +43,6 @@ Featured in [Awesome Mac](https://github.com/jaywcjlove/awesome-mac) and [Awesom
 
 Reviewers keep every tool they need. A reviewer can spawn workers to reproduce a bug, run the tests or try a fix, and each one runs in its own git worktree.
 
-![One ask, three workers: the task splits into packets, each worker builds its page in its own worktree, and every tile reports as it goes](./assets/three-workers.gif)
-
 A merge that fails climbs a five-step ladder that ends at a human card. The same verbs work from the app, the `o8` CLI and any MCP client. The long version is [How o8 works](./docs/user/how-o8-works.md).
 
 ## Runtimes
@@ -56,8 +54,6 @@ A merge that fails climbs a five-step ladder that ends at a human card. The same
 | | 3code · Prime Agent · DeepSeek Harness |
 
 o8 finds the coding-agent CLIs you already have installed and runs them behind one adapter contract, as reviewers, fixers and workers. The table lists every runtime o8 can detect today, and a test keeps it equal to the registry. Readiness differs by CLI version and platform, so the first-run picker shows what is installed and working on your machine. Adding a runtime is a small documented patch: [runtime adapter contract](./docs/internals/runtime-adapter-contract.md). Claude Code can also keep its tools and session behavior while another model supplies inference: [model carriers](./docs/user/claude-code-model-carriers.md).
-
-![Before sending: the Lead chip sets the model and its thinking effort, and the mode chip sets Solo, Multitask, Compare plans, or Fusion](./assets/choose-before-you-send.gif)
 
 ## Get it
 
