@@ -222,21 +222,43 @@ describe('openTerminalPanes', () => {
 
   it('reads running packets from a lane list, once each, titled as o8 titles them', () => {
     expect(runningPackets([
-      { packetId: 'pkt-1', status: 'running', label: 'Fix login' },
+      { packetId: 'pkt-1', status: 'reviewing', label: 'Fix login' },
       { packetId: 'pkt-2', status: 'launching' },
       { packetId: 'pkt-3', status: 'reviewing', label: 'Done already' },
       { packetId: 'pkt-4', status: 'awaiting_input', label: 'Waiting' },
-      { packetId: 'pkt-1', status: 'running', label: 'Fix login, second lane' },
+      { packetId: 'pkt-1', status: 'running', label: 'Fix login, second try' },
       { packetId: null, status: 'running', label: 'A lane with no packet' },
       { packetId: 7, status: 'running' },
       { status: 'running' },
       null,
     ])).toEqual([
-      { id: 'pkt-1', title: 'Fix login, second lane', kind: 'packet' },
+      { id: 'pkt-1', title: 'Fix login, second try', kind: 'packet' },
       { id: 'pkt-2', title: '', kind: 'packet' },
     ]);
     expect(runningPackets(undefined)).toEqual([]);
     expect(runningPackets({ lanes: [] })).toEqual([]);
+  });
+
+  it('lets a packet\'s newest lane decide, and keeps a title an earlier lane gave', () => {
+    expect(runningPackets([
+      { packetId: 'pkt-1', status: 'running', label: 'Old lane still says running' },
+      { packetId: 'pkt-1', status: 'reviewing', label: 'Newest lane is done' },
+    ])).toEqual([]);
+    expect(runningPackets([
+      { packetId: 'pkt-2', status: 'failed', label: 'Named once' },
+      { packetId: 'pkt-2', status: 'running' },
+    ])).toEqual([{ id: 'pkt-2', title: 'Named once', kind: 'packet' }]);
+  });
+
+  it('never passes an unsafe packet ID to the multiplexer', () => {
+    const { calls, exec } = fakeRex();
+    const result = openTerminalPanes({
+      terminals: [{ id: '-rf', kind: 'packet' }, { id: 'a b', kind: 'packet' }, { id: 'x]', kind: 'packet' }, { id: 'pkt-ok', kind: 'packet' }],
+      limit: 8, env: rexEnv, self, exec,
+    });
+    expect(result.skipped).toEqual(['-rf', 'a b', 'x]']);
+    expect(result.opened.map((pane) => pane.id)).toEqual(['pkt-ok']);
+    expect(calls.filter((args) => args.includes('--label'))).toHaveLength(1);
   });
 
   it('follows a running packet in its pane and observes a terminal in its pane', () => {
@@ -261,11 +283,15 @@ describe('openTerminalPanes', () => {
     expect(again.existing).toEqual(['pkt-1']);
     expect(again.opened).toEqual([]);
     const remote = fakeRex();
-    openTerminalPanes({
-      terminals: [{ id: 'pkt-1', kind: 'packet' }], limit: 8, machineKey: 'Build', env: rexEnv, self, exec: remote.exec,
+    const far = openTerminalPanes({
+      terminals: [{ id: 'pkt-1', kind: 'packet' }, { id: 'cortex-dash-1', title: 'shell' }],
+      limit: 8, machineKey: 'Build', env: rexEnv, self, exec: remote.exec,
     });
+    expect(far.opened.map((pane) => pane.id)).toEqual(['cortex-dash-1']);
+    expect(far.skipped).toEqual([]);
+    expect(remote.calls.filter((args) => args.includes('--label'))).toHaveLength(1);
     expect(command(remote.calls.filter((args) => args.includes('--label'))[0]))
-      .toEqual([...self, '--human', 'terminal', 'observe', 'pkt-1', '--machine', 'Build']);
+      .toEqual([...self, '--human', 'terminal', 'observe', 'cortex-dash-1', '--machine', 'Build']);
   });
 
   it('reads worker terminals from a fleet list and leaves out the ones without a live terminal', () => {

@@ -155,19 +155,25 @@ const WORKING_LANE_STATES = new Set(['launching', 'running']);
 
 /**
  * Packets with a working worker in a lane list, titled as o8 titles them. A
- * packet appears once however many lanes it has had.
+ * packet's newest lane decides, as it does for `o8 packet transcript
+ * --follow`: lanes are listed oldest first, and an older lane that still says
+ * `running` does not bring a finished packet back.
  */
 export function runningPackets(lanes: unknown): PaneTerminal[] {
   if (!Array.isArray(lanes)) return [];
-  const packets = new Map<string, PaneTerminal>();
+  const newest = new Map<string, { working: boolean; title: string }>();
   for (const entry of lanes) {
     if (!entry || typeof entry !== 'object') continue;
     const lane = entry as { packetId?: unknown; status?: unknown; label?: unknown };
     if (typeof lane.packetId !== 'string' || !lane.packetId) continue;
-    if (typeof lane.status !== 'string' || !WORKING_LANE_STATES.has(lane.status)) continue;
-    packets.set(lane.packetId, { id: lane.packetId, title: typeof lane.label === 'string' ? lane.label : '', kind: 'packet' });
+    const label = typeof lane.label === 'string' ? lane.label : '';
+    newest.set(lane.packetId, {
+      working: typeof lane.status === 'string' && WORKING_LANE_STATES.has(lane.status),
+      // A lane without a label keeps the title an earlier lane gave the packet.
+      title: label || newest.get(lane.packetId)?.title || '',
+    });
   }
-  return [...packets.values()];
+  return [...newest].flatMap(([id, lane]) => (lane.working ? [{ id, title: lane.title, kind: 'packet' as const }] : []));
 }
 
 /** The command a packet's pane runs: this CLI, following that packet's transcript. */
@@ -245,7 +251,8 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
   const packets = new Set<string>();
   for (const terminal of input.terminals) {
     // Packets are local to this machine. A remote machine's panes only observe its shells.
-    if (terminal.kind === 'packet' && !input.machineKey) packets.add(terminal.id);
+    if (terminal.kind === 'packet' && input.machineKey) continue;
+    if (terminal.kind === 'packet') packets.add(terminal.id);
     if (!titles.has(terminal.id) || (terminal.title && !titles.get(terminal.id))) titles.set(terminal.id, terminal.title);
   }
   const unique = [...titles.keys()];
