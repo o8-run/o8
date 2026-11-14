@@ -480,12 +480,16 @@ describe('o8 mission create refuses what it would drop', () => {
   it('says a value flag needs a value when another flag follows it', () => {
     expect(() => checkMissionCreateArgs(['--effort', '--title', 'x']))
       .toThrowError(expect.objectContaining({ message: '--effort needs a value.' }));
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--body', '--repo=/r']))
+      .toThrowError(expect.objectContaining({ message: '--body needs a value.' }));
   });
 
   it('echoes a refused word without control characters, and short', () => {
     let message = '';
     try { checkMissionCreateArgs(['--title', 'x', `--a\x1b]0;pwn\x07${'b'.repeat(200)}`]); } catch (error) { message = (error as Error).message; }
     expect(message).not.toMatch(/[\x00-\x1f]/);
+    try { checkMissionCreateArgs(['--title', 'x', 'a\u202eb']); } catch (error) { message = (error as Error).message; }
+    expect(message).toContain('ab');
     expect(message.length).toBeLessThan(140);
   });
 

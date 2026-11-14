@@ -306,9 +306,9 @@ const CREATE_SWITCHES = new Set(['dispatch', 'read-only', 'sequential', 'huddle'
  */
 export function checkMissionCreateArgs(rest: string[]): void {
   // The refused word is echoed back, so it is shown without control characters and kept short.
-  const shown = (word: string) => word.replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 80);
+  const shown = (word: string) => word.replace(/[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, '').slice(0, 80);
   const knownFlag = (word: string | undefined) => word !== undefined && word.startsWith('--')
-    && (CREATE_VALUE_FLAGS.has(word.slice(2)) || CREATE_SWITCHES.has(word.slice(2)));
+    && (CREATE_VALUE_FLAGS.has(word.slice(2).split('=', 1)[0]) || CREATE_SWITCHES.has(word.slice(2).split('=', 1)[0]));
   for (let i = 0; i < rest.length; i += 1) {
     const tok = rest[i];
     const name = tok.startsWith('--') ? tok.slice(2).split('=', 1)[0] : null;
