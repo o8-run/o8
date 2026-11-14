@@ -31,7 +31,9 @@ import { fetchCorrelatedPacketMutation } from './packet/correlated-mutation.js';
 import { resolveConfig } from '../config.js';
 import {
   createTerminalStatusReporter,
+  missionTailReport,
   packetStatusReport,
+  packetTailReport,
   watchingStatusReport,
 } from '../terminal-status.js';
 import {
@@ -650,8 +652,12 @@ async function runMissionTail(mode: OutputMode, rest: string[]): Promise<number>
     }
   };
 
+  const tabStatus = createTerminalStatusReporter(mode);
   while (Date.now() < deadline && !allTerminal) {
-    const snapshot = await fetchStatus(missionId, false);
+    const snapshot = await fetchStatus(missionId, false).catch((error: unknown) => {
+      tabStatus.report({ state: 'clear' });
+      throw error;
+    });
     const packets = snapshot.packets ?? [];
     for (const p of packets) {
       const prev = lastStatus.get(p.id);
@@ -660,7 +666,9 @@ async function runMissionTail(mode: OutputMode, rest: string[]): Promise<number>
         emit({ packetId: p.id, from: prev ?? null, status: cur, title: p.title ?? '' });
         lastStatus.set(p.id, cur);
       }
+      tabStatus.report(packetTailReport(p));
     }
+    tabStatus.report(missionTailReport(packets));
     allTerminal = packets.length > 0 && packets.every(
       (p) => typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status),
     );
@@ -671,6 +679,8 @@ async function runMissionTail(mode: OutputMode, rest: string[]): Promise<number>
   if (!mode.human) {
     printJson({ schema: 'o8/cli/mission.tail/v1', done: allTerminal, reason: allTerminal ? 'all-terminal' : 'timeout' });
   }
+  // A timed-out tail clears its marks; a finished one leaves them in the tab.
+  if (!allTerminal) tabStatus.report({ state: 'clear' });
   return 0;
 }
 

@@ -19,6 +19,8 @@ export interface TerminalStatusReport {
   state: TerminalStatusState;
   title?: string | null;
   msg?: string | null;
+  /** Addresses a per-packet child record (`o8/<packet>`) instead of o8's own record. */
+  packetId?: string | null;
 }
 
 const APP = 'o8';
@@ -57,10 +59,22 @@ function base64(text: string): string {
   return Buffer.from(text, 'utf8').toString('base64');
 }
 
+/**
+ * The record a report addresses: `o8`, or `o8/<packet>` for one packet. A
+ * record id segment allows only `[A-Za-z0-9_.+-]` and 32 bytes, so other
+ * characters become `_` and a long packet id keeps its last 32 characters,
+ * the part that tells packets apart.
+ */
+export function statusRecordId(packetId?: string | null): string {
+  const segment = (packetId ?? '').replace(/[^A-Za-z0-9_.+-]/g, '_').slice(-32);
+  return segment ? `${RECORD_ID}/${segment}` : RECORD_ID;
+}
+
 /** Encode one report. Returns an empty string if it would break a protocol limit. */
 export function encodeTerminalStatus(report: TerminalStatusReport): string {
-  if (report.state === 'clear') return `\x1b]7501;state=clear:id=${RECORD_ID}\x1b\\`;
-  const pairs = [`state=${report.state}`, `id=${RECORD_ID}`, `app=${APP}`];
+  const id = statusRecordId(report.packetId);
+  if (report.state === 'clear') return `\x1b]7501;state=clear:id=${id}\x1b\\`;
+  const pairs = [`state=${report.state}`, `id=${id}`, `app=${APP}`];
   const title = sanitizeStatusText(report.title, TITLE_MAX_BYTES);
   if (title) pairs.push(`title=${base64(title)}`);
   const msg = sanitizeStatusText(report.msg, MSG_MAX_BYTES);
@@ -109,13 +123,16 @@ export function createTerminalStatusReporter(
   stderr: StatusStream = process.stderr,
 ): TerminalStatusReporter {
   const stream = terminalStatusStream(mode, env, stdout, stderr);
-  let last = '';
+  const last = new Map<string, string>();
   return {
     report(report) {
       if (!stream) return;
       const sequence = encodeTerminalStatus(report);
-      if (!sequence || sequence === last) return;
-      last = sequence;
+      const id = statusRecordId(report.packetId);
+      if (!sequence || last.get(id) === sequence) return;
+      // Clearing o8's own record also removes every per-packet record under it.
+      if (report.state === 'clear' && id === RECORD_ID) last.clear();
+      last.set(id, sequence);
       stream.write(sequence);
     },
   };
@@ -144,4 +161,41 @@ export function watchingStatusReport(
 ): TerminalStatusReport {
   const title = packets.length === 1 ? packets[0].title : packets.length > 1 ? `${packets.length} packets` : null;
   return { state: 'working', title, msg: 'Waiting for review' };
+}
+
+const PACKET_PROGRESS_PHRASES: Record<string, string> = {
+  draft: 'Draft',
+  queued: 'Queued',
+  launching: 'Starting',
+  idle: 'Idle',
+  running: 'Running',
+  recovering: 'Recovering',
+};
+
+/** One packet's line while a mission is tailed: its own record under o8's. */
+export function packetTailReport(packet: {
+  id: string;
+  status?: string | null;
+  title?: string | null;
+}): TerminalStatusReport {
+  const finished = packetStatusReport(packet.status, packet.title);
+  if (finished) return { ...finished, packetId: packet.id };
+  const msg = (packet.status && PACKET_PROGRESS_PHRASES[packet.status]) || 'In progress';
+  return { state: 'working', packetId: packet.id, title: packet.title, msg };
+}
+
+/** The mission's own line while it is tailed: how many packets have finished. */
+export function missionTailReport(
+  packets: Array<{ status?: string | null }>,
+): TerminalStatusReport {
+  const outcomes = packets.map((packet) => packetStatusReport(packet.status, null));
+  const settled = outcomes.filter((outcome) => outcome !== null).length;
+  const failed = outcomes.filter((outcome) => outcome?.state === 'error').length;
+  const title = packets.length === 1 ? '1 packet' : `${packets.length} packets`;
+  if (packets.length === 0 || settled < packets.length) {
+    return { state: 'working', title, msg: `${settled} of ${packets.length} finished` };
+  }
+  return failed > 0
+    ? { state: 'error', title, msg: `${failed} of ${packets.length} failed, blocked, or archived` }
+    : { state: 'done', title, msg: `All ${packets.length} ready for review or released` };
 }

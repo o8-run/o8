@@ -64,6 +64,11 @@ the watcher is working, then keeps a finished mark when a packet reaches review
 or release, or a failed mark when it fails, blocks, or is archived. A watcher
 that times out clears its mark.
 
+`o8 mission tail` reports each packet on its own record under o8's
+(`o8/<packet>`), with a fixed phrase for its status, and uses o8's record for
+the mission as a whole: how many packets have finished, then one finished or
+failed mark once all of them have.
+
 Reports are written only with `--human`, when stdout is an interactive terminal,
 and when the terminal is known to read the sequence. Rex is detected through
 `REX_SESSION`. Set `O8_TERMINAL_STATUS=1` to send reports in any interactive
