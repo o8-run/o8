@@ -2,7 +2,7 @@
 
 `EffectivePolicy` in `src/lib/lane/effective-policy.ts` is the exported
 `o8/effective-policy/v1` contract. The API is `GET /api/lanes/:id/policy`
-(lane or packet ID). CLI `o8 packet policy [id]` and MCP `get_effective_policy`
+(lane or packet ID), registered on both Next and the native HTTP transport. CLI `o8 packet policy [id]` and MCP `get_effective_policy`
 use that operator-only API. A missing lane returns 404. Reads do not cache,
 fetch Git refs, populate the attribution fetch memo, dispatch work or publish.
 

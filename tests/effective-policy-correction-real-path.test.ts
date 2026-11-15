@@ -81,6 +81,16 @@ it('reaches PR preparation with a durable approved review at HEAD and documents 
   expect(value.unevaluatedControls).toEqual(expect.arrayContaining(['runMergeGate', 'file-size-limit', 'contract-coverage', 'run-preflight']));
   expect(value.correctionBounds.maximum).toMatchObject({ value: 2, precedence: 'constant' });
 });
+it('exposes the persisted operator read through the native HTTP registry', async () => {
+  const { matchNativeHttpRoute } = await import('@/lib/ws-server/native-http-registry');
+  const match = matchNativeHttpRoute(`/api/lanes/${lane.id}/policy`, 'GET');
+  expect(match?.route.path).toBe('/api/lanes/[id]/policy');
+  const handlers = await match!.route.load() as typeof import('@/app/api/lanes/[id]/policy/route');
+  const response = await handlers.GET(new NextRequest(`http://localhost/api/lanes/${lane.id}/policy`, {
+    headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` },
+  }), { params: Promise.resolve({ id: lane.id }) });
+  expect(await response.json()).toMatchObject({ laneId: lane.id, headSha: head, nextAction: { value: 'prepare_pull_request' } });
+});
 it('uses the execution approval policy when approval is always required', async () => {
   writeFileSync(join(root, 'settings.toml'), '[review]\nrequire_approval = "always"\n');
   const value = await policy();
