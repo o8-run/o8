@@ -11,7 +11,11 @@ paths plus `version`. Omitted ports use the shell's default ranges; zero selects
 free ports. Always supply zero ports and a temporary data directory for fixtures.
 Optional executable injections `dialog`, `probe`, and `focus`, and
 `native_lifecycle: false`, allow headless tests without displaying windows.
-The production bundle is not wired to this entry point.
+Started with no arguments from inside an app bundle, the launcher reads its
+paths from that bundle (`src/bundle.rs`): the server under
+`Contents/Resources/server`, the window at `Contents/MacOS/o8-next`, the version
+from `Info.plist`, and the classic shell's data directory rule. It then finds a
+runtime as the classic shell does. Release packaging does not select it yet.
 
 ## Lifecycle
 

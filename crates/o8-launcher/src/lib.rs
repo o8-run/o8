@@ -8,5 +8,6 @@ macro_rules! note {
         let _ = writeln!(std::io::stderr(), $($arg)*);
     }};
 }
+pub mod bundle;
 pub mod ownership;
 pub mod update;

@@ -1195,6 +1195,11 @@ pub fn link_stays_inside(entry: &Path, link: &Path) -> bool {
     true
 }
 
+/// The release version recorded in a bundle's `Info.plist`.
+pub fn bundle_version(app: &Path) -> Option<String> {
+    plist_value(app, "CFBundleShortVersionString").ok()
+}
+
 fn plist_value(app: &Path, key: &str) -> Result<String, String> {
     let output = std::process::Command::new("/usr/libexec/PlistBuddy")
         .arg("-c")
