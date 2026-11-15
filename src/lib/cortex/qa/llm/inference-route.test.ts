@@ -32,6 +32,7 @@ import {
   probeLocalInference,
   resetLocalInferenceProbeCacheForTests,
   resolveEmbedRoute,
+  openRouterTextModels,
   resolveOpenRouterRoute,
   resolveTranscribeRoute,
 } from '@/lib/cortex/qa/llm/inference-route';
@@ -455,5 +456,18 @@ describe('inference-route', () => {
       setEnt(null);
       expect(await resolveTranscribeRoute()).toBeNull();
     });
+  });
+});
+
+describe('openRouterTextModels', () => {
+  it.each([
+    ['direct', { O8_OPENROUTER_TEXT_MODEL: 'deepseek/deepseek-v4-flash' }, 'deepseek/deepseek-v4-flash'],
+    ['direct', { O8_OPENROUTER_TEXT_MODEL: 'meta-llama/llama-4-scout:free' }, 'meta-llama/llama-4-scout:free'],
+    ['direct', {}, 'openai/gpt-6-luna'],
+    ['direct', { O8_OPENROUTER_TEXT_MODEL: '   ' }, 'openai/gpt-6-luna'],
+    ['proxy', { O8_OPENROUTER_TEXT_MODEL: 'deepseek/deepseek-v4-flash' }, 'openai/gpt-6-luna'],
+    ['local', { O8_OPENROUTER_TEXT_MODEL: 'deepseek/deepseek-v4-flash' }, 'openai/gpt-6-luna'],
+  ] as const)('%s with %j leads with %s', (via, env, first) => {
+    expect(openRouterTextModels(via, env)).toEqual([first, 'nvidia/nemotron-3.5-lightning:free']);
   });
 });

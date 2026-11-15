@@ -1,11 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import {
-  managedTextModelOptions,
-  openRouterTextModels,
-  resolveOpenRouterRoute,
-} from '@/lib/cortex/qa/llm/inference-route';
+import { MODEL_IDS } from '@/lib/models';
+import { resolveProviderKey } from '@/lib/providers/key-store';
 import {
   buildPolishSystemPrompt,
   straightenQuotes,
@@ -14,10 +11,14 @@ import {
 } from '@/lib/dictation/polish-prompt';
 import { processVoiceCommands } from '@/lib/dictation/voice-commands';
 
-// Polish runs on the managed text model with reasoning off; the $0 model is the
-// fallback (a direct key may replace the first slot with O8_OPENROUTER_TEXT_MODEL).
-// Re-verify any new id with scripts/founder-polish-sweep.mjs, which
-// checks that polish keeps the transcript's meaning.
+// Polish runs on Claude Haiku only, with the operator's Anthropic key, as the
+// desktop voice app polishes. No key, an error or a timeout returns the
+// pre-cleaned transcript unpolished.
+const POLISH_MODEL = MODEL_IDS.raw.anthropicClaudeHaiku55;
+// A person is waiting to send. A few minutes of speech is around 1,000 output
+// tokens, which Haiku, the fastest Claude tier, writes well inside this; past
+// it, the raw text goes out instead of holding the send any longer.
+const POLISH_TIMEOUT_MS = 15_000;
 
 interface PolishRequestBody {
   transcript?: string;
@@ -28,7 +29,7 @@ interface PolishRequestBody {
 /**
  * POST /api/dictation/polish
  *
- * Cleans up a raw Whisper transcript with one model call using the
+ * Cleans up a raw transcript with one Claude Haiku call using the
  * dev-aware adaptive-punctuation prompt from polish-prompt.ts.
  * Voice commands ("cancel", "scratch that", "remove that", "new line")
  * are processed deterministically before polish — saves an LLM call on
@@ -59,67 +60,48 @@ export async function POST(request: Request) {
   const surface: DictationSurface = body.surface ?? 'general';
   const systemPrompt = buildPolishSystemPrompt(surface, body.context ?? {});
 
-  const route = await resolveOpenRouterRoute();
-  if (!route) {
-    // Polish is best-effort — with no key AND no plan token, return the
-    // pre-cleaned transcript so the user still gets text inserted, just
-    // unpolished. A plan token routes this through the proxy.
+  const apiKey = resolveProviderKey('ANTHROPIC_API_KEY');
+  if (!apiKey) {
+    // Polish is best-effort: without a key the pre-cleaned transcript still
+    // goes out, just unpolished.
     return NextResponse.json({ text: preCleaned, polished: false });
   }
 
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: `RAW TRANSCRIPT:\n${preCleaned}` },
-  ];
-
-  const failures: string[] = [];
-  const polishModels = route.model ? [route.model] : openRouterTextModels(route.via);
-  for (const model of polishModels) {
-    try {
-      const response = await fetch(route.url, {
-        method: 'POST',
-        headers: route.headers,
-        body: JSON.stringify({
-          model,
-          messages,
-          // Gemini Flash silently truncates long inputs without an
-          // explicit cap. 16k matches Symon's mitigation.
-          max_tokens: 16_384,
-          temperature: 0.2,
-          ...managedTextModelOptions(model),
-        }),
-        // Bound each upstream call (polish loops over 2 models → 60s worst
-        // case). Polish is best-effort and falls back to the raw transcript,
-        // so a per-model timeout just skips cleanup rather than hanging.
-        signal: AbortSignal.timeout(30_000),
-      });
-      const text = await response.text();
-      if (!response.ok) {
-        failures.push(`${model}: HTTP ${response.status} ${text.slice(0, 160)}`);
-        continue;
-      }
-      const parsed = JSON.parse(text) as {
-        choices?: Array<{ message?: { content?: string } }>;
-        error?: { message?: string };
-      };
+  let failure: string;
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: POLISH_MODEL,
+        // Room for a long dictation; a cap below it truncates silently.
+        max_tokens: 16_384,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: `RAW TRANSCRIPT:\n${preCleaned}` }],
+      }),
+      signal: AbortSignal.timeout(POLISH_TIMEOUT_MS),
+    });
+    const text = await response.text();
+    if (response.ok) {
+      const parsed = JSON.parse(text) as { content?: Array<{ type?: string; text?: string }> };
       // Typographic quotes break text dictated into a terminal or code.
-      const polished = straightenQuotes(parsed.choices?.[0]?.message?.content?.trim() ?? '');
-      if (!polished && parsed.error?.message) {
-        failures.push(`${model}: ${parsed.error.message.slice(0, 160)}`);
-        continue;
-      }
-      return NextResponse.json({ text: polished || preCleaned, polished: Boolean(polished) });
-    } catch (error) {
-      failures.push(`${model}: ${error instanceof Error ? error.message : 'unknown error'}`);
+      const polished = straightenQuotes(
+        parsed.content?.find((block) => block.type === 'text')?.text?.trim() ?? '',
+      );
+      if (polished) return NextResponse.json({ text: polished, polished: true });
+      failure = 'Claude returned no text.';
+    } else {
+      failure = `Claude HTTP ${response.status} ${text.slice(0, 160)}`;
     }
+  } catch (error) {
+    failure = error instanceof Error ? error.message : 'unknown error';
   }
 
-  // All models failed — fall back to the pre-cleaned transcript so the
-  // user still gets text. Surface the failure detail in the response so
-  // the client can warn-toast.
-  return NextResponse.json({
-    text: preCleaned,
-    polished: false,
-    error: `Polish failed across all models. ${failures.join('; ')}`,
-  });
+  // Fall back to the pre-cleaned transcript so the user still gets text;
+  // the detail lets the client warn.
+  return NextResponse.json({ text: preCleaned, polished: false, error: `Polish failed. ${failure}` });
 }

@@ -1,54 +1,106 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The managed route, as a signed-in plan resolves it. The polish route sends
-// the model list and options; the hosted endpoint is a stub here.
+// The Anthropic key as the key store resolves it; null means none is saved.
+const key = vi.hoisted(() => ({ value: 'sk-ant-fixture' as string | null, names: [] as string[] }));
+vi.mock('@/lib/providers/key-store', () => ({
+  resolveProviderKey: (name: string) => {
+    key.names.push(name);
+    return key.value;
+  },
+}));
+// Polish never takes the OpenRouter or plan-proxy route.
+const openRouter = vi.hoisted(() => ({ resolveOpenRouterRoute: vi.fn() }));
 vi.mock('@/lib/cortex/qa/llm/inference-route', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/cortex/qa/llm/inference-route')>(),
-  resolveOpenRouterRoute: async () => ({
-    url: 'https://relay.test/v1/inference',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer plan.token' },
-    via: 'proxy',
-  }),
+  resolveOpenRouterRoute: openRouter.resolveOpenRouterRoute,
 }));
 
 import { POST } from './route';
 
 const fetchMock = vi.fn();
-const completion = (content: string) => new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+const reply = (text: string) => new Response(JSON.stringify({
+  content: [{ type: 'text', text }],
+}), { status: 200 });
 const polish = (transcript: string, context?: Record<string, unknown>) => POST(new Request('http://localhost/api/dictation/polish', {
   method: 'POST',
   body: JSON.stringify({ transcript, surface: 'terminal', ...(context ? { context } : {}) }),
 }));
-const system = (index: number) => String(sent(index).messages[0].content);
-const sent = (index: number) => JSON.parse(String((fetchMock.mock.calls[index] as [string, RequestInit])[1].body));
+const call = (index: number) => fetchMock.mock.calls[index] as [string, RequestInit];
+const sent = (index: number) => JSON.parse(String(call(index)[1].body));
+const system = (index: number) => String(sent(index).system);
 
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
+  key.value = 'sk-ant-fixture';
+  key.names = [];
+  openRouter.resolveOpenRouterRoute.mockReset();
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('POST /api/dictation/polish on the managed route', () => {
-  it('polishes with the managed text model, reasoning off, and returns straight quotes', async () => {
-    fetchMock.mockResolvedValueOnce(completion('It’s “done” ‘now’.'));
+describe('POST /api/dictation/polish', () => {
+  it('polishes with one Claude Haiku call and returns straight quotes', async () => {
+    fetchMock.mockResolvedValueOnce(reply('It’s “done” ‘now’.'));
     const response = await polish('its done now');
     expect(await response.json()).toEqual({ text: 'It\'s "done" \'now\'.', polished: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(sent(0)).toMatchObject({ model: 'openai/gpt-6-luna', reasoning_effort: 'none' });
+    const [url, init] = call(0);
+    expect(url).toBe('https://api.anthropic.com/v1/messages');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({
+      'Content-Type': 'application/json',
+      'x-api-key': 'sk-ant-fixture',
+      'anthropic-version': '2023-06-01',
+    });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(key.names).toEqual(['ANTHROPIC_API_KEY']);
+    const body = sent(0);
+    expect(Object.keys(body).sort()).toEqual(['max_tokens', 'messages', 'model', 'system']);
+    expect(body.model).toBe('claude-haiku-5-5');
+    expect(body.messages).toEqual([{ role: 'user', content: 'RAW TRANSCRIPT:\nits done now' }]);
+    expect(system(0)).toContain('terminal');
   });
 
-  it('falls back to the $0 model without a reasoning field when the managed model fails', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response('{"error":"unavailable"}', { status: 503 }))
-      .mockResolvedValueOnce(completion('Ship it.'));
-    const response = await polish('ship it');
-    expect(await response.json()).toEqual({ text: 'Ship it.', polished: true });
-    expect(sent(1).model).toBe('nvidia/nemotron-3.5-lightning:free');
-    expect(sent(1)).not.toHaveProperty('reasoning_effort');
+  it('returns the pre-cleaned transcript unpolished without a key, and calls nothing', async () => {
+    key.value = null;
+    const response = await polish('first line new line second line');
+    expect(await response.json()).toEqual({ text: 'first line\nsecond line', polished: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the pre-cleaned transcript when Claude answers with an error', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{"type":"error","error":{"type":"overloaded_error"}}', { status: 529 }));
+    const body = await (await polish('ship it')).json();
+    expect(body).toMatchObject({ text: 'ship it', polished: false });
+    expect(body.error).toContain('Claude HTTP 529');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back when the call times out or the network fails', async () => {
+    fetchMock.mockRejectedValueOnce(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+    const body = await (await polish('ship it')).json();
+    expect(body).toMatchObject({ text: 'ship it', polished: false });
+    expect(body.error).toContain('timeout');
+  });
+
+  it('never resolves or calls the OpenRouter route, with or without a key', async () => {
+    fetchMock.mockResolvedValueOnce(reply('Ship it.'));
+    await polish('ship it');
+    key.value = null;
+    await polish('ship it');
+    expect(openRouter.resolveOpenRouterRoute).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['https://api.anthropic.com/v1/messages']);
+  });
+
+  it('cancels a spoken cancel before any call', async () => {
+    const body = await (await polish('Scratch that.')).json();
+    expect(body).toMatchObject({ text: '', cancelled: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(key.names).toEqual([]);
   });
 
   it('adds the saved dictionary and instructions to the prompt when the caller sends them', async () => {
-    fetchMock.mockResolvedValueOnce(completion('Ask Kubectl about o8.'));
+    fetchMock.mockResolvedValueOnce(reply('Ask Kubectl about o8.'));
     await polish('ask cube control about oh eight', {
       dictionary: [' Kubectl ', 'o8', '', 7],
       instructions: '  Always write o8 in lowercase.  ',
@@ -58,7 +110,7 @@ describe('POST /api/dictation/polish on the managed route', () => {
   });
 
   it('keeps the prompt unchanged for callers that send neither', async () => {
-    fetchMock.mockResolvedValueOnce(completion('Ship it.')).mockResolvedValueOnce(completion('Ship it.'));
+    fetchMock.mockResolvedValueOnce(reply('Ship it.')).mockResolvedValueOnce(reply('Ship it.'));
     await polish('ship it');
     await polish('ship it', { dictionary: 'not a list', instructions: 42 });
     expect(system(0)).not.toContain('CUSTOM DICTIONARY');
