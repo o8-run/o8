@@ -9,14 +9,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct Stub {
+pub(super) struct Stub {
     heard: Result<String, String>,
     polished: Option<Result<Polished, String>>,
     calls: Mutex<Vec<String>>,
 }
 
 impl Stub {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             heard: Ok(String::new()),
             polished: None,
@@ -75,7 +75,7 @@ fn next(speech: &Speech) -> Event {
 }
 
 /// Updates for `id` until the first one that ends the recording.
-fn until_end(speech: &Speech, id: u64) -> Vec<Update> {
+pub(super) fn until_end(speech: &Speech, id: u64) -> Vec<Update> {
     let mut updates = Vec::new();
     loop {
         let event = next(speech);
@@ -95,7 +95,7 @@ fn until_end(speech: &Speech, id: u64) -> Vec<Update> {
 }
 
 /// Starts a recording and reads through its last partial.
-fn listen(speech: &mut Speech, repo: Option<&str>) -> u64 {
+pub(super) fn listen(speech: &mut Speech, repo: Option<&str>) -> u64 {
     let id = speech.start(repo.map(String::from));
     let mut updates = Vec::new();
     while updates.last() != Some(&Update::Partial("hello world".into())) {
@@ -478,7 +478,11 @@ fn speech_helper_path_prefers_the_override_then_the_bundle() {
 }
 
 /// A data directory with the desktop's two settings files.
-fn saved(fake: &Fake, dictation: serde_json::Value, overlay: Option<serde_json::Value>) -> PathBuf {
+pub(super) fn saved(
+    fake: &Fake,
+    dictation: serde_json::Value,
+    overlay: Option<serde_json::Value>,
+) -> PathBuf {
     let dir = fake.dir.join("data");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("dictation.json"), dictation.to_string()).unwrap();
