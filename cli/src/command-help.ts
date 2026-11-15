@@ -77,6 +77,8 @@ const help: Record<string, CommandHelp> = {
     details: 'Use o8 lease list to discover active names.',
     example: 'o8 lease status audit',
   },
+  'integration-queue read': { usage: '--repo-id <id>', required: 'Operator credential and registered repository ID.', defaults: 'Fresh queue projection with saved verification history.', example: 'o8 integration-queue read --repo-id repo-id' },
+  'integration-queue prepare': { usage: '--repo-id <id> --spec <file.json>', required: 'Operator credential and a specification containing targetRef, changes and required checks.', defaults: 'Checks an isolated combined candidate; never publishes.', example: 'o8 integration-queue prepare --repo-id repo-id --spec queue.json' },
   'task adopt-pr': { usage: '<number-or-url> --repo <registered-repo> [--intended-outcome <text>]', required: 'Operator token, registered repository and GitHub PR.', defaults: 'Returns the stable task and current immutable revision; does not start review.', example: 'o8 task adopt-pr 7 --repo /path/to/repo' },
   'task create': {
     usage: '--title <text> [--repo <path>] [--project <id>] [--summary <text>]',
