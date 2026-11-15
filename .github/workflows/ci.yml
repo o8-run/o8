@@ -183,7 +183,8 @@ jobs:
 
   # Lint restored to the PR lane 2026-07-18 (#1547): the error debt is burned
   # to zero on main (the old 398 baseline was mostly a stale nested worktree
-  # being linted). Warnings don't fail the job; errors do.
+  # being linted). The warning baseline reached zero on 2026-11-15 (#1670), so
+  # warnings and errors both fail the job.
   lint:
     name: Lint
     if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name != 'schedule')

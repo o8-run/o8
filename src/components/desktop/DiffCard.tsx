@@ -96,6 +96,7 @@ export const DiffCard = memo(function DiffCard({ code, onApplyDiff, isStreaming,
     });
     seenHunkKeysRef.current = currentKeys;
     if (fresh.size > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- marks hunks that arrived in this commit so they fade in once
       setNewHunkKeys(fresh);
       // Clear the fade-in marker after the animation completes so future
       // re-renders don't replay the animation.

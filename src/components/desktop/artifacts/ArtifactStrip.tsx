@@ -44,6 +44,7 @@ function Thumb({ artifact, tag, height, onOpen }: { artifact: ArtifactRef; tag?:
           fontFamily: 'var(--font-sans-system)',
         }}>{tag}</span>
       ) : null}
+      {/* eslint-disable-next-line @next/next/no-img-element -- artifact URL of unknown size, lazy-loaded thumbnail */}
       <img
         src={artifact.url}
         alt={artifact.label ?? tag ?? 'artifact'}

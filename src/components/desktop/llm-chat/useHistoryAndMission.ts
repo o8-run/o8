@@ -85,6 +85,7 @@ export function useHistoryAndMission({
 
   useEffect(() => {
     if (historyOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- opening the history panel starts its fetch and loading state
       void loadHistory();
     }
   }, [historyOpen, loadHistory]);
@@ -92,6 +93,7 @@ export function useHistoryAndMission({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const dismissed = window.localStorage.getItem(MISSION_DISMISSED_STORAGE_KEY) === '1';
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads browser storage after mount so server and client markup match
     setMissionDismissed(dismissed);
     setMissionDismissalResolved(true);
   }, []);

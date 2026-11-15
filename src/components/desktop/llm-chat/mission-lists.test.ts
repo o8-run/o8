@@ -29,6 +29,7 @@ function Mission({ repo = preferred, empty = true, index = 0 }: { repo?: Preferr
   const inputRef = useRef<HTMLTextAreaElement>(null), scrollRef = useRef<HTMLDivElement>(null);
   const mission = useHistoryAndMission({ historyOpen: false, input: '', inputRef, isEmpty: empty,
     preferredRepo: repo, queuedContextCards: [], sendMessage: send, tabId: `new-${index}`, onOpenHistoryChat: openHistory });
+  // eslint-disable-next-line react-hooks/refs -- the ref object is passed through as a prop, never read during render
   return createElement(ChatSurface, {
     activeThinking: null, activeToolCalls: [], followUps: [], followUpsLoading: false, inputRef,
     isEmpty: empty, isStreaming: false, isUserScrolledUp: false, messages: [], missionCard: mission.missionCard,

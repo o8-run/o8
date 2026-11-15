@@ -100,6 +100,7 @@ function ModelPickerBase({
             <div key={group.runtime}>
               <div style={{ ...SECTION_HEADER, display: 'flex', alignItems: 'center', gap: 5, paddingTop: gi === 0 ? 6 : 8, ...(gi > 0 ? { borderTop: '1px solid var(--t-divider-subtle)', marginTop: 2 } : {}) }}>
                 {group.meta.logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- 12px bundled provider logo
                   <img src={group.meta.logo} alt="" width={12} height={12} style={{ display: 'block', objectFit: 'contain', flexShrink: 0, borderRadius: 2 }} />
                 ) : (
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: group.meta.color, flexShrink: 0 }} />

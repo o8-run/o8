@@ -595,6 +595,7 @@ export function renderInline(text: string): React.ReactNode {
     if (match[3]) {
       // Image: ![alt](url)
       parts.push(
+        // eslint-disable-next-line @next/next/no-img-element -- model-authored URL of unknown size and origin; the image optimizer does not apply
         <img
           key={`img-${match.index}`}
           src={match[3]}

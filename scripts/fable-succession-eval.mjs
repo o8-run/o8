@@ -140,7 +140,8 @@ function askViaCli(prompt, model) {
       settled = true;
       clearTimeout(timer);
       try { child.kill(); } catch { /* dead */ }
-      err ? reject(err) : resolve(val);
+      if (err) reject(err);
+      else resolve(val);
     };
     const timer = setTimeout(() => finish(new Error(`cli timeout (${model})`)), 180_000);
     child.stdout.on('data', (chunk) => {

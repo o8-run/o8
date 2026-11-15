@@ -73,7 +73,7 @@ npm run typecheck:fast          # must be clean
 # Falls back to tsc 5.8 on Intel Macs and Windows.
 # Slower TypeScript 5.8.2 cross-check: npm run typecheck:tsc
 npm test                  # judge by the final summary, not by stderr
-npx eslint <files you changed>
+npm run lint              # must report zero warnings
 ```
 
 Rust changes also need the matching Cargo check or test: from `native/o8-next/` for the native app, or from `src-tauri/` for the installer and host. Documentation-only changes check their links and whatever checks apply to that documentation.
@@ -107,7 +107,7 @@ The check fails when the manifest doesn't match the current test sources. Leave 
 Three things about these gates that will cost you time if nobody tells you:
 
 - **The suite prints scary output on purpose.** Negative-path tests write things like `LOCKOUT BREACH`, authorization failures and timeouts to stderr while they pass. The Vitest summary and the exit code are the verdict.
-- **Repo-wide lint is a ratchet.** `npm run lint` allows the current warning count, and that ceiling only goes down. Keep lint fixes focused. When your pull request clears warnings, lower `--max-warnings` in `package.json` in the same pull request.
+- **Repo-wide lint is a gate.** `npm run lint` fails on any warning. If a rule flags a pattern that is intentional, disable that one line and state the reason after `--`.
 - **Integration tests can touch shared app state.** Some reach global paths outside `CORTEX_IDE_DATA_DIR`. Use isolated test state and quit the installed desktop app before you run them. This applies to the integration lane (and its part of `npm run test:all`), not to the default `npm test`.
 
 Use one of the commit prefixes we already use: `feat:`, `fix:`, `chore:`, `docs:`, `perf:` or `refactor:`. Files have an 800-line ceiling unless an existing waiver covers them. New TSX styling uses inline style objects, not new CSS classes.

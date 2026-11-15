@@ -132,6 +132,7 @@ export function SpecTab({ repo, onOpenInWorkspace }: SpecTabProps) {
     if (error) return error;
     if (guardedDraft !== null) return 'Save guarded — content much shorter than the saved spec';
     if (savedAt) {
+      // eslint-disable-next-line react-hooks/purity -- the saved age is read at render time on purpose; it refreshes on the next edit or save
       const seconds = Math.max(0, Math.floor((Date.now() - savedAt) / 1000));
       if (seconds < 5) return 'Saved';
       if (seconds < 60) return `Saved ${seconds}s ago`;
