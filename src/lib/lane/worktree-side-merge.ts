@@ -579,11 +579,8 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       // points at now, and no uncommitted changes the review did not cover.
       const pinned = await resolveHeadSha(worktreePath, reviewedHead.reviewedHeadSha ?? command.expectedHeadSha!, lane.repoPath);
       if (!pinned) {
-        return {
-          ok: false,
-          laneId: command.laneId,
-          note: `The reviewed commit ${reviewedHead.reviewedHeadSha ?? command.expectedHeadSha} could not be resolved in this lane's repository.`,
-        };
+        return { ok: false, laneId: command.laneId, reason: 'approved_head_unavailable',
+          note: `The reviewed commit ${reviewedHead.reviewedHeadSha ?? command.expectedHeadSha} could not be resolved in this lane's repository. Return to review.` };
       }
       reviewedSnapshotSha = pinned;
     } else {

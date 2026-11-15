@@ -71,7 +71,7 @@ export async function POST(request: Request) {
     }
 
     if (action === 'merge') {
-      if (typeof body?.commitSha !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(body.commitSha)) return NextResponse.json({ error: 'An approved head SHA is required before publication.' }, { status: 400 });
+      if (typeof body?.commitSha !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(body.commitSha)) return NextResponse.json({ code: 'approved_head_required', message: 'The approved head SHA is required. Send it as commitSha.', error: 'The approved head SHA is required. Send it as commitSha.' }, { status: 400 });
       const result = await mergeGitHubPullRequest(repo, prNumber, { deleteBranch: true, expectedHeadSha: body.commitSha,
         mergeMethod: body.mergeMethod, expectedMergeGate: body.expectedMergeGate, principal: resolveRequestPrincipalContext(request).role });
       invalidateGitHubSync(repo, 'pull_requests');

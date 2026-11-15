@@ -1,3 +1,5 @@
+import { fetchWorkerRun } from '@/lib/worker/runs';
+import { fetchWorkerBranch, cleanupRemoteMergeWorktree } from './remote-fetch';
 import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import type { ApprovalRisk } from '@/lib/approvals/types';
 import { buildPolicyContext } from '@/lib/approvals/policies';
@@ -49,6 +51,16 @@ async function readDiffForLane(lane: DiffLane) {
       return { rawDiff: '', diffBase: null, headSha: undefined };
     }
   }
+}
+
+async function readMergeApprovalDiff(lane: Lane) {
+  if ((lane.runtime as string) !== 'remote-customer') return readDiffForLane(lane);
+  const run = fetchWorkerRun(lane.id);
+  if (!run?.remoteBranch) throw new Error('The remote source branch is unavailable. Return to review.');
+  const fetched = await fetchWorkerBranch(lane.repoPath, run.remoteBranch, `approval-${run.id}`);
+  if (!fetched.ok) throw new Error(fetched.note);
+  try { return await readDiffForLane({ ...lane, worktreePath: fetched.tempWorktreePath }); }
+  finally { await cleanupRemoteMergeWorktree(lane.repoPath, fetched.tempWorktreePath); }
 }
 
 export async function getDiffForLane(lane: DiffLane) {
@@ -159,8 +171,8 @@ export async function createLaneActionApproval(
       }
     }
   }
-  const { rawDiff, diffBase, headSha } = await readDiffForLane(lane);
-  const expectedHeadSha = input.expectedHeadSha ?? (input.verb === 'merge' && (lane.runtime as string) !== 'remote-customer' ? headSha : undefined);
+  const { rawDiff, diffBase, headSha } = await (input.verb === 'merge' ? readMergeApprovalDiff(lane) : readDiffForLane(lane));
+  const expectedHeadSha = (input.expectedHeadSha ?? (input.verb === 'merge' ? headSha : undefined))?.toLowerCase();
   const files = parseGitDiff(rawDiff);
   const surfaceRoute = resolveRequireApprovalSync() === 'surface' && lane.packetId
     ? resolvePacketDispatcher(lane.packetId) ?? {

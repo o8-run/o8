@@ -64,6 +64,7 @@ it('a device continuation without an approved SHA refuses before merge', async (
   expect(await response.json()).toMatchObject({ code: 'approved_head_required' });
   expect(git(f.origin, 'rev-parse', 'main')).toBe(base);
   expect(getLane(f.lane.id)?.status).toBe('reviewing');
+  expect(getApproval(f.approval.id)).toMatchObject({ status: 'rejected', resolution: { note: expect.stringContaining('Return to review') } });
 });
 
 it('new merge cards carry the exact head used for their saved diff', async () => {
@@ -89,4 +90,48 @@ it('refuses a head moved after the device decision was durably recorded', async 
     expect(getLane(f.lane.id)?.status).toBe('reviewing');
     expect(getApproval(f.approval.id)?.status).toBe('pending');
   } finally { boundary.mockRestore(); }
+});
+
+it('an unavailable pinned commit after the device decision returns to review with a reason', async () => {
+  const f = await fixture(); const base = git(f.origin, 'rev-parse', 'main');
+  const head = await import('@/lib/lane/head-sha-lock');
+  const boundary = vi.spyOn(head, 'resolveHeadSha').mockResolvedValueOnce(undefined);
+  try {
+    const response = await approve(f.approval.id);
+    expect(response.status).toBe(409);
+    expect(getLane(f.lane.id)?.status).toBe('reviewing');
+    expect(getApproval(f.approval.id)).toMatchObject({ status: 'pending', audit: expect.arrayContaining([expect.objectContaining({ note: expect.stringContaining('could not be resolved') })]) });
+    expect(git(f.origin, 'rev-parse', 'main')).toBe(base);
+  } finally { boundary.mockRestore(); }
+});
+it.each([false, true])('remote-lane device cards pin the fetched source, moved=%s', async moved => {
+  const f = await fixture(false);
+  const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
+  const branch = `remote/${f.lane.id}`;
+  git(f.lane.worktreePath!, 'push', 'origin', `HEAD:refs/heads/${branch}`);
+  const lane = createLane({ repoPath: f.repo, branch, baseBranch: 'main', runtime: 'remote-customer' as typeof f.lane.runtime, label: 'Remote device fixture' });
+  const { createToken } = await import('@/lib/worker/tokens');
+  const workerToken = createToken({ label: 'Remote publication fixture' });
+  getSqlite().prepare('INSERT INTO worker_runs (id, lane_id, worker_token_id, transport, status, remote_branch, started_at, last_event_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(`run-${lane.id}`, lane.id, workerToken.id, 'ssh', 'completed', branch, new Date().toISOString(), new Date().toISOString());
+  const result = await createLaneActionApproval(lane, 'orchestrator', { verb: 'merge', title: 'Merge remote fixture', description: 'Review remote fixture', summary: 'Merge fixture', risk: 'low', policyRuleId: 'lane-merge', note: 'Held for review' });
+  expect(getApproval(result.approvalId!)?.continuation).toMatchObject({ expectedHeadSha: f.sha });
+  if (moved) {
+    writeFileSync(join(f.lane.worktreePath!, 'file.txt'), 'remote replacement\n');
+    git(f.lane.worktreePath!, 'add', 'file.txt'); git(f.lane.worktreePath!, 'commit', '-qm', 'remote replacement');
+    git(f.lane.worktreePath!, 'push', 'origin', `HEAD:refs/heads/${branch}`);
+  }
+  const response = await approve(result.approvalId!);
+  const body = await response.json();
+  if (moved) {
+    expect(response.status, JSON.stringify(body)).toBe(409);
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    expect(getApproval(result.approvalId!)?.status).toBe('pending');
+    expect(git(f.origin, 'show', 'main:file.txt')).toBe('base');
+    return;
+  }
+  expect(response.status, JSON.stringify(body)).toBe(200);
+  expect(body, JSON.stringify(body)).toMatchObject({ approval: { resolution: { continuationStatus: 'completed' } } });
+  expect(getApproval(result.approvalId!)?.resolution).toMatchObject({ authorizingPrincipal: 'device', approvedHeadSha: f.sha });
+  expect(git(f.origin, 'show', 'main:file.txt')).toBe('approved');
 });

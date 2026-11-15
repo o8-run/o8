@@ -6,7 +6,7 @@ import { checkExpectedHeadSha } from '@/lib/lane/head-sha-lock';
 export async function checkApprovalMergeHead(approval: ApprovalRecord, spokenHead?: string) {
   const continuation = approval.continuation;
   if (continuation?.kind !== 'lane' || continuation.verb !== 'merge') return null;
-  const sha = spokenHead ?? continuation.expectedHeadSha;
+  const sha = (spokenHead ?? continuation.expectedHeadSha)?.toLowerCase();
   const lane = getLane(continuation.laneId);
   const refuse = (code: string, message: string) => {
     if (lane) setLaneStatus(lane.id, 'reviewing', 'system', 'review_invalidated');
