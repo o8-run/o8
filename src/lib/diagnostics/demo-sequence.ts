@@ -95,6 +95,12 @@ const MISSION_SIDEBAR_TOGGLE_COORDS = { x: 1180, y: 88 };
 // NavRail Settings icon: bottom of the left rail, 56px wide.
 // Approximately x=28, y=720 on a standard 800-tall window.
 const SETTINGS_NAV_COORDS = { x: 28, y: 720 };
+// The demo drove the browser console, which was removed (#6163); its pages
+// now show a static notice, so navigating there would fail every step. The run
+// reports each step as skipped, without touching the window, until the demo
+// targets the native window.
+const DEMO_SKIP_REASON: string | null = 'skipped: the browser console this demo drove was removed';
+
 const STEP_NAMES = [
   '01-navigate-dashboard',
   '02-verify-route',
@@ -589,6 +595,14 @@ async function withGlobalTimeout<T>(
 export async function runDemoSequence(opts?: { timeoutMs?: number }): Promise<DemoRunResult> {
   const startedAt = nowIso();
   const startedMs = Date.now();
+  if (DEMO_SKIP_REASON) {
+    const reason = DEMO_SKIP_REASON;
+    return {
+      startedAt, finishedAt: nowIso(), durationMs: Date.now() - startedMs, totalSteps: STEP_NAMES.length,
+      passed: 0, failed: 0, skipped: STEP_NAMES.length, unavailable: 0, runDir: '',
+      steps: STEP_NAMES.map((name) => skippedStep(name, reason)),
+    };
+  }
   // Default 45s — 11 steps including sidebar toggle + Settings nav + context-graph
   // navigate each add ~1-2s over the original 6-step 30s budget. Still well
   // within the hard cap of 60s.

@@ -1,7 +1,7 @@
 import type { ApprovalGateResult } from '@/lib/approvals/types';
 import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
 import { assessGateFailureRisk } from '@/lib/lane/gate-failure-warning';
-import { buildCheckList } from '@/lib/lane/preview-merge';
+import { buildCheckList, type MergePreviewResult } from '@/lib/lane/preview-merge';
 import { startWakeTriage } from '@/lib/orchestrator/wake-triage';
 import {
   appendEvent,
@@ -315,4 +315,11 @@ export async function handlePostRebaseVerifyFailure(
     checks,
     blockers,
   };
+}
+
+/** Record the decision principal separately from the unchanged execution actor. */
+export function recordMergePublication(command: MergeCommand, actor: LaneEventActor, approvedSha: string,
+  mergedSha: string, baseBranch: string, checks: MergePreviewResult['checks']) {
+  appendEvent(command.laneId, 'merge', actor, { laneHeadSha: mergedSha, baseBranch, approvedSha, mergedSha,
+    authorizingPrincipal: command.authorizingPrincipal ?? 'unknown', authorizingApprovalId: command.authorizingApprovalId ?? null, checks });
 }

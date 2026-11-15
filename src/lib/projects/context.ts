@@ -249,6 +249,7 @@ export async function syncProjectStoreFromPanelLedger(): Promise<{
     if (!settingsProject) {
       const created = createProject({
         name: panelProject.name,
+        mergeModeSourceProjectId: panelProject.id,
         slug,
         description: null,
       });

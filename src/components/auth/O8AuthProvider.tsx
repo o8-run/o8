@@ -53,17 +53,17 @@ const DISABLED_STATE: O8AuthState = {
 const O8AuthContext = createContext<O8AuthState>(DISABLED_STATE);
 
 /**
- * The single shared auth hook for BOTH the default dashboard and the canvas
- * surface. Reads from O8AuthContext, so consumers never call Clerk hooks
- * directly and work unchanged whether or not Clerk is configured.
+ * The shared auth hook for retained shell webviews. Reads from O8AuthContext,
+ * so consumers never call Clerk hooks directly and work unchanged whether or
+ * not Clerk is configured.
  */
 export function useO8Auth(): O8AuthState {
   return useContext(O8AuthContext);
 }
 
 /**
- * Root auth provider. Wraps the whole app in src/app/layout.tsx so both the
- * dashboard and canvas routes share one identity. No-op (account-less) when no
+ * Shell auth provider. The retained webview layouts share one identity through
+ * src/components/shell-layout.tsx. No-op (account-less) when no
  * Clerk key is baked into the build.
  */
 export function O8AuthProvider({ children }: { children: ReactNode }) {

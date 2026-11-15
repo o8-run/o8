@@ -1,10 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
 import { emit } from '@tauri-apps/api/event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { onFileOpenRequest } from './bridge';
 import { listenTauriEvent, subscribeTauriEvent } from './events';
 
@@ -22,8 +19,6 @@ describe('native event registration and disposal through the SDK', () => {
   const invoke = vi.fn();
   const unregisterCallback = vi.fn((id: number) => { callbacks.delete(id); });
   const consoleError = vi.fn();
-  let root: Root | null;
-  let container: HTMLDivElement | null;
 
   function unlistenCalls() {
     return invoke.mock.calls.filter(([command]) => command === 'plugin:event|unlisten');
@@ -38,8 +33,6 @@ describe('native event registration and disposal through the SDK', () => {
     responseDelay = 0;
     existingEvent = true;
     pendingFiles = [];
-    root = null;
-    container = null;
     callbacks.clear();
     nativeListeners.clear();
     for (const key of Object.keys(registry)) delete registry[key];
@@ -96,10 +89,8 @@ describe('native event registration and disposal through the SDK', () => {
   });
 
   afterEach(async () => {
-    if (root) act(() => root?.unmount());
     await vi.dynamicImportSettled();
     await vi.advanceTimersByTimeAsync(1000);
-    container?.remove();
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -195,32 +186,5 @@ describe('native event registration and disposal through the SDK', () => {
     vi.stubGlobal('__TAURI_INTERNALS__', { metadata: { currentWindow: { label: 'browser-view' } }, invoke });
     expect(await onFileOpenRequest(vi.fn())).toBeNull();
     expect(invoke).not.toHaveBeenCalled();
-  });
-
-  it('mounts the file bridge once, routes to the latest callback, and releases on unmount', async () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    const first = vi.fn();
-    const latest = vi.fn();
-    pendingFiles = ['/workspace/first.txt'];
-    await act(async () => { root?.render(createElement(FileOpenBridge, { onOpenFile: first })); });
-    await vi.dynamicImportSettled();
-    await vi.advanceTimersByTimeAsync(30);
-    expect(first).toHaveBeenCalledWith('/workspace/first.txt');
-    await act(async () => { root?.render(createElement(FileOpenBridge, { onOpenFile: latest })); });
-    expect(invoke.mock.calls.filter(([command]) => command === 'plugin:event|listen')).toHaveLength(1);
-    pendingFiles = ['/workspace/second.txt'];
-    await act(async () => { await emit('file-open-request', pendingFiles); });
-    expect(latest).toHaveBeenCalledWith('/workspace/second.txt');
-    expect(first).toHaveBeenCalledTimes(1);
-    act(() => root?.unmount());
-    root = null;
-    await vi.advanceTimersByTimeAsync(1000);
-    await emit('file-open-request', ['/workspace/stale.txt']);
-    expect(latest).toHaveBeenCalledTimes(1);
-    expect(nativeListeners.size).toBe(0);
-    expect(callbacks.size).toBe(0);
-    expect(consoleError).not.toHaveBeenCalled();
   });
 });

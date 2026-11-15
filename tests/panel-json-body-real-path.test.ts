@@ -36,3 +36,23 @@ it.each(routes)('%s rejects missing, malformed and non-object JSON', async (_nam
     expect(await response.json()).toEqual({ error: 'Request body must be a JSON object.' });
   }
 });
+
+const objectRoutes = [
+  ['PUT /api/panel/file-io', () => import('@/app/api/panel/file-io/route').then(route => route.PUT)],
+  ['POST /api/panel/repos', () => import('@/app/api/panel/repos/route').then(route => route.POST)],
+  ['DELETE /api/panel/repos', () => import('@/app/api/panel/repos/route').then(route => route.DELETE)],
+  ['POST /api/panel/ssh-machines', () => import('@/app/api/panel/ssh-machines/route').then(route => route.POST)],
+  ['POST /api/panel/targets/dispatch', () => import('@/app/api/panel/targets/dispatch/route').then(route => route.POST)],
+] as const;
+it.each(objectRoutes)('%s refuses null and non-object bodies before side effects', async (_name, load) => {
+  const handler = await load();
+  for (const body of ['null', '[]', '"text"', '42', 'true', '', '{']) {
+    const response = await handler(new NextRequest('http://localhost/api/panel/test', {
+      method: 'POST', headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` }, body,
+    }));
+    expect(response.status, body).toBe(400);
+    const payload = await response.json();
+    expect(payload).toHaveProperty('error');
+    expect(JSON.stringify(payload)).not.toMatch(/Unexpected (?:end|token)/);
+  }
+});

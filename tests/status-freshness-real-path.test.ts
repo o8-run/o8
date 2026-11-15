@@ -18,6 +18,7 @@ vi.mock('@/lib/lane/sweep-orphan-sessions', () => ({ sweepOrphanedOwnedSessions:
 const { GET } = await import('@/app/api/operator/status/route');
 const { GET: approvalsGET } = await import('@/app/api/panel/approvals/route');
 const { handleStatus } = await import('@/lib/mcp/operator-handlers/status');
+const { GET: leadGET } = await import('@/lib/orchestrator/http/lead');
 const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
 const { runStatus } = await import('../cli/src/commands/status');
 const { createLane, listLanes } = await import('@/lib/lane/registry');
@@ -38,6 +39,7 @@ const server = createServer((request, response) => {
   const headers = { authorization: `Bearer ${getOrCreateWsToken()}` };
   const req = new NextRequest(url, { headers });
   const result = url.pathname === '/api/operator/status' ? GET(req)
+    : url.pathname === '/api/orchestrator/lead' ? leadGET(req)
     : url.pathname === '/api/panel/approvals' ? approvalsGET(req)
       : Promise.resolve(Response.json(url.pathname === '/api/lanes'
         ? { lanes: listLanes().filter((lane) => url.searchParams.get('active') === 'false' || lane.status === 'running') }

@@ -1010,6 +1010,32 @@ pub fn glass_muted() -> Rgba {
 pub fn symon_glow() -> Rgba {
     gpui::rgba(0x88d1f173)
 }
+/// The dictation HUD's dark material, the same in both palettes: solid, or
+/// the glass tint (the web HUD's rgb(20,22,28) and rgba(9,10,13,0.82)).
+pub fn dictation_hud_fill(solid: bool) -> Rgba {
+    if solid {
+        gpui::rgb(0x14161c)
+    } else {
+        gpui::rgba(0x090a0dd1)
+    }
+}
+/// The draw-on-screen ink: ember (--t-brand-orange, the web overlay's ORANGE)
+/// at `alpha`, so the operator's marks and Symon's point-backs are one language.
+pub fn ink_ember(alpha: f32) -> Rgba {
+    let mut ember = brand_orange();
+    ember.a = alpha.clamp(0., 1.);
+    ember
+}
+/// The ink's warm-white hot core over the glow (the web overlay's CORE_HOT).
+pub fn ink_core(alpha: f32) -> Rgba {
+    let mut core = rgb(0xffe2cf);
+    core.a = alpha.clamp(0., 1.);
+    core
+}
+/// The HUD's polishing track under the travelling Symon segment.
+pub fn symon_track() -> Rgba {
+    gpui::rgba(0xb1b4e529)
+}
 /// Symon's palette, SymonVisuals' SYMON_GRADIENT_STOPS.
 const SYMON_STOPS: [(f32, u32); 4] = [
     (0., 0x88d1f1eb),

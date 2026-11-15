@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
@@ -347,8 +348,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const scope = sanitizeScope(new URL(request.url).searchParams.get('scope'));
-    const state = await request.json().catch(() => null);
-    if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    const state = await readJsonObject(request);
+    if (!state) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     if (!existsSync(STATE_DIR)) {

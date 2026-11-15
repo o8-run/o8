@@ -95,19 +95,17 @@ export function releasePageUrl(version: string | null): string {
 }
 
 /**
- * Where a non-self-updatable install sends the operator. The release pipeline
- * publishes one signed x86_64 AppImage per release, and the publish-preview
- * job re-uploads it under a name that differs from the local build's basename
- * — `publishedLinuxAssetName` in `scripts/lib/release-manifest.mjs` is the one
- * source of that name, and `tests/linux-update-download.test.ts` pins this
- * helper to the url that builder emits. Any other arch gets the release page,
- * which lists whatever that build actually produced.
+ * Where a non-self-updatable install sends the operator. The GPUI package and
+ * release attachment use the same basename. `publishedLinuxAssetName` in
+ * `scripts/lib/release-manifest.mjs` defines that name; the Linux download tests
+ * keep this runtime URL aligned with it. Unsupported architectures use the
+ * release page, which lists the artifacts actually produced.
  */
 export function releaseDownloadUrl(info: InstallInfo, version: string | null): string {
   const bare = version?.trim().replace(/^v/, '') ?? '';
   if (!bare) return RELEASES_LATEST_URL;
   if (info.platform === 'linux' && packageArch(info.arch) === 'amd64') {
-    return `${RELEASES_BASE}/download/v${bare}/o8_${bare}_linux_amd64_preview.AppImage`;
+    return `${RELEASES_BASE}/download/v${bare}/o8-${bare}-x86_64.AppImage`;
   }
   return `${RELEASES_BASE}/tag/v${bare}`;
 }

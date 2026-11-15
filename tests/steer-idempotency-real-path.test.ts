@@ -119,6 +119,7 @@ describe('packet steer post-effect idempotency through real routes', () => {
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const request = new NextRequest(String(input));
+      if (request.nextUrl.pathname === '/api/orchestrator/lead') return Response.json({ cursor: 0, leads: [] });
       if (request.nextUrl.pathname === '/api/operator/status') {
         return operatorStatusRoute.GET(request);
       }

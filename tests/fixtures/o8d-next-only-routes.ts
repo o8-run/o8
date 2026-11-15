@@ -58,7 +58,6 @@ export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
 export const NEXT_ONLY_WS_PATHS: NextOnlyTable = {
 
 
-  '/api/mobile/symon/text-turn': security('Symon relay: operator credential only'),
 
 
   '/api/v2/proxy/llm': security('o8 lane model calls: provider keys and spend'),

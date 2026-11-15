@@ -224,7 +224,7 @@ function resolveSurface(
   systemReduceTransparency: boolean,
   forceSolid: boolean = false,
 ): SurfaceMode {
-  // WARNING: mirrored by the pre-paint stamp script in src/app/layout.tsx (which
+  // WARNING: mirrored by the stamp in src/components/shell-layout.tsx, which
   // assumes systemReduceTransparency=false because the Tauri IPC wiring for
   // the OS setting doesn't exist yet). If you wire the real OS value here,
   // update the layout script too or 'system' users flash the wrong surface.

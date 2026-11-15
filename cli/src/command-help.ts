@@ -22,11 +22,11 @@ const help: Record<string, CommandHelp> = {
     example: 'o8 triage --human',
   },
   'mission create': {
-    usage: '--title <text> [--repo <path>] [--dispatch] [--runtime <id>] [--effort <tier>]',
+    usage: '--title <text> [--body <text>] [--repo <path>] [--dispatch] [--runtime <id>] [--effort <tier>]',
     required: '--title <text>. Use --repo <path> to select the repository explicitly.',
     defaults: 'dispatch is false; the mission is prepared without launching. Runtime follows saved routing.',
-    details: '--dispatch starts work immediately. --effort accepts adaptive, low, medium, high, max, xhigh, ultra. --existingBranchPolicy accepts auto, reset, continue, error (default auto).',
-    example: 'o8 mission create --title "Inspect behavior" --repo /path/to/repo',
+    details: '--body is the task the worker carries out; without it the worker gets only the title. --dispatch starts work immediately. --effort accepts adaptive, low, medium, high, max, xhigh, ultra. --existingBranchPolicy accepts auto, reset, continue, error (default auto). An unknown flag is refused.',
+    example: 'o8 mission create --title "Add a health route" --body "Create /api/health returning 200." --repo /path/to/repo',
   },
   'mission dispatch': {
     usage: '[--mission <id>] [--wait | --watch] [--timeout <duration>] [--poll <ms>]',
@@ -77,6 +77,9 @@ const help: Record<string, CommandHelp> = {
     details: 'Use o8 lease list to discover active names.',
     example: 'o8 lease status audit',
   },
+  'integration-queue read': { usage: '--repo-id <id>', required: 'Operator credential and registered repository ID.', defaults: 'Fresh queue projection with saved verification history.', example: 'o8 integration-queue read --repo-id repo-id' },
+  'integration-queue prepare': { usage: '--repo-id <id> --spec <file.json>', required: 'Operator credential and a specification containing targetRef, changes and required checks.', defaults: 'Checks an isolated combined candidate; never publishes.', example: 'o8 integration-queue prepare --repo-id repo-id --spec queue.json' },
+  'task adopt-pr': { usage: '<number-or-url> --repo <registered-repo> [--intended-outcome <text>]', required: 'Operator token, registered repository and GitHub PR.', defaults: 'Returns the stable task and current immutable revision; does not start review.', example: 'o8 task adopt-pr 7 --repo /path/to/repo' },
   'task create': {
     usage: '--title <text> [--repo <path>] [--project <id>] [--summary <text>]',
     required: '--title <text> or a positional title. A project must be selected or active.',

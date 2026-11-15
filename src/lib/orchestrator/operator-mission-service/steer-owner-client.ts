@@ -7,7 +7,8 @@ import type { correctAuthorFromReview } from '@/lib/orchestrator/review-author-c
 
 type Operation = { kind: 'steer'; input: SteerPacketInput } | { kind: 'deliver'; eventId: string }
   | { kind: 'correct'; input: Parameters<typeof correctWorkers>[0] }
-  | { kind: 'review-correct'; input: Parameters<typeof correctAuthorFromReview>[0] };
+  | { kind: 'review-correct'; input: Parameters<typeof correctAuthorFromReview>[0] }
+  | { kind: 'review-inspect'; packetId: string };
 /** Whole operations cross this boundary; caller closures and held locks never do. */
 export async function callSteerOwner<T>(operation: Operation): Promise<T> {
   let response: Response;

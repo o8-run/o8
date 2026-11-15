@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 
 // Regression guard for the Next (webpack) server build rewriting require.resolve('better-sqlite3')
 // to a numeric module id, so the stamped child credential policy carried a non-path sqliteModule and
@@ -50,6 +50,28 @@ it('the stamped policy carries an absolute sqliteModule the embedded child accep
   expect(isAbsolute(policy.sqliteModule as string)).toBe(true);
 
   const script = `${EMBEDDED_CHILD_POLICY_SCRIPT}\ntry { withO8ChildPolicy(() => process.stdout.write('VALID'), {}); } catch (e) { process.stdout.write('THREW:' + e.message); }`;
+  const out = execFileSync(process.execPath, ['-e', script], { env, encoding: 'utf8' });
+  expect(out).toBe('VALID');
+});
+
+it('a packaged layout with the addon only under prebuilds/ loads in the plain-Node child', () => {
+  // The installed app ships better-sqlite3 without build/Release and redirects to prebuilds/ only
+  // inside the server process. Every worker launch died in the child with "Could not locate the
+  // bindings file" (0.1.820). This rebuilds that layout from the real module.
+  const realRoot = dirname(dirname(resolveChildSqliteModule() as string));
+  const packaged = join(state.dir, 'packaged', 'better-sqlite3');
+  cpSync(join(realRoot, 'lib'), join(packaged, 'lib'), { recursive: true });
+  cpSync(join(realRoot, 'package.json'), join(packaged, 'package.json'));
+  const abiDir = join(packaged, 'prebuilds', `node-v${process.versions.modules}`, `${process.platform}-${process.arch}`);
+  mkdirSync(abiDir, { recursive: true });
+  cpSync(join(realRoot, 'build', 'Release', 'better_sqlite3.node'), join(abiDir, 'better_sqlite3.node'));
+
+  const env = childEnvironment({ runtimeId: 'claude-code', env: { PATH: process.env.PATH ?? '', NODE_ENV: 'test' } });
+  stampChildPolicy(env);
+  const policy = JSON.parse(env.O8_CHILD_CREDENTIAL_POLICY!) as Record<string, unknown>;
+  env.O8_CHILD_CREDENTIAL_POLICY = JSON.stringify({ ...policy, sqliteModule: join(packaged, 'lib', 'index.js') });
+
+  const script = `${EMBEDDED_CHILD_POLICY_SCRIPT}\ntry { withO8ChildPolicy(() => process.stdout.write('VALID'), {}); } catch (e) { process.stdout.write('THREW:' + e.message.split('\\n')[0]); }`;
   const out = execFileSync(process.execPath, ['-e', script], { env, encoding: 'utf8' });
   expect(out).toBe('VALID');
 });

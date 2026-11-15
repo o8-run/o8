@@ -84,6 +84,10 @@ impl Card {
     pub fn update(&mut self, task: Task, cx: &mut Context<Self>) {
         if self.task != task {
             self.task = task;
+            if let Some(diff) = &self.diff {
+                let allowed = self.task.can_discard_missing();
+                diff.update(cx, |diff, cx| { diff.allow_orphan_discard(allowed); cx.notify(); });
+            }
             self.revision += 1;
             cx.notify();
         }

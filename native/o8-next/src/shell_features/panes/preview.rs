@@ -72,7 +72,7 @@ const WORKERS: [(&str, &str, &str, &str); 10] = [
 ];
 /// The pause between two workers joining, as classic's.
 const ARRIVAL: Duration = Duration::from_millis(180);
-/// Shows the preview's launch button over the panes in a dev window.
+/// Lists the preview's commands in a dev window's command palette.
 const LAUNCH_ENV: &str = "O8_DEV_WORKER_PREVIEW";
 
 pub(super) struct Preview {
@@ -227,7 +227,13 @@ pub(super) static END: PaletteCommand = PaletteCommand {
 };
 /// Dev windows only, as classic's preview: O8_DEV_WORKER_PREVIEW set.
 pub(super) fn commands(s: &Shell) -> Vec<Command> {
-    if std::env::var_os(LAUNCH_ENV).is_none() {
+    listed(s, std::env::var_os(LAUNCH_ENV).is_some())
+}
+
+/// The palette is the preview's only entry point: no control sits over the
+/// panes while no preview runs.
+fn listed(s: &Shell, dev: bool) -> Vec<Command> {
+    if !dev {
         return vec![];
     }
     let active = s
@@ -241,45 +247,24 @@ pub(super) fn commands(s: &Shell) -> Vec<Command> {
     commands
 }
 
-/// The panes with the preview's bar over them, or with the launch button in
-/// a dev window.
+/// The panes with the preview's bar over them. A dev window starts the
+/// preview from the command palette, so nothing sits over the panes at rest.
 pub(super) fn wrap(s: &Shell, panes: AnyElement, cx: &mut Context<Shell>) -> AnyElement {
-    let shown = super::previewing(s).map(|preview| (preview.workers.len(), preview.target));
-    let frame = div()
+    let Some((shown, target)) =
+        super::previewing(s).map(|preview| (preview.workers.len(), preview.target))
+    else {
+        return panes;
+    };
+    div()
         .size_full()
         .flex()
         .flex_col()
         .flex_1()
         .min_w_0()
-        .min_h_0();
-    match shown {
-        Some((shown, target)) => frame
-            .child(bar(shown, target, cx))
-            .child(panes)
-            .into_any_element(),
-        // A row of its own above the panes, where the preview's bar goes:
-        // floating, it sat on the composer's microphone at the bottom and
-        // on a pane header's controls at the top.
-        None if std::env::var_os(LAUNCH_ENV).is_some() => frame
-            .child(
-                div()
-                    .h(px(32.))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .px(px(12.))
-                    .child(button(
-                        "worker-preview-launch",
-                        "Preview 4 / 10 workers",
-                        cx,
-                        |s, cx| start(s, 4, cx),
-                    )),
-            )
-            .child(panes)
-            .into_any_element(),
-        None => panes,
-    }
+        .min_h_0()
+        .child(bar(shown, target, cx))
+        .child(panes)
+        .into_any_element()
 }
 
 fn bar(shown: usize, target: usize, cx: &mut Context<Shell>) -> impl IntoElement {
@@ -593,13 +578,36 @@ mod tests {
         );
         ready(&s, &mut v);
         assert!(
-            s.read_with(&v, |s, _| commands(s)).is_empty(),
+            s.read_with(&v, |s, _| listed(s, false)).is_empty(),
             "only a dev window lists the preview"
+        );
+        let ids = |s: &Shell| -> Vec<&'static str> {
+            listed(s, true)
+                .into_iter()
+                .filter_map(|command| match command {
+                    Command::Feature(command) => Some(command.id),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            s.read_with(&v, |s, _| ids(s)),
+            ["worker-preview-4", "worker-preview-10"],
+            "a dev window starts the preview from the palette"
+        );
+        draw(&mut v);
+        assert!(
+            v.debug_bounds("worker-preview-launch").is_none(),
+            "nothing sits over the panes at rest"
         );
         s.update_in(&mut v, |s, _, cx| start(s, 4, cx));
         v.executor().advance_clock(ARRIVAL);
         settle(&mut v, 20);
         assert_eq!(workers(&s, &v).len(), 1);
+        assert_eq!(
+            s.read_with(&v, |s, _| ids(s)),
+            ["worker-preview-4", "worker-preview-10", "worker-preview-end"]
+        );
         // As if the shell moved to another workspace under it.
         s.update_in(&mut v, |s, _, _| {
             s.features

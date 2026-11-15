@@ -47,7 +47,8 @@ const cp = require('node:child_process');
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(trace)}, JSON.stringify({ args,
   writer: process.env.TAR_WRITER_OPTIONS ?? null,
-  marker: process.env.O8_CACHE_TEST_MARKER }) + '\\n');
+  credentials: [process.env.OPENAI_API_KEY, process.env.APPLE_ID_PASSWORD, process.env.O8_MASTER_KEY, process.env.O8_CHILD_CREDENTIAL_POLICY, process.env.NODE_OPTIONS].map(value => value ?? null),
+  marker: process.env.O8_CACHE_TEST_MARKER ?? null }) + '\\n');
 const child = cp.spawnSync('/usr/bin/tar', args, { stdio: 'inherit' });
 process.exit(child.status ?? 1);
 `);
@@ -79,7 +80,9 @@ console.log(JSON.stringify({ captured, restored, archiveHeader, contents, update
   writer: process.env.TAR_WRITER_OPTIONS }));
 `], {
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TAR_WRITER_OPTIONS: writerOptions,
-        O8_CACHE_TEST_MARKER: 'preserved' },
+        O8_CACHE_TEST_MARKER: 'preserved', OPENAI_API_KEY: 'fixture-provider-secret',
+        APPLE_ID_PASSWORD: 'fixture-signing-secret', O8_MASTER_KEY: 'fixture-master-secret',
+        O8_CHILD_CREDENTIAL_POLICY: undefined },
       encoding: 'utf8',
       timeout: 90_000,
     });
@@ -95,7 +98,7 @@ console.log(JSON.stringify({ captured, restored, archiveHeader, contents, update
     const calls = readFileSync(trace, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     for (const operation of ['-cf', '-xf']) {
       expect(calls.filter(call => call.args.includes(operation))).toEqual([
-        expect.objectContaining({ writer: null, marker: 'preserved' }),
+        expect.objectContaining({ writer: null, marker: null, credentials: [null, null, null, null, null] }),
       ]);
     }
   });

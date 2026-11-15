@@ -1,11 +1,8 @@
-// @vitest-environment jsdom
 import { createHash, randomUUID, webcrypto } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { act, createElement } from 'react';
-import { createRoot } from 'react-dom/client';
 import { SignJWT } from 'jose';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -23,9 +20,6 @@ vi.mock('@/lib/entitlement/license', async original => ({
 vi.mock('@/lib/voice/managed-live/personal-pilot-key', () => ({ PERSONAL_PILOT_PUBLIC_KEY: keys.pilotPem }));
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => fixture.operator }));
 vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => false, canUseTauriEvents: () => false }));
-vi.mock('@/components/desktop/thoughts/chat-panel/useTurnByTurnVoice', () => ({
-  useTurnByTurnVoice: () => ({ available: false, enabled: false, detail: '', stop() {}, start: async () => false }),
-}));
 let root: string; let epoch: string;
 let voice: typeof import('./route');
 let state: typeof import('@/lib/auth/account-state');
@@ -61,7 +55,7 @@ async function grant(overrides: Record<string, unknown> = {}) {
   writeFileSync(join(root, 'managed-voice-pilot.jwt'), signed, { mode: 0o600 });
 }
 beforeEach(async () => {
-  // Route signatures use the host crypto realm alongside the mounted browser component.
+  // Route signatures use the host crypto realm.
   vi.stubGlobal('Uint8Array', Object.getPrototypeOf(Buffer)); vi.stubGlobal('crypto', webcrypto);
   vi.resetModules(); root = mkdtempSync(join(tmpdir(), 'o8-voice-availability-')); epoch = randomUUID(); calls.length = 0; closed = false;
   vi.stubEnv('O8_DATA_DIR', root); vi.stubEnv('CORTEX_IDE_DATA_DIR', root); vi.stubEnv('NODE_ENV', 'development');
@@ -137,48 +131,4 @@ it('recovers the persisted relay after expiry and rotation without retargeting o
   expect(calls).toEqual([{ url: `${gateway}/v1/live/sessions`, method: 'POST' },
     { url: `${gateway}/v1/live/sessions/${id}?after=0`, method: 'GET' }, { url: `${gateway}/v1/live/sessions/${id}`, method: 'DELETE' }]);
   expect(readFileSync(join(root, 'managed-voice-relay', `${id}.json`), 'utf8')).toBe(record);
-});
-
-it('starts the advertised personal transport through the actual composer Live button', async () => {
-  preview(Date.now() - 1); await grant();
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  const answered = vi.fn();
-  class Peer {
-    localDescription = { sdp: 'v=0\noffer' }; connectionState = 'connected';
-    addTrack() {} createDataChannel() {} close() {}
-    createOffer = async () => this.localDescription;
-    setLocalDescription = async () => {}; setRemoteDescription = async () => { answered(); };
-  }
-  class AudioFixture { srcObject = null; play = async () => {}; pause() {} }
-  class AudioContextFixture {
-    close = async () => {};
-    createAnalyser() { return { fftSize: 256, getByteTimeDomainData: (data: Uint8Array) => data.fill(128) }; }
-    createMediaStreamSource() { return { connect() {} }; }
-  }
-  vi.stubGlobal('RTCPeerConnection', Peer); vi.stubGlobal('Audio', AudioFixture); vi.stubGlobal('AudioContext', AudioContextFixture);
-  vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } });
-  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([new DOMRect(0, 0, 24, 24)] as unknown as DOMRectList);
-  const { ManagedLiveButton } = await import('@/components/desktop/thoughts/chat-panel/ManagedLiveButton');
-  const host = document.createElement('div'); document.body.append(host); const mounted = createRoot(host);
-  const send = vi.fn();
-  try {
-    await act(async () => mounted.render(createElement(ManagedLiveButton, { binding: 'existing-chat', messages: [], terminals: {}, busy: false,
-      send, interrupt() {} })));
-    await vi.waitFor(async () => {
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
-      expect(host.querySelector('[aria-label="Start managed voice for this conversation"]')).not.toBeNull();
-    });
-    const start = host.querySelector<HTMLButtonElement>('[aria-label="Start managed voice for this conversation"]');
-    expect(start).not.toBeNull();
-    await act(async () => start!.click());
-    await vi.waitFor(async () => {
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
-      expect(answered).toHaveBeenCalledOnce();
-      expect(host.querySelector('[aria-label="Disconnect managed voice"]')?.getAttribute('aria-pressed')).toBe('true');
-    });
-    expect(calls.filter(call => call.method === 'POST' && call.url.endsWith('/v1/live/sessions'))).toEqual([{ url: `${gateway}/v1/live/sessions`, method: 'POST' }]);
-    expect(send).not.toHaveBeenCalled();
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Disconnect managed voice"]')!.click());
-    await vi.waitFor(() => expect(host.querySelector('[aria-label="Resume managed voice for this conversation"]')).not.toBeNull());
-  } finally { await act(async () => mounted.unmount()); host.remove(); }
 });
