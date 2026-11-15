@@ -39,7 +39,7 @@ const FOLLOW_RETRIES = 5;
 const DETAIL_MAX = 110;
 const TEXT_MAX = 1_200;
 /** Argument names that say what a tool call is about, most telling first. */
-const DETAIL_KEYS = ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt'] as const;
+const DETAIL_KEYS = ['command', 'cmd', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt'] as const;
 const PATH_KEYS = new Set(['file_path', 'path']);
 
 export interface TranscriptArgs { target: string | null; follow: boolean; hold: boolean; limit: number }
@@ -93,6 +93,48 @@ function shortPath(path: string): string {
   return parts.length <= 2 ? path : `…/${parts.slice(-2).join('/')}`;
 }
 
+/** The first telling argument written as `"key": "value"` anywhere in the text. */
+function keyedValue(text: string): string | null {
+  for (const key of DETAIL_KEYS) {
+    const found = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(text.slice(0, 4_000));
+    if (!found || !found[1].trim()) continue;
+    let value = found[1];
+    try { value = JSON.parse(`"${found[1]}"`) as string; } catch { /* keep the raw text */ }
+    const local = withoutWorktree(value.trim());
+    return plainText(PATH_KEYS.has(key) ? shortPath(local) : local, DETAIL_MAX);
+  }
+  return null;
+}
+
+const PATCH_VERBS: Record<string, string> = { Add: 'add', Update: 'edit', Delete: 'delete' };
+/** Inner tools whose command says everything, so their own name would only add noise. */
+const SHELL_TOOLS = new Set(['exec_command', 'shell', 'shell_command']);
+
+/**
+ * Newer Codex models call their tools from a short JavaScript program, such as
+ * `const r = await tools.exec_command({"cmd":"git status"})`, or write a patch
+ * as a string. Read the command or the patched file out of the program, so the
+ * pane shows `git status` or `edit ./notes.txt` rather than the code.
+ */
+function codeModeDetail(args: string): string | null {
+  const code = args.slice(0, 4_000);
+  // JSON arguments, even cut short, are never a program.
+  if (code.trimStart().startsWith('{')) return null;
+  const inner = /\btools\.(\w+)\s*\(/.exec(code);
+  if (!inner) return null;
+  // Inside a JS string a patch's line breaks are written `\n`, so a path ends at a backslash or quote.
+  const files = [...code.matchAll(/\*\*\* (Add|Update|Delete) File: ([^\\"\n]+)/g)];
+  if (files.length) {
+    const first = shortPath(withoutWorktree(files[0][2].trim()));
+    const more = files.length > 1 ? ` (+${files.length - 1} more)` : '';
+    return plainText(`${PATCH_VERBS[files[0][1]]} ${first}${more}`, DETAIL_MAX);
+  }
+  const value = keyedValue(code.slice(inner.index));
+  if (SHELL_TOOLS.has(inner[1]) && value) return value;
+  const name = plainText(inner[1], 32);
+  return value ? plainText(`${name} ${value}`, DETAIL_MAX) : name;
+}
+
 /** What a tool call is about, in a few words, taken from its arguments. */
 export function toolDetail(event: Extract<TranscriptEvent, { type: 'tool_call' }>): string {
   let parsed: unknown;
@@ -107,16 +149,12 @@ export function toolDetail(event: Extract<TranscriptEvent, { type: 'tool_call' }
       }
     }
   }
+  const code = codeModeDetail(event.args);
+  if (code) return code;
   // The server cuts long arguments short, which leaves JSON that does not parse. A telling
   // argument near the start can still be read out of it.
-  for (const key of DETAIL_KEYS) {
-    const found = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(event.args.slice(0, 4_000));
-    if (!found || !found[1].trim()) continue;
-    let value = found[1];
-    try { value = JSON.parse(`"${found[1]}"`) as string; } catch { /* keep the raw text */ }
-    const local = withoutWorktree(value.trim());
-    return plainText(PATH_KEYS.has(key) ? shortPath(local) : local, DETAIL_MAX);
-  }
+  const found = keyedValue(event.args);
+  if (found) return found;
   // Arguments that name nothing we know fall back to the summary.
   return plainText(withoutWorktree(event.summary || event.args), DETAIL_MAX);
 }

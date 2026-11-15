@@ -65,6 +65,26 @@ describe('what a tool call is about', () => {
     expect(toolDetail(call('Custom', { other: 1 }, 'did a thing'))).toBe('did a thing');
     expect(toolDetail(call('Custom', '[1,2]'))).toBe('[1,2]');
   });
+
+  it('reads the command or the patched file out of a Codex tool program', () => {
+    const root = '/home/u/.o8/worktrees/demo-ee60/.cortex-worktrees/packet-pkt-1-index.noindex';
+    const run = `const r = await tools.exec_command({"cmd":"git status --short && rg -n \\"TODO\\"","workdir":"${root}","yield_time_ms":10000}); text(r.output);`;
+    expect(toolDetail(call('exec', run, run))).toBe('git status --short && rg -n "TODO"');
+    const patch = `const patch = "*** Begin Patch\\n*** Add File: ${root}/notes.txt\\n+edit-check\\n*** End Patch"; const r = await tools.apply_patch(patch);`;
+    expect(toolDetail(call('exec', patch, patch))).toBe('add ./notes.txt');
+    const two = 'const p = "*** Begin Patch\\n*** Update File: src/a/b/app.ts\\n@@\\n-x\\n+y\\n*** Delete File: old.txt\\n*** End Patch"; await tools.apply_patch(p);';
+    expect(toolDetail(call('exec', two, two))).toBe('edit …/b/app.ts (+1 more)');
+    expect(toolDetail(call('exec', 'await tools.view_image({"path":"shots/a.png"})'))).toBe('view_image shots/a.png');
+    expect(toolDetail(call('exec', 'const x = await tools.list_mcp_resources({});'))).toBe('list_mcp_resources');
+  });
+
+  it('keeps a Codex command readable when it arrives as JSON or cut short', () => {
+    expect(toolDetail(call('exec_command', { cmd: 'npm test', workdir: '/w' }))).toBe('npm test');
+    const cut = 'const r = await tools.exec_command({"cmd":"git log --oneline -5","workdir":"/w/.cortex-worktrees/packet-1","yield_ti';
+    expect(toolDetail(call('exec', cut, cut))).toBe('git log --oneline -5');
+    // A JSON argument that mentions a tool program is still read as JSON.
+    expect(toolDetail(call('Bash', '{"command":"grep tools.exec_command( src","timeo', 'x'))).toBe('grep tools.exec_command( src');
+  });
 });
 
 describe('the lines an event prints', () => {
