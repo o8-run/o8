@@ -486,7 +486,9 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     ] : []),
     ...(finalAllowReadWritePaths.length ? [
       ';; re-open only this launch\'s isolated mutable runtime state',
-      '(allow file-read* file-write*',
+      // The deny above names file-write-mode, and file-write* does not re-open it.
+      // Codex resets the mode of its own state files at startup and aborts if it cannot.
+      '(allow file-read* file-write* file-write-mode',
       ...finalAllowReadWritePaths.map((p) => `  ${subpath(p)}`),
       ')',
     ] : []),
