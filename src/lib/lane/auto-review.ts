@@ -1,3 +1,4 @@
+import { reviewBackpressurePolicy } from '@/lib/orchestrator/review-backpressure';
 import { isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { getSqlite } from '@/lib/db';
 /**
@@ -397,6 +398,13 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   const lane = getLane(review.lane_id);
   if (!lane) {
     throw new Error(`Lane ${review.lane_id} not found`);
+  }
+
+  if (reviewBackpressurePolicy().enabled) {
+    const { readEffectivePolicy } = await import('./effective-policy-read');
+    const policy = await readEffectivePolicy(lane.id);
+    const hold = policy?.holds.value.find(hold => hold.blocks.includes('review'));
+    if (!policy?.headSha || !policy.reviewMode.value || hold) return deferred(hold?.reason ?? 'Review policy is unavailable; operator inspection is required.');
   }
 
   if (lane.status !== 'reviewing') {
