@@ -17,7 +17,7 @@ build.
 | `/preview/canvas-glass` | Dashboard canvas navigation | Removed |
 | `/syntax/...` (route handlers) | Highlighting assets for the dashboard's diff and file viewers | Removed |
 | `/broadcast` | `o8 broadcast` spectator URLs, opened in a browser or a stream overlay | Kept (CLI feature) |
-| `/dictation-pill`, `/agent-partials`, `/point-overlay`, `/spatial-ink`, `/voice-host`, `/voice-settings`, `/managed-chat-voice` | macOS shell voice windows | Kept until native |
+| `/dictation-pill`, `/agent-partials`, `/point-overlay`, `/spatial-ink`, `/voice-host`, `/voice-settings`, `/managed-chat-voice` | macOS shell voice windows | Removed (#6130) |
 
 The notice is server-rendered under a minimal root layout, with no redirect,
 sign-in, operator-token metadata, shell bootstrap or application styles. The
@@ -98,8 +98,8 @@ leaves it untouched.
 
 ## Console leftovers
 
-The retained shell webviews and `/broadcast` opt into `shell-layout.tsx` through
-their own layouts. This keeps their theme, port, navigation and credential
+`/broadcast` opts into `shell-layout.tsx` through its own layout. The macOS
+shell voice windows were the other users and are removed. This keeps their theme, port, navigation and credential
 bootstrap while `/`, `/dashboard`, `/mobile` and missing pages use only the
 minimal root layout. The mobile asset-cache reset script and mobile web-app
 metadata are removed.

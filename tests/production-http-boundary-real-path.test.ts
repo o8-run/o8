@@ -116,7 +116,7 @@ server.listen(0, '127.0.0.1', async () => {
   const { panelGateMiddleware, config } = await import('@/middleware');
   const { POST } = await import('@/app/api/mcp/route');
   const { default: RootLayout } = await import('@/app/layout');
-  const { default: VoiceHostLayout } = await import('@/app/voice-host/layout');
+  const { default: VoiceHostLayout } = await import('@/components/shell-layout');
   const { DesktopAppNotice } = await import('@/components/desktop-app-notice');
   child = spawn(process.execPath, [join(root, 'server.js')], { env: { ...process.env,
     O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
@@ -379,7 +379,7 @@ it('keeps the legacy MCP route origin check ahead of tool dispatch', async () =>
 });
 
 it('does not bootstrap a shell bearer for a foreign Host with a loopback peer stamp', async () => {
-  const { default: ShellLayout } = await import('@/app/voice-host/layout');
+  const { default: ShellLayout } = await import('@/components/shell-layout');
   context.headers = new Headers({ host: `untrusted.invalid:${port}`, 'x-o8-client-addr': '127.0.0.1' });
   const html = renderToStaticMarkup(await ShellLayout({ children: null }));
   expect(html.includes(bearer)).toBe(false);
