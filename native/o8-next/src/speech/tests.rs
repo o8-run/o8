@@ -52,14 +52,15 @@ impl Finish for Stub {
     }
 }
 
+/// Longer than the engine's own 10-second final deadline, which one test waits out.
 fn next(speech: &Speech) -> Event {
     let events = speech.events();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Ok(event) = events.try_recv() {
             return event;
         }
-        assert!(Instant::now() < deadline, "no speech event within 10s");
+        assert!(Instant::now() < deadline, "no speech event within 30s");
         std::thread::sleep(Duration::from_millis(5));
     }
 }
