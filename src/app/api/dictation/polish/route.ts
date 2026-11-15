@@ -15,9 +15,9 @@ import { processVoiceCommands } from '@/lib/dictation/voice-commands';
 // desktop voice app polishes. No key, an error or a timeout returns the
 // pre-cleaned transcript unpolished.
 const POLISH_MODEL = MODEL_IDS.raw.anthropicClaudeHaiku55;
-// A person is waiting to send. Haiku answers a short dictation in about a
-// second and writes a long one (a few minutes of speech, around 1,000 output
-// tokens) well inside this; past it, the raw text goes out instead.
+// A person is waiting to send. A few minutes of speech is around 1,000 output
+// tokens, which Haiku, the fastest Claude tier, writes well inside this; past
+// it, the raw text goes out instead of holding the send any longer.
 const POLISH_TIMEOUT_MS = 15_000;
 
 interface PolishRequestBody {
