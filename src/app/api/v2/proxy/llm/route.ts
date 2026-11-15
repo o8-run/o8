@@ -6,7 +6,6 @@ import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { getCurrentPeriodCost } from '@/lib/db/usage';
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import {
-  parseAnthropicStopMetadata,
   resolveAnthropicTaskBudget,
   type AnthropicStopMetadata,
   type ResolvedAnthropicTaskBudget,

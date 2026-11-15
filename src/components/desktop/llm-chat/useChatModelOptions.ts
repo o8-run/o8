@@ -65,6 +65,7 @@ export function useChatModelOptions(): ModelOption[] {
   const [planModels, setPlanModels] = useState<ModelOption[]>([]);
   useEffect(() => {
     let alive = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- drops the previous account's plan models before the reload
     setPlanModels([]);
     const load = async () => {
       if (!auth.signedIn) return;

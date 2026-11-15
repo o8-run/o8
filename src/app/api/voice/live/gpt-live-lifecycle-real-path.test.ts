@@ -104,6 +104,7 @@ function Conversation() {
   }, [state, session]);
   const active = ['live', 'connecting', 'closing'].includes(state);
   return createElement(Fragment, null,
+    // eslint-disable-next-line react-hooks/refs -- the ref is read inside the click handler, not during render
     createElement('button', { type: 'button', 'aria-pressed': active, onClick: () => {
       void (['live', 'connecting', 'closing'].includes(stateRef.current) ? stopLive() : startLive('byok'));
     } }),

@@ -35,6 +35,7 @@ function Frame({ artifact, tag }: { artifact: ArtifactRef; tag?: string }) {
           fontFamily: 'var(--font-sans-system)',
         }}>{tag}</div>
       ) : null}
+      {/* eslint-disable-next-line @next/next/no-img-element -- artifact URL of unknown size, shown at natural size */}
       <img
         src={artifact.url}
         alt={artifact.label ?? tag ?? 'artifact'}
