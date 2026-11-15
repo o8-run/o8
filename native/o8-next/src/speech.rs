@@ -20,6 +20,7 @@ mod engine;
 #[cfg(test)]
 pub(crate) mod fake;
 mod helper;
+mod prefs;
 mod server;
 #[cfg(test)]
 mod server_tests;
@@ -29,6 +30,7 @@ mod tests;
 use std::sync::{Arc, mpsc};
 
 pub(crate) use helper::{Launch, helper_path};
+pub(crate) use prefs::VoicePrefs;
 pub(crate) use server::ServerFinish;
 
 /// Where a recording is. `Idle` follows a cancel; the terminal updates
@@ -79,7 +81,14 @@ pub(crate) struct Polished {
 /// The server half of finishing a recording; tests stub it.
 pub(crate) trait Finish: Send + Sync {
     fn transcribe(&self, wav: &std::path::Path) -> Result<String, String>;
-    fn polish(&self, transcript: &str, repo: Option<&str>) -> Result<Polished, String>;
+    /// `prefs` carries the saved dictionary and instructions; the client
+    /// applies the replacements itself.
+    fn polish(
+        &self,
+        transcript: &str,
+        repo: Option<&str>,
+        prefs: &VoicePrefs,
+    ) -> Result<Polished, String>;
 }
 
 /// The handle the composer holds. Dropping it quits the helper.

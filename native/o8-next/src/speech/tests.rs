@@ -2,7 +2,7 @@
 use super::engine::{BUSY, ENDED_EARLY, HELPER_STOPPED, MIC_DENIED, SPEECH_DENIED};
 use super::fake::Fake;
 use super::helper::resolve;
-use super::{Event, Finish, Launch, Phase, Polished, Speech, Update};
+use super::{Event, Finish, Launch, Phase, Polished, Speech, Update, VoicePrefs};
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -38,11 +38,20 @@ impl Finish for Stub {
             .push(format!("transcribe present={present}"));
         self.heard.clone()
     }
-    fn polish(&self, transcript: &str, repo: Option<&str>) -> Result<Polished, String> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("polish {transcript} repo={}", repo.unwrap_or("-")));
+    fn polish(
+        &self,
+        transcript: &str,
+        repo: Option<&str>,
+        prefs: &VoicePrefs,
+    ) -> Result<Polished, String> {
+        let mut call = format!("polish {transcript} repo={}", repo.unwrap_or("-"));
+        if prefs != &VoicePrefs::default() {
+            call.push_str(&format!(
+                " dictionary={:?} instructions={:?}",
+                prefs.dictionary, prefs.instructions
+            ));
+        }
+        self.calls.lock().unwrap().push(call);
         self.polished.clone().unwrap_or_else(|| {
             Ok(Polished {
                 text: format!("{transcript}."),
@@ -420,6 +429,7 @@ fn speech_missing_helper_fails_the_start() {
             program: "/nonexistent/o8-speech-helper".into(),
             args: Vec::new(),
             envs: Vec::new(),
+            data: None,
         },
         Arc::new(Stub::new()),
     );
@@ -464,5 +474,134 @@ fn speech_helper_path_prefers_the_override_then_the_bundle() {
     assert_eq!(
         resolve(None, Some(elsewhere), Some(source.clone()), true),
         Some(source.join("speech_recognizer"))
+    );
+}
+
+/// A data directory with the desktop's two settings files.
+fn saved(fake: &Fake, dictation: serde_json::Value, overlay: Option<serde_json::Value>) -> PathBuf {
+    let dir = fake.dir.join("data");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("dictation.json"), dictation.to_string()).unwrap();
+    if let Some(overlay) = overlay {
+        std::fs::write(dir.join("voice-prefs.json"), overlay.to_string()).unwrap();
+    }
+    dir
+}
+
+#[test]
+fn speech_polish_gets_the_saved_dictionary_and_instructions_and_replacements_apply() {
+    let fake = Fake::new("prefs");
+    let dir = saved(
+        &fake,
+        serde_json::json!({
+            "dictionary": ["Stale"],
+            "polish_instructions": "Base instructions",
+            "replacements": [{"trigger": "hello", "replacement": "Hi"}],
+            "openrouter_api_key": "never sent"
+        }),
+        Some(serde_json::json!({
+            "dictionary": [" Kubectl ", "", 3, "o8"],
+            "polish_instructions": "  Write o8 in lowercase.  "
+        })),
+    );
+    let stub = Arc::new(Stub::new());
+    let mut launch = fake.launch(&[("FAKE_FINAL", "hello world")]);
+    launch.data = Some(dir);
+    let mut speech = Speech::new(launch, stub.clone());
+    let id = listen(&mut speech, None);
+    speech.stop(id);
+    // voice-prefs.json wins for the keys it has; dictation.json fills the rest.
+    assert_eq!(
+        until_end(&speech, id).last(),
+        Some(&Update::Done("Hi world.".into()))
+    );
+    assert_eq!(
+        stub.calls(),
+        [
+            r#"polish hello world repo=- dictionary=["Kubectl", "o8"] instructions="Write o8 in lowercase.""#
+        ]
+    );
+}
+
+#[test]
+fn speech_replacements_apply_when_polish_fails() {
+    let fake = Fake::new("prefs-raw");
+    let dir = saved(
+        &fake,
+        serde_json::json!({"replacements": [
+            {"trigger": "hello world", "replacement": "Greetings"},
+            {"trigger": "hello", "replacement": "Hi"},
+            {"trigger": "  ", "replacement": "never"}
+        ]}),
+        None,
+    );
+    let stub = Arc::new(Stub {
+        polished: Some(Err("Polish could not reach the o8 server.".into())),
+        ..Stub::new()
+    });
+    let mut launch = fake.launch(&[("FAKE_FINAL", "Hello World")]);
+    launch.data = Some(dir);
+    let mut speech = Speech::new(launch, stub);
+    let id = listen(&mut speech, None);
+    speech.stop(id);
+    // Longest trigger first, matched without regard to case.
+    assert_eq!(
+        until_end(&speech, id).last(),
+        Some(&Update::Done("Greetings".into()))
+    );
+}
+
+#[test]
+fn speech_replacements_match_the_desktop_rules() {
+    use super::prefs::apply_replacements;
+    let rules = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        apply_replacements(
+            "my email is my email",
+            &rules(&[("MY EMAIL", "q@example.com")])
+        ),
+        "q@example.com is q@example.com"
+    );
+    assert_eq!(apply_replacements("unchanged", &[]), "unchanged");
+    // Non-ASCII text whose lowercase changes length falls back to exact case.
+    assert_eq!(
+        apply_replacements(
+            "İstanbul trip, İstanbul",
+            &rules(&[("İstanbul", "Istanbul")])
+        ),
+        "Istanbul trip, Istanbul"
+    );
+}
+
+#[test]
+fn speech_prefs_read_the_desktop_data_directory() {
+    use super::prefs::dir_from;
+    use std::ffi::OsString;
+    let env = |pairs: &'static [(&'static str, &'static str)]| {
+        move |key: &str| {
+            pairs
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| OsString::from(value))
+        }
+    };
+    assert_eq!(
+        dir_from(env(&[("O8_DATA_DIR", "/data"), ("HOME", "/home/q")])),
+        Some(PathBuf::from("/data"))
+    );
+    assert_eq!(
+        dir_from(env(&[("O8_DATA_DIR", ""), ("HOME", "/home/q")])),
+        Some(PathBuf::from("/home/q/.o8"))
+    );
+    assert_eq!(dir_from(env(&[])), None);
+    // A missing directory reads as no saved settings.
+    assert_eq!(
+        super::prefs::read(Path::new("/nonexistent/o8-speech-prefs")),
+        VoicePrefs::default()
     );
 }

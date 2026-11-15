@@ -1,8 +1,9 @@
 //! Finishing through the server's dictation routes with the shell's client:
 //! `POST /api/dictation/transcribe` (multipart `audio`, Whisper) and
-//! `POST /api/dictation/polish` (`{transcript, surface, context}`). Both answer
+//! `POST /api/dictation/polish` (`{transcript, surface, context}`, the context
+//! carrying the saved dictionary and instructions). Both answer
 //! `{text}`; polish adds `cancelled` for a spoken cancel.
-use super::{Finish, Polished};
+use super::{Finish, Polished, VoicePrefs};
 use crate::client::{Client, server_reason};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -49,10 +50,25 @@ impl Finish for ServerFinish {
         Ok(reply["text"].as_str().unwrap_or_default().trim().to_owned())
     }
 
-    fn polish(&self, transcript: &str, repo: Option<&str>) -> Result<Polished, String> {
+    fn polish(
+        &self,
+        transcript: &str,
+        repo: Option<&str>,
+        prefs: &VoicePrefs,
+    ) -> Result<Polished, String> {
         let mut body = json!({"transcript": transcript, "surface": "chat"});
+        let mut context = serde_json::Map::new();
         if let Some(repo) = repo {
-            body["context"] = json!({"activeRepoPath": repo});
+            context.insert("activeRepoPath".into(), json!(repo));
+        }
+        if !prefs.dictionary.is_empty() {
+            context.insert("dictionary".into(), json!(prefs.dictionary));
+        }
+        if !prefs.instructions.is_empty() {
+            context.insert("instructions".into(), json!(prefs.instructions));
+        }
+        if !context.is_empty() {
+            body["context"] = Value::Object(context);
         }
         let url = self
             .client

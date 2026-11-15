@@ -1,7 +1,7 @@
 //! `ServerFinish` against a loopback listener: the exact requests the
 //! dictation routes receive, and how their answers and refusals read.
 use super::server::multipart;
-use super::{Finish, Polished, ServerFinish};
+use super::{Finish, Polished, ServerFinish, VoicePrefs};
 use crate::client::Client;
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -122,7 +122,11 @@ fn speech_transcribe_refusal_without_reason_names_the_status() {
 fn speech_polish_posts_the_transcript_for_chat() {
     let (server, received) = serve(200, r#"{"text":"Check the build.","polished":true}"#);
     assert_eq!(
-        server.polish("check the build", Some("/work/repo")),
+        server.polish(
+            "check the build",
+            Some("/work/repo"),
+            &VoicePrefs::default()
+        ),
         Ok(Polished {
             text: "Check the build.".into(),
             cancelled: false
@@ -147,7 +151,7 @@ fn speech_polish_posts_the_transcript_for_chat() {
 fn speech_polish_reads_a_spoken_cancel() {
     let (server, received) = serve(200, r#"{"text":"","cancelled":true,"reason":"cancel"}"#);
     assert_eq!(
-        server.polish("cancel", None),
+        server.polish("cancel", None, &VoicePrefs::default()),
         Ok(Polished {
             text: String::new(),
             cancelled: true
@@ -167,7 +171,25 @@ fn speech_unreachable_server_is_reported() {
     drop(listener);
     let client = Client::authenticated(&format!("http://127.0.0.1:{port}"), None).unwrap();
     assert_eq!(
-        ServerFinish::new(client).polish("hello", None),
+        ServerFinish::new(client).polish("hello", None, &VoicePrefs::default()),
         Err("Polish could not reach the o8 server.".into())
+    );
+}
+
+#[test]
+fn speech_polish_sends_the_saved_dictionary_and_instructions() {
+    let (server, received) = serve(200, r#"{"text":"Ask Kubectl.","polished":true}"#);
+    let prefs = VoicePrefs {
+        dictionary: vec!["Kubectl".into(), "o8".into()],
+        instructions: "Write o8 in lowercase.".into(),
+        // Replacements stay local; the route never sees them.
+        replacements: vec![("ask".into(), "Ask".into())],
+    };
+    server.polish("ask cube control", None, &prefs).unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received.recv().unwrap().body).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({"transcript":"ask cube control","surface":"chat",
+            "context":{"dictionary":["Kubectl","o8"],"instructions":"Write o8 in lowercase."}})
     );
 }
