@@ -33,7 +33,6 @@ interface RepoListResponse {
 }
 
 interface ProjectEntry {
-  mergePolicy?: { mode: 'direct' | 'pr_only'; note: string | null };
   id: string;
   name: string;
   color?: string;
@@ -262,7 +261,6 @@ function projectPayload(project: ProjectEntry, activeProjectId?: string) {
     color: project.color ?? null,
     repoPaths: project.repoPaths ?? [],
     repoCount: project.repoPaths?.length ?? 0,
-    mergePolicy: project.mergePolicy ?? null,
     createdAt: project.createdAt ?? null,
   };
 }
