@@ -1,13 +1,13 @@
 //! Opt-in launcher. No bundle selects this executable yet.
 use o8_launch_core::{next_main_startup, ports, restart::*};
 use o8_launcher::ownership::{self, identity, private_write, Pending, Receipt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 mod control;
 mod native;
 mod prepare;
 mod shutdown;
 use control::{Instance, Request};
-use prepare::{kill_group, prepare, prepare_here};
+use prepare::{kill_group, prepare};
 use shutdown::{Shutdown, SHUTDOWN_BOUND};
 use std::{
     fs::{self, OpenOptions},
@@ -22,7 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     data_dir: PathBuf,
@@ -467,7 +467,7 @@ fn present_pumping(config: &Config, native: &native::Native, stopped: &AtomicBoo
     }
 }
 /// `Err(None)`: the failure was already reported, or a stop was requested.
-fn run(config: &mut Config, config_path: &std::path::Path) -> Result<(), Option<String>> {
+fn run(config: &mut Config) -> Result<(), Option<String>> {
     if !config.data_dir.is_absolute()
         || !config.server_dir.is_absolute()
         || !config.node.is_absolute()
@@ -526,14 +526,7 @@ fn run(config: &mut Config, config_path: &std::path::Path) -> Result<(), Option<
         );
     }
     let outcome = serve(
-        config,
-        config_path,
-        &native,
-        &stopped,
-        &reopen,
-        &servers,
-        &control,
-        &preparing,
+        config, &native, &stopped, &reopen, &servers, &control, &preparing,
     );
     let stopped_cleanly = shutdown.run();
     match outcome {
@@ -551,7 +544,6 @@ fn run(config: &mut Config, config_path: &std::path::Path) -> Result<(), Option<
 #[allow(clippy::too_many_arguments)]
 fn serve(
     config: &mut Config,
-    config_path: &std::path::Path,
     native: &native::Native,
     stopped: &Arc<AtomicBool>,
     reopen: &AtomicBool,
@@ -563,7 +555,7 @@ fn serve(
         signal_hook::flag::register(signal, stopped.clone())
             .map_err(|_| "Shutdown handler unavailable")?;
     }
-    let Some(prepared) = prepare(config_path, native, stopped, preparing)? else {
+    let Some(prepared) = prepare(config, native, stopped, preparing, control)? else {
         return Ok(());
     };
     o8_launch_core::path_env::augment_process_path(&prepared.path);
@@ -632,8 +624,17 @@ fn serve(
         return Ok(());
     }
     let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
-    if let Some(servers) = lock(servers).as_mut() {
-        servers.api = Some(api);
+    // The shutdown already took the slot: stop the server here, unlocked.
+    let unrecorded = match lock(servers).as_mut() {
+        Some(servers) => {
+            servers.api = Some(api);
+            None
+        }
+        None => Some(api),
+    };
+    if let Some(mut api) = unrecorded {
+        api.stop(Instant::now() + SHUTDOWN_BOUND)?;
+        return Ok(());
     }
     if stop_requested(native, stopped) {
         return Ok(());
@@ -645,8 +646,16 @@ fn serve(
         &instance,
         "launcher-ws.json",
     )?;
-    if let Some(servers) = lock(servers).as_mut() {
-        servers.ws = Some(ws);
+    let unrecorded = match lock(servers).as_mut() {
+        Some(servers) => {
+            servers.ws = Some(ws);
+            None
+        }
+        None => Some(ws),
+    };
+    if let Some(mut ws) = unrecorded {
+        ws.stop(Instant::now() + SHUTDOWN_BOUND)?;
+        return Ok(());
     }
     let restart_stop = stopped.clone();
     let restart = o8_launch_core::restart_job_drain::guard(
@@ -831,7 +840,10 @@ fn serve(
 }
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
-    if args.len() != 3 || (args[1] != "--config" && args[1] != "--prepare") {
+    if args.len() == 2 && args[1] == "--prepare" {
+        std::process::exit(prepare::helper_main());
+    }
+    if args.len() != 3 || args[1] != "--config" {
         o8_launcher::note!("usage: o8-launcher --config <file>");
         std::process::exit(2);
     }
@@ -845,13 +857,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    if args[1] == "--prepare" {
-        let answer =
-            prepare_here(&config).unwrap_or_else(|error| serde_json::json!({"error": error}));
-        let _ = writeln!(std::io::stdout(), "{answer}");
-        return;
-    }
-    match run(&mut config, std::path::Path::new(&args[2])) {
+    match run(&mut config) {
         Ok(()) => {}
         Err(Some(reason)) => {
             present(&config, &reason);

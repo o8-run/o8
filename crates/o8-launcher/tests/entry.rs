@@ -676,12 +676,16 @@ fn a_hung_probe_is_killed_at_the_startup_bound_and_quit_ends_its_alert() {
     fs::write(f.root.join("hold-probe"), "1").unwrap();
     fs::write(f.root.join("hold-dialog"), "1").unwrap();
     let root = f.root.to_string_lossy().into_owned();
+    // The bound starts when the probe is reached, so machine load cannot let
+    // it expire first.
+    let entered = f.root.join("probe-entered").to_string_lossy().into_owned();
     f.launcher = Some(f.launch_with(
         std::path::Path::new(env!("CARGO_BIN_EXE_o8-launcher")),
         &f.root.join("config.json"),
         &[
             ("O8_LAUNCHER_FAKE_TERMINATE", &root),
-            ("O8_LAUNCHER_PREPARE_BOUND_MS", "4000"),
+            ("O8_LAUNCHER_PREPARE_BOUND_MS", "500"),
+            ("O8_LAUNCHER_PREPARE_BOUND_AFTER", &entered),
         ],
         "launcher-stderr",
     ));
