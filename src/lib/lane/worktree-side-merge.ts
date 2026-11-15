@@ -12,7 +12,7 @@ import { checkExpectedHeadSha, formatHeadShaMismatchNote, resolveHeadSha } from 
 import { assertLaneHeadOnBranch, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { blockIncompleteMergeDependencies } from '@/lib/lane/dependency-materialization-merge-blocker';
 import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
-import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
+import { prFirstMergeRefusal } from '@/lib/lane/pr-first-delivery';
 import {
   appendEvent,
   getLane,
@@ -426,8 +426,8 @@ export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): P
 
 async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
   const { lane, command, actor } = input;
-  // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
-  if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
+  const prOnlyNote = await prFirstMergeRefusal(lane);
+  if (prOnlyNote) return { ok: false, laneId: command.laneId, note: prOnlyNote, reason: 'pr_only' };
   const worktreePath = lane.worktreePath;
   const lfsBase = readLaneCreationBaseCommit(lane.id);
   if (!worktreePath) {

@@ -187,7 +187,8 @@ function writeWhole(file: string, content: string): void {
   const target = existsSync(file) ? realpathSync(file) : file;
   // The file keeps its permissions, such as a config its owner made private.
   const mode = existsSync(target) ? statSync(target).mode & 0o777 : undefined;
-  const draft = `${target}.o8-tmp`;
+  // Each process drafts in its own file, so two o8 commands at once cannot take each other's draft.
+  const draft = `${target}.o8-tmp.${process.pid}`;
   try {
     // A leftover draft is removed, never written through, in case it is a link.
     rmSync(draft, { force: true });

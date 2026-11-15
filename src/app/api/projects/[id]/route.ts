@@ -1,3 +1,7 @@
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
+import { getSqlite } from '@/lib/db';
+import { projectMergeModeKey } from '@/lib/lane/project-merge-mode-migration';
+import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { RepoRuntimeStopUnconfirmed } from '@/lib/repos/runtime-removal';
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -26,13 +30,16 @@ export async function GET(
   if (!project) {
     return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
   }
-  return NextResponse.json({ project }, { headers: NO_STORE });
+  return NextResponse.json({ project, mergePolicy: currentLaneMergePolicy(project.id),
+    savedMergeMode: (getSqlite().prepare('SELECT value FROM app_state WHERE key = ?').get(projectMergeModeKey(project.id)) as { value: string } | undefined)?.value ?? null,
+  }, { headers: NO_STORE });
 }
 
 interface UpdateProjectBody {
   name?: unknown;
   description?: unknown;
   mainRepoId?: unknown;
+  mergeMode?: unknown;
 }
 
 export async function PATCH(
@@ -48,6 +55,18 @@ export async function PATCH(
     body = (await req.json()) as UpdateProjectBody;
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
+  }
+
+  if (body.mergeMode !== undefined) {
+    if (Object.keys(body).some(key => key !== 'mergeMode')) {
+      return NextResponse.json({ error: 'Save mergeMode separately from other project settings.' }, { status: 400 });
+    }
+    if (resolveRequestPrincipalContext(req).role !== 'operator') {
+      return NextResponse.json({ error: 'Project merge policy requires an operator credential.' }, { status: 403 });
+    }
+    if (body.mergeMode !== 'direct' && body.mergeMode !== 'pr_only') {
+      return NextResponse.json({ error: 'mergeMode must be direct or pr_only.' }, { status: 400 });
+    }
   }
 
   const updates: { name?: string; description?: string | null; mainRepoId?: string | null } = {};
@@ -81,11 +100,21 @@ export async function PATCH(
     if (!project) {
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
     }
+    if (body.mergeMode !== undefined) {
+      const sqlite = getSqlite();
+      sqlite.transaction(() => {
+        const save = sqlite.prepare(`INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?)
+          ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`);
+        for (const projectId of new Set([project.id, identity.project.id])) {
+          save.run(projectMergeModeKey(projectId), body.mergeMode, Date.now());
+        }
+      })();
+    }
     const withRepos = getProjectWithRepos(project.id);
     if (withRepos) {
       await syncPanelLedgerFromProjectStore(withRepos, identity.project.id);
     }
-    return NextResponse.json({ project: withRepos ?? project }, { headers: NO_STORE });
+    return NextResponse.json({ project: withRepos ?? project, mergePolicy: currentLaneMergePolicy(project.id) }, { headers: NO_STORE });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to update project.';
     return NextResponse.json({ error: message }, { status: 500 });

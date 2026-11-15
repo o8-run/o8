@@ -4,15 +4,14 @@
 
 o8 keeps ownership of every worker. Rex only shows them. Closing a pane, a tab or Rex itself never stops a worker.
 
-## One-time setup
+## Setup
 
-Add the shortcut:
+There is nothing to run. The first time you run an `o8` command in a Rex pane, o8 adds "Show o8 Terminals" to the Rex command palette and says so in one line. It writes one file, `o8.lua`, beside your Rex `init.lua` and adds one `require("o8")` line to it; nothing else in your Rex config changes. The action starts the `o8` command on your PATH, so updating o8 keeps it working.
 
-```sh
-o8 terminal shortcut --key cmd+shift+o
-```
-
-This adds "Show o8 Terminals" to the Rex command palette and binds the key. Leave out `--key` to use the palette only. The command writes one file, `o8.lua`, beside your Rex `init.lua` and adds one `require("o8")` line to it; nothing else in your Rex config changes. `o8 terminal shortcut --remove` takes both out again. Run the command again if o8 moves, since the action starts o8 from where it is installed now.
+- To bind a key as well, run `o8 terminal shortcut --key cmd+shift+o`.
+- `o8 terminal shortcut --remove` takes it out, and o8 remembers that and does not add it back. Run `o8 terminal shortcut` to add it again.
+- Set `O8_REX_SHORTCUT=0` to stop o8 from adding it on its own.
+- o8 never replaces an `o8.lua` you wrote yourself, never binds a key on its own, and does nothing when it runs as a worker or without a person at the terminal.
 
 ## Watch your workers
 
@@ -42,6 +41,7 @@ Rex marks a tab while a program in it reports its state. o8 reports from:
 | Where | Working | Then |
 |---|---|---|
 | A packet's pane | while its worker runs | error when the packet failed, is blocked on a decision, or was archived; done for any other stop, such as awaiting review |
+| The `o8 watcher` pane (`o8 terminal panes --watch`) | while a packet it has seen runs | a count of the packets it has seen run since it started, by where each stands now, such as `2 running · 1 needs you`; error when one waits on you or failed; done when none runs and at least one finished (a merged or dismissed packet counts as done); idle before the first ("No workers yet"), when only paused ones are left, and while o8 does not answer ("Cannot reach o8") |
 | `o8 mission dispatch --watch`, `o8 mission wait` | while it waits | done when the packet reaches review or release; error when it fails, blocks or is archived; cleared on a timeout or any other wake |
 | `o8 mission tail` | while packets run | one mark per packet (up to 60), and one for the mission |
 | `o8 chat` | while a turn runs | done when a reply to a message you sent from that chat is ready; error when the connection drops or the chat shows an error |

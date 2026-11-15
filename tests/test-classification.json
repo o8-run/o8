@@ -40,6 +40,12 @@
       ]
     },
     {
+      "path": "cli/src/rex-auto-shortcut.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/app/api/automations/connected/route.test.ts",
       "reasons": [
         "executable-fixture"
@@ -402,6 +408,12 @@
       "path": "src/lib/codex/appserver-probe.test.ts",
       "reasons": [
         "executable-fixture"
+      ]
+    },
+    {
+      "path": "src/lib/codex/default-identity-rollout.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {
@@ -3161,6 +3173,22 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/effective-policy-correction-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/effective-policy-read-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {
@@ -6620,6 +6648,15 @@
       ]
     },
     {
+      "path": "tests/pr-first-publication-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/preflight-refusal-bound-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6746,6 +6783,19 @@
         "child-process",
         "git-cli",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/project-merge-mode-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/project-policy-startup-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },
@@ -7433,6 +7483,14 @@
       ]
     },
     {
+      "path": "tests/review-backpressure-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-completeness-trace-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -7576,6 +7634,14 @@
       "path": "tests/revoked-packet-worker-gate-real-path.test.ts",
       "reasons": [
         "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/rex-auto-shortcut-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
         "real-path"
       ]
     },

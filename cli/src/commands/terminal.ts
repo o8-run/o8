@@ -7,11 +7,13 @@ import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
 import {
-  confirmOpenedPanes, openTerminalPanes, parsePanesArgs, prepareWatcherTab, readAnswer, runningPackets, settledAfterRound, watchChanges, watchRetries, workerTerminals,
+  confirmOpenedPanes, newestLaneStates, openTerminalPanes, parsePanesArgs, prepareWatcherTab, readAnswer, runningPackets, settledAfterRound, watchChanges, WATCHER_UNREACHABLE, watcherSummary, watchRetries, workerTerminals,
   type PaneTerminal, type TerminalPanesResult,
 } from './terminal-panes.js';
+import { forgetRemoved, rememberRemoved } from '../rex-auto-shortcut.js';
 import { installShortcut, parseShortcutArgs, removeShortcut } from './terminal-shortcut.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
+import { createTerminalStatusReporter } from '../terminal-status.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
 
@@ -84,14 +86,14 @@ async function listWorkerTerminals(cfg: ResolvedConfig): Promise<{ terminals: Pa
  * follows the packet's transcript instead. `failed` is set when the lane list
  * could not be read.
  */
-async function listRunningPackets(cfg: ResolvedConfig): Promise<{ terminals: PaneTerminal[]; failed: boolean }> {
+async function listRunningPackets(cfg: ResolvedConfig): Promise<{ terminals: PaneTerminal[]; failed: boolean; states: Map<string, string> }> {
   try {
     // Every lane, not only active ones: a packet's newest lane decides, and a finished one must be seen to count.
     const response = await apiFetch<{ lanes?: unknown }>(cfg, '/api/lanes', { query: { active: 'false' }, timeoutMs: 8_000 });
-    if (!Array.isArray(response.data?.lanes)) return { terminals: [], failed: true };
-    return { terminals: runningPackets(response.data.lanes), failed: false };
+    if (!Array.isArray(response.data?.lanes)) return { terminals: [], failed: true, states: new Map() };
+    return { terminals: runningPackets(response.data.lanes), failed: false, states: newestLaneStates(response.data.lanes) };
   } catch {
-    return { terminals: [], failed: true };
+    return { terminals: [], failed: true, states: new Map() };
   }
 }
 
@@ -395,11 +397,11 @@ async function panesRound(
   cfg: ResolvedConfig,
   { limit, machineKey, here }: PanesOptions,
   settled?: Set<string>,
-): Promise<{ result: TerminalPanesResult; warnings: string[]; listed: string[] | null }> {
+): Promise<{ result: TerminalPanesResult; warnings: string[]; listed: string[] | null; packets: { running: string[]; states: Map<string, string> } | null }> {
   const workers = machineKey ? { terminals: [], failed: false } : await listWorkerTerminals(cfg);
   const workerIds = new Set(workers.terminals.map((worker) => worker.id));
   const shellIds = machineKey ? listRemoteSessionIds(machineKey) : (await listSessions(cfg)).map((session) => session.id);
-  const packets = machineKey ? { terminals: [], failed: false } : await listRunningPackets(cfg);
+  const packets = machineKey ? { terminals: [], failed: false, states: new Map<string, string>() } : await listRunningPackets(cfg);
   // Work first, so a short limit shows agents before idle shells. A worker keeps its own title.
   const listed = [
     ...packets.terminals,
@@ -420,6 +422,8 @@ async function panesRound(
     warnings,
     // A list that failed would look like everything stopped; report it as unknown.
     listed: packets.failed || workers.failed ? null : listed.map((terminal) => terminal.id),
+    // A remote machine's list has no packets, so it has nothing to summarise.
+    packets: packets.failed || machineKey ? null : { running: packets.terminals.map((packet) => packet.id), states: packets.states },
   };
 }
 
@@ -438,15 +442,25 @@ async function watchTerminalPanes(mode: OutputMode, cfg: ResolvedConfig, options
     return EXIT.OK;
   }
   if (mode.human) process.stdout.write('Watching for running packets and live terminals. Press Ctrl-C to stop.\n');
+  // The watcher's own tab mark counts the packets it has seen run, by where each stands now.
+  const status = createTerminalStatusReporter(mode);
+  const followed = new Set<string>();
   while (true) {
     let round: { result: Pick<TerminalPanesResult, 'opened' | 'closed' | 'remaining' | 'skipped' | 'error'>; warnings: string[] };
     try {
       const done = await panesRound(cfg, options, settled);
       settledAfterRound(settled, done.result, done.listed);
       round = done;
+      if (done.packets) {
+        for (const id of done.packets.running) followed.add(id);
+        status.report(watcherSummary(followed, done.packets.states));
+      } else if (!options.machineKey) {
+        status.report(WATCHER_UNREACHABLE);
+      }
     } catch (error) {
       if (!watchRetries(error)) throw error;
       round = { result: { opened: [], closed: [], remaining: [], skipped: [], error: error.message }, warnings: [] };
+      if (!options.machineKey) status.report(WATCHER_UNREACHABLE);
     }
     const changes = watchChanges(round.result, round.warnings, standing);
     if (mode.human) {
@@ -492,6 +506,9 @@ function runTerminalShortcut(mode: OutputMode, rest: string[]): number {
   const result = remove
     ? removeShortcut({ env: process.env })
     : installShortcut({ self: selfCommand(), key, env: process.env });
+  // A removal is remembered so o8 does not add the shortcut back on its own; asking for it again forgets that.
+  if (remove) rememberRemoved();
+  else forgetRemoved();
   if (mode.human) {
     const lines = result.action === 'installed'
       ? [

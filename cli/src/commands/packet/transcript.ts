@@ -39,7 +39,7 @@ const FOLLOW_RETRIES = 5;
 const DETAIL_MAX = 110;
 const TEXT_MAX = 1_200;
 /** Argument names that say what a tool call is about, most telling first. */
-const DETAIL_KEYS = ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt'] as const;
+const DETAIL_KEYS = ['command', 'cmd', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt'] as const;
 const PATH_KEYS = new Set(['file_path', 'path']);
 
 export interface TranscriptArgs { target: string | null; follow: boolean; hold: boolean; limit: number }
@@ -93,6 +93,96 @@ function shortPath(path: string): string {
   return parts.length <= 2 ? path : `…/${parts.slice(-2).join('/')}`;
 }
 
+/** The first telling argument written as `"key": "value"` anywhere in the text. */
+function keyedValue(text: string): string | null {
+  for (const key of DETAIL_KEYS) {
+    const found = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(text.slice(0, 4_000));
+    if (!found || !found[1].trim()) continue;
+    let value = found[1];
+    try { value = JSON.parse(`"${found[1]}"`) as string; } catch { /* keep the raw text */ }
+    const local = withoutWorktree(value.trim());
+    return plainText(PATH_KEYS.has(key) ? shortPath(local) : local, DETAIL_MAX);
+  }
+  return null;
+}
+
+const PATCH_VERBS: Record<string, string> = { Add: 'add', Update: 'edit', Delete: 'delete' };
+/** Inner tools whose command says everything, so their own name would only add noise. */
+const SHELL_TOOLS = new Set(['exec_command', 'shell', 'shell_command']);
+
+/** Undo JS string escapes in a short piece of a program, such as a path. */
+function unescapeJs(text: string): string {
+  return text.replace(/\\(?:u\{([0-9a-fA-F]{1,6})\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|([\s\S]))/g, (_, braced, u4, x2, other) => {
+    const hex = braced ?? u4 ?? x2;
+    if (hex) {
+      const point = parseInt(hex, 16);
+      return point <= 0x10ffff ? String.fromCodePoint(point) : '';
+    }
+    return ({ n: '\n', r: '\r', t: '\t' } as Record<string, string>)[other] ?? other;
+  });
+}
+
+/** The first file a patch in the program touches, as `edit ./a.ts`, with a count of the rest. */
+function patchDetail(code: string): string | null {
+  // Inside a JS string a patch's line breaks are written `\n`, so a path runs to an escaped or real line break or a quote.
+  const files = [...code.matchAll(/\*\*\* (Add|Update|Delete) File: ((?:[^\\"'`\r\n]|\\(?![nr])[\s\S])+)/g)];
+  if (!files.length) return null;
+  const first = shortPath(withoutWorktree(unescapeJs(files[0][2]).trim()));
+  const more = files.length > 1 ? ` (+${files.length - 1} more)` : '';
+  return `${PATCH_VERBS[files[0][1]]} ${first}${more}`;
+}
+
+/**
+ * The command a shell tool call runs: its `cmd` or `command` argument, written as JSON or as a JS
+ * object, as a string or a list of words, and possibly cut short.
+ */
+function shellCommand(call: string): string | null {
+  const key = /["']?\b(?:cmd|command)["']?\s*:\s*/.exec(call);
+  if (!key) return null;
+  const words: string[] = [];
+  const list = call[key.index + key[0].length] === '[';
+  // One quoted word at a time, from the value on. A word cut short ends the text.
+  const word = /\s*(["'`])((?:(?!\1)[^\\]|\\[\s\S])*)(\1?)\s*,?/y;
+  word.lastIndex = key.index + key[0].length + (list ? 1 : 0);
+  for (let found = word.exec(call); found; found = list && found[3] ? word.exec(call) : null) {
+    words.push(unescapeJs(found[2]));
+  }
+  return words.join(' ').trim() || null;
+}
+
+/**
+ * Newer Codex models call their tools from a short JavaScript program, such as
+ * `const r = await tools.exec_command({"cmd":"git status"})`, or write a patch
+ * as a string for `tools.apply_patch`. Read the command or the patched file out
+ * of the program, so the pane shows `git status` or `edit ./notes.txt` rather
+ * than the code. A program that makes more calls says how many.
+ */
+function codeModeDetail(args: string): string | null {
+  const code = args.slice(0, 4_000);
+  // JSON arguments, even cut short, are never a program.
+  if (code.trimStart().startsWith('{')) return null;
+  const calls = [...code.matchAll(/\btools\.(\w+)\s*\(/g)];
+  if (!calls.length) {
+    // Cut short before the call: a patch being written is still worth naming.
+    const patch = /\*\*\* Begin Patch/.test(code) ? patchDetail(code) : null;
+    return patch ? plainText(patch, DETAIL_MAX) : null;
+  }
+  const [first] = calls;
+  const name = first[1];
+  const rest = code.slice(first.index + first[0].length, calls[1]?.index ?? code.length);
+  let detail: string;
+  if (name === 'apply_patch') {
+    detail = patchDetail(code.slice(0, calls[1]?.index ?? code.length)) ?? name;
+  } else {
+    const command = SHELL_TOOLS.has(name) ? shellCommand(rest) : null;
+    const value = command === null ? keyedValue(rest) : null;
+    detail = command !== null ? withoutWorktree(command) : value ? `${name} ${value}` : name;
+  }
+  const more = calls.length > 1 ? ` (+${calls.length - 1} more call${calls.length > 2 ? 's' : ''})` : '';
+  // The count goes on even when the detail is cut, so a later call is never hidden.
+  return `${plainText(detail, DETAIL_MAX - more.length)}${more}`;
+}
+
 /** What a tool call is about, in a few words, taken from its arguments. */
 export function toolDetail(event: Extract<TranscriptEvent, { type: 'tool_call' }>): string {
   let parsed: unknown;
@@ -107,16 +197,12 @@ export function toolDetail(event: Extract<TranscriptEvent, { type: 'tool_call' }
       }
     }
   }
+  const code = codeModeDetail(event.args);
+  if (code) return code;
   // The server cuts long arguments short, which leaves JSON that does not parse. A telling
   // argument near the start can still be read out of it.
-  for (const key of DETAIL_KEYS) {
-    const found = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(event.args.slice(0, 4_000));
-    if (!found || !found[1].trim()) continue;
-    let value = found[1];
-    try { value = JSON.parse(`"${found[1]}"`) as string; } catch { /* keep the raw text */ }
-    const local = withoutWorktree(value.trim());
-    return plainText(PATH_KEYS.has(key) ? shortPath(local) : local, DETAIL_MAX);
-  }
+  const found = keyedValue(event.args);
+  if (found) return found;
   // Arguments that name nothing we know fall back to the summary.
   return plainText(withoutWorktree(event.summary || event.args), DETAIL_MAX);
 }

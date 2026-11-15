@@ -35,7 +35,17 @@ export type NativeDockSnapshot = Omit<DictationSnapshot, 'state'> & {
   glint?: { key: string; text: string; tone: string; fadeAt: number; until: number };
   workers?: DockWorkers;
   expanded?: boolean;
+  /** Caret/HUD feedback (the `hud` surface only): what the panel draws and where. */
+  hud?: NativeHudDetail;
 };
+/** Wording is chosen by the web page so both surfaces read the same. `placement`
+ * is the classic shell's anchor in top-left desktop points, or absent until known. */
+export interface NativeHudDetail {
+  surface: 'caret' | 'hud'; title: string; text: string; dim: boolean; solid: boolean; reducedMotion: boolean;
+  placement?: { x: number; y: number; width: number; height: number };
+}
+/** Which native panel a feed drives: the dock, or the caret/HUD feedback window. */
+export type NativeFeedSurface = 'dock' | 'hud';
 /** A click the native panel reports; the web dock runs the matching command. A
  * revert names the chip (`edit`) as well as the frame it was drawn under. */
 export type NativeDockAction = {
@@ -74,17 +84,26 @@ export function useNativePillDockExtent(native: boolean, active: boolean, visibl
 
 /** The native window acknowledges preparation before React relinquishes drawing.
  * Frames are sent only from the effect after that hidden render has committed.
- * Failed requests restore web drawing immediately and block the current session. */
+ * Failed requests restore web drawing immediately and block the current session.
+ *
+ * The `hud` surface hands over per session: the web keeps painting until a
+ * visible frame of the current session is acknowledged (`drawn`); the native
+ * panel acknowledges a first frame only once it has drawn it and is on screen.
+ * A disabled flag is rechecked at each session instead of for the life of the
+ * page, and retiring a session for a newer one hides it at once. */
 export function useNativeDictationPill(
   snapshot: NativeDockSnapshot, session: number, onFinish: () => void, onAction?: (action: NativeDockAction) => void,
-): { native: boolean; suppressed: boolean } {
+  surface: NativeFeedSurface = 'dock',
+): { native: boolean; suppressed: boolean; drawn: boolean } {
   const [native, setNative] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
+  const [drawnSession, setDrawnSession] = useState<number | null>(null);
   const active = snapshot.state !== 'idle';
+  const drawn = surface === 'hud' ? native && active && drawnSession === session : native;
   // A static frame changes only on events, so each change wakes the feed.
   const staticKey = native && isStatic(snapshot.state) ? JSON.stringify(snapshot) : '';
   const latest = useRef({
-    snapshot, session, onFinish, onAction, native, active: false, family: family(snapshot.state),
+    snapshot, session, onFinish, onAction, native, drawn, active: false, family: family(snapshot.state),
     generation: 0, retirement: 0, retiredGeneration: 0, retiredSession: session, retiredFamily: family(snapshot.state),
   });
   const wake = useRef<(() => void) | null>(null);
@@ -95,13 +114,13 @@ export function useNativeDictationPill(
       ? previous.generation + 1 : previous.generation;
     const retiring = previous.active && !active;
     latest.current = {
-      snapshot, session, onFinish, onAction, native, active, family: kind, generation,
+      snapshot, session, onFinish, onAction, native, drawn, active, family: kind, generation,
       retirement: previous.retirement + (retiring ? 1 : 0),
       retiredGeneration: retiring ? previous.generation : previous.retiredGeneration,
       retiredSession: retiring ? previous.session : previous.retiredSession,
       retiredFamily: retiring ? previous.family : previous.retiredFamily,
     };
-  }, [snapshot, session, onFinish, onAction, native, active]);
+  }, [snapshot, session, onFinish, onAction, native, drawn, active]);
   useEffect(() => {
     if (!isTauri()) return;
     let disposed = false;
@@ -143,7 +162,7 @@ export function useNativeDictationPill(
         return await Promise.race([
           fetch('/api/next/dictation-pill', {
             method: 'POST', headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + getMobileWsToken() },
-            body: JSON.stringify({ ...body, deadline: Date.now() + timing.requestMs }), signal: controller.signal,
+            body: JSON.stringify({ ...body, ...(surface === 'hud' ? { surface } : {}), deadline: Date.now() + timing.requestMs }), signal: controller.signal,
           }).then(async response => response.ok ? response.json() : { native: false }),
           new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('Pill deadline')); }, timing.requestMs); }),
         ]);
@@ -155,7 +174,7 @@ export function useNativeDictationPill(
       // Independent best effort: a lost acknowledgement must not block retirement.
       // It names its session, so a late arrival cannot hide the next session.
       const now = latest.current;
-      void request({ action: 'release', ...(now.active ? { session: now.session, kind: now.family } : { session: now.retiredSession, kind: now.retiredFamily }) })
+      void request({ action: 'release', immediate: true, ...(now.active ? { session: now.session, kind: now.family } : { session: now.retiredSession, kind: now.retiredFamily }) })
         .catch(() => undefined);
     };
     // One request owns the transport until its reply settles. Wakes only replace
@@ -207,13 +226,16 @@ export function useNativeDictationPill(
           glint: frame.glint && { ...frame.glint, key: undefined, text: bounded(frame.glint.text, 200) },
           workers: frame.workers && { ...frame.workers, label: bounded(frame.workers.label, 20), repos: frame.workers.repos.slice(0, 4).map(repo => bounded(repo, 60)) },
           expanded: frame.expanded, holdMs,
+          hud: frame.hud && { ...frame.hud, title: bounded(frame.hud.title, 120), text: bounded(frame.hud.text, 2400) },
         } : undefined,
-        ...(action === 'release' ? { session: releaseSession, kind: releaseKind, immediate: current.snapshot.handoff === true } : {}) });
+        // A HUD session retired by a newer one hides at once under the new web bar.
+        ...(action === 'release' ? { session: releaseSession, kind: releaseKind,
+          immediate: current.snapshot.handoff === true || surface === 'hud' && current.session !== releaseSession } : {}) });
         if (disposed) return;
         if (reply.enabled === true) enabled = true;
         if (generation !== latest.current.generation) { pending = true; return; }
         if (!reply.native) {
-          if (reply.enabled === false) disabled = true;
+          if (reply.enabled === false && surface !== 'hud') disabled = true;
           blocked = generation;
           if (latest.current.native) fallback(generation);
           return;
@@ -223,6 +245,8 @@ export function useNativeDictationPill(
           awaitingCommit = true;
           setNative(true);
         } else if (action === 'frame') {
+          // The panel is on screen with this session: the web bar can go.
+          if (surface === 'hud' && current.active && current.snapshot.hud) setDrawnSession(current.session);
           if (!quiet && latest.current.native && reply.finishSession === latest.current.session
             && latest.current.snapshot.state === 'recording') latest.current.onFinish();
           // Each reported click runs once, only for the capsule still on screen.
@@ -273,7 +297,7 @@ export function useNativeDictationPill(
       const initial = await request({ action: 'prepare', checkSettings: true }).catch(() => ({ native: false }));
       if (disposed) return;
       probed = true;
-      if (initial.enabled === false) { disabled = true; return; }
+      if (initial.enabled === false && surface !== 'hud') { disabled = true; return; }
       if (initial.enabled === true) enabled = true;
       if (!initial.native) blocked = generation;
       const [{ listen }, { invoke }] = await Promise.all([import('@tauri-apps/api/event'), import('@tauri-apps/api/core')]);
@@ -303,7 +327,7 @@ export function useNativeDictationPill(
       clearTimeout(frameTimer);
       unlisten?.();
     };
-  }, []);
-  useEffect(() => { wake.current?.(); }, [active, session, native, suppressed, snapshot.state, staticKey]);
-  return { native, suppressed };
+  }, [surface]);
+  useEffect(() => { wake.current?.(); }, [active, session, native, drawn, suppressed, snapshot.state, staticKey]);
+  return { native, suppressed, drawn };
 }

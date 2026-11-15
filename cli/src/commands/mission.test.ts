@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { checkMissionCreateArgs, runMission } from './mission';
-import { EXIT } from '../api';
+import { CliError, EXIT } from '../api';
 
 const mode = { human: false, verbose: false };
 
@@ -51,6 +51,48 @@ describe('o8 mission create --dispatch', () => {
     await expect(runMission({ human: true, verbose: false }, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch']))
       .resolves.toBe(0);
     expect(written.join('')).toContain('admitted, awaiting launch');
+  });
+});
+
+describe('a dispatch that does not start', () => {
+  function serve(dispatchResult: Record<string, unknown>) {
+    process.env.O8_API_PORT = '47120';
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => (String(url).includes('/api/orchestrator/dispatch')
+      ? new Response(JSON.stringify({ ok: true, result: dispatchResult }), { status: 200 })
+      : new Response(JSON.stringify(missionResponse()), { status: 201 }))));
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+    return written;
+  }
+
+  it('fails mission create --dispatch after printing the mission it made, as mission dispatch fails', async () => {
+    const written = serve({ initiated: false, async: true, missionId: 'mission-effort-pin', blocked: true });
+    const error = await runMission(mode, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch']).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CliError);
+    expect(error).toMatchObject({ code: 'dispatch_blocked', exit: EXIT.CONFLICT });
+    expect((error as Error).message).toContain('o8 mission dispatch --mission mission-effort-pin');
+    expect(JSON.parse(written.join('')).mission.missionId).toBe('mission-effort-pin');
+  });
+
+  it('says blocked in human output, and not dispatched for any other refusal', async () => {
+    const human = { human: true, verbose: false };
+    const blocked = serve({ initiated: false, missionId: 'mission-effort-pin', blocked: true });
+    await expect(runMission(human, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch'])).rejects.toMatchObject({ code: 'dispatch_blocked' });
+    expect(blocked.join('')).toContain('blocked, not dispatched');
+    vi.restoreAllMocks();
+    const other = serve({ initiated: false });
+    await expect(runMission(human, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch'])).rejects.toMatchObject({ code: 'dispatch_not_initiated', exit: EXIT.NOT_FOUND });
+    expect(other.join('')).toContain('not dispatched');
+  });
+
+  it('names the hold from mission dispatch too, rather than asking for a mission', async () => {
+    serve({ initiated: false, async: true, missionId: 'mission-held', blocked: true });
+    await expect(runMission(mode, 'dispatch', ['--mission', 'mission-held'])).rejects.toMatchObject({
+      code: 'dispatch_blocked', exit: EXIT.CONFLICT, message: 'Mission mission-held has an active lifecycle hold and was not dispatched.',
+    });
+    vi.restoreAllMocks();
+    serve({ initiated: false });
+    await expect(runMission(mode, 'dispatch', [])).rejects.toMatchObject({ code: 'dispatch_not_initiated', exit: EXIT.NOT_FOUND });
   });
 });
 

@@ -1,6 +1,7 @@
 //! Passive dock drawing: dictation, the speech, live voice, agent working and
 //! fleet capsules, and the edit chip and glints below them. Capture, voice,
-//! agent and edit commands keep their web owners.
+//! agent and edit commands keep their web owners. The caret/HUD dictation
+//! feedback panel (native_hud.rs) shares this queue and loop.
 #[cfg(test)]
 use gpui::TestAppContext;
 use gpui::{
@@ -445,9 +446,9 @@ fn deliver(handle: WindowHandle<Pill>, frame: Value, cx: &mut gpui::AsyncApp) ->
 }
 
 pub(crate) fn has_real_windows(cx: &App) -> bool {
-    cx.windows()
-        .iter()
-        .any(|window| window.downcast::<Pill>().is_none())
+    cx.windows().iter().any(|window| {
+        window.downcast::<Pill>().is_none() && window.downcast::<hud::Hud>().is_none()
+    })
 }
 
 async fn wait_for_work(
@@ -468,6 +469,7 @@ pub(crate) fn install(cx: &mut App) {
     #[cfg(target_os = "macos")]
     cx.spawn(async move |cx| {
         let mut handle: Option<WindowHandle<Pill>> = None;
+        let mut hud_handle: Option<WindowHandle<hud::Hud>> = None;
         let mut visible = false;
         loop {
             wait_for_work(visible, &WAKE.1, cx.background_executor()).await;
@@ -476,6 +478,10 @@ pub(crate) fn install(cx: &mut App) {
                 let id = frame["id"].as_str().unwrap_or_default();
                 if expired(&frame) {
                     crate::app_parent::browser_result(id, json!({"ok":false}));
+                    continue;
+                }
+                if frame["type"] == "dictation-hud" {
+                    hud::deliver(&mut hud_handle, frame, cx);
                     continue;
                 }
                 if handle.is_none() && frame["args"]["action"] == "release" {
@@ -546,6 +552,7 @@ pub(crate) fn install(cx: &mut App) {
                     visible = false;
                 }
             }
+            visible |= hud::tick(&mut hud_handle, cx);
         }
     })
     .detach();
@@ -687,12 +694,32 @@ mod macos {
             }
         }
     }
+
+    /// The dock's never-key, never-main panel class, shared with the caret/HUD panel.
+    /// The subclass is registered once, from the first panel's class, so
+    /// every panel given it must be of that same GPUI class (or already it).
+    pub(super) unsafe fn make_nonactivating(panel: id) {
+        unsafe {
+            let class = nonactivating_class(panel);
+            let current = (&*panel).class() as *const Class;
+            debug_assert!(
+                std::ptr::eq(current, class)
+                    || (&*class)
+                        .superclass()
+                        .is_some_and(|base| std::ptr::eq(base, current)),
+                "never-key panel subclass built from another window class"
+            );
+            object_setClass(panel, class);
+        }
+    }
 }
 
 #[path = "native_pill_capsules.rs"]
 mod capsules;
 #[path = "native_pill_extras.rs"]
 mod extras;
+#[path = "native_hud.rs"]
+mod hud;
 
 #[cfg(test)]
 #[path = "native_pill_extras_tests.rs"]
