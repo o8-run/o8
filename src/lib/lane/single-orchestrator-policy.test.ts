@@ -207,6 +207,31 @@ describe('Single orchestrator process boundary', () => {
     prepared.cleanup();
   });
 
+  it.skipIf(process.platform !== 'darwin')('lets the CLI reset the mode of its own state files while policy files stay immutable (#2638)', async () => {
+    const repo = tempRoot('o8-single-repo-');
+    const codexHome = tempRoot('o8-single-mode-home-');
+    // Codex resets the mode of an existing installation_id at startup and aborts the launch if it cannot.
+    writeFileSync(join(codexHome, 'installation_id'), '5f0e6a0c-7c1d-4f4e-9a57-1f2f3e4d5c6b\n', { mode: 0o644 });
+    const sourceLauncher = join(codexHome, 'codex-test-launcher');
+    writeFileSync(sourceLauncher, '#!/bin/sh\nexec /bin/sh "$@"\n', { mode: 0o700 });
+    const prepared = await prepareSingleOrchestratorLaunch({
+      repoPath: repo, codexHome, binary: sourceLauncher, args: ['-c', 'true'], env: process.env,
+    });
+    try {
+      const sandboxed = (...command: string[]) => execFileSync(SANDBOX_EXEC_PATH, ['-f', prepared.profilePath, ...command], { env: prepared.env });
+      const overlayId = join(prepared.overlayPath, 'installation_id');
+      sandboxed('/bin/chmod', '600', overlayId);
+      sandboxed('/bin/chmod', '644', overlayId);
+      expect(() => sandboxed('/bin/chmod', '644', prepared.rulesPath)).toThrow();
+      expect(() => sandboxed('/bin/chmod', '755', prepared.guardPath)).toThrow();
+      expect(() => sandboxed('/bin/chmod', '755', prepared.launchBinaryPath)).toThrow();
+      expect(() => sandboxed('/bin/chmod', '600', join(codexHome, 'installation_id'))).not.toThrow();
+      expect(() => sandboxed('/bin/chmod', '755', join(prepared.overlayPath, '..'))).toThrow();
+    } finally {
+      prepared.cleanup();
+    }
+  });
+
   it.skipIf(process.platform !== 'darwin')('reads a persisted composer image from the actual Solo sandbox', async () => {
     const repo = tempRoot('o8-single-image-repo-');
     const dataDir = tempRoot('o8-single-image-data-');

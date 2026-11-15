@@ -150,8 +150,8 @@ describe('buildSeatbeltProfile — policy shape', () => {
     expect(profile).toContain('(regex #"(^|/)codex(?:$|[-.])")');
     expect(profile).toContain('(regex #"(^|/)codex\\.js$")');
     expect(profile).toContain('file-link file-clone\n  (literal "/tmp/immutable.rules")');
-    expect(profile).toContain('(allow file-read* file-write*\n  (subpath "/tmp/active-state")');
-    const activeStateAllow = profile.indexOf('(allow file-read* file-write*\n  (subpath "/tmp/active-state")');
+    expect(profile).toContain('(allow file-read* file-write* file-write-mode\n  (subpath "/tmp/active-state")');
+    const activeStateAllow = profile.indexOf('(allow file-read* file-write* file-write-mode\n  (subpath "/tmp/active-state")');
     const activePolicyDeny = profile.indexOf('(literal "/tmp/active-state/policy.rules")');
     expect(activePolicyDeny).toBeGreaterThan(activeStateAllow);
     const execDeny = profile.indexOf('(deny process-exec');
