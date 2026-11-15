@@ -19,11 +19,13 @@ build.
 | `/broadcast` | `o8 broadcast` spectator URLs, opened in a browser or a stream overlay | Kept (CLI feature) |
 | `/dictation-pill`, `/agent-partials`, `/point-overlay`, `/spatial-ink`, `/voice-host`, `/voice-settings`, `/managed-chat-voice` | macOS shell voice windows | Kept until native |
 
-The notice is server-rendered, with no redirect or sign-in and no client code
-of its own; the root layout still wraps it. Its text reads correctly both in a
-browser and inside the older window. The classic window, which loads `/dashboard` on Windows and Linux, shows the
-notice instead of the dashboard; its loader and the bundled-server prewarm
-still get an answer, so startup does not fail. `not-found.tsx` is unchanged.
+The notice is server-rendered under a minimal root layout, with no redirect,
+sign-in, operator-token metadata, shell bootstrap or application styles. The
+not-found page uses the same notice instead of dashboard navigation. Its text
+reads correctly both in a browser and inside the older window. The classic
+window, which loads `/dashboard` on Windows and Linux, shows the notice instead
+of the dashboard; its loader and the bundled-server prewarm still get an answer,
+so startup does not fail.
 
 ## What only those pages reached
 
@@ -64,9 +66,11 @@ The native phone app is not in this repository. The pairing route
 (`src/app/api/panel/mobile-pairing/route.ts`) states that the app loads nothing
 from the desktop: the QR code carries the host, ports and token, and the app
 calls `/api/mobile/*` and the WebSocket server. No page URL is part of pairing.
-Push payloads still set `url: '/mobile?view=...'` (`src/lib/push`); that field
-was read by the old web app's service worker and now lands on the notice. The
-`/api/mobile/*` routes and the WebSocket server are unchanged.
+Push payloads retain their event metadata and delivery behavior but no longer
+include links to the removed mobile web page, including the push-test API.
+The chat API's daily-limit response also omits its old dashboard upgrade link
+and points users to desktop Settings. All mobile API endpoints and the
+WebSocket server remain available.
 
 ## Relay
 
@@ -81,7 +85,7 @@ Two relay paths share the same tunnel protocol
   `machine-registry.ts`, `attach-settings.ts`, `open-surface-websocket.ts`):
   replays remote HTTP and WebSocket traffic for a browser on another device.
   The web-machine surface marks those page loads
-  (`src/lib/connect/web-machine-surface.ts`; read in `src/app/layout.tsx`,
+  (`src/lib/connect/web-machine-surface.ts`; read in `src/components/shell-layout.tsx`,
   `ApiBearerBootstrap`, the theme pre-paint stamp and
   `src/lib/mobile/ws-token-client.ts`). The same transport carries plugin
   relay grants (`src/lib/connect/plugin-relay.ts`).
@@ -91,6 +95,23 @@ voice pages. Removing the browser-session part of machine attach, and the
 web-machine handling in the layout and auth helpers, touches relay, auth and
 credential code. It needs its own security-reviewed pull request; this change
 leaves it untouched.
+
+## Console leftovers
+
+The retained shell webviews and `/broadcast` opt into `shell-layout.tsx` through
+their own layouts. This keeps their theme, port, navigation and credential
+bootstrap while `/`, `/dashboard`, `/mobile` and missing pages use only the
+minimal root layout. The mobile asset-cache reset script and mobile web-app
+metadata are removed.
+
+The orphaned public terminal stylesheet, preview image and video, asset-cache
+and push service workers, and mobile web manifest are removed. The unused
+editor cache group is removed from the build configuration. The unused npm
+autostart wrapper is removed; desktop launch-at-login still uses the native
+plugin and native bridge commands. Shared runtime and desktop dependencies stay.
+Test-only helpers and native parity fixtures described above remain outside the
+page bundles. The legacy mobile mode in `ApiBearerBootstrap` is retained with
+the shared relay and credential helpers pending their separate review.
 
 ## What still needs the web build
 

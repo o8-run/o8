@@ -103,7 +103,6 @@ function deliverViaPush(notification: ReviewReadyNotification, flips: ReviewRead
     title: notification.title,
     body: notification.body,
     tag: notification.tag,
-    url: '/mobile?view=agents',
     data: {
       kind: 'review-ready',
       count: notification.count,

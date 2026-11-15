@@ -126,6 +126,7 @@ function readRejections(packetId: string | undefined, scan: number, ids?: string
       (SELECT id FROM lanes WHERE a.packet_id IS NOT NULL AND packet_id = a.packet_id ORDER BY created_at DESC LIMIT 1)
     )
     WHERE a.status = 'rejected'
+      AND (@packetId IS NOT NULL OR COALESCE(a.tool_name, '') != 'orchestrator_review')
       AND json_valid(a.resolution_json)
       AND TRIM(COALESCE(json_extract(a.resolution_json, '$.note'), '')) != ''
       ${packetClause}

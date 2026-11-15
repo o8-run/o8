@@ -5,6 +5,7 @@ import type { DictationSnapshot, DictationState } from '@/components/desktop/dic
 import { isTauri } from '@/lib/tauri/bridge';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import timing from '@/lib/next/pill-timing.json';
+import type { NativeAskFrame } from './nativeDockAsk';
 
 export const IDLE_SNAPSHOT: DictationSnapshot = {
   state: 'idle',
@@ -17,7 +18,7 @@ export const IDLE_SNAPSHOT: DictationSnapshot = {
 /** Dock capsules the native panel draws besides dictation. `workers` is the
  * fleet orbit or its expanded capsule; `extras` is the edit chip and/or glint
  * with no capsule above them. */
-export type NativeCapsuleState = 'speaking' | 'working' | 'voice' | 'workers' | 'extras';
+export type NativeCapsuleState = 'speaking' | 'working' | 'voice' | 'workers' | 'extras' | 'ask' | 'confirm' | 'drop' | 'staged' | 'sliver';
 /** The fleet detail DockNotchSurface draws. */
 export interface DockWorkers { count: number; working: number; waiting: number; label: string; repos: string[] }
 /** One frame for the native panel: a dictation snapshot or one capsule. `handoff`
@@ -35,9 +36,17 @@ export type NativeDockSnapshot = Omit<DictationSnapshot, 'state'> & {
   glint?: { key: string; text: string; tone: string; fadeAt: number; until: number };
   workers?: DockWorkers;
   expanded?: boolean;
+  /** The Ask conversation panel (state `ask`). */
+  ask?: NativeAskFrame;
+  /** The confirmation card (state `confirm`): the exact identity the web decides on. */
+  confirm?: NativeConfirmFrame;
+  /** The staged-file chips (state `staged`): at most three, then a count. */
+  staged?: { files: { name: string; size: string }[]; extra: number };
   /** Caret/HUD feedback (the `hud` surface only): what the panel draws and where. */
   hud?: NativeHudDetail;
 };
+/** DockConfirmationCard's content and the confirmation/task identity it decides. */
+export interface NativeConfirmFrame { id: string; task: string; kind: 'action' | 'plan'; summary: string; steps?: { index: number; summary: string }[] }
 /** Wording is chosen by the web page so both surfaces read the same. `placement`
  * is the classic shell's anchor in top-left desktop points, or absent until known. */
 export interface NativeHudDetail {
@@ -47,20 +56,36 @@ export interface NativeHudDetail {
 /** Which native panel a feed drives: the dock, or the caret/HUD feedback window. */
 export type NativeFeedSurface = 'dock' | 'hud';
 /** A click the native panel reports; the web dock runs the matching command. A
- * revert names the chip (`edit`) as well as the frame it was drawn under. */
+ * revert names the chip (`edit`) as well as the frame it was drawn under; an
+ * Ask intent names the thread revision (`ref`) it was drawn for. */
 export type NativeDockAction = {
   session: number; state: NativeDockSnapshot['state'];
-  action: 'pause' | 'stop' | 'speed' | 'voice-stop' | 'interrupt' | 'workers-expand' | 'revert'; value?: number | null; edit?: number;
+  action: 'pause' | 'stop' | 'speed' | 'voice-stop' | 'interrupt' | 'workers-expand' | 'revert' | 'ask-close' | 'ask-copy' | 'ask-active'
+    | 'confirm-allow' | 'confirm-deny' | 'voice-settings';
+  value?: number | null; edit?: number; ref?: string; task?: string;
 };
 
-const CAPSULE_ACTIONS: Record<Exclude<NativeDockAction['action'], 'revert'>, NativeCapsuleState> = {
+const CAPSULE_ACTIONS: Record<Exclude<NativeDockAction['action'], 'revert' | 'voice-settings'>, NativeCapsuleState> = {
   pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice', 'workers-expand': 'workers',
+  'ask-close': 'ask', 'ask-copy': 'ask', 'ask-active': 'ask', 'confirm-allow': 'confirm', 'confirm-deny': 'confirm',
 };
-const CAPSULES = new Set<string>(['speaking', 'working', 'voice', 'workers', 'extras']);
+const CAPSULES = new Set<string>(['speaking', 'working', 'voice', 'workers', 'extras', 'ask', 'confirm', 'drop', 'staged', 'sliver']);
+/** A decision applies only to the exact card it was drawn for. */
+const cardCurrent = (clicked: NativeDockAction, frame: NativeDockSnapshot) => !clicked.action.startsWith('confirm-')
+  || !!frame.confirm && clicked.ref === frame.confirm.id && clicked.task === frame.confirm.task;
+/** An Ask intent applies only to the thread it was drawn for; a copy only to an answer on screen. */
+function askCurrent(clicked: NativeDockAction, frame: NativeDockSnapshot) {
+  if (!clicked.action.startsWith('ask-')) return true;
+  if (!frame.ask || clicked.ref !== String(frame.ask.rev)) return false;
+  return clicked.action !== 'ask-copy'
+    || frame.ask.turns.some(turn => turn.index === clicked.value && turn.role === 'assistant');
+}
+/** The frame records the dictation a click can finish: the capsule, or the pending turn inside Ask. */
+const recording = (frame: NativeDockSnapshot) => frame.state === 'recording' || frame.state === 'ask' && frame.ask?.pending?.phase === 'listening';
 const family = (state: NativeDockSnapshot['state']) => CAPSULES.has(state) ? state : 'dictation';
 /** Static frames draw nothing that changes between events, so they hold the
  * panel for up to `staticMs` and send a keep-alive only when they outlast it. */
-const isStatic = (state: NativeDockSnapshot['state']) => state === 'workers' || state === 'extras';
+const isStatic = (state: NativeDockSnapshot['state']) => state === 'workers' || state === 'extras' || state === 'drop' || state === 'staged' || state === 'sliver';
 function holdFor(frame: NativeDockSnapshot, now: number) {
   if (!isStatic(frame.state)) return undefined;
   const ends = frame.state === 'extras' ? Math.max(frame.edit?.until ?? 0, frame.glint?.until ?? 0) - now : Infinity;
@@ -225,7 +250,10 @@ export function useNativeDictationPill(
           edit: frame.edit && { ...frame.edit, app: bounded(frame.edit.app, 120) },
           glint: frame.glint && { ...frame.glint, key: undefined, text: bounded(frame.glint.text, 200) },
           workers: frame.workers && { ...frame.workers, label: bounded(frame.workers.label, 20), repos: frame.workers.repos.slice(0, 4).map(repo => bounded(repo, 60)) },
-          expanded: frame.expanded, holdMs,
+          expanded: frame.expanded, holdMs, ask: frame.ask,
+          confirm: frame.confirm && { ...frame.confirm, summary: bounded(frame.confirm.summary, 1500),
+            steps: frame.confirm.steps?.slice(0, 5).map(step => ({ index: step.index, summary: bounded(step.summary, 300) })) },
+          staged: frame.staged && { extra: frame.staged.extra, files: frame.staged.files.slice(0, 3).map(file => ({ name: bounded(file.name, 200), size: file.size })) },
           hud: frame.hud && { ...frame.hud, title: bounded(frame.hud.title, 120), text: bounded(frame.hud.text, 2400) },
         } : undefined,
         // A HUD session retired by a newer one hides at once under the new web bar.
@@ -248,9 +276,10 @@ export function useNativeDictationPill(
           // The panel is on screen with this session: the web bar can go.
           if (surface === 'hud' && current.active && current.snapshot.hud) setDrawnSession(current.session);
           if (!quiet && latest.current.native && reply.finishSession === latest.current.session
-            && latest.current.snapshot.state === 'recording') latest.current.onFinish();
+            && recording(latest.current.snapshot)) latest.current.onFinish();
           // Each reported click runs once, only for the capsule still on screen.
           let reverted = false;
+          let decided = false;
           for (const clicked of Array.isArray(reply.actions) ? reply.actions as NativeDockAction[] : []) {
             const now = latest.current;
             if (quiet || disposed || !now.native || clicked?.session !== now.session || clicked.state !== now.snapshot.state) continue;
@@ -258,7 +287,13 @@ export function useNativeDictationPill(
               // The chip on screen, still offering Revert; at most one per reply.
               if (reverted || now.snapshot.edit?.id !== clicked.edit || now.snapshot.edit?.status !== 'ready') continue;
               reverted = true;
-            } else if (CAPSULE_ACTIONS[clicked.action] !== now.snapshot.state) continue;
+            } else if (clicked.action === 'voice-settings') {
+              // The resting dock only: the idle sliver or the fleet orbit/capsule.
+              if (now.snapshot.state !== 'sliver' && now.snapshot.state !== 'workers') continue;
+            } else if (CAPSULE_ACTIONS[clicked.action] !== now.snapshot.state || !askCurrent(clicked, now.snapshot)
+              || !cardCurrent(clicked, now.snapshot)) continue;
+            // One decision per reply; the page clears the card when it runs it.
+            if (clicked.action.startsWith('confirm-')) { if (decided) continue; decided = true; }
             if (clicked.action === 'voice-stop' && now.snapshot.connecting) continue;
             now.onAction?.(clicked);
           }

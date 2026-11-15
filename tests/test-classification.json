@@ -3062,6 +3062,15 @@
       ]
     },
     {
+      "path": "tests/device-merge-publication-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/device-owner-handoff-paging.test.ts",
       "reasons": [
         "network-listener"
@@ -3627,6 +3636,22 @@
       ]
     },
     {
+      "path": "tests/hosting-publication-native-fixture-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/hosting-publication-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/http-mcp-webview-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -3703,6 +3728,16 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/integration-queue-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "integration",
+        "real-path"
       ]
     },
     {
@@ -7506,6 +7541,14 @@
         "git-cli",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/review-outcome-reuse-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },

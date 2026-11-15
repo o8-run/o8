@@ -118,6 +118,7 @@ export function buildOrchestratorReviewApprovalInput(
   review: OrchestratorReviewRecordInput,
 ): CreateApprovalInput {
   return {
+    projectId: lane?.projectId,
     source: 'runtime',
     runtime: lane?.runtime ?? 'codex',
     agent: lane?.label ?? review.reviewer ?? 'Orchestrator',

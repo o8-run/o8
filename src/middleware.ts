@@ -483,8 +483,8 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
-  // An operator bearer is valid on every API route. The root layout installs
-  // it on same-origin fetches before hydration for local desktop pages.
+  // An operator bearer is valid on every API route. The retained shell layout
+  // installs it on same-origin fetches before hydration for local desktop pages.
   const panelToken = loadPanelToken();
   if (panelToken) {
     if (bearer && tokenMatches(bearer, panelToken)) {

@@ -1,11 +1,11 @@
 // Served where the removed browser console used to load (/, /dashboard, /mobile),
 // in a browser and in the older Windows and Linux window, which loads /dashboard.
-// No redirect and no sign-in. It has no client code of its own; the root layout
-// still wraps it.
+// No redirect, sign-in or shell bootstrap; the minimal root layout wraps it.
 export function DesktopAppNotice() {
   return (
     <main
       style={{
+        boxSizing: 'border-box',
         minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',

@@ -97,22 +97,27 @@ afterEach(async () => {
 });
 
 describe('native glints, chip and fleet through the real dock hook', () => {
-  it('a lone glint is one frame and one release; its fade and end are sent once and never ticked', async () => {
+  it('a glint below the resting sliver rides its static frame: fade and end are sent once, never ticked', async () => {
     await render({}); await tick(100);
     expect(dock.native).toBe(true);
+    expect(sent()).toMatchObject({ state: 'sliver', holdMs: 5000 });
     const mounted = frames.length;
     await act(async () => { showGlint('Remembered'); });
     await tick(100);
     expect(sent()).toMatchObject({
-      state: 'extras', holdMs: 4800,
+      state: 'sliver', holdMs: 5000,
       glint: { text: 'Remembered', tone: 'progress', fadeAt: 1_004_300, until: 1_004_900 },
     });
     expect(dock.webGlint).toBeNull();
     expect(dock.dockVisible).toBe(false);
     await tick(10_000);
     const traffic = after(mounted);
-    expect(traffic.map(frame => frame.action)).toEqual(['frame', 'release']);
-    expect(traffic[1]).toMatchObject({ kind: 'extras', session: traffic[0].snapshot?.session, immediate: false });
+    // The glint's appearance and its end wake the feed; otherwise only the 4 s keep-alive.
+    expect(traffic.every(frame => frame.action === 'frame' && frame.snapshot?.state === 'sliver')).toBe(true);
+    expect(traffic.length).toBeLessThanOrEqual(5);
+    const carrying = traffic.filter(frame => frame.snapshot?.glint);
+    expect(new Set(carrying.map(frame => JSON.stringify(frame.snapshot?.glint))).size).toBe(1);
+    expect(sent()).not.toHaveProperty('glint');
   });
 
   it('a lone fleet orbit holds with one keep-alive every 4 s; a tap expands it without waiting', async () => {
@@ -133,8 +138,9 @@ describe('native glints, chip and fleet through the real dock hook', () => {
     expect(dock.nativeCapsule).toBe(true);
     await render({ showWorkers: false }); await tick(10);
     expect(sent()).toMatchObject({ state: 'workers', expanded: false });
+    // With the top-pill preference the resting sliver takes over from the orbit.
     await render({ workerCount: 0, workers: undefined }); await tick(10);
-    expect(frames.at(-1)).toMatchObject({ action: 'release', kind: 'workers' });
+    expect(sent()).toMatchObject({ state: 'sliver' });
   });
 
   it('live voice carries the in-flight worker count, which batch 2 left on the web', async () => {
@@ -152,7 +158,11 @@ describe('native glints, chip and fleet through the real dock hook', () => {
     ['voice', { realtimeVoice: 'live' as const }, 'voice'],
     ['fleet orbit', fleet(1), 'workers'],
     ['fleet capsule', { ...fleet(1), showWorkers: true }, 'workers'],
-    ['nothing else', {}, 'extras'],
+    ['nothing else (the resting sliver)', {}, 'sliver'],
+    ['Ask', { askOpen: true }, 'ask'],
+    ['a drop', { dropActive: true }, 'drop'],
+    ['dictation over a drop or staged files', { dropActive: true, stagedFiles: true, snapshot: { ...IDLE, state: 'recording' as const }, dictationSession: 3 }, 'recording'],
+    ['Ask with dictation beside it', { askOpen: true, snapshot: { ...IDLE, state: 'recording' as const }, dictationSession: 3 }, 'recording'],
   ] as const)('the chip and glint compose below %s natively, and the web draws neither', async (_name, patch, state) => {
     await render({}); await tick(100);
     await emit('o8:edit-applied', { app: 'Notes' });
@@ -162,26 +172,6 @@ describe('native glints, chip and fleet through the real dock hook', () => {
     expect(dock.webEdit).toBeNull();
     expect(dock.webGlint).toBeNull();
     expect(dock.edit).toMatchObject({ id: 1 });
-  });
-
-  it.each([
-    ['Ask', { askOpen: true }], ['a confirmation', { agentConfirm: true }], ['a drop', { dropActive: true }], ['staged files', { stagedFiles: true }],
-  ] as const)('beside native dictation, %s keeps the chip and glint on the web, under that surface', async (_name, patch) => {
-    await render({}); await tick(100);
-    await emit('o8:edit-applied', { app: 'Notes' });
-    await act(async () => { showGlint('Remembered'); });
-    await render({ ...patch, snapshot: { ...IDLE, state: 'recording' }, dictationSession: 4 }); await tick(150);
-    expect(sent()?.state).toBe('recording');
-    expect(sent()).not.toHaveProperty('edit');
-    expect(sent()).not.toHaveProperty('glint');
-    expect(dock.webEdit).toMatchObject({ id: 1 });
-    expect(dock.webGlint).toMatchObject({ text: 'Remembered' });
-    expect(dock.dockVisible).toBe(true);
-    // Without dictation the still-web surface wins: native releases at once, the web draws all of it.
-    await render({ snapshot: IDLE }); await tick(150);
-    expect(frames.at(-1)).toMatchObject({ action: 'release', immediate: true });
-    expect(dock.webEdit).toMatchObject({ id: 1 });
-    expect(dock.webGlint).not.toBeNull();
   });
 
   it('the chip dismisses from its timestamp: sent once, unchanged on every frame, then gone', async () => {
@@ -207,11 +197,11 @@ describe('native glints, chip and fleet through the real dock hook', () => {
     await emit('o8:edit-applied', { app: 'Notes' });
     await tick(100);
     const session = sent()?.session as number;
-    expect(sent()).toMatchObject({ state: 'extras', edit: { id: 1, status: 'ready' } });
+    expect(sent()).toMatchObject({ state: 'sliver', edit: { id: 1, status: 'ready' } });
     const reverts = () => invoke.mock.calls.filter(([command]) => command === 'agent_edit_revert');
     reply = { native: true, enabled: true, actions: [
-      { session, state: 'extras', action: 'revert', value: null, edit: 2 },
-      { session: session + 1, state: 'extras', action: 'revert', value: null, edit: 1 },
+      { session, state: 'sliver', action: 'revert', value: null, edit: 2 },
+      { session: session + 1, state: 'sliver', action: 'revert', value: null, edit: 1 },
       { session, state: 'working', action: 'revert', value: null, edit: 1 },
     ] };
     // A static frame has no keep-alive: the next event's frame carries the reply.
@@ -220,8 +210,8 @@ describe('native glints, chip and fleet through the real dock hook', () => {
     expect(reply.actions).toBeUndefined();
     expect(reverts()).toHaveLength(0);
     reply = { native: true, enabled: true, actions: [
-      { session, state: 'extras', action: 'revert', value: null, edit: 1 },
-      { session, state: 'extras', action: 'revert', value: null, edit: 1 },
+      { session, state: 'sliver', action: 'revert', value: null, edit: 1 },
+      { session, state: 'sliver', action: 'revert', value: null, edit: 1 },
     ] };
     await act(async () => { showGlint('Remembered again'); });
     await tick(100);
@@ -229,7 +219,7 @@ describe('native glints, chip and fleet through the real dock hook', () => {
     expect(dock.edit).toMatchObject({ id: 1, status: 'reverted', until: Date.now() - 100 + 1800 });
     expect(sent()?.edit).toMatchObject({ id: 1, status: 'reverted' });
     // Once reverted the chip no longer offers it.
-    reply = { native: true, enabled: true, actions: [{ session, state: 'extras', action: 'revert', value: null, edit: 1 }] };
+    reply = { native: true, enabled: true, actions: [{ session, state: 'sliver', action: 'revert', value: null, edit: 1 }] };
     await emit('o8:edit-revert-settled', { outcome: 'restored' });
     await tick(100);
     expect(reply.actions).toBeUndefined();
@@ -338,7 +328,7 @@ describe('the top-pill preference and an unknown flag', () => {
     await render({}); await tick(100);
     await act(async () => { showGlint('Remembered'); });
     await tick(100);
-    expect(sent()).toMatchObject({ state: 'extras', glint: { text: 'Remembered' } });
+    expect(sent()).toMatchObject({ state: 'sliver', glint: { text: 'Remembered' } });
     expect(webGlintAnimation()).toBeNull();
     // The panel's next request stalls; the deadline hands the glint back to the web.
     vi.mocked(fetch).mockImplementation((_url, init) => {

@@ -230,6 +230,9 @@ export type LaneCommand =
   | {
       verb: 'merge';
       laneId: string;
+      /** Evidence only; authority continues to come from the authenticated approval route. */
+      authorizingPrincipal?: 'operator' | 'device';
+      authorizingApprovalId?: string;
       commitMessage?: string;
       /** Orchestrator review verdict — shown on the approval card */
       reviewSummary?: string;

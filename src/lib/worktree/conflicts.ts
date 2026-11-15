@@ -285,12 +285,13 @@ async function getWorktreeChangeSize(worktree: WorktreeInfo): Promise<number> {
 export async function recommendMergeOrder(
   worktrees: WorktreeInfo[],
   conflicts: FileConflictDetail[],
+  readChangeSize: (worktree: WorktreeInfo) => Promise<number> = getWorktreeChangeSize,
 ): Promise<MergeOrderRecommendation[]> {
   const active = worktrees.filter((wt) => wt.dirtyFiles.length > 0);
   if (active.length === 0) return [];
 
   // Calculate change sizes in parallel
-  const sizes = await Promise.all(active.map(getWorktreeChangeSize));
+  const sizes = await Promise.all(active.map(readChangeSize));
 
   // Count conflicts per worktree
   const conflictCounts = new Map<string, number>();
