@@ -931,6 +931,8 @@ pub mod brand {
     pub const INK: u32 = 0x17140f;
     pub const PAPER: u32 = 0xf4f2ec;
     pub const ORANGE: u32 = 0xff5a1f;
+    /// tokens.json `graphite-eye`: Glance's eyes on a light (dark-mode) body.
+    pub const GRAPHITE_EYE: u32 = 0x1c1a17;
 }
 
 /// Activity's fixed tints, the same on every appearance: classic

@@ -23,6 +23,7 @@ mod request_changes;
 mod request_changes_revision_tests;
 mod editor_command;
 mod files_panel;
+mod glance;
 mod grid_sessions;
 mod icon;
 mod inbox;

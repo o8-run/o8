@@ -97,12 +97,17 @@ export function normalizeLoadedIssue(issue: LoadedIssue, index: number): LoadedI
     throw new Error(`issues[${index}] must include a title.`);
   }
 
+  const allowedFiles = Array.isArray(issue.allowedFiles)
+    ? [...new Set(issue.allowedFiles.map((file) => (typeof file === 'string' ? file.trim() : '')).filter(Boolean))].slice(0, 64)
+    : [];
+
   return {
     number: issue.number,
     title,
     body: typeof issue.body === 'string' ? issue.body : '',
     url: typeof issue.url === 'string' ? issue.url : '',
     ...(issue.runtime ? { runtime: issue.runtime } : {}),
+    ...(allowedFiles.length > 0 ? { allowedFiles } : {}),
   };
 }
 

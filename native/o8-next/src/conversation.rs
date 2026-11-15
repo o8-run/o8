@@ -36,6 +36,8 @@ mod network_tests;
 mod changes_pill;
 pub(crate) use changes_pill::PILL_INSET;
 pub(crate) use changes_pill::ChangesPill;
+#[path = "composer/working_strip.rs"]
+mod working_strip;
 #[path = "composer/project_bar.rs"]
 mod project_bar;
 #[path = "composer/empty_overview.rs"]
@@ -772,6 +774,8 @@ impl Surface {
             .children(self.shell_run_card(cx))
             .children(self.lineage_strip(cx))
             .children(self.changes_pill(cx))
+            // Floats over the transcript's foot, so the transcript never moves.
+            .children(self.working_strip())
             .child(self.composer_card(window, cx))
             // An empty chat's project, checkout, branch and access sit under it.
             .children(self.project_bar(cx))
