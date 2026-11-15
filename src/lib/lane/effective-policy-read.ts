@@ -2,10 +2,11 @@ import 'server-only';
 import { readFile } from 'node:fs/promises';
 import { getLegacyOperatorDefaultsPath } from '@/lib/settings/operator-defaults-store';
 import { composeEffectivePolicy, type EffectivePolicyInput } from './effective-policy';
-import { getLane, findLaneByPacket, getLaneEvents } from './registry';
+import { getLane, findLaneByPacket } from './registry';
 import { readHeadSha } from './head-sha-lock';
 import { validateReviewMode } from './review-mode';
 import { laneGit } from './lane-git';
+import { getSqlite } from '@/lib/db';
 import { isProtectedPath } from '../../../scripts/ci/flag-test-deletions.mjs';
 import { evaluatePolicy } from '@/lib/approvals/policies';
 import { buildLanePolicyContext } from './commands-approval';
@@ -68,7 +69,7 @@ export async function readEffectivePolicy(id: string) {
       reason: 'PR preparation is held: no trustworthy risk receipt and comparison base are pinned to this HEAD. Request independent review again.' });
     if (recorded.comparisonRef) {
       const names = await laneGit(lane.worktreePath || lane.repoPath, lane.repoPath,
-        ['--no-optional-locks', 'diff', '--name-only', '-z', `${recorded.comparisonRef}..${head}`]);
+        ['--no-optional-locks', 'diff', '--no-renames', '--name-only', '-z', `${recorded.comparisonRef}..${head}`]);
       if (names.stdout.split('\0').some(isProtectedPath)) input.holds.push({ source: 'protected-test-change', precedence: 'derived', blocks: ['create_pr', 'merge'],
         reason: 'PR preparation requires maintainer inspection: this revision changes protected test-control paths identified by the CI policy.' });
     }
@@ -76,8 +77,9 @@ export async function readEffectivePolicy(id: string) {
     input.review = await assessDurableApprovedReview(lane, head, { readOnly: true });
     reading = 'packet-policy';
     const entry = lane.packetId ? findMissionRegistryEntryByPacketId(lane.packetId, { includeArchived: true }) : null;
+    const storedPacket = entry?.mission.packets.find(packet => packet.id === lane.packetId);
     const packet = readOrchestratorControlPlaneState().packets.find(packet => packet.id === lane.packetId)
-      ?? entry?.mission.packets.find(packet => packet.id === lane.packetId);
+      ?? storedPacket;
     if (packet) {
       input.correctionBounds = readReviewCorrectionBounds(packet);
       if (packet.queueState === 'held') input.holds.push({ source: 'packet-hold', precedence: 'saved', blocks: ['create_pr', 'merge', 'correction'], reason: 'PR preparation and correction are held by the packet queue hold.' });
@@ -90,15 +92,17 @@ export async function readEffectivePolicy(id: string) {
     reading = 'approval-posture';
     const approval = evaluatePolicy(buildLanePolicyContext(lane, 'create_pr', 'orchestrator', { hasApprovedReview: input.review.approved }));
     input.createPrApproval = { requiresApproval: approval.requiresApproval, ruleId: approval.ruleId ?? null, reason: approval.reason };
-    const events = getLaneEvents(lane.id, 1000);
-    if (packet?.lastEventLabel === 'scope_expansion_requested' || events.some(event => event.verb === 'scope_expansion_requested' && event.payload.expanded === true)) {
-      input.holds.push({ source: 'scope-expansion', precedence: 'saved', blocks: ['create_pr', 'merge', 'correction'],
+    reading = 'scope-expansion';
+    const expansion = getSqlite().prepare("SELECT 1 FROM lane_events WHERE lane_id = ? AND verb = 'scope_expansion_requested' AND json_extract(payload_json, '$.expanded') IS NOT 0 LIMIT 1").get(lane.id);
+    if (packet?.lastEventLabel === 'scope_expansion_requested' || storedPacket?.lastEventLabel === 'scope_expansion_requested' || expansion) {
+      input.holds.push({ source: 'scope-expansion', precedence: 'derived', blocks: ['create_pr', 'merge', 'correction'],
         reason: 'PR preparation and further correction require maintainer inspection of the recorded scope expansion.' });
     }
     if (packet?.mergeHold === true || isPacketMergeHeld(lane.packetId)) input.holds.push({ source: 'merge-hold', precedence: 'saved', blocks: ['merge'], reason: 'Merging is held for the operator; a review does not release the hold.' });
     try { assertSessionMergeAllowed(lane.packetId); }
     catch { input.holds.push({ source: 'session-restriction', precedence: 'saved', blocks: ['merge'], reason: 'Merging is blocked by a session restriction or inconsistent parent identity; operator inspection is required.' }); }
     if (input.mergePolicy.mode === 'pr_only') input.holds.push({ source: 'dogfood-guard', precedence: 'run-effective', blocks: ['merge'], reason: 'Direct merging is blocked by the PR-only safety wall.' });
+    reading = 'work-revision';
     if (await readHeadSha(lane.worktreePath || lane.repoPath, lane.repoPath) !== head) {
       input.errors.push('Work revision changed during the policy read; read it again.');
     }

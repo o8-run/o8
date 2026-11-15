@@ -15,7 +15,8 @@ mkdirSync(repoPath);
 function git(...args: string[]) { return execFileSync('git', args, { cwd: repoPath, encoding: 'utf8' }).trim(); }
 git('init', '-q', '-b', 'main');
 writeFileSync(join(repoPath, 'fixture.txt'), 'fixture\n');
-git('add', 'fixture.txt');
+writeFileSync(join(repoPath, 'vitest.config.ts'), 'export default { test: {} };\n');
+git('add', 'fixture.txt', 'vitest.config.ts');
 git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-qm', 'fixture');
 const head = git('rev-parse', 'HEAD');
 vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn(), notifyAllInBackground: vi.fn() }));
@@ -119,7 +120,17 @@ it('holds a missing risk receipt', async () => {
 it('holds a recorded scope expansion', async () => {
   const { requestPacketScopeExpansion } = await import('@/lib/orchestrator/packet-scope-expansion');
   packet.allowedFiles = ['fixture.txt']; persist();
-  await requestPacketScopeExpansion({ packetId: packet.id, paths: ['extra.txt'], reason: 'Inspect the extra surface.' });
+  const expansion = await requestPacketScopeExpansion({ packetId: packet.id, paths: ['extra.txt'], reason: 'Inspect the extra surface.' });
+  await held('scope-expansion');
+  // Progress must not erase a scope hold once it leaves the recent-event window.
+  packet.allowedFiles = expansion.allowedPaths;
+  packet.lastEventLabel = 'progress'; persist();
+  const { getSqlite } = await import('@/lib/db');
+  const db = getSqlite();
+  const insert = db.prepare('INSERT INTO lane_events (id, lane_id, verb, actor, payload_json, timestamp) VALUES (?, ?, ?, ?, ?, ?)');
+  db.transaction(() => {
+    for (let index = 0; index < 1001; index++) insert.run(`noise-${packet.id}-${index}`, lane.id, 'heartbeat', 'system', '{}', '9999-01-01T00:00:00.000Z');
+  })();
   await held('scope-expansion');
 });
 it('holds protected test-control changes using the CI protected path classifier', async () => {
@@ -127,6 +138,18 @@ it('holds protected test-control changes using the CI protected path classifier'
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-qm', 'protected fixture');
   const next = git('rev-parse', 'HEAD');
   risk({ reviewedHeadSha: next, diffBase: { comparisonRef: head, mergeBase: head, usedFallback: false } });
+  try { await held('protected-test-change'); } finally { git('reset', '--hard', head); }
+});
+it('holds protected test-control renames even with an approved review at the new HEAD', async () => {
+  git('mv', 'vitest.config.ts', 'moved-config.ts');
+  git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-qm', 'rename fixture');
+  const next = git('rev-parse', 'HEAD');
+  risk({ reviewedHeadSha: next, diffBase: { comparisonRef: head, mergeBase: head, usedFallback: false } });
+  const approval = createApproval({ source: 'test', runtime: 'codex', agent: 'Fixture', sessionKey: `policy:${packet.id}`,
+    title: 'Reviewed rename', description: 'Reviewed rename fixture', summary: 'Reviewed rename fixture', risk: 'low', toolName: 'orchestrator_review',
+    args: { packetId: packet.id, approved: true, reviewedHeadSha: next, reviewTurnId: `${packet.id}-rename`, reviewTurnOutcome: 'completed' },
+    metadata: { Packet: packet.id, laneId: lane.id } });
+  resolveApproval(approval.id, 'approve', 'test');
   try { await held('protected-test-change'); } finally { git('reset', '--hard', head); }
 });
 it('never calls the fetching attribution resolver or writes FETCH_HEAD', async () => {

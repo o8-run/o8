@@ -32,7 +32,7 @@ block merging. The other sources are `unknown-state`, `review-mode`,
 `unevaluatedControls` is a closed list, currently `runMergeGate`,
 `file-size-limit`, `contract-coverage`, `run-preflight`, `spoken-review-evidence`,
 `publication-transaction` and `test-removals`. Protected test-control paths use
-CI's existing `isProtectedPath` classifier. General test assertion deletion or
+CI's existing `isProtectedPath` classifier on both sides of renames. General test assertion deletion or
 weakening still belongs to CI's test-removal evaluation. Absence of a hold is
 never clearance for an unevaluated control. Required but unevaluated contract
 coverage also withholds durable approval in this projection.
@@ -43,7 +43,8 @@ Legacy events without that identity, missing events, fallback bases and warnings
 require human inspection. New warning provenance is a boolean, without raw Git
 stderr. `comparisonRef` reports the comparison actually used
 by the review summary (merge-base when available); the read never refreshes it.
-Scope expansion uses the persisted lane event and packet marker; its
+Scope expansion reads the complete per-lane expansion ledger and packet markers,
+without the recent-event display limit; its
 acknowledgement is a maintainer decision.
 
 Controls carry `value`, `source` and `precedence`: file maps to `saved`, env to
