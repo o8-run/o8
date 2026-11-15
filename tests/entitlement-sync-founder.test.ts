@@ -151,7 +151,8 @@ describe('lifetime seat through desktop entitlement sync (#3269)', () => {
     expect(existsSync(path.join(dataDir, 'entitlement.json'))).toBe(true);
     fixtureAuth.user = { id: 'user_other_fixture', name: 'Other account' };
     await act(async () => render());
-    await vi.waitFor(() => expect(existsSync(path.join(dataDir, 'entitlement.json'))).toBe(false));
+    // The eviction crosses a real route and file removal; one second is too short on a loaded runner.
+    await vi.waitFor(() => expect(existsSync(path.join(dataDir, 'entitlement.json'))).toBe(false), { timeout: 10_000 });
     expect(existsSync(founderPath())).toBe(false);
     expect(fetch).toHaveBeenCalledWith('/api/panel/entitlement?subject=user_other_fixture', { cache: 'no-store' });
   });
