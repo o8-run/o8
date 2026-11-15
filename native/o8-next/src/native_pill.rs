@@ -86,6 +86,8 @@ pub(crate) struct Snapshot {
     pub hold_ms: u64,
     #[serde(default)]
     pub ask: Option<ask::Ask>,
+    #[serde(default)]
+    pub confirm: Option<confirm::Card>,
 }
 impl Snapshot {
     pub fn visible(&self) -> bool {
@@ -102,6 +104,7 @@ impl Snapshot {
                 | "voice"
                 | "workers"
         ) || self.state == "ask" && self.ask.is_some()
+            || self.state == "confirm" && self.confirm.as_ref().is_some_and(confirm::Card::valid)
             || self.state == "extras" && self.extras_live(capsules::now_ms())
     }
     fn label(&self) -> &str {
@@ -187,6 +190,7 @@ pub(crate) struct Pill {
     extras_phase: (bool, u8),
     ask_scroll: gpui::ScrollHandle,
     ask_active_sent: bool,
+    decided: Option<(String, String)>,
     presentation: Presentation,
 }
 impl Default for Pill {
@@ -207,6 +211,7 @@ impl Default for Pill {
             extras_phase: (false, 2),
             ask_scroll: gpui::ScrollHandle::new(),
             ask_active_sent: false,
+            decided: None,
             presentation: Presentation::default(),
         }
     }
@@ -239,6 +244,7 @@ impl Pill {
             self.second = None;
             self.revert_sent = None;
             self.ask_active_sent = false;
+            self.decided = None;
         }
         // A revert stays sent until the web shows the chip's next status.
         if snapshot
@@ -284,6 +290,9 @@ impl Render for Pill {
         }
         if self.snapshot.state == "ask" {
             return root.child(self.render_ask(opacity, cx)).children(extras);
+        }
+        if self.snapshot.state == "confirm" {
+            return root.child(self.render_confirm(opacity, cx)).children(extras);
         }
         if capsules::is_capsule(&self.snapshot.state) {
             let capsule = div()
@@ -750,6 +759,8 @@ mod macos {
 mod ask;
 #[path = "native_pill_capsules.rs"]
 mod capsules;
+#[path = "native_pill_confirm.rs"]
+mod confirm;
 #[path = "native_pill_extras.rs"]
 mod extras;
 #[path = "native_hud.rs"]
@@ -766,6 +777,9 @@ mod tests;
 #[cfg(test)]
 #[path = "native_pill_ask_tests.rs"]
 mod ask_tests;
+#[cfg(test)]
+#[path = "native_pill_confirm_tests.rs"]
+mod confirm_tests;
 
 #[path = "native_pill_fixture.rs"]
 mod fixture;

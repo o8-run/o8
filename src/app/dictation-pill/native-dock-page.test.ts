@@ -215,6 +215,85 @@ describe('the Ask panel through the real dock page', () => {
   });
 });
 
+describe('the confirmation card through the real dock page', () => {
+  const card = (id: string, task = 'task-1') => ({ confirmationId: id, taskId: task, tool: 'send', summary: 'Send the draft' });
+  const decisions = () => invoke.mock.calls.filter(([command]) => command === 'agent_confirm_exact').map(([, args]) => args);
+
+  it('draws the exact card natively and runs one decision for it', async () => {
+    await emit('o8:agent-confirm', card('c-1'));
+    await tick(150);
+    const session = sent()?.session as number;
+    expect(sent()).toMatchObject({ state: 'confirm', confirm: { id: 'c-1', task: 'task-1', kind: 'action', summary: 'Send the draft' } });
+    expect(web()).toEqual({ visible: false, ask: false });
+    expect(host.innerHTML).not.toContain('for confirmation');
+    reply = { native: true, enabled: true, actions: [
+      { session, state: 'confirm', action: 'confirm-allow', value: null, ref: 'c-1', task: 'task-1' },
+      { session, state: 'confirm', action: 'confirm-deny', value: null, ref: 'c-1', task: 'task-1' },
+    ] };
+    await tick(150);
+    expect(decisions()).toEqual([{ confirmationId: 'c-1', taskId: 'task-1', allow: true }]);
+    await tick(150);
+    expect(frames.at(-1)).toMatchObject({ action: 'release', kind: 'confirm', session });
+  });
+
+  it('a click on a card that has since changed does nothing', async () => {
+    await emit('o8:agent-confirm', card('c-1'));
+    await tick(150);
+    const first = sent()?.session as number;
+    await emit('o8:agent-confirm', card('c-2'));
+    await tick(150);
+    const second = sent()?.session as number;
+    expect(second).not.toBe(first);
+    reply = { native: true, enabled: true, actions: [
+      { session: first, state: 'confirm', action: 'confirm-allow', value: null, ref: 'c-1', task: 'task-1' },
+      { session: second, state: 'confirm', action: 'confirm-allow', value: null, ref: 'c-1', task: 'task-1' },
+      { session: second, state: 'confirm', action: 'confirm-allow', value: null, ref: 'c-2', task: 'task-9' },
+      { session: second, state: 'ask', action: 'confirm-allow', value: null, ref: 'c-2', task: 'task-1' },
+    ] };
+    await tick(150);
+    expect(decisions()).toEqual([]);
+    // Dismissed by the agent: a late click for it does nothing either.
+    await emit('o8:agent-confirm-dismissed', { confirmationId: 'c-2', taskId: 'task-1' });
+    await tick(150);
+    reply = { native: true, enabled: true, actions: [{ session: second, state: 'confirm', action: 'confirm-deny', value: null, ref: 'c-2', task: 'task-1' }] };
+    await tick(300);
+    expect(decisions()).toEqual([]);
+  });
+
+  it('waits behind a real dictation on both surfaces and falls back to the web card', async () => {
+    await emit('o8:agent-confirm', card('c-1'));
+    await emit('o8:stt-event', { type: 'system-start', origin: 'system', sessionId: 1, startId: 's1' });
+    await tick(150);
+    expect(sent()?.state).toBe('recording');
+    expect(host.innerHTML).not.toContain('for confirmation');
+    await emit('o8:stt-event', { type: 'system-idle', origin: 'system', sessionId: 1, startId: 's1' });
+    await tick(150);
+    expect(sent()).toMatchObject({ state: 'confirm', confirm: { id: 'c-1' } });
+    vi.mocked(fetch).mockImplementation((_url, init) => {
+      frames.push(JSON.parse(String(init?.body)));
+      return new Promise<Response>(() => undefined);
+    });
+    await tick(599);
+    expect(host.innerHTML).toContain('for confirmation');
+    expect(web().visible).toBe(true);
+    expect(frames.at(-1)).toMatchObject({ action: 'release', kind: 'confirm', immediate: true });
+  });
+
+  it('the route forwards only a decision naming a confirmation and task', async () => {
+    const { POST } = await import('@/app/api/next/dictation-pill/route');
+    pipe.requestNextPill.mockResolvedValue({ ok: true, actions: [
+      { session: 1, state: 'confirm', action: 'confirm-allow', value: null, ref: 'c-1', task: 't' },
+      { session: 1, state: 'confirm', action: 'confirm-deny', value: 3, ref: 'c-1' },
+      { session: 1, state: 'confirm', action: 'confirm-deny', value: null, ref: 'c\n1', task: 't' },
+      { session: 1, state: 'ask', action: 'confirm-allow', value: null, ref: 'c-1', task: 't' },
+    ] });
+    const request = new Request('http://localhost/api/next/dictation-pill', { method: 'POST', body: JSON.stringify({ action: 'frame', checkSettings: true }) });
+    expect((await (await POST(request as never)).json()).actions).toEqual([
+      { session: 1, state: 'confirm', action: 'confirm-allow', value: null, ref: 'c-1', task: 't' },
+    ]);
+  });
+});
+
 describe('flag off', () => {
   it('the web page draws the Ask panel exactly as before and sends nothing after the probe', async () => {
     await act(async () => root.unmount());
@@ -224,8 +303,11 @@ describe('flag off', () => {
     root = createRoot(host);
     await mount();
     await answer('Q1', 'A1');
+    await emit('o8:agent-confirm', { confirmationId: 'c-1', taskId: 't', tool: 'send', summary: 'Send it' });
     await tick(5000);
     expect(frames).toHaveLength(1);
+    expect(host.innerHTML).toContain('for confirmation');
+    await emit('o8:agent-confirm-dismissed', { confirmationId: 'c-1', taskId: 't' });
     expect(web()).toEqual({ visible: true, ask: true });
     expect(expanded()).toEqual({ expanded: true });
   });

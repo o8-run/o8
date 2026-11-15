@@ -839,9 +839,9 @@ export default function DictationPillPage() {
   const dock = useNativeDock({
     snapshot, dictationSession: startTimeRef.current, ttsState, askOpen, agentConfirm: !!agentConfirm, agentWorking, dropActive, showWorkers,
     stagedFiles: !!stagedChips?.length, workerCount: displayedWorkers.count, realtimeVoice, speechSpeed, agentTool, agentStartedAt, glint,
-    ask: { mode: askMode, thread: askThread, pending: panelPending },
+    ask: { mode: askMode, thread: askThread, pending: panelPending }, confirmCard: agentConfirm,
     workers: { count: displayedWorkers.count, working: displayedWorkers.working, waiting: displayedWaiting, label: displayedWorkers.waitingLabel, repos: displayedWorkers.repos },
-  }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, closeAsk, armAskIdle: armAskIdleTimer, invokeCmd, onError: dockLog },
+  }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, closeAsk, armAskIdle: armAskIdleTimer, decideConfirm: handleAgentConfirm, invokeCmd, onError: dockLog },
   { topPillEnabled, staged: !!stagedChips });
   const { native: nativeDictation, nativeActive, nativeCapsule, webSnapshot, webTts, webRealtime, webAgentWorking, dockVisible } = dock;
   useLayoutEffect(() => { nativeExtentRef.current = nativeDictation; }, [nativeDictation]);
@@ -940,7 +940,7 @@ export default function DictationPillPage() {
             askMode={askMode}
             askThread={askThread}
             onCloseAsk={closeAsk}
-            agentConfirm={agentConfirm}
+            agentConfirm={dock.webAgentConfirm ? agentConfirm : null}
             agentWorking={webAgentWorking}
             agentTool={agentTool}
             agentStartedAt={agentStartedAt}

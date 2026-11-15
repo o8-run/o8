@@ -127,7 +127,29 @@ recording finishes that dictation through the existing finish channel, as the
 web panel's body click does. The API route forwards an Ask intent only with a
 numeric `ref`, and a copy only with an integer index.
 
-Releases now name the session and kind (dictation, speaking, working, voice or ask)
+Confirmation cards (#6145). The action or plan confirmation card is drawn
+natively too (native_pill_confirm.rs), as state `confirm`, at the web card's
+fixed 420×96 footprint with the review scrolling inside it and Cancel and
+Allow (Run plan for a plan) pinned. The frame carries `confirm`: `id` (the
+confirmation id), `task` (the task id), `kind` (`action` or `plan`),
+`summary` (at most 1,500 bytes) and, for a plan, up to five `steps`. It is
+interactive, so it keeps the 100 ms keep-alive and the 750 ms lease. Each card
+is its own session (the session number changes with the card's identity), so a
+decision queued for one card is cleared, never sent, when the next card
+arrives. A real dictation holds the card back on both surfaces, as the web
+dock does with the flag off (it was drawn beside native dictation by the
+retained web dock before).
+
+A click is a `confirm-allow` or `confirm-deny` intent carrying the exact card it
+was drawn for (`ref` is the confirmation id, `task` the task id). The panel
+queues at most one decision per card. The web runs the page's own decision
+(`agent_confirm_exact`, which also clears the card) only while the frame on
+screen names that same confirmation and task in the same session, and at most
+one decision per reply; a click for a card that has changed, been dismissed or
+expired does nothing. The API route forwards a decision only with a non-empty,
+bounded, printable confirmation id and task id.
+
+Releases now name the session and kind (dictation, speaking, working, voice, ask or confirm)
 they retire, so a late fallback release can no longer hide a newer session that
 is already drawn, including another kind with the same session number (closes
 that #6145 item).
@@ -184,7 +206,7 @@ port order; source references name the current implementation.
 | --- | --- | --- | --- | --- |
 | Dictation requesting/listening/levels, transcribing, polishing, done, error | src/app/dictation-pill/page.tsx:196; native/o8-next/src/native_pill.rs:1 | System STT events and existing session fence | Presentation API only; capture/finish stay with their existing owners | native (batch 1) |
 | Edit/revert chip | src/app/dictation-pill/EditRevertChip.tsx:19; native/o8-next/src/native_pill_extras.rs:1 | edit-applied and edit-revert-settled; timed dismissal from `until` | agent_edit_revert, run by the web dock from a reported click | native (batch 3) |
-| Action and plan confirmation cards | src/components/desktop/dictation/useAgentConfirmations.ts:47; src/components/desktop/dictation/DockNotchSurface.tsx:843 | agent-confirm and agent-confirm-dismissed, exact confirmation/task identity | agent_confirm_exact | still web |
+| Action and plan confirmation cards | src/components/desktop/dictation/useAgentConfirmations.ts:47; src/components/desktop/dictation/DockNotchSurface.tsx:843; native/o8-next/src/native_pill_confirm.rs:1 | agent-confirm and agent-confirm-dismissed, exact confirmation/task identity | agent_confirm_exact, run by the web dock from a reported decision naming the exact card | native (#6145) |
 | Ask conversation, pending user turn, answers, errors and sources | src/app/dictation-pill/page.tsx:530; src/components/desktop/dictation/DockAskPanel.tsx:214; native/o8-next/src/native_pill_ask.rs:1 | ask-open/answer/error and agent-task-event; pending agent dictation while panel is open; thread, timers and idle collapse stay in the web dock | close, copy (browser clipboard) and idle re-arm run by the web dock from reported `ask-*` intents | native (#6145) |
 | Speech playback, pause, stop and speed | src/app/dictation-pill/page.tsx:399; native/o8-next/src/native_pill_capsules.rs:1 | tts-state playing/paused | tts_toggle_pause, tts_stop, tts_set_speed, run by the web dock from a reported click | native (batch 2) |
 | Live voice presence and stop | src/app/dictation-pill/page.tsx:427; native/o8-next/src/native_pill_capsules.rs:1 | realtime-status connecting/live/off; safety timer stays in the web dock | Emits o8:realtime-toggle (dock-tap) from a reported click; no direct shell command | native (batch 2) |
@@ -215,7 +237,8 @@ src/components/desktop/dictation/dockPrecedence.ts, is:
 
 The native frame follows the same order: the Ask panel when Ask wins
 (including a pending turn inside it), dictation when it is active, otherwise
-the winning capsule (5, 6, 8 or 9). When a still-web surface (2, 4 or 7) wins,
+the confirmation card when it wins, otherwise
+the winning capsule (5, 6, 8 or 9). When a still-web surface (4 or 7) wins,
 the frame is idle with an immediate release and the web draws that surface. When nothing wins (10) and workers exist, the frame is the
 resting fleet orbit; with no workers but a chip or glint, it is `extras`. While the native panel draws the winner, the web dock does not
 draw speech, working or live voice under it; with a native capsule the web
@@ -232,12 +255,13 @@ belong under:
 | Dock state | Drawn by | Chip and glint |
 | --- | --- | --- |
 | Dictation, nothing still-web beside it | native | native, below the dictation capsule |
-| Dictation with a confirmation, a drop or staged files beside it (web, below the native capsule) | native and web | web, below the web surface |
+| Dictation with a drop or staged files beside it (web, below the native capsule) | native and web | web, below the web surface |
 | Speaking, working, live voice | native | native, below the capsule |
 | Ask panel (or its listening capsule) | native | native, below the panel |
+| Confirmation card | native | native, below the card |
 | Fleet orbit or capsule | native | native, below it |
 | Nothing (10) | native `extras` | native, alone at the capsule position |
-| Confirmation, drop, staged files (handoff) | web | web, as today |
+| Drop, staged files (handoff) | web | web, as today |
 | Flag off, fallback, quiet mode | web | web, as today |
 
 While native, the web never draws the fleet orbit or capsule (native draws
@@ -277,6 +301,7 @@ The idle sliver alone does not make it visible under native ownership.
 | Fleet capsule (expanded) | 320×44, ring or dot, DockNotchSurface wording, repos dimmed; tap re-arms the 5 s timer | No hover tooltip; static ring |
 | Edit/revert chip | 248×24 below the capsule (alone at the capsule position otherwise), Rewrote in App — Revert, Reverting…, Reverted, Original copied | Fixed width with truncation (the web chip sizes to its text); no enter slide |
 | Glint | Below the chip, uppercase, tone colour from theme tokens, 0.5 s fade from `fadeAt`, gone at `until` | Theme surface instead of the dark gradient; no enter slide |
+| Confirmation card | 420×96, radius 24; SYMON WANTS TO or SYMON’S PLAN, the summary or numbered steps scrolling, Cancel and Allow/Run plan pinned right | Theme surface instead of the frosted card; Allow uses the theme text colour as its fill |
 | Ask listening | 248×40 capsule with the bars at rest | Static bars instead of the ambient gradient waveform |
 | Ask panel | 420×380, radius 26; header (mark, Symon, close); scrolling thread of You/Symon turns, paragraphs and bullet/numbered items, sources line, Copy/Copied per answer; pending You turn (words or Listening…, level bars, Polishing…); pending Symon turn (ring, Working…/Synthesizing…, timer); follows the newest turn | Theme surface instead of the frosted panel; accent dot instead of the gradient mark; inline `code` and **bold** drawn as plain text; Copy always visible (the web shows it on hover); only the newest turns within 4.5 KB are scrollable; Escape does not close it (the panel never takes keyboard focus) |
 
@@ -377,7 +402,18 @@ Physical focus retention is reserved for the lead's live check.
     with the trackpad while the panel is not focused.
 18. Quit the native window process with the panel open: the web panel returns
     expanded within about half a second and its controls work.
-19. Set the flag false and repeat a dock-routed session and steps 7 to 17 to
+19. Confirmation: give an agent instruction that needs approval (an action, then
+    a multi-step plan). The native card shows the summary (or numbered steps,
+    scrolling if long) with Cancel and Allow (Run plan); no web card shows.
+    Click Allow once: the action runs once and the card retires; repeat with
+    Cancel. Click several times quickly: one decision. Hold Fn while a card is
+    up: the card hides for the dictation and returns after it. Keyboard focus
+    stays in the front application.
+20. With a card up, trigger a second confirmation (or let the agent dismiss
+    the first) and click immediately: nothing is decided for the old card.
+    Quit the native window process with a card up: the web card returns within
+    about half a second and its buttons work.
+21. Set the flag false and repeat a dock-routed session and steps 7 to 20 to
     verify web behavior.
 
 Gradient/shimmer, the squiggle loader and the spring geometry morph are follow-up

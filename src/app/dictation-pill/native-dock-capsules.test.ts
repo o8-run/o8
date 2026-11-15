@@ -105,11 +105,12 @@ describe('dock precedence', () => {
    * The edit chip and glints are not in the order: page.tsx draws them below
    * whatever the dock shows. Composition, stated without the helpers: the
    * native frame is the Ask panel when Ask owns the dock (including a pending
-   * in-panel dictation), dictation when active, else the reference owner's
+   * in-panel dictation), the confirmation card when it owns the dock,
+   * dictation when active, else the reference owner's
    * capsule, the fleet orbit when nothing owns the dock and workers exist, or
    * the chip/glint alone; any other owner is a handoff to the web. The chip and
    * glint go native with a drawn frame, except beside native dictation while
-   * the web draws a confirmation, a drop or staged files. When origin/main
+   * the web draws a drop or staged files. When origin/main
    * would hide the web dock (no top-pill preference and nothing else keeping
    * it visible), the fleet and a lone chip or glint draw nowhere.
    */
@@ -132,19 +133,20 @@ describe('dock precedence', () => {
               const active = dictationState !== 'idle';
               // origin/main nativeDockFrame.ts:91 dockVisible with the flag off, at idle dictation.
               const shownOnMain = topPill || ttsState !== 'idle' || input.askOpen || input.agentWorking || input.agentConfirm || realtimeVoice !== 'off';
-              const state = owner === 'ask' ? 'ask' : active ? dictationState
+              const state = owner === 'ask' || owner === 'confirm' ? owner : active ? dictationState
                 : owner === 'speaking' || owner === 'working' || owner === 'voice' ? owner
                   : (owner === 'workers' || owner === 'idle') && !shownOnMain ? 'idle'
                     : owner === 'workers' || owner === 'idle' && workerCount > 0 ? 'workers'
                       : owner === 'idle' ? 'extras' : 'idle';
-              const webBeside = active && owner !== 'ask' && (input.agentConfirm || input.dropActive || input.stagedFiles);
-              const handoff = !active && ['confirm', 'drop', 'staged'].includes(owner);
+              const webBeside = active && owner !== 'ask' && (input.dropActive || input.stagedFiles);
+              const handoff = !active && ['drop', 'staged'].includes(owner);
               const siblings = state !== 'idle' && !webBeside ? 'native' : webBeside || handoff ? 'web' : 'hidden';
               const { frame } = nativeDockFrame({
                 ...input, snapshot: { ...IDLE, state: dictationState }, dictationSession: 1, speechSpeed: 1, agentTool: '', agentStartedAt: 1, edit, glint, topPill,
                 ask: { mode: 'answer', thread: [{ role: 'assistant', text: 'Answer' }], pending: input.panelPending ? { phase: 'listening', text: '' } : null },
-              }, { speaking: 1, voice: 1, workers: 1, extras: 1, ask: 1 });
-              const view = webDockView(true, frame, dictationState, { ...input, showWorkers: input.showWorkers, workerCount });
+                confirmCard: input.agentConfirm ? { confirmationId: 'c', taskId: 't', tool: 'tool', summary: 'Review' } : null,
+              }, { speaking: 1, voice: 1, workers: 1, extras: 1, ask: 1, confirm: 1 });
+              const view = webDockView(true, frame, dictationState, { ...input, showWorkers: input.showWorkers, workerCount, agentConfirm: input.agentConfirm });
               const visible = webDockVisible(true, false, view, { ...input, snapshot: { ...IDLE, state: dictationState } }, { topPillEnabled: topPill, staged: input.stagedFiles });
               const label = JSON.stringify({ ...input, topPill });
               expect(frame.state, label).toBe(state);
@@ -152,11 +154,11 @@ describe('dock precedence', () => {
               expect(drawnBy, label).toBe(siblings);
               expect(view.workerCount, label).toBe(0);
               // The web never draws Ask while the native panel draws anything.
-              if (view.nativeDrawn) expect(view.askOpen, label).toBe(false);
+              if (view.nativeDrawn) expect([view.askOpen, view.agentConfirm], label).toEqual([false, false]);
               seen.add(`${state}:${siblings}`);
             }
     expect([...seen].sort()).toEqual([
-      'ask:native', 'extras:native', 'idle:hidden', 'idle:web', 'recording:native', 'recording:web', 'speaking:native', 'success:native', 'success:web',
+      'ask:native', 'confirm:native', 'extras:native', 'idle:hidden', 'idle:web', 'recording:native', 'recording:web', 'speaking:native', 'success:native', 'success:web',
       'voice:native', 'workers:native', 'working:native',
     ]);
   });
@@ -272,13 +274,14 @@ describe('native dock capsules through the real hook', () => {
     // Ask is native: it replaces the speaking capsule in the same panel.
     await render({ askOpen: true }); await tick(200);
     expect(sent()).toMatchObject({ state: 'ask', ask: { listening: false, turns: [] } });
-    await render({ agentConfirm: true }); await tick(200);
+    // A drop wins over speaking (Ask beats a drop), and the web draws it.
+    await render({ askOpen: false, dropActive: true }); await tick(200);
     expect(frames.at(-1)).toMatchObject({ action: 'release', immediate: true, kind: 'ask' });
     const count = frames.length;
     await tick(2000);
     expect(frames).toHaveLength(count);
-    for (const patch of [{ agentConfirm: true }, { dropActive: true }]) {
-      await render({ askOpen: false, agentConfirm: false, dropActive: false }); await tick(200);
+    for (const patch of [{ dropActive: true }]) {
+      await render({ askOpen: false, stagedFiles: false, dropActive: false }); await tick(200);
       expect(sent()?.state).toBe('speaking');
       await render(patch); await tick(200);
       expect(frames.at(-1)).toMatchObject({ action: 'release', immediate: true });
@@ -362,7 +365,7 @@ describe('native dock capsules through the real hook', () => {
     for (const state of ['speaking', 'working', 'voice', 'recording', 'idle'] as const) {
       const live = { ttsState: 'paused', realtimeVoice: 'live', agentWorking: true, askOpen: false } as const;
       expect(webDockView(false, { ...IDLE, state }, 'idle', live)).toEqual({
-        nativeDrawn: false, nativeCapsule: false, ttsState: 'paused', realtimeVoice: 'live', askOpen: false, agentWorking: true,
+        nativeDrawn: false, nativeCapsule: false, ttsState: 'paused', realtimeVoice: 'live', askOpen: false, agentConfirm: false, agentWorking: true,
         showWorkers: false, workerCount: 0, nativeEdit: false, nativeGlint: false,
       });
     }

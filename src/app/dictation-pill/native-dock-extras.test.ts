@@ -167,7 +167,7 @@ describe('native glints, chip and fleet through the real dock hook', () => {
   });
 
   it.each([
-    ['a confirmation', { agentConfirm: true }], ['a drop', { dropActive: true }], ['staged files', { stagedFiles: true }],
+    ['a drop', { dropActive: true }], ['staged files', { stagedFiles: true }],
   ] as const)('beside native dictation, %s keeps the chip and glint on the web, under that surface', async (_name, patch) => {
     await render({}); await tick(100);
     await emit('o8:edit-applied', { app: 'Notes' });
