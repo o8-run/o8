@@ -80,6 +80,7 @@
     "ship": "node scripts/ship.mjs",
     "ship:linux-sig": "node scripts/sign-linux-appimage.mjs",
     "postinstall": "node scripts/postinstall.mjs",
+    "native:app:build": "node scripts/native-app-build.mjs",
     "tauri:prebuild": "node scripts/tauri-prebuild.mjs",
     "version": "node scripts/sync-version.mjs",
     "tauri:build:nonotary": "sh -c 'unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD= node scripts/tauri-build.mjs -- --features dev-mcp-plugin'",
