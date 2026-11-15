@@ -4,7 +4,7 @@ import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { correctWorkers, listCorrectableWorkers, listWorkerCorrections, readWorkerCorrection } from '@/lib/orchestrator/worker-corrections';
 import { validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import { correctAuthorFromReview } from '@/lib/orchestrator/review-author-correction';
+import { correctAuthorFromReview, inspectReviewAuthorCorrection } from '@/lib/orchestrator/review-author-correction';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +16,8 @@ const failure = (error: unknown) => NextResponse.json({ error: error instanceof 
 export async function GET(request: NextRequest) {
   const denied = authorize(request); if (denied) return denied;
   try {
+    const packetId = request.nextUrl.searchParams.get('packetId');
+    if (packetId) return NextResponse.json({ reviewCorrection: await inspectReviewAuthorCorrection(packetId) }, { headers: { 'Cache-Control': 'no-store' } });
     const target = validateComposerQueueTarget({ repoPath: request.nextUrl.searchParams.get('repoPath'), threadId: request.nextUrl.searchParams.get('threadId') });
     return NextResponse.json({ workers: await listCorrectableWorkers(target), corrections: listWorkerCorrections(target) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }

@@ -842,12 +842,16 @@ fn lines(steps: &[Step], trace: &Trace) -> Vec<Line> {
         out.push(Line {
             key: "done".into(),
             rail: Rail::Main,
-            icon: if trace.stopped {
+            icon: if trace.terminal_note.is_some() {
+                Icon::Dot
+            } else if trace.stopped {
                 Icon::Cross
             } else {
                 Icon::Check
             },
-            label: if trace.stopped {
+            label: if let Some(note) = &trace.terminal_note {
+                note.clone()
+            } else if trace.stopped {
                 "Stopped".into()
             } else if trace.thinking {
                 "Finished thinking".into()
@@ -878,7 +882,10 @@ pub(crate) fn seconds(ms: f64) -> String {
 }
 
 /// The header: "Thinking" with its running seconds, then how long it took.
-fn title(steps: &[Step], trace: &Trace, now: f64) -> (String, Option<String>) {
+pub(crate) fn title(steps: &[Step], trace: &Trace, now: f64) -> (String, Option<String>) {
+    if let Some(note) = &trace.terminal_note {
+        return (note.clone(), None);
+    }
     if trace.live {
         let elapsed = trace.started.map(|start| seconds(now - start));
         let working = steps.is_empty() && !trace.thinking;
@@ -1249,7 +1256,9 @@ pub fn element(state: Rc<RefCell<RowState>>, index: usize, list: &gpui::ListStat
                 .items_center()
                 .gap(px(7.))
                 .opacity(0.35 + 0.65 * title_fade)
-                .text_color(if trace.live {
+                .text_color(if trace.attention {
+                    theme().warning
+                } else if trace.live {
                     theme().text
                 } else {
                     theme().text_secondary

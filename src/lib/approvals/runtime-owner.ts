@@ -22,7 +22,8 @@ export function isRuntimeApprovalRequest(value: unknown): value is Record<string
 const forward = ownedByNativeTransport(
   async () => Response.json({ ok: false, error: 'Native approval operation requires the native transport.' }, { status: 503 }),
   () => Response.json({ ok: false, error: 'Approval runtime owner is unavailable.' }, { status: 503 }),
-  { forwardHeaders: ['cookie', 'x-o8-agent-tool'] },
+  // The handler reads only the bearer and the agent-tool marker; the merge hold depends on the marker.
+  { forwardHeaders: ['x-o8-agent-tool'] },
 );
 
 /** Forward runtime, lane and plan decisions; LLM continuations stay beside their proxy. */

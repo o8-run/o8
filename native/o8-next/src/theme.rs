@@ -791,6 +791,31 @@ pub fn popover_background() -> Rgba {
     }
 }
 // --t-brand-orange in src/lib/theme/registry.ts.
+/// The macOS window buttons (window_lights), as AppKit and the classic shell
+/// (TrafficLights.tsx) draw them in every theme: close, minimize and full
+/// screen fills, the hairline rim inside each, and the hover glyph ink.
+/// macOS's own colours, so no theme changes them.
+pub fn window_light(index: usize) -> Rgba {
+    rgb([0xff5f57, 0xfebc2e, 0x28c840][index.min(2)])
+}
+pub const WINDOW_LIGHT_RIM: Rgba = Rgba {
+    r: 0.,
+    g: 0.,
+    b: 0.,
+    a: 0.18,
+};
+pub const WINDOW_LIGHT_GLYPH: Rgba = Rgba {
+    r: 0.,
+    g: 0.,
+    b: 0.,
+    a: 0.55,
+};
+/// The inactive window's flat grey: the theme's ink at 22%.
+pub fn window_light_inactive() -> Rgba {
+    let mut grey = current().text;
+    grey.a *= 0.22;
+    grey
+}
 pub fn brand_orange() -> Rgba {
     rgb(0xff5a1f)
 }
@@ -899,6 +924,15 @@ pub mod annotate {
     pub const HINT: u32 = 0xffffffcc;
 }
 
+/// Brand v1's fixed colours (brand/tokens, docs/design/BRAND.md): the Ring's
+/// ink and paper and its orange review point. The Ring and the app icon use
+/// them on every theme, so they are not theme tokens.
+pub mod brand {
+    pub const INK: u32 = 0x17140f;
+    pub const PAPER: u32 = 0xf4f2ec;
+    pub const ORANGE: u32 = 0xff5a1f;
+}
+
 /// Activity's fixed tints, the same on every appearance: classic
 /// ACTIVITY_COLORS (o8-activity-helpers.tsx) and orchestratorStatusTone
 /// (src/lib/orchestrator/display.ts).
@@ -975,6 +1009,32 @@ pub fn glass_muted() -> Rgba {
 /// The soft halo around the rail's Symon mark.
 pub fn symon_glow() -> Rgba {
     gpui::rgba(0x88d1f173)
+}
+/// The dictation HUD's dark material, the same in both palettes: solid, or
+/// the glass tint (the web HUD's rgb(20,22,28) and rgba(9,10,13,0.82)).
+pub fn dictation_hud_fill(solid: bool) -> Rgba {
+    if solid {
+        gpui::rgb(0x14161c)
+    } else {
+        gpui::rgba(0x090a0dd1)
+    }
+}
+/// The draw-on-screen ink: ember (--t-brand-orange, the web overlay's ORANGE)
+/// at `alpha`, so the operator's marks and Symon's point-backs are one language.
+pub fn ink_ember(alpha: f32) -> Rgba {
+    let mut ember = brand_orange();
+    ember.a = alpha.clamp(0., 1.);
+    ember
+}
+/// The ink's warm-white hot core over the glow (the web overlay's CORE_HOT).
+pub fn ink_core(alpha: f32) -> Rgba {
+    let mut core = rgb(0xffe2cf);
+    core.a = alpha.clamp(0., 1.);
+    core
+}
+/// The HUD's polishing track under the travelling Symon segment.
+pub fn symon_track() -> Rgba {
+    gpui::rgba(0xb1b4e529)
 }
 /// Symon's palette, SymonVisuals' SYMON_GRADIENT_STOPS.
 const SYMON_STOPS: [(f32, u32); 4] = [

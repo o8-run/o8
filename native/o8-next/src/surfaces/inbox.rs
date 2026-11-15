@@ -44,9 +44,7 @@ fn create(
                 }
                 let id = session.id;
                 this.execute(Command::Session(id.clone()), window, cx);
-                if let Some(Content::Session(surface)) =
-                    this.content.get(&this.key(&Tab::Session(id.clone())))
-                {
+                if let Some(Content::Session(surface)) = this.thread_content(&id) {
                     surface.update(cx, |surface, cx| surface.shell_open(id, cx));
                 }
                 this.capture(window, cx);

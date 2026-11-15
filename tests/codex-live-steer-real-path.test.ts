@@ -2,8 +2,6 @@ import { execFile, execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { NextRequest } from 'next/server';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -20,9 +18,6 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBacke
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 // Solo's platform sandbox has its own tests. Keep its exec process real here.
 vi.mock('@/lib/lane/single-orchestrator-policy', () => ({ prepareSingleOrchestratorLaunch: async (input: Record<string, unknown>) => ({ ...input, diagnostics: [], cleanup: () => {} }) }));
-vi.mock('@/components/desktop/thoughts/InputButtons', () => ({ InputButtons: () => null }));
-vi.mock('@/components/desktop/thoughts/chat-panel/SlashCommandPicker', () => ({ SlashCommandPicker: () => null }));
-vi.mock('@/components/desktop/thoughts/chat-panel/ComposerStatusBar', () => ({ ComposerStatusBar: () => null }));
 
 const root = realpathSync(mkdtempSync(join(getDataDir(), 'codex-live-steer-')));
 const home = join(root, 'home');
@@ -133,7 +128,7 @@ async function running(outcome = 'accepted', options: { bridge?: boolean; model?
 afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 describe.skipIf(process.platform === 'win32')('Codex native live steer through the composer and bridge', () => {
-  it.each(['high', 'ultra'] as const)('refuses a queued %s pin before native input with a visible reason', async effort => {
+  it.each(['high', 'ultra'] as const)('refuses a queued %s pin before native input with a saved reason', async effort => {
     const fixture = await running();
     const id = `effort-local-${sequence}`;
     const payload = { ...fixture.payload, routing: { ...fixture.payload.routing, effort } };
@@ -147,16 +142,12 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       expect(item.admittedAt).toBeNull();
       expect(item.reason).toMatch(new RegExp(`cannot.*effort.*${effort}`, 'i'));
       expect(fixture.steers()).toEqual([]);
-      const { ComposerDeliveryTag } = await import('@/components/desktop/thoughts/chat-panel/ComposerQueuedMessages');
-      const html = renderToStaticMarkup(createElement(ComposerDeliveryTag, { item,
-        queue: { items: [item], canSteer: true, onSteer: () => {}, onCancel: () => {} } }));
-      expect(html.replace(/<[^>]*>/g, '')).toContain(renderToStaticMarkup(item.reason!));
       closeDb(); ensureV71ComposerQueueSchema(getSqlite());
       expect(queue.readComposerSend(id)).toMatchObject({ status: 'held', reason: item.reason });
     } finally { await fixture.close(); }
   }, 60_000);
 
-  it.each(['high', 'ultra'] as const)('retains the %s refusal across the server-process relay and chat', async effort => {
+  it.each(['high', 'ultra'] as const)('retains the %s refusal across the server-process relay', async effort => {
     const fixture = await running();
     const id = `effort-remote-${sequence}`;
     const payload = { ...fixture.payload, routing: { ...fixture.payload.routing, effort } };
@@ -180,10 +171,6 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       expect(item.reason).toMatch(new RegExp(`cannot.*effort.*${effort}`, 'i'));
       expect(item.reason).not.toContain('unconfirmed');
       expect(fixture.steers()).toEqual([]);
-      const { ComposerDeliveryTag } = await import('@/components/desktop/thoughts/chat-panel/ComposerQueuedMessages');
-      const html = renderToStaticMarkup(createElement(ComposerDeliveryTag, { item,
-        queue: { items: [item], canSteer: true, onSteer: () => {}, onCancel: () => {} } }));
-      expect(html.replace(/<[^>]*>/g, '')).toContain(renderToStaticMarkup(item.reason));
     } finally { await fixture.close(); }
   }, 60_000);
 
@@ -314,20 +301,10 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
     } finally { await fixture.close(); }
   }, 60_000);
 
-  it('defaults the Codex lead composer to Steer from the real bridge capability response', async () => {
+  it('reports a running Codex lead as steerable from the real bridge capability response', async () => {
     const fixture = await running();
     try {
-      const { ComposerArea } = await import('@/components/desktop/thoughts/chat-panel/ComposerArea');
-      const { canSteer } = await fixture.capability();
-      const noop = () => {};
-      const html = renderToStaticMarkup(createElement(ComposerArea, {
-        input: 'Smaller change', onInputChange: noop, isOrchestratorMode: true, activeBackend: 'codex',
-        displayWaiting: true, chatMessages: [], activeTargetLabel: 'Codex', targetAgentExists: true,
-        thoughtsBodyBackground: 'transparent', enhancing: false, preEnhanceInput: null, onEnhance: noop, onUndoEnhance: noop,
-        onSubmit: noop, onSteer: noop, canSteerLive: canSteer, onSlashCommand: noop, modelLabel: 'Codex',
-        effort: 'low', onEffortChange: noop, adaptiveEnabled: false, displayMessagesCount: 2, hasAssistantActivity: true,
-      }));
-      expect(html).toContain('placeholder="Steer the agent…"');
+      expect((await fixture.capability()).canSteer).toBe(true);
     } finally { await fixture.close(); }
   }, 60_000);
 

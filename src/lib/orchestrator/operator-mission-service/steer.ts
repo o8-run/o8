@@ -1,14 +1,11 @@
+import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
+import { isNativeCortexReader } from '@/lib/cortex/owner-process';
+import { callSteerOwner } from './steer-owner-client';
 /**
  * steerPacket — nudge a packet's warm session with a follow-up message.
  *
- * CLI-as-control-plane symmetry (Stage 4). This was the one
- * mission verb with no HTTP route: the MCP `steer_packet` handler resolved the
- * lane and flipped its status IN ITS OWN PROCESS (a separate in-memory registry
- * instance from the app), only the runtime steer itself crossing the HTTP seam.
- * Extracting it here — and routing both the MCP tool and the `o8 packet steer`
- * CLI through `/api/orchestrator/steer-packet` — means the lane resolution +
- * status flip run in the Next process where the live registry and warm-session
- * pool actually live. Removes the cross-process-registry fragility.
+ * Admission, queue claims and runtime delivery share the WS process in native mode.
+ * Callers send data before constructing any reviewed-run or spawn predicates.
  *
  * Layer 3 of the merge-failure escalation chain (CLAUDE.md): cheaper than a
  * fresh redispatch because it reuses the warm Codex thread.
@@ -171,13 +168,9 @@ async function markAlignmentResolved(packetId: string): Promise<void> {
   });
 }
 
-export async function steerPacket({
-  packetId,
-  message,
-  source,
-  clientMutationId,
-  immediate,
-}: SteerPacketInput): Promise<SteerPacketResult> {
+export async function steerPacket(input: SteerPacketInput): Promise<SteerPacketResult> {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) return callSteerOwner({ kind: 'steer', input });
+  const { packetId, message, source, clientMutationId, immediate } = input;
   const lane = findSteerablePacketLane(packetId);
   if (!lane) {
     const current = currentMissionState();
@@ -211,6 +204,7 @@ export async function steerPacket({
 }
 
 export async function deliverQueuedPacketSteer(steerEvent: LaneEvent): Promise<SteerPacketResult> {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) return callSteerOwner({ kind: 'deliver', eventId: steerEvent.id });
   let admittedRunId: string | undefined;
   const check = () => {
     const { packetId, sessionKey, stopVersion } = steerEvent.payload;

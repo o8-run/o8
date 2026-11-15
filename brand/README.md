@@ -7,7 +7,7 @@ o8 Branding v1 assets. The rules for using them are in `docs/design/BRAND.md`; w
 | `ring/` | The main logo. `ring-light.svg` (ink, for light surfaces), `ring-dark.svg` (paper, for dark), `ring-mono-*.svg` (one colour), `ring-currentcolor.svg` (inherits text colour), 512 and 1024 PNGs. `loop/ring-step-1..6.svg`: the point at each loop step |
 | `app-icon/` | Flat Ring on a tile. `icon-{light,dark}.svg` (macOS grid), `icon-{light,dark}-square.svg` (full bleed), `o8-{light,dark}.iconset/` (run `iconutil -c icns` on macOS), `png/` sizes 32 to 1024 |
 | `favicon/` | `favicon.svg` (switches with the browser theme), 16/32/48 PNGs, `apple-touch-icon-180.png` |
-| `glance/` | o8's face. `glance-{fog,mist,tight,hair}-{light,dark}.svg`, `states/` (reviewing, working, sent back, approved in fog and tight), `flat/` fallback |
+| `glance/` | o8's face. `glance-{fog,mist,tight,hair}-{light,dark}.svg`, `states/` (reviewing, working, sent back, approved in fog and tight), `flat/` fallback, `core/` (Core treatment under test next to Fog, Fog stays default) |
 | `motion/` | The locked motions as animated SVG: intro-wake, approve, fan-out, read-the-diff, many-in-one-out, branch-review, color-states. `glance-to-merge-OPEN.svg` is not locked |
 | `working/` | The working indicator. `states.json` (states, lines, loops, rules), `composer/` (40px, tight fog) and `stage/` (96px, fog) animated SVGs, `frames-80/` (PNG frames for native code, 20fps), `o8-working.js` + `.css` (web reference) |
 | `fonts/` | Inter Tight (Light, Regular, Medium as TTF and WOFF2, plus the variable font) and JetBrains Mono Regular, each with its OFL licence |

@@ -377,7 +377,7 @@ impl GitActions {
                 Ok((slug, Reply::Done(reply))) => {
                     match pull_request_url(slug.as_deref(), reply["branch"].as_str()) {
                         Some(url) => {
-                            cx.open_url(&url);
+                            crate::external_open::url(cx, &url);
                             this.say("Pushed. Opening the pull request form.".into(), false, cx);
                         }
                         None => this.say("Pushed. Open the pull request on GitHub.".into(), false, cx),

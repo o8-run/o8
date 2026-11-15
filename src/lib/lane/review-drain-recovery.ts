@@ -1,3 +1,4 @@
+import { nextFairReview, recordFairReviewClaim } from './review-scheduling';
 /**
  * Review-queue claim + recovery, split out of `auto-review.ts`.
  *
@@ -38,6 +39,7 @@ export interface QueuedReview {
   attempts: number;
   head_sha: string | null;
   claim_owner: string;
+  updated_at?: string;
 }
 
 /**
@@ -58,12 +60,16 @@ function unkeyedHeadSha(row: Pick<QueuedReview, 'lane_id' | 'repo_path'>): strin
   }
 }
 
-export function claimNextReview(): QueuedReview | null {
+function claimNextReviewLocked(): QueuedReview | null {
   const db = getDb();
-  const row = db.prepare(
-    `SELECT id, lane_id, repo_path, attempts, head_sha FROM review_queue
+  const fairId = nextFairReview();
+  if (fairId === null) return null;
+  const row = fairId === undefined ? db.prepare(
+    `SELECT id, lane_id, repo_path, attempts, head_sha, updated_at FROM review_queue
      WHERE status = 'pending' ORDER BY updated_at ASC, created_at ASC LIMIT 1`,
-  ).get() as QueuedReview | undefined;
+  ).get() as QueuedReview | undefined : db.prepare(
+    `SELECT id, lane_id, repo_path, attempts, head_sha, updated_at FROM review_queue WHERE id = ? AND status = 'pending'`,
+  ).get(fairId) as QueuedReview | undefined;
 
   if (!row) return null;
 
@@ -82,7 +88,12 @@ export function claimNextReview(): QueuedReview | null {
   ).run(headSha, claimOwner, row.id);
   if (claimed.changes !== 1) return null;
 
+  recordFairReviewClaim(row);
   return { ...row, head_sha: headSha, claim_owner: claimOwner };
+}
+
+export function claimNextReview(): QueuedReview | null {
+  return getDb().transaction(claimNextReviewLocked).immediate();
 }
 
 /** True only while this exact claim generation still owns the queue row. */

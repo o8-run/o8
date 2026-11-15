@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -210,4 +210,32 @@ describe('operator-defaults dispatchable runtime inventory', () => {
       defaultDispatchRuntime: 'claude-code', defaultDispatchModel: 'claude-sonnet-5', workerRuntimes: ['claude-code'],
     } });
   });
+});
+
+it('refuses saving and loading a non-dispatchable default at the settings boundary', async () => {
+  const defaults = await import('@/lib/operator/defaults');
+  const { getLegacyOperatorDefaultsPath } = await import('@/lib/settings/operator-defaults-store');
+  const { isDispatchableRuntime } = await import('@/lib/orchestrator/runtime-capabilities');
+  const toml = defaults.getOperatorDefaultsTomlPath();
+  const legacy = getLegacyOperatorDefaultsPath();
+  const before = readFileSync(toml, 'utf8');
+  const beforeLegacy = existsSync(legacy) ? readFileSync(legacy, 'utf8') : undefined;
+  try {
+    const response = await operatorDefaultsRoute.POST(new Request('http://localhost/api/panel/operator-defaults', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ defaultDispatchRuntime: 'magnitude' }),
+    }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/defaultDispatchRuntime|runtime/i);
+    expect(readFileSync(toml, 'utf8')).toBe(before);
+    rmSync(toml);
+    writeFileSync(legacy, JSON.stringify({ defaultDispatchRuntime: 'magnitude' }));
+    expect(isDispatchableRuntime((await defaults.getOperatorDefaults()).values.defaultDispatchRuntime)).toBe(true);
+    expect(isDispatchableRuntime(defaults.getOperatorDefaultsSync().values.defaultDispatchRuntime)).toBe(true);
+    writeFileSync(toml, '[models]\ndefault_dispatch_runtime = "magnitude"\n');
+    expect(isDispatchableRuntime((await defaults.getOperatorDefaults()).values.defaultDispatchRuntime)).toBe(true);
+    expect(isDispatchableRuntime(defaults.getOperatorDefaultsSync().values.defaultDispatchRuntime)).toBe(true);
+  } finally {
+    writeFileSync(toml, before);
+    if (beforeLegacy === undefined) rmSync(legacy, { force: true }); else writeFileSync(legacy, beforeLegacy);
+  }
 });

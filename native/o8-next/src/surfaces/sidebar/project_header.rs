@@ -251,7 +251,7 @@ impl ThreadList {
                     .pl(px(6.))
                     // The last control's centre meets the list's right axis,
                     // 22px in, with the shelf chevrons and the dock's Tools.
-                    .pr(px(8.))
+                    .pr(px(super::super::HEAD_PAD))
                     .flex()
                     .items_center()
                     .gap(px(2.))

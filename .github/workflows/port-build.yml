@@ -344,13 +344,13 @@ jobs:
             both)
               copy_one "o8_${version}_x64_en-US.msi" "o8_${version}_windows_x64_preview.msi"
               copy_one "o8_${version}_x64-setup.exe" "o8_${version}_windows_x64_preview.exe"
-              copy_one "o8_${version}_amd64.AppImage" "o8_${version}_linux_amd64_preview.AppImage"
+              copy_one "o8_${version}_amd64.AppImage" "o8-${version}-x86_64.AppImage"
               copy_one "o8_${version}_amd64.deb" "o8_${version}_linux_amd64_preview.deb"
               copy_one "o8-${version}-1.x86_64.rpm" "o8_${version}_linux_x86_64_preview.rpm"
               checksum_file="SHA256SUMS-windows-linux-preview.txt"
               ;;
             linux)
-              copy_one "o8_${version}_amd64.AppImage" "o8_${version}_linux_amd64_preview.AppImage"
+              copy_one "o8_${version}_amd64.AppImage" "o8-${version}-x86_64.AppImage"
               copy_one "o8_${version}_amd64.deb" "o8_${version}_linux_amd64_preview.deb"
               copy_one "o8-${version}-1.x86_64.rpm" "o8_${version}_linux_x86_64_preview.rpm"
               checksum_file="SHA256SUMS-linux-preview.txt"
@@ -443,7 +443,7 @@ jobs:
           set -euo pipefail
 
           version="${RELEASE_TAG#v}"
-          appimage_name="o8_${version}_linux_amd64_preview.AppImage"
+          appimage_name="o8-${version}-x86_64.AppImage"
           sig_name="${appimage_name}.sig"
 
           mkdir -p mirror-assets

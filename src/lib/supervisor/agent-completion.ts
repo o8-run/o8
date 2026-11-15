@@ -1,11 +1,12 @@
 import { completionOutcomeId } from '@/lib/cortex/outcome-exclusion';
-import { findLaneBySession, setLaneStatus, updateLane } from '@/lib/lane/registry';
+import { findLaneBySession, getLane, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import type { Lane } from '@/lib/lane/types';
 import type { AgentCompletionDecision } from './agent-supervisor-types';
 import type { SupervisorInboxKind } from './inbox';
 import { createCompletionTurnGuard, SupersededCompletionError } from './completion-turn';
 import { completionHandoffTurnCheck } from '@/lib/orchestrator/completion-handoff';
+import { recordLaneEvent } from '@/lib/lane/events';
 
 interface CompletionDependencies {
   enqueueAutoReview(laneId: string): Promise<unknown>;
@@ -41,6 +42,7 @@ export async function handleAgentCompletion(
   const guard = createCompletionTurnGuard(lane, { checkCurrent: handoffTurn.check });
   const { enqueueAutoReview, triggerHeadlessSprintTick,
     queueReviewContinuation, enqueueVerificationFailureInboxItem } = dependencies;
+  let reviewAccepted = false;
   try {
     if (outcome === 'completed') {
       const { shouldDeferCompletionForLiveRuntime } = await guard.wait(() => import('@/lib/supervisor/completion-liveness'));
@@ -369,6 +371,7 @@ export async function handleAgentCompletion(
         void triggerHeadlessSprintTick().catch((err) => {
           console.warn(`[supervisor] triggerHeadlessSprintTick errored (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         });
+        reviewAccepted = true;
         queueReviewContinuation({ ...updated, packetId: packetId ?? updated.packetId });
       }
       console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
@@ -383,5 +386,25 @@ export async function handleAgentCompletion(
     if (error instanceof SupersededCompletionError)
       return { superseded: true };
     console.error('[supervisor] Completion callback failed:', error);
+    const detail = 'Completion check failed; work is retained and needs operator input.';
+    try {
+      guard.check();
+      // Review acceptance already passed its checks; a follow-up cannot undo it.
+      if (reviewAccepted && getLane(lane.id)?.status === 'reviewing') {
+        recordLaneEvent(lane.id, 'update', 'system', {
+          event: 'review_continuation_failed', sessionKey: surfaceId, packetId: lane.packetId,
+          reason: 'Review was accepted, but its follow-up failed. Check the review continuation before progressing.',
+        });
+        return;
+      }
+      updateLane(lane.id, { status: 'awaiting_input', outcomeNote: detail,
+        lastEventAt: new Date().toISOString(), lastEventLabel: 'completion_check_failed' }, 'system');
+    } catch (holdError) {
+      if (holdError instanceof SupersededCompletionError) return { superseded: true };
+      console.error('[supervisor] Failed to retain completion attention state:', holdError);
+    }
+    // An unavailable check is never an affirmative completion verdict, even
+    // when persisting the attention state also fails.
+    return { block: true, detail };
   }
 }

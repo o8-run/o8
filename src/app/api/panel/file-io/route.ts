@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 import { isMaskedViewerReplay } from '@/lib/viewers/copy-safety';
 import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
@@ -96,10 +97,8 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  let body: { path?: string; content?: string; expectedMtimeMs?: number; force?: boolean };
-  try {
-    body = await request.json();
-  } catch {
+  const body = await readJsonObject<{ path?: string; content?: string; expectedMtimeMs?: number; force?: boolean }>(request);
+  if (!body) {
     return viewerJson({ error: 'Invalid JSON body' }, { status: 400 });
   }
   if (typeof body.path !== 'string' || typeof body.content !== 'string') {

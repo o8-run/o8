@@ -1,3 +1,9 @@
+#[cfg(test)]
+#[path = "right_panel/review_tests.rs"]
+mod review_tests;
+#[cfg(test)]
+#[path = "right_panel/restore_tests.rs"]
+mod restore_tests;
 use super::*;
 use crate::motion::Transition;
 use gpui::SharedString;
@@ -724,10 +730,19 @@ fn ensure_side_chat(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
 }
 
 fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    show_mode(s, tool, true, window, cx);
+}
+fn show_mode(
+    s: &mut Shell,
+    tool: Tool,
+    interactive: bool,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
     if tool == Tool::Subagents {
         subagents::prepare(s, cx);
     }
-    if tool == Tool::SideChat {
+    if interactive && tool == Tool::SideChat {
         side_chat(s, cx);
     }
     let workspace = s.state.selected.clone().unwrap_or_default();
@@ -739,7 +754,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         if !matches!(tab, Tab::Inbox | Tab::Activity)
             && !s.state.workspaces.contains_key(&workspace)
         {
-            layout::select(s, tool, window, cx);
+            if interactive {
+                layout::select(s, tool, window, cx);
+            }
             return;
         }
         if let Some(content) = (tab.registration().create)(s, tab, workspace.clone(), window, cx) {
@@ -751,7 +768,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     {
         // Notes can target settings without a workspace; Files cannot.
         if workspace.is_empty() && tool == Tool::Files {
-            layout::select(s, tool, window, cx);
+            if interactive {
+                layout::select(s, tool, window, cx);
+            }
             return;
         }
         let mode = if tool == Tool::Files {
@@ -788,8 +807,10 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     if tool == Tool::Prs {
         contextual::ensure_prs(s, window, cx);
     }
-    layout::select(s, tool, window, cx);
-    if tool == Tool::Subagents {
+    if interactive {
+        layout::select(s, tool, window, cx);
+    }
+    if interactive && tool == Tool::Subagents {
         subagents::focus(s, window, cx);
     }
     if tool == Tool::Subagents && !fits(s, f32::from(window.viewport_size().width)) {
@@ -798,6 +819,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         panel.motion.set(true);
         panel.morph.set(true);
         s.state.right_panel.visible = true;
+    }
+    if !interactive {
+        return;
     }
     if let Some(content) = s.content.get(&key) {
         content.focus(tool == Tool::SideChat, window, cx);

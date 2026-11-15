@@ -107,5 +107,15 @@ w("brand/working/states.json", json.dumps(dict(
     version="v1", crossfade_ms=300, switch_rule="switch only at the end of the current loop",
     composer=dict(size_px=40, fog="tight", file="composer/<key>.svg"), stage=dict(size_px=96, fog="fog", file="stage/<key>.svg"),
     timer="m:ss · esc to stop", states=meta), indent=2))
+# Core: alternate Glance treatment under test next to Fog (Fog stays the default). Same body, eyes and dot;
+# the fog is a crisp, dense middle with a longer, softer tail. 48px and up only; under 48px both use tight/hair.
+w("brand/glance/core/glance-core-light.svg", glance_svg("core","full","reviewing",STATE["reviewing"]))
+w("brand/glance/core/glance-core-dark.svg", glance_svg("core","full","reviewing",DARK["reviewing"]))
+for st in STATE:
+    w(f"brand/glance/core/states/glance-{st}-core-light.svg", glance_svg("core","full",st,STATE[st]))
+    w(f"brand/glance/core/states/glance-{st}-core-dark.svg", glance_svg("core","full",st,DARK[st]))
+# Core version of the 96px stage indicator, for testing next to the fog stage set
+for st in working.build("core"):
+    w(f"brand/glance/core/working/{st['key']}.svg", st["svg"])
 # grep checks
 print("files:", sum(len(f) for _,_,f in os.walk(OUT)))

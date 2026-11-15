@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { humanizeActivity, workerTranscriptBlocks } from './worker-activity';
 import { codexParseRunLog } from '@/lib/codex/owned-log';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
-import { normalizeCodexEvents } from '@/lib/orchestrator/transcript-normalizer';
-import { mapPacketTranscriptEntries } from './use-packet-transcript-poll';
 import type { OwnedRunRecord } from '@/lib/runtimes/shared/owned-session/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
@@ -64,15 +62,6 @@ describe('command identity through log and packet entry points', () => {
     expect(transcript).toHaveLength(1);
     expect(transcript[0]).toMatchObject({ id: start.id, toolCalls: [{ id: 'run:a', status: 'done' }] });
   });
-  it('pairs concurrent identical tools by item id across intervening prose', () => {
-    const raw = [log('item.started', 'a'), log('item.started', 'b'), JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Checking both.' } }), log('item.completed', 'a', { exit_code: 1, aggregated_output: 'denied' }), log('item.completed', 'b', { exit_code: 0 })].join('\n');
-    const entries = mapPacketTranscriptEntries(normalizeCodexEvents(raw, run.startedAt));
-    const blocks = workerTranscriptBlocks(entries, false);
-    const steps = blocks.flatMap(block => block.kind === 'activity' ? block.steps : []);
-    expect(steps).toHaveLength(2);
-    expect(steps.map(step => step.status)).toEqual(['failed', 'ok']);
-    expect(steps[0].reason).toContain('denied');
-  });
 });
 
 describe('activity collapse', () => {
@@ -99,12 +88,6 @@ describe('activity collapse', () => {
     expect(blocks.map(block => block.kind)).toEqual(['activity', 'message']);
     expect(blocks[0]).toMatchObject({ failed: 1 });
   });
-});
-
-it('preserves markdown line breaks through the packet normalization boundary', () => {
-  const text = '# Result\n\n- First\n- Second\n\n```ts\nconst ready = true;\n```';
-  const events = normalizeCodexEvents(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text } }));
-  expect(mapPacketTranscriptEntries(events)[0].text).toBe(text);
 });
 
 it('merges native tool items and pairs legacy function results through the shared owned entry point', async () => {

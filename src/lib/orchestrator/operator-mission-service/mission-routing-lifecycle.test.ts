@@ -55,3 +55,11 @@ describe('createMission routing recommendation lifecycle', () => {
     }
   });
 });
+it.each(['typo-runtime', 42, false])('refuses invalid per-issue runtime %j through createMission', async runtime => {
+  const calls = routingMock.recommendRuntime.mock.calls.length;
+  await expect(createMission({
+    issues: [{ number: 90101, title: 'Validate issue runtime', body: '', url: '', runtime: runtime as never }],
+    repoPath: createRepo(), runtime: 'codex', constraints: '',
+  })).rejects.toThrow(/Unknown requested runtime/);
+  expect(routingMock.recommendRuntime).toHaveBeenCalledTimes(calls);
+});

@@ -9,7 +9,7 @@
 //! security boundary, since the caller writes `allow` itself.
 use gpui::{
     App, Bounds, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, PlatformInput, ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point, px,
+    Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point, px,
 };
 use serde_json::{Value, json};
 
@@ -165,6 +165,10 @@ fn press(request: &Value, window: &mut Window, cx: &mut App) -> Result<Value, St
         ));
     }
     let modifiers = Modifiers::default();
+    // Input events arrive in platform points, which the window divides by
+    // its zoom; a layout point sent as is lands elsewhere when zoomed (at
+    // 140% a press on the green window light reached the yellow one).
+    let position = platform(position, window);
     for event in [
         PlatformInput::MouseMove(MouseMoveEvent {
             position,
@@ -187,7 +191,13 @@ fn press(request: &Value, window: &mut Window, cx: &mut App) -> Result<Value, St
     ] {
         window.dispatch_input_event(event, cx);
     }
-    Ok(json!({"selector": selector, "x": number(position.x), "y": number(position.y)}))
+    let at = bounds.center();
+    Ok(json!({"selector": selector, "x": number(at.x), "y": number(at.y)}))
+}
+
+/// A window (layout) point in the platform points input events carry.
+fn platform(position: Point<Pixels>, window: &Window) -> Point<Pixels> {
+    position.map(|v| v * window.zoom())
 }
 
 /// A wheel movement over a control, in points; positive `dy` shows what is above.
@@ -200,7 +210,7 @@ fn scroll(request: &Value, window: &mut Window, cx: &mut App) -> Result<Value, S
     }
     window.dispatch_input_event(
         PlatformInput::ScrollWheel(ScrollWheelEvent {
-            position: bounds.center(),
+            position: platform(bounds.center(), window),
             delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
             modifiers: Modifiers::default(),
             touch_phase: TouchPhase::Moved,

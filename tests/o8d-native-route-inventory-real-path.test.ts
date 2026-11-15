@@ -253,6 +253,8 @@ const API_BASE_CLIENTS = [
   'src/lib/hooks/claude-code-pretool-hook.ts',
   'src/lib/operator/settings-window-owner.ts',
   'src/lib/orchestrator/http/reload.ts',
+  'src/lib/orchestrator/operator-mission-service/steer-owner-client.ts',
+  'src/lib/runtime/owner-context.ts',
   'src/lib/runtimes/shared/dispatch-readiness.ts',
   'src/lib/startup/schedule.ts',
   'src/lib/tasks/dispatch-owner-client.ts',

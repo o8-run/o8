@@ -10,7 +10,7 @@ export const DISPATCH_MISSION_TOOL: McpTool = {
     properties: {
       force: { type: 'boolean', description: 'Bypass machine load admission for this dispatch only.' },
       missionId: { type: 'string', description: 'Optional mission ID. If omitted, dispatches the current stored mission.' },
-      runtime: { type: 'string', enum: listDispatchableRuntimes(), description: 'Optional per-dispatch worker runtime. When set, it overrides the runtime stamped on every not-yet-launched packet admitted by this dispatch.' },
+      runtime: { type: 'string', enum: [...listDispatchableRuntimes(), 'claude'], description: 'Optional per-dispatch worker runtime. When set, it overrides the runtime stamped on every not-yet-launched packet admitted by this dispatch.' },
     },
   },
 };

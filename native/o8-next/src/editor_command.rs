@@ -5,7 +5,7 @@
 use crate::client::Client;
 use crate::shell::settings::machines::SSH_MACHINES;
 use serde_json::Value;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 const DEFAULT_EDITOR: &str = "code";
 const DEFAULTS: &str = "/api/panel/operator-defaults";
@@ -71,7 +71,7 @@ pub(crate) fn launch(tries: &[Vec<String>]) -> Result<(), String> {
         let Some((program, args)) = argv.split_first() else {
             return false;
         };
-        Command::new(program)
+        crate::child_command::command(program)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

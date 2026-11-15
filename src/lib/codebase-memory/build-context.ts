@@ -56,6 +56,7 @@ import { extractRoughdraftReviewIndex } from '@/lib/o8md/rfm';
 import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged';
 
 import { extractGraphResolvedSymbols, type SymbolEdge } from './client';
+import { reviewOutcomesSection } from '@/lib/cortex/review-outcomes';
 
 const MAX_BLOCK_CHARS = 4000;
 const MAX_DIRECTIVES = 5;
@@ -377,8 +378,8 @@ function renderPendingSpecSection(repoPath: string): string[] {
  * `<context>` wrapper is included in the budget. Operator o8.md notes are the
  * highest priority — dropped last.
  */
-function fitWithinBudget(sections: { heading: 'spec' | 'project' | 'directives' | 'corrections' | 'outcomes' | 'symbols'; lines: string[] }[]): string {
-  const order: typeof sections[number]['heading'][] = ['symbols', 'outcomes', 'corrections', 'directives', 'project', 'spec'];
+function fitWithinBudget(sections: { heading: 'spec' | 'project' | 'directives' | 'corrections' | 'reviews' | 'outcomes' | 'symbols'; lines: string[] }[]): string {
+  const order: typeof sections[number]['heading'][] = ['symbols', 'outcomes', 'corrections', 'reviews', 'directives', 'project', 'spec'];
   const drop: Set<typeof sections[number]['heading']> = new Set();
 
   const render = () => {
@@ -456,6 +457,9 @@ export async function buildContextBlock({
     { heading: 'project', lines: renderProjectScopeSection(projectContext) },
     { heading: 'directives', lines: renderDirectivesSection(directives) },
     { heading: 'corrections', lines: renderCorrectionsSection(corrections) },
+    { heading: 'reviews', lines: projectContext.repoInProject ? reviewOutcomesSection({
+      repoPath, projectId: activeProjectId, packetBody, excludePacketId: excludeCorrectionsForPacketId,
+    }) : [] },
     { heading: 'outcomes', lines: renderOutcomesSection(outcomes) },
     { heading: 'symbols', lines: renderSymbolGraphSection(edges) },
   ]);

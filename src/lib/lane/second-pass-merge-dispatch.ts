@@ -13,6 +13,7 @@
  * blocker are written when the dispatch does not merge.
  */
 
+import { prFirstMergeRefusal } from './pr-first-delivery';
 import { randomUUID } from 'node:crypto';
 
 import { isStaleApprovalExpiryResolution } from '@/lib/approvals/expiry';
@@ -225,13 +226,17 @@ export async function dispatchSecondPassMerge(input: {
     };
   }
 
+  let policyRefused = false;
   let ok = false;
   let note = '';
   let routedApprovalId: string | null = null;
   let recovery: MergeDispatchRecovery | null = null;
   try {
+    const prOnlyNote = await prFirstMergeRefusal(lane);
+    policyRefused = Boolean(prOnlyNote);
     const { dispatch } = await import('@/lib/lane/commands');
-    const mergeResult = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    const mergeResult = prOnlyNote ? { ok: false, note: prOnlyNote, reason: 'pr_only', approvalId: null }
+      : await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
     ok = mergeResult.ok;
     note = mergeResult.note ?? '';
     routedApprovalId = mergeResult.approvalId ?? null;
@@ -306,5 +311,5 @@ export async function dispatchSecondPassMerge(input: {
     });
   }
   console.warn(`[auto-review] ${reason}`);
-  return { ok, note, dispatched: true, approvalId: routedApprovalId };
+  return { ok, note, dispatched: !policyRefused, approvalId: routedApprovalId };
 }

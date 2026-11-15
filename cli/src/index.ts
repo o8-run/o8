@@ -1,3 +1,5 @@
+import { runIntegrationQueue } from './commands/integration-queue.js';
+import { runPacketPolicy } from './commands/packet/policy.js';
 import { runHeavy } from './commands/run-heavy.js';
 import { runPrStack } from './commands/pr-stack.js';
 import { runBrainSources } from './commands/brain-sources.js';
@@ -12,8 +14,9 @@ import { commandUsage } from './command-help.js';
  * Design principles (epic #926):
  *   - Agent-first I/O: JSON to stdout by default, --human for pretty fallback.
  *   - Exit codes that mean things: 0 ok, 1 invalid args, 2 connection refused,
- *     3 unauthorized, 4 not found, 5 conflict. Agents branch on these without
- *     parsing strings.
+ *     3 unauthorized, 4 not found, 5 conflict, 6 server timeout,
+ *     7 lead turn is unreported (send new work or stop the lead).
+ *     Agents branch on these without parsing strings.
  *   - Stable, schema-versioned output. Every payload carries `schema: o8/cli/<cmd>/v1`.
  *   - Command mode has no telemetry, auto-update, or prompts. Failures loud (stderr),
  *     successes silent unless --verbose.
@@ -65,6 +68,7 @@ import { runStatus } from './commands/status.js';
 import { runSession } from './commands/session.js';
 import { runRun } from './commands/run.js';
 import { runTerminal } from './commands/terminal.js';
+import { maybeSetUpRexShortcut } from './rex-auto-shortcut.js';
 import { runMachine } from './commands/machine.js';
 import { runServe } from './commands/serve.js';
 import { runVersion } from './commands/version.js';
@@ -72,6 +76,7 @@ import { runWorkerLogin } from './commands/worker-login.js';
 import { runPacketInfo } from './commands/packet/info.js';
 import { runPacketHeartbeat } from './commands/packet/heartbeat.js';
 import { runPacketLog } from './commands/packet/log.js';
+import { runPacketTranscript } from './commands/packet/transcript.js';
 import { runPacketReport } from './commands/packet/report.js';
 import { runPacketCapture } from './commands/packet/capture.js';
 import { runPacketMirrorProof } from './commands/packet/mirror-proof.js';
@@ -109,6 +114,7 @@ import {
   runTaskBrief,
   runTaskClaim,
   runTaskCreate,
+  runTaskAdoptPr,
   runTaskDispatch,
   runTaskList,
   runTaskPrune,
@@ -256,6 +262,8 @@ commands:
   terminal observe <id>  read-only live stream from an existing terminal
   terminal control <id>  exclusive input/output to an existing terminal; --human for interactive mode
   terminal wait <id> --match <text> [--timeout ms]  wait read-only for output already present or arriving later
+  terminal panes [--watch] [--here] [--limit N] [--machine <label-or-id>]  open one read-only pane per running packet, worker terminal and live shell in the Rex session you are in; --here opens them beside this pane
+  terminal shortcut [--key <key>] | --remove  add "Show o8 Terminals" to the Rex command palette: a tab that keeps filling as work starts; optional key; --remove takes it out
   terminal ... --machine <label-or-id>  run terminal commands on a saved SSH machine
   machine add <target> --label <name>  save a verified SSH terminal machine; optional --port, --ssh-config
   machine list|check|rename|disable|enable|remove  manage saved SSH machines
@@ -342,7 +350,10 @@ commands:
   plugin terminal list list persistent plugin terminals [--plugin ID]
   plugin terminal launch <plugin-id> <entry-id> --revision <sha256> [--repo <path>] [--request <uuid>]
   plugin terminal stop <receipt-id> (stop the process, retain its receipt)
+  inbox decisions      review/integration decisions [--state unresolved|history|all] [--project ID] [--cursor ID] [--limit N]
   inbox list           pending governance approvals (--all includes resolved)
+  inbox drafts         drafts idle three days (age, checks, conflicts)
+  inbox continue-draft|handoff-draft|close-draft <number> --repo owner/repo --expected-head-sha SHA --expected-updated-at ISO [--owner login] [--reason text]
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
 ${OPERATOR_PACKET_COMMAND_LINES}
@@ -355,6 +366,8 @@ ${OPERATOR_PACKET_COMMAND_LINES}
   session resume <key> --message <text> [--idempotency-key <key>]  admit a continuation turn
   session dismiss-pending <key> --confirm-no-continuation  clear an unresolved attempt after provider inspection
   task list            current task pool grouped by ready/running/review/etc.
+  integration-queue read|prepare --repo-id <id> [--spec <file.json>]
+  task adopt-pr        adopt a GitHub PR into a durable review task
   task create          add a project-backed task to the ready pool
   task brief <id>      project-backed task brief for a packet or lane
   task claim <id>      bind/reserve a task to a lane
@@ -382,6 +395,7 @@ exit codes:
   0 ok   1 invalid args   2 connection refused
   3 unauthorized   4 not found   5 conflict
   6 server timeout (ambiguous: the operation may have landed)
+  7 lead turn is unreported (send new work or stop the lead)
 
 error JSON:
   error.ambiguous is true when retry safety cannot be inferred from the result
@@ -531,6 +545,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'mcp':
       return runMcp(args.mode, secondary, args.rest);
     case 'setup': return runSetup(args.mode, secondary, args.rest);
+    case 'integration-queue': return runIntegrationQueue(args.mode, secondary, args.rest);
     case 'repo':
       return runRepo(args.mode, secondary, args.rest);
     case 'project':
@@ -551,6 +566,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runSession(args.mode, secondary, args.rest);
     case 'task': {
       if (secondary === 'list') return runTaskList(args.mode, args.rest);
+      if (secondary === 'adopt-pr') return runTaskAdoptPr(args.mode, args.rest);
       if (secondary === 'create') return runTaskCreate(args.mode, args.rest);
       if (secondary === 'brief') return runTaskBrief(args.mode, args.rest);
       if (secondary === 'claim') return runTaskClaim(args.mode, args.rest);
@@ -563,6 +579,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     }
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode, args.rest);
+      if (secondary === 'policy') return runPacketPolicy(args.mode, args.rest);
       if (secondary === 'scope') return runPacketScope(args.mode, args.rest);
       if (secondary === 'expand-scope') return runPacketExpandScope(args.mode, args.rest);
       if (secondary === 'diff') return runPacketDiff(args.mode, args.rest);
@@ -592,6 +609,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'receipt') return runPacketReceipt(args.mode, args.rest);
       if (secondary === 'receipts') return runPacketReceipts(args.mode, args.rest);
       if (secondary === 'log') return runPacketLog(args.mode, args.rest);
+      if (secondary === 'transcript') return runPacketTranscript(args.mode, args.rest);
       if (secondary === 'runtime-drift') return runPacketRuntimeDrift(args.mode, args.rest);
       throw unknownSubcommandError('packet', secondary);
     }
@@ -610,6 +628,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
 }
 
 const parsed = parseArgs(process.argv.slice(2));
+// Inside Rex, the first command a person runs adds the "Show o8 Terminals" shortcut.
+if (!parsed.help && !parsed.version) maybeSetUpRexShortcut(parsed.command);
 try {
   const code = await dispatch(parsed);
   await exitAfterFlush(code);

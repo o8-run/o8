@@ -313,3 +313,22 @@ fn names_that_change_real_state_are_guarded() {
         assert!(!guarded(name), "{name}");
     }
 }
+
+#[gpui::test]
+fn a_press_lands_on_the_named_control_at_any_zoom(cx: &mut TestAppContext) {
+    let (probe, cx) = probe(cx);
+    // At 200% the second row's centre, sent unconverted, is the first row's.
+    cx.update(|window, cx| window.set_zoom(2., cx));
+    draw(cx);
+    let answer = ask(
+        cx,
+        json!({"command": "press", "selector": "probe-stop-mission",
+            "allow": ["probe-stop-mission"]}),
+    );
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert_eq!(
+        probe.read_with(cx, |probe, _| (probe.ok, probe.stop)),
+        (0, 1),
+        "the press reached the named control, not the one above it"
+    );
+}

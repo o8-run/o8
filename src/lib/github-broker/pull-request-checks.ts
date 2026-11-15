@@ -18,6 +18,9 @@ interface Entry {
   pending?: Promise<Check[]>;
 }
 
+/** Bounded read failure that is safe to display in decision and merge refusals. */
+export class PullRequestChecksUnavailableError extends Error {}
+
 const entries = new Map<string, Entry>();
 const MAX_ENTRIES = 32;
 
@@ -51,9 +54,18 @@ export function readPullRequestChecks(repo: string, head: string, installationId
       throw new Error(`Pull request checks could not be read (${response.status}). Retry.`);
     }
     const payload = await response.json() as {
+      total_count?: number;
       check_runs?: Array<{ name?: string | null; status?: string | null; conclusion?: string | null; html_url?: string | null }>;
     };
     if (!Array.isArray(payload.check_runs)) throw new Error('Pull request checks response is invalid. Retry.');
+    const hasNextPage = /rel="next"/.test(response.headers.get('link') ?? '');
+    if (hasNextPage
+      || typeof payload.total_count === 'number' && payload.total_count > payload.check_runs.length
+      || payload.check_runs.length >= 100 && typeof payload.total_count !== 'number') {
+      throw new PullRequestChecksUnavailableError(hasNextPage || typeof payload.total_count === 'number' && payload.total_count > 100
+        ? 'More than 100 check runs; checks unavailable.'
+        : 'Incomplete check-run pagination; checks unavailable.');
+    }
     const checks = payload.check_runs.filter((check) => Boolean(check.name)).map((check) => ({
       name: check.name!, status: check.status ?? null, conclusion: check.conclusion ?? null, url: check.html_url ?? null,
     }));

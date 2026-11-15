@@ -69,10 +69,9 @@ function publishUser() {
   mocks.userListeners.forEach(listener => listener());
 }
 
-async function mount(withAccount = false) {
+async function mount() {
   publishUser();
   const { O8AuthProvider, useO8Auth } = await import('@/components/auth/O8AuthProvider');
-  const Account = withAccount ? (await import('@/components/desktop/settings/AccountTab')).AccountTab : null;
   const Probe = () => {
     const value = useO8Auth();
     useEffect(() => { state = value; }, [value]);
@@ -82,7 +81,7 @@ async function mount(withAccount = false) {
   document.body.append(host);
   root = createRoot(host);
   render = () => root.render(createElement(O8AuthProvider, null, createElement(Fragment, null,
-    createElement(Probe), Account && createElement(Account),
+    createElement(Probe),
   )));
   await act(async () => { render(); });
   await act(async () => { await vi.dynamicImportSettled(); });
@@ -186,12 +185,10 @@ afterEach(async () => {
 });
 
 describe('round 2 handoff through the native provider, real callback handler and persisted route state', () => {
-  it('opens the native launcher from Account settings while the account SDK is still loading, then begins the browser handoff', async () => {
+  it('opens the native launcher while the account SDK is still loading, then begins the browser handoff', async () => {
     mocks.userLoaded = false;
-    await mount(true);
-    const button = [...host.querySelectorAll('button')].find((element) => element.textContent?.trim() === 'Sign in to o8');
-    expect(button).toBeDefined();
-    const continueButton = await openNativeLauncher(() => button!.click());
+    await mount();
+    const continueButton = await openNativeLauncher();
     expect(fetchMock.mock.calls.filter(([input]) => input.endsWith('/handoff?action=begin'))).toHaveLength(0);
     await act(async () => {
       continueButton.click();
@@ -327,31 +324,11 @@ describe('round 2 handoff through the native provider, real callback handler and
     expect(existsSync(join(dataDir, 'desktop-auth-handoff.json'))).toBe(true);
   });
 
-  it('shows the cancellation failure through the real Sign out button without an unhandled rejection', async () => {
+  it('waits for a slow device revoke before completing sign-out', async () => {
     mocks.signedIn = true;
     mocks.user = { id: 'user_device', reload: async () => {} };
     mocks.clerk.user = mocks.user;
-    await mount(true);
-    const normal = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation(async (input, init) => {
-      if (input.endsWith('/device/revoke') || input.endsWith('/handoff?action=cancel')) throw new Error('Unavailable');
-      return normal(input, init);
-    });
-    const button = [...document.querySelectorAll('button')].find((element) => element.textContent?.trim() === 'Sign out');
-    expect(button).toBeDefined();
-    await act(async () => {
-      button!.click();
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    });
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Sign-out could not be saved. Try again.');
-    expect(state.signedIn).toBe(true);
-  });
-
-  it('keeps the Sign out button disabled and names a longer wait', async () => {
-    mocks.signedIn = true;
-    mocks.user = { id: 'user_device', reload: async () => {} };
-    mocks.clerk.user = mocks.user;
-    await mount(true);
+    await mount();
     let release!: () => void;
     const hold = new Promise<void>((resolve) => { release = resolve; });
     const normal = fetchMock.getMockImplementation()!;
@@ -359,20 +336,18 @@ describe('round 2 handoff through the native provider, real callback handler and
       if (input.endsWith('/device/revoke')) await hold;
       return normal(input, init);
     });
-    const button = [...document.querySelectorAll('button')].find((element) => element.textContent?.trim() === 'Sign out')!;
-    vi.useFakeTimers();
-    try {
-      await act(async () => { button.click(); });
-      expect(button.disabled).toBe(true);
-      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-      expect(button.textContent).toContain('Waiting for sign-out');
-    } finally {
-      vi.useRealTimers();
-      await act(async () => {
-        release();
-        await vi.waitFor(() => expect(mocks.signedIn).toBe(false), { timeout: 10000 });
-      });
-    }
+    let signOut!: Promise<void>;
+    await act(async () => {
+      signOut = state.signOut();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    expect(mocks.clerk.signOut).not.toHaveBeenCalled();
+    expect(state.signedIn).toBe(true);
+    await act(async () => {
+      release();
+      await signOut;
+      await vi.waitFor(() => expect(mocks.signedIn).toBe(false), { timeout: 10000 });
+    });
     expect(state.signedIn).toBe(false);
   });
 

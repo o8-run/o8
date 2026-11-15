@@ -72,11 +72,13 @@ export function OllamaMark(props: ProviderMarkProps) {
   );
 }
 
+// The Ring in one colour (brand/ring/ring-mono-*.svg): the ring with its cut
+// around the review point, drawn as one outline so it needs no mask.
 export function O8Mark(props: ProviderMarkProps) {
   return (
-    <ProviderMark {...props}>
-      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth={2.2} />
-      <circle cx="12" cy="12" r="3" />
+    <ProviderMark {...props} viewBox="0 0 100 100">
+      <path d="M82.656 26.9A40 40 0 1 1 73.1 17.344A10.8 10.8 0 0 0 61.617 31.317A22 22 0 1 0 68.683 38.383A10.8 10.8 0 0 0 82.656 26.9Z" />
+      <circle cx="71.92" cy="28.08" r="7.4" />
     </ProviderMark>
   );
 }

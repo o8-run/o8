@@ -25,11 +25,11 @@ jobs:
         with:
           script: |
             const labels = [
-              { name: 'size/XS', max: 9, color: '3CBF00' },
-              { name: 'size/S', max: 49, color: '5DCE58' },
-              { name: 'size/M', max: 249, color: 'FBCA04' },
-              { name: 'size/L', max: 999, color: 'D93F0B' },
-              { name: 'size/XL', max: Number.POSITIVE_INFINITY, color: 'B60205' },
+              { name: 'size/XS', max: 9, color: 'EEEBE2' },
+              { name: 'size/S', max: 49, color: 'CFCAC0' },
+              { name: 'size/M', max: 249, color: 'A8A398' },
+              { name: 'size/L', max: 999, color: '706C64' },
+              { name: 'size/XL', max: Number.POSITIVE_INFINITY, color: '17140F' },
             ];
 
             const files = await github.paginate(github.rest.pulls.listFiles, {

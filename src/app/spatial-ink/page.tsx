@@ -20,6 +20,11 @@
  *      screen then) and `o8:spatial-ink-strokes` on the `final` event (Rust has
  *      the strokes at finalize), plus `o8:spatial-ink-disarm-request` on any
  *      terminal event (belt for the mouse-capture safety chain).
+ *   4. With the experimental `native_spatial_ink` flag, offer each agent hold to
+ *      the native panel (nativeInkFeed.ts). Once it acknowledges, this page
+ *      paints and captures nothing for the hold and relays the panel's points
+ *      through the same two events; it takes the hold back if the panel stops
+ *      acknowledging.
  *
  * Coordinates are emitted NORMALIZED (0..1) so they survive the capture-vs-window
  * resolution mismatch. Inline styles only (repo rule); no emoji.
@@ -31,6 +36,9 @@ import { VisualCaptureInput, type VisualCaptureBounds, type VisualCaptureVoice }
 import { VisualCaptureControls } from '@/components/desktop/visual-instructions/VisualCaptureControls';
 import { getPalette, resolveTheme } from '@/lib/theme/registry';
 import { inkOutline, inkPath } from './stroke';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
+import { monitorValid, type InkMonitor } from '@/lib/next/spatial-ink';
+import { NativeInkFeed, postInk, type NormalizedStroke } from './nativeInkFeed';
 
 export const dynamic = 'force-dynamic';
 
@@ -100,6 +108,8 @@ export default function SpatialInkPage() {
   const dprRef = useRef(1);
   const reducedRef = useRef(false);
   const visualFadeAtRef = useRef(0);
+  // The shell's latest agent arm: generation and the monitor it covers.
+  const armedRef = useRef<{ generation: number; monitor: InkMonitor; at: number } | null>(null);
 
   useEffect(() => {
     if (!visualCaptureId) return;
@@ -299,6 +309,31 @@ export default function SpatialInkPage() {
       if (rafRef.current == null) rafRef.current = requestAnimationFrame(frame);
     };
 
+    // ── Native panel feed (experimental native_spatial_ink) ──
+    const feed = isTauri() ? new NativeInkFeed({
+      request: postInk(getMobileWsToken),
+      pointer: (owner, generation) => emitRef.current?.('o8:spatial-ink-pointer', { generation, owner }),
+      firstStroke: () => {
+        if (firstStrokeEmittedRef.current) return;
+        firstStrokeEmittedRef.current = true;
+        emitRef.current?.('o8:spatial-ink-first-stroke', { sessionId: sessionIdRef.current });
+      },
+      adopt: (strokes) => {
+        // Fallback: the web paints what the panel captured and owns the rest.
+        const vw = window.innerWidth || 1;
+        const vh = window.innerHeight || 1;
+        for (const stroke of strokes) {
+          strokesRef.current.push({ pts: stroke.map((p) => ({ x: p.x * vw, y: p.y * vh, t: p.t })), done: true });
+        }
+        activeRef.current = true;
+        if (phaseRef.current === 'idle') phaseRef.current = 'live';
+        ensureLoop();
+      },
+      webHasInk: () => strokesRef.current.some((s) => s.pts.length > 0),
+      setTimer: (run, ms) => setTimeout(run, ms),
+      clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    }) : null;
+
     // ── Pointer drawing ──
     const beginSession = () => {
       // A pointerdown only reaches us while Rust has armed the mouse capture, so
@@ -309,6 +344,7 @@ export default function SpatialInkPage() {
     };
 
     const onDown = (e: PointerEvent) => {
+      if (feed?.nativeOwned) return; // the native panel draws this hold
       if ((e.target as Element)?.closest?.('[data-visual-capture-controls]')) return;
       if (visualIdRef.current) return; // visual strokes come from the native Shift + pointer monitor
       if (handedOffRef.current) return; // already sending — ignore stray input
@@ -372,10 +408,14 @@ export default function SpatialInkPage() {
     window.addEventListener('pointercancel', onUp);
 
     // ── Handoff (final) + teardown ──
-    const emitStrokes = () => {
+    // `normalized` carries the native panel's strokes, already 0..1 on the
+    // same monitor; otherwise the web strokes are normalized here.
+    const emitStrokes = (normalized?: NormalizedStroke[]) => {
       const vw = window.innerWidth || 1;
       const vh = window.innerHeight || 1;
-      const strokes = strokesRef.current
+      const strokes = normalized
+        ? normalized.map((points) => ({ points }))
+        : strokesRef.current
         .filter((s) => s.pts.length > 0)
         .map((s) => ({
           points: s.pts.map((p) => ({ x: Math.min(1, Math.max(0, p.x / vw)), y: Math.min(1, Math.max(0, p.y / vh)), t: p.t })),
@@ -394,6 +434,11 @@ export default function SpatialInkPage() {
       if (handedOffRef.current) return;
       handedOffRef.current = true;
       drawingRef.current = false;
+      if (feed?.nativeOwned) {
+        // The panel stops capturing and plays its own flash and fade.
+        void feed.finish().then((strokes) => { emitStrokes(strokes ?? []); resetSession(); });
+        return;
+      }
       const hasInk = strokesRef.current.some((s) => s.pts.length > 0);
       emitStrokes();
       if (!hasInk) {
@@ -419,6 +464,7 @@ export default function SpatialInkPage() {
     };
 
     const hardClear = () => {
+      feed?.release();
       clearAll();
       resetSession();
       handedOffRef.current = false;
@@ -445,6 +491,11 @@ export default function SpatialInkPage() {
           hardClear();
           activeRef.current = true;
           phaseRef.current = 'live';
+          // The shell arms (and emits the monitor) just before this start.
+          const armed = armedRef.current;
+          if (feed && armed && Date.now() - armed.at < 2_000) {
+            void feed.begin({ generation: armed.generation, monitor: armed.monitor, reducedMotion: reducedRef.current });
+          }
         }
         return;
       }
@@ -477,6 +528,11 @@ export default function SpatialInkPage() {
             void emit(event, payload);
           };
           const p1 = listen<SttPayload>('o8:stt-event', (e) => handleStt(e.payload ?? {}));
+          const p9 = listen<{ generation?: unknown; monitor?: unknown }>('o8:spatial-ink-armed', (event) => {
+            const { generation, monitor } = event.payload ?? {};
+            armedRef.current = Number.isSafeInteger(generation) && monitorValid(monitor)
+              ? { generation: generation as number, monitor, at: Date.now() } : null;
+          });
           const p2 = listen('o8:spatial-ink-clear', () => {
             // Rust disarm — clear unless a flash/fade is mid-play.
             if (visualIdRef.current || (phaseRef.current !== 'flash' && phaseRef.current !== 'fade')) hardClear();
@@ -530,7 +586,7 @@ export default function SpatialInkPage() {
             ensureLoop();
           });
           const p8 = listen<{ id: string; generation: number }>('o8:visual-capture-undo', event => { if (event.payload.id === visualIdRef.current && event.payload.generation === visualGenerationRef.current) { clearAll(); setVisualBounds(null); } });
-          return Promise.all([p1, p2, p3, p4, p5, p6, p7, p8]);
+          return Promise.all([p1, p2, p3, p4, p5, p6, p7, p8, p9]);
         })
         .then((uns) => {
           if (disposed) {
@@ -548,6 +604,7 @@ export default function SpatialInkPage() {
 
     return () => {
       disposed = true;
+      feed?.release();
       window.removeEventListener('resize', resize);
       window.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointermove', onMove);

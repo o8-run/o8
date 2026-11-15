@@ -106,7 +106,7 @@ pub(crate) fn stop() {
     if let Some(playing) = SPEECH.lock().unwrap().take() {
         playing.cancel.store(true, Ordering::SeqCst);
         if let Some(pid) = playing.player {
-            let _ = std::process::Command::new("kill")
+            let _ = crate::child_command::command("kill")
                 .arg(pid.to_string())
                 .status();
         }
@@ -157,12 +157,12 @@ fn player(file: &std::path::Path) -> Option<std::process::Command> {
         ]
     };
     candidates.iter().find_map(|(name, args)| {
-        let found = std::process::Command::new("sh")
+        let found = crate::child_command::command("sh")
             .args(["-c", &format!("command -v {name}")])
             .output()
             .is_ok_and(|o| o.status.success());
         found.then(|| {
-            let mut command = std::process::Command::new(name);
+            let mut command = crate::child_command::command(name);
             command.args(*args).arg(file);
             command
         })

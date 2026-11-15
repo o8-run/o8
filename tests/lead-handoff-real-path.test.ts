@@ -1,7 +1,7 @@
 import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -27,7 +27,7 @@ interface LeadCliReceipt {
   latestTurn: { id: string; status: string } | null;
   cursor: number;
 }
-const testHome = mkdtempSync(path.join(os.tmpdir(), 'o8-lead-handoff-home-'));
+const testHome = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-lead-handoff-home-')));
 const dataDir = path.join(testHome, '.o8');
 const repoPath = path.join(testHome, 'repo');
 const remotePath = path.join(testHome, 'remote.git');
@@ -39,10 +39,12 @@ const workerMarkersPath = path.join(testHome, 'lead-worker-markers.jsonl');
 const reviewCapturePath = path.join(testHome, 'lead-review.json');
 const dispatchDebugPath = path.join(testHome, 'lead-dispatch-debug.json');
 const dispatchReadyPath = path.join(testHome, 'lead-dispatch-ready');
+const workerReturnReadyPath = path.join(testHome, 'lead-worker-return-ready');
 const token = 'lead-handoff-operator-token-0123456789abcdef';
 const workerToken = 'lead-handoff-worker-token-0123456789abcdef';
 const originalEnv = {
   HOME: process.env.HOME,
+  O8_WORKER_ENV_ALLOW: process.env.O8_WORKER_ENV_ALLOW,
   O8_DATA_DIR: process.env.O8_DATA_DIR,
   CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR,
   CORTEX_IDE_OWNED_CODEX_ROOT: process.env.CORTEX_IDE_OWNED_CODEX_ROOT,
@@ -61,6 +63,7 @@ const originalEnv = {
   O8_TEST_SOURCE_ROOT: process.env.O8_TEST_SOURCE_ROOT,
   O8_TEST_TARGET_REPO: process.env.O8_TEST_TARGET_REPO,
   O8_TEST_DISPATCH_READY_FILE: process.env.O8_TEST_DISPATCH_READY_FILE,
+  O8_TEST_WORKER_RETURN_READY_FILE: process.env.O8_TEST_WORKER_RETURN_READY_FILE,
 };
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(repoPath, { recursive: true });
@@ -235,6 +238,7 @@ beforeAll(async () => {
   process.env.O8_TEST_SOURCE_ROOT = process.cwd();
   process.env.O8_TEST_TARGET_REPO = repoPath;
   process.env.O8_TEST_DISPATCH_READY_FILE = dispatchReadyPath;
+  process.env.O8_TEST_WORKER_RETURN_READY_FILE = workerReturnReadyPath;
   execFileSync(process.execPath, [path.join(process.cwd(), 'cli/esbuild.config.mjs')], { cwd: process.cwd(), stdio: 'ignore' });
 
   apiServer = createServer(async (request, response) => {
@@ -272,6 +276,12 @@ beforeAll(async () => {
   process.env.O8_API_PORT = String(apiPort);
   wsPort = await freePort();
   process.env.O8_WS_PORT = String(wsPort);
+  // Exercise the runtime's explicit environment allowlist for this isolated fake provider.
+  // Keep filtering enabled and keep fixture credentials out of the executable.
+  process.env.O8_WORKER_ENV_ALLOW = [
+    ...Object.keys(originalEnv).filter(key => key.startsWith('O8_TEST_')),
+    'O8_WORKER_ENV_ALLOW',
+  ].join(',');
   wsProcess = execFile(process.execPath, [
     '--import=./scripts/register-server-only-stub.mjs',
     '--import=tsx',
@@ -579,6 +589,7 @@ describe('persistent lead handoff real path', () => {
     rmSync(workerMarkersPath, { force: true });
     rmSync(reviewCapturePath, { force: true });
     rmSync(dispatchReadyPath, { force: true });
+    rmSync(workerReturnReadyPath, { force: true });
     const sent = await runCli([
       'lead', 'send', lead.id, '--message', '[fixture:dispatch-worker]',
       '--idempotency-key', 'dispatch-real-worker',
@@ -635,6 +646,8 @@ describe('persistent lead handoff real path', () => {
       turnId: `lead-assistant-${leadTurnId}`,
     }));
     writeFileSync(dispatchReadyPath, 'ready');
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('waiting_workers'), { timeout: 5_000 });
+    writeFileSync(workerReturnReadyPath, 'ready');
     await vi.waitFor(() => expect(existsSync(workerCapturePath)).toBe(true), { timeout: 20_000 });
     const waited = await waitedPromise;
     globalThis.fetch = originalFetch;
@@ -687,6 +700,23 @@ describe('persistent lead handoff real path', () => {
       repoPath, packetId: worker.packetId, laneId: worker.laneId, label: 'duplicate natural return',
     })).toBe(true);
     expect(reviewCount()).toBe(1);
+    // Model a new admitted worker turn before its exit. A watch must not
+    // resurrect an awaiting-review packet without new work admission.
+    await withMissionRegistryState(worker.missionId, (state) => {
+      const packet = state.packets.find(candidate => candidate.id === worker.packetId)!;
+      packet.status = 'running';
+      return { state, result: undefined };
+    });
+    updateLane(worker.laneId, { status: 'running' }, 'system', { reason: 'fixture successor admitted' });
+    expect(findLaneByPacket(worker.packetId)?.status).toBe('running');
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+    await withLockedState(state => {
+      const packet = state.packets.find(candidate => candidate.id === worker.packetId);
+      if (packet) {
+        packet.status = 'running';
+      }
+    });
+
     appendEvent(worker.laneId, 'runtime_process_exit', 'system', {
       surfaceId: lane.sessionKey,
       runId: 'fixture-successor-finished-run',
@@ -702,6 +732,7 @@ describe('persistent lead handoff real path', () => {
     });
     expect(successorWatch.status).toBe(200);
     await vi.waitFor(() => expect(reviewCount()).toBe(2), { timeout: 10_000 });
+    expect((await settled(lead.id)).lead.status).toBe('needs_approval');
 
     updateLane(worker.laneId, { status: 'failed' }, 'system', { reason: 'retired test generation' });
     await withMissionRegistryState(worker.missionId, (state) => {
@@ -728,8 +759,9 @@ describe('persistent lead handoff real path', () => {
     ]);
     expect(missing.exitCode, missing.stderr).toBe(0);
     const missingDone = await runCli(['lead', 'wait', lead.id, '--turn',
-      (JSON.parse(missing.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '10s']);
-    expect((JSON.parse(missingDone.stdout) as LeadCliReceipt).lead.status).toBe('blocked');
+      (JSON.parse(missing.stdout) as LeadCliReceipt).admittedTurnId!, '--timeout', '1s']);
+    expect(missingDone.exitCode).toBe(7);
+    expect((JSON.parse(missingDone.stdout) as LeadCliReceipt).lead.status).toBe('unreported');
     const errored = await runCli([
       'lead', 'send', lead.id, '--message', '[fixture:event-error]', '--idempotency-key', 'event-error',
     ]);
@@ -914,4 +946,133 @@ describe('persistent lead handoff real path', () => {
         (SELECT COUNT(*) FROM orchestrator_lead_events) AS events
     `).get()).toEqual(countsBefore);
   });
+  it('includes the structured outcome in the caller handback receipt', async () => {
+    const started = await runCli(startArgs('outcome-receipt'));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    const completed = await settled(lead.id);
+    expect(readFileSync(fakeCodex, 'utf8')).toBe(fakeCodexScript);
+    expect(completed.lead.result).toMatchObject({
+      outcome: { kind: 'completed', summary: expect.any(String), evidence: expect.any(Array) },
+    });
+  });
+
+  it('requires a turn outcome before handback and clears it on more work', async () => {
+    const started = await runCli(startArgs('turn-outcome-required'));
+    expect(started.exitCode, started.stderr).toBe(0);
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    const completed = await settled(lead.id);
+    expect(completed.lead.status).toBe('completed');
+    const sent = await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]',
+      '--idempotency-key', 'missing-report']);
+    expect(sent.exitCode, sent.stderr).toBe(0);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('unreported'), { timeout: 5_000 });
+    const status = await runCli(['lead', 'status', lead.id]);
+    expect(JSON.parse(status.stdout)).toMatchObject({ lead: { status: 'unreported', result: {
+      outcome: null, error: null, reason: 'turn ended without an outcome report',
+    } } });
+    const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
+    expect(waited.exitCode).toBe(7);
+    expect(waited.stderr).toContain('unreported: turn ended without an outcome report');
+    expect(JSON.parse(waited.stdout).requestedTurn).toMatchObject({
+      id: JSON.parse(sent.stdout).admittedTurnId, status: 'unreported', error: null,
+      reason: 'turn ended without an outcome report',
+    });
+    const terminalWait = await leadRoute.GET(new NextRequest(
+      `http://localhost/api/orchestrator/lead?leadId=${lead.id}&afterCursor=${JSON.parse(status.stdout).cursor}&waitMs=30000`,
+      { headers: { authorization: `Bearer ${token}` } },
+    ));
+    expect(await terminalWait.json()).toMatchObject({ requestedTurn: { status: 'unreported', error: null } });
+    const late = await runCli(['lead', 'report', lead.id, '--turn', JSON.parse(sent.stdout).admittedTurnId,
+      '--repo', repoPath, '--thread-id', lead.threadId, '--kind', 'completed', '--summary', 'Late',
+      '--evidence', '["late evidence"]']);
+    expect(late.exitCode).toBe(5);
+    expect(late.stderr).toContain('Only the active lead turn');
+    const more = await runCli(['lead', 'send', lead.id, '--message', '[fixture:hang]',
+      '--idempotency-key', 'more-work']);
+    expect(more.exitCode, more.stderr).toBe(0);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).lead.status).toBe('running'));
+    expect(getLeadStatus(lead.id).lead.result).toBeNull();
+    await runCli(['lead', 'stop', lead.id]);
+  }, 20_000);
+
+
+  it.each([
+    ['failed', 'blocked'], ['awaiting_human', 'needs_approval'], ['running', 'waiting_workers'], ['reviewing', 'blocked'],
+  ] as const)('preserves %s worker obligations without a lead report', async (workerStatus, expected) => {
+    const started = await runCli(startArgs(`obligation-${workerStatus}`));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    await settled(lead.id);
+    const mission = await createMission({
+      issues: [{ number: 6040, title: 'Worker obligation', body: 'Keep the obligation visible.', url: '' }],
+      repoPath, runtime: 'codex', constraints: '', orchestratorThreadId: lead.threadId,
+    });
+    const lane = createLane({ repoPath, branch: `obligation-${workerStatus}`, runtime: 'codex',
+      packetId: mission.packets[0].id, sessionKey: `obligation-${workerStatus}`, label: 'Obligation' });
+    updateLane(lane.id, { status: 'running', lastEventAt: new Date().toISOString() }, 'system');
+    if (workerStatus !== 'running') updateLane(lane.id, { status: workerStatus }, 'system');
+    await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]',
+      '--idempotency-key', `missing-${workerStatus}`]);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe(expected), { timeout: 5_000 });
+    if (workerStatus === 'reviewing') {
+      const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
+      expect(waited.exitCode, waited.stderr).toBe(0);
+      expect(JSON.parse(waited.stdout).requestedTurn.status).toBe('blocked');
+    }
+    await runCli(['lead', 'stop', lead.id]);
+  }, 20_000);
+
+  it.each(['completed', 'waiting_workers', 'needs_context', 'needs_approval', 'blocked'].flatMap(kind => [
+    { kind, workers: ['reviewing'], expected: 'blocked', scenario: 'reviewing' },
+    { kind, workers: ['failed', 'running'], expected: 'waiting_workers', scenario: 'failed plus running' },
+    { kind, workers: ['failed', 'awaiting_human'], expected: 'needs_approval', scenario: 'failed plus approval' },
+  ]))('reported turns retain origin/main classification: $kind / $scenario', async ({ kind, workers, expected }) => {
+    const started = await runCli(startArgs(`main-parity-${kind}-${workers.join('-')}`));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    await settled(lead.id);
+    const mission = await createMission({
+      issues: workers.map((_, index) => ({ number: 60400 + index, title: 'Classification parity', body: 'Keep the recorded outcome.', url: '' })),
+      repoPath, runtime: 'codex', constraints: '', orchestratorThreadId: lead.threadId,
+    });
+    expect(mission.packets).toHaveLength(workers.length);
+    for (const [index, status] of workers.entries()) {
+      const lane = createLane({ repoPath, branch: `parity-${kind}-${index}`, runtime: 'codex',
+        packetId: mission.packets[index].id, sessionKey: `parity-${lead.id}-${index}`, label: 'Parity worker' });
+      // Model fresh worker activity so the real silent-exit detector preserves this fixture.
+      updateLane(lane.id, { status: 'running', lastEventAt: new Date().toISOString() }, 'system');
+      if (status !== 'running') updateLane(lane.id, { status: status as 'failed' | 'reviewing' | 'awaiting_human' }, 'system');
+    }
+    if (kind === 'completed' && workers.includes('running')) {
+      const { runSilentExitTickForTesting } = await import('@/lib/supervisor/silent-exit-detector');
+      await runSilentExitTickForTesting();
+    }
+    const sent = await runCli(['lead', 'send', lead.id, '--message', `[fixture:outcome:${kind}]`, '--idempotency-key', 'reported-parity']);
+    expect(sent.exitCode, sent.stderr).toBe(0);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe(expected), { timeout: 5_000 });
+    expect(getLeadStatus(lead.id).latestTurn?.outcome?.kind).toBe(kind);
+    const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
+    expect(waited.exitCode, waited.stderr).toBe(expected === 'waiting_workers' ? 6 : 0);
+    expect(JSON.parse(waited.stdout).requestedTurn.status).toBe(expected);
+    await runCli(['lead', 'stop', lead.id]);
+  }, 20_000);
+
+  it('only a no-outcome turn gives a failed worker precedence over a running worker', async () => {
+    const started = await runCli(startArgs('unreported-mixed-workers'));
+    const lead = (JSON.parse(started.stdout) as LeadCliReceipt).lead;
+    await settled(lead.id);
+    const mission = await createMission({ issues: [1, 2].map(number => ({ number, title: 'Mixed workers', body: 'Keep failure visible.', url: '' })),
+      repoPath, runtime: 'codex', constraints: '', orchestratorThreadId: lead.threadId });
+    for (const [index, packet] of mission.packets.entries()) {
+      const lane = createLane({ repoPath, branch: `mixed-${index}`, runtime: 'codex', packetId: packet.id,
+        sessionKey: `mixed-${lead.id}-${index}`, label: 'Mixed worker' });
+      updateLane(lane.id, { status: 'running', lastEventAt: new Date().toISOString() }, 'system');
+      if (index === 0) updateLane(lane.id, { status: 'failed' }, 'system');
+    }
+    await runCli(['lead', 'send', lead.id, '--message', '[fixture:no-outcome]', '--idempotency-key', 'mixed-no-outcome']);
+    await vi.waitFor(() => expect(getLeadStatus(lead.id).latestTurn?.status).toBe('blocked'), { timeout: 5_000 });
+    const waited = await runCli(['lead', 'wait', lead.id, '--timeout', '1s']);
+    expect(waited.exitCode, waited.stderr).toBe(0);
+    expect(JSON.parse(waited.stdout).requestedTurn.status).toBe('blocked');
+    await runCli(['lead', 'stop', lead.id]);
+  }, 20_000);
+
 });

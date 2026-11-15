@@ -57,7 +57,18 @@ Files: `brand/ring/` (light, dark, mono, `currentColor`, PNGs), app icon in `bra
 
 ### App icon
 
-Flat Ring on a tile. Light: paper tile, ink ring. Dark: graphite (`#242424`) tile, paper ring. The macOS file follows Apple's grid (824px rounded tile inside 1024, radius 185, soft drop). Square full-bleed versions are for iOS, Windows and Linux. Glass on the icon is allowed later as the one place glass goes, but v1 ships flat.
+Flat Ring on a tile. Light: paper tile, ink ring. Dark: graphite (`#242424`) tile, paper ring. The macOS file follows Apple's grid (824px rounded tile inside 1024, radius 185, soft drop). Square full-bleed versions are for iOS, Windows and Linux. Glass on the icon is allowed later as the one place glass goes.
+
+**v1.1 (Q, 2026-11-12):** the app icon carries one soft colour edge: a thin rim, cool at the top (`#8DB8FF`) and warm at the bottom (`#FF7A3D`), fading to nothing through the middle, at 60% strength. The Ring itself stays flat. The square full-bleed versions stay flat, because their edge is cropped by the platform.
+
+| Icon | Tile | Mark | File |
+| --- | --- | --- | --- |
+| Default | paper | ink Ring | `brand/app-icon/icon-light-edge.svg` |
+| Alternate | paper | Glance (tight) | `brand/app-icon/icon-glance-light.svg` |
+| Dark variation | ink | paper Ring | `brand/app-icon/icon-dark-edge.svg` |
+| Dark alternate | ink | paper Glance (tight) | `brand/app-icon/icon-glance-dark.svg` |
+
+The default is what ships in the installer and what the app shows wherever it shows its own icon. The alternates are a later customization; whichever icon a person picks is the one the app shows them. Glance on an app icon is the one exception to "Glance is never the logo": it is an alternate icon, never the mark in a lockup.
 
 ## 4. The loop (the brand's story)
 
@@ -96,6 +107,12 @@ Glance's body is always **fog**: solid in the middle, fading evenly to nothing a
 | Mist | Big backdrops only | `glance-mist-*.svg` |
 
 Never below 16px. Where layered SVG can't render, use the flat fallback in `brand/glance/flat/`.
+
+### Core (under test)
+
+Core is an alternate Glance treatment being tested next to Fog. Same body, eyes and dot, but the fog is a crisp, dense middle with a longer, softer tail. **Fog stays the default until Core is picked.** Core only applies at 48px and up; below that both use Tight and Hairline.
+
+Files are in `brand/glance/core/`: `glance-core-{light,dark}.svg` (hero), `states/glance-{reviewing,working,sentback,approved}-core-{light,dark}.svg`, and `working/<key>.svg`, the 96px stage indicator in Core. Ship nothing in Core until it's chosen. If it wins, swap the `fog` style for `core` in `build_v1.py` and rebuild.
 
 ### Color states
 
@@ -231,7 +248,7 @@ Everything here is editable source, so later rounds build on v1 instead of start
 | To change | Edit | Then run (from `brand/src`) |
 | --- | --- | --- |
 | Ring, loop steps, app icon, favicon | `logos.py` (geometry), `build_v1.py` (colours, sizes) | `python3 -I build_v1.py "$PWD" ../..` |
-| Glance shape, faces, fog | `glance.py`, `fog.py` | same as above |
+| Glance shape, faces, fog (and the Core test set) | `glance.py`, `fog.py` | same as above |
 | A motion | `studies.py` (and `working.py` for the two indicator-only loops) | `python3 -I motions.py "$PWD"`, then `build_v1.py` for the indicator SVGs |
 | Indicator frames for native | after any motion or indicator change | `python3 -I frames.py "$PWD" ../working/frames-80 20 80 tight` |
 | The studies page | `studies_page.py` and `page*.css` | `python3 -I studies_page.py "$PWD" ../studies/o8-mark-studies.html` |

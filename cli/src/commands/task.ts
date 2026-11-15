@@ -46,6 +46,7 @@ interface TaskPoolLaneSummary {
 }
 
 interface TaskPoolTask {
+  externalReview?: { url: string; state: string; revision: { headSha: string; sequence: number } };
   id: string;
   packetId: string | null;
   laneId: string | null;
@@ -55,6 +56,7 @@ interface TaskPoolTask {
   status: string;
   runtime: string;
   workerIntent: string | null;
+  runtimeSubstitution?: string | null;
   workerRouting: {
     requestedProvider: string | null;
     requestedRuntime: string | null;
@@ -106,6 +108,7 @@ interface TaskMutation {
 }
 
 const VALUE_FLAGS = new Set([
+  '--intended-outcome',
   '--project',
   '--repo',
   '--title',
@@ -174,10 +177,12 @@ function taskIdFromRest(rest: string[], command: string): string {
 }
 
 function printTaskLine(task: TaskPoolTask): void {
-  const id = task.packetId ?? task.laneId ?? task.id;
+  const id = task.externalReview ? task.id : task.packetId ?? task.laneId ?? task.id;
   const repo = task.repoName ?? 'no repo';
   const project = task.project?.name ?? 'no project';
   process.stdout.write(`  ${id}  ${task.status}  ${repo}  ${project}\n`);
+  if (task.externalReview) process.stdout.write(`    ${task.externalReview.url}  ${task.externalReview.revision.headSha}  ${task.externalReview.state}\n`);
+  if (task.runtimeSubstitution) process.stdout.write(`    runtime substitution=${task.runtimeSubstitution}\n`);
   if (task.workerIntent || task.workerRouting) {
     process.stdout.write(`    worker=${task.workerIntent ?? 'unknown'} selected=${task.workerRouting?.selectedRuntime ?? task.runtime}\n`);
   }
@@ -218,10 +223,12 @@ function printHumanTaskDetail(detail: TaskDetail): void {
     ['runtime', task.runtime],
     ['worker', task.workerIntent ?? '(none)'],
     ['selected runtime', task.workerRouting?.selectedRuntime ?? '(none)'],
+    ['runtime substitution', task.runtimeSubstitution ?? '(none)'],
     ['repo', task.repoName ?? '(none)'],
     ['project', task.project?.name ?? '(none)'],
     ['branch', task.branch ?? '(none)'],
   ]);
+  if (task.externalReview) printHumanKv([['PR', task.externalReview.url], ['head SHA', task.externalReview.revision.headSha], ['review state', task.externalReview.state]]);
   process.stdout.write(`\n${task.title}\n`);
   if (task.summary) process.stdout.write(`\n${task.summary}\n`);
   if (task.taskBrief) {
@@ -239,6 +246,7 @@ function printHumanMutation(result: TaskMutation): void {
     ['lane', result.laneId ?? '(none)'],
     ['note', result.note],
     ['selected runtime', result.workerRouting?.selectedRuntime ?? result.task?.workerRouting?.selectedRuntime ?? '(none)'],
+    ['runtime substitution', result.task?.runtimeSubstitution ?? '(none)'],
   ]);
   if (result.task) {
     process.stdout.write(`\n${result.task.title}\n`);
@@ -424,4 +432,13 @@ export async function runTaskPrune(mode: OutputMode, rest: string[]): Promise<nu
     repoPath: readFlagValue(rest, '--repo'),
     reason: readFlagValue(rest, '--reason'),
   });
+}
+
+export async function runTaskAdoptPr(mode: OutputMode, rest: string[]): Promise<number> {
+  const repoPath = readFlagValue(rest, '--repo');
+  const pullRequest = positionalArgs(rest)[0];
+  if (!repoPath || !pullRequest) throw new CliError('invalid_args', 'Use o8 task adopt-pr <number-or-url> --repo <registered-repo>.', EXIT.INVALID_ARGS);
+  const result = await apiFetch(resolveConfig(), '/api/tasks/adopt-pr', { method: 'POST', body: { repoPath, pullRequest, intendedOutcome: readFlagValue(rest, '--intended-outcome') ?? undefined } });
+  if (mode.human) process.stdout.write(JSON.stringify(result.data, null, 2) + '\n'); else printJson(result.data);
+  return 0;
 }

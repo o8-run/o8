@@ -19,7 +19,7 @@ Run the `Port Build` workflow (`.github/workflows/port-build.yml`) against an
 existing public release tag with `publish_to_mirror` enabled. The
 `publish-mirror` job:
 
-- Downloads `o8_<version>_linux_amd64_preview.AppImage` from the source
+- Downloads `o8-<version>-x86_64.AppImage` from the source
   release on `o8-run/o8` (uploaded there by the `publish-preview` job in
   the same run, or a previous one).
 - Copies it to the mirror release for the same tag on
@@ -58,3 +58,10 @@ provide.
    with a `linux-x86_64` entry.
 4. No re-dispatch of step 2 is needed — step 3 uploads the `.sig` to the
    mirror itself.
+
+The AppImage retries once with its bundled Mesa lavapipe driver after the native
+renderer reports no usable Vulkan device. System drivers run first. Explicit
+`VK_ICD_FILENAMES` or `VK_DRIVER_FILES` settings disable this automatic retry.
+Set `O8_DISABLE_BUNDLED_VULKAN=1` to disable the fallback for diagnosis. A fallback
+prints `Using bundled software Vulkan driver; performance will be lower.`
+DEB and RPM continue to require system Vulkan drivers.

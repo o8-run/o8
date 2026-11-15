@@ -44,5 +44,5 @@ export interface GitProvider {
   readDiscussion(repo: string, number: number): Promise<GitProviderDiscussion>;
   comment(repo: string, number: number, body: string): Promise<void>;
   /** Re-checks the provider's merge gate against the reviewed head before publishing. */
-  merge(repo: string, number: number, options: GitProviderMergeOptions): Promise<void>;
+  merge(repo: string, number: number, options: GitProviderMergeOptions): Promise<void | { status: string; approvedSha: string; mergedSha: string | null }>;
 }

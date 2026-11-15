@@ -350,7 +350,7 @@ impl PullRequests {
         } else if string(&self.page, "repo").eq_ignore_ascii_case(repo) {
             self.select(number, cx);
         } else {
-            cx.open_url(&format!("https://github.com/{repo}/pull/{number}"));
+            crate::external_open::url(cx, &format!("https://github.com/{repo}/pull/{number}"));
         }
     }
     /// A row click: in the shell the panel opens it; alone the detail shows beside the list.

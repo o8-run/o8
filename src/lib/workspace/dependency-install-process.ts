@@ -2,7 +2,7 @@ import type { ExecFileOptions } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import { execFile, spawn } from '@/lib/providers/child-process';
-import { piWriteHelperPath } from '@/lib/pi/sdk/scripts';
+import { nativeProcessHelperPath } from '@/lib/pi/sdk/scripts';
 
 /** A cache reservation may be released only after installer teardown is proved. */
 export function dependencyInstallProcessesStopped(error: unknown): boolean {
@@ -64,7 +64,7 @@ export function execDependencyInstallProcess(command: string, args: string[], op
 function execSupervisedInstall(command: string, args: string[], options: ExecFileOptions): Promise<{ stdout: string; stderr: string }> {
   const { signal, timeout, maxBuffer = 1024 * 1024, ...execution } = options;
   let helper: string;
-  try { signal?.throwIfAborted(); helper = piWriteHelperPath(); }
+  try { signal?.throwIfAborted(); helper = nativeProcessHelperPath(); }
   catch (error) { return Promise.reject(Object.assign(error as Error, { installProcessesStopped: true })); }
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>;

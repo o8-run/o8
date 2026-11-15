@@ -79,6 +79,8 @@ pub struct Trace {
     pub helpers_below: bool,
     /// The turn was stopped while this block was its last work.
     pub stopped: bool,
+    pub terminal_note: Option<String>,
+    pub attention: bool,
 }
 
 impl Trace {
@@ -203,7 +205,7 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                  trace: &mut Trace,
                  trace_id: &str,
                  ended: Option<f64>| {
-        if !pending.is_empty() || trace.thinking || trace.stopped {
+        if !pending.is_empty() || trace.thinking || trace.stopped || trace.terminal_note.is_some() {
             let mut trace = std::mem::take(trace);
             if let Some(ended) = ended {
                 trace.ended = Some(trace.ended.map_or(ended, |e| e.max(ended)));
@@ -269,6 +271,13 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 indices.insert(id, steps.len());
                 pending.push(steps.len());
                 steps.push(step);
+            }
+        }
+        if let Some(note) = entry.extra.get("terminalNote") {
+            trace.terminal_note = note["text"].as_str().map(str::to_owned);
+            trace.attention = note["attention"] == true;
+            if trace_id.is_empty() && pending.is_empty() {
+                trace_id = entry.id.clone();
             }
         }
         if interrupted(entry) {

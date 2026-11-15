@@ -823,19 +823,6 @@ fn divider() -> Div {
         .bg(theme().border)
 }
 
-pub(super) fn brand() -> impl IntoElement {
-    static LOGO: OnceLock<Arc<Image>> = OnceLock::new();
-    let logo = LOGO.get_or_init(|| {
-        Arc::new(Image::from_bytes(
-            ImageFormat::Png,
-            include_bytes!("surfaces/sidebar/project_identity.png").to_vec(),
-        ))
-    });
-    img(logo.clone())
-        .size(px(24.))
-        .object_fit(ObjectFit::Contain)
-}
-
 /// SymonMark: classic's orb, rendered from SYMON_ORB_BACKGROUND because GPUI has
 /// no conic gradient. Its highlight follows `--t-text`, so each ink has a file.
 fn symon_mark(active: bool) -> impl IntoElement {
@@ -899,6 +886,7 @@ impl Shell {
             self.surfaces.setup.view = None;
             self.revision += 1;
         }
+        crate::shell::sidebar::navigation(self, cx);
     }
     pub(super) fn render_rail(
         &mut self,

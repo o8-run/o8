@@ -125,6 +125,9 @@ function fullPacketFixture() {
       recordedAt: '2026-01-01T00:05:00.000Z',
       reviewedHeadSha: 'def456',
       summary: 'Looks good',
+      runEvidence: { status: 'not_run', reason: 'No structured run evidence was recorded.' },
+      reviewMode: 'read_only',
+      verdictLabel: 'approved, not run',
       auditApprovalId: 'approval-1',
     },
     lane: {
