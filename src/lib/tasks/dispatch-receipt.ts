@@ -36,6 +36,7 @@ export async function dispatchWithReceipt(input: {
   const intentHash = createHash('sha256').update(JSON.stringify(input.intent)).digest('hex');
   const replay = async () => {
     const lane = input.packetId ? findLaneByPacket(input.packetId) : getLane(input.laneId!);
+    if (lane?.status === 'awaiting_orchestrator' && lane.lastEventLabel?.startsWith('runtime_launch_held:')) throw input.conflict(`A held spawn still owns this task (${lane.lastEventLabel}). Inspect its original session before retrying.`);
     if (!lane || !['launching', 'running', 'awaiting_input'].includes(lane.status)) return null;
     if (input.packetId && !inspectPacketManagedRunAdmission(input.packetId).allowed) throw input.conflict('Task is held or stopped. Inspect it before dispatching.');
     const previous = latestAdmission(lane.id);
@@ -93,7 +94,7 @@ export async function dispatchWithReceipt(input: {
     try {
       return await withPacketLifecycleSpawnLock(key, async () => {
         guard();
-        return input.settle(lane, { ok: false, laneId: lane.id, note }, guard);
+        return input.settle(lane, { ok: false, laneId: lane.id, note, reason: 'dispatch_settlement_failed' }, guard);
       });
     } catch { throw error; }
   });

@@ -4085,6 +4085,12 @@
       ]
     },
     {
+      "path": "tests/linux-gpui-publication-policy.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/linux-native-addon-abis.test.ts",
       "reasons": [
         "child-process"
@@ -7743,6 +7749,12 @@
       "path": "tests/runtime-refusal-consistency-real-path.test.ts",
       "reasons": [
         "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/runtime-surface-deadline-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },

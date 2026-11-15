@@ -37,20 +37,15 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  # Merge-queue reuse. When main has not moved since a pull request was
-  # tested, its squashed group commit has the same tree that already passed,
-  # so a second full run adds nothing. scripts/ci/reuse-green-tree.mjs answers
-  # reuse=true only for a group holding exactly one pull request whose tree is
-  # byte-identical to the commit every required check passed on, with main
-  # inside that commit's history. Every other event, several pull requests,
-  # a moved main, differing trees, a missing or unsuccessful check, or
-  # unreadable API data answers reuse=false and everything runs in full.
-  # Outside merge groups the decision job is skipped without a runner.
-  # Downstream jobs explicitly accept that skip, but reject failures and cancellation.
-  # Heavy jobs skip their steps on reuse, so each still reports success
-  # under its required name. If this job itself fails, the jobs that need it
-  # are skipped and the required Hermetic Unit Tests aggregate fails, which
-  # blocks the merge.
+  # Pull requests run quick checks; slow jobs report skips and run in the queue.
+  # Reuse is only safe for a historical PR commit where every check, including
+  # every shard and both Rust gates, completed successfully in the same CI run.
+  # Skipped checks never qualify. Ordinary quick-only PR runs therefore answer
+  # reuse=false even for an identical tree, and the queue runs the full gates.
+  # Missing checks, changed trees, moved bases and unreadable API data also run
+  # everything. Outside merge groups this decision job skips without a runner.
+  # Downstream jobs accept that skip, but reject failure and cancellation;
+  # the always-running queue aggregate fails closed on unsuccessful prerequisites.
   reuse:
     if: github.event_name == 'merge_group'
     name: Merge Queue Reuse
@@ -145,7 +140,7 @@ jobs:
 
   server-bundle-size:
     name: Server Bundle Size
-    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name != 'schedule')
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name != 'schedule') && github.event_name != 'pull_request'
     needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -270,7 +265,7 @@ jobs:
 
   test-shards:
     name: Hermetic Unit Tests (shard ${{ matrix.shard }}/4)
-    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event.schedule != '41 13 * * 1')
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event.schedule != '41 13 * * 1') && github.event_name != 'pull_request'
     needs: [reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -311,7 +306,7 @@ jobs:
   test:
     name: Hermetic Unit Tests
     needs: [test-shards, o8-next-tests, classification]
-    if: always() && github.event.schedule != '41 13 * * 1'
+    if: always() && github.event.schedule != '41 13 * * 1' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -326,7 +321,7 @@ jobs:
           echo "Classification result: $CLASSIFICATION_RESULT"
           test "$SHARD_RESULT" = success && test "$NATIVE_RESULT" = success && test "$CLASSIFICATION_RESULT" = success
 
-  # PR lane (#2391): runs exactly the resource-owning test files the branch
+  # Queue lane (#2391): runs exactly the resource-owning test files the branch
   # touches, diffed from the merge-base with the base branch. No touched files
   # means the test steps skip and the check passes. No continue-on-error: a red
   # file fails the check unless it is in the exempted baseline described below. workflow_dispatch with integration_base runs the same
@@ -338,7 +333,7 @@ jobs:
   # a PR touching roughly 150 resource-owning files.
   integration-changed:
     name: Integration Tests (changed files)
-    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.integration_base != ''))
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.integration_base != '')) && github.event_name != 'pull_request'
     needs: [reuse]
     # ubuntu-26.04 pulls amd64v3 package variants that the signed APT check rejects (#5140).
     runs-on: ubuntu-24.04
@@ -560,7 +555,7 @@ jobs:
 
   governance-smoke:
     name: Governance Smoke
-    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && needs.typecheck.result == 'success' && (github.event_name != 'schedule')
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && needs.typecheck.result == 'success' && (github.event_name != 'schedule') && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     # timeout is load-bearing: this job hung at the 6h GitHub ceiling 3x on
     # 2026-07-11 (open handle keeps node alive after the smoke passes) —
@@ -626,10 +621,10 @@ jobs:
   # Both targets compile clean as of run 31047139210 (2026-08-05), so the
   # gates are BLOCKING — a PR that breaks non-Darwin compilation goes red.
   # Both targets also run on merge groups so their required checks cover the
-  # queued commit, alongside pull requests, main pushes and manual runs.
+  # queued commit, alongside main pushes and manual runs.
   rust-check-windows:
     name: Rust Compile Gate (Windows)
-    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && ((github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.classification.result == 'success' && needs.classification.outputs.rust_changed != 'false')
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && ((github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.classification.result == 'success' && needs.classification.outputs.rust_changed != 'false') && github.event_name != 'pull_request'
     needs: [reuse, classification]
     runs-on: windows-latest
     timeout-minutes: 30
@@ -672,7 +667,7 @@ jobs:
 
   rust-check-linux:
     name: Rust Compile Gate (Linux)
-    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && ((github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.classification.result == 'success' && needs.classification.outputs.rust_changed != 'false')
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && ((github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.classification.result == 'success' && needs.classification.outputs.rust_changed != 'false') && github.event_name != 'pull_request'
     needs: [reuse, classification]
     # ubuntu-26.04 pulls amd64v3 package variants that the signed APT check rejects (#5140).
     runs-on: ubuntu-24.04
@@ -732,7 +727,7 @@ jobs:
 
   o8-next-tests:
     name: o8 next Native Tests (Linux)
-    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event.schedule != '41 13 * * 1')
+    if: cancelled() == false && (needs.reuse.result == 'success' || (github.event_name != 'merge_group' && needs.reuse.result == 'skipped')) && (github.event.schedule != '41 13 * * 1') && github.event_name != 'pull_request'
     needs: [reuse]
     runs-on: ubuntu-24.04
     # Keep cold-build headroom; warm runs distribute tests over eight shards.

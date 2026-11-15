@@ -183,6 +183,15 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const jobs = workflow.jobs;
   requireCondition(jobs && typeof jobs === 'object', 'CI must define jobs');
   requireCondition(workflow.defaults?.run === undefined, 'workflow run defaults need a verify:ci equivalent');
+  // Hosted PR admission skips slow jobs; local verification always runs them.
+  // Validate the exact exclusion before normalizing it away for the full plan.
+  for (const id of ['test-shards', 'test', 'integration-changed', 'governance-smoke',
+    'rust-check-windows', 'rust-check-linux', 'o8-next-tests', 'server-bundle-size']) {
+    const suffix = " && github.event_name != 'pull_request'";
+    requireCondition(typeof jobs[id]?.if === 'string' && jobs[id].if.endsWith(suffix),
+      `${id} must skip slow work on pull requests`);
+    jobs[id].if = jobs[id].if.slice(0, -suffix.length);
+  }
   withoutReuseGate(jobs);
   withoutAuditToolCache(jobs.security);
   for (const id of Object.keys(jobs)) {

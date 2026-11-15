@@ -267,7 +267,7 @@ impl Render for WorkerPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let id = self.agent.id.clone();
         let transcript = match &self.detail {
-            Some(detail) => detail.content(),
+            Some(detail) => detail.content_for(cx.entity()),
             None => div()
                 .flex_1()
                 .px(px(12.))

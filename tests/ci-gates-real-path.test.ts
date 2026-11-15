@@ -160,9 +160,33 @@ describe('required CI gates through workflow commands', () => {
             reuse: { result: event_name === 'merge_group' ? 'success' : 'skipped' },
             typecheck: { result: 'success' },
             'test-shards': { result: 'success' },
-          }, cancelled), `${id} on ${event_name}, cancelled=${cancelled}`).toBe(id === 'test' || !cancelled);
+          }, cancelled), `${id} on ${event_name}, cancelled=${cancelled}`).toBe((event_name !== 'pull_request' || ['typecheck', 'lint', 'security'].includes(id)) && (id === 'test' || !cancelled));
         }
       }
+    }
+  });
+
+  it('skips every slow job on pull requests while retaining quick work', () => {
+    for (const id of ['test-shards', 'test', 'integration-changed', 'governance-smoke',
+      'rust-check-linux', 'rust-check-windows', 'o8-next-tests', 'server-bundle-size']) {
+      expect(condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
+        { reuse: { result: 'skipped' } }), id).toBe(false);
+      expect(condition(workflow.jobs[id].if, { event_name: 'merge_group', event: {} }), id).toBe(true);
+    }
+    for (const id of ['typecheck', 'lint', 'classification', 'security']) {
+      expect(condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
+        { reuse: { result: 'skipped' } }), id).toBe(true);
+    }
+  });
+
+  it('fails closed in the queue when any aggregate prerequisite is skipped', () => {
+    const job = workflow.jobs.test;
+    for (const failed of ['SHARD_RESULT', 'NATIVE_RESULT', 'CLASSIFICATION_RESULT']) {
+      expect(condition(job.if, { event_name: 'merge_group', event: {} })).toBe(true);
+      const run = spawnSync(job.steps[0].run, { shell: true, encoding: 'utf8',
+        env: { ...process.env, SHARD_RESULT: 'success', NATIVE_RESULT: 'success',
+          CLASSIFICATION_RESULT: 'success', [failed]: 'skipped' } });
+      expect(run.status, failed).not.toBe(0);
     }
   });
 
@@ -231,7 +255,7 @@ describe('required CI gates through workflow commands', () => {
     for (const id of ['rust-check-linux', 'rust-check-windows']) {
       expect(workflow.jobs[id].needs).toEqual(['reuse', 'classification']);
       for (const changed of ['false', 'true', '']) {
-        expect(condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
+        expect(condition(workflow.jobs[id].if, { event_name: 'merge_group', event: {} },
           { classification: { result: 'success', outputs: { rust_changed: changed } } })).toBe(changed !== 'false');
       }
     }
@@ -267,7 +291,7 @@ describe('required CI gates through workflow commands', () => {
       });
       expect(aggregate.status, result).not.toBe(0);
       for (const id of ['rust-check-linux', 'rust-check-windows']) {
-        const skipped = !condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
+        const skipped = !condition(workflow.jobs[id].if, { event_name: 'merge_group', event: {} },
           { classification: { result, outputs: { rust_changed: 'false' } } });
         expect(skipped && aggregate.status === 0, `${id}: ${result} must not combine a Rust skip with a green aggregate`).toBe(false);
       }
@@ -292,8 +316,8 @@ describe('required CI gates through workflow commands', () => {
     expect(shards.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
     expect(workflow.jobs.test.needs).toEqual(['test-shards', 'o8-next-tests', 'classification']);
     for (const cancelled of [false, true]) {
-      expect(condition(shards.if, { event_name: 'pull_request', event: {} }, {
-        reuse: { result: 'skipped' },
+      expect(condition(shards.if, { event_name: 'merge_group', event: {} }, {
+        reuse: { result: 'success' },
       }, cancelled)).toBe(!cancelled);
     }
     for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
