@@ -54,6 +54,7 @@ Ranked. Work on a lower item does not delay a higher one.
 2. **Governance and security.** The reason to trust the loop. No lane stalls silently ([#2197](https://github.com/o8-run/o8/issues/2197)), and a worker cannot reach anything its packet does not grant ([#2198](https://github.com/o8-run/o8/issues/2198), security lane).
 3. **Other tools plug in.** Work written in another tool enters review without copy and paste. Its author sees verdicts and findings natively inside that tool, so nobody switches apps. o8's MCP server and CLI carry them ([#5841](https://github.com/o8-run/o8/issues/5841)).
 4. **The window shows the review.** o8 next keeps every surface it has. The sidebar lists work flowing in, and a selected item shows the reviewer's transcript. Reviewers can still spawn workers ([#5842](https://github.com/o8-run/o8/issues/5842)).
+   - In progress: a native Review scorecard beside Activity, with durable outcome figures and change lists ([#5879](https://github.com/o8-run/o8/issues/5879)).
    - In progress: worker and reviewer sessions use the chat transcript and grouped traces ([#5878](https://github.com/o8-run/o8/issues/5878)).
    - In progress: prompt navigation in every native transcript ([#5877](https://github.com/o8-run/o8/issues/5877)).
 5. **Linux as a home for o8.** The machine that hosts o8 is often a Linux server. A fresh Ubuntu machine goes from install to a merged review ([#1672](https://github.com/o8-run/o8/issues/1672)).

@@ -30,6 +30,7 @@ const repositoryRead = (load: Route['load']): Route['load'] => async () => ({
 // Keys mirror register_surfaces!, including surfaces whose transport is WebSocket-only.
 // Each route loads its own implementation; unrelated surfaces stay cold.
 export const nativeSurfaceRoutes: Record<string, Route[]> = {
+  scorecard: [route('/api/panel/analytics', 'GET', () => import('@/app/api/panel/analytics/route'))],
   session: [
     route('/api/worktrees/conflicts', 'GET', () => import('@/app/api/worktrees/conflicts/route')),
     route('/api/orchestrator/workspace/maintenance', 'GET POST', () => import('@/app/api/orchestrator/workspace/maintenance/route')),

@@ -9,6 +9,7 @@ import { CLOSE_UNMERGED_DISPOSITIONS } from '@/lib/orchestrator/close-unmerged';
 import { gte, sql } from 'drizzle-orm';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { claudeRequestCostUsd, claudeRequestRate, readClaudeRequestTokens } from '@/lib/cost/rate-table';
+import { reviewScorecard } from './review-scorecard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -298,6 +299,14 @@ function computeMoatMetrics(sinceTs: number): {
 
 export async function GET(request: NextRequest) {
   try {
+    if (request.nextUrl.searchParams.get('view') === 'review') {
+      const range = request.nextUrl.searchParams.get('range') ?? '7';
+      const source = request.nextUrl.searchParams.get('source') ?? 'all';
+      if (!['7', '30', 'all'].includes(range) || !['all', 'chat', 'external', 'pr', 'unknown'].includes(source)) {
+        return NextResponse.json({ error: 'Invalid scorecard range or source' }, { status: 400 });
+      }
+      return NextResponse.json(reviewScorecard(range, source, request.nextUrl.searchParams.get('repoPath')));
+    }
     const hours = parseInt(request.nextUrl.searchParams.get('hours') || '24', 10);
     const sinceTs = Date.now() - hours * 60 * 60 * 1000;
     const visibleSurfaces = SURFACES;
