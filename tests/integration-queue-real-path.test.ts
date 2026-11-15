@@ -63,6 +63,13 @@ function change(id: string, files: Record<string, string>, parent = base, depend
 const checks = [{ name: 'combined-behavior', command: process.execPath, args: ['-e', "const f=require('node:fs');if(!f.existsSync('independent.txt'))process.exit(1)"], timeoutMs: 10000 }];
 beforeAll(async () => {
   writeFileSync(join(root, 'settings.toml'), '[review]\nrequire_approval = "never"\n');
+  // These candidate-verification fixtures exercise operator-enabled direct integration.
+  const { PATCH } = await import('@/app/api/projects/[id]/route');
+  const saved = await PATCH(new NextRequest(`http://localhost/api/projects/${project.id}`, {
+    method: 'PATCH', headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` },
+    body: JSON.stringify({ mergeMode: 'direct' }),
+  }), { params: Promise.resolve({ id: project.id }) });
+  expect(saved.status, await saved.clone().text()).toBe(200);
   const { addRepo } = await import('@/lib/repos/registry');
   repoId = (await addRepo(repoPath)).id;
   const parent = change('parent', { 'shared.txt': 'parent\n' });
