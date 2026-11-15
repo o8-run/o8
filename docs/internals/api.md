@@ -247,7 +247,7 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/dictation/transcribe` | Multipart audio upload → OpenRouter transcription endpoint. |
-| POST | `/api/dictation/polish` | Polish raw Whisper transcript via Gemini Flash Lite (adaptive punctuation). |
+| POST | `/api/dictation/polish` | Polish a raw dictation transcript with Claude Haiku and the Anthropic key (adaptive punctuation); unpolished without a key. |
 
 ### `/api/github/*` — GitHub App webhook receiver (self-authenticating)
 
