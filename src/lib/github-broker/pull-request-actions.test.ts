@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ transport: vi.fn(), head: vi.fn(), publication: vi.fn() }));
-vi.mock('./auth', () => ({ githubInstallationFetch: mocks.transport }));
+const mocks = vi.hoisted(() => ({ transport: vi.fn(), head: vi.fn(), publication: vi.fn(), disabled: vi.fn() }));
+vi.mock('./auth', () => ({ githubInstallationFetch: mocks.transport, captureGitHubAccount: () => ({ apiBaseUrl: 'https://api.github.com' }), requireGitHubAccount: vi.fn() }));
 vi.mock('./actions', () => ({ getGitHubPullRequestHeadRef: mocks.head }));
-vi.mock('./publication', () => ({ publishGitHubPullRequest: mocks.publication }));
+vi.mock('./publication', () => ({ publishGitHubPullRequest: mocks.publication, recordGitHubAutoMergeDisabled: mocks.disabled }));
 import { updateGitHubPullRequestMode } from './pull-request-actions';
 const sha = 'a'.repeat(40);
 beforeEach(() => { vi.resetAllMocks(); mocks.head.mockResolvedValue({ nodeId: 'pr-node', sha, state: 'open' }); });

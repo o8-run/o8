@@ -216,7 +216,7 @@ export async function POST(
         expectedMergeGate: body.expectedMergeGate,
         principal: resolveRequestPrincipalContext(request).role,
       });
-      return NextResponse.json({ ok: true, action: result.publication?.status === 'queued' ? 'queued' : 'merged', publication: result.publication });
+      return NextResponse.json({ ok: true, action: result.publication?.status ?? 'merged', publication: result.publication });
     }
 
     if (action === 'draft' || action === 'ready' || action === 'enable-auto-merge' || action === 'disable-auto-merge') {

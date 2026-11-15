@@ -3608,6 +3608,14 @@
       ]
     },
     {
+      "path": "tests/hosting-publication-native-fixture-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/hosting-publication-real-path.test.ts",
       "reasons": [
         "child-process",

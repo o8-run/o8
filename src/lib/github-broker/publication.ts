@@ -71,7 +71,7 @@ export async function publishGitHubPullRequest(repo: string, number: number, act
   const host = account.apiBaseUrl;
   const scope = githubCredentialScope(host, authorization.installation.id, authorization.token);
   const previous = readPublication(host, repo, number);
-  if (previous && previous.status !== 'refused') {
+  if (previous && !['refused', 'disabled'].includes(previous.status)) {
     const reconciled = await reconcile(host, previous, authorization);
     if (previous.approvedSha !== approvedSha) throw new Error('The approved head changed. Return to review before publishing.');
     return reconciled;
@@ -139,4 +139,11 @@ export async function publishGitHubPullRequest(repo: string, number: number, act
   if (saved.status === 'refused') throw new PublicationRefused(saved);
   if (saved.status === 'queued' || saved.status === 'auto_merge_enabled') return reconcile(host, saved, authorization).catch(error => { if (error instanceof PublicationRefused || error instanceof PublicationUnknown) throw error; return saved; });
   return saved;
+}
+
+/** A confirmed disable settles a known enable; it cannot clear an unknown request. */
+export function recordGitHubAutoMergeDisabled(host: string, repo: string, number: number): void {
+  const receipt = readPublication(host, repo, number);
+  if (receipt?.status !== 'auto_merge_enabled') return;
+  savePublication(host, { ...receipt, status: 'disabled', reason: 'GitHub confirmed auto-merge was disabled.', updatedAt: new Date().toISOString() });
 }

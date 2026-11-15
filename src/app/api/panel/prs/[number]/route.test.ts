@@ -55,10 +55,10 @@ describe('pull request write entry point', () => {
     expect((await post({ action: 'merge', mergeMethod, commitSha, expectedMergeGate })).status).toBe(200);
     expect(mocks.mergeGitHubPullRequest).toHaveBeenCalledWith('example/repo', 5, { deleteBranch: false, mergeMethod, expectedHeadSha: commitSha, expectedMergeGate, principal: 'anonymous' });
   });
-  it('reports an accepted queue entry separately from a merged commit', async () => {
-    mocks.mergeGitHubPullRequest.mockResolvedValueOnce({ merged: false, publication: { status: 'queued', mergedSha: null } });
+  it.each(['queued', 'auto_merge_enabled'])('reports %s separately from a merged commit', async status => {
+    mocks.mergeGitHubPullRequest.mockResolvedValueOnce({ merged: false, publication: { status, mergedSha: null } });
     const response = await post({ action: 'merge', mergeMethod: 'squash', commitSha: 'a'.repeat(40) });
-    expect(await response.json()).toMatchObject({ ok: true, action: 'queued', publication: { status: 'queued', mergedSha: null } });
+    expect(await response.json()).toMatchObject({ ok: true, action: status, publication: { status, mergedSha: null } });
   });
   it.each([{ action: 'merge' }, { action: 'merge', commitSha: 'a'.repeat(40), mergeMethod: 'bad' }, { action: 'enable-auto-merge', mergeMethod: 'squash' }])('refuses an unbound action', async (body) => {
     expect((await post(body)).status).toBe(400); expect(mocks.mergeGitHubPullRequest).not.toHaveBeenCalled(); expect(mocks.updateGitHubPullRequestMode).not.toHaveBeenCalled();

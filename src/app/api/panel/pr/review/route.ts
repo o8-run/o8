@@ -75,7 +75,7 @@ export async function POST(request: Request) {
       const result = await mergeGitHubPullRequest(repo, prNumber, { deleteBranch: true, expectedHeadSha: body.commitSha,
         mergeMethod: body.mergeMethod, expectedMergeGate: body.expectedMergeGate, principal: resolveRequestPrincipalContext(request).role });
       invalidateGitHubSync(repo, 'pull_requests');
-      return NextResponse.json({ ok: true, success: true, action: result.publication.status === 'queued' ? 'queued' : 'merged', publication: result.publication });
+      return NextResponse.json({ ok: true, success: true, action: result.publication.status, publication: result.publication });
     }
 
     return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });

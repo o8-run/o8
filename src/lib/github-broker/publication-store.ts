@@ -13,7 +13,7 @@ export interface PublicationReceipt {
   action: 'merge' | 'enable-auto-merge';
   authorizingPrincipal: string;
   scope: string;
-  status: 'unknown' | 'merged' | 'queued' | 'auto_merge_enabled' | 'refused';
+  status: 'unknown' | 'merged' | 'queued' | 'auto_merge_enabled' | 'refused' | 'disabled';
   checks: unknown;
   reason: string | null;
   createdAt: string;
@@ -38,7 +38,7 @@ export function claimPublication(host: string, receipt: PublicationReceipt): Pub
   const db = tables();
   return db.transaction(() => {
     const previous = readPublication(host, receipt.repo, receipt.number);
-    if (previous && previous.status !== 'refused') return previous;
+    if (previous && !['refused', 'disabled'].includes(previous.status)) return previous;
     savePublication(host, receipt, true);
     return receipt;
   }).immediate();
