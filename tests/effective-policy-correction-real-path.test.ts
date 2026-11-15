@@ -107,6 +107,10 @@ it('holds a session no_merge rule', async () => {
 it('uses the persisted high risk tier', async () => { risk({ tier: 'high', reasons: ['Fixture sensitive change'] }); await held('review-risk'); });
 it('does not infer a tier for an unpinned risk event', async () => { risk({ reviewedHeadSha: null }); await held('review-risk-uncertain'); });
 it('holds a fallback base recorded by review', async () => { risk({ diffBase: { comparisonRef: head, usedFallback: true, warning: 'Refresh failed' } }); await held('review-risk-uncertain'); });
+it('holds a warning flag recorded by review', async () => {
+  risk({ diffBase: { comparisonRef: head, mergeBase: head, usedFallback: false, warning: true } });
+  await held('review-risk-uncertain');
+});
 it('holds a missing risk receipt', async () => {
   const { getSqlite } = await import('@/lib/db');
   getSqlite().prepare("DELETE FROM lane_events WHERE lane_id = ? AND verb = 'review_risk_classified'").run(lane.id);

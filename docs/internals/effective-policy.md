@@ -40,7 +40,8 @@ coverage also withholds durable approval in this projection.
 Review risk comes from the latest persisted `review_risk_classified` event,
 pinned to the exact HEAD and containing the review's diff-base provenance.
 Legacy events without that identity, missing events, fallback bases and warnings
-require human inspection. `comparisonRef` reports the comparison actually used
+require human inspection. New warning provenance is a boolean, without raw Git
+stderr. `comparisonRef` reports the comparison actually used
 by the review summary (merge-base when available); the read never refreshes it.
 Scope expansion uses the persisted lane event and packet marker; its
 acknowledgement is a maintainer decision.
