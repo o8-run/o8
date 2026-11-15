@@ -144,6 +144,7 @@ interface InlineIssue {
   number: number;
   title: string;
   body?: string;
+  allowedFiles?: string[];
 }
 
 interface CreateMissionInlineInput {
@@ -436,6 +437,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
       title: issue.title,
       body: issue.body ?? '',
       url: '',
+      ...(issue.allowedFiles?.length ? { allowedFiles: issue.allowedFiles } : {}),
     }));
 
     log(`Creating mission from ${loadedIssues.length} inline issue${loadedIssues.length === 1 ? '' : 's'} (no GitHub fetch).`);

@@ -7,6 +7,8 @@ use std::time::Duration;
 pub(super) mod continuation;
 #[path = "prompt_actions/metadata.rs"]
 mod metadata;
+#[path = "prompt_actions/reading.rs"]
+pub(crate) mod reading;
 
 const CONTROL_SIZE: f32 = 26.;
 const ROW_PADDING_BOTTOM: f32 = 6.;
@@ -475,8 +477,14 @@ impl Surface {
     }
 }
 
+#[derive(Clone)]
+struct Handlers {
+    event: Rc<dyn Fn(Action, &mut Window, &mut App)>,
+    redraw: Rc<dyn Fn(&mut App)>,
+}
+
 fn control(
-    view: &Entity<Surface>,
+    handlers: &Handlers,
     prompt: &Prompt,
     name: &'static str,
     path: &'static str,
@@ -486,10 +494,9 @@ fn control(
     action: Action,
 ) -> gpui::Stateful<gpui::Div> {
     let id: SharedString = format!("prompt-{name}-{}", prompt.id).into();
-    let (source, prompt_id) = (prompt.source.clone(), prompt.id.clone());
-    let click = view.clone();
+    let click = handlers.clone();
     let clicked_focus = focus.clone();
-    let (key_source, key_id, key_view) = (source.clone(), prompt_id.clone(), view.clone());
+    let keys = handlers.clone();
     div()
         .id(id.clone())
         .debug_selector(move || id.to_string())
@@ -522,9 +529,7 @@ fn control(
         .on_click(move |_, window, cx| {
             if enabled {
                 clicked_focus.focus(window);
-                click.update(cx, |s, cx| {
-                    s.prompt_event(&source, &prompt_id, action, window, cx)
-                });
+                (click.event)(action, window, cx);
             }
         })
         .on_key_down(move |event, window, cx| {
@@ -535,14 +540,12 @@ fn control(
                 } else {
                     window.focus_next();
                 }
-                key_view.update(cx, |_, cx| cx.notify());
+                (keys.redraw)(cx);
                 return;
             }
             if enabled && matches!(event.keystroke.key.as_str(), "enter" | "space") {
                 cx.stop_propagation();
-                key_view.update(cx, |s, cx| {
-                    s.prompt_event(&key_source, &key_id, action, window, cx)
-                });
+                (keys.event)(action, window, cx);
             }
         })
 }
@@ -558,6 +561,22 @@ pub(super) fn container(view: Entity<Surface>, prompt: &Prompt) -> gpui::Statefu
 }
 
 pub(super) fn row(view: &Entity<Surface>, prompt: &Prompt, window: &Window) -> AnyElement {
+    let (source, id) = (prompt.source.clone(), prompt.id.clone());
+    let event_view = view.clone();
+    let redraw_view = view.clone();
+    row_with(
+        &Handlers {
+            event: Rc::new(move |action, window, cx| {
+                event_view.update(cx, |s, cx| s.prompt_event(&source, &id, action, window, cx))
+            }),
+            redraw: Rc::new(move |cx| redraw_view.update(cx, |_, cx| cx.notify())),
+        },
+        prompt,
+        window,
+    )
+}
+
+fn row_with(handlers: &Handlers, prompt: &Prompt, window: &Window) -> AnyElement {
     let visible = prompt.confirm
         || prompt.busy
         || prompt.error.is_some()
@@ -620,9 +639,9 @@ pub(super) fn row(view: &Entity<Surface>, prompt: &Prompt, window: &Window) -> A
             .child("·");
     }
     actions = actions
-        .child(control(view, prompt, "copy", if prompt.copied { CHECK } else { COPY }, if prompt.copied { "Copied" } else { "Copy" }.into(), true, &prompt.focus[0], Action::Copy))
-        .child(control(view, prompt, "rewind", REWIND, prompt.rewind_reason.clone().unwrap_or_else(|| "Rewind from here. Restore this prompt in a continuation; keep the original chat and workspace files.".into()), prompt.rewind_reason.is_none(), &prompt.focus[1], Action::Rewind))
-        .child(control(view, prompt, "fork", FORK, prompt.fork_reason.clone().unwrap_or_else(|| "Fork from here. Start a new conversation through this prompt. This one stays as it is.".into()), prompt.fork_reason.is_none(), &prompt.focus[2], Action::Fork));
+        .child(control(handlers, prompt, "copy", if prompt.copied { CHECK } else { COPY }, if prompt.copied { "Copied" } else { "Copy" }.into(), true, &prompt.focus[0], Action::Copy))
+        .child(control(handlers, prompt, "rewind", REWIND, prompt.rewind_reason.clone().unwrap_or_else(|| "Rewind from here. Restore this prompt in a continuation; keep the original chat and workspace files.".into()), prompt.rewind_reason.is_none(), &prompt.focus[1], Action::Rewind))
+        .child(control(handlers, prompt, "fork", FORK, prompt.fork_reason.clone().unwrap_or_else(|| "Fork from here. Start a new conversation through this prompt. This one stays as it is.".into()), prompt.fork_reason.is_none(), &prompt.focus[2], Action::Fork));
     let mut body = div()
         .w_full()
         .max_w(px(crate::retained::reading_column()))
@@ -656,7 +675,7 @@ pub(super) fn row(view: &Entity<Surface>, prompt: &Prompt, window: &Window) -> A
                 .child("Reopen before this prompt? Original chat and files stay unchanged.")
                 .child(
                     control(
-                        view,
+                        handlers,
                         prompt,
                         "rewind-confirm",
                         CHECK,
@@ -674,7 +693,7 @@ pub(super) fn row(view: &Entity<Surface>, prompt: &Prompt, window: &Window) -> A
                 )
                 .child(
                     control(
-                        view,
+                        handlers,
                         prompt,
                         "rewind-cancel",
                         "M6 6l12 12 M6 18 18 6",

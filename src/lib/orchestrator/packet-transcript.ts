@@ -31,6 +31,8 @@ interface ResolvedJsonl {
   runtime: TranscriptRuntime;
   fallbackTimestamp?: string;
   unsupportedReason?: string;
+  historyComplete?: boolean;
+  earliestEventTime?: string;
 }
 
 interface RawTailSnapshot {
@@ -43,6 +45,8 @@ export interface SessionTranscriptReadback {
   runtime: TranscriptRuntime;
   events: TranscriptEvent[];
   unsupportedReason?: string;
+  historyComplete?: boolean;
+  earliestEventTime?: string;
 }
 
 export interface PacketTranscriptReadback extends SessionTranscriptReadback {
@@ -124,8 +128,8 @@ async function findClaudeCodeJsonl(sessionId: string): Promise<string | null> {
 }
 
 /** Stream complete Codex history without retaining raw tool payloads in memory. */
-async function readCodexHistory(paths: string[]): Promise<TranscriptEvent[]> {
-  const normalizer = createCodexEventNormalizer();
+async function readCodexHistory(paths: string[], native = false): Promise<TranscriptEvent[]> {
+  const normalizer = createCodexEventNormalizer(undefined, native);
   for (const filePath of paths) {
     const handle = await open(await realpath(filePath), 'r');
     try {
@@ -147,7 +151,7 @@ async function readCodexHistory(paths: string[]): Promise<TranscriptEvent[]> {
   return normalizer.events;
 }
 
-async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false): Promise<ResolvedJsonl> {
+async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false, native = false): Promise<ResolvedJsonl> {
   if (!sessionKey) return { raw: '', runtime: null };
 
   if (sessionKey.startsWith('pi-builtin-owned:')) {
@@ -165,8 +169,8 @@ async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false
         const identityId = await getOwnedCodexSessionIdentityId(sessionKey);
         const rolloutPath = await getCodexRolloutPath(`codex:${sources.threadId}`, identityId ?? undefined);
         if (fullHistory && rolloutPath) {
-          const events = await readCodexHistory([rolloutPath]);
-          if (events.length) return { raw: '', events, runtime: 'codex' };
+          const events = await readCodexHistory([rolloutPath], native);
+          if (events.length) return { raw: '', events, runtime: 'codex', historyComplete: true };
         }
         const raw = rolloutPath ? await readRawTail(rolloutPath) : '';
         if (raw.trim()) return { raw, runtime: 'codex' };
@@ -174,7 +178,7 @@ async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false
         // A missing runtime inventory must not hide the owned stdout fallback.
       }
       const tail = await readOwnedRunStdouts(sources.stdoutPaths);
-      if (fullHistory) return { raw: '', events: await readCodexHistory(sources.stdoutPaths), runtime: 'codex' };
+      if (fullHistory) return { raw: '', events: await readCodexHistory(sources.stdoutPaths, native), runtime: 'codex', historyComplete: true };
       return { raw: tail.raw, runtime: 'codex', fallbackTimestamp: tail.modifiedAt };
     } catch {
       return { raw: '', runtime: 'codex' };
@@ -185,7 +189,7 @@ async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false
     try {
       const rolloutPath = await getCodexRolloutPath(sessionKey);
       if (!rolloutPath) return { raw: '', runtime: 'codex' };
-      if (fullHistory) return { raw: '', events: await readCodexHistory([rolloutPath]), runtime: 'codex' };
+      if (fullHistory) return { raw: '', events: await readCodexHistory([rolloutPath], native), runtime: 'codex', historyComplete: true };
       return { raw: await readRawTail(rolloutPath), runtime: 'codex' };
     } catch {
       return { raw: '', runtime: 'codex' };
@@ -252,17 +256,18 @@ function normalizeForRuntime(
   runtime: TranscriptRuntime,
   raw: string,
   fallbackTimestamp?: string,
+  native = false,
 ): TranscriptEvent[] {
   if (!raw) return [];
   switch (runtime) {
     case 'pi-builtin':
-      return normalizePiBuiltinEvents(raw);
+      return normalizePiBuiltinEvents(raw).map(event => native ? { ...event, nativeTimestamp: event.ts === '1970-01-01T00:00:00.000Z' ? '' : event.ts } : event);
     case 'codex':
-      return normalizeCodexEvents(raw, fallbackTimestamp);
+      return normalizeCodexEvents(raw, fallbackTimestamp, native);
     case 'opencode':
-      return normalizeOpencodeEvents(raw);
+      return normalizeOpencodeEvents(raw, undefined, native);
     case 'claude-code':
-      return normalizeClaudeCodeEvents(raw);
+      return normalizeClaudeCodeEvents(raw, undefined, native);
     default:
       return [];
   }
@@ -276,7 +281,7 @@ function readTextPayload(payload: Record<string, unknown>, ...keys: string[]): s
   return '';
 }
 
-function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
+function laneSteerEvents(laneId: string, native = false): LaneSteerTranscriptEvent[] {
   // Read intents separately so a long busy turn's delivery receipts cannot
   // paginate the original message out of the pane.
   const queued = getSqlite().prepare(`SELECT id, payload_json, timestamp FROM lane_events
@@ -320,6 +325,7 @@ function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
           : [noteText, stderrHead].filter(Boolean).join('\n')));
       return {
         seq: index + 1,
+        ...(native ? { eventId: event.id } : {}),
         ts: event.timestamp,
         type: 'steer',
         source,
@@ -330,13 +336,14 @@ function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
     });
 }
 
-function laneHuddleEvents(laneId: string): LaneHuddleTranscriptEvent[] {
+function laneHuddleEvents(laneId: string, native = false): LaneHuddleTranscriptEvent[] {
   return getLaneEvents(laneId, 500)
     .filter((event) => event.verb === 'agent_report' && event.payload.event === 'huddle')
     .map((event, index) => {
       const message = readTextPayload(event.payload, 'message') || 'Huddle plan posted.';
       return {
         seq: index + 1,
+        ...(native ? { eventId: event.id } : {}),
         ts: event.timestamp,
         type: 'assistant',
         text: message,
@@ -344,16 +351,16 @@ function laneHuddleEvents(laneId: string): LaneHuddleTranscriptEvent[] {
     });
 }
 
-function laneSteerEventsForSession(sessionKey: string): LaneSteerTranscriptEvent[] {
+function laneSteerEventsForSession(sessionKey: string, native = false): LaneSteerTranscriptEvent[] {
   if (!sessionKey) return [];
   const lane = listLanes().find((candidate) => candidate.sessionKey === sessionKey);
-  return lane ? laneSteerEvents(lane.id) : [];
+  return lane ? laneSteerEvents(lane.id, native) : [];
 }
 
-function laneHuddleEventsForSession(sessionKey: string): LaneHuddleTranscriptEvent[] {
+function laneHuddleEventsForSession(sessionKey: string, native = false): LaneHuddleTranscriptEvent[] {
   if (!sessionKey) return [];
   const lane = listLanes().find((candidate) => candidate.sessionKey === sessionKey);
-  return lane ? laneHuddleEvents(lane.id) : [];
+  return lane ? laneHuddleEvents(lane.id, native) : [];
 }
 
 function mergeTranscriptEvents(runtimeEvents: TranscriptEvent[], extraEvents: TranscriptEvent[]): TranscriptEvent[] {
@@ -370,16 +377,16 @@ function mergeTranscriptEvents(runtimeEvents: TranscriptEvent[], extraEvents: Tr
   return stamped.map(({ event }, index) => ({ ...event, seq: index + 1 }) as TranscriptEvent);
 }
 
-export function readSessionSteerTranscriptEvents(sessionKey: string): LaneSteerTranscriptEvent[] {
-  return laneSteerEventsForSession(sessionKey);
+export function readSessionSteerTranscriptEvents(sessionKey: string, native = false): LaneSteerTranscriptEvent[] {
+  return laneSteerEventsForSession(sessionKey, native);
 }
 
-export function readSessionHuddleTranscriptEvents(sessionKey: string): LaneHuddleTranscriptEvent[] {
-  return laneHuddleEventsForSession(sessionKey);
+export function readSessionHuddleTranscriptEvents(sessionKey: string, native = false): LaneHuddleTranscriptEvent[] {
+  return laneHuddleEventsForSession(sessionKey, native);
 }
 
-export async function readSessionTranscriptEvents(sessionKey: string, fullHistory = false): Promise<SessionTranscriptReadback> {
-  const resolved = await resolveRawJsonlForSession(sessionKey, fullHistory);
+export async function readSessionTranscriptEvents(sessionKey: string, fullHistory = false, native = false): Promise<SessionTranscriptReadback> {
+  const resolved = await resolveRawJsonlForSession(sessionKey, fullHistory, native);
   if (resolved.unsupportedReason) {
     return {
       sessionKey,
@@ -389,17 +396,21 @@ export async function readSessionTranscriptEvents(sessionKey: string, fullHistor
     };
   }
 
+  const runtimeEvents = resolved.events ?? normalizeForRuntime(resolved.runtime, resolved.raw, resolved.fallbackTimestamp, native);
+  const earliest = runtimeEvents.map(event => Date.parse((event as TranscriptEvent & { nativeTimestamp?: string }).nativeTimestamp ?? event.ts)).filter(Number.isFinite);
   return {
     sessionKey,
     runtime: resolved.runtime,
+    historyComplete: resolved.historyComplete === true,
+    earliestEventTime: earliest.length ? new Date(earliest.reduce((a, b) => Math.min(a, b))).toISOString() : undefined,
     events: mergeTranscriptEvents(
-      resolved.events ?? normalizeForRuntime(resolved.runtime, resolved.raw, resolved.fallbackTimestamp),
-      [...laneHuddleEventsForSession(sessionKey), ...laneSteerEventsForSession(sessionKey)],
+      runtimeEvents,
+      [...laneHuddleEventsForSession(sessionKey, native), ...laneSteerEventsForSession(sessionKey, native)],
     ),
   };
 }
 
-export async function readPacketTranscriptEvents(packetId: string, fullHistory = false): Promise<PacketTranscriptReadback> {
+export async function readPacketTranscriptEvents(packetId: string, fullHistory = false, native = false): Promise<PacketTranscriptReadback> {
   const packet = findPacket(packetId);
   const packetSessionKey = packet?.lane?.sessionKey?.trim() ?? '';
   const packetLane = findLatestLaneByPacket(packetId);
@@ -415,9 +426,9 @@ export async function readPacketTranscriptEvents(packetId: string, fullHistory =
     return { packetId, sessionKey: '', runtime: null, events: [], note: 'no_session_binding', terminalReason };
   }
 
-  const readback = await readSessionTranscriptEvents(sessionKey, fullHistory);
+  const readback = await readSessionTranscriptEvents(sessionKey, fullHistory, native);
   const packetEvents = packetLane && packetLane.sessionKey !== sessionKey
-    ? [...laneHuddleEvents(packetLane.id), ...laneSteerEvents(packetLane.id)]
+    ? [...laneHuddleEvents(packetLane.id, native), ...laneSteerEvents(packetLane.id, native)]
     : [];
   return {
     packetId,

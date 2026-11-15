@@ -599,6 +599,16 @@ describe('local CI verification through its command entry point', () => {
     expect(plan.required).toEqual(['classification']);
   });
 
+  it.each(['test-shards', 'test', 'integration-changed', 'governance-smoke',
+    'rust-check-windows', 'rust-check-linux', 'o8-next-tests', 'server-bundle-size'])(
+    'rejects restoring slow PR work in %s without a local parity update', id => {
+      const workflow = parse(readFileSync(workflowPath, 'utf8'));
+      workflow.jobs[id].if = workflow.jobs[id].if.replace(" && github.event_name != 'pull_request'", '');
+      const result = coverage(workflow);
+      expect(result.status, result.stdout).toBe(1);
+      expect(result.stderr).toContain(`${id} must skip slow work on pull requests`);
+    });
+
   it.each(['command', 'action', 'condition', 'native tolerance', 'native step tolerance',
     'aggregate tolerance', 'aggregate step tolerance', 'aggregate condition', 'checkout ref',
     'shard tolerance', 'shard step tolerance', 'missing native shard', 'native fail fast',

@@ -13,6 +13,8 @@ export interface PacketScopeExpansionResult {
   allowedPaths: string[];
   reason: string;
   expanded: boolean;
+  /** `lead` when the lead granted the scope; `worker` when the worker requested it. */
+  grantedBy: 'lead' | 'worker';
 }
 
 function normalizeExpansionPath(value: string): string {
@@ -34,7 +36,11 @@ export async function requestPacketScopeExpansion(input: {
   packetId: string;
   paths: string[];
   reason: string;
+  /** A lead grant records `scope_granted`, which does not hold the packet for inspection. */
+  grantedBy?: 'lead' | 'worker';
 }): Promise<PacketScopeExpansionResult> {
+  const grantedBy = input.grantedBy === 'lead' ? 'lead' : 'worker';
+  const verb = grantedBy === 'lead' ? 'scope_granted' : 'scope_expansion_requested';
   const packetId = input.packetId.trim();
   const reason = input.reason.trim();
   if (!packetId) throw new Error('packetId is required.');
@@ -57,7 +63,7 @@ export async function requestPacketScopeExpansion(input: {
     }
     packet.allowedFiles = allowedPaths;
     packet.lastEventAt = new Date().toISOString();
-    packet.lastEventLabel = 'scope_expansion_requested';
+    packet.lastEventLabel = verb;
     return {
       requestedPaths,
       allowedPaths,
@@ -67,7 +73,7 @@ export async function requestPacketScopeExpansion(input: {
 
   const lane = listLanes().find((candidate) => candidate.packetId === packetId) ?? null;
   if (lane) {
-    appendEvent(lane.id, 'scope_expansion_requested', 'orchestrator', {
+    appendEvent(lane.id, verb, 'orchestrator', {
       packetId,
       requestedPaths,
       allowedPaths: result.allowedPaths,
@@ -82,5 +88,6 @@ export async function requestPacketScopeExpansion(input: {
     allowedPaths: result.allowedPaths,
     reason,
     expanded: result.expanded,
+    grantedBy,
   };
 }

@@ -186,6 +186,26 @@ export const MISSION_TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'o8_packet_scope_grant',
+    description:
+      'Grant a bounded file scope to a packet as the lead. Use it when a worker stops and asks for authority to edit named files. The grant is recorded as a scope_granted lane event and the worker\'s next scope read returns it. Returns the effective allowed paths.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: { type: 'string', description: 'Packet id or lane id.' },
+        files: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 8,
+          items: { type: 'string' },
+          description: 'Repository-relative paths to add, or a directory with a trailing /**.',
+        },
+        reason: { type: 'string', minLength: 8, description: 'Why the task requires these files. Recorded with the grant.' },
+      },
+      required: ['packetId', 'files', 'reason'],
+    },
+  },
+  {
     name: 'o8_task_brief',
     description:
       'Return one project-backed task brief for a packet or lane id. Use this when a worker needs the exact main repo, current repo, related repo, and output policy before editing.',
@@ -693,6 +713,27 @@ export async function handleGetPacketScope(args: Record<string, unknown>): Promi
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_packet_scope failed: ${errorText(error)}`);
     return textResult(`Failed to read packet scope: ${errorText(error)}`, true);
+  }
+}
+
+export async function handlePacketScopeGrant(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const packetId = requiredString(args, 'packetId');
+    const reason = requiredString(args, 'reason');
+    const files = Array.isArray(args.files)
+      ? args.files.filter((file): file is string => typeof file === 'string' && Boolean(file.trim()))
+      : [];
+    if (files.length === 0) return textResult('files must list at least one repository-relative path.', true);
+    const data = await apiFetch(`/api/lanes/${encodeURIComponent(packetId)}/scope`, {
+      method: 'POST',
+      retry: false,
+      acceptedErrorStatuses: [400, 403, 404],
+      body: JSON.stringify({ paths: files, reason, grant: true }),
+    });
+    return jsonResult(data, !(data && typeof data === 'object' && (data as Record<string, unknown>).ok === true));
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_packet_scope_grant failed: ${errorText(error)}`);
+    return textResult(`Failed to grant packet scope: ${errorText(error)}`, true);
   }
 }
 
