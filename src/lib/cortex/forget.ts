@@ -10,6 +10,7 @@ import { invalidateAnswerCache } from '@/lib/cortex/qa/ask';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 import { publishCortexChange } from '@/lib/realtime/publisher';
 import { excludeOutcomeFromMemory } from '@/lib/cortex/outcome-exclusion';
+import { forgetReviewOutcome } from '@/lib/cortex/review-outcomes';
 
 type Kind = 'directive' | 'outcome';
 class ForgetError extends Error {
@@ -86,6 +87,10 @@ function forgetDirective(id: string) {
   try { unlinkSync(staged); } catch { console.warn('[cortex-forget] Deleted instruction has retained staging data.'); }
 }
 function forgetOutcome(id: string, repoPath: string, projectId: string | null) {
+  if (id.startsWith('review:')) {
+    if (!forgetReviewOutcome(id, repoPath, projectId)) throw new ForgetError('Review outcome not found in this repository and project.', 404);
+    return;
+  }
   const db = getSqlite();
   db.transaction(() => {
     const found = db.prepare('SELECT id FROM session_outcomes WHERE id = ? AND repo_path = ? AND project_id IS ?').get(id, repoPath, projectId);

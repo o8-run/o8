@@ -2,6 +2,7 @@ import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { getSqlite } from '@/lib/db';
+import { readReviewOutcomes } from './review-outcomes';
 
 /** The operator inventory includes expired memory and inactive projects. Recent recall remains live-only. */
 export function outcomeMemoryInventory(request: NextRequest) {
@@ -24,7 +25,14 @@ export function outcomeMemoryInventory(request: NextRequest) {
     `).all({ repos: JSON.stringify(repos), allProjects: Number(!params.has('projectId')),
       projectId: params.get('projectId')?.trim() || null,
       query: (params.get('query') ?? '').toLowerCase(), offset, limit: limit + 1 });
-    return NextResponse.json({ ok: true, outcomes: rows.slice(0, limit), hasMore: rows.length > limit }, { headers });
+    const reviews = readReviewOutcomes({ repoPaths: repos,
+      projectId: params.has('projectId') ? params.get('projectId')?.trim() || null : undefined,
+      ...(params.has('packetBody') ? { packetBody: params.get('packetBody') ?? '' } : {}),
+      offset, limit: limit + 1, query: params.get('query') ?? '',
+    });
+    return NextResponse.json({ ok: true, outcomes: rows.slice(0, limit), hasMore: rows.length > limit,
+      reviewOutcomes: reviews.slice(0, limit), reviewHasMore: reviews.length > limit,
+    }, { headers });
   } catch {
     return NextResponse.json({ ok: false, error: 'Could not load retained outcomes. Try again.' }, { status: 500, headers });
   }

@@ -128,7 +128,11 @@ async function launch(id: string, running = false) {
   const session = record(body.surfaceId); return { surfaceId: body.surfaceId, runId: (session.activeRun ?? session.recentRuns[0]).id };
 }
 beforeAll(async () => {
-  const { addRepo } = await import('@/lib/repos/registry'); await addRepo(repo);
+  const { addRepo } = await import('@/lib/repos/registry'); const registered = await addRepo(repo);
+  const { createProject, addRepoToProject } = await import('@/lib/projects/store');
+  const project = createProject({ name: 'Correction review fixture' });
+  addRepoToProject(project.id, registered.id, 'library', 'manual');
+  const { setActiveProject } = await import('@/lib/repos/projects'); await setActiveProject(project.id);
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
   await updateOperatorDefaults({ workerRuntimes: ['codex'], defaultDispatchRuntime: 'codex' });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
@@ -356,7 +360,8 @@ it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-move
   const saved = await submitReview(new NextRequest('http://localhost/api/orchestrator/review', { method: 'POST',
     headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ packetId, approved: false, reviewedHeadSha: packetHead, clientMutationId: `packet-bound-rejection-${outcome}`,
-      findings: [{ file: 'answer.txt', severity: 'note', description: 'Preserve the original request.', status: 'deferred' }] }) }));
+      findings: [...(outcome === 'delivered' ? [{ file: 'other.txt', severity: 'note', description: 'Unrelated residual accepted explicitly.', status: 'accepted' }] : []),
+        { file: 'answer.txt', severity: 'note', description: 'Preserve the original request.', status: 'deferred' }] }) }));
   expect(saved.status, JSON.stringify(await saved.clone().json())).toBe(200);
   expect(control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)?.status).toBe('awaiting_review');
   const review = control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)!.review!;
@@ -417,7 +422,8 @@ it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-move
   expect(record(target.surfaceId).recentRuns).toHaveLength(deliveryExpected ? 2 : 1);
   if (deliveryExpected) expect(record(target.surfaceId).recentRuns[0].prompt).toContain(review.auditApprovalId);
   expect(control.readOrchestratorControlPlaneState().packets.find(p => p.id === packetId)?.review).toMatchObject({ approved: false,
-    findings: [expect.objectContaining({ resolution: 'deferred' })] });
+    findings: [...(outcome === 'delivered' ? [expect.objectContaining({ resolution: 'accepted' })] : []),
+      expect.objectContaining({ resolution: 'deferred' })] });
   expect((await readOwnedRecoveryState(target.surfaceId)).automaticRecoveryAllowed).toBe(false);
   if (deliveryExpected) {
     // Use the same production entry as the supervisor's completion callback.
@@ -532,6 +538,24 @@ it.each(['busy', 'stopped', 'moved-before-queue', 'dirty', 'moved', 'review-move
     const { isPacketMergeHeld } = await import('@/lib/lane/merge-hold');
     expect(isPacketMergeHeld(packetId)).toBe(true);
     expect(execFileSync('git', ['-C', repo, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(head);
+    if (outcome === 'delivered') {
+      const { createMission } = await import('@/lib/orchestrator/operator-mission-service/mission');
+      const lane = listLanes().find(candidate => candidate.id === launched.laneId)!;
+      await createMission({ repoPath: repo, projectId: lane.projectId, runtime: lane.runtime, constraints: '', taskContract: 'off',
+        issues: [{ number: 99001, title: 'Extend answer.txt', body: 'Preserve the response behavior in answer.txt.', url: '' }] });
+      const successor = control.readOrchestratorControlPlaneState().packets[0];
+      const { buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt');
+      const prompt = await buildPacketPrompt(successor, [successor]);
+      expect(prompt).toContain('## Relevant Review Outcomes');
+      expect(prompt).toContain('Preserve the original request.');
+      expect(prompt).toContain(`approval:${review.auditApprovalId}#finding:1`);
+      expect(prompt).not.toContain('Unrelated residual accepted explicitly.');
+      expect(prompt).toContain(`correction:${value.receipt.id}`);
+      expect(prompt).toContain(`approval:${approved[0].id}`);
+      expect(prompt).toContain(correctedHead);
+      expect(prompt).toContain('independent_review');
+      expect(prompt).toContain('Repeated findings observed: 1');
+    }
   }
 }, 60000);
 
