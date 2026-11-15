@@ -122,6 +122,9 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
 #[path = "worker_tests.rs"]
 mod worker_tests;
 
+#[path = "subagents/transcript_parity_tests.rs"]
+mod subagent_transcript_parity_tests;
+
 #[path = "prompt_action_tests.rs"]
 mod prompt_action_tests;
 
@@ -262,6 +265,47 @@ fn placement_empty_state_composer_and_right_panel(cx: &mut TestAppContext) {
     if let Ok(file) = std::env::var("O8_NEXT_PLACEMENT_EVIDENCE") {
         std::fs::write(file, serde_json::to_vec_pretty(&json!({"endpoint":"headless production GPUI layout; no raster or compositor capture","layouts":layouts})).unwrap()).unwrap();
     }
+}
+
+#[gpui::test]
+fn placement_empty_loaded_chat_matches_main_without_an_empty_state_row(cx: &mut TestAppContext) {
+    let (_server, client) = fixture_options(false, true);
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-composer-first".into(), cx);
+    });
+    cx.run_until_parked();
+    cx.simulate_resize(size(px(1680.), px(1050.)));
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    assert!(
+        surface.read_with(cx, |s, _| s.transcript.is_some() && s.rows.is_empty()),
+        "the fixture must be an empty, loaded chat"
+    );
+    // Main renders no transcript list for an empty chat: no shared empty-state
+    // row, and the composer space takes the column below any notice row.
+    assert!(
+        cx.debug_bounds("transcript-row-0").is_none(),
+        "an empty main chat must not show the shared empty-state row"
+    );
+    let column = cx.debug_bounds("conversation-column").unwrap();
+    let space = cx.debug_bounds("composer-space").unwrap();
+    let card = cx.debug_bounds("composer-card").unwrap();
+    assert!(
+        (space.bottom() - column.bottom()).abs() < px(1.)
+            && space.size.height > column.size.height * 0.9,
+        "composer space {space:?} must fill the column {column:?}, not share it with a list"
+    );
+    assert!(
+        (space.center().y - card.center().y).abs() < px(1.),
+        "composer {card:?} must be centred in its space {space:?}"
+    );
 }
 
 #[gpui::test]

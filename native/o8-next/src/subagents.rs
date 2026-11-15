@@ -13,6 +13,8 @@ pub(crate) mod model;
 pub(crate) mod trace;
 #[path = "subagents/view.rs"]
 mod view;
+#[path = "subagents/transcript_state.rs"]
+mod transcript_state;
 use model::{Agent, Scope};
 
 pub(crate) struct Open(pub gpui::AnyWindowHandle);
@@ -40,7 +42,6 @@ pub(crate) struct Inspector {
     /// What a subagent's own chat last read as, and when; it has no session.
     native_read: Option<(String, std::time::Instant)>,
     native_entries: Vec<crate::model::Entry>,
-    native_status: String,
     native_sent: u64,
     native_applied: u64,
     detail_error: Option<String>,
@@ -82,7 +83,6 @@ impl Inspector {
             detail_pending: false,
             native_read: None,
             native_entries: Vec::new(),
-            native_status: String::new(),
             native_sent: 0,
             native_applied: 0,
             detail_error: None,
@@ -330,11 +330,12 @@ impl Inspector {
             return;
         };
         let session = agent.session.clone();
+        let root = agent.facts.worktree.clone().unwrap_or_else(|| self.scope.repo.clone());
         let id = agent.id.clone();
         let Some(key) = session else {
+            let agent = agent.clone();
+            self.show_native(&agent);
             if agent.native {
-                let agent = agent.clone();
-                self.show_native(&agent);
                 self.read_native(&agent, cx);
             }
             return;
@@ -364,8 +365,14 @@ impl Inspector {
                 }
                 this.detail_pending = false;
                 match result {
-                    Ok(history) => {
+                    Ok(mut history) => {
+                        if history.transcript.is_empty() {
+                            if let Some(agent) = this.selected.as_ref().and_then(|id| this.agents.iter().find(|a| &a.id == id)) {
+                                history = transcript_state::fallback(agent, key.clone());
+                            }
+                        }
                         let mut detail = crate::pane::Pane::new(Some(key.clone()));
+                        detail.reading_root(&root);
                         detail.install(history, this.client.clone());
                         this.detail = Some(detail);
                         this.detail_key = Some(key);
@@ -383,33 +390,17 @@ impl Inspector {
     fn show_native(&mut self, agent: &Agent) {
         let key = format!("native:{}", agent.id);
         let same = self.detail_key.as_ref() == Some(&key);
+        let history = transcript_state::fallback(agent, key.clone());
         // Its own chat survives a status change; only the placeholder rebuilds.
-        if same && (!self.native_entries.is_empty() || self.native_status == agent.status) {
+        if same && (!self.native_entries.is_empty() || self.detail.as_ref().and_then(|d| d.transcript.as_ref())
+            .is_some_and(|t| t.shown_entries() == history.transcript.as_slice())) {
             return;
         }
-        let entry = |id: &str, role: &str, text: &str| crate::model::Entry {
-            id: format!("{}:{id}", agent.id),
-            role: role.into(),
-            text: text.to_owned(),
-            tools: None,
-            extra: Default::default(),
-        };
-        let mut transcript = Vec::new();
-        if let Some(prompt) = &agent.prompt {
-            transcript.push(entry("prompt", "user", prompt));
-        }
-        if let Some(result) = &agent.result {
-            transcript.push(entry("result", "assistant", result));
-        }
         let mut detail = crate::pane::Pane::new(Some(key.clone()));
-        detail.install_saved(crate::model::History {
-            session_key: key.clone(),
-            transcript,
-            page: None,
-        });
+        detail.reading_root(agent.facts.worktree.as_deref().unwrap_or(&self.scope.repo));
+        detail.install_readonly(history, self.client.clone());
         self.detail = Some(detail);
         self.detail_key = Some(key);
-        self.native_status.clone_from(&agent.status);
         if !same {
             self.native_read = None;
             self.native_entries.clear();
@@ -472,7 +463,7 @@ impl Inspector {
                 this.native_entries.clone_from(&history.transcript);
                 if let Some(detail) = &mut this.detail {
                     let following = crate::retained::at_end(&detail.list);
-                    detail.install_saved(history);
+                    detail.install_readonly(history, this.client.clone());
                     if following {
                         crate::retained::pin_end(&detail.list);
                     }

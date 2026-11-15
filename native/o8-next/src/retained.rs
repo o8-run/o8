@@ -40,6 +40,7 @@ pub struct RowState {
     /// The reader opened or closed this trace, so updates keep that choice
     /// instead of holding a running trace open.
     chosen: bool,
+    pub(crate) result_open: BTreeSet<String>,
     cache: Option<Layout>,
     diagram_sources: BTreeSet<usize>,
     diagram_views: crate::transcript_diagram::Views,
@@ -88,6 +89,7 @@ impl RowState {
             painted_geometry: RefCell::new(PaintedGeometry::default()),
             expanded,
             chosen: false,
+            result_open: Default::default(),
             cache: None,
             diagram_sources: BTreeSet::new(),
             diagram_views: Default::default(),
@@ -107,6 +109,7 @@ impl RowState {
     /// A row that changed in place (a tool step finished) keeps its disclosure;
     /// a trace watched while live stays open once it finishes.
     pub fn keep_disclosure(&mut self, previous: &RowState) {
+        self.result_open = previous.result_open.clone();
         self.subagent_focus = previous.subagent_focus.clone();
         self.subagent_roster = previous.subagent_roster.clone();
         self.diagram_sources = previous.diagram_sources.clone();

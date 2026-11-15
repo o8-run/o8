@@ -343,7 +343,7 @@ impl Grid {
                     .into_any_element(),
             }
         } else {
-            pane.content()
+            pane.content_for(cx.entity())
         };
         let child = div()
             .id(("pane", index))
