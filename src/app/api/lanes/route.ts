@@ -103,11 +103,11 @@ export async function GET(req: NextRequest) {
   // Stamp the memorable codename (same pure fn that labels the canvas card and
   // resolves voice "[Name], [task]") so every lane consumer — the canvas, voice
   // status, mobile — sees the agent by the SAME name. Additive, deterministic.
-  const mergePolicy = currentLaneMergePolicy();
   const launchContexts = resolvePacketLaunchContexts(
     resolvedLanes.flatMap((lane) => lane.packetId ? [lane.packetId] : []),
   );
   const lanes = await Promise.all(resolvedLanes.map(async (lane) => {
+    const mergePolicy = currentLaneMergePolicy(lane.projectId);
     const retired = lane.status === 'archived' || lane.status === 'completed';
     const archiveEvents = retired ? getLaneEvents(lane.id, 80) : [];
     return {

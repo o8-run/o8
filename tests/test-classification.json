@@ -6623,6 +6623,15 @@
       ]
     },
     {
+      "path": "tests/pr-first-publication-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/preflight-refusal-bound-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6749,6 +6758,19 @@
         "child-process",
         "git-cli",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/project-merge-mode-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/project-policy-startup-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },
