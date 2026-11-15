@@ -3662,6 +3662,14 @@
       ]
     },
     {
+      "path": "tests/inbox-decisions-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/inbox-preferences.integration.test.ts",
       "reasons": [
         "child-process",

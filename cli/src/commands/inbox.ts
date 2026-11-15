@@ -126,6 +126,8 @@ async function runDrafts(mode: OutputMode, action: string, rest: string[]): Prom
 export async function runInbox(mode: OutputMode, secondary: string | undefined, rest: string[]): Promise<number> {
   if (secondary && ['drafts', 'continue-draft', 'handoff-draft', 'close-draft'].includes(secondary)) return runDrafts(mode, secondary, rest);
   switch (secondary) {
+    case 'decisions':
+      return runInboxDecisions(mode, rest);
     case 'list':
       return runInboxList(mode, rest);
     case 'approve':
@@ -137,7 +139,25 @@ export async function runInbox(mode: OutputMode, secondary: string | undefined, 
         'unknown_inbox_subcommand',
         `Unknown inbox subcommand: ${secondary ?? '(none)'}`,
         EXIT.INVALID_ARGS,
-        'Subcommands: list | approve | reject | drafts | continue-draft | handoff-draft | close-draft. Run `o8 --help`.',
+        'Subcommands: decisions | list | approve | reject | drafts | continue-draft | handoff-draft | close-draft. Run `o8 --help`.',
       );
   }
+}
+
+async function runInboxDecisions(mode: OutputMode, rest: string[]): Promise<number> {
+  const query: Record<string, string> = {};
+  for (let index = 0; index < rest.length; index += 2) {
+    const key = { '--state': 'state', '--project': 'projectId', '--cursor': 'cursor', '--limit': 'limit' }[rest[index]];
+    if (!key) throw new CliError('invalid_args', 'Use --state, --project, --cursor or --limit for inbox decisions.', EXIT.INVALID_ARGS);
+    query[key] = flag(rest, rest[index]);
+  }
+  const result = await apiFetch<{ decisions: Array<{ id: string; title: string; blocker: string; primaryAction: { label: string } | null }>; nextCursor: string | null }>(resolveConfig(), '/api/panel/inbox/decisions', { query });
+  if (!result.data) throw new CliError('invalid_response', 'Server returned empty inbox decisions.', EXIT.INVALID_ARGS);
+  if (!mode.human) printJson(result.data);
+  else {
+    printHumanHeading(`Inbox decisions (${result.data.decisions.length})`);
+    printHumanKv(result.data.decisions.map(item => [item.id, `${item.title} · ${item.blocker} · ${item.primaryAction?.label ?? 'History'}`]));
+    if (result.data.nextCursor) printHumanKv([['next cursor', result.data.nextCursor]]);
+  }
+  return 0;
 }

@@ -349,6 +349,7 @@ commands:
   plugin terminal list list persistent plugin terminals [--plugin ID]
   plugin terminal launch <plugin-id> <entry-id> --revision <sha256> [--repo <path>] [--request <uuid>]
   plugin terminal stop <receipt-id> (stop the process, retain its receipt)
+  inbox decisions      review/integration decisions [--state unresolved|history|all] [--project ID] [--cursor ID] [--limit N]
   inbox list           pending governance approvals (--all includes resolved)
   inbox drafts         drafts idle three days (age, checks, conflicts)
   inbox continue-draft|handoff-draft|close-draft <number> --repo owner/repo --expected-head-sha SHA --expected-updated-at ISO [--owner login] [--reason text]
