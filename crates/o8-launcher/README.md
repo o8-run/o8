@@ -163,7 +163,8 @@ Restart uses the shared final work inspection and cloud-job drain before stoppin
 children. An `admitted` response is admission, not a shutdown receipt; an updater
 must wait for process exit and port release, then retain ownership and instance
 exclusion across its handoff. Feed, signature, download, replacement, and relaunch
-logic remain step 4 work.
+logic is documented in `UPDATER.md`: `update-check`, `update-apply` and
+`update-status` use this socket and the same restart admission.
 
 ## Verification and limits
 
@@ -194,8 +195,8 @@ Dock reopen, unhide/focus, native quit, and native failure-alert appearance need
 live macOS check before a packaging switch. The shell check also needs generated
 helpers and frontend assets. Optional helper installation remains shell-owned;
 the launcher forwards an existing `O8_CODEBASE_MEMORY_BIN` and bundled helper
-paths. This crate does not download helpers or implement updater, voice, menu,
-signing, or packaging changes.
+paths. This crate does not download helpers or implement voice, menu, signing, or
+packaging changes. The updater is described in `UPDATER.md`.
 
 Native termination **needs live check** before bundling. It cannot run in CI.
 Do this on an isolated macOS test account with no unsaved work, never on a
