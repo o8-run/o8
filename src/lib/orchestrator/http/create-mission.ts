@@ -58,6 +58,9 @@ function normalizeIssues(value: unknown): LoadedIssue[] | null {
       body: typeof record?.body === 'string' ? record.body : '',
       url: typeof record?.url === 'string' ? record.url : '',
       ...(perIssueRuntime ? { runtime: perIssueRuntime } : {}),
+      ...(Array.isArray(record?.allowedFiles)
+        ? { allowedFiles: record.allowedFiles.filter((file): file is string => typeof file === 'string') }
+        : {}),
     };
   });
 }
