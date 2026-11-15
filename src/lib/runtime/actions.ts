@@ -383,7 +383,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, resolved
   return withRuntimeLaunchDeadline({ runtime: runtimeId, laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, async () => {
     await runtimeLaunchStep({ laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, 'reviewer_checkout', () => assertReviewerPrCheckout(payload.packetId, cwd));
     assertPreRunAdmission();
-    const result = await runtime.launch({
+    const result = await runtimeLaunchStep({ laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, 'worker_start', () => runtime.launch({
       runtimeIdentity: launchIdentity,
       cwd,
       sourceRepoPath: repoPath,
@@ -407,7 +407,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, resolved
       executionPolicy: payload.executionPolicy,
       controlledTask: payload.controlledTask,
       controlledProvider: payload.controlledProvider,
-    });
+    }));
 
     return runtimeLaunchStep({ laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, 'launch_governance', () => settleRuntimeLaunchGovernance({
       payload,
