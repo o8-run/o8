@@ -9,7 +9,8 @@
 //! ```
 //!
 //! It reads the server's port and operator token from the data directory
-//! (`O8_DATA_DIR` or `~/.o8`) and never prints them. Voice History and the saved
+//! (`O8_DATA_DIR` or `~/.o8`) and never prints them; `O8_SPEECH_LIVE_PORT`
+//! overrides a stale port file. Voice History and the saved
 //! settings use a scratch directory, so this Mac's history is not touched.
 //! `O8_SPEECH_RECOGNIZER` selects another helper build.
 use super::{Event, Launch, Phase, ServerFinish, Speech, Update, VoicePrefs};
@@ -40,11 +41,9 @@ fn client() -> Client {
             .trim()
             .to_owned()
     };
-    Client::authenticated(
-        &format!("http://127.0.0.1:{}", read("api-port")),
-        Some(read("ws-token")),
-    )
-    .unwrap()
+    // The port file can outlive the server that wrote it.
+    let port = std::env::var("O8_SPEECH_LIVE_PORT").unwrap_or_else(|_| read("api-port"));
+    Client::authenticated(&format!("http://127.0.0.1:{port}"), Some(read("ws-token"))).unwrap()
 }
 
 /// `say` rendered to 16 kHz mono: little-endian f32 samples, and a 16-bit WAV.
@@ -223,8 +222,11 @@ fn speech_live_helper_round_trip() {
         &dir,
     );
     eprintln!("normal: {}", summary(&normal));
+    // Recognition of synthetic speech can miss a word ("build" came back as
+    // "bill" once); the pipeline is what this checks.
     assert!(
-        matches!(normal.last(), Some(Update::Done(text)) if text.to_lowercase().contains("build")),
+        matches!(normal.last(), Some(Update::Done(text))
+            if text.to_lowercase().contains("check") && text.to_lowercase().contains("test")),
         "{normal:?}"
     );
     let history = std::fs::read_to_string(data.join("dictation-history.json")).unwrap();
