@@ -319,7 +319,7 @@ impl Surface {
                     )
                     .on_click(cx.listener(move |_, _, _, cx| {
                         if let Some(url) = &url {
-                            cx.open_url(url);
+                            crate::external_open::url(cx, url);
                         }
                     }))
             }));
