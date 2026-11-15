@@ -69,6 +69,7 @@ impl Fake {
                 .iter()
                 .map(|(key, value)| ((*key).into(), (*value).into()))
                 .collect(),
+            data: None,
         }
     }
 }

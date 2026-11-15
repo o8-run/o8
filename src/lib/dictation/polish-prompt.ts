@@ -15,6 +15,24 @@ export interface DictationPolishContext {
   openFiles?: string[];
   /** Active repo path, for tone hints (the polish doesn't reference this directly). */
   activeRepoPath?: string | null;
+  /** The saved custom dictionary (Settings > Voice): words to spell exactly. */
+  dictionary?: string[];
+  /** The saved custom polish instructions (Settings > Voice). */
+  instructions?: string;
+}
+
+const MAX_DICTIONARY_WORDS = 200;
+const MAX_DICTIONARY_WORD = 100;
+const MAX_INSTRUCTIONS = 2000;
+
+/** The dictionary words a caller sent, trimmed and bounded; anything else is dropped. */
+function dictionaryWords(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((word): word is string => typeof word === 'string')
+    .map(word => word.trim().slice(0, MAX_DICTIONARY_WORD))
+    .filter(Boolean)
+    .slice(0, MAX_DICTIONARY_WORDS);
 }
 
 /** Replace typographic quotes and primes with their ASCII forms. */
@@ -33,6 +51,15 @@ export function buildPolishSystemPrompt(
   const fileBlock = fileAnchors.length > 0
     ? `Open files (use these for exact spelling of paths and symbols):\n${fileAnchors.map((path) => `- ${path}`).join('\n')}\n`
     : '';
+  // The desktop's own polish lists the same two settings this way.
+  const dictionary = dictionaryWords(context.dictionary);
+  const dictionaryBlock = dictionary.length > 0
+    ? `CUSTOM DICTIONARY (spell exactly as shown): ${dictionary.join(', ')}\n`
+    : '';
+  const instructions = typeof context.instructions === 'string'
+    ? context.instructions.trim().slice(0, MAX_INSTRUCTIONS)
+    : '';
+  const instructionsBlock = instructions ? `USER INSTRUCTIONS: ${instructions}\n` : '';
 
   return [
     'You are a speech-to-text correction assistant for a developer using o8, an IDE for orchestrating AI coding agents.',
@@ -56,6 +83,8 @@ export function buildPolishSystemPrompt(
     surfaceLine,
     '',
     fileBlock,
+    dictionaryBlock,
+    instructionsBlock,
     'Output coverage (required)',
     '- Output the full polished version of the transcript.',
     '- Do not summarize. Do not omit clauses. Do not add commentary.',

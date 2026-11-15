@@ -2,6 +2,7 @@
 //! recording; commands, helper lines and finished server calls arrive on one
 //! channel, so they are handled in order without locks.
 use super::helper::{Helper, Launch, Line, remove_wav};
+use super::prefs::{self, VoicePrefs, apply_replacements};
 use super::{Event, Finish, Phase, Update};
 use std::{
     path::PathBuf,
@@ -413,14 +414,23 @@ impl Engine {
         });
         let finish = self.finish.clone();
         let inputs = self.inputs.clone();
+        let saved = self.launch.data.clone();
         let worker = std::thread::Builder::new()
             .name("o8-speech-finish".into())
             .spawn(move || {
+                // Read now, so a settings change applies to the next recording.
+                let prefs = saved.as_deref().map(prefs::read).unwrap_or_default();
                 let progress = |phase| {
                     let _ = inputs.send(Input::Progress(id, phase));
                 };
-                let update =
-                    finish_text(&*finish, apple, audio.as_deref(), repo.as_deref(), progress);
+                let update = finish_text(
+                    &*finish,
+                    apple,
+                    audio.as_deref(),
+                    repo.as_deref(),
+                    &prefs,
+                    progress,
+                );
                 if let Some(audio) = &audio {
                     remove_wav(audio);
                 }
@@ -437,6 +447,7 @@ pub(super) fn finish_text(
     apple: String,
     audio: Option<&std::path::Path>,
     repo: Option<&str>,
+    prefs: &VoicePrefs,
     progress: impl Fn(Phase),
 ) -> Update {
     let mut text = apple;
@@ -452,12 +463,12 @@ pub(super) fn finish_text(
         return Update::Empty;
     }
     progress(Phase::Polishing);
-    match finish.polish(&text, repo) {
-        Ok(polished) if polished.cancelled => Update::Dropped,
-        Ok(polished) if !polished.text.trim().is_empty() => {
-            Update::Done(polished.text.trim().to_owned())
-        }
+    let text = match finish.polish(&text, repo, prefs) {
+        Ok(polished) if polished.cancelled => return Update::Dropped,
+        Ok(polished) if !polished.text.trim().is_empty() => polished.text.trim().to_owned(),
         // Polish is best effort; the raw text still goes out.
-        _ => Update::Done(text),
-    }
+        _ => text,
+    };
+    // The saved replacements apply whether or not polish ran, as on the desktop.
+    Update::Done(apply_replacements(&text, &prefs.replacements))
 }

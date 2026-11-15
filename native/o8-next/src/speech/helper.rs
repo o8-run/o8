@@ -19,6 +19,9 @@ pub(crate) struct Launch {
     pub program: PathBuf,
     pub args: Vec<OsString>,
     pub envs: Vec<(OsString, OsString)>,
+    /// The desktop's data directory, which holds the saved voice settings
+    /// (`dictation.json`, `voice-prefs.json`); none means no saved settings.
+    pub data: Option<PathBuf>,
 }
 
 impl Launch {
@@ -28,6 +31,7 @@ impl Launch {
             program,
             args: Vec::new(),
             envs: Vec::new(),
+            data: super::prefs::data_dir(),
         })
     }
 }
