@@ -1,4 +1,5 @@
 import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
+import { reviewOutcomeForLane } from '@/lib/cortex/review-outcomes';
 import { and, desc, eq, gte, or, sql, type SQL } from 'drizzle-orm';
 import {
   buildApprovalContextMatchPredicate, extractApprovalContextIds,
@@ -635,6 +636,7 @@ export function recordOrchestratorReview(
   const reviewEvent = buildOrchestratorReviewEvent(normalizedReview);
   const reviewedApproval: ApprovalRecord = {
     ...approval,
+    projectId: lane?.projectId ?? approval.projectId,
     risk: deriveOrchestratorReviewRisk(normalizedReview),
     updatedAt: reviewEvent.timestamp,
     metadata: {
@@ -667,6 +669,7 @@ export function recordOrchestratorReview(
       ...(normalizedReview.rawText ? { rawText: normalizedReview.rawText } : {}),
       reviewTurnId,
       reviewTurnOutcome,
+      reusableOutcome: reviewOutcomeForLane(lane, normalizedReview),
     },
     audit: [...approval.audit, reviewEvent],
   };
