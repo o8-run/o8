@@ -93,7 +93,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
   // A database file created by a concurrent fresh start is not legacy storage.
   try {
     sqlite.transaction(() => {
-      const existingPolicyStorage = Boolean(sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_state'").get());
+      const existingUserSchema = Boolean(sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get());
       const topMarkerExists = existsSync(migrationMarkerPath(DB_SCHEMA_VERSION));
       // Upgrade only columns referenced by current base-schema indexes here.
       // The full idempotent migration path expects the base tables to exist and
@@ -107,7 +107,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
       }
       ensureIdempotentColumnAdds(sqlite);
       ensureOutcomeExclusionStorage(sqlite);
-      initializeProjectMergeModes(sqlite, DATA_DIR, existingPolicyStorage);
+      initializeProjectMergeModes(sqlite, DATA_DIR, existingUserSchema);
     }).immediate();
     writeAllMissingMigrationMarkers();
   } catch (error) {

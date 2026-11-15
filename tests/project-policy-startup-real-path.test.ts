@@ -61,3 +61,15 @@ it('corrupt inventory leaves the database open and preserves existing choices', 
   expect(result.policy.mode).toBe('direct'); expect(result.oldPolicy).toBe('direct');
   expect(result.savedPolicy).toBe('pr_only'); expect(result.projectlessPolicy).toBe('direct');
 });
+
+it('an existing project from before app_state existed keeps direct integration', async () => {
+  const data = mkdtempSync(join(root, 'old-schema'));
+  const db = new Database(join(data, 'test.db'));
+  db.exec(`CREATE TABLE projects (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
+    description TEXT, main_repo_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  ); INSERT INTO projects (id,name,slug,created_at,updated_at) VALUES ('old','Old','old',1,1);`);
+  db.close();
+  const result = await start(data, 'next-first');
+  expect(result.oldPolicy).toBe('direct'); expect(result.policy.mode).toBe('direct');
+});
