@@ -3,10 +3,10 @@ name: o8 next Linux shell
 on:
   pull_request:
     branches: [main]
-    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'tests/o8-next-o8d-boot-real-path.test.ts', 'src/lib/ws-server/native-http-registry.ts', 'src/lib/ws-server/native-http-routes.ts', 'src/lib/ws-server/native-http-handlers.ts', 'tests/fixtures/ws-parity-server.ts', 'package.json', 'package-lock.json']
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'tests/o8-next-o8d-boot-real-path.test.ts', 'src/lib/ws-server/native-http-registry.ts', 'src/lib/ws-server/native-http-routes.ts', 'tests/fixtures/ws-parity-server.ts', 'package.json', 'package-lock.json']
   push:
     branches: [main]
-    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'tests/o8-next-o8d-boot-real-path.test.ts', 'src/lib/ws-server/native-http-registry.ts', 'src/lib/ws-server/native-http-routes.ts', 'src/lib/ws-server/native-http-handlers.ts', 'tests/fixtures/ws-parity-server.ts', 'package.json', 'package-lock.json']
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'tests/o8-next-o8d-boot-real-path.test.ts', 'src/lib/ws-server/native-http-registry.ts', 'src/lib/ws-server/native-http-routes.ts', 'tests/fixtures/ws-parity-server.ts', 'package.json', 'package-lock.json']
 
 permissions:
   contents: read

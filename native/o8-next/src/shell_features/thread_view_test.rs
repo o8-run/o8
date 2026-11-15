@@ -104,6 +104,18 @@ fn click(v: &mut VisualTestContext, id: &'static str) {
     settle(v);
 }
 
+/// Runs a palette command by its label, as typed into the palette.
+fn run_command(v: &mut VisualTestContext, label: &str) {
+    settle(v);
+    v.simulate_keystrokes("ctrl-shift-p");
+    let keys: Vec<String> = label
+        .chars()
+        .map(|c| if c == ' ' { "space".into() } else { c.to_string() })
+        .collect();
+    v.simulate_keystrokes(&format!("{} enter", keys.join(" ")));
+    settle(v);
+}
+
 #[gpui::test]
 fn thread_view_switches_to_the_resumed_cli_in_the_workspace_terminal_and_back(
     cx: &mut TestAppContext,
@@ -160,9 +172,9 @@ fn thread_view_switches_to_the_resumed_cli_in_the_workspace_terminal_and_back(
         }))
         .unwrap();
 
-    // The header menu opens the terminal view.
-    click(&mut v, "thread-view-menu");
-    click(&mut v, "thread-view-toggle");
+    // The palette's command opens the terminal view; the header has no menu.
+    assert!(v.debug_bounds("thread-view-menu").is_none());
+    run_command(&mut v, "switch to terminal view");
     let line = "exec codex resume 0199-thread-view-session";
     until(&mut v, "the CLI line typed into the thread's shell", |v| {
         s.read_with(v, |s, cx| match thread(s, cx).map(|t| &t.state) {
@@ -191,8 +203,17 @@ fn thread_view_switches_to_the_resumed_cli_in_the_workspace_terminal_and_back(
     });
 
     // Back to chat: the same transcript view, and the shell stays attached.
-    v.simulate_keystrokes("ctrl-alt-v");
-    settle(&mut v);
+    // The command now offers the way back, and only that. The palette's last
+    // query still filters its list until it opens again, so read every command.
+    let labels = s.read_with(&v, |s, _| {
+        crate::shell::features::commands(s)
+            .iter()
+            .map(|command| command.label(&s.sessions))
+            .collect::<Vec<_>>()
+    });
+    assert!(labels.iter().any(|l| l == "Switch to Chat View"), "{labels:?}");
+    assert!(!labels.iter().any(|l| l == "Switch to Terminal View"), "{labels:?}");
+    run_command(&mut v, "switch to chat view");
     assert!(v.debug_bounds("thread-terminal-view").is_none());
     assert_eq!(chat(&s, &v).entity_id(), surface.entity_id());
     assert!(surface.read_with(&v, |c, _| c.shell_ready()));

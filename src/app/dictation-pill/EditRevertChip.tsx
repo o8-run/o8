@@ -3,23 +3,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 
-type EditStatus = 'ready' | 'pending' | 'reverted' | 'copied';
+export type EditStatus = 'ready' | 'pending' | 'reverted' | 'copied';
 
-interface EditApplied {
+/** The chip on screen. `id` names each edit-applied; `until` is when its
+ * dismissal timer fires (epoch ms), so the native panel can dismiss it too. */
+export interface EditChipState {
+  id: number;
   app: string;
   status: EditStatus;
+  until: number;
 }
 
-interface EditRevertChipProps {
-  onError: (message: string) => void;
-}
-
-export function EditRevertChip({ onError }: EditRevertChipProps) {
-  const [editApplied, setEditApplied] = useState<EditApplied | null>(null);
+/** The chip's state, events and dismissal timers, shared by the web chip and
+ * the native dock frame. */
+export function useEditRevert(onError: (message: string) => void) {
+  const [editApplied, setEditApplied] = useState<EditChipState | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idRef = useRef(0);
 
   const dismissAfter = useCallback((delayMs: number) => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    const until = Date.now() + delayMs;
+    setEditApplied((current) => (current ? { ...current, until } : current));
     timerRef.current = setTimeout(() => setEditApplied(null), delayMs);
   }, []);
 
@@ -31,7 +36,8 @@ export function EditRevertChip({ onError }: EditRevertChipProps) {
     import('@tauri-apps/api/event')
       .then(async ({ listen }) => {
         unlisteners.push(await listen<{ app?: string }>('o8:edit-applied', (event) => {
-          setEditApplied({ app: event.payload?.app ?? '', status: 'ready' });
+          idRef.current += 1;
+          setEditApplied({ id: idRef.current, app: event.payload?.app ?? '', status: 'ready', until: 0 });
           dismissAfter(20_000);
         }));
         unlisteners.push(await listen<{ outcome?: 'restored' | 'copied_to_clipboard' }>(
@@ -67,6 +73,15 @@ export function EditRevertChip({ onError }: EditRevertChipProps) {
     }
   }, [dismissAfter, onError]);
 
+  return { edit: editApplied, revert: handleRevert };
+}
+
+interface EditRevertChipProps {
+  edit: EditChipState | null;
+  onRevert: () => void;
+}
+
+export function EditRevertChip({ edit: editApplied, onRevert: handleRevert }: EditRevertChipProps) {
   if (!editApplied) return null;
 
   return (

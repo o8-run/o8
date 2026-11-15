@@ -15,15 +15,17 @@ use std::{
     time::Duration,
 };
 
-// The parent waits only for the first paint of the open window. This channel
-// carries only fixed control signals, never diagnostics or credentials.
+// Owners opt into a first-paint receipt, never diagnostics or credentials.
+// READY_STDOUT enables only this receipt; PARENT_PIPE separately owns stdin
+// lifetime and desktop updater semantics.
 fn report_startup() {
     use std::{
         io::Write,
         sync::atomic::{AtomicBool, Ordering},
     };
     static REPORTED: AtomicBool = AtomicBool::new(false);
-    if std::env::var("O8_NEXT_PARENT_PIPE").as_deref() != Ok("1")
+    if (std::env::var("O8_NEXT_PARENT_PIPE").as_deref() != Ok("1")
+        && std::env::var("O8_NEXT_READY_STDOUT").as_deref() != Ok("1"))
         || REPORTED.swap(true, Ordering::SeqCst)
     {
         return;
@@ -83,7 +85,12 @@ pub struct Shell {
     client: Client,
     file: PathBuf,
     state: State,
+    #[cfg(test)]
+    review_persist_calls: usize,
+    #[cfg(test)]
+    review_title_visits: usize,
     sessions: Vec<Session>,
+    session_titles: std::collections::BTreeMap<String, String>,
     workspaces: Vec<String>,
     /// Tunnels to saved machines, shared with the sidebar.
     links: crate::shell::settings::machine_links::Links,
@@ -130,7 +137,12 @@ impl Shell {
             client,
             file,
             state,
+            #[cfg(test)]
+            review_persist_calls: 0,
+            #[cfg(test)]
+            review_title_visits: 0,
             sessions: vec![],
+            session_titles: Default::default(),
             workspaces: vec![],
             links: Default::default(),
             content: HashMap::new(),
@@ -154,6 +166,22 @@ impl Shell {
         shell
     }
     fn persist(&mut self) {
+        #[cfg(test)] { self.review_persist_calls += 1; }
+        let open = self.state.workspaces.iter().flat_map(|(scope, saved)| {
+            saved.tabs.iter().filter_map(move |tab| match tab {
+                Tab::Session(id) => Some(format!(
+                    "{scope}|{}", saved.selections.get(id).unwrap_or(id)
+                )),
+                _ => None,
+            })
+        }).collect::<BTreeSet<_>>();
+        self.state.thread_titles.retain(|key, _| open.contains(key));
+        for key in &open {
+            #[cfg(test)] { self.review_title_visits += 1; }
+            if let Some(title) = self.session_titles.get(key) {
+                self.state.thread_titles.insert(key.clone(), title.chars().take(256).collect());
+            }
+        }
         if let Some(local) = self
             .state
             .selected
@@ -258,6 +286,20 @@ impl Shell {
     fn key(&self, tab: &Tab) -> String {
         format!("{}|{:?}", self.state.selected.as_deref().unwrap_or(""), tab)
     }
+    /// Content for the thread a tab displays, independent of its stable key.
+    fn thread_content(&self, id: &str) -> Option<&Content> {
+        let saved = self.current()?;
+        let tab = &saved.tabs[Self::tab_index(saved, &Tab::Session(id.to_owned()))?];
+        self.content.get(&self.key(tab))
+    }
+    fn tab_index(saved: &Workspace, target: &Tab) -> Option<usize> {
+        saved.tabs.iter().position(|tab| match (target, tab) {
+            (Tab::Session(id), Tab::Session(original)) => {
+                saved.selections.get(original).unwrap_or(original) == id
+            }
+            _ => tab == target,
+        })
+    }
     fn active(&self) -> Option<Tab> {
         self.current().and_then(|w| w.tabs.get(w.active)).cloned()
     }
@@ -358,6 +400,7 @@ impl Shell {
             (registration.after_tab)(self);
         }
         self.palette = false;
+        sidebar::navigation(self, cx);
         self.ensure(window, cx);
         self.restore_focus(window, cx);
         self.persist();
@@ -414,7 +457,7 @@ impl Shell {
             .iter()
             .any(|registration| (registration.claim_link)(self, url, window, cx))
         {
-            cx.open_url(url);
+            crate::external_open::url(cx, url);
         }
     }
     /// A sent worktree pill opens its files, a script pill its line in the
@@ -471,7 +514,7 @@ impl Shell {
         } else if let Some((repo, number)) = github_item(url, "pull") {
             self.open_pr_in_panel(repo, number, window, cx);
         } else if url.starts_with("https://") || url.starts_with("http://") {
-            cx.open_url(url);
+            crate::external_open::url(cx, url);
         } else if let Some(path) = url.strip_prefix("o8-change:") {
             self.open_change_link(path.to_owned(), window, cx);
         } else if let Some(repo) = url.strip_prefix("o8-new-thread:") {
@@ -488,6 +531,50 @@ impl Shell {
             self.open_file_link(path.to_owned(), line, window, cx);
         }
     }
+    /// Insert or reuse a tab without creating its view. Only foreground opens activate it.
+    /// Some(true) is an insertion, Some(false) a reuse, and None is the capacity limit.
+    fn insert_tab(
+        &mut self,
+        workspace: &str,
+        tab: Tab,
+        activate: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
+        let saved = self.state.workspaces.entry(workspace.to_owned()).or_default();
+        let index = Self::tab_index(saved, &tab);
+        if index.is_none() && saved.tabs.len() >= 32 {
+            if activate {
+                toasts::show(toasts::Kind::Info, "Close a surface before opening another.",
+                    vec![], Some(toasts::NOTICE_TIMEOUT), cx);
+            }
+            return None;
+        }
+        let inserted = index.is_none();
+        let index = index.unwrap_or_else(|| {
+            let mut tab = tab;
+            if let Tab::Session(id) = &tab
+                && saved.tabs.contains(&tab)
+            {
+                let id = id.clone();
+                let mut suffix = 1;
+                let key = loop {
+                    let key = format!("chat-tab:{id}:{suffix}");
+                    if !saved.tabs.contains(&Tab::Session(key.clone())) {
+                        break key;
+                    }
+                    suffix += 1;
+                };
+                saved.selections.insert(key.clone(), id);
+                tab = Tab::Session(key);
+            }
+            saved.tabs.push(tab);
+            saved.tabs.len() - 1
+        });
+        if activate {
+            saved.active = index;
+        }
+        Some(inserted)
+    }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
             return;
@@ -495,6 +582,7 @@ impl Shell {
         if features::execute(self, &command, window, cx) {
             return;
         }
+        self.capture(window, cx);
         let registration = command.registration();
         if !(registration.available)(self) {
             return;
@@ -519,25 +607,13 @@ impl Shell {
             .clone()
             .or_else(|| tab.registration().global.then(String::new))
         {
-            let saved = self.state.workspaces.entry(workspace).or_default();
-            let index = saved.tabs.iter().position(|t| t == &tab);
-            if index.is_none() && saved.tabs.len() >= 32 {
-                toasts::show(
-                    toasts::Kind::Info,
-                    "Close a surface before opening another.",
-                    vec![],
-                    Some(toasts::NOTICE_TIMEOUT),
-                    cx,
-                );
+            if self.insert_tab(&workspace, tab, true, cx).is_none() {
                 return;
             }
-            saved.active = index.unwrap_or_else(|| {
-                saved.tabs.push(tab);
-                saved.tabs.len() - 1
-            });
-            saved.composer = composer;
+            self.state.workspaces.get_mut(&workspace).unwrap().composer = composer;
         }
         self.palette = false;
+        sidebar::navigation(self, cx);
         self.ensure(window, cx);
         self.restore_focus(window, cx);
         self.persist();
@@ -576,7 +652,7 @@ impl Shell {
 #[path = "shell_material.rs"]
 mod material;
 #[path = "shell_rail.rs"]
-mod rail;
+pub(crate) mod rail;
 #[path = "shell_view.rs"]
 mod view;
 pub use view::try_launch;

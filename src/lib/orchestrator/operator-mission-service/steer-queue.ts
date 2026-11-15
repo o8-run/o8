@@ -1,3 +1,5 @@
+import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
+import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { getSqlite } from '@/lib/db';
 import { recordLaneEvent } from '@/lib/lane/events';
 import type { LaneEvent } from '@/lib/lane/types';
@@ -46,6 +48,7 @@ export async function deliverSteerEvent(
   event: LaneEvent,
   deliver: (deliveryAttemptId: string) => Promise<SteerPacketResult>,
 ): Promise<SteerPacketResult> {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) throw new Error('Steer claims require the native owner.');
   const queued: SteerPacketResult = { packetId: String(event.payload.packetId), laneId: event.laneId,
     note: QUEUED_STEER_NOTE, deliveryState: 'queued' };
   const immediate = event.payload.deliveryState === 'immediate';
@@ -100,6 +103,7 @@ function reconcileAbandonedSend(row: QueueRow, event: LaneEvent): void {
 
 /** The existing authenticated server wake owns delivery, including after restart. */
 export async function drainQueuedPacketSteers(): Promise<void> {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) return;
   const { deliverQueuedPacketSteer } = await import('./steer');
   // One message per lane per wake preserves FIFO even if inventory lags a new turn.
   const lanes = new Set<string>();

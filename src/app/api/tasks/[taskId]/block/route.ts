@@ -1,31 +1,12 @@
 import type { NextRequest } from 'next/server';
-
-import type { AgentReportReason } from '@/lib/lane/types';
-import { blockTask } from '@/lib/tasks/actions';
-import { runTaskMutationRoute } from '../mutation';
+import { ownedByNativeTransport } from '@/lib/ws-server/native-owner';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function optionalString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function actor(value: unknown) {
-  return value === 'user' || value === 'system' || value === 'orchestrator'
-    ? value
-    : undefined;
-}
-
-export async function POST(
-  request: NextRequest,
-  context: { params: Promise<{ taskId: string }> },
-) {
-  return runTaskMutationRoute(request, context, (taskId, body) => blockTask(taskId, {
-    actor: actor(body.actor),
-    projectId: optionalString(body.projectId),
-    repoPath: optionalString(body.repoPath),
-    reason: optionalString(body.reason) ?? '',
-    code: optionalString(body.code) as AgentReportReason | null,
-  }));
+export async function POST(request: NextRequest, context: { params: Promise<{ taskId: string }> }) {
+  return ownedByNativeTransport(
+    async () => (await import('@/lib/tasks/block-route')).POST(request, context),
+    () => Response.json({ error: 'Task owner unavailable' }, { status: 503 }),
+  )(request);
 }

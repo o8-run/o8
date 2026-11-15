@@ -41,7 +41,7 @@ pub(super) fn nav_index(section: &str) -> Option<usize> {
 /// Headings a tab's own panel draws above any fields. Choosing one opens the
 /// tab; field groups below also scroll to their heading.
 const PANEL_GROUPS: &[(&str, &[&str])] = &[
-    ("appearance", &["Theme", "Chat width"]),
+    ("appearance", &["Theme", "Chat width", "Zoom"]),
     ("about", &["Version", "Links", "Credits"]),
     (
         "diagnostics",

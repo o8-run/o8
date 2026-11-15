@@ -79,6 +79,10 @@ pub struct Grid {
     last_exit: Option<i32>,
     /// The end of the last feed when it may begin an exit report.
     osc_tail: Vec<u8>,
+    /// The host shows this terminal through tmux; see `keep_one_screen`.
+    multiplexed: bool,
+    /// The end of the last feed when it may begin a screen switch.
+    switch_tail: Vec<u8>,
 }
 /// Where a terminal stands for one command line: its live feeds, the echoes
 /// of that line still in reach, and the exit reports seen so far.
@@ -121,6 +125,8 @@ impl Grid {
             exits: 0,
             last_exit: None,
             osc_tail: vec![],
+            multiplexed: false,
+            switch_tail: vec![],
         }
     }
     pub fn size(&self) -> Size {
@@ -135,9 +141,20 @@ impl Grid {
         self.revision += 1;
         true
     }
+    /// Say whether the host shows this terminal through tmux. A fresh
+    /// snapshot decides it, so call this after `reset`.
+    pub fn set_multiplexed(&mut self, multiplexed: bool) {
+        self.multiplexed = multiplexed;
+        self.switch_tail.clear();
+    }
     pub fn feed(&mut self, bytes: &[u8], historical: bool) -> Vec<String> {
         self.historical.store(historical, Ordering::Relaxed);
-        self.parser.advance(&mut self.term, bytes);
+        if self.multiplexed {
+            let kept = keep_one_screen(&mut self.switch_tail, bytes);
+            self.parser.advance(&mut self.term, &kept);
+        } else {
+            self.parser.advance(&mut self.term, bytes);
+        }
         self.historical.store(false, Ordering::Relaxed);
         // A replay repeats old reports; only live ones count.
         if historical {
@@ -321,6 +338,67 @@ impl Grid {
         self.cells().into_iter().map(|c| c.text).collect()
     }
 }
+/// tmux's client enters and leaves a second screen of its own.
+const SWITCH: &[u8] = b"\x1b[?1049";
+/// Clears the screen where it stands; nothing moves into the scrollback.
+const CLEAR_IN_PLACE: &[u8] = b"\x1b[H\x1b[J";
+/// tmux clears the whole screen before it redraws. On the first screen that
+/// would push what is showing into the scrollback, a second copy of lines
+/// the redraw then paints again (or a blank line when nothing is showing).
+const FULL_CLEAR: &[u8] = b"\x1b[2J";
+/// The same clear, above and below the cursor, which moves nothing.
+const FULL_CLEAR_IN_PLACE: &[u8] = b"\x1b[1J\x1b[J";
+
+/// Output from tmux with its own screen switch taken out.
+///
+/// tmux's client switches to a second screen when it attaches, then repaints
+/// the rows the snapshot already drew. That second screen has no scrollback,
+/// so obeying the switch hid the history the snapshot restored and left the
+/// wheel nothing to scroll. Programs inside tmux do not send this switch to
+/// us unless passthrough is on: tmux keeps their second screens to itself,
+/// and sends its own again only when it suspends, locks or detaches. So on
+/// entry the screen is cleared in place for the repaint, and leaving is
+/// dropped, whichever of those sent it. tmux's whole-screen clear before a
+/// redraw is made to clear in place for the same reason.
+///
+/// `tail` holds a switch cut short by the end of a feed until the next one.
+pub(crate) fn keep_one_screen(tail: &mut Vec<u8>, bytes: &[u8]) -> Vec<u8> {
+    let mut data = std::mem::take(tail);
+    data.extend_from_slice(bytes);
+    let mut kept = Vec::with_capacity(data.len());
+    let mut at = 0;
+    while let Some(found) = data[at..].iter().position(|&byte| byte == 0x1b) {
+        let start = at + found;
+        kept.extend_from_slice(&data[at..start]);
+        let rest = &data[start..];
+        if (rest.len() <= SWITCH.len() && SWITCH.starts_with(rest))
+            || (rest.len() < FULL_CLEAR.len() && FULL_CLEAR.starts_with(rest))
+        {
+            // Maybe a switch or a clear; the next feed finishes it.
+            *tail = rest.to_vec();
+            return kept;
+        }
+        if rest.starts_with(FULL_CLEAR) {
+            kept.extend_from_slice(FULL_CLEAR_IN_PLACE);
+            at = start + FULL_CLEAR.len();
+            continue;
+        }
+        at = match rest.strip_prefix(SWITCH).and_then(|after| after.first()) {
+            Some(b'h') => {
+                kept.extend_from_slice(CLEAR_IN_PLACE);
+                start + SWITCH.len() + 1
+            }
+            Some(b'l') => start + SWITCH.len() + 1,
+            _ => {
+                kept.push(0x1b);
+                start + 1
+            }
+        };
+    }
+    kept.extend_from_slice(&data[at..]);
+    kept
+}
+
 /// How far back a command's echo is looked for.
 const LOOKBACK: usize = 3_000;
 /// The lines after the last echo of `command` (a prompt, then the command),

@@ -1,3 +1,4 @@
+import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
@@ -82,7 +83,9 @@ export function parseEvaluationResponse(input: {
       : 'The reviewer response was not valid structured JSON.';
   return {
     schema: 'o8/evaluate-diff/v1',
+    ...reviewExecution(validVerdict === 'approve', null, { status: 'not_run', reason: 'Self-contained diff evaluation does not launch or exercise a commit.' }),
     verdict: validVerdict,
+    verdictLabel: `${validVerdict === 'approve' ? 'approved' : validVerdict === 'request_changes' ? 'changes requested' : 'inconclusive'}, not run`,
     summary,
     findings,
     risk: input.risk,
@@ -109,6 +112,7 @@ function buildPrompt(input: {
       ? `This is a high-risk patch. Try to disprove its scope partition and state-transition safety. Risk signals: ${input.riskReasons.join('; ')}`
       : 'Check correctness, security, persistence, error handling, and whether the patch can be reached from its real entry point.',
     '',
+    'This evaluator cannot run a commit. Return runEvidence:{status:"not_run",reason:"Self-contained diff evaluation cannot exercise a commit."}. Never claim execution from the patch or prose. Approval is approved, not run.',
     'Return one JSON object and no prose:',
     '{"verdict":"approve|request_changes|inconclusive","summary":"...","findings":[{"severity":"critical|high|medium|low","file":"path or null","line":123,"title":"...","detail":"..."}]}',
     '',

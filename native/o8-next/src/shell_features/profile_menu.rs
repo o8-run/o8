@@ -389,7 +389,7 @@ fn menu(s: &mut Shell, viewport_width: f32, cx: &mut Context<Shell>) -> gpui::An
                             "Community Discord",
                             crate::icon::stroke(EXTERNAL, theme().text_faint, 11., 1.8),
                         )
-                        .on_click(cx.listener(|_, _, _, cx| cx.open_url(DISCORD_URL))),
+                        .on_click(cx.listener(|_, _, _, cx| crate::external_open::url(cx, DISCORD_URL))),
                     )
                     .child(
                         row(
@@ -398,7 +398,7 @@ fn menu(s: &mut Shell, viewport_width: f32, cx: &mut Context<Shell>) -> gpui::An
                             "Documentation",
                             crate::icon::stroke(EXTERNAL, theme().text_faint, 11., 1.8),
                         )
-                        .on_click(cx.listener(|_, _, _, cx| cx.open_url(DOCS_URL))),
+                        .on_click(cx.listener(|_, _, _, cx| crate::external_open::url(cx, DOCS_URL))),
                     ),
             )
         });
@@ -482,7 +482,30 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Shell>,
     ) {
-        if crate::theme::set_appearance(mode) {
+        // Settings tunes All Glass the same way. A new backdrop kind applies
+        // the material again; a veil change only repaints.
+        let glass = crate::theme::glass_settings();
+        let tuned = if let Some(kind) = mode.strip_prefix("glass-backdrop:") {
+            Some(crate::theme::Glass {
+                vivid: kind == "vivid",
+                ..glass
+            })
+        } else {
+            mode.strip_prefix("glass-veil:")
+                .and_then(|veil| veil.parse::<f32>().ok())
+                .map(|veil| crate::theme::Glass { veil, ..glass })
+        };
+        let changed = match tuned {
+            Some(tuned) => {
+                let backdrop = crate::theme::set_glass(tuned);
+                if !backdrop {
+                    window.refresh();
+                }
+                backdrop
+            }
+            None => crate::theme::set_appearance(mode),
+        };
+        if changed {
             self.system_glass = crate::shell::material::switch(window, self.offscreen);
             window.refresh();
         }

@@ -70,8 +70,14 @@ fn create(
         let session = shell.sessions.iter().find(|s| s.id == id)?;
         sessions.push(session.clone());
     }
+    let all = shell.sessions.clone();
+    let snoozes = shell.state.sidebar_snoozes.clone();
+    let navigation = shell.surfaces.sidebar.generation.clone();
     Some(Content::Session(cx.new(|cx| {
-        Surface::shell_new(client, sessions, id, window, cx)
+        let mut surface = Surface::shell_new(client, sessions, id, window, cx);
+        surface.shell_navigation = Some(navigation);
+        surface.shell_overview(&all, &snoozes, cx);
+        surface
     })))
 }
 impl Session {
@@ -214,6 +220,9 @@ pub struct Session {
     pub unread: bool,
     #[serde(default)]
     pub packet_header: Option<Value>,
+    /// A worker's own name, kept for search once the row is titled after its task.
+    #[serde(default)]
+    pub runtime_name: Option<String>,
     #[serde(default)]
     pub tmux_session: Option<String>,
     #[serde(default)]

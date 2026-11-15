@@ -232,7 +232,7 @@ pub(crate) fn capture(mode: Mode, path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|_| "Could not save the snapshot.")?;
     }
-    let mut command = std::process::Command::new("screencapture");
+    let mut command = crate::child_command::command("screencapture");
     command.arg("-x");
     match (mode == Mode::Window).then(frontmost_window).flatten() {
         Some(id) => command.args(["-o", "-l", &id.to_string()]),
@@ -249,7 +249,7 @@ pub(crate) fn capture(mode: Mode, path: &Path) -> Result<(), String> {
     }
     // Retina captures can exceed the composer's 5 MiB image limit.
     if std::fs::metadata(path).is_ok_and(|m| m.len() > 5 * 1024 * 1024) {
-        let _ = std::process::Command::new("sips")
+        let _ = crate::child_command::command("sips")
             .args(["-Z", "2048"])
             .arg(path)
             .stdout(std::process::Stdio::null())

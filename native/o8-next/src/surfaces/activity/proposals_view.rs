@@ -1,6 +1,14 @@
 //! O8DirectiveProposalDrawer and DirectiveProposalRow chrome and disclosure.
 use super::super::proposals;
 use super::*;
+/// A packet or lane id as a person reads it: the prefix and first block of a
+/// long id ("pkt-9f8d9dc6"), the whole of a short one.
+pub(super) fn short_id(id: &str) -> &str {
+    match id.char_indices().filter(|(_, c)| *c == '-').nth(1) {
+        Some((cut, _)) if id.len() > 16 => &id[..cut],
+        _ => id,
+    }
+}
 impl ActivityPane {
     pub(super) fn proposal_drawer(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let rows = self.proposals.rows();
@@ -79,13 +87,13 @@ impl ActivityPane {
                     .collect::<String>()
                     .to_uppercase(),
                 format!(
-                    "observation: {} · proposed by {}{}",
+                    "{} observation · {}{}",
                     text(p, "scope"),
-                    text(p, "proposed_by"),
+                    short_id(&text(p, "proposed_by")),
                     p["laneId"]
                         .as_str()
                         .filter(|id| *id != text(p, "proposed_by"))
-                        .map(|id| format!(" / {id}"))
+                        .map(|id| format!(" / {}", short_id(id)))
                         .unwrap_or_default()
                 ),
             ),
@@ -178,7 +186,10 @@ impl ActivityPane {
                     .font_weight(FontWeight(450.))
                     .flex_shrink_0()
                     .when(accept && pending.is_none(), |v| {
-                        v.bg(theme().accent).text_color(crate::theme::on_accent())
+                        // Quiet: a list of filled buttons all shout at once.
+                        v.bg(theme().selection)
+                            .border_color(tint(marks::ACCENT, 0.35))
+                            .text_color(theme().text)
                     }),
             );
         }

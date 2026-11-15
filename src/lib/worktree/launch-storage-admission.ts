@@ -58,6 +58,28 @@ export async function withManagedWorktreeStorageAdmission<T>(
   ));
 }
 
+/** A refusal materialized nothing. A later dispatch may take a fresh reading,
+ * while an admitted or uncertain reservation keeps its replay generation. */
+function managedStorageAdmissionEpoch(ownerId: string): number {
+  const sqlite = getSqlite();
+  const reservation = new StorageAdmissionStore(sqlite).getLatestReservationForOwner(ownerId);
+  if (reservation && ['reserved', 'committed'].includes(reservation.state)) return reservation.ownerGeneration;
+  const prefix = `packet-storage-reserve:${ownerId}:`;
+  const previous = sqlite.prepare(`SELECT mutation_id, result_json FROM storage_admission_mutations
+    WHERE operation = 'reserve' AND mutation_id >= ? AND mutation_id < ?
+    ORDER BY rowid DESC LIMIT 1`).get(prefix, `${prefix}\uffff`) as { mutation_id: string; result_json: string } | undefined;
+  if (!previous) return 1;
+  const generation = Number(previous.mutation_id.slice(prefix.length));
+  if (!Number.isSafeInteger(generation) || generation < 1 || previous.mutation_id !== `${prefix}${generation}`) {
+    throw new Error('Managed worktree storage admission generation is invalid.');
+  }
+  const result = JSON.parse(previous.result_json) as { mutationId: string; decision: string; reservation: unknown };
+  if (result.mutationId !== previous.mutation_id) throw new Error('Managed worktree storage admission receipt identity changed.');
+  if (result.decision !== 'held' || result.reservation !== null) return generation;
+  if (!Number.isSafeInteger(generation + 1)) throw new Error('Managed worktree storage admission generation is exhausted.');
+  return generation + 1;
+}
+
 async function withManagedWorktreeStorageAdmissionUnlocked<T>(
   input: ManagedWorktreeAdmissionInput,
   materialize: (volumeId: string, rootIdentity: StorageRootIdentity) => Promise<T>,
@@ -87,7 +109,7 @@ async function withManagedWorktreeStorageAdmissionUnlocked<T>(
   const packet = {
     id: ownerId,
     workspaceTargetPath: input.repoRoot,
-    storageAdmissionEpoch: 1,
+    storageAdmissionEpoch: managedStorageAdmissionEpoch(ownerId),
     launchAttempts: 0,
   } as OrchestratorPacket;
   const admission = getPacketStorageAdmissionCoordinator();

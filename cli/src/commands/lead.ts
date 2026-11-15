@@ -14,7 +14,8 @@ interface LeadResponse {
     repoPath: string;
     routing: { backend: string; model: string; effort: string };
     status: string;
-    result: { turnId: string | null; status: string; text: string | null; error: string | null } | null;
+    result: { turnId: string | null; status: string; text: string | null; error: string | null;
+      reason?: string | null; outcome?: { kind: string; summary: string | null; evidence: unknown } | null } | null;
     stopReason: string | null;
   };
   latestTurn: { id: string; ordinal: number; kind: string; status: string; error: string | null } | null;
@@ -68,6 +69,8 @@ function printLead(mode: OutputMode, response: LeadResponse): void {
     ['routing', `${response.lead.routing.backend}/${response.lead.routing.model}/${response.lead.routing.effort}`],
     ['queued', String(response.queueDepth)],
     ['cursor', String(response.cursor)],
+    ['reason', response.lead.result?.reason ?? ''],
+    ['outcome', response.lead.result?.outcome ? JSON.stringify(response.lead.result.outcome) : ''],
   ]);
 }
 
@@ -177,7 +180,7 @@ async function wait(mode: OutputMode, args: string[]): Promise<number> {
   if (!Number.isSafeInteger(cursor) || cursor < 0) {
     throw new CliError('invalid_args', '--after must be a non-negative integer.', EXIT.INVALID_ARGS);
   }
-  const terminal = new Set(['completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
+  const terminal = new Set(['unreported', 'completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
   let latest: LeadResponse | null = null;
   let turnId = value(args, 'turn');
   while (Date.now() < deadline) {
@@ -194,6 +197,11 @@ async function wait(mode: OutputMode, args: string[]): Promise<number> {
       : latest.requestedTurn?.status ?? latest.lead.status;
     if (terminal.has(terminalStatus) || terminalStatus === 'interrupted') {
       printLead(mode, latest);
+      if (terminalStatus === 'unreported') {
+        throw new CliError('lead_unreported',
+          `unreported: ${latest.lead.result?.reason ?? 'turn ended without an outcome report'}. Send new work or stop the lead.`,
+          EXIT.LEAD_UNREPORTED);
+      }
       return 0;
     }
   }

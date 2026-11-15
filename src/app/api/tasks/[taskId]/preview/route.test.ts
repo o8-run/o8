@@ -54,4 +54,22 @@ describe('native preview origin in the bundled wildcard server', () => {
     expect((await open('127.0.0.1:4444', '127.0.0.1', '')).status).toBe(403);
     expect(mocks.open).not.toHaveBeenCalled();
   });
+
+  it('frames the preview with the page origin Next forwards, never one the caller supplies', async () => {
+    const supplied = await POST(new NextRequest('http://127.0.0.1:4444/api/tasks/task-origin/preview', {
+      method: 'POST', body: JSON.stringify({ jobId: 'job-origin', attempt: 1 }),
+      headers: { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json', 'x-o8-client-addr': '127.0.0.1', host: '127.0.0.1:4444', 'x-o8-page-origin': 'http://127.0.0.1:9' } }),
+    { params: Promise.resolve({ taskId: 'task-origin' }) });
+    expect(supplied.status).toBe(400);
+    // The WS listener receives Next's forward on its own port.
+    const handler = await import('@/lib/cloud/task-preview-route');
+    const forwarded = (page: string) => handler.POST(new NextRequest('http://127.0.0.1:5555/api/tasks/task-origin/preview', {
+      method: 'POST', body: JSON.stringify({ jobId: 'job-origin', attempt: 1 }),
+      headers: { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json', 'x-o8-client-addr': '127.0.0.1', host: '127.0.0.1:5555', 'x-o8-page-origin': page } }),
+    { params: Promise.resolve({ taskId: 'task-origin' }) });
+    for (const page of ['https://untrusted.example', 'http://127.0.0.1:4444/dashboard', 'null']) expect((await forwarded(page)).status).toBe(409);
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect((await forwarded('http://127.0.0.1:4444')).status).toBe(200);
+    expect(mocks.open).toHaveBeenCalledWith(expect.objectContaining({ jobId: 'job-origin' }), 'http://127.0.0.1:4444');
+  });
 });

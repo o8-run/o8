@@ -14,7 +14,7 @@ import { useRouter } from 'next/navigation';
  * /dashboard — and leaves Next.js mid-route, freezing the JS thread
  * for 10–30s of hydration).
  *
- * Mounted once in the root layout. See issue #863. The previous boot
+ * Mounted by each retained shell layout. See issue #863. The previous boot
  * site for tauri-plugin-mcp listener registration was retired in #932
  * phase 2 — the eval_and_await protocol invokes JS from Rust each call
  * instead of holding persistent listeners, so no JS-side init is needed.

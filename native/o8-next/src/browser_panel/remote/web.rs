@@ -169,7 +169,9 @@ mod mac {
                 let _: () = msg_send![self.view,setHidden:YES];
             }
         }
-        pub fn position(&self, bounds: gpui::Bounds<gpui::Pixels>, _: &gpui::Window) {
+        pub fn position(&self, bounds: gpui::Bounds<gpui::Pixels>, window: &gpui::Window) {
+            // AppKit frames are in unzoomed window points.
+            let bounds = crate::zoom::native(bounds, window);
             unsafe {
                 let parent: id = msg_send![self.view, superview];
                 let frame: NSRect = msg_send![parent, bounds];

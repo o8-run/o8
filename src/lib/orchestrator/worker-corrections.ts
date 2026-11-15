@@ -1,3 +1,6 @@
+import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
+import { isNativeCortexReader } from '@/lib/cortex/owner-process';
+import { callSteerOwner } from '@/lib/orchestrator/operator-mission-service/steer-owner-client';
 import { advanceCorrectionStop, correctionStopVersion } from '@/lib/db/worker-correction-fences';
 import { getSqlite } from '@/lib/db';
 import { addSessionRule } from '@/lib/db/session-rules-store';
@@ -88,10 +91,14 @@ export function holdWorkerCorrections(target: ComposerQueueTarget): void {
   })();
 }
 
-interface AdmissionChecks { state: () => void; code: () => void }
+interface AdmissionChecks { state: () => void; code: () => void; persist?: () => void }
 
 /** No automatic retry: an interrupted request can already have affected a worker. */
 export async function correctWorkers(input: ComposerQueueTarget & { id: string; payload: unknown }, admissionChecks?: AdmissionChecks): Promise<WorkerCorrectionReceipt> {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) {
+    if (admissionChecks) throw new Error('Reviewed correction admission must be constructed by its owner.');
+    return callSteerOwner({ kind: 'correct', input });
+  }
   const target = validateComposerQueueTarget(input);
   if (typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(input.id)) throw new Error('A correction identity is required.');
   const correction = payload(input.payload);
@@ -121,6 +128,7 @@ export async function correctWorkers(input: ComposerQueueTarget & { id: string; 
         .run(input.id, target.repoPath, target.threadId, serialized, rule?.id ?? null, Date.now());
       for (const selected of correction.targets) getSqlite().prepare('INSERT INTO worker_correction_deliveries VALUES (?, ?, ?, ?, ?, ?)')
         .run(input.id, selected.surfaceId, selected.runId, 'pending', 'Awaiting delivery.', Date.now());
+      admissionChecks?.persist?.();
       return true;
     })();
   });

@@ -9,6 +9,9 @@ build = "src/shell_feature_build.rs"
 
 [features]
 macos-diagnostics = ["gpui/frame-diagnostics"]
+# Development only, never in a release: lets the window be driven by control
+# name over a local socket (docs/driver.md).
+driver = ["gpui/test-support"]
 
 [[bin]]
 name = "o8-next-macos-check"

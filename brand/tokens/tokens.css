@@ -1,0 +1,32 @@
+/* o8 Branding v1 tokens (2026-11-12). Copy into the site or the web app; values match tokens.json. */
+@font-face { font-family: "Inter Tight"; font-weight: 300; font-display: swap; src: url("../fonts/inter-tight/InterTight-Light.woff2") format("woff2"); }
+@font-face { font-family: "Inter Tight"; font-weight: 400; font-display: swap; src: url("../fonts/inter-tight/InterTight-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Inter Tight"; font-weight: 500; font-display: swap; src: url("../fonts/inter-tight/InterTight-Medium.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 400; font-display: swap; src: url("../fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2"); }
+
+:root {
+  --o8-paper: #F4F2EC;
+  --o8-paper-deep: #EEEBE2;
+  --o8-card: #FDFCFA;
+  --o8-hairline: #CFCAC0;
+  --o8-ink: #17140F;
+  --o8-ink-muted: #5C584F;
+  --o8-ink-faint: #706C64;
+  --o8-graphite: #242424;
+  --o8-orange: #FF5A1F;
+  --o8-orange-ink: #B73A0B;
+  --o8-link: #2563EB;
+  --o8-success: #16A34A;
+  --o8-danger: #EF4444;
+
+  --o8-font-sans: "Inter Tight", system-ui, sans-serif;
+  --o8-font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --o8-radius-control: 8px;
+  --o8-radius-card: 12px;
+  --o8-radius-window: 16px;
+  --o8-shadow-window: 0 30px 80px rgba(40, 30, 20, 0.16);
+
+  --o8-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --o8-dur: 200ms;
+}

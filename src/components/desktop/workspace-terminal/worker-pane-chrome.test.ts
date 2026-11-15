@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { TerminalTab } from './types';
-import { isCompactWorkerPane, shortWorkerTitle, workerAttention, workerTabLabels } from './worker-pane-chrome';
+import { isCompactWorkerPane, shortWorkerTitle, workerAttention, workerTabLabels, type WorkerTabLabelSource } from './worker-pane-chrome';
 
-function tab(id: string, label: string, llmSummary?: string): TerminalTab {
-  return { id, label, llmSummary, kind: 'orchestrator', tmuxSession: null, createdAt: 0, lastActivity: 0 };
+function tab(id: string, label: string, llmSummary?: string): WorkerTabLabelSource & { id: string } {
+  return { id, label, llmSummary };
 }
 
 describe('shortWorkerTitle', () => {

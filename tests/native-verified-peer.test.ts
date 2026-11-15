@@ -112,6 +112,19 @@ it('marks a Next caller that Next did not see as local when it forwards to the W
     expect((await forward(request('o8-relay-forward'))).status).toBe(200);
     expect(received.map(headers => headers['x-o8-relay-forward'] ?? null)).toEqual([null, '1', '1']);
     expect(received.every(headers => headers['x-o8-client-addr'] === undefined)).toBe(true);
+    // A page-bound route forwards the origin Next checked, and a refusal never travels.
+    const paged = ownedByNativeTransport(async () => new Response('local'), () => new Response(null, { status: 503 }), {
+      pageOrigin: req => req.headers.get('origin') === 'http://127.0.0.1:3000' ? 'http://127.0.0.1:3000' : new Response(null, { status: 403 }),
+    });
+    const page = (origin: string, extra: Record<string, string> = {}) => new NextRequest('http://127.0.0.1:3000/api/panel/devices', {
+      headers: { host: '127.0.0.1:3000', origin, 'x-o8-client-addr': '127.0.0.1', authorization: 'Bearer fixture', ...extra } });
+    expect((await paged(page('http://127.0.0.1:3000'))).status).toBe(200);
+    expect(received.at(-1)?.['x-o8-page-origin']).toBe('http://127.0.0.1:3000');
+    expect(received.at(-1)?.origin).toBeUndefined();
+    const before = received.length;
+    expect((await paged(page('https://untrusted.example'))).status).toBe(403);
+    expect((await paged(page('http://127.0.0.1:3000', { 'x-o8-page-origin': 'http://127.0.0.1:9' }))).status).toBe(400);
+    expect(received.length).toBe(before);
   } finally {
     vi.unstubAllEnvs();
     await new Promise<void>(resolve => listener.close(() => resolve()));

@@ -134,10 +134,13 @@ impl Viewer {
             let parent: id = msg_send![self.view, superview];
             let flipped: BOOL = msg_send![parent, isFlipped];
             let x = |v: gpui::Pixels| f64::from(f32::from(v));
+            // AppKit frames are in unzoomed window points.
+            let bounds = crate::zoom::native(bounds, window);
             let top = if flipped == YES {
                 x(bounds.top())
             } else {
-                f64::from(f32::from(window.viewport_size().height)) - x(bounds.bottom())
+                f64::from(f32::from(window.viewport_size().height) * window.zoom())
+                    - x(bounds.bottom())
             };
             let frame = NSRect::new(
                 NSPoint::new(x(bounds.left()), top),

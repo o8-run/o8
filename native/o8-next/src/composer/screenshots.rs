@@ -11,7 +11,7 @@ fn folder() -> Option<&'static Path> {
     FOLDER
         .get_or_init(|| {
             let home = PathBuf::from(std::env::var_os("HOME")?);
-            let chosen = std::process::Command::new("defaults")
+            let chosen = crate::child_command::command("defaults")
                 .args(["read", "com.apple.screencapture", "location"])
                 .output()
                 .ok()
@@ -91,7 +91,7 @@ pub(super) fn make_thumbnails(paths: Vec<PathBuf>) {
         if let Some(dir) = thumb.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::process::Command::new("sips")
+        let _ = crate::child_command::command("sips")
             .args(["-Z", "192"])
             .arg(&path)
             .arg("--out")

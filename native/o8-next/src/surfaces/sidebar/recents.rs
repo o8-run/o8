@@ -72,8 +72,9 @@ pub(super) fn visible<'a>(
         .filter(|s| {
             query.is_empty()
                 || format!(
-                    "{} {} {}",
+                    "{} {} {} {}",
                     s.title,
+                    s.runtime_name.as_deref().unwrap_or(""),
                     s.status,
                     s.repo_path.as_deref().unwrap_or("Unassigned")
                 )

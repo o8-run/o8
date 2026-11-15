@@ -117,6 +117,13 @@ impl Settings {
             .flex_col()
             .flex_shrink_0()
             .gap(px(16.))
+            // The bare Ring above the page, at 48 (BRAND.md §3).
+            .child(
+                div()
+                    .debug_selector(|| "settings-about-ring".into())
+                    .size(px(48.))
+                    .child(crate::ring::ring(48.)),
+            )
             .child("Version")
             .child(panels::fact(
                 "settings-about-version",
@@ -207,7 +214,7 @@ impl Settings {
                 false,
                 window,
                 cx,
-                move |_, _, cx| cx.open_url(url),
+                move |_, _, cx| crate::external_open::url(cx, url),
             ));
         }
         content.child("Credits").child(div().text_size(px(11.)).text_color(theme().text_muted)

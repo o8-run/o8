@@ -1,7 +1,5 @@
-import { redirect } from 'next/navigation';
+import { DesktopAppNotice } from '@/components/desktop-app-notice';
 
-export const dynamic = 'force-dynamic';
-
-export default function HomePage() {
-  redirect('/dashboard');
+export default function Page() {
+  return <DesktopAppNotice />;
 }

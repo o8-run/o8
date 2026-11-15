@@ -1,3 +1,4 @@
+import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 /**
  * LLM Tool definitions and execution.
  *
@@ -377,12 +378,12 @@ async function executeDispatchCodexTask(args: Record<string, unknown>): Promise<
   const task = args.task as string;
   const branch = (args.branch as string) || 'main';
   const label = (args.label as string) || task.slice(0, 60);
-  const runtimeOverride = typeof args.runtime === 'string' ? args.runtime : null;
+  const { validateRequestedRuntime, resolveWorkerRouting } = await import('@/lib/agents/routing');
+  const runtimeOverride = validateRequestedRuntime(args.runtime, resolveDefaultDispatchRuntimeSync());
 
   if (!repoPath) return { content: 'Error: repoPath is required.' };
   if (!task) return { content: 'Error: task is required.' };
 
-  const { resolveWorkerRouting } = await import('@/lib/agents/routing');
   const workerRouting = resolveWorkerRouting({
     requestedRuntime: runtimeOverride,
     source: 'dispatch-codex-task',

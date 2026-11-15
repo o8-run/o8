@@ -21,7 +21,7 @@ import {
 } from './subscription-profile';
 import { resolveWorkerEffortDefault } from './worker-effort-default';
 import { isWorkerStartMode, type WorkerStartMode } from './worker-start-mode';
-import { parseStoredJson } from './stored-json';
+import { parseStoredDefaults, type StoredOperatorDefaults, type FileOperatorDefaults } from './defaults-file-types';
 import { assertExecutionCarrierRoutingCompatibility, assertRoutingCompatibility, routingUpdateTouchesCompatibility } from './routing-compatibility';
 import {
   coerceStoredTier,
@@ -135,6 +135,7 @@ export function isRequireApproval(value: unknown): value is RequireApproval { re
 
 export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults, conversationDefaults.ConversationDefaults {
   subscriptionProfile: SubscriptionProfile;
+  dispatchLoadPerCore: number;
   parallelCap: number;
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
@@ -211,7 +212,7 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
    * fleet-canvas tabs (mirrors `experimentalChat`: tab data stays persisted
    * for when it flips back on).
    */
-  experimentalCanvas: boolean; experimentalNext: boolean;
+  experimentalCanvas: boolean; experimentalNext: boolean; nativeDictationPill: boolean; nativeDictationHud: boolean; nativeSpatialInk: boolean;
   /** Native browser-view: render the embedded Browser pane in a host-owned child
    *  WebviewWindow (origin-sensitive auth apps render natively + stay
    *  agent-grabbable) instead of the iframe/proxy + engine-JPEG fallback.
@@ -338,6 +339,7 @@ export interface OperatorDefaultsWithSources {
 export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   knowledgeSources: [],
   subscriptionProfile: 'both',
+  dispatchLoadPerCore: 6,
   parallelCap: 5,
   overlapGate: 'strict',
   healBotEnabled: true,
@@ -374,7 +376,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
-  experimentalCanvas: false, experimentalNext: false,
+  experimentalCanvas: false, experimentalNext: false, nativeDictationPill: false, nativeDictationHud: false, nativeSpatialInk: false,
   nativeBrowserView: true,
   classAComposer: 'auto',
   // ON by default post-#1097; subscription pool, not Agent SDK pool.
@@ -413,17 +415,6 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxTotalGb: 20,
   ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK, ...SYMON_VOICE_FALLBACK, ...JUDGMENT_PROVIDER_FALLBACK, ...JUDGMENT_ALLOWANCE_FALLBACK,
 };
-type StoredOperatorDefaults = Partial<OperatorDefaults> & {
-  defaultDispatchRuntimeExplicit?: boolean;
-  autoApplyUpdates?: 'off' | 'when-idle';
-};
-
-type FileOperatorDefaults = Partial<OperatorDefaults> & {
-  defaultDispatchRuntimeExplicit?: boolean;
-};
-
-const parseStoredDefaults = (raw: string): StoredOperatorDefaults => parseStoredJson<StoredOperatorDefaults>(raw);
-
 function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   const result: FileOperatorDefaults = {};
   if (stored.knowledgeSources !== undefined) {
@@ -434,6 +425,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isSubscriptionProfile(stored.subscriptionProfile)) {
     result.subscriptionProfile = stored.subscriptionProfile;
   }
+  if (typeof stored.dispatchLoadPerCore === 'number' && Number.isFinite(stored.dispatchLoadPerCore) && stored.dispatchLoadPerCore >= 0) result.dispatchLoadPerCore = stored.dispatchLoadPerCore;
   if (isParallelCap(stored.parallelCap)) {
     result.parallelCap = stored.parallelCap;
   }
@@ -520,7 +512,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.experimentalCanvas === 'boolean') {
     result.experimentalCanvas = stored.experimentalCanvas;
-  } if (typeof stored.experimentalNext === 'boolean') result.experimentalNext = stored.experimentalNext;
+  } if (typeof stored.experimentalNext === 'boolean') result.experimentalNext = stored.experimentalNext; if (typeof stored.nativeDictationPill === 'boolean') result.nativeDictationPill = stored.nativeDictationPill; if (typeof stored.nativeDictationHud === 'boolean') result.nativeDictationHud = stored.nativeDictationHud; if (typeof stored.nativeSpatialInk === 'boolean') result.nativeSpatialInk = stored.nativeSpatialInk;
   if (typeof stored.nativeBrowserView === 'boolean') {
     result.nativeBrowserView = stored.nativeBrowserView;
   }
@@ -662,9 +654,12 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   });
   const defaultDispatchRuntime = profileDefaults?.defaultDispatchRuntime ?? baseDefaultDispatchRuntime;
 
+  const loadOverride = process.env.O8_DISPATCH_LOAD_PER_CORE?.trim() || undefined;
+  const envLoad = loadOverride !== undefined && Number.isFinite(Number(loadOverride)) && Number(loadOverride) >= 0 ? Number(loadOverride) : undefined;
   const resolved: OperatorDefaults = {
     knowledgeSources: fileValues.knowledgeSources ?? [],
     subscriptionProfile,
+    dispatchLoadPerCore: envLoad ?? fileValues.dispatchLoadPerCore ?? OPERATOR_DEFAULTS_FALLBACK.dispatchLoadPerCore,
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
     overlapGate: envGate ?? fileValues.overlapGate ?? OPERATOR_DEFAULTS_FALLBACK.overlapGate,
     healBotEnabled: envHeal ?? fileValues.healBotEnabled ?? OPERATOR_DEFAULTS_FALLBACK.healBotEnabled,
@@ -708,7 +703,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
-    experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas, experimentalNext: fileValues.experimentalNext ?? false,
+    experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas, experimentalNext: fileValues.experimentalNext ?? false, nativeDictationPill: fileValues.nativeDictationPill ?? false, nativeDictationHud: fileValues.nativeDictationHud ?? false, nativeSpatialInk: fileValues.nativeSpatialInk ?? false,
     nativeBrowserView: envNative ?? fileValues.nativeBrowserView ?? OPERATOR_DEFAULTS_FALLBACK.nativeBrowserView,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled,
@@ -748,6 +743,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
     knowledgeSources: fileValues.knowledgeSources !== undefined ? 'file' : 'default',
     subscriptionProfile: envProfile !== null ? 'env' : fileValues.subscriptionProfile !== undefined ? 'file' : 'default',
+    dispatchLoadPerCore: envLoad !== undefined ? 'env' : fileValues.dispatchLoadPerCore !== undefined ? 'file' : 'default',
     parallelCap: envCap !== null ? 'env' : fileValues.parallelCap !== undefined ? 'file' : 'default',
     overlapGate: envGate !== null ? 'env' : fileValues.overlapGate !== undefined ? 'file' : 'default',
     healBotEnabled: envHeal !== null ? 'env' : fileValues.healBotEnabled !== undefined ? 'file' : 'default',
@@ -789,7 +785,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
-    experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default', experimentalNext: fileValues.experimentalNext !== undefined ? 'file' : 'default',
+    experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default', experimentalNext: fileValues.experimentalNext !== undefined ? 'file' : 'default', nativeDictationPill: fileValues.nativeDictationPill !== undefined ? 'file' : 'default', nativeDictationHud: fileValues.nativeDictationHud !== undefined ? 'file' : 'default', nativeSpatialInk: fileValues.nativeSpatialInk !== undefined ? 'file' : 'default',
     nativeBrowserView: envNative !== null ? 'env' : fileValues.nativeBrowserView !== undefined ? 'file' : 'default',
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
@@ -859,6 +855,10 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
     }
   }
 
+  if (update.dispatchLoadPerCore !== undefined) {
+    if (!Number.isFinite(update.dispatchLoadPerCore) || update.dispatchLoadPerCore < 0) throw new Error('dispatchLoadPerCore must be a non-negative number.');
+    stored.dispatchLoadPerCore = update.dispatchLoadPerCore;
+  }
   if (update.parallelCap !== undefined) {
     if (!isParallelCap(update.parallelCap)) {
       throw new Error('parallelCap must be a positive safe integer.');
@@ -1001,7 +1001,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   }
   if (update.experimentalCanvas !== undefined) {
     stored.experimentalCanvas = Boolean(update.experimentalCanvas);
-  } if (update.experimentalNext !== undefined) stored.experimentalNext = Boolean(update.experimentalNext);
+  } if (update.experimentalNext !== undefined) stored.experimentalNext = Boolean(update.experimentalNext); if (update.nativeDictationPill !== undefined) stored.nativeDictationPill = Boolean(update.nativeDictationPill); if (update.nativeDictationHud !== undefined) stored.nativeDictationHud = Boolean(update.nativeDictationHud); if (update.nativeSpatialInk !== undefined) stored.nativeSpatialInk = Boolean(update.nativeSpatialInk);
   if (update.nativeBrowserView !== undefined) {
     stored.nativeBrowserView = Boolean(update.nativeBrowserView);
   }

@@ -649,7 +649,7 @@ impl Issues {
                 && url.username().is_empty()
                 && url.password().is_none()
             {
-                cx.open_url(url.as_str());
+                crate::external_open::url(cx, url.as_str());
             }
         }
     }

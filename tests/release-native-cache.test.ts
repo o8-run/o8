@@ -92,7 +92,7 @@ function compile(values) {
   fs.mkdirSync(path.join(root, 'src-tauri/helpers'), { recursive: true });
   for (const suffix of ['-' + target, '-universal-apple-darwin'])
     fs.copyFileSync(helper, path.join(root, 'src-tauri/helpers/speech_recognizer' + suffix));
-  event({ phase: 'compile', target, targetDir, dependencyWarm });
+  event({ phase: 'compile', target, targetDir, dependencyWarm, wrapper: process.env.RUSTC_WRAPPER, cache: process.env.SCCACHE_DIR });
 }
 if (args[0] === 'tauri' && args[1] === 'build') {
   event({ phase: 'prebuild' });
@@ -522,4 +522,17 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     execFileSync('git', ['switch', '--detach', head], { cwd: f.root, stdio: 'pipe' });
     expect(run({ O8_FIXTURE_CAN_REUSE: '1' })).toContain('speech restore=miss');
   });
+});
+
+it('configures the compiler cache through the release wrapper and both Cargo slices', () => {
+  const f = compilerFixture();
+  const wrapper = join(f.base, 'bin/sccache');
+  put(f.base, 'bin/sccache', '#!/bin/sh\nexit 0\n'); chmodSync(wrapper, 0o700);
+  f.run({ RUSTC_WRAPPER: '', O8_RELEASE_SCCACHE: 'auto' });
+  const compiles = f.events().filter(row => row.phase === 'compile');
+  expect(compiles).toHaveLength(2);
+  for (const row of compiles) {
+    expect(row.wrapper).toBe(wrapper);
+    expect(row.cache).toBe(join(f.cacheRoot, 'sccache'));
+  }
 });

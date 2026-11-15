@@ -24,7 +24,7 @@ const steerRoute = await import('@/app/api/orchestrator/ui-loop/steer/route');
 const { closeDb } = await import('@/lib/db');
 const { reportAgentEvent } = await import('@/lib/lane/agent-report');
 const { createLane, deleteLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
-const { getResourceLeaseStore } = await import('@/lib/leases/resource-lease-service');
+const { getResourceLeaseStore } = await import('@/lib/leases/resource-lease-default-store');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const {
   readOrchestratorControlPlaneState,

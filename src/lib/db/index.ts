@@ -11,6 +11,8 @@ import { addColumnTolerant, tableColumnExists } from '@/lib/db/schema-columns';
  */
 
 import Database from 'better-sqlite3';
+import { configureSqlite } from '@/lib/db/startup-pragmas';
+import { initializeProjectMergeModes } from '@/lib/lane/project-merge-mode-migration';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -79,14 +81,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
     }
   } catch { /* chmod is best-effort — never block DB init on it */ }
 
-  // SQLite performance pragmas
-  sqlite.pragma('journal_mode = WAL');      // Write-ahead logging (concurrent reads)
-  sqlite.pragma('synchronous = NORMAL');    // Faster writes, still crash-safe with WAL
-  sqlite.pragma('busy_timeout = 5000');     // Wait 5s instead of failing on lock
-  sqlite.pragma('cache_size = -20000');     // 20MB page cache
-  sqlite.pragma('foreign_keys = ON');       // Enforce FK constraints
-
-  const db = drizzle!(sqlite, { schema });
+  configureSqlite(sqlite);
 
   // #859 — the old gate skipped `ensureIdempotentColumnAdds` whenever the
   // top-version marker was missing, leaving installs that landed before v4
@@ -102,33 +97,38 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
   //      from older schemas show the full migration history on disk and
   //      brand-new installs don't appear to have skipped versions.
   try {
-    const topMarkerExists = existsSync(migrationMarkerPath(DB_SCHEMA_VERSION));
-    // Upgrade only columns referenced by current base-schema indexes here.
-    // The full idempotent migration path expects the base tables to exist and
-    // therefore runs after ensureTables below.
-    if (dbFilePreviouslyExisted && !topMarkerExists) {
-      ensureSessionOutcomeColumns(sqlite);
-      ensureV57CostLedgerAttributionSchema(sqlite);
-    }
-    if (!dbFilePreviouslyExisted || !topMarkerExists) {
-      ensureTables(sqlite);
-    }
-    ensureIdempotentColumnAdds(sqlite);
-    ensureOutcomeExclusionStorage(sqlite);
+    // Keep bootstrap serialized: narrowing this lock races concurrent fresh FTS setup.
+    // Migration authors: foreign_keys=OFF is ineffective here; table rebuilds must
+    // account for that, and long migrations can exceed another startup's 5s timeout.
+    sqlite.transaction(() => {
+      const existingUserSchema = Boolean(sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get());
+      const topMarkerExists = existsSync(migrationMarkerPath(DB_SCHEMA_VERSION));
+      // Upgrade only columns referenced by current base-schema indexes here.
+      // The full idempotent migration path expects the base tables to exist and
+      // therefore runs after ensureTables below.
+      if (dbFilePreviouslyExisted && !topMarkerExists) {
+        ensureSessionOutcomeColumns(sqlite);
+        ensureV57CostLedgerAttributionSchema(sqlite);
+      }
+      if (!dbFilePreviouslyExisted || !topMarkerExists) {
+        ensureTables(sqlite);
+      }
+      ensureIdempotentColumnAdds(sqlite);
+      ensureOutcomeExclusionStorage(sqlite);
+      initializeProjectMergeModes(sqlite, DATA_DIR, existingUserSchema);
+    }).immediate();
     writeAllMissingMigrationMarkers();
   } catch (error) {
-    // Never publish a half-initialized singleton. A later request must retry
-    // the complete migration path rather than receiving a Drizzle handle whose
-    // schema setup failed partway through.
+    // Schema failures never publish a half-initialized singleton.
     try { sqlite.close(); } catch { /* best effort */ }
     throw error;
   }
 
   _sqlite = sqlite;
-  _db = db;
+  _db = drizzle!(sqlite, { schema });
 
   console.log(`[db] Connected to ${DB_PATH}`);
-  return db;
+  return _db;
 }
 
 function ensureIdempotentColumnAdds(sqlite: Database.Database): void {

@@ -11,7 +11,8 @@ impl Frame for Window {
         self.window_bounds().get_bounds().size
     }
     fn content_size(&self) -> Size<Pixels> {
-        self.viewport_size()
+        // The platform's size, not the zoomed layout viewport.
+        self.viewport_size().map(|v| v * self.zoom())
     }
     fn resize_content(&mut self, size: Size<Pixels>) {
         self.resize(size);

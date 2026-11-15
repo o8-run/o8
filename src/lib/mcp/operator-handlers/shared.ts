@@ -1,13 +1,12 @@
+import { RuntimeSelectionError, validateRequestedRuntime } from '@/lib/agents/routing';
+import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { operatorSteerOrigin } from '@/lib/runtime/owner-context';
 import { apiError, McpInputError, O8ApiError, safeErrorText, unreachableApiError } from '@/lib/mcp/api-error';
 export { McpInputError } from '@/lib/mcp/api-error';
 export { parseDirectivesApplied, parseDirectivesViolated } from '@/lib/orchestrator/review-finding-input';
 import { parseReviewFindings as readReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import {
-  formatDispatchableRuntimeChoices,
-  isDispatchableRuntime,
-} from '@/lib/orchestrator/runtime-capabilities';
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
   pollCorrelatedMcpMutation,
@@ -142,6 +141,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 export interface ApiFetchOptions extends RequestInit {
+  /** Disable automatic replay for explicit, non-idempotent decisions. */
+  retry?: boolean;
   /** Per-call timeout override in ms. Defaults to FETCH_TIMEOUT_MS (15s).
    *  Use a higher value for endpoints that legitimately take longer
    *  (e.g. /api/cortex/ask/answer can spend 10–40s in the classifier — see #1115). */
@@ -159,10 +160,10 @@ async function apiFetchResponse(
   let lastError: O8ApiError | undefined;
   const timeoutMs = init?.timeoutMs ?? FETCH_TIMEOUT_MS;
   // Strip timeoutMs from the RequestInit so fetch doesn't see it.
-  const { timeoutMs: _omit, acceptedErrorStatuses = [], ...fetchInit } = init ?? {};
+  const { timeoutMs: _omit, retry = true, acceptedErrorStatuses = [], ...fetchInit } = init ?? {};
   void _omit;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= (retry ? MAX_RETRIES : 0); attempt++) {
     if (attempt > 0) {
       const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
       console.error(`[o8-operator] API retry ${attempt}/${MAX_RETRIES} for ${path} in ${delay}ms`);
@@ -170,7 +171,7 @@ async function apiFetchResponse(
     }
 
     try {
-      const baseUrl = resolveApiBaseLive();
+      const baseUrl = (['/api/orchestrator/steer-packet', '/api/runtime/action'].includes(path) ? operatorSteerOrigin() : undefined) ?? resolveApiBaseLive();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       const panelToken = readPanelToken();
@@ -199,7 +200,7 @@ async function apiFetchResponse(
       return res;
     } catch (err) {
       lastError = err instanceof O8ApiError ? err : apiError(path, null, '', err);
-      if (lastError.noRetry) {
+      if (lastError.noRetry || lastError.managedBrainUnavailable) {
         _apiHealthy = true; // backend responded; the request itself was rejected
         throw lastError;
       }
@@ -253,7 +254,7 @@ export function jsonResult(data: unknown, isError = false): McpToolResult {
 }
 
 export function errorText(error: unknown) {
-  return safeErrorText(error);
+  return error instanceof RuntimeSelectionError ? error.message : safeErrorText(error);
 }
 
 export function requiredString(args: Record<string, unknown>, key: string) {
@@ -270,17 +271,9 @@ export function optionalString(args: Record<string, unknown>, key: string) {
 }
 
 export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
-  if (value === undefined || value === null || value === '') {
-    // Preserve the effective operator default as a requested-routing hint.
-    try {
-      const { resolveDefaultDispatchRuntimeSync } = require('@/lib/operator/defaults') as typeof import('@/lib/operator/defaults');
-      return resolveDefaultDispatchRuntimeSync();
-    } catch {
-      return 'codex';
-    }
-  }
-  if (isDispatchableRuntime(value)) return value;
-  throw new McpInputError(`runtime must be one of ${formatDispatchableRuntimeChoices()}`);
+  try {
+    return validateRequestedRuntime(value, resolveDefaultDispatchRuntimeSync())!;
+  } catch (error) { throw new McpInputError((error as Error).message); }
 }
 
 export function parseIssueList(value: unknown) {

@@ -33,7 +33,7 @@ export function observeCloseProcess<T>(key: string, read: () => Promise<T>): Pro
   if (performance.now() - state.startedAt > 30_000) throw new Error('Close process observation exceeded its phase deadline.');
   const existing = state.values.get(key);
   if (existing) return existing as Promise<T>;
-  if (key === 'open-files') state.scans.openFiles += 1;
+  if (key === 'open-files' || key === 'open-files-retry') state.scans.openFiles += 1;
   if (key === 'cwd') state.scans.cwdProjections += 1;
   const value = Promise.resolve().then(read);
   state.values.set(key, value);

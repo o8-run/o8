@@ -63,7 +63,7 @@ impl ThreadList {
             return;
         };
         let task = cx.background_executor().spawn(async move {
-            std::process::Command::new(program)
+            crate::child_command::command(program)
                 .args(args)
                 .status()
                 .is_ok_and(|status| status.success())

@@ -38,6 +38,8 @@ pub(crate) use changes_pill::PILL_INSET;
 pub(crate) use changes_pill::ChangesPill;
 #[path = "composer/project_bar.rs"]
 mod project_bar;
+#[path = "composer/empty_overview.rs"]
+pub(crate) mod empty_overview;
 pub(crate) use project_bar::ProjectBar;
 #[path = "composer/queue_tail.rs"]
 mod queue_rows;

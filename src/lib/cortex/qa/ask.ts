@@ -42,6 +42,7 @@ import {
   invalidateRegisteredSemanticCaches,
   normalizeSemanticCacheQuestion,
 } from '@/lib/cortex/qa/semantic-cache';
+import { ManagedBrainUnavailableError } from '@/lib/cortex/qa/managed-brain-unavailable';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 import { currentComposerBrainRoute } from '@/lib/operator/composer-brain-context';
@@ -435,10 +436,21 @@ async function runAskCortexUncached(
     }
   };
 
-  if (classification.class === 'A') {
-    await composeClassA(question, repoPath, topRows, emit, composeOptions);
-  } else {
-    await composeClassB(question, repoPath, topRows, emit, composeOptions);
+  try {
+    if (classification.class === 'A') {
+      await composeClassA(question, repoPath, topRows, emit, composeOptions);
+    } else {
+      await composeClassB(question, repoPath, topRows, emit, composeOptions);
+    }
+  } catch (error) {
+    if (error instanceof ManagedBrainUnavailableError) {
+      assertKnowledgeCurrent();
+      throw new ManagedBrainUnavailableError(
+        topRows.map(row => ({ ...row.citation, title: rowDisplayTitle(row) })),
+        topRows.length,
+      );
+    }
+    throw error;
   }
 
   assertKnowledgeCurrent();

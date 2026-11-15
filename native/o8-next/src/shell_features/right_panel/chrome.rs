@@ -94,7 +94,7 @@ pub(super) fn toggle(s: &Shell, open: bool, cx: &mut Context<Shell>) -> gpui::St
         .read::<Panel>()
         .map(|p| {
             (
-                p.viewport < 1180.,
+                !super::fits(s, p.viewport),
                 p.morph.value().0,
                 p.focus.get("header-right-panel").cloned(),
             )
@@ -105,7 +105,7 @@ pub(super) fn toggle(s: &Shell, open: bool, cx: &mut Context<Shell>) -> gpui::St
         super::toggle(s, w, cx)
     };
     let label = if disabled {
-        "Widen the window to open the right panel"
+        "Widen the window or hide the sidebar to open the right panel"
     } else if open {
         "Close panel  ⌘⌥B"
     } else {
@@ -294,8 +294,10 @@ pub(super) fn header(s: &Shell, full: f32, shown: f32, cx: &mut Context<Shell>) 
         return div().into_any_element();
     };
     let selected = p.selected;
+    // Glass has no fill to fade into: a veil-coloured strip over the veiled
+    // backdrop paints a darker block, plainest on the Vivid backdrop.
     let fade = if s.system_glass {
-        crate::theme::veil_color(crate::theme::GLASS_VEIL[0].1)
+        crate::theme::CLEAR
     } else {
         theme().background
     };

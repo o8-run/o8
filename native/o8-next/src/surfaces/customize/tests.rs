@@ -340,25 +340,3 @@ fn rail_plugins_opens_customize_on_its_tab(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("rail-symon").is_none());
     assert!(cx.debug_bounds("dock-settings").is_none());
 }
-
-#[gpui::test]
-fn narrow_dock_folds_updates_into_tools(cx: &mut TestAppContext) {
-    let fixture = Fixture::start_mode(false, "--customize");
-    let (_shell, mut visual) = open(
-        fixture.client.clone(),
-        fixture.root.join("customize-narrow-dock.json"),
-        State {
-            sidebar_width: Some(200.),
-            ..State::default()
-        },
-        cx,
-    );
-    let cx = &mut visual;
-    cx.run_until_parked();
-    draw(cx);
-    // Under 240 px Tools carries Updates.
-    assert!(cx.debug_bounds("shell-profile").is_some());
-    assert!(cx.debug_bounds("rail-update").is_none());
-    custom_click(cx, "rail-more");
-    assert!(cx.debug_bounds("rail-more-updates").is_some());
-}

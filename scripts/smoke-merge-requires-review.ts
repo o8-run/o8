@@ -20,6 +20,7 @@ const repoRoot = process.cwd();
 let tempHome = '';
 
 interface SmokeApi {
+  setMergeMode: (projectId: string | null, mode: string) => void;
   createApproval: typeof ApprovalsStore.createApproval;
   listApprovalsForContext: typeof ApprovalsStore.listApprovalsForContext;
   markSecondPassAgreed: typeof ApprovalsStore.markSecondPassAgreed;
@@ -198,6 +199,12 @@ async function createCaseRepo(caseId: string, opts: { highRisk?: boolean; projec
     actor: 'system',
   });
 
+  if (caseId === 'case-a') {
+    const held = await api.dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    expectEqual('PR-FIRST', held.reason, 'pr_only', 'fresh project does not integrate directly');
+    expectEqual('PR-FIRST', await git(repoPath, ['rev-parse', 'main']), baseHead, 'PR-first preserves main');
+  }
+  api.setMergeMode(lane.projectId, 'direct');
   return {
     caseId,
     repoPath,
@@ -431,7 +438,13 @@ async function main(): Promise<void> {
     import('@/lib/worktree/materialization-identity'),
     import('@/lib/worktree/metadata-store'),
   ]);
+  const { getSqlite } = await import('@/lib/db');
+  const { projectMergeModeKey } = await import('@/lib/lane/project-merge-mode-migration');
   api = {
+    setMergeMode: (projectId, mode) => {
+      getSqlite().prepare('INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, ?)')
+        .run(projectMergeModeKey(projectId ?? 'default'), mode, Date.now());
+    },
     createApproval: approvalsStore.createApproval,
     listApprovalsForContext: approvalsStore.listApprovalsForContext,
     markSecondPassAgreed: approvalsStore.markSecondPassAgreed,

@@ -626,10 +626,12 @@ impl ThreadList {
 
     /// Keeps Working timers counting: one repaint a second while any is shown.
     pub(super) fn tick_working(&mut self, cx: &mut Context<Self>) {
-        if self.second_tick || self.view() != folders::View::Inbox {
+        // The Working drawer's dot and run times keep the same beat.
+        let drawer = self.drawer_at().is_some();
+        if self.second_tick || self.view() != folders::View::Inbox && !drawer {
             return;
         }
-        let shown = self.rows.iter().any(|r| r.running && r.id.is_some());
+        let shown = drawer || self.rows.iter().any(|r| r.running && r.id.is_some());
         if !shown && self.lingering.is_empty() {
             return;
         }

@@ -136,7 +136,7 @@ impl Client {
             let packet_header = state["mission"]["packets"].as_array().and_then(|packets| packets.iter().find(|packet| packet["lane"]["sessionKey"] == key)).map(|packet| json!({
                 "enabled":true,"title":packet["title"],"branch":packet["branchTarget"],"runtime":packet["runtime"],"status":packet["status"],"repo":packet["workspaceTargetPath"].as_str().and_then(|path| path.rsplit('/').find(|part| !part.is_empty())),"launchContext":packet["launchContext"]
             }));
-            sessions.push(Session {
+            let mut worker = Session {
                 machine: None,
                 machine_label: None,
                 parked_workspaces: serde_json::from_value(agent["parkedWorkspaces"].clone())
@@ -168,6 +168,7 @@ impl Client {
                 rejected: false,
                 unread: false,
                 packet_header,
+                runtime_name: None,
                 packet_state: false,
                 inbox_subject: Some(&agent["inboxSubject"])
                     .filter(|v| v.is_object())
@@ -181,7 +182,9 @@ impl Client {
                 current_task: None,
                 auto_settled_reason: agent["autoSettledReason"].as_str().map(str::to_owned),
                 auto_settle_disabled_at: agent["autoSettleDisabledAt"].as_str().map(str::to_owned),
-            });
+            };
+            label_from_task(&mut worker);
+            sessions.push(worker);
         }
         if let Some(workspace) = self.workspace() {
             // Home also lists the chats saved with no project (#5503).
@@ -311,5 +314,64 @@ mod worker_tests {
                 .unwrap();
         assert_eq!(worker.branch, None);
         assert!(worker_session(&json!({"sessionKey": "plain"})).is_none());
+    }
+}
+
+/// A worker started for a task is listed by that task's title and project.
+/// The runtime names such a session after its branch, which says nothing to a
+/// person reading the list. The task is the packet saved for this session, so
+/// the label needs no request of its own and survives an inventory refresh
+/// that keeps the packet header.
+pub(super) fn label_from_task(worker: &mut Session) {
+    let Some(header) = &worker.packet_header else {
+        return;
+    };
+    if let Some(title) = header["title"]
+        .as_str()
+        .filter(|title| !title.trim().is_empty())
+    {
+        worker.runtime_name = Some(std::mem::take(&mut worker.title));
+        worker.title = crate::text::sanitize(title);
+    }
+    if let Some(repo) = header["repo"].as_str().filter(|repo| !repo.is_empty()) {
+        worker.repo_slug = Some(repo.to_owned());
+    }
+}
+
+#[cfg(test)]
+mod task_title_tests {
+    use super::{label_from_task, worker_session};
+    use serde_json::json;
+
+    fn worker() -> crate::client::Session {
+        worker_session(&json!({
+            "sessionKey": "codex:7", "name": "o8 • agent/review-pr-5870-4b4801",
+            "runtime": "codex", "branch": "agent/review-pr-5870-4b4801",
+        }))
+        .unwrap()
+        .unwrap()
+    }
+
+    #[test]
+    fn a_worker_is_listed_by_its_task_title_and_project() {
+        let mut worker = worker();
+        worker.packet_header =
+            Some(json!({"title": "Review PR 5870 request changes", "repo": "o8"}));
+        label_from_task(&mut worker);
+        assert_eq!(worker.title, "Review PR 5870 request changes");
+        assert_eq!(worker.runtime_name.as_deref(), Some("o8 • agent/review-pr-5870-4b4801"));
+        assert_eq!(worker.repo_slug.as_deref(), Some("o8"));
+    }
+
+    #[test]
+    fn a_worker_with_no_task_or_an_untitled_one_keeps_its_own_name() {
+        let mut worker = worker();
+        label_from_task(&mut worker);
+        assert_eq!(worker.title, "o8 • agent/review-pr-5870-4b4801");
+        assert_eq!(worker.repo_slug, None);
+        worker.packet_header = Some(json!({"title": "  ", "repo": ""}));
+        label_from_task(&mut worker);
+        assert_eq!(worker.title, "o8 • agent/review-pr-5870-4b4801");
+        assert_eq!(worker.repo_slug, None);
     }
 }
