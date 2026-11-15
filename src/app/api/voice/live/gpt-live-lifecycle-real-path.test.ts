@@ -58,7 +58,6 @@ let voice: typeof import('./route');
 let controller: typeof import('@/components/desktop/thoughts/chat-panel/useChatLiveController');
 let presentation: typeof import('@/components/desktop/thoughts/chat-panel/useManagedVoicePresentation');
 let formatUsage: typeof import('@/lib/voice/managed-live/usage').formatGptLiveUsage;
-let Overlay: typeof import('@/app/managed-chat-voice/page').default;
 let admissions: Array<{ id: string; context: string; binding: string; source: string }>;
 let creations: Array<{ body: { session: { model: string; delegation: { type: string }; instructions: string } }; authorization: string | null }>;
 let releaseNarration: (() => void) | undefined;
@@ -111,8 +110,7 @@ function Conversation() {
     createElement('span', { role: 'status' }, `${usage}${state === 'closed' ? ` · ${detail || 'Voice paused.'}` : ''}`));
 }
 async function start() {
-  await act(async () => { root.render(createElement(Fragment, null, createElement(Conversation),
-    provider.native ? createElement('div', { 'data-fixture-overlay': true }, createElement(Overlay)) : null)); await flush(); });
+  await act(async () => { root.render(createElement(Conversation)); await flush(); });
   await click(talk());
   await waitForAdmission(1);
   expect(talk().getAttribute('aria-pressed'), container.textContent ?? '').toBe('true');
@@ -135,7 +133,6 @@ beforeEach(async () => {
   controller = await import('@/components/desktop/thoughts/chat-panel/useChatLiveController');
   presentation = await import('@/components/desktop/thoughts/chat-panel/useManagedVoicePresentation');
   formatUsage = (await import('@/lib/voice/managed-live/usage')).formatGptLiveUsage;
-  Overlay = (await import('@/app/managed-chat-voice/page')).default;
   vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
     if (String(input) === 'https://api.openai.com/v1/live/sessions') {
       creations.push({ body: JSON.parse(String(init?.body)), authorization: new Headers(init?.headers).get('authorization') });
@@ -173,12 +170,6 @@ it('reports elapsed time and estimated voice cost matching recorded provider dur
   expect(final.finalSeconds).toBe(12.5);
   expect(container.textContent).toContain('0:12 · Est. $0.01');
   expect(creations[0]).toMatchObject({ authorization: 'Bearer sk-live-key-fixture', body: { session: { model: 'gpt-live-1', delegation: { type: 'client' } } } });
-});
-it('shows the same estimate on the existing desktop voice overlay through its presentation events', async () => {
-  provider.native = true; await start(); await advance(12_000);
-  emit({ type: 'session.usage.updated', event_id: 'overlay-usage', usage: { seconds: 12 } });
-  await advance(500);
-  expect(container.querySelector('[data-fixture-overlay]')?.textContent).toContain('0:12 · Est. $0.01');
 });
 it('closes after silence and resumes the same conversation in one talk gesture', async () => {
   await start(); await advance(1000);

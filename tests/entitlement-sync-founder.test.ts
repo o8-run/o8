@@ -10,7 +10,6 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import VoiceAccount from '@/app/voice-settings/tabs/AccountTab';
 import { AccountAuthorizationSync } from '@/lib/entitlement/AccountAuthorizationSync';
 import type { Plan } from '@/lib/entitlement/types';
 
@@ -141,12 +140,12 @@ describe('lifetime seat through desktop entitlement sync (#3269)', () => {
     vi.unstubAllEnvs();
   });
 
-  it.each(['account sync', 'voice-settings'])('evicts a different account service license through %s', async (surface) => {
+  it('evicts a different account service license through account sync', async () => {
     const licenseKey = await signedLicense('pro');
     writeFileSync(path.join(dataDir, 'entitlement.json'), JSON.stringify({ plan: 'pro', status: 'active', licenseKey }));
     seedStaleSeat();
     serveAccountLicense({ license: licenseKey, source: 'subscription' });
-    const render = () => root.render(surface === 'voice-settings' ? createElement(VoiceAccount) : createElement(AccountAuthorizationSync, null, null));
+    const render = () => root.render(createElement(AccountAuthorizationSync, null, null));
     await act(async () => render());
     expect(existsSync(path.join(dataDir, 'entitlement.json'))).toBe(true);
     fixtureAuth.user = { id: 'user_other_fixture', name: 'Other account' };

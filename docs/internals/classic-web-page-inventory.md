@@ -16,14 +16,11 @@ can remain when retained pages import them; they do not create routes.
 | `/` | Static notice that the desktop app is the interface. The browser console was removed (see [browser console removal](../operations/browser-console-removal.md)). |
 | `/dashboard` | Static notice. The classic window's loader (`scripts/tauri-export.mjs`), the development URL and the bundled-server prewarm still request it, so it must answer. |
 | `/broadcast` | `cli/src/commands/broadcast.ts` returns spectator URLs at this page. |
-| `/dictation-pill` | `src-tauri/src/dock_window.rs` hosts the Symon dictation pill. |
-| `/voice-host` | `src-tauri/src/voice_host.rs` hosts browser voice runtimes for the native main window. |
-| `/voice-settings` | `src-tauri/src/lib.rs` opens the voice settings webview. |
-| `/managed-chat-voice` | `src-tauri/src/managed_voice_window.rs` hosts managed chat voice. |
-| `/point-overlay` | `src-tauri/src/point_overlay.rs` hosts the pointer overlay. |
-| `/spatial-ink` | `src-tauri/src/spatial_ink_window.rs` hosts the ink overlay. |
-| `/agent-partials` | `src-tauri/src/agent_partials_window.rs` hosts partial agent output. |
 | `/mobile` | Static notice for old bookmarks and web installs. Push payloads no longer link here. The native phone app loads no web page. |
+
+Removed with the classic shell's voice windows (#6130): `/agent-partials`,
+`/dictation-pill`, `/managed-chat-voice`, `/point-overlay`, `/spatial-ink`,
+`/voice-host` and `/voice-settings`.
 
 Removed pages:
 
