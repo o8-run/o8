@@ -33,6 +33,8 @@ mod dock_window;
 #[cfg(target_os = "macos")]
 mod first_run_install;
 mod fn_hotkey;
+#[cfg(target_os = "macos")]
+mod symon_yield;
 mod voice_surfaces;
 #[cfg(target_os = "macos")]
 mod voice_only;
