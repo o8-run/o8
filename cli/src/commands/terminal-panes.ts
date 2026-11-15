@@ -13,6 +13,7 @@
 import { execFileSync } from 'node:child_process';
 
 import { CliError, EXIT } from '../api.js';
+import type { TerminalStatusReport } from '../terminal-status.js';
 
 export const PANE_LIMIT_DEFAULT = 8;
 export const PANE_LIMIT_MAX = 16;
@@ -184,6 +185,54 @@ export function runningPackets(lanes: unknown): PaneTerminal[] {
   }
   return [...newest].flatMap(([id, lane]) => (lane.working ? [{ id, title: lane.title, kind: 'packet' as const }] : []));
 }
+
+/** Each packet's newest lane state. Lanes are listed oldest first. */
+export function newestLaneStates(lanes: unknown): Map<string, string> {
+  const states = new Map<string, string>();
+  if (!Array.isArray(lanes)) return states;
+  for (const entry of lanes) {
+    const lane = entry && typeof entry === 'object' ? entry as { packetId?: unknown; status?: unknown } : null;
+    if (lane && typeof lane.packetId === 'string' && lane.packetId && typeof lane.status === 'string') states.set(lane.packetId, lane.status);
+  }
+  return states;
+}
+
+// Grouped as the server maps lane states to packet states (`packetStatusFromLaneStatus`).
+const SUMMARY_GROUPS: Record<string, 'running' | 'needs' | 'failed' | 'stopped' | 'done'> = {
+  launching: 'running', running: 'running', recovering: 'running',
+  awaiting_input: 'needs', awaiting_orchestrator: 'needs', awaiting_human: 'needs',
+  failed: 'failed',
+  paused: 'stopped', idle: 'stopped',
+  // A merged or dismissed lane ends archived: finished, with nothing left to do.
+  reviewing: 'done', merging: 'done', completed: 'done', archived: 'done',
+};
+
+/**
+ * The watcher tab's own mark: every packet the watcher has followed since it
+ * started, by where each stands now, such as `2 running · 1 needs you`.
+ * Anything waiting on the operator, or failed, marks the tab for attention.
+ */
+export function watcherSummary(seen: Iterable<string>, states: ReadonlyMap<string, string>): TerminalStatusReport {
+  const counts = { running: 0, needs: 0, failed: 0, stopped: 0, done: 0 };
+  for (const id of seen) {
+    const group = SUMMARY_GROUPS[states.get(id) ?? ''];
+    if (group) counts[group] += 1;
+  }
+  const parts = [
+    counts.running ? `${counts.running} running` : '',
+    counts.needs ? `${counts.needs} need${counts.needs === 1 ? 's' : ''} you` : '',
+    counts.failed ? `${counts.failed} failed` : '',
+    counts.stopped ? `${counts.stopped} paused` : '',
+    counts.done ? `${counts.done} done` : '',
+  ].filter(Boolean);
+  const title = WATCHER_LABEL;
+  if (parts.length === 0) return { state: 'idle', title, msg: 'No workers yet' };
+  const state = counts.needs || counts.failed ? 'error' : counts.running ? 'working' : counts.done ? 'done' : 'idle';
+  return { state, title, msg: parts.join(' · ') };
+}
+
+/** The watcher's mark while o8 does not answer, so old counts do not stand as current. */
+export const WATCHER_UNREACHABLE: TerminalStatusReport = { state: 'idle', title: WATCHER_LABEL, msg: 'Cannot reach o8; trying again' };
 
 /**
  * The command a packet's pane runs: this CLI, following that packet's
