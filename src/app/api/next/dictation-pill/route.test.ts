@@ -6,9 +6,34 @@ import type { ChildProcess } from '@/lib/providers/child-process';
 import { bindNextBrowserPipe } from '@/lib/next/browser-pipe';
 import { POST } from './route';
 
-const settings = vi.hoisted(() => ({ enabled: false, reads: 0 }));
-vi.mock('@/lib/operator/defaults', () => ({ getOperatorDefaults: async () => { settings.reads++; return { values: { nativeDictationPill: settings.enabled } }; } }));
-afterEach(() => { settings.enabled = false; settings.reads = 0; vi.useRealTimers(); });
+const settings = vi.hoisted(() => ({ enabled: false, hud: false, reads: 0 }));
+vi.mock('@/lib/operator/defaults', () => ({ getOperatorDefaults: async () => { settings.reads++; return { values: { nativeDictationPill: settings.enabled, nativeDictationHud: settings.hud } }; } }));
+afterEach(() => { settings.enabled = false; settings.hud = false; settings.reads = 0; vi.useRealTimers(); });
+
+it('drives the caret/HUD panel only under its own flag, over its own frame type', async () => {
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
+  bindNextBrowserPipe(child as unknown as ChildProcess);
+  const frames: Record<string, unknown>[] = [];
+  child.stdin.on('data', data => {
+    const frame = JSON.parse(String(data));
+    frames.push(frame);
+    child.stdout.write('o8-next-browser-result:' + JSON.stringify({ id: frame.id, result: { ok: true, finishSession: 3, actions: [{ session: 3, state: 'speaking', action: 'stop' }] } }) + '\n');
+  });
+  const post = (body: object) => POST(new NextRequest('http://localhost/api/next/dictation-pill', { method: 'POST', body: JSON.stringify(body) }));
+  // The dock flag alone never turns the HUD native.
+  settings.enabled = true;
+  expect(await (await post({ action: 'prepare', surface: 'hud' })).json()).toMatchObject({ native: false, enabled: false });
+  expect(frames).toHaveLength(0);
+  settings.enabled = false; settings.hud = true;
+  const reply = await (await post({ action: 'frame', checkSettings: true, surface: 'hud', snapshot: { state: 'recording' } })).json();
+  expect(reply).toEqual({ enabled: true, native: true, absent: false });
+  expect(frames).toHaveLength(1);
+  expect(frames[0]).toMatchObject({ type: 'dictation-hud', verb: 'present', args: { action: 'frame', surface: 'hud' } });
+  // The dock keeps reading its own flag.
+  expect(await (await post({ action: 'prepare' })).json()).toMatchObject({ native: false, enabled: false });
+  expect(frames).toHaveLength(1);
+  child.emit('exit');
+});
 it('defaults to web without sending any pipe frame when disabled', async () => {
   const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
   bindNextBrowserPipe(child as unknown as ChildProcess);
@@ -114,5 +139,28 @@ it('forwards a fleet tap and a revert naming its chip, and drops malformed ones'
     { session: 3, state: 'success', action: 'revert', value: null, edit: 7 },
     { session: 3, state: 'extras', action: 'revert', value: null, edit: 8 },
   ]);
+  child.emit('exit');
+});
+
+it('rejects an out-of-range HUD placement before it reaches the native process', async () => {
+  settings.hud = true;
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
+  bindNextBrowserPipe(child as unknown as ChildProcess);
+  const frames: unknown[] = [];
+  child.stdin.on('data', data => {
+    const frame = JSON.parse(String(data));
+    frames.push(frame);
+    child.stdout.write('o8-next-browser-result:' + JSON.stringify({ id: frame.id, result: { ok: true } }) + '\n');
+  });
+  const post = (placement: unknown) => POST(new NextRequest('http://localhost/api/next/dictation-pill', { method: 'POST', body: JSON.stringify({
+    action: 'frame', checkSettings: true, surface: 'hud', snapshot: { state: 'recording', hud: { surface: 'caret', placement } },
+  }) }));
+  for (const placement of [
+    { x: 1e7, y: 0, width: 460, height: 138 }, { x: 0, y: 0, width: 5000, height: 138 },
+    { x: 0, y: 0, width: 460, height: -1 }, { x: '1', y: 0, width: 460, height: 138 }, null,
+  ]) expect((await post(placement)).status).toBe(400);
+  expect(frames).toHaveLength(0);
+  expect(await (await post({ x: -1200, y: -300, width: 460, height: 138 })).json()).toMatchObject({ native: true });
+  expect(frames).toHaveLength(1);
   child.emit('exit');
 });
