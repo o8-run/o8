@@ -1393,6 +1393,8 @@ pub fn start(app: tauri::AppHandle) {
         false,
     ));
     crate::external_keyboard::start_watcher();
+    // While the standalone Symon app runs, it owns Fn and the voice keys.
+    crate::symon_yield::start_watcher();
 
     // Stash the app handle so the off-tap worker threads can drive the screen
     // dock pill window (show on Fn-down, hide on brush/error). Ignore a second
@@ -1525,6 +1527,15 @@ pub fn start(app: tauri::AppHandle) {
                             CGEventTapEnable(port_bits as *mut std::ffi::c_void, true);
                         }
                     }
+                    return None;
+                }
+
+                // Symon owns the voice keys while it runs (see symon_yield).
+                // Drop any held latch so a press that began before Symon
+                // started can't fire a stale release here.
+                if crate::symon_yield::symon_active() {
+                    fn_held_cb.store(false, Ordering::SeqCst);
+                    OPTION_HELD.store(false, Ordering::SeqCst);
                     return None;
                 }
 
