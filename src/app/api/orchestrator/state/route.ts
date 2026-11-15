@@ -46,10 +46,25 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
   // Merge policy (#1367) — this rebuild is the LAST shape the desktop provider
   // sees; dropping the policy here left the chat banner rendering a doomed
   // Approve & merge in PR-only mode (live-hit 2026-07-04).
-  const mergePolicy = currentLaneMergePolicy();
   const packets = mission.packets.map((packet) => {
     const lane = findLaneByPacket(packet.id);
     if (!lane) return packet;
+    const mergePolicy = currentLaneMergePolicy(lane.projectId);
+    // A stored binding is the owner Stop verifies (packet-stop-hold.ts), so show that one and only
+    // refresh its activity fields; rebuilding it here showed an owner Stop would refuse (#5799).
+    // Rows delegated before the binding was stored keep the rebuilt display.
+    if (packet.lane?.laneId) {
+      return {
+        ...packet,
+        lane: {
+          ...packet.lane,
+          lastEventAt: packet.lane.laneId === lane.id ? lane.lastEventAt : packet.lane.lastEventAt,
+          lastEventLabel: packet.lane.laneId === lane.id ? lane.lastEventLabel : packet.lane.lastEventLabel,
+          mergeMode: mergePolicy.mode,
+          mergeModeNote: mergePolicy.note,
+        },
+      };
+    }
     return {
       ...packet,
       lane: {

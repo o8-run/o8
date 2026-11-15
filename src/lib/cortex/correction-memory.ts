@@ -16,6 +16,7 @@ export function listCorrectionMemory(input: { repoPaths: string[]; projectId?: s
         json_extract(a.continuation_json, '$.laneId'),
         (SELECT id FROM lanes WHERE a.packet_id IS NOT NULL AND packet_id = a.packet_id ORDER BY created_at DESC LIMIT 1))
       WHERE a.status = 'rejected' AND json_valid(a.resolution_json)
+        AND COALESCE(a.tool_name, '') != 'orchestrator_review'
         AND TRIM(COALESCE(json_extract(a.resolution_json, '$.note'), '')) != ''
       UNION ALL
       SELECT 'steer:' || e.id, l.label, json_extract(e.payload_json, '$.message'), l.repo_path, l.project_id,

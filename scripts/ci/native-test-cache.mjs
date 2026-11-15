@@ -9,6 +9,7 @@ const crate = 'native/o8-next';
 const target = path.resolve(process.env.CARGO_TARGET_DIR || `${crate}/target`);
 const registrationTarget = path.join(target, 'pull-request-registration-target');
 const manifestPath = path.join(target, '.o8-native-sources.json');
+const registrationMarker = path.join(registrationTarget, '.o8-registration-sources');
 const cargoHome = path.resolve(process.env.CARGO_HOME || '.o8-next-cargo');
 function command(name, args) {
   const result = spawnSync(name, args, { encoding: 'utf8', maxBuffer: 64 * 1024 ** 2 });
@@ -45,19 +46,40 @@ function sources() {
   }
   return [...inputs].sort();
 }
+function sourceDigest() {
+  const source = createHash('sha256');
+  for (const file of sources()) source.update(file).update('\0').update(readFileSync(file)).update('\0');
+  return source.digest('hex');
+}
+// Compiler configuration, lockfile and every tracked crate input, including vendor/gpui.
+function registrationIdentity() {
+  const { configuration, lockfile } = cacheIdentity();
+  return `native-registration-v2-${configuration}-${lockfile}-${sourceDigest()}`;
+}
 switch (process.argv[2]) {
   case 'key': {
     const { configuration, lockfile } = cacheIdentity();
-    const source = createHash('sha256');
-    for (const file of sources()) source.update(file).update('\0').update(readFileSync(file)).update('\0');
     const prefix = `native-tests-v1-${configuration}-${lockfile}-`;
-    output('key', `${prefix}${source.digest('hex')}`);
+    output('key', `${prefix}${sourceDigest()}`);
     output('restore-key', prefix);
-    output('registration-key', `native-registration-v1-${configuration}-${lockfile}`);
-    output('registration-restore-key', `native-registration-v1-${configuration}-`);
+    // Exact key only: the nested check compiles the copied app and vendored path
+    // dependencies, so a target built from other sources is never reused.
+    output('registration-key', registrationIdentity());
     break;
   }
   case 'restore': {
+    // Runs before any backdating. Backdating is proven against the main target's
+    // manifest only, so a second target inside CARGO_TARGET_DIR built from other
+    // sources would look fresh to Cargo. Keep the registration target only when it
+    // records exactly the current source identity; otherwise remove it.
+    if (existsSync(registrationTarget)) {
+      const recorded = existsSync(registrationMarker) ? readFileSync(registrationMarker, 'utf8').trim() : null;
+      if (recorded === registrationIdentity()) console.log('[native-cache] registration target matches the current sources');
+      else {
+        rmSync(registrationTarget, { recursive: true, force: true });
+        console.log(`[native-cache] registration target ${recorded ? 'built from other sources' : 'has no source record'}: removed`);
+      }
+    }
     // A new checkout is newer than cached Cargo dep-info. On fallback restores,
     // only content proven unchanged by the cached manifest may be backdated.
     const exact = process.env.O8_NATIVE_CACHE_HIT === 'true';
@@ -109,6 +131,9 @@ switch (process.argv[2]) {
     mkdirSync(target, { recursive: true });
     writeFileSync(manifestPath, JSON.stringify({ ...cacheIdentity(),
       sources: Object.fromEntries(sources().map(file => [file, hash(readFileSync(file))])) }));
+    // Restore removed any registration target from other sources, so one present
+    // now was built from, or proven equal to, this checkout.
+    if (existsSync(registrationTarget)) writeFileSync(registrationMarker, registrationIdentity());
     function measure() {
       let total = 0;
       // Shard 1 publishes this nested check target under its own cache budget.

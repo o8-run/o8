@@ -39,9 +39,10 @@ it('registers the production ACP GET for the native settings caller', async () =
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE']) {
     expect(matchNativeHttpRoute('/api/runtime/acp-registry', method)).toBeUndefined();
   }
-  for (const path of ['/api/setup/detect', '/api/review/push']) {
-    expect(matchNativeHttpRoute(path), path).toBeUndefined();
-  }
+  expect(matchNativeHttpRoute('/api/setup/detect', 'GET')?.route.methods).toEqual(['GET']);
+  expect(matchNativeHttpRoute('/api/setup/detect', 'POST')).toBeUndefined();
+  expect(matchNativeHttpRoute('/api/review/push', 'POST')?.route.methods).toEqual(['POST']);
+  expect(matchNativeHttpRoute('/api/review/push', 'GET')).toBeUndefined();
 });
 
 it('reads and refreshes the public ACP catalog on a cold data dir without creating state', async () => {

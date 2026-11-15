@@ -400,7 +400,9 @@ fn projects_palette_loading_and_cancel(cx: &mut TestAppContext) {
     click(cx, "project-cancel");
     click(cx, "repo-add");
     click(cx, "repo-cancel");
-    click(cx, "shell-workspace");
+    // Picking the open Projects again from Tools returns to the workspace.
+    click(cx, "rail-more");
+    click(cx, "rail-more-projects");
     assert!(!shell.read_with(cx, |s, _| s.surfaces.projects.open));
 }
 

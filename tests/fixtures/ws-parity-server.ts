@@ -26,6 +26,10 @@ export async function startParityReference(options: {
   logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean | 'default'; nativeRepositoryReads?: boolean; ttsPython?: string;
   /** WS_TOKEN for the WS process when it should differ from the stored ws-token. */
   envToken?: string;
+  /** An owned HTTP fixture that executes the Next route in a separate process context. */
+  nextOrigin?: string;
+  /** The WS process's API base is its own listener, as the Next-stopped switch will bind it. */
+  apiOnListener?: boolean;
   inbox?: () => typeof fixtureInbox;
   sync?: (body: Record<string, unknown>) => unknown | Promise<unknown>;
 } = {}) {
@@ -85,7 +89,9 @@ export async function startParityReference(options: {
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: options.envToken ?? token,
       // Never reach pip from a fixture, even from a shell that sets a real one.
       O8_TTS_PYTHON: options.ttsPython ?? join(directory, 'no-python'),
-      O8_API_PORT: String(address.port), O8_WS_PORT: String(port),
+      // PORT outranks O8_API_PORT in getApiBase(), so it moves with it.
+      O8_API_PORT: String(options.apiOnListener ? port : address.port), O8_WS_PORT: String(port),
+      ...(options.apiOnListener ? { PORT: String(port) } : {}),
       CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${port}`,
       O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
       O8_NEXT_O8D: options.nativeHttp ? '1' : '0',
@@ -93,7 +99,7 @@ export async function startParityReference(options: {
       O8D_NATIVE_SESSION_READS: options.nativeSessionReads === 'default' ? undefined : options.nativeSessionReads ? '1' : '0',
       O8D_NATIVE_REPOSITORY_READS: options.nativeRepositoryReads ? '1' : '0',
       O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,
-      O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: apiUrl },
+      O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: options.nextOrigin ?? apiUrl },
   });
   // spawn drains a long-lived process without execFile's cumulative maxBuffer.
   let stopRequested = false;
@@ -109,6 +115,12 @@ export async function startParityReference(options: {
     diagnostics.code = code;
     diagnostics.signal = signal;
     diagnostics.exitAfterStop = stopRequested;
+    // A listener that dies mid-test otherwise surfaces only as ECONNREFUSED in the next
+    // request. Report why the child went away, from the child itself.
+    if (!stopRequested) {
+      console.error(`[ws-parity-server] WS child exited unexpectedly (pid ${child.pid}, code ${code}, signal ${signal}, `
+        + `${diagnostics.stderrBytes} stderr bytes). Last stderr:\n${diagnostics.stderr.slice(-8_192) || '(none)'}`);
+    }
   });
   const receipt = () => ({ ...diagnostics });
   const stop = async () => {

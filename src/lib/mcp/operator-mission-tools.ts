@@ -482,7 +482,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
   try {
     return await correlatedApiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').dispatchMission>>>(
       '/api/orchestrator/dispatch',
-      { missionId: input.missionId, runtime: input.runtime },
+      { missionId: input.missionId, runtime: input.runtime, force: input.force },
     );
   } catch (error) {
     return missionToolError('dispatchMission', error, 'Failed to dispatch mission.');
@@ -520,6 +520,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
         findings: input.findings,
         approved: input.approved,
         reviewedHeadSha: input.reviewedHeadSha,
+        runEvidence: input.runEvidence,
         contractCoverageEvidence: input.contractCoverageEvidence,
       },
     );

@@ -48,11 +48,11 @@ it('observes only persisted parent workers through the actual MCP entry, with st
   const team = { id: hash, path: repo, parentThreadId: parent, members: [{ surfaceId: surface, runtime: 'opencode' }, { surfaceId: unknown, runtime: 'codex' }] };
   writeFileSync(join(data, 'shared-checkout-teams', `${hash}.json`), JSON.stringify(team));
   writeFileSync(join(data, 'shared-checkout-teams', 'archive', `${hash}-1.json`), JSON.stringify({ ...team, members: [{ surfaceId: archived, runtime: 'claude-code' }], finishedAt: '2026-01-01T00:00:00Z' }));
-  writeFileSync(join(data, 'orchestrator-state.json'), JSON.stringify({ packets: [
+  writeFileSync(join(data, 'orchestrator-state.json'), JSON.stringify({ version: 1, mission: { packets: [
     { id: 'packet-related', workspaceTargetPath: repo, orchestratorThreadId: parent, runtime: 'codex' },
     { id: 'packet-file', workspaceTargetPath: repo, orchestratorThreadId: parent, runtime: 'codex', lane: { sessionKey: fileBound } },
     { id: 'packet-unrelated', workspaceTargetPath: repo, orchestratorThreadId: 'thoughts-other', runtime: 'codex' },
-  ] }));
+  ] } }));
   const sessionPath = join(data, 'owned-opencode', 'related', 'session.json');
   mkdirSync(join(sessionPath, '..'), { recursive: true });
   const run = { id: 'run-1', startedAt: '2026-01-01T00:00:00Z', outcome: 'running' };

@@ -393,7 +393,7 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
 
   if (state.hasUncommittedWork) {
     try {
-      const committed = await commitCrashedWorkerWork(cwd, lane.repoPath, lane.label);
+      const committed = await commitCrashedWorkerWork(cwd, lane.repoPath, lane.label, lane.branch);
       if (committed) {
         console.log(`[silent-exit] Auto-committed salvaged work in ${cwd} for lane ${lane.id}`);
       }

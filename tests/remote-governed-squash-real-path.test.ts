@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -197,4 +197,27 @@ it('checks a newly persisted session restriction at the remote publication bound
   expect(git(fixture.origin, ['rev-parse', 'main'])).toBe(fixture.preMergeMainSha);
   expect(git(fixture.repo, ['status', '--porcelain'])).toBe('');
   expect(git(fixture.repo, ['branch', '--show-current'])).toBe(fixture.savedBranch);
+}, 30_000);
+
+it('runs no repository hook while it fetches, checks out, merges and pushes a remote lane', async () => {
+  const fixture = await createFixture('hooks', false);
+  const marker = join(fixture.repo, '..', 'hooks-ran.txt');
+  const hooks = join(fixture.repo, '.githooks');
+  mkdirSync(hooks);
+  for (const hook of ['pre-commit', 'post-commit', 'pre-push', 'post-checkout', 'post-merge', 'post-rewrite', 'reference-transaction']) {
+    writeFileSync(join(hooks, hook), `#!/bin/sh\necho ${hook} >> ${JSON.stringify(marker)}\n`);
+    chmodSync(join(hooks, hook), 0o755);
+  }
+  writeFileSync(join(fixture.repo, '.git', 'info', 'exclude'), '.githooks/\n');
+  git(fixture.repo, ['config', 'core.hooksPath', join(fixture.repo, '.githooks')]);
+
+  const result = await performRemoteCustomerMerge(fixture.lane, {
+    verb: 'merge',
+    laneId: fixture.lane.id,
+    commitMessage: 'fix: squash remote packet without hooks',
+  }, 'user');
+
+  expect(result).toMatchObject({ ok: true, pushedToOrigin: true });
+  const ran = existsSync(marker) ? readFileSync(marker, 'utf8').trim().split('\n') : [];
+  expect(ran, ran.join(',')).toEqual([]);
 }, 30_000);

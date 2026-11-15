@@ -1,3 +1,5 @@
+import { listExternalReviews, type ExternalReviewTask } from './external-review-store';
+import { readLaneTerminalReason } from '@/lib/lane/terminal-reason';
 import 'server-only';
 
 import { basename } from 'node:path';
@@ -11,6 +13,7 @@ import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 
 import { listLanes } from '@/lib/lane/registry';
+import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { Lane, LaneStatus } from '@/lib/lane/types';
 import { currentMissionState } from '@/lib/orchestrator/operator-mission-service/shared';
 import type {
@@ -21,6 +24,50 @@ import type {
   WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext, ProjectNotFoundError, type ProjectContext } from '@/lib/projects/context';
+
+interface FallbackReceipt { fromRuntime?: string; suggestedModel?: string }
+
+/** One read for the listed tasks; malformed historical rows cannot break the pool. */
+function taskFallbackReceipts(lanes: Lane[]): Map<string, FallbackReceipt> {
+  const receipts = new Map<string, FallbackReceipt>();
+  if (!lanes.length) return receipts;
+  const runtimes = new Map(lanes.map(lane => [lane.id, lane.runtime]));
+  const rows = getSqlite().prepare(`SELECT lane_id, payload_json FROM lane_events
+    WHERE verb = 'worker_fallback' AND lane_id IN (SELECT value FROM json_each(?))
+    ORDER BY rowid DESC`).all(JSON.stringify([...runtimes.keys()])) as Array<{ lane_id: string; payload_json: string }>;
+  for (const row of rows) {
+    if (receipts.has(row.lane_id)) continue;
+    try {
+      const value: unknown = JSON.parse(row.payload_json);
+      if (!value || typeof value !== 'object') continue;
+      const receipt = value as Record<string, unknown>;
+      if (receipt.status !== 'redispatched' || receipt.toRuntime !== runtimes.get(row.lane_id)) continue;
+      receipts.set(row.lane_id, {
+        fromRuntime: typeof receipt.fromRuntime === 'string' ? receipt.fromRuntime : undefined,
+        suggestedModel: typeof receipt.suggestedModel === 'string' ? receipt.suggestedModel : undefined,
+      });
+    } catch { /* Skip corrupt historical event payloads. */ }
+  }
+  return receipts;
+}
+
+/** Project the durable fallback receipt, keeping the original requested route. */
+function taskWorkerRouting(packet: OrchestratorPacket, lane: Lane, receipt: FallbackReceipt): WorkerRouting {
+  const routing = packet.workerRouting!;
+  return {
+    ...routing,
+    selectedRuntime: lane.runtime,
+    selectedProvider: getRuntimeCapability(lane.runtime).workerProvider,
+    selectedModel: receipt.suggestedModel ?? null,
+    selectedEffort: null,
+    reason: `Worker quota fallback from ${receipt.fromRuntime ?? routing.selectedRuntime} to ${lane.runtime}.`,
+  };
+}
+
+function taskRuntimeSubstitution(packet: OrchestratorPacket, routing: WorkerRouting | null): string | null {
+  return routing?.runtimeSubstitution?.reason ?? (routing && ((routing.requestedRuntime && routing.requestedRuntime !== routing.selectedRuntime)
+    || packet.workerRouting?.selectedRuntime !== routing.selectedRuntime) ? routing.reason : null);
+}
 
 export type TaskPoolGroup = 'ready' | 'running' | 'review' | 'blocked' | 'done';
 
@@ -71,6 +118,7 @@ export interface TaskPoolRemoteExecution {
 }
 
 export interface TaskPoolTask {
+  externalReview?: ExternalReviewTask;
   id: string;
   packetId: string | null;
   laneId: string | null;
@@ -81,6 +129,7 @@ export interface TaskPoolTask {
   runtime: OrchestratorRuntime | Lane['runtime'];
   workerIntent: WorkerIntent | null;
   workerRouting: WorkerRouting | null;
+  runtimeSubstitution?: string | null;
   branch: string | null;
   baseBranch: string | null;
   repoPath: string | null;
@@ -88,6 +137,8 @@ export interface TaskPoolTask {
   queueState: OrchestratorPacket['queueState'] | null;
   releaseState: OrchestratorPacket['releaseState'] | null;
   blockedReason: string | null;
+  failureReason?: string | null;
+  cleanup?: import('@/lib/worktree/preparation-failure').PreparationCleanup;
   lastEventAt: string | null;
   lastEventLabel: string | null;
   allowedFiles: string[];
@@ -108,11 +159,13 @@ export interface TaskPool {
 }
 
 export interface TaskPoolOptions {
+  packetId?: string | null;
   includeMissionHistory?: boolean;
   projectId?: string | null;
   repoPath?: string | null;
   includeDone?: boolean;
   includeBrief?: boolean;
+  externalTaskId?: string;
 }
 
 const GROUP_ORDER: TaskPoolGroup[] = ['blocked', 'review', 'running', 'ready', 'done'];
@@ -276,11 +329,19 @@ async function resolveProjectContext(
   }
 }
 
+function preparationFields(lane: Lane | null) {
+  const reason = readLaneTerminalReason(lane);
+  return reason?.code === 'packet_worktree_provision_failed'
+    ? { failureReason: reason.cause, ...(reason.cleanup ? { cleanup: reason.cleanup } : {}) } : {};
+}
+
 export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPool> {
   const panelProjects = (await getProjectsLedger()).projects;
   const mission = currentMissionState();
+  let historyPackets: OrchestratorPacket[] | undefined;
+  const readHistory = () => historyPackets ??= listMissionRegistryEntries({ includeArchived: true }).flatMap(entry => entry.mission.packets);
   const packets = options.includeMissionHistory
-    ? [...new Map([...listMissionRegistryEntries({ includeArchived: true }).flatMap(entry => entry.mission.packets), ...mission.packets].map(packet => [packet.id, packet])).values()]
+    ? [...new Map([...readHistory(), ...mission.packets].map(packet => [packet.id, packet])).values()]
     : mission.packets;
   const lanes = listLanes();
   const lanesByPacketId = new Map(lanes.flatMap((lane) => (
@@ -289,9 +350,11 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
   const packetIds = new Set(packets.map((packet) => packet.id));
   const projectCache = new Map<string, ProjectContext | null>();
   const tasks: TaskPoolTask[] = [];
+  const fallbackCandidates: Array<{ packet: OrchestratorPacket; lane: Lane; task: TaskPoolTask }> = [];
   const nowMs = Date.now();
 
   for (const packet of packets) {
+    if (options.packetId && packet.id !== options.packetId) continue;
     const lane = lanesByPacketId.get(packet.id) ?? null;
     const remoteJob = lane?.runtime === 'cloud'
       ? getLatestPacketJob(DEFAULT_CLOUD_TEAM_ID, packet.id)
@@ -307,7 +370,9 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
     const group = chooseGroup(packet, lane, execution ? remoteJob : undefined);
     if (!options.includeDone && group === 'done') continue;
 
-    tasks.push({
+    const routing = packet.workerRouting ?? null;
+    const task: TaskPoolTask = {
+      ...preparationFields(lane),
       id: packet.id,
       packetId: packet.id,
       laneId: lane?.id ?? packet.lane?.laneId ?? null,
@@ -317,7 +382,8 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       status: lane?.status ?? packet.status,
       runtime: lane?.runtime ?? packet.runtime,
       workerIntent: packet.workerIntent ?? null,
-      workerRouting: packet.workerRouting ?? null,
+      workerRouting: routing,
+      runtimeSubstitution: taskRuntimeSubstitution(packet, routing),
       branch: lane?.branch ?? packet.branchTarget ?? null,
       baseBranch: lane?.baseBranch ?? null,
       repoPath,
@@ -341,10 +407,21 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
           taskBody: packet.summary,
         })
         : undefined,
-    });
+    };
+    tasks.push(task);
+    if (lane && routing && routing.selectedRuntime !== lane.runtime) fallbackCandidates.push({ packet, lane, task });
+  }
+
+  const receipts = taskFallbackReceipts(fallbackCandidates.map(candidate => candidate.lane));
+  for (const { packet, lane, task } of fallbackCandidates) {
+    const receipt = receipts.get(lane.id);
+    if (!receipt) continue;
+    task.workerRouting = taskWorkerRouting(packet, lane, receipt);
+    task.runtimeSubstitution = taskRuntimeSubstitution(packet, task.workerRouting);
   }
 
   for (const lane of lanes) {
+    if (options.packetId && lane.packetId !== options.packetId) continue;
     if (lane.packetId && packetIds.has(lane.packetId)) continue;
     const repoPath = normalizePath(lane.repoPath);
     const context = await resolveProjectContext(projectCache, repoPath, lane.projectId);
@@ -355,6 +432,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
     if (!options.includeDone && group === 'done') continue;
 
     tasks.push({
+      ...preparationFields(lane),
       id: lane.id,
       packetId: null,
       laneId: lane.id,
@@ -365,6 +443,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       runtime: lane.runtime,
       workerIntent: null,
       workerRouting: null,
+      runtimeSubstitution: null,
       branch: lane.branch,
       baseBranch: lane.baseBranch,
       repoPath,
@@ -389,6 +468,33 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
         })
         : undefined,
     });
+  }
+
+  if (!options.packetId) {
+    const currentTasks = new Map(tasks.flatMap(task => task.packetId ? [[task.packetId, task] as const] : []));
+    const representedTasks: string[] = [];
+    for (const external of listExternalReviews({ taskId: options.externalTaskId, packets, lanes, historyPackets: readHistory })) {
+      if (options.repoPath && normalizePath(options.repoPath) !== normalizePath(external.repoPath)) continue;
+      const current = currentTasks.get(external.revision.packetId);
+      const context = await resolveProjectContext(projectCache, external.repoPath, null);
+      if (options.projectId && context?.id !== options.projectId && context?.slug !== options.projectId) continue;
+      representedTasks.push(external.taskId);
+      tasks.push({ id: external.taskId, packetId: external.revision.packetId, laneId: null, title: `Review PR #${external.pullRequest}`,
+        summary: external.revision.intendedOutcome ?? 'Intended outcome missing.', group: 'ready', status: 'draft', runtime: 'codex',
+        workerIntent: 'reviewer', workerRouting: null, branch: null, baseBranch: external.revision.baseRef, repoPath: external.repoPath,
+        repoName: basename(external.repoPath), queueState: 'held', releaseState: 'pending', blockedReason: null, lastEventAt: external.revision.adoptedAt,
+        lastEventLabel: external.state, allowedFiles: [], sourceIssue: null, problemDossierId: null, problemRemedyId: null,
+        project: context ? toProjectSummary(context, panelProjects) : null, lane: null, execution: null, ...current, externalReview: external,
+        ...(current ? { id: external.taskId } : {}) });
+    }
+    const revisionPackets = new Set((getSqlite().prepare(`SELECT r.packet_id FROM external_pr_review_revisions r
+      JOIN external_pr_review_tasks t ON t.id = r.task_id
+      WHERE r.packet_id IN (SELECT value FROM json_each(?))
+        AND (r.id != t.current_revision_id OR r.task_id IN (SELECT value FROM json_each(?)))`)
+      .all(JSON.stringify([...currentTasks.keys()]), JSON.stringify(representedTasks)) as Array<{ packet_id: string }>).map(row => row.packet_id));
+    for (let i = tasks.length - 1; i >= 0; i--) {
+      if (!tasks[i].externalReview && tasks[i].packetId && revisionPackets.has(tasks[i].packetId!)) tasks.splice(i, 1);
+    }
   }
 
   tasks.sort((left, right) => {
@@ -416,6 +522,6 @@ export async function getTaskPoolTask(
   taskId: string,
   options: Omit<TaskPoolOptions, 'includeBrief'> = {},
 ): Promise<TaskPoolTask | null> {
-  const pool = await getTaskPool({ ...options, includeDone: true, includeBrief: true });
+  const pool = await getTaskPool({ ...options, externalTaskId: taskId.startsWith('external-pr-') ? taskId : undefined, includeDone: true, includeBrief: true });
   return pool.tasks.find((task) => task.id === taskId || task.packetId === taskId || task.laneId === taskId) ?? null;
 }

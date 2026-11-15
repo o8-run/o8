@@ -16,7 +16,10 @@ const priorOwnedRoot = process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
 const ownedRoot = realpathSync(mkdtempSync(join(os.tmpdir(), 'o8-canonical-owned-')));
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedRoot;
 
+const { getSqlite } = await import('@/lib/db');
+const { projectMergeModeKey } = await import('@/lib/lane/project-merge-mode-migration');
 const { recordMission } = await import('@/lib/db/missions-store');
+const operatorCheckoutMerge = await import('@/lib/lane/operator-checkout-merge');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const {
   approveAndMergePacket,
@@ -133,6 +136,16 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
       '',
     ].join('\n'));
     chmodSync(tscPath, 0o755);
+    // The merge typecheck runs the repository install's compiler. It fails, so
+    // a typecheck that ran would leave the marker and take the layer-1 retry.
+    const compiler = join(canonicalRepo, 'node_modules', 'typescript', 'bin', 'tsc');
+    mkdirSync(join(compiler, '..'), { recursive: true });
+    writeFileSync(compiler, [
+      `try { require('node:fs').writeFileSync(${JSON.stringify(typecheckMarker)}, ''); } catch {}`,
+      'console.log("src/index.ts(1,1): error TS2307: Cannot find module gate-check");',
+      'process.exit(2);',
+      '',
+    ].join('\n'));
   }
 
   const registeredRepo = await addRepo(realpathSync.native(canonicalRepo));
@@ -179,6 +192,9 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
     sessionKey,
     label: `Canonical merge ${label}`,
   });
+  // This suite exercises the operator-enabled direct integration path.
+  getSqlite().prepare('INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, ?)')
+    .run(projectMergeModeKey(lane.projectId ?? 'default'), 'direct', Date.now());
   setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
 
   const packet = packetFixture(packetId, canonicalRepo, branch);
@@ -297,9 +313,13 @@ describe('direct merge publishes through the canonical mission repository', () =
 
   it('blocks and escalates when canonical main loses the candidate after git merge succeeds', async () => {
     const fixture = await createRelocatedCloneMission('postcondition');
-    const hook = join(fixture.canonicalRepo, '.git', 'hooks', 'post-merge');
-    writeFileSync(hook, `#!/bin/sh\ngit reset --hard ${fixture.baseSha} >/dev/null\n`);
-    chmodSync(hook, 0o755);
+    // Canonical main loses the candidate right after o8's fast-forward merge.
+    const fastForward = operatorCheckoutMerge.fastForwardBaseBranch;
+    vi.spyOn(operatorCheckoutMerge, 'fastForwardBaseBranch').mockImplementation(async (input) => {
+      const merged = await fastForward(input);
+      git(fixture.canonicalRepo, ['reset', '--hard', fixture.baseSha]);
+      return merged;
+    });
 
     const result = await reviewAndMerge(fixture);
     const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === fixture.packetId);

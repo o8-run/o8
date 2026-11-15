@@ -712,7 +712,7 @@ export async function getRuntimeInventorySnapshot(
               try {
                 const lane = getLane(laneId);
                 if (!lane) return;
-                const committed = await autoCommitCompletionWorktree(worktreePath, lane.repoPath);
+                const committed = await autoCommitCompletionWorktree(worktreePath, lane.repoPath, undefined, lane.branch);
                 if (committed) {
                   console.log(`[lane-review] Auto-committed dirty worktree for lane ${laneId} at ${worktreePath}`);
                 }

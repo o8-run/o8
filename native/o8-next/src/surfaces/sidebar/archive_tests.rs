@@ -13,7 +13,7 @@ fn archive_fixture(cx: &mut TestAppContext, restore: bool) {
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("archive-row.json"),
-        State::default(),
+        by_date(),
         cx,
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);
@@ -117,7 +117,7 @@ fn sidebar_archived_disclosure_keyboard_activation_and_navigation(cx: &mut TestA
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("disclosure-keys.json"),
-        State::default(),
+        by_date(),
         cx,
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);
@@ -218,7 +218,7 @@ fn sidebar_titles_ellipsize_with_visible_archive_and_restore_at_280(cx: &mut Tes
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("title-width.json"),
-        State::default(),
+        by_date(),
         cx,
     );
     wait_for(&shell, &mut visual, |s, _| s.connected);

@@ -1,6 +1,7 @@
 use super::*;
-// The rail's More button and its menu (RailMoreMenu.tsx): Projects, Customize,
-// Settings and Setup, anchored beside the button. PRs follows it on the rail.
+// The dock's Tools button and its drawer: every destination the old rail held
+// (new chat, terminal, scheduled, plugins) plus RailMoreMenu.tsx's Projects,
+// Customize, Settings and Setup, opening upward from the end of the dock.
 struct RailMore;
 register_shell_feature!(RailMore);
 impl ShellFeature for RailMore {
@@ -37,6 +38,20 @@ impl ShellFeature for RailMore {
     }
 }
 
+/// Below this sidebar width the dock drops the update button; the Tools
+/// drawer has it (Q 2026-11-09).
+pub(crate) const COMPACT_BELOW: f32 = 240.;
+
+/// The dock's width this frame, set by the dock before its items render.
+#[derive(Default)]
+pub(crate) struct Dock {
+    pub(crate) width: f32,
+}
+
+pub(crate) fn compact(s: &Shell) -> bool {
+    s.features.read::<Dock>().is_some_and(|dock| dock.width < COMPACT_BELOW)
+}
+
 #[derive(Default)]
 struct Menu {
     open: bool,
@@ -59,6 +74,8 @@ fn selected(s: &Shell) -> bool {
 }
 
 pub(crate) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
+    // In a narrow dock the update button lives in the drawer; a dot says it is ready.
+    let dot = compact(s) && super::update::ready(s);
     let open = s.features.get::<Menu>().open;
     let active = open || selected(s);
     div()
@@ -68,7 +85,7 @@ pub(crate) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement
             div()
                 .id("rail-more")
                 .debug_selector(|| "rail-more".into())
-                .size(px(44.))
+                .size(px(super::super::rail::TARGET))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -79,20 +96,31 @@ pub(crate) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement
                 // The tooltip would sit over the open menu.
                 .when(!open, |button| {
                     button.tooltip(|_, cx| {
-                        cx.new(|_| crate::icon::Tip("Projects, Customize and Settings".into()))
+                        cx.new(|_| crate::icon::Tip("Tools".into()))
                             .into()
                     })
                 })
                 .child(crate::icon::stroke(
-                    MORE,
+                    GRID,
                     if active {
                         theme().text
                     } else {
                         theme().text_secondary
                     },
-                    19.,
-                    2.6,
+                    17.,
+                    1.8,
                 ))
+                .when(dot, |button| {
+                    button.relative().child(
+                        div()
+                            .absolute()
+                            .top(px(5.))
+                            .right(px(5.))
+                            .size(px(6.))
+                            .rounded_full()
+                            .bg(crate::theme::update_ready()),
+                    )
+                })
                 .on_click(cx.listener(|this, _, window, cx| {
                     let menu = this.features.get::<Menu>();
                     if menu.open {
@@ -113,19 +141,38 @@ pub(crate) fn button(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement
         .into_any_element()
 }
 
-/// One destination: its glyph, label and, for some, a line under the label.
-type Item = (&'static str, &'static str, &'static str, Option<&'static str>, bool, fn() -> Command);
+/// What a drawer row does when picked.
+type Action = fn(&mut Shell, &mut Window, &mut Context<Shell>);
 
-fn items(s: &Shell) -> [Item; 4] {
-    [
-        ("rail-more-projects", PROJECTS, "Projects", None, s.surfaces.projects.open, || Command::Projects),
+/// One destination: its glyph, label, a line under the label for some, whether
+/// it is the open one, whether it is an overlay a second pick closes, and its action.
+type Item = (&'static str, &'static str, &'static str, Option<&'static str>, bool, bool, Action);
+
+fn run(command: Command, s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    s.capture(window, cx);
+    s.execute(command, window, cx);
+}
+
+fn items(s: &Shell) -> Vec<Item> {
+    use super::super::rail::Icon;
+    let active = s.active();
+    let mut items: Vec<Item> = vec![
+        ("rail-more-chat", Icon::Play.path(), "New chat", Some("Start a chat on the lead"), false, false, |s, w, cx| {
+            s.capture(w, cx);
+            super::start_chat(s, w, cx);
+        }),
+        ("rail-more-terminal", Icon::Terminal.path(), "Terminal", None, active == Some(Tab::Terminal), false, |s, w, cx| run(Command::Terminal, s, w, cx)),
+        ("rail-more-scheduled", Icon::Clock.path(), "Scheduled", None, active == Some(Tab::Scheduled), false, |s, w, cx| run(Command::Scheduled, s, w, cx)),
+        ("rail-more-plugins", Icon::Puzzle.path(), "Plugins", None, false, false, |s, w, cx| s.show_customize_tab("plugins", w, cx)),
+        ("rail-more-projects", PROJECTS, "Projects", None, s.surfaces.projects.open, true, |s, w, cx| run(Command::Projects, s, w, cx)),
         (
             "rail-more-customize",
             CUSTOMIZE,
             "Customize",
             Some("Agent and workspace capabilities"),
             s.surfaces.customize.open,
-            || Command::Customize,
+            true,
+            |s, w, cx| run(Command::Customize, s, w, cx),
         ),
         (
             "rail-more-settings",
@@ -133,7 +180,8 @@ fn items(s: &Shell) -> [Item; 4] {
             "Settings",
             Some("Appearance and app preferences"),
             s.surfaces.settings.view.is_some(),
-            || Command::Settings,
+            true,
+            |s, w, cx| run(Command::Settings, s, w, cx),
         ),
         (
             "rail-more-setup",
@@ -141,19 +189,38 @@ fn items(s: &Shell) -> [Item; 4] {
             "Setup",
             Some("Repositories and agent runtimes"),
             s.surfaces.setup.view.is_some(),
-            || Command::Setup,
+            true,
+            |s, w, cx| run(Command::Setup, s, w, cx),
         ),
-    ]
+    ];
+    if compact(s) {
+        let ready = super::update::ready(s);
+        items.push((
+            "rail-more-updates",
+            UPDATES,
+            "Updates",
+            Some(if ready { "An update is ready to install" } else { "Check for updates" }),
+            false,
+            false,
+            |s, _, cx| super::update::open(s, cx),
+        ));
+    }
+    items
 }
 
-/// Opens destination `index`. One destination at a time, as classic's More
-/// menu; the open one stays as it is.
+/// Opens destination `index`, one at a time. Picking the open overlay again
+/// closes it, which is how the workspace comes back now that Home is gone.
 fn pick(s: &mut Shell, index: usize, window: &mut Window, cx: &mut Context<Shell>) {
-    let (.., current, command) = items(s)[index];
+    let Some(&(.., current, overlay, action)) = items(s).get(index) else {
+        return;
+    };
     close(s, cx);
-    if !current {
-        s.close_rail_overlays(window, cx);
-        s.execute(command(), window, cx);
+    s.close_rail_overlays(window, cx);
+    if current && overlay {
+        s.restore_focus(window, cx);
+        cx.notify();
+    } else if !current {
+        action(s, window, cx);
     }
 }
 
@@ -203,21 +270,37 @@ fn row(
 fn menu(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
     let menu = s.features.get::<Menu>();
     let active = menu.keyed.then_some(menu.active);
+    // New chat and Terminal still drag onto the workspace, as they did from the
+    // rail; the drawer closes as the drag starts.
+    let shell = cx.weak_entity();
+    let draggable = move |row: gpui::Stateful<gpui::Div>, pane: super::RailPane| {
+        let shell = shell.clone();
+        row.on_drag(pane, move |drag: &super::RailPane, _, _, cx: &mut gpui::App| {
+            let _ = shell.update(cx, |s, cx| close(s, cx));
+            cx.new(|_| drag.clone())
+        })
+    };
     let body = div()
         .p(px(8.))
         .flex()
         .flex_col()
         .children(items(s).into_iter().enumerate().map(
-            |(index, (id, glyph, label, description, current, _))| {
-                row(id, glyph, label, description, current, active == Some(index)).on_click(
+            |(index, (id, glyph, label, description, current, ..))| {
+                let row = row(id, glyph, label, description, current, active == Some(index)).on_click(
                     cx.listener(move |this, _, window, cx| pick(this, index, window, cx)),
-                )
+                );
+                match id {
+                    "rail-more-chat" => draggable(row, super::RailPane::Chat),
+                    "rail-more-terminal" => draggable(row, super::RailPane::Terminal),
+                    _ => row,
+                }
             },
         ));
+    // The drawer opens 8 px above the dock, right-aligned to the Tools button.
     div()
         .absolute()
-        .left(px(54.))
-        .top(px(0.))
+        .right(px(0.))
+        .top(px(-8.))
         .child(
             gpui::deferred(
                 gpui::anchored()
@@ -238,14 +321,14 @@ fn menu(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
         .child(
             gpui::deferred(
                 gpui::anchored()
-                    .anchor(gpui::Corner::TopLeft)
+                    .anchor(gpui::Corner::BottomRight)
                     .snap_to_window_with_margin(px(12.))
                     .child(
                         div()
                             .id("rail-more-menu")
                             .debug_selector(|| "rail-more-menu".into())
                             .occlude()
-                            .w(px(206.))
+                            .w(px(240.))
                             .rounded(px(12.))
                             .bg(crate::theme::popover_background())
                             .border_1()
@@ -259,8 +342,9 @@ fn menu(s: &mut Shell, cx: &mut Context<Shell>) -> gpui::AnyElement {
         .into_any_element()
 }
 
-// Lucide paths: more-horizontal drawn as three dots, then the menu's glyphs.
-const MORE: &str = "M5 12h.01 M12 12h.01 M19 12h.01";
+// Lucide paths: layout-grid for the Tools button, then the drawer's glyphs.
+const UPDATES: &str = "M12 15V3 M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5";
+const GRID: &str = "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z";
 const PROJECTS: &str = "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z";
 const CUSTOMIZE: &str = "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6";
 const SETTINGS: &str =

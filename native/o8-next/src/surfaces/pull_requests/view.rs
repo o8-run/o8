@@ -424,6 +424,12 @@ impl Render for PullRequests {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(12.))
             .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.tab == "reviews" && this.composer.is_empty() && event.keystroke.key == "tab" {
+                    if event.keystroke.modifiers.shift { window.focus_prev(); } else { window.focus_next(); }
+                    cx.stop_propagation();
+                }
+            }))
             .map(|root| {
                 if self.contextual.is_some() {
                     root.child(self.detail_view(cx))

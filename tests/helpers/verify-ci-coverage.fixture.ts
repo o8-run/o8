@@ -39,6 +39,7 @@ export function mutateNativeSetupFixture(setup: { runs: { steps: Array<{
   const registration = setup.runs.steps.find(step => step.id === 'registration-cache');
   if (change === 'registration without headless gate' && registration) registration.if = "inputs.registration-cache == 'true'";
   if (change === 'registration without dependency key' && registration?.with) registration.with.key = 'native-registration-config-only';
+  if (change === 'registration prefix restore' && registration?.with) registration.with['restore-keys'] = '${{ steps.native-cache-key.outputs.registration-key }}';
   if (change === 'registration restored before native' && registration) {
     setup.runs.steps = setup.runs.steps.filter(step => step !== registration);
     setup.runs.steps.splice(setup.runs.steps.findIndex(step => step.id === 'native-cache'), 0, registration);

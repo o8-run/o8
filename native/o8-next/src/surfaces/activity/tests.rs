@@ -84,6 +84,58 @@ pub(super) fn activity_click(cx: &mut VisualTestContext, selector: &'static str)
     start.elapsed().as_secs_f64() * 1000.
 }
 
+/// Stop mission asks first: one press to ask, a second to stop.
+fn stop_mission(cx: &mut VisualTestContext) {
+    activity_click(cx, "activity-stop-mission");
+    activity_click(cx, "activity-stop-mission");
+}
+
+#[gpui::test]
+fn stop_mission_asks_before_it_stops(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    activity_click(cx, "activity-filter-packet");
+    activity_click(cx, "activity-row-packet-local-activity-queued");
+    let _: Value = fixture
+        .client
+        .get("/api/activity-fixture", &[("mode", "stop-ready")])
+        .unwrap();
+    let stops = |fixture: &Fixture| {
+        let receipt: Value = fixture.client.get("/api/activity-fixture", &[]).unwrap();
+        // The fixture keeps each mutation's body; only a stop carries this key.
+        receipt["mutations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|body| body.as_str().is_some_and(|body| body.contains("idempotencyKey")))
+            .count()
+    };
+    // One press, such as one meant for Refresh beside it, stops nothing.
+    activity_click(cx, "activity-stop-mission");
+    assert_eq!(stops(&fixture), 0, "one press only asks");
+    assert!(view.read_with(cx, |v, _| v.stop_armed.is_some()));
+    // The question lapses; a press after that asks again.
+    cx.executor().advance_clock(Duration::from_secs(6));
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |v, _| v.stop_armed.is_none()));
+    activity_click(cx, "activity-stop-mission");
+    assert_eq!(stops(&fixture), 0, "a lapsed question does not count");
+    // A second press while it is asking stops the mission.
+    // A question about one mission is not an answer for another.
+    view.update(cx, |v, _| {
+        let (asked, _) = v.stop_armed.take().unwrap();
+        v.stop_armed = Some((asked, "another-mission".into()));
+    });
+    activity_click(cx, "activity-stop-mission");
+    assert_eq!(stops(&fixture), 0, "the question was about another mission");
+    assert!(view.read_with(cx, |v, _| v.stop_armed.is_some()));
+    activity_click(cx, "activity-stop-mission");
+    assert!(stops(&fixture) >= 1, "the second press stops");
+    assert!(view.read_with(cx, |v, _| v.stop_armed.is_none()));
+}
+
 #[gpui::test]
 fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--activity");
@@ -299,7 +351,7 @@ fn activity_packet_hold_release_and_stop_mission(cx: &mut TestAppContext) {
         .client
         .get("/api/activity-fixture", &[("mode", "stop-ready")])
         .unwrap();
-    activity_click(cx, "activity-stop-mission");
+    stop_mission(cx);
     let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
     assert_eq!(state["mission"]["packets"][0]["queueState"], "held");
     let origin = fixture
@@ -335,7 +387,7 @@ fn activity_stop_replays_lost_response_with_one_identity(cx: &mut TestAppContext
         .client
         .get("/api/activity-fixture", &[("mode", "drop-stop")])
         .unwrap();
-    activity_click(cx, "activity-stop-mission");
+    stop_mission(cx);
     assert_eq!(
         view.read_with(cx, |v, _| v.notice.clone()),
         "Decision applied."
@@ -364,7 +416,7 @@ fn activity_unsettled_stop_blocks_until_refresh_reads_its_receipt(cx: &mut TestA
         .client
         .get("/api/activity-fixture", &[("mode", "stop-unknown")])
         .unwrap();
-    activity_click(cx, "activity-stop-mission");
+    stop_mission(cx);
     assert_eq!(
         view.read_with(cx, |v, _| v.notice.clone()),
         "Decision is unsettled. Refresh to check it."
@@ -453,7 +505,7 @@ fn activity_refused_stop_and_archive_never_archives_later(cx: &mut TestAppContex
     activity_click(cx, "activity-filter-packet");
     activity_click(cx, "activity-row-packet-local-activity-packet");
     activity_click(cx, "activity-release");
-    activity_click(cx, "activity-stop-mission");
+    stop_mission(cx);
     assert_eq!(
         view.read_with(cx, |v, _| v.notice.clone()),
         "Decision is unsettled. Refresh to check it."
@@ -894,7 +946,7 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
             .unwrap()
             .iter()
             .filter_map(|body| serde_json::from_str::<Value>(body.as_str()?).ok())
-            .filter(|body| body["verb"].is_string())
+            .filter(|body| body["verb"].is_string() || body["packetId"].is_string())
             .collect::<Vec<_>>();
         (commands, state["laneId"].clone())
     };
@@ -908,12 +960,15 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
     for control in [
         "activity-lane-resume",
         "activity-lane-create-pr",
-        "activity-lane-merge",
         "activity-close-unmerged",
     ] {
         assert!(cx.debug_bounds(control).is_some(), "{control}");
     }
     assert!(cx.debug_bounds("activity-lane-stop").is_none());
+    assert!(
+        cx.debug_bounds("activity-lane-merge").is_none(),
+        "pending review cannot merge"
+    );
 
     activity_click(cx, "activity-lane-create-pr");
     settle(cx);
@@ -930,20 +985,23 @@ fn activity_packet_lane_commands_and_close_unmerged(cx: &mut TestAppContext) {
         "the created PR's note shows"
     );
 
+    // This UI fixture starts without a saved review. Supply an approved verdict
+    // before exercising the canonical merge conflict response.
+    view.update(cx, |view, cx| {
+        let packet = view.rows.iter_mut()
+            .find(|row| row.id == "activity-packet")
+            .unwrap();
+        packet.data["review"] = serde_json::json!({"approved": true});
+        cx.notify();
+    });
+    draw(cx);
     activity_click(cx, "activity-lane-merge");
     settle(cx);
     let (commands, _) = lane_commands();
-    assert_eq!(commands.last().unwrap()["verb"], "merge");
-    assert_eq!(
-        commands.last().unwrap()["commitMessage"],
-        "Merge lane: Fixture packet"
-    );
+    assert_eq!(commands.last().unwrap()["packetId"], "activity-packet");
+    assert!(commands.last().unwrap()["idempotencyKey"].is_string());
     let notice = view.read_with(cx, |v, _| v.notice.clone());
-    assert!(
-        notice.contains("Merge conflict in fixture.ts.")
-            && notice.ends_with("Try \"Create PR\" instead."),
-        "{notice}"
-    );
+    assert_eq!(notice, "Merge conflict in fixture.ts. Try \"Create PR\" instead.");
 
     // The first close answer is still running: the same body replays until its
     // receipt settles, and the busy confirm cannot send a second close.
@@ -1039,4 +1097,42 @@ fn activity_scope_menu_picks_and_closes(cx: &mut TestAppContext) {
         view.read_with(cx, |v, _| (v.scope_menu, v.keyboard.clone())),
         (false, Some("activity-scope".into()))
     );
+}
+
+#[gpui::test]
+fn activity_loading_line_shows_only_while_the_feed_is_empty(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let view = activity_view(&shell, cx);
+    let row = "activity-row-pr-example/activity-7";
+    draw(cx);
+    assert!(cx.debug_bounds(row).is_some(), "the loaded feed lists its rows");
+    // A refresh of a feed that already has rows is quiet.
+    view.update(cx, |v, cx| {
+        v.loading = true;
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds(row).is_some());
+    assert!(
+        cx.debug_bounds("activity-loading").is_none(),
+        "no loading line above rows that are already drawn"
+    );
+    // Nothing to show and a request in flight: the line.
+    view.update(cx, |v, cx| {
+        v.rows.clear();
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("activity-loading").is_some());
+    assert!(cx.debug_bounds("activity-empty").is_none());
+    // Nothing to show and nothing in flight: the empty state.
+    view.update(cx, |v, cx| {
+        v.loading = false;
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("activity-loading").is_none());
+    assert!(cx.debug_bounds("activity-empty").is_some());
 }

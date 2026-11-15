@@ -1,3 +1,4 @@
+import { cliBuildOptions } from '../cli/build-options.mjs';
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -23,7 +24,7 @@ it.each(['development', 'packaged'] as const)('runs a Pi lead and reopens a dura
       await build({ entryPoints: ['tests/fixtures/pi-dev-host.ts'], outfile: bundle,
         bundle: true, platform: 'node', format: 'esm',
         alias: { 'server-only': resolve('scripts/server-only-stub.js') },
-        external: ['node-pty', 'better-sqlite3', 'bindings'], logLevel: 'silent',
+        external: ['node-pty', 'better-sqlite3', 'bindings', ...cliBuildOptions({ outfile: bundle, version: 'test' }).external!], logLevel: 'silent',
         plugins: [{ name: 'fixture-native-resolution', setup(builder) {
           builder.onResolve({ filter: /^(node-pty|better-sqlite3|bindings)$/ }, args => ({
             path: requireFromRoot.resolve(args.path), external: true,

@@ -43,6 +43,9 @@ export const CORTEX_WORKER_TOOLS = [
       mode: { type: 'string', enum: ['send', 'pause-and-send', 'stop'] },
       holdMerges: { type: 'boolean', description: 'Add an explicit no-merge restriction. False never removes an existing restriction.' },
       idempotencyKey: { type: 'string', description: 'Stable identity for this correction. Reuse only to inspect the identical request after an uncertain response.' },
+      reviewSource: { type: 'object', description: 'Send unresolved findings from this saved rejected packet review to its original editable author. Select exactly one idle author run from the snapshot; omit message, mode and holdMerges. The server builds feedback, enforces a two-round budget and assigns a stable identity. Repeating inspects the same receipt; never resumes a stopped worker. Delivery leaves the review unresolved pending independent verification.',
+        properties: { packetId: { type: 'string' }, approvalId: { type: 'string' }, reviewedHeadSha: { type: 'string' } },
+        required: ['packetId', 'approvalId', 'reviewedHeadSha'], additionalProperties: false },
     } },
   },
   {

@@ -8,6 +8,8 @@ use std::{
 
 #[path = "merge_tests.rs"]
 mod merge;
+#[path = "review_tests.rs"]
+mod reviews;
 
 struct Fixture {
     server: Child,
@@ -638,10 +640,9 @@ fn pull_requests_filters_empty_retry_and_server_merge_refusal(cx: &mut TestAppCo
     choose(cx, "pr-merge-squash");
     click(cx, "pr-confirm");
     assert!(
-        view.read_with(cx, |s, cx| s.delivery(cx).uncertain),
-        "an unconfirmed publication still keeps its delivery hold"
+        !view.read_with(cx, |s, cx| s.delivery(cx).uncertain),
+        "a definitive host refusal is separate from an unknown delivery"
     );
-    click(cx, "pr-acknowledge");
     fixture
         .client
         .pr_post("/__fixture/pr-gates", &json!({"scenario":"ready"}))

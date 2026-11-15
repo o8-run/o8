@@ -348,10 +348,10 @@ function hasUnreconciledRuntimeExit(lane: Lane, events: LaneEvent[]): boolean {
 
 export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): DomainLaneSummary[] {
   if (packetIds?.size === 0) return [];
-  const mergePolicy = currentLaneMergePolicy();
   return listLanes(packetIds)
     .filter((lane) => lane.packetId)
     .map((lane) => {
+      const mergePolicy = currentLaneMergePolicy(lane.projectId);
       const events = getLaneEvents(lane.id, 100);
       const recovery = recoveryInfoFromLaneEvents(events);
       const currentAuthExit = findCurrentAuthExit(lane, events);
@@ -367,7 +367,7 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
         ? (contextEvent.payload.authRecoveryRequired === true ? CODEX_AUTH_RECOVERY_MESSAGE
           : codexAuthRecoveryMessage(typeof contextEvent.payload.stderr === 'string' ? contextEvent.payload.stderr : ''))
         : lane.lastEventLabel === 'packet_worktree_provision_failed'
-          ? String(provisionFailure?.payload.note ?? provisionFailure?.payload.cause
+          ? String(readLaneTerminalReason(lane)?.cause ?? provisionFailure?.payload.note ?? provisionFailure?.payload.cause
             ?? readLaneTerminalReason(lane)?.cause ?? 'Worktree provisioning failed')
           : null;
       return {
@@ -534,15 +534,6 @@ export async function syncOrchestratorControlPlaneState() {
 }
 
 /**
- * #460 — Locked read-modify-write: read state, apply a mutation, reconcile, and persist.
- * Use this for any operation that needs exclusive access to orchestrator-state.json.
- *
- * If the callback returns an OrchestratorMissionState, that value is used as the
- * basis for reconcile + write instead of the pre-callback snapshot. This allows
- * callers that run a sub-operation (e.g. runDispatchTick) producing a new state
- * to persist that result without a second write that would clobber it.
- */
-/**
  * #1488 — Lock-only variant: exclusive access (in-process + cross-process)
  * WITHOUT the end-of-lock reconcile+write that withLockedState performs. For
  * callers that must persist exact statuses (e.g. mission stop's honest
@@ -565,6 +556,23 @@ export async function withControlPlaneLock<T>(
   }
 }
 
+function isReturnedMissionState(value: unknown): value is OrchestratorMissionState {
+  if (value === null || typeof value !== 'object') return false;
+  const candidate = value as Partial<OrchestratorMissionState>;
+  return candidate.version === 2 && Array.isArray(candidate.packets) && typeof candidate.prompt === 'string';
+}
+
+/**
+ * #460 — Locked read-modify-write: read state, apply a mutation, reconcile, and persist.
+ * Use this for any operation that needs exclusive access to orchestrator-state.json.
+ *
+ * The callback either mutates the state it is given, or returns a new mission
+ * state (version 2, a packets array and a prompt string). A returned mission state is the basis
+ * for reconcile + write instead of the pre-callback snapshot, so callers that
+ * build a new state (e.g. a dispatch tick or an approved plan) persist it
+ * without a second write that would clobber it. Any other return value is
+ * passed through as `result`, and the mutated input state is persisted.
+ */
 export async function withLockedState<T>(
   fn: (state: OrchestratorMissionState) => T | Promise<T>,
   options: ControlPlaneLockOptions = {},
@@ -574,15 +582,7 @@ export async function withLockedState<T>(
     const current = readOrchestratorControlPlaneState();
     const base = structuredClone(current);
     const result = await fn(current);
-    // If the callback returned a mission state, reconcile from that (post-operation
-    // snapshot). Otherwise fall back to the mutated `current` object as before.
-    const basisForReconcile: OrchestratorMissionState =
-      result !== null
-      && typeof result === 'object'
-      && 'packets' in (result as object)
-      && 'lanes' in (result as object)
-        ? (result as unknown as OrchestratorMissionState)
-        : current;
+    const basisForReconcile: OrchestratorMissionState = isReturnedMissionState(result) ? result : current;
     const mission = normalizeOrchestratorMissionState(basisForReconcile);
     const state = await persistMissionUnderLock(base, mission);
     return { result, state };

@@ -316,6 +316,9 @@ struct TextLayoutInner {
     lines: SmallVec<[WrappedLine; 1]>,
     line_height: Pixels,
     wrap_width: Option<Pixels>,
+    // o8 patch: the width this layout was truncated to, so a measure that
+    // learns a narrower width shapes again instead of reusing the full text.
+    truncate_width: Option<Pixels>,
     size: Option<Size<Pixels>>,
     bounds: Option<Bounds<Pixels>>,
 }
@@ -373,6 +376,11 @@ impl TextLayout {
                 if let Some(text_layout) = element_state.0.borrow().as_ref()
                     && text_layout.size.is_some()
                     && (wrap_width.is_none() || wrap_width == text_layout.wrap_width)
+                    // o8 patch: unwrapped text is first measured with no width
+                    // and later with the real one. Reusing the first size left
+                    // `text_ellipsis` text at full length, clipped mid-letter.
+                    && (truncate_width.is_none()
+                        || truncate_width == text_layout.truncate_width)
                 {
                     return text_layout.size.unwrap();
                 }
@@ -410,6 +418,7 @@ impl TextLayout {
                         len: 0,
                         line_height,
                         wrap_width,
+                        truncate_width,
                         size: Some(Size::default()),
                         bounds: None,
                     });
@@ -428,6 +437,7 @@ impl TextLayout {
                     len,
                     line_height,
                     wrap_width,
+                    truncate_width,
                     size: Some(size),
                     bounds: None,
                 });

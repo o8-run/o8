@@ -23,12 +23,13 @@ export interface ModelRateTable {
  * corrected and Opus 5.5 and Opus 5 fast mode added from its fast mode table
  * the same day; Opus 4.7 and 4.6 have no fast mode there, so their fast rows
  * were removed. Fable 5 and Opus 4.5, which the app still offers, were added
- * from the same page on 2026-11-06. This does not claim the other entries
+ * from the same page on 2026-11-06. Fable 5.2 and its fast mode were added
+ * from the same page on 2026-11-09. This does not claim the other entries
  * were refreshed.
  */
 export const modelRateTable = {
-  rateTableVersion: '2026-11-06.1',
-  observedOn: '2026-11-06',
+  rateTableVersion: '2026-11-09.1',
+  observedOn: '2026-11-09',
   rates: {
     'claude-opus-5-5': {
       inputUsdPerMillion: 4,
@@ -58,6 +59,21 @@ export const modelRateTable = {
       cacheReadUsdPerMillion: 1,
       cacheWriteUsdPerMillion: 12.5,
       cacheWrite1hUsdPerMillion: 20,
+    },
+    'claude-fable-5-2': {
+      inputUsdPerMillion: 8,
+      outputUsdPerMillion: 40,
+      cacheReadUsdPerMillion: 0.2,
+      cacheWriteUsdPerMillion: 10,
+      cacheWrite1hUsdPerMillion: 16,
+    },
+    // Fast mode $16 / $80 with the same cache multipliers (0.025x read, 1.25x and 2x writes).
+    'claude-fable-5-2-fast': {
+      inputUsdPerMillion: 16,
+      outputUsdPerMillion: 80,
+      cacheReadUsdPerMillion: 0.4,
+      cacheWriteUsdPerMillion: 20,
+      cacheWrite1hUsdPerMillion: 32,
     },
     'claude-fable-5-1': {
       inputUsdPerMillion: 10,
@@ -356,8 +372,9 @@ function resolveAnthropicRate(model: string): ResolvedRate | null {
   const fast = normalized.includes('fast');
   if (normalized.includes('opus-5-5')) return resolved(fast ? 'claude-opus-5-5-fast' : 'claude-opus-5-5');
   if (normalized.includes('opus-5')) return resolved(fast ? 'claude-opus-5-fast' : 'claude-opus-5');
+  if (normalized.includes('fable-5-2')) return resolved(fast ? 'claude-fable-5-2-fast' : 'claude-fable-5-2');
   if (normalized.includes('fable-5-1')) return fast ? null : resolved('claude-fable-5-1');
-  // After 5.1: `claude-fable-5`, also as `claude-fable-5[1m]`.
+  // After 5.2 and 5.1: `claude-fable-5`, also as `claude-fable-5[1m]`.
   if (/fable-5(?!-\d)/.test(normalized)) return fast ? null : resolved('claude-fable-5');
   if (normalized.includes('opus-4-8')) return resolved(fast ? 'claude-opus-4-8-fast' : 'claude-opus-4-8');
   // The pricing page lists no fast mode for Opus 4.7 or 4.6.

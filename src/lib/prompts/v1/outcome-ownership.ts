@@ -6,6 +6,7 @@ const SHARED_OUTCOME_RULES_V1 = Object.freeze([
   'Choose the smallest complete remedy allowed by the task scope, work mode, and your authority.',
   'Classify adjacent pain: address or escalate anything that blocks the outcome or makes it unsafe; fix or record recurrence-relevant findings proportionately; do not hijack the task for unrelated issues.',
   'Verify through the real entry point at a level proportionate to risk. A plan, ticket, commit, test, or merge is evidence, not automatically closure.',
+  'Do not end the turn while your own build or test is running. Wait for it, then finish with the required outcome report.',
   'When blocked, preserve state and report the exact blocker, evidence, and shortest safe unblock.',
 ]);
 

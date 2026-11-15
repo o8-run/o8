@@ -20,6 +20,7 @@ mod visual_capture_packet;
 mod audio_ducker;
 mod background;
 mod browser_view;
+#[cfg(not(target_os = "macos"))]
 mod remote_preview;
 mod restart_job_drain;
 mod cli_locate;
@@ -33,6 +34,13 @@ mod dock_window;
 mod first_run_install;
 mod fn_hotkey;
 mod voice_surfaces;
+#[cfg(target_os = "macos")]
+mod voice_only;
+/// How long a full-app launch waits for a previous shell to release the
+/// dictation hotkey. `restart_app` spawns the new instance before the old one
+/// exits, so an immediate refusal would leave no app after an update restart.
+#[cfg(target_os = "macos")]
+const HOTKEY_HANDOVER_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 mod voice_input;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod headless_dictation;
@@ -61,6 +69,7 @@ mod no_window;
 mod native_test_instance;
 mod overlay_geometry;
 mod next_main;
+mod next_main_startup;
 mod paste;
 mod point_overlay;
 mod presentation;
@@ -74,12 +83,12 @@ mod speech_text;
 mod stt;
 #[cfg(target_os = "macos")]
 mod tts;
+#[cfg(not(target_os = "macos"))]
 mod window_restore;
 mod window_state_sanitizer;
-// Windows-native Node.js discovery (#1740). Compiles on Windows targets or
-// under `cfg(test)` so its pure logic gets real unit coverage from macOS —
-// see the module doc comment.
-#[cfg(any(test, target_os = "windows"))]
+// Windows-native Node.js discovery (#1740). Only Windows imports this
+// wrapper. Cross-platform locator tests live in the shared launch crate.
+#[cfg(target_os = "windows")]
 mod windows_node_locate;
 // #1741: PATH string logic is unconditional so `cargo test --lib` exercises
 // it on every host OS; only its `windows_impl` submodule is cfg-gated.
@@ -98,6 +107,7 @@ mod telemetry;
 mod url_scheme_handler;
 mod webview_latch;
 
+#[cfg(not(target_os = "macos"))]
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -118,8 +128,6 @@ use tauri::{
 };
 use tauri_plugin_notification::NotificationExt;
 use webview_latch::WebviewLatch;
-#[cfg(target_os = "macos")]
-use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
 // ── macOS Keychain integration ──
 //
@@ -288,7 +296,8 @@ fn o8_data_dir() -> String {
     let directory = o8_restart_safety::resolve_data_directory(primary.as_deref(), legacy.as_deref(),
         std::path::Path::new(&home), &cwd).expect("Native data directory must be absolute");
     let resolved = directory.to_string_lossy().into_owned();
-    if !primary.as_ref().is_some_and(|value| !value.is_empty())
+    if !env_flag_enabled("O8_VOICE_ONLY")
+        && !primary.as_ref().is_some_and(|value| !value.is_empty())
         && !legacy.as_ref().is_some_and(|value| !value.is_empty()) {
         migrate_data_dir_once(&home, &resolved);
     }
@@ -773,11 +782,6 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
 // `/api/setup/mcp-config`, the orchestrator session config writer) all
 // agree on where the backend actually lives.
 
-const PROD_API_DEFAULT_PORT: u16 = 47100;
-const PROD_WS_DEFAULT_PORT: u16 = 47105;
-const PROD_API_PORT_RANGE: std::ops::Range<u16> = 47100..47105;
-const PROD_WS_PORT_RANGE: std::ops::Range<u16> = 47105..47110;
-
 /// Take at most `max` bytes from the head of `s`, floored to a char boundary.
 /// `&s[..n]` panics when byte `n` lands mid-UTF-8-sequence — error bodies from
 /// provider APIs routinely contain multibyte characters, and the panic fires
@@ -829,60 +833,7 @@ mod utf8_head_tests {
 /// even though the bundled Node sidecar cannot subsequently claim that port.
 /// Reject reachable listeners before using the bind probe so desktop/daemon
 /// coexistence always advances to a genuinely unused port.
-fn bundled_sidecar_port_available(port: u16) -> bool {
-    if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-        return false;
-    }
-    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
-}
-
-/// Returns the first port in the range that the bundled sidecar can claim.
-/// `skip` lets the caller avoid picking the same port for API and WS.
-fn find_free_port(range: std::ops::Range<u16>, skip: Option<u16>) -> Option<u16> {
-    for port in range {
-        if Some(port) == skip {
-            continue;
-        }
-        if bundled_sidecar_port_available(port) {
-            return Some(port);
-        }
-    }
-    None
-}
-
-fn bind_ephemeral_port(skip: Option<u16>) -> u16 {
-    for _ in 0..16 {
-        if let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 0)) {
-            if let Ok(addr) = listener.local_addr() {
-                let port = addr.port();
-                drop(listener);
-                if Some(port) != skip && bundled_sidecar_port_available(port) {
-                    return port;
-                }
-            }
-        }
-    }
-    0
-}
-
-/// Bind host for the bundled Next server (and, via the inherited
-/// `O8_LAN_ACCESS`, the ws-server — see src/lib/panel/listen-host.ts).
-/// Loopback by default: every desktop caller uses 127.0.0.1, and a wildcard
-/// bind exposes the API to the whole LAN/VPN. `O8_LAN_ACCESS=1` opts in to
-/// 0.0.0.0 so a phone can reach this machine directly for mobile pairing.
-fn sidecar_listen_host() -> &'static str {
-    listen_host_for(std::env::var("O8_LAN_ACCESS").ok().as_deref())
-}
-
-fn listen_host_for(lan_access: Option<&str>) -> &'static str {
-    match lan_access
-        .map(|value| value.trim().to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("1" | "true" | "yes" | "on") => "0.0.0.0",
-        _ => "127.0.0.1",
-    }
-}
+use o8_launch_core::ports::*;
 
 #[cfg(test)]
 mod listen_host_tests {
@@ -924,67 +875,9 @@ mod port_allocation_tests {
     }
 }
 
-fn random_uuid_v4() -> String {
-    use std::io::Read;
-    let mut bytes = [0u8; 16];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut bytes);
-    } else {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        bytes[..8].copy_from_slice(&(now as u64).to_be_bytes());
-        bytes[8..12].copy_from_slice(&std::process::id().to_be_bytes());
-    }
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0],
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-        bytes[8],
-        bytes[9],
-        bytes[10],
-        bytes[11],
-        bytes[12],
-        bytes[13],
-        bytes[14],
-        bytes[15]
-    )
-}
-
-#[derive(Clone, Debug)]
-struct BootIdentity {
-    boot_id: String,
-    instance_id: String,
-}
-
+use o8_launch_core::identity::BootIdentity;
 fn read_or_create_boot_identity() -> BootIdentity {
-    let dir = o8_data_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let instance_path = format!("{}/instance-id", dir);
-    let instance_id = std::fs::read_to_string(&instance_path)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            let id = random_uuid_v4();
-            let _ = std::fs::write(&instance_path, &id);
-            id
-        });
-    let boot_id = random_uuid_v4();
-    let _ = std::fs::write(format!("{}/boot-id", dir), &boot_id);
-    BootIdentity {
-        boot_id,
-        instance_id,
-    }
+    o8_launch_core::identity::read_or_create_boot_identity(&o8_data_dir())
 }
 
 fn export_boot_identity(identity: &BootIdentity) {
@@ -1776,10 +1669,7 @@ fn allocate_ws_port(api_port: u16) -> u16 {
 /// Persist the chosen ports to the data dir so child processes (MCP server,
 /// generators) can read the same values without guessing.
 fn write_port_file(name: &str, port: u16) -> std::io::Result<()> {
-    let dir = o8_data_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let path = format!("{}/{}", dir, name);
-    std::fs::write(path, port.to_string())
+    o8_launch_core::identity::write_port_file(&o8_data_dir(), name, port)
 }
 
 // ── Orphan bundled-server detection (issue #509) ──
@@ -2138,7 +2028,8 @@ fn capture_ws_server_stream<R>(
 
 fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
     std::thread::spawn(move || {
-        let url = format!("http://127.0.0.1:{}/dashboard", api_port);
+        let path = if next_main::enabled() { "/api/setup/identity" } else { "/dashboard" };
+        let url = format!("http://127.0.0.1:{api_port}{path}");
 
         let client = match reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_millis(1500))
@@ -2261,117 +2152,7 @@ fn spawn_bundled_ws_server(
 // asks it where `node` lives, yielding the real absolute path a terminal
 // would see. If nothing works, returns None and the caller shows a dialog.
 
-const MIN_NODE_MAJOR: u32 = 22;
-// macOS ships multiple native-addon ABIs. Linux keeps the host-built Node 22
-// addons, so it must not accept Node 24 merely because macOS supports it.
-// Linux also loads the actual packaged addons before admitting a runtime.
-const PREFERRED_NODE_MAJOR: u32 = 22;
-const LATEST_SUPPORTED_NODE_MAJOR: u32 = 24;
-#[cfg(target_os = "linux")]
-const SUPPORTED_NATIVE_NODE_MAJORS: &[u32] = &[PREFERRED_NODE_MAJOR];
-#[cfg(not(target_os = "linux"))]
-const SUPPORTED_NATIVE_NODE_MAJORS: &[u32] = &[PREFERRED_NODE_MAJOR, LATEST_SUPPORTED_NODE_MAJOR];
-
-/// Look in well-known places for a Node 22.x install regardless of the user's
-/// nvm/fnm/volta default. Order matches the rough population of users on each.
-fn find_preferred_node_22(server_dir: &std::path::Path) -> Option<String> {
-    let home = std::env::var("HOME").ok()?;
-    find_preferred_node_22_in(&home, |candidate| {
-        let version = check_node_version(candidate)?;
-        supports_packaged_native_addons(candidate, server_dir).then_some(version)
-    })
-}
-
-fn find_preferred_node_22_in<F>(home: &str, mut check_node: F) -> Option<String>
-where
-    F: FnMut(&str) -> Option<(u32, String)>,
-{
-    let glob_dirs = [
-        (format!("{}/.nvm/versions/node", home), "v22"),
-        (format!("{}/.fnm/node-versions", home), "v22"),
-        // fnm's default root on Linux is $XDG_DATA_HOME/fnm, not ~/.fnm.
-        #[cfg(target_os = "linux")]
-        (format!("{}/.local/share/fnm/node-versions", home), "v22"),
-        (format!("{}/.volta/tools/image/node", home), "22"),
-        // Extra Linux manager roots must not change macOS/Windows discovery.
-        #[cfg(target_os = "linux")]
-        (format!("{}/.asdf/installs/nodejs", home), "22."),
-        #[cfg(target_os = "linux")]
-        (format!("{}/.local/share/mise/installs/node", home), "22"),
-        ("/opt/homebrew/opt/node@22".to_string(), ""),
-        ("/usr/local/opt/node@22".to_string(), ""),
-        #[cfg(target_os = "linux")]
-        ("/home/linuxbrew/.linuxbrew/opt/node@22".to_string(), ""),
-    ];
-    for (dir, prefix) in glob_dirs {
-        // Homebrew's node@22 keg has node directly at <keg>/bin/node — no
-        // version-dir traversal needed.
-        if prefix.is_empty() {
-            let candidate = format!("{}/bin/node", dir);
-            if let Some((22, _)) = check_node(&candidate) {
-                return Some(candidate);
-            }
-            continue;
-        }
-        // nvm / fnm / volta lay out as <root>/<version>/bin/node or
-        // <root>/<version>/installation/bin/node (fnm). Scan the version dirs.
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                if !name_str.starts_with(prefix) {
-                    continue;
-                }
-                let bases = [
-                    entry.path().join("bin").join("node"),
-                    entry.path().join("installation").join("bin").join("node"),
-                ];
-                for base in bases {
-                    if let Some(p) = base.to_str() {
-                        if let Some((22, _)) = check_node(p) {
-                            return Some(p.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-fn resolve_node_via_login_shell() -> Option<String> {
-    let shells: [(&str, &[&str]); 3] = [
-        ("zsh", &["-l", "-c", "command -v node"]),
-        ("bash", &["-l", "-c", "command -v node"]),
-        ("sh", &["-l", "-c", "command -v node"]),
-    ];
-    for (shell, args) in shells {
-        // .no_window() matters here even though these are POSIX shell names: a
-        // Windows box with Git Bash DOES resolve `sh`, and this runs inside the
-        // node pre-flight that gates the whole boot. An unflagged spawn pops a
-        // console, and a console the user CLICKS suspends the process — the
-        // same splash-screen deadlock the flag was introduced to kill.
-        if let Ok(out) = Command::new(shell).args(args).no_window().output() {
-            if out.status.success() {
-                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !path.is_empty() && std::path::Path::new(&path).exists() {
-                    return Some(path);
-                }
-            }
-        }
-    }
-    // Last resort: raw PATH lookup (in case the user really has it in
-    // /usr/local/bin and Finder's PATH is fine).
-    if let Ok(out) = Command::new("which").arg("node").no_window().output() {
-        if out.status.success() {
-            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !path.is_empty() && std::path::Path::new(&path).exists() {
-                return Some(path);
-            }
-        }
-    }
-    None
-}
+use o8_launch_core::preflight::*;
 
 /// Directories runtime CLIs (claude / codex / gemini / opencode / gh) are known
 /// to land in but that a NON-INTERACTIVE login shell (`zsh -l -c`) often can't
@@ -2393,385 +2174,8 @@ fn resolve_node_via_login_shell() -> Option<String> {
 ///
 /// `login_path` comes from the single `shell_env::probe_login_shell()` call the
 /// boot path already made — we do NOT re-source the user's profile to ask again.
-fn augment_process_path(login_path: &str) {
-    if login_path.is_empty() {
-        log::warn!(
-            "Could not resolve login-shell PATH; falling back to the well-known \
-             CLI dirs + minimal Finder PATH for sidecar children"
-        );
-    }
-    let current = std::env::var("PATH").unwrap_or_default();
-    let well_known = cli_locate::well_known_cli_bin_dirs();
-    // PATH entries are ':'-delimited on Unix, ';'-delimited on Windows —
-    // `current` is a real inherited PATH on both platforms, so this has to
-    // match the OS or every Windows PATH collapses into one bogus entry.
-    let path_sep = if cfg!(windows) { ';' } else { ':' };
-    let mut merged: Vec<String> = Vec::new();
-    for entry in login_path
-        .split(path_sep)
-        .chain(current.split(path_sep))
-        .map(str::to_string)
-        .chain(well_known.into_iter())
-    {
-        if !entry.is_empty() && !merged.contains(&entry) {
-            merged.push(entry);
-        }
-    }
-    let entry_count = merged.len();
-    let merged = merged.join(&path_sep.to_string());
-    log::info!(
-        "Augmented PATH from login shell + well-known CLI dirs ({} entries) for sidecar children",
-        entry_count
-    );
-    std::env::set_var("PATH", merged);
-}
+use o8_launch_core::path_env::augment_process_path;
 
-/// Returns Some((major, raw_version)) on success, None on failure.
-///
-/// Served from `~/.o8/node-abi-cache` when the binary hasn't changed since we
-/// last checked it: exec'ing `node --version` costs ~0.49s on the operator's
-/// machine, and it re-derives an answer that only moves when node itself does.
-/// The cache is stamped with the binary's (mtime, size), so a node upgrade
-/// invalidates the entry and we re-exec — the #1032 ABI pin is preserved.
-fn check_node_version(node_bin: &str) -> Option<(u32, String)> {
-    shell_env::check_node_version_cached(node_bin)
-}
-
-/// Linux exports host-built addons. Loading both catches the actual ABI (and
-/// architecture), including a mismatched Node 22 or a stale addon payload.
-#[cfg(target_os = "linux")]
-fn supports_packaged_native_addons(node_bin: &str, server_dir: &std::path::Path) -> bool {
-    let script = r#"
-        const path = require('node:path');
-        const modules = path.join(process.argv[1], 'node_modules');
-        try {
-            const Database = require(path.join(modules, 'better-sqlite3'));
-            new Database(':memory:').close();
-            require(path.join(modules, 'node-pty'));
-        } catch { process.exit(1); }
-    "#;
-    Command::new(node_bin)
-        .args(["-e", script])
-        .arg(server_dir)
-        .no_window()
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-// Preserve the existing macOS/Windows runtime selection without an extra probe.
-#[cfg(not(target_os = "linux"))]
-fn supports_packaged_native_addons(_node_bin: &str, _server_dir: &std::path::Path) -> bool {
-    true
-}
-
-fn supports_native_node_major(major: u32) -> bool {
-    SUPPORTED_NATIVE_NODE_MAJORS.contains(&major)
-}
-
-/// Windows-native fallback: `where node`, then the common install roots
-/// (nvm-windows / Volta / fnm / official installer / winget / choco).
-/// `resolve_node_via_login_shell()` above only knows zsh/bash/sh, which USUALLY
-/// answer nothing on Windows — but not always: a box with Git Bash resolves
-/// `sh`, and an MSYS login shell can return a PATH that still has no node on it
-/// (installer/nvm-windows touch the Windows PATH, not the MSYS one). So treat
-/// that fallback as "usually empty here", never as unreachable, and keep this
-/// the actual Windows discovery path (#1740). A no-op on macOS/Linux — one more
-/// `None` in an already-exhausted `.or_else` chain there, so behavior stays
-/// byte-identical.
-#[cfg(target_os = "windows")]
-fn resolve_node_windows() -> Option<String> {
-    windows_node_locate::resolve_node_via_where()
-        .or_else(|| windows_node_locate::find_preferred_node_22(check_node_version))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn resolve_node_windows() -> Option<String> {
-    None
-}
-
-#[cfg(test)]
-mod node_preflight_tests {
-    use super::{find_preferred_node_22_in, supports_native_node_major, PREFERRED_NODE_MAJOR};
-    use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    struct TempHome {
-        path: PathBuf,
-    }
-
-    impl TempHome {
-        fn new(name: &str) -> Self {
-            let suffix = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock before unix epoch")
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "o8-node-preflight-{}-{}-{}",
-                name,
-                std::process::id(),
-                suffix
-            ));
-            fs::create_dir_all(&path).expect("create temp home");
-            Self { path }
-        }
-
-        fn str(&self) -> &str {
-            self.path.to_str().expect("utf8 temp path")
-        }
-
-        fn touch_node(&self, rel: &str) -> PathBuf {
-            let path = self.path.join(rel);
-            fs::create_dir_all(path.parent().expect("node path parent"))
-                .expect("create node parent");
-            fs::write(&path, b"fake node").expect("write fake node");
-            path
-        }
-    }
-
-    impl Drop for TempHome {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
-
-    fn checker(path: &str) -> Option<(u32, String)> {
-        if !Path::new(path).exists() {
-            return None;
-        }
-        if path.contains("/v22.") || path.contains("/22.") {
-            return Some((22, "v22.19.0".to_string()));
-        }
-        if path.contains("/v24.") || path.contains("/24.") {
-            return Some((24, "v24.11.1".to_string()));
-        }
-        None
-    }
-
-    #[test]
-    fn preferred_node_discovery_uses_nvm_before_other_managers() {
-        let home = TempHome::new("nvm-first");
-        let nvm_node = home.touch_node(".nvm/versions/node/v22.19.0/bin/node");
-        home.touch_node(".fnm/node-versions/v22.18.0/installation/bin/node");
-        home.touch_node(".volta/tools/image/node/22.17.0/bin/node");
-
-        assert_eq!(
-            find_preferred_node_22_in(home.str(), checker),
-            Some(nvm_node.to_string_lossy().to_string())
-        );
-    }
-
-    #[test]
-    fn preferred_node_discovery_supports_fnm_installation_layout() {
-        let home = TempHome::new("fnm-installation");
-        let fnm_node = home.touch_node(".fnm/node-versions/v22.18.0/installation/bin/node");
-
-        assert_eq!(
-            find_preferred_node_22_in(home.str(), checker),
-            Some(fnm_node.to_string_lossy().to_string())
-        );
-    }
-
-    #[test]
-    fn preferred_node_discovery_supports_volta_image_layout() {
-        let home = TempHome::new("volta");
-        let volta_node = home.touch_node(".volta/tools/image/node/22.17.1/bin/node");
-
-        assert_eq!(
-            find_preferred_node_22_in(home.str(), checker),
-            Some(volta_node.to_string_lossy().to_string())
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn preferred_node_discovery_supports_linux_manager_layouts() {
-        let fnm = TempHome::new("fnm-xdg");
-        let fnm_node =
-            fnm.touch_node(".local/share/fnm/node-versions/v22.18.0/installation/bin/node");
-        assert_eq!(
-            find_preferred_node_22_in(fnm.str(), checker),
-            Some(fnm_node.to_string_lossy().to_string())
-        );
-
-        let asdf = TempHome::new("asdf");
-        let asdf_node = asdf.touch_node(".asdf/installs/nodejs/22.17.0/bin/node");
-        assert_eq!(
-            find_preferred_node_22_in(asdf.str(), checker),
-            Some(asdf_node.to_string_lossy().to_string())
-        );
-
-        let mise = TempHome::new("mise");
-        let mise_node = mise.touch_node(".local/share/mise/installs/node/22.17.0/bin/node");
-        assert_eq!(
-            find_preferred_node_22_in(mise.str(), checker),
-            Some(mise_node.to_string_lossy().to_string())
-        );
-    }
-
-    #[test]
-    fn preferred_node_discovery_ignores_newer_native_abi_majors() {
-        let home = TempHome::new("ignore-newer");
-        home.touch_node(".nvm/versions/node/v24.11.1/bin/node");
-        home.touch_node(".fnm/node-versions/v24.11.1/installation/bin/node");
-        home.touch_node(".volta/tools/image/node/24.11.1/bin/node");
-
-        assert_eq!(find_preferred_node_22_in(home.str(), checker), None);
-    }
-
-    #[test]
-    fn native_abi_support_matches_shipped_node_majors() {
-        assert!(supports_native_node_major(PREFERRED_NODE_MAJOR));
-        assert_eq!(supports_native_node_major(24), cfg!(not(target_os = "linux")));
-        assert!(!supports_native_node_major(23));
-        assert!(!supports_native_node_major(25));
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    #[test]
-    fn non_linux_discovery_keeps_main_fallback_order() {
-        let home = TempHome::new("platform-order");
-        home.touch_node(".local/share/fnm/node-versions/v22.18.0/installation/bin/node");
-        home.touch_node(".asdf/installs/nodejs/22.17.0/bin/node");
-        home.touch_node(".local/share/mise/installs/node/22.17.0/bin/node");
-        let brew = "/opt/homebrew/opt/node@22/bin/node";
-        assert_eq!(find_preferred_node_22_in(home.str(), |path| {
-            if path == brew { Some((22, "v22.19.0".into())) } else { checker(path) }
-        }), Some(brew.into()));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_native_abi_support_rejects_node24() {
-        assert!(!supports_native_node_major(24));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_install_hint_avoids_distro_version_claims() {
-        let hint = super::node_install_hint();
-        assert!(!hint.contains("Ubuntu"));
-        assert!(!hint.contains("Debian"));
-        assert!(hint.contains("Node 22"));
-        assert!(hint.contains("nvm install 22"));
-    }
-
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    #[ignore = "requires a packaged Linux server plus Node 22 and Node 24 binaries"]
-    fn linux_preflight_matches_real_packaged_addons() {
-        let server = PathBuf::from(std::env::var("O8_TEST_NATIVE_SERVER").expect("packaged server"));
-        let node22 = std::env::var("O8_TEST_NODE22").expect("Node 22 binary");
-        let node24 = std::env::var("O8_TEST_NODE24").expect("Node 24 binary");
-        assert!(super::supports_packaged_native_addons(&node22, &server));
-        assert!(!super::supports_packaged_native_addons(&node24, &server));
-        assert_eq!(super::run_node_preflight(Some(&node22), &server).unwrap(), node22);
-        assert!(!matches!(super::run_node_preflight(Some(&node24), &server), Ok(path) if path == node24));
-        let missing = TempHome::new("missing-native-addons");
-        assert!(super::run_node_preflight(Some(&node22), &missing.path).is_err());
-    }
-
-}
-
-#[derive(Debug)]
-enum NodePreflightError {
-    Missing,
-    TooOld { raw: String },
-    UnsupportedNativeAbi { raw: String, major: u32 },
-}
-
-/// Full pre-flight: returns the resolved node path on success, or an error
-/// describing what to tell the user.
-///
-/// `shell_node` is whatever `shell_env::probe_login_shell()` already found —
-/// the boot path sources the user's profile exactly once, so we reuse that
-/// answer instead of spawning another login shell here. Only when the probe
-/// came back empty (no shell answered at all) do we fall back to asking
-/// directly.
-fn run_node_preflight(
-    shell_node: Option<&str>,
-    server_dir: &std::path::Path,
-) -> Result<String, NodePreflightError> {
-    let node_bin = shell_node
-        .map(str::to_string)
-        .or_else(resolve_node_via_login_shell)
-        .or_else(|| find_preferred_node_22(server_dir))
-        .or_else(resolve_node_windows)
-        .ok_or(NodePreflightError::Missing)?;
-    let (major, raw) = check_node_version(&node_bin).ok_or(NodePreflightError::Missing)?;
-    if major >= MIN_NODE_MAJOR
-        && supports_native_node_major(major)
-        && supports_packaged_native_addons(&node_bin, server_dir)
-    {
-        log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
-        return Ok(node_bin);
-    }
-
-    // Preserve #1032's rescue path when the user's default is too old or newer
-    // than the ABIs bundled by this release, but do not override a compatible
-    // default merely because another Node 22 installation exists.
-    if let Some(node22) = find_preferred_node_22(server_dir) {
-        if node22 != node_bin {
-            if let Some((22, fallback_raw)) = check_node_version(&node22) {
-                log::info!(
-                    "Node.js pre-flight OK: {} ({}) — default {} is unsupported",
-                    fallback_raw,
-                    node22,
-                    raw
-                );
-                return Ok(node22);
-            }
-        }
-    }
-
-    if major < MIN_NODE_MAJOR {
-        Err(NodePreflightError::TooOld { raw })
-    } else {
-        Err(NodePreflightError::UnsupportedNativeAbi { raw, major })
-    }
-}
-
-/// Platform-appropriate "how to install Node" text for the dialog bodies
-/// below. macOS/Linux point at brew/nvm; Windows has neither, so it points
-/// at the official installer / winget / nvm-windows instead (#1740).
-#[cfg(target_os = "windows")]
-fn node_install_hint() -> String {
-    "Install a supported version from https://nodejs.org, or run \
-     `winget install OpenJS.NodeJS.LTS`, then launch o8 again.\n\n\
-     If Node.js is already installed via nvm-windows, Volta, or fnm, make sure it\n\
-     is on PATH — open a new terminal after installing and confirm `node -v` works."
-        .to_string()
-}
-
-#[cfg(target_os = "linux")]
-fn node_install_hint() -> String {
-    format!(
-        "Your distribution's Node.js may be too old for this build.\n\
-         Install Node {major} with nvm (`nvm install {major}`), fnm (`fnm install {major}`),\n\
-         or the NodeSource packages at https://github.com/nodesource/distributions,\n\
-         then launch o8 again.\n\n\
-         o8 also finds Node {major} under nvm, fnm, Volta, asdf, mise, and Linuxbrew\n\
-         even when your default `node` is older.",
-        major = PREFERRED_NODE_MAJOR
-    )
-}
-
-#[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
-fn node_install_hint() -> String {
-    format!(
-        "Install a supported version with `brew install node@{major}` / `nvm install {major}`\n\
-         or `brew install node@{latest}` / `nvm install {latest}`, then launch o8 again.\n\n\
-         If Node.js is already installed via nvm, fnm, or Volta, make sure it is\n\
-         available to a login shell (zsh/bash with -l flag).",
-        major = PREFERRED_NODE_MAJOR,
-        latest = LATEST_SUPPORTED_NODE_MAJOR
-    )
-}
-
-/// Show a native error dialog and exit. Uses platform-native tools so we
-/// don't need to pull in tauri-plugin-dialog.
 fn show_node_error_and_exit(err: NodePreflightError) -> ! {
     #[cfg(target_os = "linux")]
     let versions = format!("{}.x", PREFERRED_NODE_MAJOR);
@@ -2980,6 +2384,7 @@ fn get_app_data_dir(app: tauri::AppHandle) -> Option<String> {
 
 /// Read the repo registry from disk. Returns { repos: [...] }.
 /// Equivalent to GET /api/panel/repos but without readiness enrichment.
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_repos() -> Result<serde_json::Value, String> {
     let repos_path = format!("{}/repos.json", o8_data_dir());
@@ -2993,6 +2398,7 @@ fn read_repos() -> Result<serde_json::Value, String> {
 
 /// Read recent git commits for a local repo path.
 /// Equivalent to GET /api/panel/commits?workspace=<path>&limit=<n>
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_local_commits(repo: String, limit: Option<u32>) -> Result<serde_json::Value, String> {
     let limit = limit.unwrap_or(10).min(50);
@@ -3033,6 +2439,7 @@ fn read_local_commits(repo: String, limit: Option<u32>) -> Result<serde_json::Va
 
 /// Read git worktrees for a local repo path.
 /// Equivalent to GET /api/worktrees?repo=<path>
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_worktrees(repo: String) -> Result<serde_json::Value, String> {
     let output = Command::new("git")
@@ -3087,35 +2494,6 @@ fn read_worktrees(repo: String) -> Result<serde_json::Value, String> {
     }
 
     Ok(serde_json::json!({ "worktrees": worktrees }))
-}
-
-/// Read the current git branch for a repo.
-#[tauri::command]
-fn read_current_branch(repo: String) -> Result<serde_json::Value, String> {
-    let output = Command::new("git")
-        .no_window()
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(&repo)
-        .output()
-        .map_err(|e| format!("git rev-parse failed: {}", e))?;
-
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(serde_json::json!({ "branch": branch }))
-}
-
-/// Read git status (changed files count) for a repo.
-#[tauri::command]
-fn read_git_status(repo: String) -> Result<serde_json::Value, String> {
-    let output = Command::new("git")
-        .no_window()
-        .args(["status", "--porcelain"])
-        .current_dir(&repo)
-        .output()
-        .map_err(|e| format!("git status failed: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let changed_files: usize = stdout.lines().filter(|l| !l.is_empty()).count();
-    Ok(serde_json::json!({ "changedFiles": changed_files, "clean": changed_files == 0 }))
 }
 
 // ── MCP loop observability (issues #793, #794) ──
@@ -3218,8 +2596,10 @@ fn record_console_error(message: String, source: String, lineno: u32) {
 // Done in Rust (not behind an HTTP route) so there is no auth surface
 // to abuse — invokes are scoped to the webview origin.
 
+#[cfg(not(target_os = "macos"))]
 const DROPPED_FILE_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
+#[cfg(not(target_os = "macos"))]
 #[derive(Serialize)]
 struct DroppedFileResult {
     name: String,
@@ -3230,6 +2610,7 @@ struct DroppedFileResult {
     size: u64,
 }
 
+#[cfg(not(target_os = "macos"))]
 fn base64_encode_standard(data: &[u8]) -> String {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
@@ -3263,6 +2644,7 @@ fn base64_encode_standard(data: &[u8]) -> String {
     out
 }
 
+#[cfg(not(target_os = "macos"))]
 fn mime_for_extension(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
@@ -3295,6 +2677,7 @@ fn mime_for_extension(name: &str) -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_dropped_file(path: String) -> Result<DroppedFileResult, String> {
     // Whitelist: must be a regular file within $HOME. Blocks /etc/*,
@@ -3402,6 +2785,7 @@ fn o8_view_console_errors() -> serde_json::Value {
 /// Read the main webview's current URL via `webview.url()` and split it into
 /// pathname / search / hash. `routerState` is intentionally `null` — the
 /// Next.js segment isn't reachable without a JS-side eval, which we defer.
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn o8_view_active_route(app: AppHandle) -> Result<serde_json::Value, String> {
     let Some(window) = app.get_webview_window("main") else {
@@ -3429,6 +2813,7 @@ fn o8_view_active_route(app: AppHandle) -> Result<serde_json::Value, String> {
 
 // ── SQLite helper (read-only, WAL mode) ──
 
+#[cfg(not(target_os = "macos"))]
 fn open_cortex_db() -> Result<Connection, String> {
     let db_path = format!("{}/cortex-ide.db", o8_data_dir());
     if !std::path::Path::new(&db_path).exists() {
@@ -3444,6 +2829,7 @@ fn open_cortex_db() -> Result<Connection, String> {
 
 /// Read pending approvals from SQLite. Returns { approvals: [...] }.
 /// Equivalent to GET /api/panel/approvals (pending only, no session filter).
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_approvals(status: Option<String>) -> Result<serde_json::Value, String> {
     let conn = match open_cortex_db() {
@@ -3501,6 +2887,7 @@ fn read_approvals(status: Option<String>) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "approvals": approvals }))
 }
 
+#[cfg(not(target_os = "macos"))]
 fn map_approval_row(row: &rusqlite::Row) -> serde_json::Value {
     let id: String = row.get(0).unwrap_or_default();
     let source: String = row.get(1).unwrap_or_default();
@@ -3577,6 +2964,7 @@ fn map_approval_row(row: &rusqlite::Row) -> serde_json::Value {
 
 /// Read watched agents from SQLite. Returns { workspaces: [...] }.
 /// Lightweight IPC snapshot of durable supervisor state.
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn read_workspaces() -> Result<serde_json::Value, String> {
     let conn = match open_cortex_db() {
@@ -3702,6 +3090,12 @@ fn read_data_file(name: &str) -> Option<String> {
 /// in `src/lib/panel/api-port.ts` — env var first, on-disk file second,
 /// production default last.
 pub(crate) fn resolve_api_port() -> u16 {
+    #[cfg(target_os = "macos")]
+    if env_flag_enabled("O8_VOICE_ONLY") {
+        // Follow a server started after voice-only launch, without pinning an
+        // inherited port override or contacting another profile's default port.
+        return voice_only::published_port(Path::new(&o8_data_dir())).unwrap_or(0);
+    }
     if let Ok(p) = std::env::var("O8_API_PORT") {
         if let Ok(parsed) = p.parse() {
             return parsed;
@@ -3814,11 +3208,11 @@ fn show_desktop_window<R: tauri::Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Bring up the window the operator works in: o8 next in the packaged macOS
-/// app, the classic window everywhere else.
+/// Bring up the window the operator works in: o8 next on macOS,
+/// the classic window on Windows and Linux.
 fn show_main_ui(app: &AppHandle) {
     if next_main::enabled() {
-        next_main::show();
+        next_main::show(app);
     } else {
         show_desktop_window(app);
     }
@@ -6360,90 +5754,6 @@ fn round_window_corners(win: &tauri::WebviewWindow, radius: f64) {
     }
 }
 
-/// Hide the native macOS traffic lights (close / miniaturize / zoom) on a
-/// window. The webview renders its own DOM traffic lights instead (Q ruling
-/// 2026-07-16): native buttons are drawn by the OS at a fixed PHYSICAL size
-/// and position, so they can never track the app's CSS `zoom` — every
-/// alignment between them and the scaled chrome was a per-zoom calibration
-/// (the 64px × --zoom-inverse spacer, the empirical 22.4px yNudge saga).
-/// DOM lights live in the same flex row as the sidebar toggle and scale with
-/// everything else. macOS re-shows standard buttons after some style-mask /
-/// fullscreen transitions, so this is also re-asserted from the main window's
-/// event handler (Focused + Resized), not just at setup.
-#[cfg(target_os = "macos")]
-fn hide_native_traffic_lights(win: &tauri::WebviewWindow) {
-    use objc2::{msg_send, runtime::AnyObject};
-    let ptr = match win.ns_window() {
-        Ok(p) if !p.is_null() => p as *mut AnyObject,
-        _ => return,
-    };
-    unsafe {
-        // NSWindowButton: 0 = close, 1 = miniaturize, 2 = zoom
-        for kind in 0usize..3 {
-            let btn: *mut AnyObject = msg_send![ptr, standardWindowButton: kind];
-            if !btn.is_null() {
-                let _: () = msg_send![btn, setHidden: true];
-            }
-        }
-    }
-}
-
-/// Make the native Zoom (maximize / restore-down) instant instead of animated.
-///
-/// WKWebView cannot repaint during an animated NSWindow frame change — the web
-/// content freezes at the old layout, slides/clips behind the animating frame,
-/// then snaps into place when the animation ends (operator video 2026-07-15;
-/// Electron apps repaint per animation frame, WKWebView has no public hook).
-/// The honest fix is to drop the animation: `-[NSWindow zoom:]` reads its
-/// duration from `animationResizeTime:`, so overriding that to 0 on tao's
-/// window class makes frame + content change together in a single repaint.
-/// The class is shared by every o8 window in this process — intended; zoom
-/// behaves identically everywhere. Manual drag-resize is unaffected (no
-/// animation involved).
-#[cfg(target_os = "macos")]
-fn make_window_zoom_instant(win: &tauri::WebviewWindow) {
-    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
-    let object = match win.ns_window() {
-        Ok(p) if !p.is_null() => p as *mut AnyObject,
-        _ => {
-            log::warn!("[zoom-anim] ns_window unavailable; zoom stays animated");
-            return;
-        }
-    };
-    // CGRect by value — 4 contiguous f64s; identical ABI to the nested
-    // {CGPoint,CGSize} layout on both x86_64 (memory class) and arm64 (HFA).
-    #[repr(C)]
-    struct CGRectRaw {
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-    }
-    unsafe extern "C-unwind" fn zero_resize_time(
-        _this: *mut AnyObject,
-        _cmd: Sel,
-        _target_frame: CGRectRaw,
-    ) -> f64 {
-        0.0
-    }
-    unsafe {
-        let cls = (*object).class();
-        let replaced = objc2::ffi::class_replaceMethod(
-            (cls as *const AnyClass).cast_mut(),
-            objc2::sel!(animationResizeTime:),
-            std::mem::transmute::<
-                unsafe extern "C-unwind" fn(*mut AnyObject, Sel, CGRectRaw) -> f64,
-                Imp,
-            >(zero_resize_time),
-            c"d@:{CGRect={CGPoint=dd}{CGSize=dd}}".as_ptr(),
-        );
-        log::info!(
-            "[zoom-anim] native zoom animation disabled (instant maximize/restore, replaced_existing={})",
-            replaced.is_some()
-        );
-    }
-}
-
 /// Read the voice preferences (`~/.o8/dictation.json`) for the settings panel,
 /// with API keys stripped. The config is mtime-cached, so writes apply live.
 /// macOS only — the pref store lives in the macOS-gated stt module (#1673).
@@ -7020,98 +6330,10 @@ fn o8_debug_show_dock(app: tauri::AppHandle) {
 /// mirror `CANVAS_GLASS_MATERIALS` in lib/canvas-mode/glass-settings.ts.
 /// `"default"` restores the HudWindow chrome material (follows-window
 /// state, matching the boot-time application).
-/// The chrome vibrancy material for THIS macOS version (#1543).
-///
-/// Apple degraded `HudWindow` twice in 2026: the 15.7.8 security update
-/// (2026-06-27) and the Tahoe 26.x line both stopped rendering it for our
-/// window shape — chrome fell back to raw transparency (sharp desktop, no
-/// blur). `UnderWindowBackground` renders correct glass on both, verified
-/// live on the operator iMac (26.6b3, operator-approved look) with the
-/// laptop (15.7.8) verified via bench build. 15.7.7-and-earlier keeps the
-/// original HudWindow (proven on 15.7.1 — Sydney's control machine).
-#[cfg(target_os = "macos")]
-fn chrome_vibrancy_material() -> window_vibrancy::NSVisualEffectMaterial {
-    use window_vibrancy::NSVisualEffectMaterial as M;
-    static MATERIAL: std::sync::OnceLock<window_vibrancy::NSVisualEffectMaterial> =
-        std::sync::OnceLock::new();
-    *MATERIAL.get_or_init(|| {
-        let version = std::process::Command::new("sysctl")
-            .args(["-n", "kern.osproductversion"])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .unwrap_or_default();
-        let mut parts = version.trim().split('.');
-        let major: u32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-        let minor: u32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-        let patch: u32 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-        let hud_broken = major >= 26 || (major == 15 && minor == 7 && patch >= 8);
-        if hud_broken {
-            log::info!(
-                "[vibrancy] macOS {version} — HudWindow degraded on this OS; using UnderWindowBackground (#1543)"
-            );
-            M::UnderWindowBackground
-        } else {
-            M::HudWindow
-        }
-    })
-}
-
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::Manager;
-        use window_vibrancy::NSVisualEffectMaterial as M;
-        let Some(window) = voice_host::classic_window(&app) else {
-            return Err("main window not found".into());
-        };
-        let target = window.clone();
-        window
-            .run_on_main_thread(move || {
-                // apply_vibrancy stacks a new effect view per call — always clear first.
-                let _ = window_vibrancy::clear_vibrancy(&target);
-                // "none" = NO effect view at all: the window is raw transparent and
-                // the desktop reads through perfectly sharp — the liquid-clear look.
-                // macOS material blur amounts are fixed recipes, so true clarity
-                // tuning is material choice; this is the clear extreme.
-                if material == "none" {
-                    return;
-                }
-                let resolved = match material.as_str() {
-                    "popover" => M::Popover,
-                    "sidebar" => M::Sidebar,
-                    "menu" => M::Menu,
-                    "sheet" => M::Sheet,
-                    "window" => M::WindowBackground,
-                    "under-window" => M::UnderWindowBackground,
-                    "fullscreen" => M::FullScreenUI,
-                    "hud" => M::HudWindow,
-                    _ => chrome_vibrancy_material(), // "default"/unknown → per-OS chrome (#1543)
-                };
-                // ALWAYS Active — including "default". Boot applies the chrome
-                // HudWindow material with State::Active (#1267: stay glassy when
-                // the window loses key focus). `None` means follows-window, so
-                // restoring "default" on canvas exit downgraded the whole window
-                // to flatten-to-grey on blur for the rest of the session
-                // (operator-reported regression, 2026-07-06).
-                let state = Some(window_vibrancy::NSVisualEffectState::Active);
-                // Rounding is owned by the content-view clip (round_window_corners,
-                // applied at setup) which clips the effect view AND the webview
-                // together and tracks resize. Keep the effect view square (None)
-                // so it fills to the corner and the content-view mask rounds it
-                // cleanly — no sliver between two mismatched radii.
-                let radius: Option<f64> = None;
-                if let Err(e) = window_vibrancy::apply_vibrancy(&target, resolved, state, radius) {
-                    log::warn!("[canvas-material] apply_vibrancy failed: {e}");
-                }
-            })
-            .map_err(|e| format!("schedule material swap failed: {e}"))?;
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (app, material);
-    }
+    let _ = (app, material);
     Ok(())
 }
 
@@ -7119,56 +6341,15 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
 // desktop-blur knob macOS offers; NSVisualEffectMaterial blur amounts are
 // fixed recipes. Private CGS API, battle-tested for a decade (iTerm2,
 // kitty, Alacritty). Failure is logged and harmless.
-#[cfg(target_os = "macos")]
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGSMainConnectionID() -> u32;
-    fn CGSSetWindowBackgroundBlurRadius(cid: u32, wid: u32, radius: i32) -> i32;
-}
+
 
 /// Tunable desktop frost for Canvas mode (#1232): blurs whatever is behind
 /// the window's transparent regions. Pairs with the "none"/Liquid material
 /// for a continuous liquid-frost dial; radius 0 restores raw clarity.
+#[cfg(not(target_os = "macos"))]
 #[tauri::command]
 fn set_canvas_backdrop_blur(app: tauri::AppHandle, radius: u32) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::Manager;
-        let Some(window) = voice_host::classic_window(&app) else {
-            return Err("main window not found".into());
-        };
-        let target = window.clone();
-        window
-            .run_on_main_thread(move || {
-                let Ok(ptr) = target.ns_window() else {
-                    log::warn!("[canvas-blur] ns_window unavailable");
-                    return;
-                };
-                if ptr.is_null() {
-                    return;
-                }
-                let object = ptr as *mut objc2::runtime::AnyObject;
-                let wid: isize = unsafe { objc2::msg_send![&*object, windowNumber] };
-                if wid <= 0 {
-                    return;
-                }
-                let err = unsafe {
-                    CGSSetWindowBackgroundBlurRadius(
-                        CGSMainConnectionID(),
-                        wid as u32,
-                        radius.min(64) as i32,
-                    )
-                };
-                if err != 0 {
-                    log::warn!("[canvas-blur] CGSSetWindowBackgroundBlurRadius failed: {err}");
-                }
-            })
-            .map_err(|e| format!("schedule backdrop blur failed: {e}"))?;
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (app, radius);
-    }
+    let _ = (app, radius);
     Ok(())
 }
 
@@ -7257,63 +6438,7 @@ fn buffer_o8_auth_deep_links(links: Vec<String>) {
     }
 }
 
-#[derive(Clone, Copy)]
-struct RestartPolicy {
-    max_restarts: usize,
-    window: std::time::Duration,
-    delay: std::time::Duration,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum RestartDecision {
-    Restart {
-        attempt: usize,
-        delay: std::time::Duration,
-    },
-    Exhausted {
-        attempts: usize,
-    },
-}
-
-struct RestartTracker {
-    policy: RestartPolicy,
-    restarts: VecDeque<std::time::Instant>,
-}
-
-impl RestartTracker {
-    fn new(policy: RestartPolicy) -> Self {
-        Self {
-            policy,
-            restarts: VecDeque::new(),
-        }
-    }
-
-    fn record_failure(&mut self, now: std::time::Instant) -> RestartDecision {
-        while self
-            .restarts
-            .front()
-            .is_some_and(|started| now.saturating_duration_since(*started) >= self.policy.window)
-        {
-            self.restarts.pop_front();
-        }
-        if self.restarts.len() >= self.policy.max_restarts {
-            return RestartDecision::Exhausted {
-                attempts: self.restarts.len(),
-            };
-        }
-        self.restarts.push_back(now);
-        RestartDecision::Restart {
-            attempt: self.restarts.len(),
-            delay: self.policy.delay,
-        }
-    }
-}
-
-const NEXT_RESTART_POLICY: RestartPolicy = RestartPolicy {
-    max_restarts: 3,
-    window: std::time::Duration::from_secs(5 * 60),
-    delay: std::time::Duration::from_millis(750),
-};
+use o8_launch_core::restart::*;
 
 fn child_exit_reason(status: &std::process::ExitStatus) -> String {
     #[cfg(unix)]
@@ -7499,49 +6624,30 @@ struct BundledNextSpawn {
 impl BundledNextSpawn {
     fn spawn(&self, log_file: Option<&std::fs::File>) -> std::io::Result<std::process::Child> {
         let mut command = Command::new(&self.node_bin);
-        command
-            .arg(&self.server_js)
-            .current_dir(&self.server_dir)
-            .env("O8_DATA_DIR", &self.data_dir)
-            .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
-            .no_window()
-            .env("PORT", self.api_port.to_string())
-            .env("HOSTNAME", sidecar_listen_host())
-            .env("NODE_ENV", "production")
-            .env("O8_PACKAGED_APP", "1")
-            .env("O8_NODE_BIN", &self.node_bin)
-            .env("O8_API_PORT", self.api_port.to_string())
-            .env("O8_WS_PORT", self.ws_port.to_string())
-            .env("O8_BOOT_ID", &self.boot_identity.boot_id)
-            .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
-            .env("WS_PORT", self.ws_port.to_string())
-            .env("O8_SIDECAR_PID", std::process::id().to_string())
-            .env("NODE_COMPILE_CACHE", compile_cache_dir());
-        if let Some(path) = pi_write_helper() {
-            command.env("O8_PI_WRITE_BIN", path);
+        command.arg(&self.server_js).current_dir(&self.server_dir);
+        o8_launch_core::server_env::ServerEnvironment {
+            data_dir: self.data_dir.clone(),
+            node_bin: self.node_bin.clone(),
+            server_dir: self.server_dir.clone(),
+            ws_port: self.ws_port,
+            boot_id: self.boot_identity.boot_id.clone(),
+            instance_id: self.boot_identity.instance_id.clone(),
+            compile_cache: compile_cache_dir(),
+            pi_write: pi_write_helper(),
+            mcp: self.bundled_operator_mcp.clone(),
+            ai_keys: self.ai_keys.clone(),
+            native_main: next_main::enabled(),
+            api_port: self.api_port,
+            window: std::env::current_exe().ok().and_then(|executable| {
+                executable.parent().map(|directory| directory.join("o8-next"))
+            }),
+            codebase_memory: self.codebase_memory_bin.clone(),
+            voice_only: o8_launch_core::server_env::voice_only(
+                std::env::var("O8_VOICE_ONLY").ok().as_deref(),
+            ),
+            ..Default::default()
         }
-        if let Some(path) = self.bundled_operator_mcp.as_ref() {
-            command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
-            command.env("O8_BUNDLED_MCP_PATH", path);
-        }
-        // Tauri externalBin lives beside the app executable. Pass only its path;
-        // the local server supplies its own operator credential at spawn time.
-        if let Ok(executable) = std::env::current_exe() {
-            if let Some(directory) = executable.parent() {
-                command.env("O8_NEXT_BIN", directory.join("o8-next"));
-            }
-        }
-        // The server keeps o8 next open as the main window instead of
-        // following the old Settings switch.
-        if next_main::enabled() {
-            command.env(next_main::SERVER_ENV, "1");
-        }
-        if let Some(path) = self.codebase_memory_bin.as_ref() {
-            command.env("O8_CODEBASE_MEMORY_BIN", path);
-        }
-        for (key, value) in &self.ai_keys {
-            command.env(key, value);
-        }
+        .api(&mut command);
         command
             .stdout(child_stdio(log_file))
             .stderr(child_stdio(log_file))
@@ -7582,36 +6688,24 @@ struct BundledWsSpawn {
 impl BundledWsSpawn {
     fn spawn(&self, log_file: Option<&std::fs::File>) -> std::io::Result<std::process::Child> {
         let mut command = Command::new(&self.node_bin);
-        command
-            .arg(&self.server_js)
-            .current_dir(&self.server_dir)
-            .env("O8_DATA_DIR", &self.data_dir)
-            .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
-            .no_window()
-            .env("O8_NODE_BIN", &self.node_bin)
-            .env("WS_PORT", self.ws_port.to_string())
-            .env("NEXT_ORIGIN", &self.next_origin)
-            .env("O8_PACKAGED_APP", "1")
-            .env("O8_APP_VERSION", crate::app_version::app_version())
-            .env("O8_BOOT_ID", &self.boot_identity.boot_id)
-            .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
-            .env("O8_SIDECAR_PID", std::process::id().to_string())
-            .env("NODE_COMPILE_CACHE", compile_cache_dir());
-        if let Some(path) = pi_write_helper() {
-            command.env("O8_PI_WRITE_BIN", path);
+        command.arg(&self.server_js).current_dir(&self.server_dir);
+        o8_launch_core::server_env::ServerEnvironment {
+            data_dir: self.data_dir.clone(),
+            node_bin: self.node_bin.clone(),
+            server_dir: self.server_dir.clone(),
+            ws_port: self.ws_port,
+            boot_id: self.boot_identity.boot_id.clone(),
+            instance_id: self.boot_identity.instance_id.clone(),
+            compile_cache: compile_cache_dir(),
+            pi_write: pi_write_helper(),
+            mcp: self.bundled_operator_mcp.clone(),
+            ai_keys: self.ai_keys.clone(),
+            native_main: next_main::enabled(),
+            version: crate::app_version::app_version().into(),
+            next_origin: self.next_origin.clone(),
+            ..Default::default()
         }
-        if let Some(path) = self.bundled_operator_mcp.as_ref() {
-            command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
-            command.env("O8_BUNDLED_MCP_PATH", path);
-        }
-        // Update apply runs here when the native transport owns updater state,
-        // and must ask the native updater rather than a webview that is absent.
-        if next_main::enabled() {
-            command.env(next_main::SERVER_ENV, "1");
-        }
-        for (key, value) in &self.ai_keys {
-            command.env(key, value);
-        }
+        .ws(&mut command);
         let mut child = command
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -8370,6 +7464,22 @@ pub fn run() {
             }
         };
 
+    #[cfg(target_os = "macos")]
+    if env_flag_enabled("O8_VOICE_ONLY") {
+        if native_test_instance.is_some() {
+            eprintln!("[voice-only] incompatible with native-test sidecar isolation");
+            std::process::exit(78);
+        }
+        let _hotkey_owner = voice_only::claim_hotkey_or_exit(std::time::Duration::ZERO);
+        if let voice_only::Launch::VoiceOnly { server_port } =
+            voice_only::inspect_launch(true, Path::new(&o8_data_dir()))
+        {
+            voice_only::run(server_port);
+        }
+        // Never fall through to boot identity, cleanup, sidecars or main UI.
+        return;
+    }
+
     // First statement in the process: everything else is measured against this.
     let _ = BOOT_T0.set(std::time::Instant::now());
     boot_trace("run() entry");
@@ -8402,6 +7512,15 @@ pub fn run() {
     // terminal launch. Runs only in the main process; no-op when the var is
     // unset. Placed AFTER minidump init so the reporter is already listening.
     telemetry::maybe_trigger_crash_test();
+
+    // The crash reporter must exit through minidump initialization above first.
+    // Real full-app launches claim the same per-user lock as voice-only mode,
+    // before reaping processes, touching server metadata or installing hotkeys.
+    // Debug builds skip it: they run beside the installed app during
+    // development, and would otherwise exit after the handover wait.
+    #[cfg(target_os = "macos")]
+    let _hotkey_owner = (native_test_instance.is_none() && !cfg!(debug_assertions))
+        .then(|| voice_only::claim_hotkey_or_exit(HOTKEY_HANDOVER_WAIT));
 
     let preship_gate = native_test_instance.is_some();
     let dev_frontend = match dev_frontend::from_env() {
@@ -8508,7 +7627,7 @@ pub fn run() {
     } else {
         boot_trace("orphan reap joined + mcp socket cleaned (pre-builder)");
     }
-    if let Some(dev_frontend) = dev_frontend.as_ref() {
+    if let Some(dev_frontend) = dev_frontend.as_ref().filter(|_| !next_main::enabled()) {
         if !dev_frontend::apply_to_main_window_config(context.config_mut(), dev_frontend) {
             eprintln!(
                 "[dev-frontend] main window config not found for {}",
@@ -8516,6 +7635,7 @@ pub fn run() {
             );
         }
     }
+    #[cfg(not(target_os = "macos"))]
     let main_window_config = context
         .config()
         .app
@@ -8551,7 +7671,6 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -8573,6 +7692,11 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ));
+
+    // macOS still needs the plugin: the native window launcher reports a
+    // start failure through a message dialog. Only the picker permission is
+    // limited to the platforms that keep the classic dashboard.
+    builder = builder.plugin(tauri_plugin_dialog::init());
 
     // ── Windows/Linux `o8://` deep-link delivery (#1742, part of #1673) ──
     // macOS is untouched: the OS hands `o8://` URLs to the running app through
@@ -8705,6 +7829,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             visual_capture::reset_on_main_navigation(webview.app_handle());
             managed_voice_window::reset_on_main_navigation(webview.app_handle());
+            #[cfg(not(target_os = "macos"))]
             remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
                 launch_updater::start_launch_update_check(webview.app_handle().clone());
@@ -8732,18 +7857,23 @@ pub fn run() {
             start_ws_server,
             cortex_available,
             get_app_data_dir,
+            #[cfg(not(target_os = "macos"))]
             read_repos,
+            #[cfg(not(target_os = "macos"))]
             read_local_commits,
+            #[cfg(not(target_os = "macos"))]
             read_worktrees,
-            read_current_branch,
-            read_git_status,
+            #[cfg(not(target_os = "macos"))]
             read_approvals,
+            #[cfg(not(target_os = "macos"))]
             read_workspaces,
             set_tray_badge,
             desktop_close_preference_get,
             desktop_close_preference_set,
             resolve_desktop_close,
+            #[cfg(not(target_os = "macos"))]
             set_canvas_material,
+            #[cfg(not(target_os = "macos"))]
             set_canvas_backdrop_blur,
             take_pending_file_opens,
             peek_pending_file_opens,
@@ -8753,9 +7883,11 @@ pub fn run() {
             presentation_quiet_mode_get,
             set_review_notifications_enabled,
             record_console_error,
+            #[cfg(not(target_os = "macos"))]
             read_dropped_file,
             mcp_result,
             o8_view_console_errors,
+            #[cfg(not(target_os = "macos"))]
             o8_view_active_route,
             #[cfg(target_os = "macos")]
             master_key_get,
@@ -8834,9 +7966,13 @@ pub fn run() {
             browser_view_hide,
             #[cfg(target_os = "macos")]
             browser_view_show,
+            #[cfg(not(target_os = "macos"))]
             remote_preview::remote_preview_supported,
+            #[cfg(not(target_os = "macos"))]
             remote_preview::remote_preview_open,
+            #[cfg(not(target_os = "macos"))]
             remote_preview::remote_preview_set_rect,
+            #[cfg(not(target_os = "macos"))]
             remote_preview::remote_preview_close,
             #[cfg(target_os = "macos")]
             open_voice_settings,
@@ -9547,42 +8683,46 @@ pub fn run() {
             // host takes the `main` label and runs Live and dictation audio
             // for o8 next.
             if next_main::enabled() {
+                next_main::start(app.handle().clone(), Some((api_port, boot_identity.boot_id.clone())));
                 log::info!("[main-window] o8 next is the main window; the classic window is not built");
                 voice_host::start(app.handle().clone(), api_port, boot_identity.boot_id.clone());
-            } else if app.get_webview_window("main").is_none() {
-                if let Some(config) = main_window_config.as_ref() {
-                    // __O8_HTML_TRAFFIC_LIGHTS__ tells the frontend this shell
-                    // hides the native traffic lights, so it must render the
-                    // DOM ones (TrafficLights.tsx). Old shells lack the flag →
-                    // the strips keep the native-lights spacer fallback, which
-                    // keeps dev-bridge (new frontend on the old installed
-                    // binary) rendering correctly. Only the macOS shell hides
-                    // them (hide_native_traffic_lights is macOS-only); Windows
-                    // and Linux keep standard decorations, so the flag is
-                    // false there and the strips draw no controls (#1743).
-                    let html_traffic_lights = cfg!(target_os = "macos");
-                    // __O8_HOST_PLATFORM__ is the frontend's synchronous
-                    // platform read (#1743) — the pre-paint theme stamp needs
-                    // it in <head>, long before any IPC exists, to pick opaque
-                    // chrome off macOS. See lib/desktop/host-platform.ts.
-                    let init_script = format!(
-                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = {}; window.__O8_HOST_PLATFORM__ = {:?};",
-                        api_port,
-                        serde_json::to_string(&boot_identity.boot_id)
-                            .unwrap_or_else(|_| "\"\"".into()),
-                        html_traffic_lights,
-                        std::env::consts::OS,
-                    );
-                    #[cfg(target_os = "linux")]
-                    let init_script = format!(
-                        "{init_script} window.__O8_LINUX_GLASS__ = {};",
-                        std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
-                    );
-                    tauri::WebviewWindowBuilder::from_config(app, config)?
-                        .initialization_script(init_script)
-                        .build()?;
-                } else {
-                    log::warn!("[main-window] config missing; could not create main webview");
+            } else {
+                #[cfg(not(target_os = "macos"))]
+                if app.get_webview_window("main").is_none() {
+                    if let Some(config) = main_window_config.as_ref() {
+                        // __O8_HTML_TRAFFIC_LIGHTS__ tells the frontend this shell
+                        // hides the native traffic lights, so it must render the
+                        // DOM ones (TrafficLights.tsx). Old shells lack the flag →
+                        // the strips keep the native-lights spacer fallback, which
+                        // keeps dev-bridge (new frontend on the old installed
+                        // binary) rendering correctly. Only the macOS shell hides
+                        // them (hide_native_traffic_lights is macOS-only); Windows
+                        // and Linux keep standard decorations, so the flag is
+                        // false there and the strips draw no controls (#1743).
+                        let html_traffic_lights = cfg!(target_os = "macos");
+                        // __O8_HOST_PLATFORM__ is the frontend's synchronous
+                        // platform read (#1743) — the pre-paint theme stamp needs
+                        // it in <head>, long before any IPC exists, to pick opaque
+                        // chrome off macOS. See lib/desktop/host-platform.ts.
+                        let init_script = format!(
+                            "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = {}; window.__O8_HOST_PLATFORM__ = {:?};",
+                            api_port,
+                            serde_json::to_string(&boot_identity.boot_id)
+                                .unwrap_or_else(|_| "\"\"".into()),
+                            html_traffic_lights,
+                            std::env::consts::OS,
+                        );
+                        #[cfg(target_os = "linux")]
+                        let init_script = format!(
+                            "{init_script} window.__O8_LINUX_GLASS__ = {};",
+                            std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
+                        );
+                        tauri::WebviewWindowBuilder::from_config(app, config)?
+                            .initialization_script(init_script)
+                            .build()?;
+                    } else {
+                        log::warn!("[main-window] config missing; could not create main webview");
+                    }
                 }
             }
             if desktop_attached {
@@ -9601,199 +8741,204 @@ pub fn run() {
             // (0.1.597–598) the guard below skipped silently and took boot
             // vibrancy, the #1543 re-assert ladder, corner rounding, launch
             // clamps, close-to-hide, and the #1136 drag-drop bridge with it.
-            let app_handle = app.handle().clone();
-            if let Some(window) = voice_host::classic_window(app.handle()) {
-                window_restore::schedule_launch_clamps(&app_handle);
+            #[cfg(not(target_os = "macos"))]
+            {
+                let app_handle = app.handle().clone();
+                if let Some(window) = voice_host::classic_window(app.handle()) {
+                    window_restore::schedule_launch_clamps(&app_handle);
 
-                #[cfg(target_os = "macos")]
-                if let Err(err) = apply_vibrancy(
-                    &window,
-                    chrome_vibrancy_material(),
-                    // Active (not focus-following): keep the chrome glassy when the
-                    // window loses key focus instead of flattening to grey (#1267).
-                    // Mirrors what the canvas surface already does (set_canvas_material).
-                    Some(window_vibrancy::NSVisualEffectState::Active),
-                    None,
-                ) {
-                    log::warn!("Failed to apply macOS vibrancy: {}", err);
-                }
+                    #[cfg(target_os = "macos")]
+                    if let Err(err) = apply_vibrancy(
+                        &window,
+                        chrome_vibrancy_material(),
+                        // Active (not focus-following): keep the chrome glassy when the
+                        // window loses key focus instead of flattening to grey (#1267).
+                        // Mirrors what the canvas surface already does (set_canvas_material).
+                        Some(window_vibrancy::NSVisualEffectState::Active),
+                        None,
+                    ) {
+                        log::warn!("Failed to apply macOS vibrancy: {}", err);
+                    }
 
-                // Boot-timing belt-and-braces (#1543): the effect view applied
-                // during setup can silently fail to render on macOS 26 AND
-                // 15.7.8 (observed live on both operator machines — a runtime
-                // clear+re-apply always cures it). Primary re-assert is
-                // webview-driven (ThemeProvider invokes set_canvas_material
-                // 'default' on mount — the frontend being alive proves the
-                // window is ready); this Rust retry loop is the fallback for
-                // boots where the webview never mounts. v0.1.582's version of
-                // this silently never ran because the dispatch error was
-                // swallowed — every failure logs now.
-                #[cfg(target_os = "macos")]
-                {
-                    let reassert = window.clone();
-                    std::thread::spawn(move || {
-                        for (attempt, delay_ms) in [(1u32, 2_000u64), (2, 6_000), (3, 12_000)] {
-                            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                            let target = reassert.clone();
-                            let dispatched = reassert.run_on_main_thread(move || {
-                                let _ = window_vibrancy::clear_vibrancy(&target);
-                                if let Err(e) = window_vibrancy::apply_vibrancy(
-                                    &target,
-                                    chrome_vibrancy_material(),
-                                    Some(window_vibrancy::NSVisualEffectState::Active),
-                                    None,
-                                ) {
-                                    log::warn!("[vibrancy] boot re-assert apply failed: {e}");
-                                } else {
-                                    log::info!("[vibrancy] boot re-assert applied");
+                    // Boot-timing belt-and-braces (#1543): the effect view applied
+                    // during setup can silently fail to render on macOS 26 AND
+                    // 15.7.8 (observed live on both operator machines — a runtime
+                    // clear+re-apply always cures it). Primary re-assert is
+                    // webview-driven (ThemeProvider invokes set_canvas_material
+                    // 'default' on mount — the frontend being alive proves the
+                    // window is ready); this Rust retry loop is the fallback for
+                    // boots where the webview never mounts. v0.1.582's version of
+                    // this silently never ran because the dispatch error was
+                    // swallowed — every failure logs now.
+                    #[cfg(target_os = "macos")]
+                    {
+                        let reassert = window.clone();
+                        std::thread::spawn(move || {
+                            for (attempt, delay_ms) in [(1u32, 2_000u64), (2, 6_000), (3, 12_000)] {
+                                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                                let target = reassert.clone();
+                                let dispatched = reassert.run_on_main_thread(move || {
+                                    let _ = window_vibrancy::clear_vibrancy(&target);
+                                    if let Err(e) = window_vibrancy::apply_vibrancy(
+                                        &target,
+                                        chrome_vibrancy_material(),
+                                        Some(window_vibrancy::NSVisualEffectState::Active),
+                                        None,
+                                    ) {
+                                        log::warn!("[vibrancy] boot re-assert apply failed: {e}");
+                                    } else {
+                                        log::info!("[vibrancy] boot re-assert applied");
+                                    }
+                                });
+                                match dispatched {
+                                    Ok(()) => break,
+                                    Err(e) => log::warn!(
+                                        "[vibrancy] boot re-assert dispatch failed (attempt {attempt}): {e}"
+                                    ),
                                 }
-                            });
-                            match dispatched {
-                                Ok(()) => break,
-                                Err(e) => log::warn!(
-                                    "[vibrancy] boot re-assert dispatch failed (attempt {attempt}): {e}"
-                                ),
                             }
-                        }
-                    });
-                }
+                        });
+                    }
 
-                // Transparent windows lose macOS's automatic corner mask, so the
-                // webview's square corners poke past the vibrancy and read as a
-                // hard/pointed edge with the desktop showing through. Clip the
-                // content-view layer to round the vibrancy + webview together —
-                // a normal rounded Mac window. Tracks resize.
-                #[cfg(target_os = "macos")]
-                round_window_corners(&window, 12.0);
+                    // Transparent windows lose macOS's automatic corner mask, so the
+                    // webview's square corners poke past the vibrancy and read as a
+                    // hard/pointed edge with the desktop showing through. Clip the
+                    // content-view layer to round the vibrancy + webview together —
+                    // a normal rounded Mac window. Tracks resize.
+                    #[cfg(target_os = "macos")]
+                    round_window_corners(&window, 12.0);
 
-                // Zoom (maximize/restore) must be instant — WKWebView can't
-                // repaint during the animated frame change, so the animation
-                // reads as frozen-content-then-snap (2026-07-15 polish pass).
-                #[cfg(target_os = "macos")]
-                make_window_zoom_instant(&window);
+                    // Zoom (maximize/restore) must be instant — WKWebView can't
+                    // repaint during the animated frame change, so the animation
+                    // reads as frozen-content-then-snap (2026-07-15 polish pass).
+                    #[cfg(target_os = "macos")]
+                    make_window_zoom_instant(&window);
 
-                // Native traffic lights OFF — the webview draws its own so the
-                // whole titlebar cluster scales with the app's CSS zoom
-                // (Q ruling 2026-07-16). Re-asserted below on Focused/Resized
-                // because macOS un-hides standard buttons across fullscreen
-                // and style-mask transitions.
-                #[cfg(target_os = "macos")]
-                hide_native_traffic_lights(&window);
+                    // Native traffic lights OFF — the webview draws its own so the
+                    // whole titlebar cluster scales with the app's CSS zoom
+                    // (Q ruling 2026-07-16). Re-asserted below on Focused/Resized
+                    // because macOS un-hides standard buttons across fullscreen
+                    // and style-mask transitions.
+                    #[cfg(target_os = "macos")]
+                    hide_native_traffic_lights(&window);
 
-                // No blur/acrylic backdrop off macOS (#1743): the Windows and
-                // Linux windows are decorated and OPAQUE (tauri.windows /
-                // tauri.linux conf overlays set transparent=false), and the
-                // frontend pins surface=solid there, so there is no
-                // translucent chrome for a backdrop to show through.
+                    // No blur/acrylic backdrop off macOS (#1743): the Windows and
+                    // Linux windows are decorated and OPAQUE (tauri.windows /
+                    // tauri.linux conf overlays set transparent=false), and the
+                    // frontend pins surface=solid there, so there is no
+                    // translucent chrome for a backdrop to show through.
 
-                window.on_window_event(move |event| {
-                    match event {
-                        tauri::WindowEvent::CloseRequested { api, .. } => {
-                            api.prevent_close();
+                    window.on_window_event(move |event| {
+                        match event {
+                            tauri::WindowEvent::CloseRequested { api, .. } => {
+                                api.prevent_close();
 
-                            // A windowless app remains visible in the macOS
-                            // Dock, so closing the window keeps the established
-                            // macOS behavior. Windows/Linux treat X as quit when
-                            // no worker is live and ask before backgrounding
-                            // active work; the tray appears only after consent.
-                            #[cfg(target_os = "macos")]
-                            {
+                                // A windowless app remains visible in the macOS
+                                // Dock, so closing the window keeps the established
+                                // macOS behavior. Windows/Linux treat X as quit when
+                                // no worker is live and ask before backgrounding
+                                // active work; the tray appears only after consent.
+                                #[cfg(target_os = "macos")]
+                                {
+                                    if let Some(w) = voice_host::classic_window(&app_handle) {
+                                        let _ = w.hide();
+                                    }
+                                    let _ = app_handle.emit("window-hidden", ());
+                                }
+                                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                                request_desktop_close(app_handle.clone());
+                            }
+                            // #1136 — bridge OS-level drag-drop into the webview as
+                            // window CustomEvents. With dragDropEnabled: true in
+                            // tauri.conf.json, HTML5 drop events no longer fire for
+                            // EXTERNAL drags (Finder → app), so this is the only
+                            // path that lets composers receive Finder file paths.
+                            // Internal webview drags (tile reorder, etc.) still
+                            // work through normal HTML5.
+                            tauri::WindowEvent::DragDrop(drag) => match drag {
+                                tauri::DragDropEvent::Enter { paths, position } => {
+                                    let payload = serde_json::json!({
+                                        "paths": paths.iter()
+                                            .map(|p| p.to_string_lossy().into_owned())
+                                            .collect::<Vec<_>>(),
+                                        "position": { "x": position.x, "y": position.y },
+                                    });
+                                    let _ = app_handle.emit("o8:tauri-file-drop-enter", payload);
+                                }
+                                tauri::DragDropEvent::Over { position } => {
+                                    let payload = serde_json::json!({
+                                        "position": { "x": position.x, "y": position.y },
+                                    });
+                                    let _ = app_handle.emit("o8:tauri-file-drop-over", payload);
+                                }
+                                tauri::DragDropEvent::Drop { paths, position } => {
+                                    let payload = serde_json::json!({
+                                        "paths": paths.iter()
+                                            .map(|p| p.to_string_lossy().into_owned())
+                                            .collect::<Vec<_>>(),
+                                        "position": { "x": position.x, "y": position.y },
+                                    });
+                                    let _ = app_handle.emit("o8:tauri-file-drop", payload);
+                                }
+                                tauri::DragDropEvent::Leave => {
+                                    let _ = app_handle.emit("o8:tauri-file-drop-leave", ());
+                                }
+                                _ => {}
+                            },
+                            tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+                                window_restore::schedule_event_clamp(&app_handle);
+                                // Re-hide the native traffic lights — macOS
+                                // re-shows standard buttons across fullscreen
+                                // enter/exit and style-mask changes, and both
+                                // paths land here as a Resized event.
+                                #[cfg(target_os = "macos")]
                                 if let Some(w) = voice_host::classic_window(&app_handle) {
-                                    let _ = w.hide();
+                                    hide_native_traffic_lights(&w);
                                 }
-                                let _ = app_handle.emit("window-hidden", ());
-                            }
-                            #[cfg(any(target_os = "windows", target_os = "linux"))]
-                            request_desktop_close(app_handle.clone());
-                        }
-                        // #1136 — bridge OS-level drag-drop into the webview as
-                        // window CustomEvents. With dragDropEnabled: true in
-                        // tauri.conf.json, HTML5 drop events no longer fire for
-                        // EXTERNAL drags (Finder → app), so this is the only
-                        // path that lets composers receive Finder file paths.
-                        // Internal webview drags (tile reorder, etc.) still
-                        // work through normal HTML5.
-                        tauri::WindowEvent::DragDrop(drag) => match drag {
-                            tauri::DragDropEvent::Enter { paths, position } => {
-                                let payload = serde_json::json!({
-                                    "paths": paths.iter()
-                                        .map(|p| p.to_string_lossy().into_owned())
-                                        .collect::<Vec<_>>(),
-                                    "position": { "x": position.x, "y": position.y },
-                                });
-                                let _ = app_handle.emit("o8:tauri-file-drop-enter", payload);
-                            }
-                            tauri::DragDropEvent::Over { position } => {
-                                let payload = serde_json::json!({
-                                    "position": { "x": position.x, "y": position.y },
-                                });
-                                let _ = app_handle.emit("o8:tauri-file-drop-over", payload);
-                            }
-                            tauri::DragDropEvent::Drop { paths, position } => {
-                                let payload = serde_json::json!({
-                                    "paths": paths.iter()
-                                        .map(|p| p.to_string_lossy().into_owned())
-                                        .collect::<Vec<_>>(),
-                                    "position": { "x": position.x, "y": position.y },
-                                });
-                                let _ = app_handle.emit("o8:tauri-file-drop", payload);
-                            }
-                            tauri::DragDropEvent::Leave => {
-                                let _ = app_handle.emit("o8:tauri-file-drop-leave", ());
-                            }
-                            _ => {}
-                        },
-                        tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
-                            window_restore::schedule_event_clamp(&app_handle);
-                            // Re-hide the native traffic lights — macOS
-                            // re-shows standard buttons across fullscreen
-                            // enter/exit and style-mask changes, and both
-                            // paths land here as a Resized event.
-                            #[cfg(target_os = "macos")]
-                            if let Some(w) = voice_host::classic_window(&app_handle) {
-                                hide_native_traffic_lights(&w);
-                            }
-                            // A monitor crossing does not always deliver the scale event before
-                            // AppKit settles the window. Refit after move/resize as a cheap fallback.
-                            #[cfg(target_os = "macos")]
-                            macos_webview_scale::schedule_main_webview_frame_repair(&app_handle);
-                        }
-                        #[cfg(target_os = "macos")]
-                        tauri::WindowEvent::ScaleFactorChanged {
-                            scale_factor,
-                            new_inner_size,
-                            ..
-                        } => {
-                            window_restore::schedule_event_clamp(&app_handle);
-                            if let Some(w) = voice_host::classic_window(&app_handle) {
-                                log::info!(
-                                    "[display-scale] main window changed to {scale_factor:.2}x at {}x{} physical pixels",
-                                    new_inner_size.width,
-                                    new_inner_size.height
-                                );
-                                hide_native_traffic_lights(&w);
-                                macos_webview_scale::repair_main_webview_frame(&w);
+                                // A monitor crossing does not always deliver the scale event before
+                                // AppKit settles the window. Refit after move/resize as a cheap fallback.
+                                #[cfg(target_os = "macos")]
                                 macos_webview_scale::schedule_main_webview_frame_repair(&app_handle);
                             }
-                        }
-                        #[cfg(not(target_os = "macos"))]
-                        tauri::WindowEvent::ScaleFactorChanged { .. } => {
-                            window_restore::schedule_event_clamp(&app_handle);
-                        }
-                        #[cfg(target_os = "macos")]
-                        tauri::WindowEvent::Focused(_) => {
-                            if let Some(w) = voice_host::classic_window(&app_handle) {
-                                hide_native_traffic_lights(&w);
+                            #[cfg(target_os = "macos")]
+                            tauri::WindowEvent::ScaleFactorChanged {
+                                scale_factor,
+                                new_inner_size,
+                                ..
+                            } => {
+                                window_restore::schedule_event_clamp(&app_handle);
+                                if let Some(w) = voice_host::classic_window(&app_handle) {
+                                    log::info!(
+                                        "[display-scale] main window changed to {scale_factor:.2}x at {}x{} physical pixels",
+                                        new_inner_size.width,
+                                        new_inner_size.height
+                                    );
+                                    hide_native_traffic_lights(&w);
+                                    macos_webview_scale::repair_main_webview_frame(&w);
+                                    macos_webview_scale::schedule_main_webview_frame_repair(&app_handle);
+                                }
                             }
+                            #[cfg(not(target_os = "macos"))]
+                            tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                                window_restore::schedule_event_clamp(&app_handle);
+                            }
+                            #[cfg(target_os = "macos")]
+                            tauri::WindowEvent::Focused(_) => {
+                                if let Some(w) = voice_host::classic_window(&app_handle) {
+                                    hide_native_traffic_lights(&w);
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    }
-                });
-            } else {
-                // Loud, not silent — this skipping is exactly the 0.1.598
-                // glass/close-to-hide regression.
-                log::warn!("[main-window] lifecycle block skipped: main window missing at setup");
+                    });
+                } else {
+                    // Loud, not silent — this skipping is exactly the 0.1.598
+                    // glass/close-to-hide regression.
+                    log::warn!("[main-window] lifecycle block skipped: main window missing at setup");
+                }
+
             }
+
 
             // Bound the V8 compile cache. Worker thread; never on the boot path.
             prune_compile_cache();

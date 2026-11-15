@@ -42,7 +42,7 @@ describe('running shell package ownership', () => {
   it('does not mistake a writable tarball for a package install', async () => {
     readlink.mockResolvedValue('/tmp/writable/o8');
     const { action } = await runningAction();
-    expect(action).toEqual({ kind: 'download', url: 'https://github.com/o8-run/o8/releases/download/v0.1.811/o8_0.1.811_linux_amd64_preview.AppImage' });
+    expect(action).toEqual({ kind: 'download', url: 'https://github.com/o8-run/o8/releases/download/v0.1.811/o8-0.1.811-x86_64.AppImage' });
   });
 
   it('does not count a different package or a wildcard ownership match', async () => {

@@ -8,7 +8,7 @@ import { recordLaneEvent } from '@/lib/lane/events';
 import { readLaneReviewDiff } from '@/lib/lane/review-source';
 import { getLane, getLaneEvents, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
-import { getResourceLeaseStore } from '@/lib/leases/resource-lease-service';
+import { getResourceLeaseStore } from '@/lib/leases/resource-lease-default-store';
 import { observeResourceLeaseParticipant } from '@/lib/leases/resource-lease-participant';
 import type { ResourceLeaseParticipant } from '@/lib/leases/resource-lease-types';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';

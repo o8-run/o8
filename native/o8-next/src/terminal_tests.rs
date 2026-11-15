@@ -1,4 +1,5 @@
 use super::*;
+use crate::terminal_grid::keep_one_screen;
 use alacritty_terminal::grid::Dimensions;
 use gpui::{Entity, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
@@ -320,6 +321,34 @@ fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
             .display_offset()),
         0
     );
+    // A trackpad sends movements smaller than a line. Seven 3px steps pass one
+    // 18px line; rounding each step alone never moved the scrollback.
+    for step in 0..7 {
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: point(px(100.), px(100.)),
+            delta: gpui::ScrollDelta::Pixels(point(px(0.), px(3.))),
+            touch_phase: if step == 0 {
+                gpui::TouchPhase::Started
+            } else {
+                gpui::TouchPhase::Moved
+            },
+            ..Default::default()
+        });
+    }
+    draw(&pane, cx);
+    assert_eq!(
+        pane.read_with(cx, |pane, _| pane
+            .grid
+            .lock()
+            .unwrap()
+            .term
+            .grid()
+            .display_offset()),
+        1,
+        "small trackpad steps must add up to a line of scrollback"
+    );
+    cx.simulate_keystrokes("shift-end");
+    draw(&pane, cx);
     // Full 50 MB at an explicit 2.5 MB/s, following the repository's fixed-rate
     // terminal workload pattern. Unpaced saturation remains a separate probe.
     let before = pane.read_with(cx, |pane, _| pane.grid.lock().unwrap().bytes);
@@ -482,4 +511,127 @@ fn exit_reports_count_live_and_whole_even_when_split() {
         !grid.text().contains("133"),
         "the parser still hides the report"
     );
+}
+
+#[test]
+fn wheel_steps_smaller_than_a_line_add_up() {
+    let mut carry = 0.;
+    let moved: i32 = (0..13).map(|_| wheel_lines(&mut carry, 3.)).sum();
+    assert_eq!(moved, 2, "39px passes two 18px lines");
+    assert!(carry > 0. && carry < 1., "the rest waits for the next step: {carry}");
+    // A wheel notch is several lines at once, in either direction.
+    assert_eq!(wheel_lines(&mut 0., 54.), 3);
+    assert_eq!(wheel_lines(&mut 0., -54.), -3);
+    // Turning back spends the carried part first.
+    let mut carry = 0.5;
+    assert_eq!(wheel_lines(&mut carry, -9.), 0);
+    assert_eq!(carry, 0.);
+}
+
+#[test]
+fn wheel_follows_the_terminal_mode() {
+    let none = TermMode::empty();
+    assert_eq!(wheel_action(none, 3, 4, 2), Wheel::Display(3));
+    assert_eq!(wheel_action(none, -2, 4, 2), Wheel::Display(-2));
+    // A full-screen program has no scrollback, so it gets arrow keys.
+    let full = TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL;
+    assert_eq!(wheel_action(full, 2, 4, 2), Wheel::Send("\x1b[A\x1b[A".into()));
+    assert_eq!(wheel_action(full, -1, 4, 2), Wheel::Send("\x1b[B".into()));
+    assert_eq!(
+        wheel_action(full | TermMode::APP_CURSOR, 1, 4, 2),
+        Wheel::Send("\x1bOA".into())
+    );
+    assert_eq!(
+        wheel_action(TermMode::ALT_SCREEN, 1, 4, 2),
+        Wheel::Display(1),
+        "a program that turned alternate scroll off gets no keys"
+    );
+    // A program that asked for the mouse gets wheel reports at the cell.
+    let mouse = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
+    assert_eq!(wheel_action(full | mouse, 1, 4, 2), Wheel::Send("\x1b[<64;5;3M".into()));
+    assert_eq!(wheel_action(mouse, -1, 0, 0), Wheel::Send("\x1b[<65;1;1M".into()));
+    assert_eq!(
+        wheel_action(TermMode::MOUSE_REPORT_CLICK, 1, 4, 2),
+        Wheel::Send("\x1b[M`%#".into()),
+        "the original encoding adds 32 to each value"
+    );
+    // One event never floods the program.
+    let Wheel::Send(burst) = wheel_action(full, 500, 0, 0) else {
+        panic!("full-screen wheel sends keys");
+    };
+    assert_eq!(burst.len(), WHEEL_BURST * "\x1b[A".len());
+}
+
+#[test]
+fn a_tmux_screen_switch_keeps_the_scrollback() {
+    let mut grid = Grid::new(Size(20, 5));
+    let lines: Vec<String> = (1..=12).map(|n| format!("line {n}")).collect();
+    // The snapshot restores the history and the screen, then says it came
+    // from tmux.
+    grid.feed(lines.join("\r\n").as_bytes(), true);
+    grid.set_multiplexed(true);
+    assert_eq!(grid.term.grid().history_size(), 7);
+    // tmux's client then enters its own screen and repaints the same rows.
+    // The switch arrives cut in two.
+    let mut repaint = String::from("\x1b[?1049h\x1b[22;0;0t\x1b[H\x1b[2J");
+    for (row, line) in lines[7..].iter().enumerate() {
+        repaint.push_str(&format!("\x1b[{};1H{line}", row + 1));
+    }
+    let (first, second) = repaint.as_bytes().split_at(5);
+    grid.feed(first, false);
+    grid.feed(second, false);
+    assert!(
+        !grid.term.mode().contains(TermMode::ALT_SCREEN),
+        "tmux's own screen has no scrollback, so the terminal stays on its first"
+    );
+    assert_eq!(
+        grid.term.grid().history_size(),
+        7,
+        "the repaint neither drops the history nor repeats the screen in it"
+    );
+    assert_eq!(grid.tail(12), lines);
+    grid.scroll(3);
+    assert_eq!(grid.term.grid().display_offset(), 3);
+    grid.bottom();
+    // Leaving that screen, as tmux does when the shell ends, changes nothing.
+    grid.feed(b"\x1b[?1049l\r\n[exited]", false);
+    assert!(grid.tail(1)[0].ends_with("[exited]"));
+    assert_eq!(grid.term.grid().history_size(), 8);
+
+    // When the server cannot take a snapshot it replays tmux's raw stream,
+    // switch and all. The lines that scrolled off are still kept.
+    let mut replayed = Grid::new(Size(20, 5));
+    replayed.set_multiplexed(true);
+    let mut stream = String::from("\x1b[?1049h\x1b[22;0;0t\x1b[H\x1b[2J");
+    stream.push_str(&lines.join("\r\n"));
+    replayed.feed(stream.as_bytes(), true);
+    assert!(!replayed.term.mode().contains(TermMode::ALT_SCREEN));
+    assert_eq!(replayed.term.grid().history_size(), 7);
+    assert_eq!(replayed.tail(12), lines);
+
+    // A program in a plain terminal still gets its second screen, and other
+    // sequences pass through whole.
+    let mut plain = Grid::new(Size(20, 5));
+    plain.feed(b"\x1b[?1049h", false);
+    assert!(plain.term.mode().contains(TermMode::ALT_SCREEN));
+    let mut tail = vec![];
+    assert_eq!(keep_one_screen(&mut tail, b"a\x1b[31mb\x1b[?1049"), b"a\x1b[31mb");
+    assert_eq!(keep_one_screen(&mut tail, b"7h\x1b"), b"\x1b[?10497h");
+    assert_eq!(keep_one_screen(&mut tail, b"[?25l"), b"\x1b[?25l");
+    // tmux's whole-screen clear before a redraw clears in place, also when
+    // it is cut across feeds; a clear that only looks like it passes through.
+    assert_eq!(keep_one_screen(&mut tail, b"x\x1b[2"), b"x");
+    assert_eq!(keep_one_screen(&mut tail, b"Jy\x1b[2K"), b"\x1b[1J\x1b[Jy\x1b[2K");
+    assert!(tail.is_empty());
+    // A redraw over a full screen must not copy that screen into the history.
+    let mut redrawn = Grid::new(Size(20, 5));
+    redrawn.set_multiplexed(true);
+    redrawn.feed(lines.join("\r\n").as_bytes(), false);
+    let before = redrawn.term.grid().history_size();
+    let mut redraw = String::from("\x1b[H\x1b[2J");
+    redraw.push_str(&lines[lines.len() - 5..].join("\r\n"));
+    redrawn.feed(redraw.as_bytes(), false);
+    assert_eq!(redrawn.term.grid().history_size(), before);
+    assert_eq!(redrawn.tail(12), lines);
+    assert!(tail.is_empty());
 }

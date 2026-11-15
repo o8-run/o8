@@ -66,7 +66,7 @@ describe('GitHub panel responses stay byte-identical', () => {
     const receipt = await Promise.all([list, detail, comments, merge, comment].map(async (response) => `${response.status} ${await response.text()}`));
     expect(receipt).toMatchSnapshot();
     expect(mocks.fetchPullRequestListPage).toHaveBeenCalledWith('example/workspace', 'open', 1, expect.any(AbortSignal), 'updated', false);
-    expect(mocks.mergeGitHubPullRequest).toHaveBeenCalledWith('example/workspace', 7, { deleteBranch: false, mergeMethod: 'squash', expectedHeadSha: head, beforePublish: expect.any(Function) });
+    expect(mocks.mergeGitHubPullRequest).toHaveBeenCalledWith('example/workspace', 7, { deleteBranch: false, mergeMethod: 'squash', expectedHeadSha: head, expectedMergeGate: undefined, principal: 'anonymous' });
     expect(mocks.commentOnGitHubPullRequest).toHaveBeenCalledWith('example/workspace', 7, 'Thanks');
   });
 });

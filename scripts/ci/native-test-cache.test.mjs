@@ -77,6 +77,47 @@ test('source, manifest, vendored and test changes miss the exact key but retain 
   assert.notEqual(run('key')['restore-key'], initial['restore-key']);
 });
 
+test('the registration key covers vendored and app sources and has no prefix fallback', () => {
+  const initial = run('key');
+  assert.match(initial['registration-key'], /^native-registration-v2-/);
+  assert.equal(initial['registration-restore-key'], undefined);
+  for (const file of ['vendor/gpui/src/lib.rs', 'src/main.rs', 'Cargo.toml']) {
+    const original = readFileSync(join(crate, file), 'utf8');
+    write(join(crate, file), `${original} changed`);
+    assert.notEqual(run('key')['registration-key'], initial['registration-key'], file);
+    write(join(crate, file), original);
+  }
+  assert.equal(run('key')['registration-key'], initial['registration-key']);
+});
+
+test('restore reuses a registration target only when it records the current sources', () => {
+  const registration = join(target, 'pull-request-registration-target');
+  const artifact = join(registration, 'debug/deps/libgpui.rmeta');
+  const marker = join(registration, '.o8-registration-sources');
+  const seed = (record) => {
+    write(artifact, 'gpui');
+    if (record === null) rmSync(marker, { force: true });
+    else write(marker, record);
+  };
+  const current = run('key')['registration-key'];
+  seed(current);
+  run('restore');
+  assert.ok(existsSync(artifact), 'a target recorded for the current sources is kept');
+  const vendored = join(crate, 'vendor/gpui/src/lib.rs');
+  const original = readFileSync(vendored, 'utf8');
+  write(vendored, `${original} zoom`);
+  try {
+    run('restore');
+    assert.equal(existsSync(registration), false, 'a vendored gpui edit makes the recorded target stale');
+  } finally { write(vendored, original); }
+  seed(current.replace(/.$/, current.endsWith('0') ? '1' : '0'));
+  run('restore');
+  assert.equal(existsSync(registration), false, 'a different recorded digest is never reused');
+  seed(null);
+  run('restore');
+  assert.equal(existsSync(registration), false, 'an unrecorded (v1) target is never reused');
+});
+
 test('only exact hits backdate checkout inputs, leaving cached Cargo dep-info intact', () => {
   const source = join(crate, 'src/main.rs');
   const depInfo = join(target, 'debug/.fingerprint/o8-next-fixture/dep-bin-o8-next');
@@ -129,6 +170,14 @@ measurementTest('an oversized target falls back to dependency outputs within the
   assert.equal(readFileSync(join(target, 'debug/build/dependency/output'), 'utf8'), 'build result');
   assert.ok(Number(result['registration-bytes']) >= 5 * 1024 ** 3);
   assert.equal(statSync(registration).size, 5 * 1024 ** 3);
+});
+
+measurementTest('measurement records the registration target source identity for the main save', () => {
+  const registration = join(target, 'pull-request-registration-target');
+  write(join(registration, 'debug/deps/libgpui.rmeta'), 'gpui');
+  run('measure');
+  assert.equal(readFileSync(join(registration, '.o8-registration-sources'), 'utf8'), run('key')['registration-key']);
+  rmSync(registration, { recursive: true, force: true });
 });
 
 measurementTest('the source manifest counts against the 4 GiB snapshot budget', () => {

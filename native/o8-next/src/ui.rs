@@ -19,7 +19,7 @@ pub(crate) mod images;
 #[path = "lineage_view.rs"]
 mod lineage_view;
 #[path = "prompt_actions.rs"]
-mod prompt_actions;
+pub(crate) mod prompt_actions;
 #[path = "session_sidebar.rs"]
 mod session_sidebar;
 #[path = "shell_session.rs"]
@@ -35,7 +35,7 @@ use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
     model::Row,
-    retained::{RetainedRow, RowState},
+    retained::RowState,
     sidebar,
     stream::Transcript,
     transport::{self, Incoming, Subscription},
@@ -43,7 +43,7 @@ use crate::{
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Keystroke, ListAlignment,
     ListOffset, ListState, Render, Window, WindowBounds, WindowHandle, WindowOptions, canvas, div,
-    list, point, prelude::*, px, size,
+    point, prelude::*, px, size,
 };
 use serde_json::{Value, json};
 use std::{
@@ -193,9 +193,15 @@ pub(crate) struct Surface {
     send_next: bool,
     subscriptions: Vec<gpui::Subscription>,
     sessions: Vec<Session>,
+    /// The shell's whole thread list, for an empty thread's overview.
+    overview_sessions: Vec<Session>,
+    /// The sidebar's snoozes, thread id to wake time, for the same overview.
+    overview_snoozes: std::collections::BTreeMap<String, u64>,
     selected: Option<String>,
     /// Embedded side conversations must not follow main-history navigation.
     bound_session: Option<String>,
+    pub(crate) shell_navigation: Option<Rc<Cell<u64>>>,
+    pub(crate) navigation_refresh_revision: u64,
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     images: images::Cache,
     peeks: crate::transcript_peek::Peeks,
@@ -220,6 +226,8 @@ pub(crate) struct Surface {
     painted: Rc<Cell<u64>>,
     painted_rows: Rc<RefCell<BTreeSet<usize>>>,
     composer_card: Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
+    /// The window viewport the transcript was last laid out in.
+    end_viewport: Option<gpui::Size<gpui::Pixels>>,
     voice: VoiceState,
     dictation: DictationState,
     /// The primary button's press count and whether that press's hold
@@ -229,6 +237,8 @@ pub(crate) struct Surface {
     away_from_end: bool,
     /// Rows that end a finished turn and carry Play and Copy.
     action_rows: BTreeSet<usize>,
+    /// The transcript ends with room for the floating changes pill.
+    pub(crate) pill_inset: bool,
     action_feedback: Rc<RefCell<crate::transcript_actions::Feedback>>,
     prompt_actions: prompt_actions::State,
     subagents: Option<gpui::Entity<crate::subagents::Inspector>>,
@@ -239,11 +249,21 @@ pub(crate) struct Surface {
     wave: Rc<RefCell<conversation::dictation_wave::Wave>>,
     /// The `!` line this composer last ran, for Esc and Add to chat.
     shell_run: Option<crate::composer::shell::ShellRun>,
+    navigator: Rc<RefCell<crate::prompt_navigator::Navigator>>,
 }
 impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_focus(client, Some(window), cx)
+    }
+    fn new_with_focus(
+        client: Client,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus = cx.focus_handle();
-        focus.focus(window);
+        if let Some(window) = window {
+            focus.focus(window);
+        }
         let defaults = client.clone();
         let task = cx.background_executor().spawn(async move {
             defaults
@@ -284,8 +304,12 @@ impl Surface {
             send_next: false,
             subscriptions: vec![],
             sessions: vec![],
+            overview_sessions: vec![],
+            overview_snoozes: Default::default(),
             selected: None,
             bound_session: None,
+            shell_navigation: None,
+            navigation_refresh_revision: 0,
             rows: Rc::new(vec![]),
             images: Default::default(),
             peeks,
@@ -309,11 +333,13 @@ impl Surface {
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
             composer_card: Default::default(),
+            end_viewport: None,
             voice: VoiceState::Off,
             dictation: DictationState::Off,
             voice_hold: (0, false),
             away_from_end: false,
             action_rows: BTreeSet::new(),
+            pill_inset: false,
             action_feedback: Default::default(),
             prompt_actions: Default::default(),
             subagents: None,
@@ -321,9 +347,27 @@ impl Surface {
             fork_send: None,
             wave: Default::default(),
             shell_run: None,
+            navigator: Default::default(),
         }
     }
+    fn reset_navigator(&mut self, cx: &mut Context<Self>) {
+        // Retain the old focus handle until reading has received its focus.
+        let previous = std::mem::take(&mut self.navigator);
+        let reading = self.focus.clone();
+        cx.defer(move |cx| {
+            for handle in cx.windows() {
+                let _ = handle.update(cx, |_, window, _| {
+                    if previous.borrow().is_focused(window) {
+                        reading.focus(window);
+                    }
+                });
+            }
+        });
+    }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
+        self.select_mode(id, true, cx);
+    }
+    fn select_mode(&mut self, id: String, navigation: bool, cx: &mut Context<Self>) {
         if self
             .bound_session
             .as_ref()
@@ -332,6 +376,13 @@ impl Surface {
             return;
         }
         if self.selected.as_ref() != Some(&id) {
+            if navigation {
+                if let Some(generation) = &self.shell_navigation {
+                    generation.set(generation.get().wrapping_add(1));
+                }
+            } else {
+                self.navigation_refresh_revision = self.navigation_refresh_revision.wrapping_add(1);
+            }
             self.prompt_actions.selection_changed();
             if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id)) {
                 brain.update(cx, |brain, cx| {
@@ -492,6 +543,7 @@ impl Surface {
         self.rows = Rc::new(vec![]);
         self.images.borrow_mut().clear();
         self.list = ListState::new(0, ListAlignment::Top, px(400.));
+        self.reset_navigator(cx);
         self.notice = "Reading history…".into();
         cx.notify();
         let client = self.client.clone();
@@ -537,6 +589,9 @@ impl Surface {
                 match result {
                     Ok((history, queue, routing)) => {
                         let key = history.session_key.clone();
+                        let readback = repo
+                            .is_none()
+                            .then(|| transport::subscribe_history(this.client.clone(), &history));
                         let transcript = Transcript::new(history);
                         let rows = transcript.rows.clone();
                         this.transcript = Some(transcript);
@@ -550,7 +605,7 @@ impl Surface {
                             Some(repo) => {
                                 transport::subscribe_live(this.client.clone(), key, repo, backend)
                             }
-                            None => transport::subscribe(this.client.clone(), key),
+                            None => readback.unwrap(),
                         });
                         this.notice = "Connecting live stream".into();
                         match (queue, routing) {
@@ -674,6 +729,8 @@ impl Surface {
             .as_ref()
             .is_some_and(|t| t.context_snapshot().1);
         if self.following.is_some() || (self.pinned && live) {
+            self.navigator.borrow_mut().resume();
+            self.away_from_end = false;
             crate::retained::pin_end(&self.list);
         }
     }
@@ -695,9 +752,15 @@ impl Surface {
         if visualizations_changed {
             cx.notify();
         }
+        let navigation_changed = self.navigator.borrow_mut().resume_at_end(&self.list);
+        if navigation_changed {
+            self.pinned = true;
+            self.away_from_end = false;
+            cx.notify();
+        }
         // Rows measure on the next paint, so the end is only read once they rest.
         if self.changed_at.elapsed() > std::time::Duration::from_millis(200) {
-            self.pinned = crate::retained::at_end(&self.list);
+            self.pinned = self.navigator.borrow().at_end(&self.list);
         }
         let messages: Vec<_> = self
             .subscription
@@ -732,7 +795,7 @@ impl Surface {
             }
             cx.notify();
         }
-        changed || visualizations_changed
+        changed || visualizations_changed || navigation_changed
     }
     fn snapshot_label(&self) -> String {
         let count = self
@@ -784,16 +847,20 @@ impl Surface {
                             .filter(|id| this.sessions.iter().any(|s| &s.id == id))
                             .or_else(|| this.sessions.first().map(|s| s.id.clone()))
                         {
-                            this.select(id, cx);
+                            this.select_mode(id, false, cx);
                         } else {
                             this.generation += 1;
                             this.subscription = None;
                             this.transcript = None;
+                            if this.selected.is_some() {
+                                this.navigation_refresh_revision = this.navigation_refresh_revision.wrapping_add(1);
+                            }
                             this.selected = None;
                             this.saved_visualizations.select(None);
                             this.rows = Rc::new(vec![]);
                             this.images.borrow_mut().clear();
                             this.list = ListState::new(0, ListAlignment::Top, px(400.));
+                            this.reset_navigator(cx);
                             this.notice = "No saved sessions.".into();
                         }
                     }
@@ -805,6 +872,7 @@ impl Surface {
         .detach();
     }
     fn navigate(&mut self, end: bool, cx: &mut Context<Self>) {
+        self.navigator.borrow_mut().resume();
         if !self.rows.is_empty() {
             self.list.scroll_to(ListOffset {
                 item_ix: if end { self.rows.len() - 1 } else { 0 },
@@ -836,6 +904,9 @@ impl Render for Surface {
         let sidebar_width = (viewport * 0.25).min(geometry.sidebar_width);
         let right_width = (viewport * 0.30).min(geometry.right_width);
         let empty = self.transcript.is_some() && self.rows.is_empty();
+        // An empty new chat shows its overview under the composer, even
+        // before its (empty) history has been read.
+        let overview = self.empty_overview(cx);
         let header = self.regions.view(
             "header",
             composer_regions::header_style(),
@@ -867,6 +938,14 @@ impl Render for Surface {
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, w, cx| {
                 let key = &event.keystroke;
+                if key.key == "escape" {
+                    let at_rail = s.navigator.borrow().is_focused(w);
+                    if !at_rail && s.navigator.borrow_mut().dismiss_preview() {
+                        w.refresh();
+                    }
+                    // Continue dispatch so the composer can dismiss its picker,
+                    // suggestions or running turn with the same Escape.
+                }
                 if key.key == "k"
                     && key.modifiers.shift
                     && (key.modifiers.platform || key.modifiers.control)
@@ -880,10 +959,19 @@ impl Render for Surface {
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 match event.keystroke.key.as_str() {
                     "tab" => {
-                        if this.composer.read(cx).focus.is_focused(window) {
+                        let composer = this.composer.read(cx).focus.clone();
+                        let at_composer = composer.is_focused(window);
+                        let at_navigator = this.navigator.borrow().is_focused(window);
+                        if event.keystroke.modifiers.shift {
+                            if at_composer || at_navigator {
+                                this.focus.focus(window);
+                            } else if !this.navigator.borrow().focus(window) {
+                                composer.focus(window);
+                            }
+                        } else if at_composer {
                             this.focus.focus(window);
                         } else {
-                            this.composer.read(cx).focus.focus(window);
+                            composer.focus(window);
                         }
                     }
                     "up" | "down" => {
@@ -972,19 +1060,14 @@ impl Render for Surface {
                             .when(empty, |view| {
                                 view.when(!self.notice.is_empty(), |view| {
                                     view.child(
-                                        div()
-                                            .px(px(24.))
-                                            .py(px(8.))
-                                            .text_size(px(11.))
-                                            .text_color(theme().text_muted)
-                                            .child(self.notice.clone()),
+                                        crate::transcript_view::notice(self.notice.clone()),
                                     )
                                 })
                                 .child(self.history_control(cx))
                             })
                             // The transcript fades out at its edges, as classic's
                             // did into the composer below it.
-                            .when(!empty, |view| {
+                            .when(!empty && overview.is_none(), |view| {
                                 view.child(
                                     div()
                                         .relative()
@@ -1005,8 +1088,33 @@ impl Render for Surface {
                                         )),
                                 )
                             })
-                            .child(
-                                div()
+                            .child(match overview {
+                                // The composer centred in the upper half, the
+                                // overview's cards below it.
+                                Some(overview) => div()
+                                    .debug_selector(|| "composer-space".into())
+                                    .flex()
+                                    .flex_col()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .px(px(geometry.content_inset))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .flex()
+                                            .flex_col()
+                                            .justify_center()
+                                            .child(self.composer_panel(window, cx)),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("empty-overview-scroll")
+                                            .flex_1()
+                                            .min_h_0()
+                                            .overflow_y_scroll()
+                                            .child(overview),
+                                    ),
+                                None => div()
                                     .debug_selector(|| "composer-space".into())
                                     .flex()
                                     .flex_col()
@@ -1015,7 +1123,7 @@ impl Render for Surface {
                                     .px(px(geometry.content_inset))
                                     .pb(px(if empty { 0. } else { geometry.gap * 2. }))
                                     .child(self.composer_panel(window, cx)),
-                            ),
+                            }),
                     )
                     .child(self.brain_panel(px(right_width), cx))
                     .when(!self.embedded, |row| {
@@ -1097,7 +1205,7 @@ fn frame(
     (start.elapsed().as_secs_f64() * 1000., cost)
 }
 fn rss() -> f64 {
-    let output = Command::new("ps")
+    let output = crate::child_command::command("ps")
         .args(["-p", &std::process::id().to_string(), "-o", "rss="])
         .output()
         .unwrap();
@@ -1312,3 +1420,7 @@ mod enter_default_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "prompt_navigator_tests.rs"]
+mod prompt_navigator_tests;

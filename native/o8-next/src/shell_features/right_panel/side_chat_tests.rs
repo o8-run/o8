@@ -50,7 +50,6 @@ fn side_chat_retries_sends_its_own_messages_and_restores_its_thread(cx: &mut Tes
         .client
         .get("/api/side-chat-fixture", &[("mode", "fail")])
         .unwrap();
-    click(&mut v, "panel-launcher-more");
     click(&mut v, "panel-tool-side chat");
     s.update_in(&mut v, |s, w, cx| s.tick(true, w, cx));
     v.run_until_parked();

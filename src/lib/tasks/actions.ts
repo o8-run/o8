@@ -1,8 +1,12 @@
+import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { inspectPacketManagedRunAdmission } from '@/lib/lane/packet-stop-hold';
 import { dispatchWithReceipt } from './dispatch-receipt';
+import { isNativeCortexReader } from '@/lib/cortex/owner-process';
+import { callTaskDispatchOwner } from './dispatch-owner-client';
 
 import {
   archiveLane,
@@ -22,7 +26,7 @@ import {
 } from '@/lib/lane/agent-report';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import type { AgentReportReason, Lane, LaneEventActor } from '@/lib/lane/types';
-import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { RuntimeSelectionError, validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { resolveEffortAliases, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -34,6 +38,7 @@ import type {
   OrchestratorPacket,
   OrchestratorPacketStatus,
   WorkerRouting,
+  WorkerLaunchContext,
 } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
@@ -138,7 +143,11 @@ export function readTaskEffortSelection(body: Record<string, unknown>): Thinking
 }
 
 async function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof resolveWorkerRouting>[0]>, cwd: string | null, packetId?: string): Promise<WorkerRouting> {
-  const routing = resolveWorkerRouting(input);
+  let routing: WorkerRouting;
+  try {
+    const requestedRuntime = validateRequestedRuntime(input.requestedRuntime, resolveDefaultDispatchRuntimeSync());
+    routing = resolveWorkerRouting({ ...input, requestedRuntime });
+  } catch (error) { if (error instanceof RuntimeSelectionError) throw error; throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
   const pin = await resolveRuntimeEffortPin({
     requestedEffort: input.requestedEffort,
     runtime: routing.selectedRuntime,
@@ -210,6 +219,13 @@ function buildLaneBinding(
   };
 }
 
+function reviewerLaunchContext(context: WorkerLaunchContext | null | undefined, intent: string | null | undefined): WorkerLaunchContext | null | undefined {
+  return intent === 'reviewer' ? {
+    source: 'agent', presentation: 'tab', repoContext: 'registered', caller: 'task-pool',
+    ...context, workMode: 'read-only',
+  } : context;
+}
+
 async function syncPacketForLane(
   task: TaskPoolTask,
   lane: Lane,
@@ -235,6 +251,7 @@ async function syncPacketForLane(
       runtime: patch.workerRouting?.selectedRuntime ?? packet.runtime,
       workerIntent: patch.workerRouting?.workerIntent ?? packet.workerIntent,
       workerRouting: patch.workerRouting ?? packet.workerRouting,
+      launchContext: reviewerLaunchContext(packet.launchContext, patch.workerRouting?.workerIntent),
       lane: buildLaneBinding(packet, lane, lastEventLabel, patch.workerRouting),
       lastEventAt: nowIso(),
       lastEventLabel,
@@ -425,6 +442,7 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
       lane: null,
       workerIntent: workerRouting.workerIntent,
       workerRouting,
+      launchContext: reviewerLaunchContext(undefined, workerRouting.workerIntent),
       issue: input.sourceIssue ? {
         number: sourceIssueNumber ?? undefined,
         body: input.sourceIssue.body ?? summary,
@@ -491,6 +509,11 @@ export async function claimTask(taskId: string, input: TaskClaimInput = {}): Pro
 }
 
 export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}): Promise<TaskMutationResult> {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) {
+    try { validateRequestedRuntime(input.requestedRuntime); }
+    catch (error) { if (error instanceof RuntimeSelectionError) throw error; throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
+    return callTaskDispatchOwner(taskId, input);
+  }
   const actor = normalizeActor(input.actor);
   const task = await resolveTask(taskId, input);
   const workerRouting = await resolveTaskWorkerRouting({
@@ -559,11 +582,15 @@ export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}
     }),
     settle: async (lane, result, guard) => {
       guard();
-      const latest = result.lane ?? getLane(lane.id) ?? lane;
-      const settled = !result.ok
-        ? setLaneStatus(latest.id, 'awaiting_orchestrator', actor, 'dispatch_failed') ?? latest : latest;
+      const latest = getLane(lane.id) ?? result.lane ?? lane;
+      const ownsFailure = latest.status === 'launching'
+        || (latest.status === 'idle' && ['launch_failed', 'launch_error'].includes(latest.lastEventLabel ?? ''))
+        || (latest.status === 'running' && result.reason === 'dispatch_settlement_failed')
+        || (result.reason === 'runtime_launch_timeout' && latest.lastEventLabel === result.reason);
+      const settled = !result.ok && ownsFailure
+        ? setLaneStatus(latest.id, result.reason === 'runtime_launch_timeout' && !result.effectStarted && !latest.sessionKey ? 'failed' : 'awaiting_orchestrator', actor, 'dispatch_failed') ?? latest : latest;
       await syncPacketForLane(task, settled, {
-        status: result.ok ? settled.status === 'running' ? 'running' : 'launching' : 'blocked',
+        status: result.ok ? settled.status === 'running' ? 'running' : 'launching' : settled.status === 'failed' ? 'failed' : 'blocked',
         blockedReason: result.ok ? null : result.note,
         lastEventLabel: result.ok ? settled.lastEventLabel ?? 'session_launched' : 'dispatch_failed', workerRouting,
       }, guard);

@@ -483,7 +483,7 @@ impl Render for BrowserPanel {
                                 if let Some(page) = slot.as_ref() {
                                     if covered || !page.has_document() { page.hide(); } else {
                                         let bounds = if agent_glow { Bounds::new(gpui::point(bounds.left() + px(2.), bounds.top() + px(2.)), gpui::size((bounds.size.width - px(4.)).max(px(0.)), (bounds.size.height - px(4.)).max(px(0.)))) } else { bounds };
-                                        page.set_zoom(if preview && viewport > 0. { f64::from(bounds.size.width) / f64::from(viewport) } else { 1. });
+                                        page.set_zoom(if preview { crate::zoom::preview_page_zoom(f32::from(bounds.size.width), viewport, window.zoom()) } else { 1. });
                                         page.position(bounds, window);
                                     }
                                 }

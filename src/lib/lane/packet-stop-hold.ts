@@ -99,6 +99,17 @@ export function packetAutomaticRecoveryHoldReason(packetId: string): string | nu
   return admission.allowed ? null : admission.reason;
 }
 
+/** An operator correction may resume reviewable work, never an automatic retry. */
+export function packetOperatorCorrectionHoldReason(packetId: string): string | null {
+  const packet = readManagedRunPacket(packetId);
+  if (!packet) return 'packet_not_found';
+  const stopped = recoveryStopReason(packet) || packetSteerHoldReason(packetId);
+  if (stopped) return stopped;
+  const admission = managedRunAdmissionForPacket(packet);
+  return admission.allowed || (admission.reason === 'packet_terminal' && packet.status === 'awaiting_review'
+    && packet.releaseState !== 'released') ? null : admission.reason;
+}
+
 /** Observe a finished current turn without granting automatic resume authority. */
 export function packetCompletionHoldReason(packetId: string): string | null {
   const packet = readManagedRunPacket(packetId);
@@ -227,6 +238,20 @@ function copyStopFields(target: OrchestratorPacket, stopped: OrchestratorPacket)
   Object.assign(target, { operatorStopped: stopped.operatorStopped, queueState: stopped.queueState,
     status: stopped.status, blockedReason: stopped.blockedReason,
     lastEventAt: stopped.lastEventAt, lastEventLabel: stopped.lastEventLabel });
+}
+
+/**
+ * Why persistLanePacketHold refused, for the operator. A control-plane packet with no stored lane
+ * binding has no owner to verify; packets delegated before the delegate route stored one (#5799)
+ * stay that way, so name it instead of the generic refusal.
+ */
+export function describeStopRefusal(packetId: string): string {
+  const packet = readOrchestratorControlPlaneState().packets.find(candidate => candidate.id === packetId);
+  if (packet && !terminalStopOwner(packet) && !packet.lane?.laneId) {
+    return `Stop refused: packet ${packetId} has no stored lane binding, so this lane cannot be verified as its owner. `
+      + 'Packets delegated before the binding was stored (#5799) are affected.';
+  }
+  return 'Stop refused because the packet hold could not be persisted.';
 }
 
 /** Persist the exact lane's stop in both stores before interrupting its worker. */

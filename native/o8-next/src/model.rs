@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Entry {
     pub id: String,
     pub role: String,
@@ -18,7 +18,7 @@ pub struct Entry {
     pub extra: HashMap<String, Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct History {
     #[serde(rename = "sessionKey")]
     pub session_key: String,
@@ -79,6 +79,8 @@ pub struct Trace {
     pub helpers_below: bool,
     /// The turn was stopped while this block was its last work.
     pub stopped: bool,
+    pub terminal_note: Option<String>,
+    pub attention: bool,
 }
 
 impl Trace {
@@ -119,7 +121,7 @@ fn completed(entry: &Entry) -> Option<f64> {
 }
 
 /// The turn's work counts as live this long after its last entry without an outcome.
-const LIVE_WINDOW_MS: f64 = 15. * 60_000.;
+pub(crate) const LIVE_WINDOW_MS: f64 = 15. * 60_000.;
 
 impl Row {
     pub fn id(&self) -> &str {
@@ -203,7 +205,7 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                  trace: &mut Trace,
                  trace_id: &str,
                  ended: Option<f64>| {
-        if !pending.is_empty() || trace.thinking || trace.stopped {
+        if !pending.is_empty() || trace.thinking || trace.stopped || trace.terminal_note.is_some() {
             let mut trace = std::mem::take(trace);
             if let Some(ended) = ended {
                 trace.ended = Some(trace.ended.map_or(ended, |e| e.max(ended)));
@@ -263,12 +265,20 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 } else {
                     steps[i].status = step.status;
                     steps[i].reason = step.reason;
+                    steps[i].output = step.output;
                     steps[i].finished = step.finished.or(steps[i].finished);
                 }
             } else {
                 indices.insert(id, steps.len());
                 pending.push(steps.len());
                 steps.push(step);
+            }
+        }
+        if let Some(note) = entry.extra.get("terminalNote") {
+            trace.terminal_note = note["text"].as_str().map(str::to_owned);
+            trace.attention = note["attention"] == true;
+            if trace_id.is_empty() && pending.is_empty() {
+                trace_id = entry.id.clone();
             }
         }
         if interrupted(entry) {

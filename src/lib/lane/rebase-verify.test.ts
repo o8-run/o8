@@ -16,7 +16,7 @@ const lint = vi.mocked(runLaneRebaseLint);
 const tests = vi.mocked(runLaneRebaseTests);
 const setting = vi.mocked(resolveMergeTestReplayEnabledSync);
 
-const input = { cwd: '/tmp/x', baseRef: 'main', actualBranch: 'branch', logPrefix: 'test' };
+const input = { cwd: '/tmp/x', installRoot: '/tmp/repo', baseRef: 'main', actualBranch: 'branch', logPrefix: 'test' };
 
 beforeEach(() => {
   vi.clearAllMocks();

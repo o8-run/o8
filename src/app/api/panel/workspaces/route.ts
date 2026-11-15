@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
@@ -520,7 +521,10 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json() as { action?: string; workspaceId?: string };
+    const body = await readJsonObject<{ action?: string; workspaceId?: string }>(req);
+    if (!body) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
     const workspaceId = body.workspaceId?.trim();
     if (!workspaceId) {
       return NextResponse.json({ error: 'workspaceId is required' }, { status: 400 });

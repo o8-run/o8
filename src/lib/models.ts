@@ -1,6 +1,7 @@
 // Keep in sync with src-tauri/src/models.rs.
 
 export const RAW_MODEL_IDS = {
+  anthropicClaudeFable52: 'claude-fable-5-2',
   anthropicClaudeFable51: 'claude-fable-5-1',
   anthropicClaudeOpus55: 'claude-opus-5-5',
   anthropicClaudeFable5: 'claude-fable-5',
@@ -74,7 +75,7 @@ export const MODEL_IDS = {
   claudeQaDefault: RAW_MODEL_IDS.anthropicClaudeSonnet5,
   claudeReviewDefault: RAW_MODEL_IDS.anthropicClaudeSonnet5,
   claudeHaikuQaDefault: RAW_MODEL_IDS.anthropicClaudeHaiku45Dated,
-  fableDefault: RAW_MODEL_IDS.anthropicClaudeFable51,
+  fableDefault: RAW_MODEL_IDS.anthropicClaudeFable52,
   opencodeDefault: RAW_MODEL_IDS.opencodeDeepseekV4FlashFree,
   // Grok Build CLI worker default (Opus-class, cheaper for context) — sub-billed
   // via SuperGrok through the CLI adapter, not a metered API route.

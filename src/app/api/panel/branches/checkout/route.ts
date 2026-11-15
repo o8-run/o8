@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -7,12 +8,15 @@ import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as {
+    const body = await readJsonObject<{
       repoPath: string;
       branch: string;
       stash?: boolean;
       force?: boolean;
-    };
+    }>(req);
+    if (!body) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
 
     const { repoPath, branch, stash, force } = body;
     if (!repoPath || !branch) {

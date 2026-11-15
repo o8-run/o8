@@ -267,6 +267,7 @@ function targetingTierField(section: string, key: string): TomlField<OperatorDef
 export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   knowledgeSources: { path: ['brain', 'knowledge_sources'], parse: parseKnowledgeSources },
   subscriptionProfile: enumField('operator', 'subscription_profile', 'one of "both", "claude-only", or "codex-only"', isSubscriptionProfile),
+  dispatchLoadPerCore: numberField('operator', 'dispatch_load_per_core', 'a non-negative number', (value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0),
   parallelCap: numberField('operator', 'parallel_cap', 'a positive safe integer', isParallelCap),
   meteredPacketCostCapUsd: numberField('operator', 'metered_packet_cost_cap_usd', 'a number greater than 0', (value) => value > 0),
   meteredPacketInputTokenCap: numberField('operator', 'metered_packet_input_token_cap', 'an integer greater than 0', (value) => Number.isInteger(value) && value > 0),
@@ -333,6 +334,9 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   experimentalChat: booleanField('experimental', 'chat_enabled'),
   experimentalCanvas: booleanField('experimental', 'canvas_enabled'),
   experimentalNext: booleanField('experimental', 'next_enabled'),
+  nativeDictationPill: booleanField('experimental', 'native_dictation_pill'),
+  nativeDictationHud: booleanField('experimental', 'native_dictation_hud'),
+  nativeSpatialInk: booleanField('experimental', 'native_spatial_ink'),
   nativeBrowserView: booleanField('experimental', 'native_browser_view'),
   classAComposer: enumField('brain', 'class_a_composer', 'one of "auto", "haiku-cli", "sonnet-cli", or "fastest"', isClassAComposer),
   brainRoutingMode: enumField('brain', 'routing_mode', 'one of "auto" or "subscription"', isBrainRoutingMode),

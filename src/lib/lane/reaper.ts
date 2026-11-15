@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { eq } from 'drizzle-orm';
 
 import { getDb, lanes } from '@/lib/db';
-import { getResourceLeaseStore } from '@/lib/leases/resource-lease-service';
+import { getResourceLeaseStore } from '@/lib/leases/resource-lease-default-store';
 import { invalidateProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
@@ -314,7 +314,7 @@ export async function reapZombieLane(
         before.worktreePath,
         baseRef,
         before.repoPath,
-        { label: before.label, preCommitted: preservedWork?.autoCommitted },
+        { label: before.label, branch: before.branch, preCommitted: preservedWork?.autoCommitted },
       );
       if (reviewable) {
         appendEvent(before.id, 'zombie_reap', 'system', { ...payload, salvaged: true, autoCommitted });

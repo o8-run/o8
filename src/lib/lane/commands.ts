@@ -1,4 +1,8 @@
+import { checkLaneMergeHead } from '@/lib/approvals/merge-head';
+import { checkReviewRunPreflight, reviewRunPolicyConfiguration } from './review-run-policy';
+import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
+import { pushLfsObjects } from '@/lib/git/lfs-push';
 import { withWorkAdmission } from '@/lib/app-update/work-launch-admission';
 /**
  * Lane Command Bus
@@ -40,13 +44,14 @@ import { decideSurfaceMerge } from '@/lib/lane/surface-merge-decision';
 import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
-import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
+import { assertLaneHeadOnBranch, laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
+import { commitLaneWork } from '@/lib/supervisor/completion-verification';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
-import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
+import { prFirstMergeRefusal } from '@/lib/lane/pr-first-delivery';
 import { isPacketMergeHeld, MERGE_HOLD_POLICY_RULE_ID } from '@/lib/lane/merge-hold';
 import { assertSessionMergeAllowed } from '@/lib/orchestrator/session-merge-restriction';
-import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { RuntimeSelectionError, runtimeSelectionRefusal, validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { resolvePortInfo } from '@/lib/panel/api-port';
@@ -60,13 +65,14 @@ import {
   SpokenReviewSnapshotChangedError,
   validateSpokenReviewEvidenceBundle,
 } from '@/lib/lane/spoken-review-snapshot';
-import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git';
+import { commitDirtyWorktree, readLaneBranchSha } from '@/lib/lane/worktree-merge-git';
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
-import { enqueueLaneReview } from '@/lib/lane/review-queue';
+import { enqueueLaneReview, surfaceReviewQueueBlocker } from '@/lib/lane/review-queue';
+import { CorrectionReviewBlocked, correctionReviewSettled, latestCorrectionReview } from '@/lib/orchestrator/correction-review';
 import { assertPacketCreationBaseAuthority, resolvePacketCreationBase, PacketCreationBaseError, type PacketCreationBaseAuthority } from '@/lib/lane/packet-creation-base';
-import { readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
-import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
+import { readLaneCreationBaseCommit, readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
+import { describeStopRefusal, persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
 import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
@@ -138,10 +144,15 @@ async function dispatchUnlocked(
   switch (command.verb) {
     case 'open_lane': {
       try { assertNotKnowledgeSource(command.repoPath); } catch (error) { return { ok: false, laneId: '', note: error instanceof Error ? error.message : 'Knowledge sources are read-only.' }; }
-      const workerRouting = resolveWorkerRouting({
-        requestedRuntime: command.runtime,
-        source: 'lane-open',
-      });
+      let workerRouting: ReturnType<typeof resolveWorkerRouting>;
+      try {
+        workerRouting = resolveWorkerRouting({
+          requestedRuntime: validateRequestedRuntime(command.runtime, resolveDefaultDispatchRuntimeSync()),
+          source: 'lane-open',
+        });
+      } catch (error) {
+        return { ok: false, laneId: '', note: error instanceof Error ? error.message : 'Invalid worker runtime.', ...(error instanceof RuntimeSelectionError ? { runtimeRefusal: runtimeSelectionRefusal(error) } : {}) };
+      }
       const existing = (await import('@/lib/lane/registry')).findLaneByRepoAndBranch(
         command.repoPath,
         command.branch,
@@ -162,6 +173,7 @@ async function dispatchUnlocked(
             laneId: existing.id,
             note: `Runtime "${existing.runtime}" is not dispatchable (existing lane ${existing.id}). Dispatchable: ${listDispatchableRuntimes({ includeExperimental: true }).join(', ')}. Archive or migrate the lane before launching new work.`,
             lane: existing,
+            runtimeRefusal: runtimeSelectionRefusal(new RuntimeSelectionError(400, `Requested runtime ${existing.runtime} is not dispatchable.`, 'worker_not_enabled')),
           };
         }
         const updatedExisting = command.packetId && existing.packetId !== command.packetId
@@ -288,7 +300,7 @@ async function dispatchUnlocked(
             return {
               ok: false,
               laneId: command.laneId,
-              note: 'Stop refused because the packet hold could not be persisted.',
+              note: describeStopRefusal(lane.packetId),
               lane,
             };
           }
@@ -464,27 +476,18 @@ async function dispatchUnlocked(
 
       // #454 — Guard: auto-commit dirty worktrees before allowing review transition
       const reviewCwd = lane.worktreePath ?? lane.repoPath;
+      const correction = latestCorrectionReview(lane.packetId);
+      const correctionPending = correction && !correctionReviewSettled(correction);
       try {
         const { stdout: porcelain } = await laneGit(reviewCwd, lane.repoPath, ['status', '--porcelain'], {
           maxBuffer: 10 * 1024 * 1024,
         });
-        if (porcelain.trim().length > 0) {
+        if (porcelain.trim().length > 0 && !correctionPending) {
           console.log(`[lane] request_review: dirty worktree detected in ${reviewCwd}, auto-committing`);
-          await laneGit(reviewCwd, lane.repoPath, ['add', '-A', '--', '.'], {
-            maxBuffer: 10 * 1024 * 1024,
-          });
-          // Unstage o8-injected worktree artifacts so they never land in the review
-          // commit: the safety-hook `.claude/settings.json` (otherwise blows the
-          // diff-budget merge gate) and the `node_modules` symlink (otherwise pollutes
-          // the target repo's main). Use `git reset` to unstage rather than a negative
-          // `git add` pathspec — the latter errors ("paths are ignored") when an ignored
-          // dir like node_modules exists in the worktree.
-          await laneGit(reviewCwd, lane.repoPath, ['reset', '-q', '--', '.claude', 'node_modules'], {
-            maxBuffer: 10 * 1024 * 1024,
-          });
-          await laneGit(reviewCwd, lane.repoPath, ['commit', '-m', 'auto-commit: agent work before review'], {
-            maxBuffer: 10 * 1024 * 1024,
-          });
+          // Commit only onto the lane's branch, wherever the worker pointed HEAD.
+          await assertLaneHeadOnBranch(reviewCwd, lane.repoPath, lane.branch);
+          // Leaves o8-injected worktree artifacts out of the review commit.
+          await commitLaneWork(reviewCwd, lane.repoPath, lane.branch, 'auto-commit: agent work before review');
         }
       } catch (err) {
         console.warn(`[lane] request_review: git status/commit check failed for ${reviewCwd}:`, err);
@@ -567,7 +570,14 @@ async function dispatchUnlocked(
       }
 
       const updated = setLaneStatus(command.laneId, 'reviewing', actor, 'review_requested');
-      if (updated) enqueueLaneReview(updated);
+      try {
+        if (updated) enqueueLaneReview(updated, { retryCorrection: actor !== 'system' });
+      } catch (error) {
+        if (!(error instanceof CorrectionReviewBlocked)) throw error;
+        surfaceReviewQueueBlocker({ laneId: lane.id, reviewId: `correction:${correction?.correction_id ?? lane.id}`,
+          attempts: 0, reason: error.message });
+        return { ok: false, laneId: lane.id, reason: 'correction_review_held', note: error.message, lane: getLane(lane.id) ?? undefined };
+      }
       return { ok: true, laneId: command.laneId, note: 'Review requested.', lane: updated ?? undefined };
     }
 
@@ -693,12 +703,12 @@ async function dispatchUnlocked(
         } else {
           if (command.commitMessage) {
             try {
-              await commitDirtyWorktree(lockedLane.worktreePath, command.commitMessage);
+              await commitDirtyWorktree(lockedLane.worktreePath, lockedLane.repoPath, lockedLane.branch, command.commitMessage);
             } catch {
               // Preserve legacy PR behavior when an optional auto-commit fails.
             }
           }
-          reviewedSnapshotSha = await readHeadSha(lockedLane.worktreePath);
+          reviewedSnapshotSha = await readLaneBranchSha(lockedLane.worktreePath, lockedLane.repoPath, lockedLane.branch);
         }
 
         const publicationGovernanceDrift = await rejectSpokenReviewGovernanceDrift({
@@ -712,6 +722,9 @@ async function dispatchUnlocked(
         if (publicationGovernanceDrift) return publicationGovernanceDrift;
 
         // Push the immutable reviewed commit, never the mutable local branch.
+        const laneWorktreePath = lockedLane.worktreePath;
+        await pushLfsObjects((args, options) => laneGit(laneWorktreePath, lockedLane.repoPath, args, options),
+          'origin', reviewedSnapshotSha, readLaneCreationBaseCommit(lockedLane.id));
         await laneGit(lockedLane.worktreePath, lockedLane.repoPath, [
           'push',
           'origin',
@@ -759,6 +772,13 @@ async function dispatchUnlocked(
     case 'merge': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+      if (lane.status === 'completed' && !lane.worktreePath && (lane.runtime as string) !== 'remote-customer') {
+        return { ok: false, laneId: lane.id, note: 'No worktree to merge. Lane is on the main working tree.' };
+      }
+      const approvedHeadRefusal = command.authorizingApprovalId ? await checkLaneMergeHead(lane.id, command.expectedHeadSha) : null;
+      if (approvedHeadRefusal) return { ok: false, laneId: lane.id, reason: approvedHeadRefusal.code, note: approvedHeadRefusal.message };
+      const prOnlyNote = await prFirstMergeRefusal(lane);
+      if (prOnlyNote) return { ok: false, laneId: command.laneId, note: prOnlyNote, reason: 'pr_only' };
       const spokenEvidence = validateSpokenReviewEvidenceBundle(command);
       if (!spokenEvidence.complete) {
         return {
@@ -768,8 +788,6 @@ async function dispatchUnlocked(
           reason: 'spoken_review_evidence_incomplete',
         };
       }
-      // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
-      if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
       const isRemoteCustomerLane = (lane.runtime as string) === 'remote-customer';
       if (!lane.worktreePath && !isRemoteCustomerLane) {
         return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
@@ -778,6 +796,8 @@ async function dispatchUnlocked(
       // submit_review persists its ApprovalRecord before updating mission state.
       // Read that durable row before every budget check so an accepted finding
       // waives the same HEAD atomically from the merge gate's perspective.
+      const runGate = isRemoteCustomerLane ? reviewRunPolicyConfiguration() : await checkReviewRunPreflight(lane);
+      if (!runGate.ok) return { ok: false, laneId: lane.id, reason: runGate.code, note: runGate.message };
       const durableReview = await assessDurableApprovedReview(lane);
       const orchestratorReviewedForBudget = command.orchestratorReviewed === true
         || durableReview.diffBudgetWaived;
@@ -921,12 +941,12 @@ async function dispatchUnlocked(
           commitMessage: command.commitMessage,
           expectedHeadSha: command.expectedHeadSha,
           reviewSummary: command.reviewSummary,
-          title: 'Merge held by mission',
-          description: `This packet's mission was created with merges held. Approve to merge "${lane.label}" (${lane.branch} → ${lane.baseBranch}), or leave it held.`,
+          title: 'Merge held',
+          description: `A merge hold is active for this packet. Approve to merge "${lane.label}" (${lane.branch} → ${lane.baseBranch}), or leave it held.`,
           summary: `Merge held: ${lane.branch} → ${lane.baseBranch}`,
           risk: 'medium',
           policyRuleId: MERGE_HOLD_POLICY_RULE_ID,
-          note: 'Merge held: the mission was created with merges held, so the operator decides. An approval card is waiting.',
+          note: 'Merge held for this packet. An approval card is waiting for an explicit release decision.',
         });
       }
 

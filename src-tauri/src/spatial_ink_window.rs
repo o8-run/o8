@@ -32,6 +32,15 @@
 //! event the page emits `o8:spatial-ink-strokes` with the normalized strokes.
 //! At finalize, `take_spatial_context()` burns the strokes into the screenshot
 //! and cuts a full-res crop of the marked region (see `screen::composite_strokes`).
+//!
+//! ── Native panel (experimental `native_spatial_ink`) ──
+//! Each agent arm emits `o8:spatial-ink-armed` (generation and the covered
+//! monitor in top-left desktop points). When the native panel acknowledges the
+//! hold, the page emits `o8:spatial-ink-pointer` with owner `native` and this
+//! window turns click-through for the rest of the hold; owner `web` takes it
+//! back. Only the current agent generation is honoured, and disarm restores
+//! click-through as always. The strokes still arrive through the page's
+//! `o8:spatial-ink-first-stroke` and `o8:spatial-ink-strokes` events.
 
 #[cfg(target_os = "macos")]
 pub const SPATIAL_INK_LABEL: &str = "spatial-ink";
@@ -275,6 +284,65 @@ mod imp {
         });
     }
 
+    /// The covered monitor in top-left desktop points, as `reposition_to_monitor`
+    /// places this window: physical position and size over the monitor's scale.
+    fn monitor_points(position: (i32, i32), size: (u32, u32), scale: f64) -> [f64; 4] {
+        let scale = if scale.is_finite() && scale > 0. { scale } else { 1. };
+        [
+            position.0 as f64 / scale,
+            position.1 as f64 / scale,
+            size.0 as f64 / scale,
+            size.1 as f64 / scale,
+        ]
+    }
+
+    fn armed_payload(generation: u64, monitor: &tauri::Monitor) -> serde_json::Value {
+        let [x, y, width, height] = monitor_points(
+            (monitor.position().x, monitor.position().y),
+            (monitor.size().width, monitor.size().height),
+            monitor.scale_factor(),
+        );
+        serde_json::json!({
+            "generation": generation,
+            "monitor": { "x": x, "y": y, "width": width, "height": height },
+            "scale": monitor.scale_factor(),
+        })
+    }
+
+    #[derive(serde::Deserialize)]
+    struct PointerPayload {
+        generation: u64,
+        owner: String,
+    }
+
+    /// The page hands the pointer to the native panel once it has acknowledged
+    /// the hold, and takes it back if the panel stops acknowledging. Only the
+    /// current agent hold may change it; a disarmed window stays click-through.
+    fn set_pointer_owner(app: &tauri::AppHandle, payload: PointerPayload) {
+        use tauri::Manager;
+        let _change = OVERLAY_CHANGE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let native = match payload.owner.as_str() {
+            "native" => true,
+            "web" => false,
+            _ => return,
+        };
+        if !is_armed()
+            || generation() != payload.generation
+            || lock_stash().visual_id.is_some()
+        {
+            return;
+        }
+        if let Some(window) = app.get_webview_window(SPATIAL_INK_LABEL) {
+            let _ = window.set_ignore_cursor_events(native);
+        }
+        log::info!(
+            "[spatial-ink] pointer owner: {}",
+            if native { "native panel" } else { "web overlay" }
+        );
+    }
+
     // ── Arm / disarm (mouse-capture protocol) ──
 
     /// Begin an agent hold: reset the stash, cover the cursor's monitor, CAPTURE
@@ -302,6 +370,7 @@ mod imp {
         if crate::presentation::overlay_show_blocked() {
             return None;
         }
+        let agent_hold = visual_id.is_none();
         let (generation, superseded) = {
             let mut stash = lock_stash();
             if visual_id.is_some() && is_armed() {
@@ -324,6 +393,16 @@ mod imp {
             let _ = app.emit_to(SPATIAL_INK_LABEL, "o8:visual-capture-superseded", &payload);
         }
 
+        // An agent hold tells the page which monitor it covers, so the native
+        // panel (experimental `native_spatial_ink`) covers the same one and its
+        // normalized points match the capture taken from it.
+        if let (true, Some(monitor)) = (agent_hold, &monitor) {
+            let _ = app.emit_to(
+                SPATIAL_INK_LABEL,
+                "o8:spatial-ink-armed",
+                armed_payload(generation, monitor),
+            );
+        }
         if let Some(win) = app.get_webview_window(SPATIAL_INK_LABEL) {
             if let Some(monitor) = monitor {
                 reposition_to_monitor(&win, monitor);
@@ -511,6 +590,15 @@ mod imp {
         }
         {
             let a = app.clone();
+            app.listen("o8:spatial-ink-pointer", move |event| {
+                match serde_json::from_str::<PointerPayload>(event.payload()) {
+                    Ok(payload) => set_pointer_owner(&a, payload),
+                    Err(e) => log::warn!("[spatial-ink] bad pointer payload: {e}"),
+                }
+            });
+        }
+        {
+            let a = app.clone();
             app.listen("o8:spatial-ink-disarm-request", move |_event| {
                 disarm(&a);
             });
@@ -568,6 +656,24 @@ mod imp {
     #[cfg(test)]
     mod visual_tests {
         use super::*;
+        #[test]
+        fn armed_monitor_is_in_desktop_points_for_any_scale_and_origin() {
+            assert_eq!(
+                monitor_points((0, 0), (3024, 1964), 2.),
+                [0., 0., 1512., 982.]
+            );
+            // A 1x display left of and above the primary.
+            assert_eq!(
+                monitor_points((-1920, -1080), (1920, 1080), 1.),
+                [-1920., -1080., 1920., 1080.]
+            );
+            // A 2x display to the left: the same division the window placement uses.
+            assert_eq!(
+                monitor_points((-5120, 200), (5120, 2880), 2.),
+                [-2560., 100., 2560., 1440.]
+            );
+            assert_eq!(monitor_points((10, 20), (30, 40), 0.), [10., 20., 30., 40.]);
+        }
         #[test]
         fn notes_handoff_rejects_a_reused_identity_from_an_older_generation() {
             let old_stash = std::mem::replace(

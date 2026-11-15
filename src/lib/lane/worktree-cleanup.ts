@@ -10,7 +10,7 @@ import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/ter
 import { worktreeIsConfirmedAbsent } from './lane-storage-release';
 
 type CleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>
-  & Partial<Pick<Lane, 'baseBranch' | 'packetId'>>
+  & Partial<Pick<Lane, 'baseBranch' | 'packetId' | 'branch'>>
   & { storageAdmissionOwnerGeneration?: number };
 
 function formatError(error: unknown) {
@@ -62,6 +62,7 @@ async function preserveHeadBeforeRemoval(lane: CleanupLane, worktreePath: string
       repoPath: lane.repoPath,
       worktreePath,
       baseBranch: lane.baseBranch ?? 'main',
+      branch: lane.branch,
     }, 'terminal_worktree_cleanup');
     return true;
   } catch (error) {

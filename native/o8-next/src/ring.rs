@@ -1,0 +1,294 @@
+//! Ring, o8's logo, drawn natively from docs/design/BRAND.md §3 (the files in
+//! `brand/ring/`): a heavy o, outer radius 40 and inner 22 on a 100×100 box,
+//! with an orange review point (r 7.4) on the mid-line (r 31) at −45° and a
+//! real 3.4 gap cut out of the ring around it. Flat: no glow, no shadow.
+//!
+//! The cut circle (r 7.4 + 3.4) crosses both edges of the ring, so the ring is
+//! one closed outline of four arcs: the outer edge the long way round, the cut
+//! inward, the inner edge back the long way, and the cut outward.
+use gpui::{Div, IntoElement, ParentElement, Rgba, Styled, div, prelude::FluentBuilder, px, rgb};
+use std::sync::LazyLock;
+
+const CENTRE: f32 = 50.;
+pub(crate) const OUTER: f32 = 40.;
+pub(crate) const INNER: f32 = 22.;
+pub(crate) const POINT_R: f32 = 7.4;
+pub(crate) const MID: f32 = 31.;
+pub(crate) const GAP: f32 = 3.4;
+/// −45°: upper right, in the box's y-down coordinates.
+const POINT_ANGLE: f32 = -std::f32::consts::FRAC_PI_4;
+
+use crate::theme::brand::{INK, ORANGE, PAPER};
+
+/// The review point's centre: (71.92, 28.08), as in ring-light.svg.
+pub(crate) fn point_centre() -> (f32, f32) {
+    let (s, c) = POINT_ANGLE.sin_cos();
+    (CENTRE + MID * c, CENTRE + MID * s)
+}
+
+/// One arc of the outline, in SVG terms (y down; `sweep` runs clockwise).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Arc {
+    pub radius: f32,
+    pub large: bool,
+    pub sweep: bool,
+    pub to: (f32, f32),
+}
+
+/// The ring's outline: a start point and four arcs back to it.
+pub(crate) fn outline() -> ((f32, f32), [Arc; 4]) {
+    let cut = POINT_R + GAP;
+    // Half the angle, seen from the ring's centre, that the cut spans on a
+    // circle of radius `r` (law of cosines).
+    let half = |r: f32| ((r * r + MID * MID - cut * cut) / (2. * r * MID)).acos();
+    let at = |r: f32, angle: f32| {
+        let (s, c) = angle.sin_cos();
+        (CENTRE + r * c, CENTRE + r * s)
+    };
+    let (outer, inner) = (half(OUTER), half(INNER));
+    let start = at(OUTER, POINT_ANGLE + outer);
+    (
+        start,
+        [
+            // The outer edge clockwise, the long way, to the far side of the cut.
+            Arc {
+                radius: OUTER,
+                large: true,
+                sweep: true,
+                to: at(OUTER, POINT_ANGLE - outer),
+            },
+            // Along the cut, inward.
+            Arc {
+                radius: cut,
+                large: false,
+                sweep: false,
+                to: at(INNER, POINT_ANGLE - inner),
+            },
+            // The inner edge back, the long way.
+            Arc {
+                radius: INNER,
+                large: true,
+                sweep: false,
+                to: at(INNER, POINT_ANGLE + inner),
+            },
+            // Along the cut, outward, to the start.
+            Arc {
+                radius: cut,
+                large: false,
+                sweep: false,
+                to: start,
+            },
+        ],
+    )
+}
+
+/// The ring's and the point's colours: an ink ring on light themes, paper on
+/// dark; the point is always orange.
+pub(crate) fn colors(light: bool) -> (Rgba, Rgba) {
+    (rgb(if light { INK } else { PAPER }), rgb(ORANGE))
+}
+
+/// The Ring at `size` layout units, coloured for the running theme.
+pub(crate) fn ring(size: f32) -> impl IntoElement {
+    let (ring_color, point_color) = colors(crate::theme::light());
+    painted(size, ring_color, point_color)
+}
+
+/// The app icon's tile, from brand/app-icon/icon-light.svg's macOS grid: an
+/// 824-unit tile with corners of 185 and the Ring's 100-unit box scaled to 500,
+/// centred. As fractions of the tile's side.
+pub(crate) const TILE_CORNER: f32 = 185. / 824.;
+pub(crate) const TILE_RING: f32 = 500. / 824.;
+
+/// An app icon the product's small tiles can show: its tile, ring and point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct AppIcon {
+    pub tile: u32,
+    pub ring: u32,
+    pub point: u32,
+}
+
+/// Brand v1's app icon, the default: the ink Ring and orange point on a paper
+/// tile. It is the app's icon, so it does not follow the theme.
+pub(crate) const RING_ON_PAPER: AppIcon = AppIcon {
+    tile: PAPER,
+    ring: INK,
+    point: ORANGE,
+};
+
+/// The icon the small tiles show. Alternates (a Glance icon, dark variants)
+/// would be chosen here, so call sites never change.
+pub(crate) fn app_icon() -> AppIcon {
+    RING_ON_PAPER
+}
+
+/// The app's mark at `size` units wherever the product shows a small app tile
+/// (a project's default identity, and anything else that showed the retired
+/// glass tile): the default app icon, flat. At these sizes the real icon's
+/// soft edge would not show, so none is drawn; on a light theme the paper
+/// tile sits on paper, so it takes the theme's 1px hairline.
+pub(crate) fn app_mark(size: f32) -> Div {
+    let icon = app_icon();
+    div()
+        .size(px(size))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(size * TILE_CORNER))
+        .bg(rgb(icon.tile))
+        .when(crate::theme::light(), |tile| {
+            tile.border_1().border_color(crate::theme::current().border)
+        })
+        .child(painted(size * TILE_RING, rgb(icon.ring), rgb(icon.point)))
+}
+
+/// The ring's outline and the point as path data on `icon.rs`'s 24-unit grid
+/// (the 100-unit box scaled by 0.24): the same four arcs and circle.
+pub(crate) fn glyph_paths() -> (String, String) {
+    let k = 24. / 100.;
+    let n = |v: f32| format!("{:.3}", v * k);
+    let (start, arcs) = outline();
+    let mut ring = format!("M{} {}", n(start.0), n(start.1));
+    for arc in arcs {
+        ring += &format!(
+            "A{r} {r} 0 {} {} {} {}",
+            u8::from(arc.large),
+            u8::from(arc.sweep),
+            n(arc.to.0),
+            n(arc.to.1),
+            r = n(arc.radius),
+        );
+    }
+    ring += "Z";
+    let (x, y) = point_centre();
+    let r = n(POINT_R);
+    let dot = format!(
+        "M{} {}A{r} {r} 0 0 1 {} {}A{r} {r} 0 0 1 {} {}Z",
+        n(x + POINT_R),
+        n(y),
+        n(x - POINT_R),
+        n(y),
+        n(x + POINT_R),
+        n(y),
+    );
+    (ring, dot)
+}
+
+static GLYPHS: LazyLock<(String, String)> = LazyLock::new(glyph_paths);
+
+/// The Ring as two tinted glyphs, the ring and the point, rasterised once per
+/// size into GPUI's shared sprite atlas like the app's icons. Painting it as a
+/// path instead makes every frame clear a window-sized multisampled path
+/// texture, which cost about 21 MiB of resident memory at rest on Linux.
+fn painted(size: f32, ring_color: Rgba, point_color: Rgba) -> impl IntoElement {
+    let (ring, dot) = &*GLYPHS;
+    div()
+        .relative()
+        .size(px(size))
+        .flex_shrink_0()
+        .child(crate::icon::fill(ring, ring_color, size).absolute())
+        .child(crate::icon::fill(dot, point_color, size).absolute())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: (f32, f32), b: (f32, f32)) -> bool {
+        (a.0 - b.0).abs() < 1e-2 && (a.1 - b.1).abs() < 1e-2
+    }
+    fn radius(p: (f32, f32)) -> f32 {
+        (p.0 - CENTRE).hypot(p.1 - CENTRE)
+    }
+
+    #[test]
+    fn geometry_matches_brand() {
+        assert_eq!((OUTER, INNER, POINT_R, MID, GAP), (40., 22., 7.4, 31., 3.4));
+        // ring-light.svg places the point and its mask at (71.92, 28.08).
+        assert!(
+            close(point_centre(), (71.92, 28.08)),
+            "{:?}",
+            point_centre()
+        );
+    }
+
+    #[test]
+    fn outline_runs_the_edges_and_the_cut() {
+        let (start, arcs) = outline();
+        // The cut meets the outer edge 9.73° and the inner edge 13.13° either
+        // side of the point, as computed from the brand geometry.
+        assert!(close(start, (82.656, 26.900)), "{start:?}");
+        assert!(close(arcs[0].to, (73.100, 17.344)), "{:?}", arcs[0].to);
+        assert!(close(arcs[1].to, (61.617, 31.317)), "{:?}", arcs[1].to);
+        assert!(close(arcs[2].to, (68.683, 38.383)), "{:?}", arcs[2].to);
+        assert_eq!(arcs[3].to, start);
+        // Each corner lies on its edge and on the cut circle.
+        let (cx, cy) = point_centre();
+        for (p, edge) in [
+            (start, OUTER),
+            (arcs[0].to, OUTER),
+            (arcs[1].to, INNER),
+            (arcs[2].to, INNER),
+        ] {
+            assert!((radius(p) - edge).abs() < 1e-3);
+            assert!(((p.0 - cx).hypot(p.1 - cy) - (POINT_R + GAP)).abs() < 1e-3);
+        }
+        // The edges go the long way round; the cut arcs are short.
+        assert_eq!(
+            arcs.map(|a| (a.radius, a.large, a.sweep)),
+            [
+                (40., true, true),
+                (10.8, false, false),
+                (22., true, false),
+                (10.8, false, false)
+            ]
+        );
+    }
+
+    #[test]
+    fn app_mark_is_the_v1_app_icon_tile() {
+        // icon-light.svg: rx 185 on an 824 tile, the Ring's box scaled to 500.
+        assert!((TILE_CORNER * 824. - 185.).abs() < 1e-3);
+        assert!((TILE_RING * 824. - 500.).abs() < 1e-3);
+        // The default is the paper tile with the ink Ring, on every theme.
+        assert_eq!(
+            app_icon(),
+            AppIcon {
+                tile: PAPER,
+                ring: INK,
+                point: ORANGE
+            }
+        );
+        // And those are brand/tokens' paper, ink and orange.
+        let hex = |c: u32| format!("{c:06X}");
+        assert_eq!(
+            (hex(PAPER), hex(INK), hex(ORANGE)),
+            ("F4F2EC".into(), "17140F".into(), "FF5A1F".into())
+        );
+    }
+
+    #[test]
+    fn glyphs_are_the_outline_and_point_on_the_icon_grid() {
+        let (ring, dot) = glyph_paths();
+        // The outline's corners and arcs, scaled by 0.24 (outline() pins them).
+        assert_eq!(
+            ring,
+            "M19.837 6.456A9.600 9.600 0 1 1 17.544 4.163\
+             A2.592 2.592 0 0 0 14.788 7.516\
+             A5.280 5.280 0 1 0 16.484 9.212\
+             A2.592 2.592 0 0 0 19.837 6.456Z"
+        );
+        // The point: r 7.4 at (71.92, 28.08), as two half circles.
+        assert_eq!(
+            dot,
+            "M19.037 6.739A1.776 1.776 0 0 1 15.485 6.739A1.776 1.776 0 0 1 19.037 6.739Z"
+        );
+    }
+
+    #[test]
+    fn ink_on_light_paper_on_dark_point_always_orange() {
+        assert_eq!(colors(true), (rgb(INK), rgb(ORANGE)));
+        assert_eq!(colors(false), (rgb(PAPER), rgb(ORANGE)));
+    }
+}

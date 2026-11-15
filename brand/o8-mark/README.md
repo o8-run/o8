@@ -1,5 +1,7 @@
 # o8 striped-circle mark
 
+> **Retired 2026-11-12.** The o8 logo is now the Ring. See [docs/design/BRAND.md](../../docs/design/BRAND.md). Kept for history only.
+
 These files are a flat, editable **vector reconstruction** of the striped-circle "o8" emblem in the reference image supplied on October 28, 2026 (`IMG_8924.jpeg`). The supplied image was a rendered metallic silver app-icon presentation on a dark textured background, **not** an original editable vector design. Its background, square app tile, grid, metallic shading, and bevel effects are intentionally excluded. Shapes were extracted and simplified into seven independent, closed vector contours, preserving the negative-space circular cutouts and the curved band geometry. They are visually faithful approximations, not the lost original source curves.
 
 ## Palette

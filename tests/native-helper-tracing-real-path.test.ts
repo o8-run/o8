@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -84,6 +84,7 @@ describe('native helper compiler output at the standalone trace boundary', () =>
 
     // The shell supplies its separately staged helper in packaged mode.
     const helper = join(standalone, 'src-tauri/helpers/o8-pi-write');
+    chmodSync(helper, 0o755);
     expect(piWriteHelperPath({ O8_PACKAGED_APP: '1', O8_PI_WRITE_BIN: helper })).toBe(helper);
     expect(() => piWriteHelperPath({ O8_PACKAGED_APP: '1' })).toThrow('Pi write helper is missing from this build');
   });

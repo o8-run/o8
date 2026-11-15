@@ -731,7 +731,7 @@ if not defined NODE_BIN set "NODE_BIN=node"\r
 
 // ── Sanity check: every expected standalone bundle must exist ──
 // Belt-and-braces guard against future compile failures slipping through.
-const REQUIRED_BUNDLES = ['ws-server.mjs', 'terminal-host.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'operator-mcp-proxy.mjs', 'cortex-mcp-server.mjs'];
+const REQUIRED_BUNDLES = ['ws-server.mjs', 'review-push.mjs', 'terminal-host.mjs', 'operator-mcp-server.mjs', 'operator-mcp-server-main.mjs', 'operator-mcp-proxy.mjs', 'cortex-mcp-server.mjs'];
 for (const bundle of REQUIRED_BUNDLES) {
   for (const required of [bundle, bundle.replace(/\.mjs$/, '-impl.mjs')]) {
     const bundlePath = join(server, required);

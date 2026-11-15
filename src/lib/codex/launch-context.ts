@@ -1,3 +1,4 @@
+import { CODEX_LOCAL_DEFAULT_IDENTITY_ID } from './discovery-store';
 import { codexModelDiscoveryHome } from './model-discovery-cache';
 import { resolveEffortPin, type ResolveEffortPinInput } from '@/lib/orchestrator/effort-pin';
 import { getRuntimeLaunchIdentitySync, type RuntimeLaunchIdentity } from '@/lib/runtime/identity-catalog';
@@ -5,7 +6,7 @@ import { getRuntimeLaunchIdentitySync, type RuntimeLaunchIdentity } from '@/lib/
 /** Carry this server-resolved identity from early admission into the owned store. */
 export function resolveCodexLaunchIdentity(packetId?: string): RuntimeLaunchIdentity {
   return getRuntimeLaunchIdentitySync('codex', packetId) ?? {
-    id: 'codex-local-default', label: 'Current local sign-in', configHomeRef: codexModelDiscoveryHome(),
+    id: CODEX_LOCAL_DEFAULT_IDENTITY_ID, label: 'Current local sign-in', configHomeRef: codexModelDiscoveryHome(),
   };
 }
 

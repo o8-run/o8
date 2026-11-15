@@ -1,5 +1,6 @@
 import { getSqlite } from '@/lib/db';
 import {
+  UNREPORTED_LEAD_REASON,
   cleanLeadString,
   LeadLifecycleError,
   type LeadRow,
@@ -8,7 +9,57 @@ import {
 } from '@/lib/orchestrator/lead-contract';
 import { leadTurnOwnerState } from '@/lib/orchestrator/lead-turn-owner';
 
-const TERMINAL = new Set<LeadStatus>(['completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
+const TERMINAL = new Set<LeadStatus>(['unreported', 'completed', 'blocked', 'needs_approval', 'failed', 'stopped']);
+const DEFAULT_LEAD_LIST_LIMIT = 100;
+
+function leadOutcome(turn: TurnRow | undefined) {
+  return turn?.outcome_kind ? {
+    kind: turn.outcome_kind,
+    summary: turn.outcome_summary,
+    evidence: turn.outcome_evidence_json ? JSON.parse(turn.outcome_evidence_json) as unknown : [],
+  } : null;
+}
+
+function turnReceipt(turn: TurnRow) {
+  return {
+    id: turn.id,
+    rootTurnId: turn.root_turn_id ?? turn.id,
+    ordinal: turn.ordinal,
+    kind: turn.kind,
+    status: turn.status,
+    outcome: leadOutcome(turn),
+    reason: turn.status === 'unreported' ? UNREPORTED_LEAD_REASON : null,
+    resultText: turn.result_text?.slice(0, 2_000) ?? null,
+    error: turn.error?.slice(0, 2_000) ?? null,
+    errorTruncated: Boolean(turn.error && turn.error.length > 2_000),
+    createdAt: turn.created_at,
+    finishedAt: turn.finished_at,
+  };
+}
+
+function leadReceipt(lead: LeadRow, resultTurn: TurnRow | undefined) {
+  return {
+    id: lead.id,
+    threadId: lead.thread_id,
+    repoPath: lead.repo_path,
+    routing: { backend: lead.backend, model: lead.model, effort: lead.effort },
+    status: lead.status,
+    currentTurnId: lead.current_turn_id,
+    result: lead.result_status ? {
+      turnId: lead.result_turn_id,
+      status: lead.result_status,
+      outcome: leadOutcome(resultTurn?.lead_id === lead.id ? resultTurn : undefined),
+      reason: lead.result_status === 'unreported' ? UNREPORTED_LEAD_REASON : null,
+      text: lead.result_text?.slice(0, 2_000) ?? null,
+      textTruncated: Boolean(lead.result_text && lead.result_text.length > 2_000),
+      error: lead.error?.slice(0, 2_000) ?? null,
+      errorTruncated: Boolean(lead.error && lead.error.length > 2_000),
+    } : null,
+    stopReason: lead.stop_reason,
+    createdAt: lead.created_at,
+    updatedAt: lead.updated_at,
+  };
+}
 
 export function appendLeadEvent(
   leadId: string,
@@ -31,6 +82,44 @@ export function findLeadTurnByKey(leadId: string, key: string): TurnRow | null {
   return getSqlite().prepare(
     'SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? AND idempotency_key = ?',
   ).get(leadId, key) as TurnRow | undefined ?? null;
+}
+
+/** Canonical receipts in two batches; unfiltered reads default to the newest 100 leads. */
+export function readLeadStatuses(input: { threadIds?: string[]; sessionKey?: string } = {}) {
+  recoverInterruptedLeadTurns();
+  const sqlite = getSqlite();
+  // Capture before reading: a concurrent change must invalidate a native snapshot.
+  const cursor = (sqlite.prepare('SELECT COALESCE(MAX(cursor), 0) AS cursor FROM orchestrator_lead_events')
+    .get() as { cursor: number }).cursor;
+  const key = input.sessionKey ?? null;
+  const threads = input.threadIds === undefined ? null : JSON.stringify([...new Set(input.threadIds)]);
+  const unfiltered = key === null && threads === null;
+  const rows = sqlite.prepare(`
+    SELECT l.*,
+      (SELECT COUNT(*) FROM orchestrator_lead_turns t WHERE t.lead_id = l.id AND t.status = 'queued') AS queue_depth,
+      (SELECT id FROM orchestrator_lead_turns t WHERE t.lead_id = l.id ORDER BY ordinal DESC LIMIT 1) AS latest_turn_id
+    FROM orchestrator_leads l
+    WHERE (? IS NULL OR l.id = ? OR l.thread_id = ? OR EXISTS (
+      SELECT 1 FROM orchestrator_lead_turns t WHERE t.lead_id = l.id AND t.session_id = ?
+    )) AND (? IS NULL OR l.thread_id IN (SELECT value FROM json_each(?)))
+    ORDER BY l.updated_at DESC, l.id LIMIT ?
+  `).all(key, key, key, key, threads, threads, unfiltered ? DEFAULT_LEAD_LIST_LIMIT + 1 : -1) as Array<
+    LeadRow & { queue_depth: number; latest_turn_id: string | null }>;
+  const truncated = unfiltered && rows.length > DEFAULT_LEAD_LIST_LIMIT;
+  const selected = truncated ? rows.slice(0, DEFAULT_LEAD_LIST_LIMIT) : rows;
+  const turnIds = [...new Set(selected.flatMap(row => [row.latest_turn_id, row.result_turn_id])
+    .filter((id): id is string => typeof id === 'string'))];
+  const turns = turnIds.length ? sqlite.prepare(`
+    SELECT * FROM orchestrator_lead_turns WHERE id IN (SELECT value FROM json_each(?))
+  `).all(JSON.stringify(turnIds)) as TurnRow[] : [];
+  const byId = new Map(turns.map(turn => [turn.id, turn]));
+  const leads = selected.map(row => {
+    const latest = row.latest_turn_id ? byId.get(row.latest_turn_id) : undefined;
+    const latestTurn = latest ? turnReceipt(latest) : null;
+    return { ...leadReceipt(row, row.result_turn_id ? byId.get(row.result_turn_id) : undefined),
+      reason: latestTurn?.reason ?? null, latestTurn, queueDepth: row.queue_depth };
+  });
+  return { cursor, leads, ...(truncated ? { truncated: true } : {}) };
 }
 
 export function recoverInterruptedLeadTurns(): number {
@@ -99,45 +188,14 @@ export function getLeadStatus(leadIdRaw: string, afterCursor = 0, requestedTurnI
     FROM orchestrator_lead_events WHERE lead_id = ? AND cursor > ? ORDER BY cursor LIMIT 100
   `).all(leadId, Math.max(0, afterCursor)) as Array<Record<string, unknown>>;
   const cursor = events.length > 0 ? Number(events[events.length - 1].cursor) : Math.max(0, afterCursor);
-  const turnReceipt = (turn: TurnRow) => ({
-    id: turn.id,
-    rootTurnId: turn.root_turn_id ?? turn.id,
-    ordinal: turn.ordinal,
-    kind: turn.kind,
-    status: turn.status,
-    outcome: turn.outcome_kind ? {
-      kind: turn.outcome_kind,
-      summary: turn.outcome_summary,
-      evidence: turn.outcome_evidence_json ? JSON.parse(turn.outcome_evidence_json) as unknown : [],
-    } : null,
-    resultText: turn.result_text?.slice(0, 2_000) ?? null,
-    error: turn.error?.slice(0, 2_000) ?? null,
-    errorTruncated: Boolean(turn.error && turn.error.length > 2_000),
-    createdAt: turn.created_at,
-    finishedAt: turn.finished_at,
-  });
+  const resultTurn = lead.result_turn_id
+    ? sqlite.prepare('SELECT * FROM orchestrator_lead_turns WHERE lead_id = ? AND id = ?')
+      .get(leadId, lead.result_turn_id) as TurnRow | undefined
+    : undefined;
   return {
     schema: 'o8/orchestrator.lead/v1',
     ok: true,
-    lead: {
-      id: lead.id,
-      threadId: lead.thread_id,
-      repoPath: lead.repo_path,
-      routing: { backend: lead.backend, model: lead.model, effort: lead.effort },
-      status: lead.status,
-      currentTurnId: lead.current_turn_id,
-      result: lead.result_status ? {
-        turnId: lead.result_turn_id,
-        status: lead.result_status,
-        text: lead.result_text?.slice(0, 2_000) ?? null,
-        textTruncated: Boolean(lead.result_text && lead.result_text.length > 2_000),
-        error: lead.error?.slice(0, 2_000) ?? null,
-        errorTruncated: Boolean(lead.error && lead.error.length > 2_000),
-      } : null,
-      stopReason: lead.stop_reason,
-      createdAt: lead.created_at,
-      updatedAt: lead.updated_at,
-    },
+    lead: leadReceipt(lead, resultTurn),
     latestTurn: latestTurn ? turnReceipt(latestTurn) : null,
     requestedTurn: requestedTurn ? turnReceipt(requestedTurn) : null,
     queueDepth,

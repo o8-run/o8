@@ -377,3 +377,18 @@ it('keeps stored TOML credentials out of native error responses and recovery log
     log.mockRestore();
   }
 });
+
+it('parses the dispatch load operator setting including zero', () => {
+  expect(parseOperatorDefaultsToml('[operator]\ndispatch_load_per_core = 0\n').dispatchLoadPerCore).toBe(0);
+  expect(parseOperatorDefaultsToml('[operator]\ndispatch_load_per_core = 1.5\n').dispatchLoadPerCore).toBe(1.5);
+});
+
+it.each(['', '   ', 'junk'])('keeps saved dispatch load ratio for unset or invalid env %j', async value => {
+  await applyToml('[operator]\ndispatch_load_per_core = 2\n');
+  vi.stubEnv('O8_DISPATCH_LOAD_PER_CORE', value);
+  try {
+    const resolved = await getOperatorDefaults();
+    expect(resolved.values.dispatchLoadPerCore).toBe(2);
+    expect(resolved.sources.dispatchLoadPerCore).toBe('file');
+  } finally { vi.unstubAllEnvs(); }
+});

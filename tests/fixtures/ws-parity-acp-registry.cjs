@@ -9,3 +9,15 @@ globalThis.fetch = function (input, options) {
   }
   return originalFetch(input, options);
 };
+
+// The detection socket test exercises credential reads, not host-installed CLI versions.
+// Keep these external probes below the production ten-second route deadline under CI load.
+const childProcess = require('node:child_process');
+const originalExecFileSync = childProcess.execFileSync;
+childProcess.execFileSync = function (command, args, options) {
+  if (Array.isArray(args) && args.length === 1 && args[0] === '--version') {
+    return options?.encoding ? 'fixture 1.0.0\n' : Buffer.from('fixture 1.0.0\n');
+  }
+  return originalExecFileSync.call(this, command, args, options);
+};
+require('node:module').syncBuiltinESMExports();

@@ -130,7 +130,7 @@ describe('conflict route without a repository', () => {
       expect.objectContaining({ worktreeId: 'metadata-child' }),
     ]));
     expect(probe.mock.calls.some(([file, args, options]) => (
-      file === 'git' && args[0] === 'diff' && options?.cwd === child
+      file === 'git' && args.includes('--no-optional-locks') && args.includes('status') && args.includes('--porcelain=v1') && args.includes('-z') && options?.cwd === child
     ))).toBe(true);
     expect(probe.mock.calls.some(([file, args, options]) => (
       file === 'git' && args[0] === 'worktree' && options?.cwd === folder

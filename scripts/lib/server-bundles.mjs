@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const SERVER_ENTRIES = {
   'ws-server': 'src/ws-server.ts',
+  'review-push': 'src/lib/review/push-entry.ts',
   'terminal-host': 'src/lib/ws-server/terminal-host-entry.ts',
   'operator-mcp-server-main': 'src/lib/mcp/operator-mcp-server.ts',
   'operator-mcp-server': 'src/lib/mcp/operator-mcp-server-bundle-entry.ts',

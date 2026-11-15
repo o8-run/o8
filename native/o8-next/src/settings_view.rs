@@ -70,6 +70,23 @@ impl Settings {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if event.keystroke.key == "escape" && self.dismiss_flyout(window, cx) {
+            self.changed(cx);
+            cx.stop_propagation();
+            return;
+        }
+        if self.section == "mcp"
+            && self.editor.is_none()
+            && self.confirm.is_none()
+            && self.search.read(cx).text.trim().len() < 2
+        {
+            if let Some(tasks) = self.plugin_tasks.clone() {
+                if tasks.update(cx, |tasks, cx| tasks.key(event, window, cx)) {
+                    cx.stop_propagation();
+                    return;
+                }
+            }
+        }
         match event.keystroke.key.as_str() {
             "enter"
                 if !self.busy
@@ -79,7 +96,6 @@ impl Settings {
                 self.open_first_result(window, cx);
             }
             "right" if self.open_focused_flyout(window, cx) => {}
-            "escape" if self.dismiss_flyout(window, cx) => {}
             "escape" if !self.busy => {
                 if self.editor.is_some() || self.confirm.is_some() {
                     self.cancel(window, cx);

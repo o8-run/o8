@@ -1,3 +1,4 @@
+import { WorktreePreparationCleanupError } from './preparation-failure';
 import { committedDiff } from '@/lib/worktree/committed-diff';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 /**
@@ -23,6 +24,7 @@ import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 
 import { access, lstat, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { NO_REPOSITORY_HOOKS } from '@/lib/git/no-repository-hooks';
 import { mayHaveGitRepositoryContext } from '@/lib/git/repository-context';
 import { taskDraftGitOptions } from '@/lib/mcp/task-draft-git';
 import { assertReviewMaterializationOptions, finishReviewMaterialization } from './review-materialization';
@@ -1113,7 +1115,7 @@ export class WorktreeManager {
     // work. On stale+unreachable: throw so the caller escalates to a
     // fetch_unreachable supervisor inbox item.
     try {
-      await execFileAsync('git', ['fetch', 'origin', baseBranch, '--quiet'], {
+      await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'fetch', 'origin', baseBranch, '--quiet'], {
         windowsHide: true,
         cwd,
         timeout: 60_000,
@@ -1202,7 +1204,7 @@ export class WorktreeManager {
     if (originMissing) return;
 
     try {
-      const rebaseArgs = ['rebase'];
+      const rebaseArgs = [...NO_REPOSITORY_HOOKS, 'rebase'];
       if (strategy) {
         rebaseArgs.push('-X', strategy);
       }
@@ -1219,14 +1221,14 @@ export class WorktreeManager {
       let conflictFiles: string[] = [];
       try {
         const { stdout } = await execFileAsync(
-          'git', ['diff', '--name-only', '--diff-filter=U'],
+          'git', [...NO_REPOSITORY_HOOKS, 'diff', '--name-only', '--diff-filter=U'],
           { windowsHide: true, cwd: worktreePath, timeout: 5000 },
         );
         conflictFiles = stdout.split('\n').map((line) => line.trim()).filter(Boolean);
       } catch { /* best effort */ }
 
       try {
-        await execFileAsync('git', ['rebase', '--abort'], {
+        await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'rebase', '--abort'], {
           windowsHide: true,
           cwd: worktreePath,
           timeout: 10_000,
@@ -1775,16 +1777,7 @@ export class WorktreeManager {
     creationError: unknown,
     retirementError: unknown,
   ): Error {
-    const creationMessage = creationError instanceof Error
-      ? creationError.message
-      : String(creationError);
-    const retirementMessage = retirementError instanceof Error
-      ? retirementError.message
-      : String(retirementError);
-    return new Error(
-      `${creationMessage} Exact retirement was refused; durable workspace ownership was retained: ${retirementMessage}`,
-      { cause: retirementError },
-    );
+    return new WorktreePreparationCleanupError(creationError, retirementError);
   }
 
   private async getOriginUrl(): Promise<string | null> {
@@ -2223,7 +2216,7 @@ export class WorktreeManager {
     // to work that survived the directory's removal.
     if (opts?.deleteBranch && entry && !confirmedMissingRetirement) {
       const branchName = entry.branchName ?? `worktree/${entry.agentType}/${worktreeId}`;
-      await execFileAsync('git', ['branch', '-D', branchName], {
+      await execFileAsync('git', [...NO_REPOSITORY_HOOKS, 'branch', '-D', branchName], {
         windowsHide: true,
         cwd: this.repoRoot,
         timeout: 5000,

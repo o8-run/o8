@@ -1,3 +1,7 @@
+import { reviewBackpressureStatus } from '../review-backpressure';
+import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
+import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
+import { readLeadStatuses } from '@/lib/orchestrator/lead-status';
 import { hasForgottenPacketOutcome } from '@/lib/cortex/outcome-exclusion';
 import { buildHistoricalMissionStatus } from './historical-status';
 import { readLaneTerminalReason } from '@/lib/lane/terminal-reason';
@@ -6,7 +10,7 @@ import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-con
 import { captureMissionProject, resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import { aggregateMissionCost, laneSessionHistoryForMission } from '@/lib/orchestrator/cost-aggregator';
 import { projectMissionFunnel } from '@/lib/orchestrator/mission-funnel';
-import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { applyPacketScopePolicy, buildRemainingLaunchBudget, computePredictedFiles, runDispatchTick } from '@/lib/orchestrator/dispatch';
@@ -110,7 +114,10 @@ export async function createMission(input: CreateMissionInput) {
     throw new Error('Quality search is not supported by the selected worker runtime yet.');
   }
 
-  const loadedIssues = input.issues.map((issue, index) => normalizeLoadedIssue(issue, index));
+  const loadedIssues = input.issues.map((issue, index) => {
+    const runtime = validateRequestedRuntime(issue.runtime);
+    return normalizeLoadedIssue({ ...issue, runtime: runtime ?? undefined }, index);
+  });
   const duplicateIssueNumber = loadedIssues.find((issue, index) => (
     loadedIssues.findIndex((candidate) => candidate.number === issue.number) !== index
   ));
@@ -139,7 +146,7 @@ export async function createMission(input: CreateMissionInput) {
   const workerRouting = resolveWorkerRouting({
     workerIntent: input.workerIntent,
     requestedProvider: input.requestedProvider,
-    requestedRuntime: input.requestedRuntime ?? input.runtime,
+    requestedRuntime: validateRequestedRuntime(input.requestedRuntime ?? input.runtime, resolveDefaultDispatchRuntimeSync()),
     requestedModel: resolveRuntimePresetModel(input.runtimePreset, input.requestedRuntime ?? input.runtime, input.requestedModel, input.claudeCodeCarrier),
     requestedEffort: input.requestedEffort,
     source: 'mission-create',
@@ -150,16 +157,17 @@ export async function createMission(input: CreateMissionInput) {
   if (executionCarrier !== null && !isExecutionCarrierId(executionCarrier)) {
     throw new Error('executionCarrier must be "ori" or null.');
   }
-  const packetRoutings = loadedIssues.map((issue) => issue.runtime
-    ? resolveWorkerRouting({
-        workerIntent: input.workerIntent,
-        requestedProvider: input.requestedProvider,
-        requestedRuntime: issue.runtime,
-        requestedModel: resolveRuntimePresetModel(input.runtimePreset, issue.runtime, input.requestedModel, input.claudeCodeCarrier),
-        requestedEffort: input.requestedEffort,
-        source: 'mission-create-packet',
-      })
-    : workerRouting);
+  const packetRoutings = loadedIssues.map((issue) => {
+    const runtime = validateRequestedRuntime(issue.runtime);
+    return runtime ? resolveWorkerRouting({
+      workerIntent: input.workerIntent,
+      requestedProvider: input.requestedProvider,
+      requestedRuntime: runtime,
+      requestedModel: resolveRuntimePresetModel(input.runtimePreset, runtime, input.requestedModel, input.claudeCodeCarrier),
+      requestedEffort: input.requestedEffort,
+      source: 'mission-create-packet',
+    }) : workerRouting;
+  });
   if (executionCarrier) {
     for (const routing of packetRoutings) assertExecutionCarrierCompatible(executionCarrier, routing.selectedRuntime);
   }
@@ -432,7 +440,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
       return { state: fanOutComparisonPackets(registryBefore), result: beforeDispatch };
     });
     const { result, state: finalState } = await withMissionRegistryState(requestedMissionId, async (durableReady) => {
-      const afterDispatch = await runDispatchTick(durableReady, { launchBudget: buildRemainingLaunchBudget() });
+      const afterDispatch = await runDispatchTick(durableReady, { launchBudget: buildRemainingLaunchBudget(), force: input.force });
       return { state: afterDispatch, result: summarizeDispatchMission(beforeDispatch, afterDispatch) };
     });
     const packetIds = new Set(finalState.packets.map((packet) => packet.id));
@@ -462,7 +470,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
     // Workers can register managed runs as soon as their process starts. Publish
     // explicit re-arming before launch, including when comparison fan-out is a no-op.
     writeOrchestratorControlPlaneState(dispatchReady);
-    const afterDispatch = await runDispatchTick(dispatchReady, { launchBudget: buildRemainingLaunchBudget() });
+    const afterDispatch = await runDispatchTick(dispatchReady, { launchBudget: buildRemainingLaunchBudget(), force: input.force });
     // #1293 — make withLockedState's end-of-lock reconcile+write use the
     // post-dispatch state, not the unmutated pre-callback `current`. Without this
     // a best-of-N seed survives the dispatch (its candidate lanes don't map back
@@ -486,6 +494,16 @@ export async function dispatchMission(input: DispatchMissionInput) {
   };
 }
 
+function missionLeadFields(packets: Array<{ orchestratorThreadId?: string | null }>) {
+  const threadIds = packets.flatMap(packet => packet.orchestratorThreadId ? [packet.orchestratorThreadId] : []);
+  try {
+    const leads = readLeadStatuses({ threadIds }).leads;
+    return leads.length ? { leads } : {};
+  } catch {
+    return { leadsUnavailable: true };
+  }
+}
+
 export async function getMissionStatus(input: MissionStatusInput) {
   const currentState = currentMissionState();
   const requestedMissionId = input.missionId?.trim();
@@ -507,7 +525,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
       const funnel = input.includeTiming && record.missionState
         ? await projectMissionFunnel(record.missionState)
         : undefined;
-      return { ...historical, ...(input.includeTiming ? { funnel: funnel ?? null } : {}) };
+      return { ...historical, ...missionLeadFields(record.missionState?.packets ?? []), ...(input.includeTiming ? { funnel: funnel ?? null } : {}) };
     }
   }
 
@@ -525,13 +543,13 @@ export async function getMissionStatus(input: MissionStatusInput) {
   const completionContextByPacketId = new Map(await Promise.all(state.packets.map(async (packet) => (
     [packet.id, await readPacketCompletionContext(packet.id)] as const
   ))));
-  const mergePolicy = currentLaneMergePolicy();
   const agents = state.packets
     .map((packet) => {
       const lane = laneByPacketId.get(packet.id);
       if (!lane) {
         return null;
       }
+      const mergePolicy = currentLaneMergePolicy(lane.projectId);
       const activity = lane.sessionKey ? transcriptActivityBySession.get(lane.sessionKey) : undefined;
       const lastTranscriptAt = activity?.lastTranscriptAt ?? null;
       const lastLifecycleEventAt = lane.lastEventAt;
@@ -594,6 +612,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
 
   return {
     missionId: state.missionId || '',
+    backpressure: await reviewBackpressureStatus(),
+    ...missionLeadFields(state.packets),
     prompt: state.prompt,
     summary: state.summary,
     repoPath: state.repoPath ?? null,
@@ -604,6 +624,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
     packets: graph.map((node) => {
       const packet = packetById.get(node.packetId)!;
       const lane = laneByPacketId.get(node.packetId);
+      const mergePolicy = currentLaneMergePolicy(lane?.projectId ?? packet.projectId ?? null);
       const recovery = packet.releaseState === 'released' || (lane?.status === 'completed' && lane.outcome === 'merged') ? null : packet.recovery ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
       const laneSessionKey = lane ? lane.sessionKey : packet.lane?.sessionKey ?? null;
       const activity = laneSessionKey ? transcriptActivityBySession.get(laneSessionKey) : undefined;
@@ -662,6 +683,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
           mergeModeNote: mergePolicy.note,
         } : null,
         review: packet.review ? {
+          ...reviewExecution(packet.review.approved, packet.review.reviewedHeadSha, packet.review.runEvidence),
           approved: packet.review.approved,
           findingsCount: packet.review.findings.length,
           summary: packet.review.summary,

@@ -5,7 +5,7 @@ import type { Lane, LaneEventActor } from './types';
 import { preserveLaneWorktreeHead } from './worktree-preservation';
 
 export async function preserveAndRecordLaneRecovery(
-  lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'baseBranch'>,
+  lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'baseBranch'> & Partial<Pick<Lane, 'branch'>>,
   reason: string,
   options: { actor?: LaneEventActor; reviewed?: boolean } = {},
 ): Promise<OrchestratorPacketRecovery | null> {

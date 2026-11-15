@@ -75,6 +75,7 @@ export async function decideReuse({ eventName, event, repository, token, api = '
     const matches = runs.filter(run => run?.name === name);
     if (matches.length === 0) refuse(`"${name}" has no check run`);
     for (const run of matches) {
+      // A job-level skip admits a PR to the queue, but proves no executed work.
       if (run.status !== 'completed' || run.conclusion !== 'success') refuse(`"${name}" is ${run.conclusion ?? run.status}`);
       if (run.app?.slug !== 'github-actions') refuse(`"${name}" was not reported by Actions`);
       shas.add(run.head_sha);

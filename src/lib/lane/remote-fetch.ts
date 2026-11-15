@@ -1,4 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
+import { NO_REPOSITORY_HOOKS } from '@/lib/git/no-repository-hooks';
 import { execFile } from '@/lib/providers/child-process';
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -41,7 +42,7 @@ export async function fetchWorkerBranch(
 
     // --end-of-options: a branch name can never be parsed as a flag, even if
     // the upstream validator ever regresses (#1644 defense-in-depth).
-    await execFileAsync(resolveGitBinary(), ['fetch', '--end-of-options', 'origin', remoteBranch], {
+    await execFileAsync(resolveGitBinary(), [...NO_REPOSITORY_HOOKS, 'fetch', '--end-of-options', 'origin', remoteBranch], {
       windowsHide: true,
       cwd: repoPath,
       maxBuffer: 4 * 1024 * 1024,
@@ -53,7 +54,7 @@ export async function fetchWorkerBranch(
       maxBuffer: 1024 * 1024,
       timeout: 15_000,
     })).stdout.trim();
-    await execFileAsync(resolveGitBinary(), ['worktree', 'add', '--force', '-B', remoteBranch, tempWorktreePath, resolvedBaseRef], {
+    await execFileAsync(resolveGitBinary(), [...NO_REPOSITORY_HOOKS, 'worktree', 'add', '--force', '-B', remoteBranch, tempWorktreePath, resolvedBaseRef], {
       windowsHide: true,
       cwd: repoPath,
       maxBuffer: 4 * 1024 * 1024,

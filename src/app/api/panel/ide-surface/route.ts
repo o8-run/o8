@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
@@ -9,10 +10,13 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as {
+    const body = await readJsonObject<{
       terminalRepoPaths?: string[];
       activeRepoPath?: string | null;
-    };
+    }>(request);
+    if (!body) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
     const next = writeIdeSurfaceState({
       terminalRepoPaths: body.terminalRepoPaths,
       activeRepoPath: body.activeRepoPath,

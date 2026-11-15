@@ -1,3 +1,5 @@
+import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
+import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { createHash, randomUUID } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
 import { appendEvent, findLaneByPacket, getLane } from '@/lib/lane/registry';
@@ -27,10 +29,14 @@ export async function dispatchWithReceipt(input: {
   launch: (lane: Lane, dispatchId: string) => Promise<LaneCommandResult>;
   settle: (lane: Lane, result: LaneCommandResult, guard: () => void) => Promise<TaskMutationResult>;
 }): Promise<TaskMutationResult> {
+  if (runtimeOwnerRequired() && !isNativeCortexReader()) {
+    throw input.conflict('Task dispatch admission requires the native owner.');
+  }
   const key = input.packetId ?? input.laneId!;
   const intentHash = createHash('sha256').update(JSON.stringify(input.intent)).digest('hex');
   const replay = async () => {
     const lane = input.packetId ? findLaneByPacket(input.packetId) : getLane(input.laneId!);
+    if (lane?.status === 'awaiting_orchestrator' && lane.lastEventLabel?.startsWith('runtime_launch_held:')) throw input.conflict(`A held spawn still owns this task (${lane.lastEventLabel}). Inspect its original session before retrying.`);
     if (!lane || !['launching', 'running', 'awaiting_input'].includes(lane.status)) return null;
     if (input.packetId && !inspectPacketManagedRunAdmission(input.packetId).allowed) throw input.conflict('Task is held or stopped. Inspect it before dispatching.');
     const previous = latestAdmission(lane.id);
@@ -88,7 +94,7 @@ export async function dispatchWithReceipt(input: {
     try {
       return await withPacketLifecycleSpawnLock(key, async () => {
         guard();
-        return input.settle(lane, { ok: false, laneId: lane.id, note }, guard);
+        return input.settle(lane, { ok: false, laneId: lane.id, note, reason: 'dispatch_settlement_failed' }, guard);
       });
     } catch { throw error; }
   });

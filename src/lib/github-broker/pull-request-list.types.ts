@@ -13,6 +13,8 @@ export interface PullRequestListItem {
   state: 'open' | 'closed' | 'merged';
   draft: boolean;
   headRefName: string;
+  headSha?: string | null;
+  checksPending?: boolean;
   headRepoFullName?: string | null;
   baseRefName: string;
   updatedAt: string;

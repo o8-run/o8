@@ -29,12 +29,12 @@ jobs:
             const definitions = [
               {
                 name: 'triage/external-author',
-                color: 'D4C5F9',
+                color: 'A8A398',
                 description: 'Pull request from an author without repository collaboration access',
               },
               {
                 name: 'triage/first-time-author',
-                color: 'C5DEF5',
+                color: 'A8A398',
                 description: 'First pull request from this author',
               },
             ];

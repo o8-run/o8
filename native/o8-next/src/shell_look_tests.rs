@@ -387,7 +387,11 @@ fn placement_shell_tabs_use_compact_rows(cx: &mut TestAppContext) {
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("tabs.json"),
-        State::default(),
+        State {
+            // The compact rows belong to the By date list; the Inbox draws cards.
+            sidebar_view: [(String::new(), "date".to_owned())].into_iter().collect(),
+            ..State::default()
+        },
         cx,
     );
     ready(&shell, &mut visual);

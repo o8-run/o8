@@ -47,7 +47,12 @@ export function relatedWorkerMembership(config: ObservationConfig): Membership[]
   const add = (surfaceId: unknown, runtime: unknown, extra: Omit<Membership, 'surfaceId' | 'runtime'>) => {
     if (typeof surfaceId !== 'string' || !isOrchestratorRuntime(runtime) || runtimeFromOwnedSessionKey(surfaceId) !== runtime) return;
     const prior = members.get(surfaceId);
-    if (!prior || extra.membership === 'active') members.set(surfaceId, { surfaceId, runtime, ...extra });
+    // A live Shared membership keeps its checkout-owner fence even if an
+    // packet also names this surface. Active ownership beats archives.
+    if (!prior || (extra.membership === 'active'
+      && (prior.membership === 'archived' || prior.checkoutMode !== 'shared'))) {
+      members.set(surfaceId, { surfaceId, runtime, ...extra });
+    }
   };
   const directory = join(getDataDir(), 'shared-checkout-teams');
   const id = createHash('sha256').update(repo).digest('hex').slice(0, 24);
@@ -61,7 +66,7 @@ export function relatedWorkerMembership(config: ObservationConfig): Membership[]
     if (canonical(team.path) !== repo || team.parentThreadId !== config.parentThreadId) continue;
     for (const member of rows(team.members)) add(member.surfaceId, member.runtime, { checkoutMode: 'shared', membership });
   }
-  const current = readJson(join(getDataDir(), 'orchestrator-state.json'));
+  const current = record(readJson(join(getDataDir(), 'orchestrator-state.json')).mission);
   const stored = withReceipts(db => {
     const missions = query(db, 'SELECT mission_state_json FROM missions WHERE repo_path = ?', repo);
     const packets = missions.flatMap(mission => {

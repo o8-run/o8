@@ -152,10 +152,10 @@ describe('host Git through lane command and merge entry points', () => {
   it('fails closed when linked metadata changes between real merge-gate probes', async () => {
     const f = fixture('linked', 'mid-gate');
     git(f.repoPath, ['checkout', '-qb', 'operator']);
-    const original = hostGit.laneGitSync;
+    const original = hostGit.laneGit;
     let redirected = false;
-    const spy = vi.spyOn(hostGit, 'laneGitSync').mockImplementation((worktree, repo, args, options) => {
-      const result = original(worktree, repo, args, options);
+    const spy = vi.spyOn(hostGit, 'laneGit').mockImplementation(async (worktree, repo, args, options) => {
+      const result = await original(worktree, repo, args, options);
       if (!redirected && args[0] === 'diff' && args.includes('--name-only')) {
         redirected = true;
         writeFileSync(path.join(f.admin, 'commondir'), f.directory + '\n');

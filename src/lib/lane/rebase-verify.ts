@@ -19,8 +19,8 @@ export type LaneRebaseVerifyResult =
  */
 export async function runLaneRebaseVerify(input: {
   cwd: string;
-  /** The repository whose ESLint install lints the merge; never the lane's checkout. */
-  installRoot?: string;
+  /** The repository whose TypeScript and ESLint installs check the merge; never the lane's checkout. */
+  installRoot: string;
   baseRef: string;
   actualBranch: string;
   logPrefix: string;

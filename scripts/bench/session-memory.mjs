@@ -4,6 +4,7 @@
 //   --idle-ms=600000 --passive --check --output=work/session-memory
 // Add --snapshots for a separate diagnostic run; RSS is sampled before snapshots.
 // Use --snapshots=raw for heaps too large to load into the diagnostic JSON parser.
+import { cliBuildOptions } from '../../cli/build-options.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
@@ -39,7 +40,7 @@ async function bundleFixture(entryPoint, outfile) {
   // Same ESM format, native externals and server-only shim as the existing WS probe.
   await build({
     entryPoints: [entryPoint], outfile, bundle: true, platform: 'node', format: 'esm',
-    minify: true, keepNames: true, target: 'node22', external: ['typescript'],
+    minify: true, keepNames: true, target: 'node22', external: ['typescript', ...cliBuildOptions({ outfile, version: 'test' }).external],
     alias: { 'server-only': path.join(root, 'scripts/server-only-stub.js'),
       'next/server': path.join(root, 'scripts/lib/next-server-exports.mjs') },
     // The CI fixture can live outside the checkout. Resolve native externals

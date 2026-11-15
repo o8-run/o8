@@ -250,14 +250,17 @@ describe('paired-device publication uses the captured managed workspace', () => 
   );
 
   it.each(['pr', 'merge'] as const)(
-    'preserves dirty bytes and refuses %s when the workspace commit hook rejects',
+    'preserves dirty bytes and refuses %s when the workspace commit fails, running no workspace hook',
     async (action) => {
       const fixture = await createOwnedWorkspace(`commit-${action}`);
       const dirtyBytes = `dirty ${action} bytes\n`;
       writeFileSync(path.join(fixture.workspacePath, 'dirty.txt'), dirtyBytes);
+      const hookRan = path.join(root, `${action}-hook-ran`);
       const hookPath = path.join(fixture.workspacePath, '.git', 'hooks', 'pre-commit');
-      writeFileSync(hookPath, '#!/bin/sh\nexit 9\n');
+      writeFileSync(hookPath, `#!/bin/sh\ntouch ${JSON.stringify(hookRan)}\nexit 9\n`);
       chmodSync(hookPath, 0o755);
+      // A held lock on the branch makes the commit itself fail.
+      writeFileSync(path.join(fixture.workspacePath, '.git', 'refs', 'heads', 'main.lock'), '');
       const repoHead = git(repoPath, 'rev-parse', 'HEAD');
 
       const response = await createWorktreeMergePostForTesting({})(
@@ -272,6 +275,31 @@ describe('paired-device publication uses the captured managed workspace', () => 
       expect(git(fixture.workspacePath, 'status', '--porcelain')).toContain('dirty.txt');
       expect(git(repoPath, 'rev-parse', 'HEAD')).toBe(repoHead);
       expect(existsSync(fixture.workspacePath)).toBe(true);
+      expect(existsSync(hookRan)).toBe(false);
+    },
+    30_000,
+  );
+
+  it.each(['pr', 'merge'] as const)(
+    'refuses %s without committing when the workspace is on another branch',
+    async (action) => {
+      const fixture = await createOwnedWorkspace(`switched-${action}`);
+      git(fixture.workspacePath, 'checkout', '-q', '-b', 'other');
+      const otherHead = git(fixture.workspacePath, 'rev-parse', 'other');
+      const dirtyBytes = `dirty ${action} bytes\n`;
+      writeFileSync(path.join(fixture.workspacePath, 'dirty.txt'), dirtyBytes);
+      const repoHead = git(repoPath, 'rev-parse', 'HEAD');
+
+      const response = await createWorktreeMergePostForTesting({})(
+        request(fixture.worktreeId, action),
+      );
+      const body = await response.json() as { ok: boolean; note: string };
+
+      expect(body).toMatchObject({ ok: false });
+      expect(body.note).toContain('Workspace commit failed');
+      expect(git(fixture.workspacePath, 'rev-parse', 'other')).toBe(otherHead);
+      expect(readFileSync(path.join(fixture.workspacePath, 'dirty.txt'), 'utf8')).toBe(dirtyBytes);
+      expect(git(repoPath, 'rev-parse', 'HEAD')).toBe(repoHead);
     },
     30_000,
   );

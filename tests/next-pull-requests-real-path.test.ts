@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -29,6 +29,54 @@ const providerMerges = async () => {
   const value = await (await fetch(`${origin}/api/panel/status`, { headers })).json();
   return value.providerWrites.filter((r: { publication: boolean }) => r.publication);
 };
+
+it('retains submitted review bodies and their exact revisions across refresh and changed code', async () => {
+  await control({ scenario: 'submitted-reviews' });
+  const read = async () => {
+    const response = await fetch(`${origin}/api/panel/prs/7?repo=example/repo`, { headers });
+    expect(response.status).toBe(200);
+    return (await response.json()).pr;
+  };
+  const detail = await read();
+  expect(detail.reviewComments).toEqual([]);
+  expect(detail.submittedReviews).toEqual([
+    { id: 501, author: 'fixture-reviewer', body: 'Close/reset may rebind a stopped packet.', state: 'COMMENTED',
+      submittedAt: '2026-11-10T01:02:19Z', reviewedHeadSha: 'c'.repeat(40), url: 'https://github.com/example/repo/pull/7#pullrequestreview-501' },
+    { id: 502, author: 'fixture-reviewer', body: 'Re-review: APPROVE. The correction covers reassigned lanes.', state: 'COMMENTED',
+      submittedAt: '2026-11-10T01:09:36Z', reviewedHeadSha: 'a'.repeat(40), url: 'https://github.com/example/repo/pull/7#pullrequestreview-502' },
+  ]);
+  expect(detail.reviewDecision).toBeNull();
+  const ui = spawnSync(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
+    'scripts/next/pull-request-desktop-probe.ts'], { input: JSON.stringify({ mode: 'reviews', detail }), encoding: 'utf8', timeout: 20_000 });
+  expect(ui.status, ui.stderr).toBe(0);
+  const rendered = JSON.parse(ui.stdout);
+  expect(rendered.initialText).toContain('Close/reset may rebind a stopped packet.');
+  expect(rendered.initialText).toContain('Reviewed cccccccc');
+  expect(rendered.initialText).toContain('Different revision');
+  expect(rendered.initialText).toContain('Current revision');
+  expect(rendered.initialText.match(/Commented/g)).toHaveLength(2);
+  expect(rendered.links).toEqual(detail.submittedReviews.map((review: { url: string }) => ({ href: review.url, label: 'Open review by fixture-reviewer on GitHub' })));
+  expect(rendered.repeatedText).toBe(rendered.initialText);
+  expect(rendered.focusRetained).toBe(true);
+  expect(rendered.changedText.match(/Different revision/g)).toHaveLength(2);
+  expect(rendered.changedText).not.toContain('Current revision');
+  expect(rendered.unknownText).toContain('Reviewed revision unavailable');
+  expect((await read()).submittedReviews).toEqual(detail.submittedReviews);
+  await control({ scenario: 'head-advanced' });
+  const changed = await read();
+  expect(changed.headSha).toBe('d'.repeat(40));
+  expect(changed.submittedReviews).toEqual(detail.submittedReviews);
+  expect(changed.reviewDecision).toBeNull();
+  await control({ scenario: 'reviews-incomplete' });
+  expect((await read()).discussionIncomplete).toBe(true);
+  await control({ scenario: 'reviews-unavailable' });
+  const interrupted = await fetch(`${origin}/api/panel/prs/7?repo=example/repo`, { headers });
+  expect(interrupted.ok).toBe(false);
+  expect((await interrupted.json()).pr).toBeUndefined();
+  await control({ scenario: 'ready' });
+  expect((await read()).submittedReviews).toEqual(detail.submittedReviews);
+  expect(await providerMerges()).toEqual([]);
+}, 60_000);
 
 it.each(['merge', 'enable-auto-merge'])('rejects a new held packet between the read and the desktop %s POST', async (action) => {
   const detail = await (await fetch(`${origin}/api/panel/prs/7?repo=example/repo`, { headers })).json();

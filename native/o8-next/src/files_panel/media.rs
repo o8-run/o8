@@ -43,7 +43,7 @@ pub(super) fn read_video_poster(workspace: &str, path: &str) -> Result<Image, St
     let name = source.file_name().ok_or(UNAVAILABLE)?.to_owned();
     let folder = std::env::temp_dir().join(format!("o8-next-posters-{}", std::process::id()));
     std::fs::create_dir_all(&folder).map_err(|_| UNAVAILABLE)?;
-    std::process::Command::new("/usr/bin/qlmanage")
+    crate::child_command::command("/usr/bin/qlmanage")
         .args(["-t", "-s", "480", "-o"])
         .arg(&folder)
         .arg(&source)

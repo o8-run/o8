@@ -4,6 +4,7 @@ import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { correctWorkers, listCorrectableWorkers, listWorkerCorrections, readWorkerCorrection } from '@/lib/orchestrator/worker-corrections';
 import { validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import { correctAuthorFromReview, inspectReviewAuthorCorrection } from '@/lib/orchestrator/review-author-correction';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,8 @@ const failure = (error: unknown) => NextResponse.json({ error: error instanceof 
 export async function GET(request: NextRequest) {
   const denied = authorize(request); if (denied) return denied;
   try {
+    const packetId = request.nextUrl.searchParams.get('packetId');
+    if (packetId) return NextResponse.json({ reviewCorrection: await inspectReviewAuthorCorrection(packetId) }, { headers: { 'Cache-Control': 'no-store' } });
     const target = validateComposerQueueTarget({ repoPath: request.nextUrl.searchParams.get('repoPath'), threadId: request.nextUrl.searchParams.get('threadId') });
     return NextResponse.json({ workers: await listCorrectableWorkers(target), corrections: listWorkerCorrections(target) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
@@ -24,7 +27,10 @@ export async function POST(request: NextRequest) {
   let body: Record<string, unknown> | undefined;
   try {
     body = await request.json();
-    const receipt = await correctWorkers(body as unknown as Parameters<typeof correctWorkers>[0]);
+    if (body?.review !== undefined && (body.payload !== undefined || body.id !== undefined)) throw new Error('A saved review handoff cannot include replacement feedback or identity.');
+    const receipt = body?.review !== undefined
+      ? await correctAuthorFromReview(body as unknown as Parameters<typeof correctAuthorFromReview>[0])
+      : await correctWorkers(body as unknown as Parameters<typeof correctWorkers>[0]);
     await publishRealtimeMutation({ mutation: { mutationId: receipt.id, source: 'desktop', action: 'worker-correction',
       status: 'completed', surfaceId: receipt.threadId, repoPath: receipt.repoPath, createdAt: new Date().toISOString() } }).catch(() => {});
     return NextResponse.json({ receipt });

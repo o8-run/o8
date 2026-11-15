@@ -242,7 +242,7 @@ impl PullRequests {
         more.extend([
             None,
             item("detail-refresh", "Refresh", true, move |s, cx| s.select(number, cx)),
-            item("open", "Open on GitHub", url.starts_with("https://"), move |_, cx| cx.open_url(&url)),
+            item("open", "Open on GitHub", url.starts_with("https://"), move |_, cx| crate::external_open::url(cx, &url)),
             item("link", "Copy link", true, move |s, cx| s.copy(link.clone(), "Pull request link copied.", cx)),
             item("number", "Copy PR number", true, move |s, cx| {
                 s.copy(number.to_string(), "Pull request number copied.", cx)
@@ -567,7 +567,7 @@ impl PullRequests {
                                     .child(crate::icon::stroke(EXTERNAL, theme().text_muted, 12., 1.8))
                                     .on_click(move |_, _, cx| {
                                         if url.starts_with("https://") {
-                                            cx.open_url(&url)
+                                            crate::external_open::url(cx, &url)
                                         }
                                     }),
                             )
@@ -658,7 +658,7 @@ impl PullRequests {
         let d = &self.detail;
         let checks = array(d, "statusCheckRollup");
         let (tone, failing, label) = check_summary(&checks);
-        let reviews = array(d, "reviewComments").len() + array(d, "issueComments").len();
+        let reviews = array(d, "reviewComments").len() + array(d, "issueComments").len() + array(d, "submittedReviews").len();
         let files = d["changedFiles"].as_u64().unwrap_or(array(d, "files").len() as u64) as usize;
         let tabs = [
             ("summary", "Summary", 0),
@@ -1028,3 +1028,5 @@ impl PullRequests {
 
 #[path = "detail_tabs.rs"]
 mod tabs;
+#[path = "reviews.rs"]
+mod reviews;

@@ -1,3 +1,4 @@
+use super::inbox_card::tabular;
 use super::*;
 use crate::theme::current as theme;
 use gpui::{Render, Styled, canvas, div, px, uniform_list};
@@ -14,6 +15,41 @@ const STAGGER_ROWS: usize = 10;
 const SETTLE_PX: f32 = 6.;
 
 impl ThreadList {
+    /// Dispatch a thread-row click; tests use the same production entry point.
+    pub(crate) fn click_thread(
+        &mut self,
+        id: String,
+        modifiers: gpui::Modifiers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.picked.is_empty() && modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.shift {
+            if self.rows.iter().any(|row| row.id.as_ref() == Some(&id)) {
+                self.choose_mode(id, true, cx);
+            }
+            return;
+        }
+        if self.pick(&id, modifiers, cx) {
+            return;
+        }
+        if self.rows.iter().any(|r| r.id.as_ref() == Some(&id)) {
+            self.focus.focus(window);
+            self.choose(id.clone(), cx);
+            let generation = self.edit_generation;
+            // Opening another workspace can restore its content
+            // focus while handling Selected. Keep row navigation
+            // focused after that event, unless a newer edit won.
+            cx.defer_in(window, move |this, window, _| {
+                if this.edit_generation == generation
+                    && this.choice.as_ref() == Some(&id)
+                    && !this.editing
+                {
+                    this.focus.focus(window);
+                }
+            });
+        }
+    }
+
     /// Fades the rows in top-down, as the column opens.
     pub(crate) fn stagger_in(&mut self, cx: &mut Context<Self>) {
         // The first row waits for the card to clear the rail's mark.
@@ -46,6 +82,9 @@ impl Render for ThreadList {
                 self.reveal = None;
             }
         }
+        let openness = self.drawer_openness(window, cx);
+        self.tick_working(cx);
+        self.tick_fade(cx);
         if !self.mark_pace {
             self.mark_pace = true;
             super::status_mark::pace(cx);
@@ -106,9 +145,6 @@ impl Render for ThreadList {
                 div().child(self.project_header(window, cx)),
                 self.arrived(0),
             ))
-            .when(self.editing || !self.query.is_empty(), |view| {
-                view.child(self.editor.clone())
-            })
             .when(!status.is_empty(), |view| {
                 view.child(
                     div()
@@ -129,7 +165,7 @@ impl Render for ThreadList {
                     ))
                     .on_drop(cx.listener(|this, drag: &pins::PinDrag, _, cx| this.drop_pin(drag, cx)))
                     .child(
-                if self.detailed {
+                if self.cards() {
                     // Detailed rows vary: 66px threads under 28px headings.
                     let view = cx.entity();
                     div().debug_selector(|| "thread-list".into()).flex().flex_col().flex_1().min_h_0().child(
@@ -141,6 +177,8 @@ impl Render for ThreadList {
                             div()
                                 .w_full()
                                 .px(px(6.))
+                                .py(px(1.))
+                                .opacity(this.arrival_opacity(i))
                                 .child(this.render_row(i, keyboard, cx))
                                 .into_any_element()
                         })
@@ -152,7 +190,7 @@ impl Render for ThreadList {
                 } else {
                     uniform_list(
                         "native-threads",
-                        self.rows.len(),
+                        self.top_len(),
                         cx.processor(|this, range: std::ops::Range<usize>, window, cx| {
                             this.materialized.set(range.len());
                             let keyboard = this.focus.is_focused(window);
@@ -168,13 +206,52 @@ impl Render for ThreadList {
                 },
             ),
             )
+            .children(self.shelves(openness, window, cx))
             .children(self.row_menu(cx))
             .children(self.pr_hover_list(cx))
     }
 }
 
 impl ThreadList {
-    fn render_row(
+    /// The sidebar's resting Search field: a magnifier, "Search" and its
+    /// shortcut; a press opens the inline search where it sits.
+    pub(super) fn search_field(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        const SEARCH: &str = "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z M16 16l5 5";
+        div()
+            .id("sidebar-search-field")
+            .debug_selector(|| "sidebar-search-field".into())
+            .group("sidebar-search")
+            .mx(px(6.))
+            .mt(px(4.))
+            .mb(px(2.))
+            .h(px(30.))
+            .px(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .rounded(px(8.))
+            .cursor_text()
+            .hover(|s| s.bg(theme().hover))
+            .child(crate::icon::stroke(SEARCH, theme().text_faint, 14., 1.8))
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(px(13.))
+                    .text_color(theme().text_muted)
+                    .child("Search"),
+            )
+            // The shortcut shows on hover only: at rest the row is just Search.
+            .child(
+                div()
+                    .invisible()
+                    .group_hover("sidebar-search", |s| s.visible())
+                    .text_size(px(11.))
+                    .text_color(theme().text_faint)
+                    .child(if cfg!(target_os = "macos") { "⌘F" } else { "Ctrl F" }),
+            )
+            .on_click(cx.listener(|this, _, window, cx| this.search(window, cx)))
+    }
+    pub(super) fn render_row(
         &mut self,
         i: usize,
         keyboard: bool,
@@ -185,11 +262,29 @@ impl ThreadList {
                     if let Some(folder) = &row.folder {
                         return this.folder_row(&row, folder, cx);
                     }
+                    if row.kind == "shelf" {
+                        return this.shelf_header(&row, cx);
+                    }
                     let thread = row.id.is_some();
-                    let detailed = this.detailed;
+                    let inbox = this.view() == folders::View::Inbox;
+                    // Inbox headings take a dragged thread (T3 Code's drag
+                    // between sections).
+                    let section_drop = (inbox
+                        && row.kind == "section"
+                        && matches!(row.title.as_str(), "Active" | "Pinned"))
+                    .then(|| row.title.clone());
+                    let slim = inbox && thread && matches!(row.marker, "snoozed" | "settled");
+                    let detailed = this.cards();
                     let detailed_thread = detailed && thread;
-                    let detailed_content = detailed_thread
-                        .then(|| this.detailed_content(&row, keyboard, cx));
+                    let detailed_content = detailed_thread.then(|| {
+                        if slim {
+                            this.slim_content(&row, cx)
+                        } else if inbox {
+                            this.card_content(&row, cx)
+                        } else {
+                            this.detailed_content(&row, keyboard, cx)
+                        }
+                    });
                     let by_repo = this.view() == folders::View::Repo;
                     let title =
                         gpui::StyledText::new(crate::text::sanitize(&row.title));
@@ -199,7 +294,13 @@ impl ThreadList {
                             .insert(id.clone(), title.layout().clone());
                     }
                     let selected = row.id.as_ref() == this.selected.as_ref() && thread;
-                    let painted = this.painted.clone();
+                    // The paint probes: the scrolling list's, and the drawer's
+                    // (it shows on every frame, so it keeps its own).
+                    let painted = if this.drawer_at().is_some_and(|at| i > at) {
+                        this.drawer_painted.clone()
+                    } else {
+                        this.painted.clone()
+                    };
                     let identity = row
                         .id
                         .as_ref()
@@ -218,7 +319,11 @@ impl ThreadList {
                         .group("thread-row")
                         .w_full()
                         .min_w_0()
-                        .h(px(if detailed_thread {
+                        .h(px(if slim {
+                            inbox_card::SLIM_HEIGHT
+                        } else if detailed_thread && inbox {
+                            inbox_card::CARD_HEIGHT
+                        } else if detailed_thread {
                             detailed::ROW_HEIGHT
                         } else {
                             28.
@@ -233,7 +338,10 @@ impl ThreadList {
                         .when(row.kind == "section" && i > 0, |v| v.items_end())
                         // With the list's 6, a highlight has even margins on
                         // both sides.
-                        .pl(px(Self::child_inset(&row)))
+                        // In the card view headings start where the cards'
+                        // content does, 16px in, as the head row's Search.
+                        .pl(px(Self::child_inset(&row)
+                            + if row.kind == "section" && this.cards() { 4. } else { 0. }))
                         .pr(px(6.))
                         .rounded(px(8.))
                         .overflow_hidden()
@@ -285,8 +393,13 @@ impl ThreadList {
                                         .child(title),
                                 )
                                 // Classic has no Search row, so the list's own
-                                // controls sit on its first heading.
-                                .when(!thread && i == 0, |view| {
+                                // controls sit on its first heading (the Inbox's
+                                // Working shelf can come before it).
+                                .when(
+                                    !thread
+                                        && this.rows.iter().position(|r| r.kind == "section")
+                                            == Some(i),
+                                    |view| {
                                     view.when(!this.scope_repos().is_empty(), |view| {
                                         view.child(
                                             div()
@@ -294,10 +407,10 @@ impl ThreadList {
                                                 .child(this.scope_trigger(cx))
                                                 .children(this.scope_picker(cx)),
                                         )
-                                        .child(this.new_thread_button(cx))
                                     })
                                     .child(this.view_picker(cx))
-                                })
+                                    },
+                                )
                                 .when(thread, |view| {
                                     // A folder already names its threads' repository.
                                     view.when(row.machine.is_some(), |view| {
@@ -326,7 +439,11 @@ impl ThreadList {
                                             .text_color(theme().text_faint)
                                             .children(row.id.as_deref().and_then(|id| this.pin_mark(id)))
                                             .children(row.id.as_deref().and_then(|id| this.auto_off_mark(id)))
-                                            .child(row.age.clone())
+                                            .map(|v| match this.drawer_age(i) {
+                                                // A running thread counts its run.
+                                                Some(run) => v.child(tabular(div()).child(run)),
+                                                None => v.child(row.age.clone()),
+                                            })
                                             .when(row.branch, |v| v.child("⑂")),
                                     )
                                     .children(row.id.as_deref().and_then(|id| {
@@ -354,13 +471,23 @@ impl ThreadList {
                                 }),
                         ))
                         .children(this.children_disclosure(&row, cx))
-                        .when(row.kind == "section" && row.status == "working", |view| {
-                            view.debug_selector(|| "sidebar-working-header".into())
-                                .cursor_pointer()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toggle_working_closed(cx);
-                                }))
-                        })
+                        // A pin zone already takes this drag (PinDrag is the
+                        // pane drag), and GPUI allows one drop listener per type,
+                        // so a pin zone handles the section move itself below.
+                        .when(
+                            section_drop.is_some() && this.pin_zone(i).is_none(),
+                            |view| {
+                                let section = row.title.clone();
+                                view.drag_over::<crate::shell::features::RailPane>(|style, _, _, _| {
+                                    style.bg(theme().selection)
+                                })
+                                .on_drop(cx.listener(
+                                    move |this, pane: &crate::shell::features::RailPane, _, cx| {
+                                        this.drop_thread(&section, pane, cx)
+                                    },
+                                ))
+                            },
+                        )
                         .when(
                             row.kind == "section" && row.title == "Archived",
                             |view| {
@@ -420,8 +547,15 @@ impl ThreadList {
                                     this.pin_drag_move(&target, Some(after), event, cx);
                                 },
                             ))
-                            .on_drop(cx.listener(move |this, drag: &pins::PinDrag, _, cx| {
-                                this.drop_pin(drag, cx);
+                            .on_drop(cx.listener({
+                                let section = section_drop.clone();
+                                move |this, drag: &pins::PinDrag, _, cx| {
+                                    let pin = matches!(drag, pins::PinDrag::Thread { id, .. } if this.pinned(id));
+                                    match section.as_deref() {
+                                        Some(section) if !pin => this.drop_thread(section, drag, cx),
+                                        _ => this.drop_pin(drag, cx),
+                                    }
+                                }
                             }))
                         })
                         .when(thread, |view| {
@@ -438,27 +572,7 @@ impl ThreadList {
                         })
                         .when(thread, |view| {
                             view.on_click(cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                                let id = row.id.clone().unwrap();
-                                if this.pick(&id, event.modifiers(), cx) {
-                                    return;
-                                }
-                                if this.rows.iter().any(|r| r.id.as_ref() == Some(&id))
-                                {
-                                    this.focus.focus(window);
-                                    this.choose(id.clone(), cx);
-                                    let generation = this.edit_generation;
-                                    // Opening another workspace can restore its content
-                                    // focus while handling Selected. Keep row navigation
-                                    // focused after that event, unless a newer edit won.
-                                    cx.defer_in(window, move |this, window, _| {
-                                        if this.edit_generation == generation
-                                            && this.choice.as_ref() == Some(&id)
-                                            && !this.editing
-                                        {
-                                            this.focus.focus(window);
-                                        }
-                                    });
-                                }
+                                this.click_thread(row.id.clone().unwrap(), event.modifiers(), window, cx);
                             }))
                         })
                         .child(
@@ -472,5 +586,49 @@ impl ThreadList {
                             )
                             .size(px(1.)),
                         )
+    }
+
+    /// The foot under the scrolling list: the Inbox's Snoozed, Settled and
+    /// Archived shelves, as T3 Code pins them to the bottom of its sidebar,
+    /// else the Working drawer.
+    fn shelves(
+        &mut self,
+        openness: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        if self.view() != folders::View::Inbox {
+            return self.drawer(openness, window, cx);
+        }
+        let start = self.top_len();
+        if start >= self.rows.len() {
+            return None;
+        }
+        let keyboard = false;
+        let rows: Vec<_> = (start..self.rows.len())
+            .map(|i| {
+                div()
+                    .w_full()
+                    .py(px(1.))
+                    .opacity(self.arrival_opacity(i))
+                    .child(self.render_row(i, keyboard, cx))
+                    .into_any_element()
+            })
+            .collect();
+        Some(
+            div()
+                .id("sidebar-shelves")
+                .debug_selector(|| "sidebar-shelves".into())
+                .flex_shrink_0()
+                .max_h(gpui::relative(0.6))
+                .overflow_y_scroll()
+                .px(px(6.))
+                .pt(px(4.))
+                .pb(px(2.))
+                .flex()
+                .flex_col()
+                .children(rows)
+                .into_any_element(),
+        )
     }
 }

@@ -2,6 +2,9 @@ mod render_region;
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
 mod app_parent;
+mod native_pill;
+mod child_command;
+mod external_open;
 mod brain;
 mod browser_panel;
 #[path = "shell_features/connection/client.rs"]
@@ -10,9 +13,14 @@ mod clock;
 mod composer;
 mod devices_panel;
 mod diff;
+#[cfg(any(test, feature = "driver"))]
+mod driver;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;
+mod request_changes;
+#[cfg(test)]
+mod request_changes_revision_tests;
 mod editor_command;
 mod files_panel;
 mod grid_sessions;
@@ -35,7 +43,9 @@ mod pane_layout;
 mod project_icon;
 mod projects;
 mod projects_model;
+mod prompt_navigator;
 mod retained;
+mod ring;
 mod rich;
 mod settings;
 mod settings_fields;
@@ -50,6 +60,8 @@ mod terminal;
 mod terminal_grid;
 mod terminal_transport;
 mod text;
+#[cfg(test)]
+mod text_ellipsis_tests;
 mod thread_messages;
 mod theme;
 mod theme_import;
@@ -62,11 +74,19 @@ mod subagents;
 mod transcript_actions;
 mod transcript_diagram;
 mod transcript_peek;
+mod transcript_view;
 mod turn_files;
 mod transport;
 mod ui;
 mod visualizations;
 mod wake;
+#[cfg(test)]
+mod worker_transcript_tests;
+#[cfg(test)]
+mod worker_transport_tests;
+mod worker_backfill;
+mod window_lights;
+mod zoom;
 use crate::{
     client::Client,
     model::{History, render_tree},
@@ -77,6 +97,7 @@ use std::{env, fs, process::ExitCode, time::Instant};
 fn run() -> Result<(), String> {
     let started = Instant::now();
     let mut args: Vec<String> = env::args().skip(1).collect();
+    if native_pill::try_fixture(&args)? { return Ok(()); }
     if args == ["--help"] {
         println!(
             "o8-next --enable-next --server http://127.0.0.1:PORT [--offscreen] [--terminal SESSION_ID | --benchmark FILE | --composer-benchmark FILE]\nSaved sessions, composer and opt-in terminal. Set O8_NEXT_API_TOKEN for the selected server. No data-directory discovery.\no8-next --render-tree HISTORY.json\no8-next --sidebar-tree SESSIONS.json SELECTED_ID"

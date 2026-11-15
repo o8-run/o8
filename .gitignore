@@ -23,6 +23,7 @@ coverage/
 *.png
 # ...but launch/brand assets are committed on purpose (README hero, icons)
 !assets/**/*.png
+!brand/**/*.png
 !docs/**/*.png
 !.github/**/*.png
 !plugins/o8/assets/o8-icon.png

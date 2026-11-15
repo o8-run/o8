@@ -4,21 +4,7 @@ import path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { detectTypecheckSkip, isMissingTscOutput } from './typecheck-availability';
-
-describe('isMissingTscOutput', () => {
-  it('detects the npm "tsc" squatter message (deps-less worktree, #1255)', () => {
-    expect(isMissingTscOutput('This is not the tsc command you are looking for')).toBe(true);
-    expect(
-      isMissingTscOutput('npm warn exec\nThis is not the tsc command you are looking for\n'),
-    ).toBe(true);
-  });
-
-  it('is false for real type errors and empty output', () => {
-    expect(isMissingTscOutput('src/x.ts(1,1): error TS2345: Argument of type ...')).toBe(false);
-    expect(isMissingTscOutput('')).toBe(false);
-  });
-});
+import { detectTypecheckSkip } from './typecheck-availability';
 
 describe('detectTypecheckSkip', () => {
   let root: string;

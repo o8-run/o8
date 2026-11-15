@@ -1,8 +1,11 @@
-import { mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
+import { pushLfsObjects } from '@/lib/git/lfs-push';
+import { NO_REPOSITORY_HOOKS } from '@/lib/git/no-repository-hooks';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { listReposFresh } from '@/lib/repos/registry';
+import { laneGit, removeAbandonedDirectories, withLaneCommitDirectory, type LaneCommitDirectory } from '@/lib/lane/lane-git';
 
 const execFileAsync = materializationAwareExecFile;
 
@@ -11,7 +14,7 @@ export async function git(
   args: string[],
   opts: { timeout?: number; maxBuffer?: number } = {},
 ) {
-  return execFileAsync('git', args, {
+  return execFileAsync('git', [...NO_REPOSITORY_HOOKS, ...args], {
     windowsHide: true,
     cwd,
     timeout: opts.timeout ?? 60_000,
@@ -118,19 +121,41 @@ export async function readHeadSha(cwd: string): Promise<string> {
   return stdout.trim();
 }
 
+/**
+ * Commits a lane checkout's work onto the lane's branch from a host-owned Git
+ * directory. A lane without a recorded branch commits in its checkout's own
+ * Git state.
+ */
 export async function commitDirtyWorktree(
   worktreePath: string,
+  repoPath: string,
+  branch: string | null | undefined,
   commitMessage: string,
 ): Promise<void> {
-  await git(worktreePath, ['add', '-A']);
-  const { stdout: porcelain } = await git(
-    worktreePath,
-    ['status', '--porcelain'],
-    { timeout: 5000 },
-  );
-  if (porcelain.trim()) {
-    await git(worktreePath, ['commit', '-m', commitMessage]);
-  }
+  const commit = async (directory?: LaneCommitDirectory) => {
+    const options = { ...directory?.options, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 };
+    await laneGit(worktreePath, repoPath, ['add', '-A'], options);
+    const { stdout: porcelain } = await laneGit(worktreePath, repoPath, ['status', '--porcelain'], options);
+    if (porcelain.trim()) {
+      await laneGit(worktreePath, repoPath, ['commit', '-m', commitMessage], options);
+      if (directory) {
+        const { stdout: commit } = await laneGit(worktreePath, repoPath, ['rev-parse', 'HEAD'], options);
+        await directory.advance(commit.trim(), `commit: ${commitMessage.split('\n')[0]}`);
+        directory.syncIndex();
+      }
+    }
+  };
+  const laneBranch = branch?.trim();
+  await (laneBranch ? withLaneCommitDirectory(worktreePath, repoPath, laneBranch, commit) : commit());
+}
+
+/** The lane branch's commit, never the one the checkout's HEAD names. */
+export async function readLaneBranchSha(worktreePath: string, repoPath: string, branch: string | null | undefined): Promise<string> {
+  const laneBranch = branch?.trim();
+  if (!laneBranch) return readHeadSha(worktreePath);
+  const { stdout } = await laneGit(worktreePath, repoPath,
+    ['rev-parse', '--verify', '--end-of-options', `refs/heads/${laneBranch}^{commit}`], { timeout: 5000 });
+  return stdout.trim();
 }
 
 export interface DetachedIntegrationWorktree {
@@ -212,6 +237,8 @@ async function copyTransportConfig(
   }
 }
 
+const INTEGRATION_DIRECTORY_PREFIX = 'integration-';
+
 async function removeIntegrationParentBestEffort(parent: string): Promise<void> {
   try {
     await rm(parent, { recursive: true, force: true });
@@ -233,7 +260,11 @@ export async function createDetachedIntegrationWorktree(input: {
   sourceWorktreePath: string;
   sourceSha: string;
 }): Promise<DetachedIntegrationWorktree> {
-  const parent = await mkdtemp(join(tmpdir(), 'o8-reviewed-integration-'));
+  // The worker sandbox denies the data dir, unlike the system temp dir.
+  const root = resolve(getDataDir(), 'lane-merge');
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await removeAbandonedDirectories(root, INTEGRATION_DIRECTORY_PREFIX);
+  const parent = await mkdtemp(join(root, INTEGRATION_DIRECTORY_PREFIX));
   const integrationPath = join(parent, 'worktree');
   try {
     await git(input.repoPath, [
@@ -329,11 +360,14 @@ export async function deleteRefBestEffort(repoPath: string, ref: string): Promis
 
 export async function pushWorkerBranchBestEffort(
   worktreePath: string,
+  repoPath: string,
   actualBranch: string,
   sourceSha: string,
+  lfsBase: string | null,
 ): Promise<void> {
   try {
-    await git(worktreePath, [
+    await pushLfsObjects((args, options) => laneGit(worktreePath, repoPath, args, options), 'origin', sourceSha, lfsBase);
+    await laneGit(worktreePath, repoPath, [
       'push',
       'origin',
       `${sourceSha}:refs/heads/${actualBranch}`,
@@ -348,13 +382,16 @@ export async function pushWorkerBranchBestEffort(
 
 export async function pushWorkerBranchLeaseBestEffort(
   worktreePath: string,
+  repoPath: string,
   actualBranch: string,
   sourceSha: string,
   expectedRemoteSha: string,
+  lfsBase: string | null,
 ): Promise<void> {
   const destination = `refs/heads/${actualBranch}`;
   try {
-    await git(worktreePath, [
+    await pushLfsObjects((args, options) => laneGit(worktreePath, repoPath, args, options), 'origin', sourceSha, lfsBase);
+    await laneGit(worktreePath, repoPath, [
       'push',
       `--force-with-lease=${destination}:${expectedRemoteSha}`,
       'origin',
@@ -372,9 +409,11 @@ export async function pushExactBase(
   repoPath: string,
   baseBranch: string,
   sourceSha: string,
+  lfsBase: string | null,
   expectedRemoteSha?: string,
 ): Promise<void> {
   const destination = `refs/heads/${baseBranch}`;
+  await pushLfsObjects((args, options) => git(repoPath, args, options), 'origin', sourceSha, lfsBase);
   await git(repoPath, [
     'push',
     ...(expectedRemoteSha

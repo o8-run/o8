@@ -140,6 +140,7 @@ pub(crate) struct Settings {
     pub limits: Option<gpui::AnyView>,
     pub machines: Option<gpui::AnyView>,
     pub mcp: Option<gpui::AnyView>,
+    pub plugin_tasks: Option<Entity<crate::shell::settings::plugin_tasks::Tasks>>,
     pub mobile: Option<Entity<crate::shell::settings::mobile::Mobile>>,
     /// Voice › History, from the desktop voice window.
     pub voice_history: Option<Entity<crate::shell::settings::voice_history::VoiceHistory>>,
@@ -213,6 +214,7 @@ impl Settings {
             providers: None,
             limits: None,
             mcp: None,
+            plugin_tasks: None,
             mobile: None,
             machines: None,
             voice_history: None,
@@ -723,3 +725,7 @@ mod bots;
 
 #[path = "settings_scope.rs"]
 pub(crate) mod scope;
+
+#[cfg(test)]
+#[path = "settings_plugin_tasks_tests.rs"]
+mod plugin_tasks_tests;

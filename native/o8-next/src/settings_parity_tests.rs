@@ -200,7 +200,8 @@ fn settings_parity_model_defaults_persist(cx: &mut TestAppContext) {
         assert_eq!(values(&fixture)[field], !before);
     }
     search(cx, "orchestratorModel");
-    click(cx, "setting-orchestratorModel-7");
+    // Sonnet 5.5, after Opus 5.5, Fable 5.2, Fable 5.1, Fable 5 and four Opus rows.
+    click(cx, "setting-orchestratorModel-8");
     frame(&shell, cx);
     assert_eq!(error(&shell, cx), None);
     assert_eq!(values(&fixture)["orchestratorModel"], "claude-sonnet-5-5");

@@ -143,3 +143,11 @@ describe('close-scoped native observations', () => {
     } finally { read.mockRestore(); }
   });
 });
+
+
+it('accepts a nameless routing socket while retaining every filesystem descriptor', () => {
+  const rows = parseOpenFileSnapshot('p12\ncnode\nfcwd\ntDIR\nn/owned\nf4\ntREG\nn/owned/file\np13\ncroute\nf8\ntrte\nn\n');
+  expect(rows.filter(row => row.file)).toHaveLength(2);
+  expect(rows[1]).toMatchObject({ pid: 12, file: '/owned/file' });
+  expect(rows[2]).toMatchObject({ pid: 13, file: '' });
+});

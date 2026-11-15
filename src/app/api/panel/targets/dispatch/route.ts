@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 export const dynamic = 'force-dynamic';
 
 import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
@@ -25,10 +26,8 @@ import {
  * No throw — structured errors.
  */
 export async function POST(request: Request) {
-  let body: { repoPath?: string; projectId?: string; path?: string; clientMutationId?: string };
-  try {
-    body = await request.json();
-  } catch {
+  const body = await readJsonObject<{ repoPath?: string; projectId?: string; path?: string; clientMutationId?: string }>(request);
+  if (!body) {
     return NextResponse.json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
   }
 

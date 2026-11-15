@@ -16,7 +16,6 @@ fn resources_opens_from_launcher_and_shows_live_metrics(cx: &mut TestAppContext)
     let (s, mut v) = open(f.client.clone(), f.root.join("resources.json"), state, cx);
     v.simulate_resize(gpui::size(px(1680.), px(1050.)));
     ready(&s, &mut v);
-    click(&mut v, "panel-launcher-more");
     click(&mut v, "panel-tool-resources");
     s.update_in(&mut v, |s, w, cx| s.tick(true, w, cx));
     v.run_until_parked();
@@ -240,7 +239,6 @@ fn resources_shows_each_saved_machine_from_its_own_server(cx: &mut TestAppContex
         );
         s.links.put("studio", "Studio", Reach::Connecting);
     });
-    click(&mut v, "panel-launcher-more");
     click(&mut v, "panel-tool-resources");
     let started = Instant::now();
     while v.debug_bounds("resources-meter-build-box-cpu").is_none() {

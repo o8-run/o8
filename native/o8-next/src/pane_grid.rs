@@ -313,14 +313,34 @@ impl Grid {
             if self.layout.views[self.layout.focus] == View::Terminal {
                 return;
             }
+            let at_navigator = self.panes[self.layout.focus]
+                .navigator
+                .borrow()
+                .is_focused(window);
+            if at_navigator && key != "tab" {
+                return;
+            }
             match key {
                 "tab" => {
-                    let next = if modifiers.shift {
-                        (self.layout.focus + self.layout.size - 1) % self.layout.size
+                    if modifiers.shift {
+                        if at_navigator {
+                            self.focus.focus(window);
+                        } else {
+                            let previous =
+                                (self.layout.focus + self.layout.size - 1) % self.layout.size;
+                            self.focus(previous, window, cx);
+                            self.panes[previous].navigator.borrow().focus(window);
+                        }
+                    } else if !at_navigator
+                        && self.panes[self.layout.focus]
+                            .navigator
+                            .borrow()
+                            .focus(window)
+                    {
+                        // The transcript's rail is the stop before the next pane.
                     } else {
-                        (self.layout.focus + 1) % self.layout.size
-                    };
-                    self.focus(next, window, cx);
+                        self.focus((self.layout.focus + 1) % self.layout.size, window, cx);
+                    }
                 }
                 "home" | "end" => {
                     self.panes[self.layout.focus].navigate(key == "end");
@@ -343,7 +363,7 @@ impl Grid {
                     .into_any_element(),
             }
         } else {
-            pane.content()
+            pane.content_for(cx.entity())
         };
         let child = div()
             .id(("pane", index))
@@ -535,6 +555,7 @@ pub fn launch(client: Client, offscreen: bool, options: Options) -> Result<(), S
         Application::new()
     })
     .run(move |cx: &mut App| {
+        crate::zoom::install(true, cx);
         let handle = cx
             .open_window(
                 WindowOptions {
@@ -551,7 +572,9 @@ pub fn launch(client: Client, offscreen: bool, options: Options) -> Result<(), S
                     ..Default::default()
                 },
                 |window, cx| {
+                    crate::zoom::apply(window, cx);
                     cx.new(|cx| {
+                        crate::zoom::follow(window, false, cx);
                         let mut grid = Grid::new(client, options, window, cx);
                         grid.load(cx);
                         grid

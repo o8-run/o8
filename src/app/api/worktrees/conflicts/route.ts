@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { getWorktreeManager } from '@/lib/worktree/launch';
+import { WorktreeManager } from '@/lib/worktree/manager';
 import { generateConflictReport } from '@/lib/worktree/conflicts';
 
 export async function GET(req: NextRequest) {
@@ -28,7 +28,8 @@ export async function GET(req: NextRequest) {
   const deep = req.nextUrl.searchParams.get('deep') === 'true';
 
   try {
-    const mgr = getWorktreeManager(repo);
+    // This read needs only persisted metadata, not the launch module's manager cache.
+    const mgr = new WorktreeManager(repo);
     const worktrees = await mgr.list();
     const report = await generateConflictReport(worktrees, deep);
 

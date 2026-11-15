@@ -152,7 +152,7 @@ impl Route {
 
     /// Reads the far server's token and ports, then opens the tunnel.
     pub(crate) fn connect(&self) -> Result<Link, String> {
-        let reply = Command::new("ssh")
+        let reply = crate::child_command::command("ssh")
             .args(self.remote_args())
             .stdin(Stdio::null())
             .stderr(Stdio::null())
@@ -165,7 +165,7 @@ impl Route {
             .flatten()
             .ok_or("o8 is not running on this machine, or ssh could not reach it.")?;
         let (api, ws) = (free_port()?, free_port()?);
-        let mut tunnel = Command::new("ssh")
+        let mut tunnel = crate::child_command::command("ssh")
             .args(self.tunnel_args(api, ws, &remote))
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -189,7 +189,7 @@ impl Route {
         let link = self.connect()?;
         let home = std::env::var("HOME").map_err(|_| "HOME is not set.".to_owned())?;
         let binary = std::env::current_exe().map_err(|_| "Could not find this app.".to_owned())?;
-        let window = Command::new(binary)
+        let window = crate::child_command::command(binary)
             .args([
                 "--enable-next",
                 "--app-shell",

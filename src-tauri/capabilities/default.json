@@ -32,7 +32,6 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-is-focused",
     "shell:allow-open",
-    "dialog:allow-open",
     "process:allow-exit",
     "process:deny-restart",
     "notification:default",

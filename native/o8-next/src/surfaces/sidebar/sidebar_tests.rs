@@ -214,6 +214,14 @@ fn oracle(fixture: &Fixture) -> Value {
     assert!(output.status.success(), "desktop route oracle");
     serde_json::from_slice(&output.stdout).unwrap()
 }
+/// A shell state that chose By date with no project, for tests of the
+/// date-grouped list now that the Inbox is the default view.
+pub(super) fn by_date() -> State {
+    State {
+        sidebar_view: [(String::new(), "date".to_owned())].into_iter().collect(),
+        ..State::default()
+    }
+}
 fn settle(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     for _ in 0..5 {
         cx.run_until_parked();
@@ -306,7 +314,7 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("interactions.json"),
-        State::default(),
+        by_date(),
         cx,
     );
     let cx = &mut visual;
@@ -423,6 +431,13 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
             }]})).unwrap();
         assert_eq!(response.status(), 200);
     };
+    // A running thread waits in the Working drawer; open it to see the row.
+    shell.update(cx, |s, cx| {
+        s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
+            l.open_drawer();
+            cx.notify();
+        })
+    });
     write_turn("user", 1791000000000);
     wait_for(&shell, cx, |s, cx| {
         s.surfaces
@@ -547,7 +562,7 @@ fn sidebar_unassigned_thread_opens_session(cx: &mut TestAppContext) {
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("unassigned.json"),
-        State::default(),
+        by_date(),
         cx,
     );
     let cx = &mut visual;
@@ -747,3 +762,7 @@ mod archive_tests;
 mod pin_reorder_tests;
 #[path = "copy_tests.rs"]
 mod copy_tests;
+
+// Mounted here for the shell's private fields, tick and commands, and test_support's open_past_setup and draw.
+#[path = "../../o8d_write_receipt.rs"]
+mod o8d_write_receipt;

@@ -22,10 +22,12 @@ export const PACKET_SUBCOMMANDS = [
   'capture',
   'mirror-proof',
   'log',
+  'transcript',
   'runtime-drift',
 ] as const;
 
 export const OPERATOR_PACKET_SUBCOMMANDS = [
+  'policy',
   'retain',
   'release-retention',
   'restore-artifacts',
@@ -34,12 +36,14 @@ export const OPERATOR_PACKET_SUBCOMMANDS = [
 ] as const;
 
 export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; explicit packet/lane id overrides cwd
+  packet policy [id]   read effective review and merge policy (operator only)
   packet scope [id]    bounded worker context (--include-directives for bodies)
   packet expand-scope [id] request bounded paths (--paths <path[,path]> --reason <text>)
   packet diff [id]     the packet's code diff vs base (committed + uncommitted)
   packet commit -m ".." stage + commit the current worktree with an explicit pathspec
   packet heartbeat [id] update a packet lane heartbeat
   packet review [id]   approve + merge; cite --coverage for files, --requirement-evidence for non-file requirements, and --process-evidence for process constraints; --supplement-process-evidence completes an existing clean review; --waive-missing-contract <reason> covers an uncaptured default contract
+    --run-evidence <JSON-file> records execution at --expected-sha; --not-run <reason> records a read-only review
   packet park [id]     remove a verified review-ready workspace while preserving immutable review
   packet restore [id]  restore a parked workspace to its exact reviewed state
   packet close [id]    close without merging (--reason adopted_elsewhere|superseded|spec_changed|wontfix)
@@ -56,6 +60,7 @@ export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; exp
   packet capture [id]  screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
   packet mirror-proof [id] mirror the packet's before/after proof onto a GitHub PR (--pr <n> [--repo owner/repo])
   packet log [id]      read or follow packet lane events (--follow, --since)
+  packet transcript [id] read or follow what the worker is doing: tool calls, replies, steers (--follow, --hold, --limit 1..200)
   packet runtime-drift [id] detect and warn when a lane's bound runtime drifted`;
 
 export const OPERATOR_PACKET_COMMAND_LINES = `  packet retain [id]   hold automatic workspace retirement (--reason <text>)
