@@ -21,7 +21,7 @@ export function dogfoodPrOnlyActive(): boolean {
 
 export { DOGFOOD_PR_ONLY_NOTE };
 
-export function currentLaneMergePolicy(projectId?: string | null): LaneMergePolicy {
+export function currentLaneMergePolicy(projectId: string | null): LaneMergePolicy {
   if (dogfoodPrOnlyActive()) return { mode: 'pr_only', note: DOGFOOD_PR_ONLY_NOTE };
   try {
     const sqlite = getSqlite();

@@ -8,9 +8,9 @@ import { afterAll, expect, it } from 'vitest';
 const run = promisify(execFile);
 const root = mkdtempSync(join(tmpdir(), 'o8-policy-startup-'));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
-async function start(data: string, order: string) {
+async function start(data: string, order: string, projectId?: string) {
   const { stdout } = await run(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', 'tests/fixtures/project-policy-startup.ts', order], {
-    env: { ...process.env, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'test.db'), HOME: data }, timeout: 30_000,
+    env: { ...process.env, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'test.db'), HOME: data, O8_POLICY_TEST_PROJECT_ID: projectId }, timeout: 30_000,
   });
   return JSON.parse(stdout.split('\n').find(line => line.startsWith('{"policy"'))!);
 }
@@ -72,4 +72,33 @@ it('an existing project from before app_state existed keeps direct integration',
   db.close();
   const result = await start(data, 'next-first');
   expect(result.oldPolicy).toBe('direct'); expect(result.policy.mode).toBe('direct');
+});
+
+it.each(['repos.json', 'projects.json'])('retries unreadable %s and carries repaired identities before completing', async file => {
+  const data = mkdtempSync(join(root, 'repair'));
+  await start(data, 'seed');
+  const db = new Database(join(data, 'test.db'));
+  db.prepare("DELETE FROM app_state WHERE key = 'migration:project-merge-mode:carry-over-v1'").run();
+  db.close();
+  const id = file === 'repos.json' ? 'repo:recovered-repo' : 'recovered-project';
+  writeFileSync(join(data, file), '{corrupt');
+  const first = await start(data, 'next-first', id);
+  expect(first.carried).toBe(false);
+  expect(first.saved).toEqual({ value: 'direct' });
+  expect(first.requestedPolicy.mode).toBe('direct');
+  const repaired = file === 'repos.json'
+    ? { repos: [{ id: 'recovered-repo', name: 'Recovered', localPath: data }] }
+    : { projects: [{ id, name: 'Recovered', repoPaths: [], createdAt: new Date(0).toISOString() }], activeProjectId: id };
+  writeFileSync(join(data, file), JSON.stringify(repaired));
+  const resumed = await start(data, 'next-first', id);
+  expect(resumed.carried).toBe(true); expect(resumed.requestedPolicy.mode).toBe('direct');
+  const inspect = new Database(join(data, 'test.db'));
+  expect(inspect.prepare('SELECT value FROM app_state WHERE key = ?').get(`project-merge-mode:${id}`)).toEqual({ value: 'direct' });
+  inspect.close();
+});
+it('fresh initialization ignores unreadable legacy inventories and completes PR-first', async () => {
+  const data = mkdtempSync(join(root, 'fresh-corrupt'));
+  writeFileSync(join(data, 'repos.json'), '{corrupt'); writeFileSync(join(data, 'projects.json'), '{corrupt');
+  const result = await start(data, 'next-first', 'repo:never-existing');
+  expect(result.carried).toBe(true); expect(result.requestedPolicy.mode).toBe('pr_only');
 });

@@ -35,15 +35,16 @@ it.each(['policy-operator-fixture-token', 'policy-device-fixture-token'])('workt
   expect(await response.json()).toMatchObject({ reason: 'pr_only', ok: false });
   expect(merge).not.toHaveBeenCalled(); expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base); expect(existsSync(f.worktree.path)).toBe(true);
 });
-it.each([null, 'https://github.com/example/project.git', 'https://gitlab.com/example/project.git'])('delivery guidance is true for origin %s and automatic agreement settles without merge retries', async origin => {
+it.each([null, 'https://github.com/example/project.git', 'https://gitlab.com/example/project.git', 'https://code.example.test/example/project.git'])('delivery guidance is true for origin %s and automatic agreement settles without merge retries', async origin => {
   const f = await fixture();
   if (origin) git(f.repo, 'remote', 'add', 'origin', origin);
   const { prFirstMergeRefusal } = await import('@/lib/lane/pr-first-delivery');
   const note = await prFirstMergeRefusal(f.lane);
   expect(note).toContain('Branch retained');
   if (!origin) { expect(note).toContain('no origin remote'); expect(note).not.toContain('open a pull request'); }
-  else if (origin.includes('github.com')) expect(note).toContain('action: "pr"');
-  else { expect(note).toContain('cannot open pull requests on this remote host'); expect(note).not.toContain('Next:'); expect(note).not.toContain('open a pull request'); }
+  else if (origin.includes('github.com')) { expect(note).toContain('Create PR'); expect(note).not.toContain('/api/'); }
+  else if (origin.includes('gitlab.com')) { expect(note).toContain('GitLab'); expect(note).toContain('merge request'); expect(note).not.toContain('unsupported'); }
+  else { expect(note).toContain('not identified'); expect(note).not.toContain('Next:'); }
   const input = { lane: f.lane, approvalId: `approval-${f.lane.id}`, reviewedHeadSha: f.base };
   const agreement = await dispatchSecondPassMerge({ ...input, trigger: 'second_pass_agreed' });
   const retry = await dispatchSecondPassMerge({ ...input, trigger: 'stall_reconcile' });

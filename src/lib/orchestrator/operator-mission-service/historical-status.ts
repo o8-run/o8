@@ -52,6 +52,7 @@ export function buildHistoricalMissionStatus(record: import('@/lib/db/missions-s
 
   const packets = record.packetMeta.map((meta) => {
     const lane = lanesByPacket.get(meta.id) ?? null;
+    const mergePolicy = currentLaneMergePolicy(lane?.projectId ?? null);
     const recovery = lane?.outcome === 'merged' ? null : lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null;
     return {
       id: meta.id,
@@ -81,8 +82,8 @@ export function buildHistoricalMissionStatus(record: import('@/lib/db/missions-s
         transcriptUnsupportedReason: null,
         lastEventLabel: lane.lastEventLabel,
         terminalReason: readLaneTerminalReason(lane),
-        mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
-        mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
+        mergeMode: mergePolicy.mode,
+        mergeModeNote: mergePolicy.note,
       } : null,
       review: null,
     };

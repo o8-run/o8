@@ -11,6 +11,7 @@ import { addColumnTolerant, tableColumnExists } from '@/lib/db/schema-columns';
  */
 
 import Database from 'better-sqlite3';
+import { configureSqlite } from '@/lib/db/startup-pragmas';
 import { initializeProjectMergeModes } from '@/lib/lane/project-merge-mode-migration';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -80,18 +81,25 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
     }
   } catch { /* chmod is best-effort — never block DB init on it */ }
 
-  // SQLite performance pragmas
-  sqlite.pragma('journal_mode = WAL');      // Write-ahead logging (concurrent reads)
-  sqlite.pragma('synchronous = NORMAL');    // Faster writes, still crash-safe with WAL
-  sqlite.pragma('busy_timeout = 5000');     // Wait 5s instead of failing on lock
-  sqlite.pragma('cache_size = -20000');     // 20MB page cache
-  sqlite.pragma('foreign_keys = ON');       // Enforce FK constraints
+  configureSqlite(sqlite);
 
-  const db = drizzle!(sqlite, { schema });
-
-  // Serialize schema/bootstrap and merge-policy classification across processes.
-  // A database file created by a concurrent fresh start is not legacy storage.
+  // #859 — the old gate skipped `ensureIdempotentColumnAdds` whenever the
+  // top-version marker was missing, leaving installs that landed before v4
+  // pinned at v3 forever and silently skipping the per-boot column-add +
+  // backfill helpers. New behaviour:
+  //   1. Existing DBs missing the top-version marker run the narrow migrations
+  //      for columns referenced by base-schema indexes before `ensureTables`.
+  //   2. Run `ensureTables` (CREATE TABLE IF NOT EXISTS) for new or upgrading
+  //      DBs, then ALWAYS repeat `ensureIdempotentColumnAdds` so column-add + backfill
+  //      helpers can never be silently skipped for existing installs whose
+  //      marker drifted out of sync with DB_SCHEMA_VERSION.
+  //   3. Backfill any missing v1..v12 markers in order so installs upgraded
+  //      from older schemas show the full migration history on disk and
+  //      brand-new installs don't appear to have skipped versions.
   try {
+    // Keep bootstrap serialized: narrowing this lock races concurrent fresh FTS setup.
+    // Migration authors: foreign_keys=OFF is ineffective here; table rebuilds must
+    // account for that, and long migrations can exceed another startup's 5s timeout.
     sqlite.transaction(() => {
       const existingUserSchema = Boolean(sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get());
       const topMarkerExists = existsSync(migrationMarkerPath(DB_SCHEMA_VERSION));
@@ -117,10 +125,10 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
   }
 
   _sqlite = sqlite;
-  _db = db;
+  _db = drizzle!(sqlite, { schema });
 
   console.log(`[db] Connected to ${DB_PATH}`);
-  return db;
+  return _db;
 }
 
 function ensureIdempotentColumnAdds(sqlite: Database.Database): void {

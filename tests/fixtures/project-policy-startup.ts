@@ -14,7 +14,9 @@ async function main() {
     const lane = createLane({ repoPath: process.env.O8_DATA_DIR!, branch: 'fixture/projectless', runtime: 'codex' });
     getSqlite().prepare('UPDATE lanes SET project_id = NULL WHERE id = ?').run(lane.id);
   }
-  console.log(JSON.stringify({ policy, savedPolicy: currentLaneMergePolicy('saved').mode, oldPolicy: currentLaneMergePolicy('old').mode, projectlessPolicy: currentLaneMergePolicy(projectless?.project_id).mode, saved: getSqlite().prepare("SELECT value FROM app_state WHERE key = 'project-merge-mode:default'").get() ?? null }));
+  console.log(JSON.stringify({ policy,
+    requestedPolicy: currentLaneMergePolicy(process.env.O8_POLICY_TEST_PROJECT_ID ?? null),
+    carried: Boolean(getSqlite().prepare("SELECT 1 FROM app_state WHERE key = 'migration:project-merge-mode:carry-over-v1'").get()), savedPolicy: currentLaneMergePolicy('saved').mode, oldPolicy: currentLaneMergePolicy('old').mode, projectlessPolicy: currentLaneMergePolicy(projectless?.project_id ?? null).mode, saved: getSqlite().prepare("SELECT value FROM app_state WHERE key = 'project-merge-mode:default'").get() ?? null }));
   closeDb();
 }
 void main();

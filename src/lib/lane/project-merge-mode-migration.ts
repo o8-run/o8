@@ -20,6 +20,7 @@ export function carryOverProjectMergeModes(sqlite: Database.Database, dataDir: s
     }
     // Legacy inventory is best-effort, as in its existing readers. SQLite identities
     // and the legacy default still retain their effective choice if JSON is unreadable.
+    let inventoryReadable = true;
     for (const [file, field] of [['projects.json', 'projects'], ['repos.json', 'repos']] as const) {
       try {
         const parsed = JSON.parse(readFileSync(join(dataDir, file), 'utf8'));
@@ -30,12 +31,15 @@ export function carryOverProjectMergeModes(sqlite: Database.Database, dataDir: s
           else { add(row.id); add(row.sqliteProjectId); }
         }
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('[merge-policy] Legacy inventory unavailable; preserving database project choices.');
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          inventoryReadable = false;
+          console.warn('[merge-policy] Legacy inventory unavailable; carry-over will retry after repair.');
+        }
       }
     }
     const mode = 'direct';
     for (const id of ids) insert.run(projectMergeModeKey(id), mode, Date.now());
-    insert.run(projectMergeModeMigrationMarker, 'done', Date.now());
+    if (inventoryReadable) insert.run(projectMergeModeMigrationMarker, 'done', Date.now());
   }).immediate();
 }
 

@@ -351,6 +351,7 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
   return listLanes(packetIds)
     .filter((lane) => lane.packetId)
     .map((lane) => {
+      const mergePolicy = currentLaneMergePolicy(lane.projectId);
       const events = getLaneEvents(lane.id, 100);
       const recovery = recoveryInfoFromLaneEvents(events);
       const currentAuthExit = findCurrentAuthExit(lane, events);
@@ -387,8 +388,8 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
         authRecoveryRequired: Boolean(currentAuthExit),
         recovery,
         contextObservation: contextEvent ? packetContextObservationFromEvent(contextEvent) : undefined,
-        mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
-        mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
+        mergeMode: mergePolicy.mode,
+        mergeModeNote: mergePolicy.note,
       };
     });
 }

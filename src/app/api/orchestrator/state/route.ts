@@ -49,6 +49,7 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
   const packets = mission.packets.map((packet) => {
     const lane = findLaneByPacket(packet.id);
     if (!lane) return packet;
+    const mergePolicy = currentLaneMergePolicy(lane.projectId);
     // A stored binding is the owner Stop verifies (packet-stop-hold.ts), so show that one and only
     // refresh its activity fields; rebuilding it here showed an owner Stop would refuse (#5799).
     // Rows delegated before the binding was stored keep the rebuilt display.
@@ -59,8 +60,8 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
           ...packet.lane,
           lastEventAt: packet.lane.laneId === lane.id ? lane.lastEventAt : packet.lane.lastEventAt,
           lastEventLabel: packet.lane.laneId === lane.id ? lane.lastEventLabel : packet.lane.lastEventLabel,
-          mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
-          mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
+          mergeMode: mergePolicy.mode,
+          mergeModeNote: mergePolicy.note,
         },
       };
     }
@@ -77,8 +78,8 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
         lastHeartbeatAt: packet.lane?.lastHeartbeatAt ?? null,
         lastEventAt: lane.lastEventAt,
         lastEventLabel: lane.lastEventLabel,
-        mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
-        mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
+        mergeMode: mergePolicy.mode,
+        mergeModeNote: mergePolicy.note,
       },
     };
   });

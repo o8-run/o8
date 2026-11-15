@@ -107,6 +107,7 @@ export async function GET(req: NextRequest) {
     resolvedLanes.flatMap((lane) => lane.packetId ? [lane.packetId] : []),
   );
   const lanes = await Promise.all(resolvedLanes.map(async (lane) => {
+    const mergePolicy = currentLaneMergePolicy(lane.projectId);
     const retired = lane.status === 'archived' || lane.status === 'completed';
     const archiveEvents = retired ? getLaneEvents(lane.id, 80) : [];
     return {
@@ -116,8 +117,8 @@ export async function GET(req: NextRequest) {
         ? launchContexts.get(lane.packetId)?.launchContext ?? null
         : null,
       codename: codename(lane.id),
-      mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
-      mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
+      mergeMode: mergePolicy.mode,
+      mergeModeNote: mergePolicy.note,
       archiveSummary: retired ? summarizeLaneArchive(lane, archiveEvents) : null,
       // #2154 — the rail needs to tell an operator's dismissal apart from the
       // headless loop's auto-archive: the first clears the row, the second

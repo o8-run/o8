@@ -548,6 +548,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
       if (!lane) {
         return null;
       }
+      const mergePolicy = currentLaneMergePolicy(lane.projectId);
       const activity = lane.sessionKey ? transcriptActivityBySession.get(lane.sessionKey) : undefined;
       const lastTranscriptAt = activity?.lastTranscriptAt ?? null;
       const lastLifecycleEventAt = lane.lastEventAt;
@@ -570,8 +571,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
         transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
         lastEventLabel: lane.lastEventLabel,
         terminalReason: readLaneTerminalReason(lane),
-        mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
-        mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
+        mergeMode: mergePolicy.mode,
+        mergeModeNote: mergePolicy.note,
       };
     })
     .filter((agent): agent is NonNullable<typeof agent> => agent !== null);
@@ -621,6 +622,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
     packets: graph.map((node) => {
       const packet = packetById.get(node.packetId)!;
       const lane = laneByPacketId.get(node.packetId);
+      const mergePolicy = currentLaneMergePolicy(lane?.projectId ?? packet.projectId ?? null);
       const recovery = packet.releaseState === 'released' || (lane?.status === 'completed' && lane.outcome === 'merged') ? null : packet.recovery ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
       const laneSessionKey = lane ? lane.sessionKey : packet.lane?.sessionKey ?? null;
       const activity = laneSessionKey ? transcriptActivityBySession.get(laneSessionKey) : undefined;
@@ -665,8 +667,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
           transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
           lastEventLabel: lane.lastEventLabel,
           terminalReason: readLaneTerminalReason(lane),
-          mergeMode: currentLaneMergePolicy(lane?.projectId).mode,
-          mergeModeNote: currentLaneMergePolicy(lane?.projectId).note,
+          mergeMode: mergePolicy.mode,
+          mergeModeNote: mergePolicy.note,
         } : packet.lane ? {
           ...packet.lane,
           lastEventAt: lastActivityAt ?? packet.lane.lastEventAt ?? null,
@@ -675,8 +677,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
           lastActivityAt,
           lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, packet.lane.lastEventLabel),
           transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
-          mergeMode: currentLaneMergePolicy(packet.projectId).mode,
-          mergeModeNote: currentLaneMergePolicy(packet.projectId).note,
+          mergeMode: mergePolicy.mode,
+          mergeModeNote: mergePolicy.note,
         } : null,
         review: packet.review ? {
           ...reviewExecution(packet.review.approved, packet.review.reviewedHeadSha, packet.review.runEvidence),
