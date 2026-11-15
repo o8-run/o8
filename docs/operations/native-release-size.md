@@ -1,7 +1,7 @@
 # Native release size
 
-The native release profile strips executable symbols, uses thin LTO and one
-codegen unit, and keeps Rust's default unwind behavior. Release builds generate
+The native release profile strips executable symbols, uses thin LTO and 16
+codegen units, and keeps Rust's default unwind behavior. Release builds generate
 line tables and pack the debug information into separate macOS dSYM bundles.
 
 For a universal build, retain both architecture artifacts:
