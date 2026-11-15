@@ -54,6 +54,7 @@ mod settings_secret;
 mod shell;
 mod shell_state;
 mod sidebar;
+mod speech;
 mod snapshot_hotkey;
 mod stream;
 mod switch_receipt;
