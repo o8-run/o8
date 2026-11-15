@@ -3,7 +3,7 @@ import { scrubSentryEvent, type SentryEventLike } from './scrub';
 /**
  * Build the crash payload shown in first-run consent. This is executable proof,
  * not display-only copy: the representative event runs through the same
- * scrubSentryEvent transform used by the browser and Node beforeSend hooks.
+ * scrubSentryEvent transform used by the Node beforeSend hooks.
  */
 export function buildScrubbedCrashSample(): SentryEventLike {
   const representativeError: SentryEventLike = {

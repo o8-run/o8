@@ -115,17 +115,6 @@ const nextConfig: NextConfig = {
           ...(typeof config.optimization?.splitChunks === 'object'
             ? (config.optimization.splitChunks as Record<string, unknown>).cacheGroups as Record<string, unknown>
             : {}),
-          monaco: {
-            test: /[\\/]node_modules[\\/](monaco-editor|@monaco-editor)[\\/]/,
-            name: 'vendor-monaco',
-            // Worker runtimes keep their compiler code out of the UI vendor
-            // chunk. Worker entries are async too, so 'async' is insufficient.
-            chunks: (chunk: { runtime?: string | Set<string> }) => {
-              const runtimes = typeof chunk.runtime === 'string' ? [chunk.runtime] : [...(chunk.runtime ?? [])];
-              return runtimes.some(runtime => runtime === 'webpack' || runtime === 'webpack-runtime');
-            },
-            priority: 30,
-          },
           xterm: {
             test: /[\\/]node_modules[\\/]@xterm[\\/]/,
             name: 'vendor-xterm',

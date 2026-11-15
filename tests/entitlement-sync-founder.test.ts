@@ -228,7 +228,9 @@ describe('lifetime seat through desktop entitlement sync (#3269)', () => {
     }
     const rejected = await POST(request());
     expect(rejected.status).toBe(429);
-    expect(await rejected.json()).toMatchObject({ error: 'free_tier_rate_limit', limit: 10, remaining: 0 });
+    const error = await rejected.json();
+    expect(error).toMatchObject({ error: 'free_tier_rate_limit', limit: 10, remaining: 0 });
+    expect(error).not.toHaveProperty('upgradeUrl');
     expect(gatewayStream).toHaveBeenCalledTimes(10);
     const persisted = new Database(path.join(dataDir, 'chat-usage.db'), { readonly: true });
     try {

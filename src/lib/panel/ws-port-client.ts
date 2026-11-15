@@ -1,9 +1,9 @@
 /**
  * Browser-side WS port resolver.
  *
- * The Tauri Rust sidecar probes a free port for the ws-server and writes it
- * to `~/.o8/ws-port`. The root layout (`src/app/layout.tsx`) reads
- * that file server-side and injects the value as `window.__O8_WS_PORT__`
+ * The native sidecar records the selected ws-server port. The shell layout
+ * (`src/components/shell-layout.tsx`) resolves it server-side and injects
+ * the value as `window.__O8_WS_PORT__`
  * before any client code runs.
  *
  * Browser hooks call `getBrowserWsPort()` instead of hardcoding a port. Legacy
