@@ -1,3 +1,4 @@
+import { reviewBackpressureStatus } from '../review-backpressure';
 import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { readLeadStatuses } from '@/lib/orchestrator/lead-status';
@@ -611,6 +612,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
 
   return {
     missionId: state.missionId || '',
+    backpressure: await reviewBackpressureStatus(),
     ...missionLeadFields(state.packets),
     prompt: state.prompt,
     summary: state.summary,
