@@ -1,3 +1,5 @@
+import { reviewRunPolicy } from '@/lib/lane/review-run-policy';
+import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { viewerJson } from '@/lib/viewers/response';
 /**
  * GET /api/orchestrator/review-state?packetId=<id>
@@ -57,9 +59,12 @@ function toOrchestratorReview(review: {
   approved: boolean;
   summary: string;
   recordedAt: string;
+  reviewedHeadSha?: string | null;
+  runEvidence?: unknown;
 } | null | undefined): DeriveReviewStateOrchestratorReview | null {
   if (!review) return null;
   return {
+    ...reviewExecution(review.approved, review.reviewedHeadSha, review.runEvidence),
     verdict: review.approved ? 'approved' : 'rejected',
     ts: review.recordedAt,
     summary: review.summary,
@@ -81,6 +86,7 @@ function toDurableOrchestratorReview(approval: ApprovalRecord | null): DeriveRev
   if (!approval || typeof approval.args?.approved !== 'boolean') return null;
   const approved = approval.args.approved;
   return {
+    ...reviewExecution(approved, approval.args?.reviewedHeadSha, approval.args?.runEvidence),
     verdict: approved ? 'approved' : 'rejected',
     ts: approvalReviewedAt(approval),
     summary: approval.description || approval.summary || '',
@@ -172,9 +178,10 @@ function toLaneEventOrchestratorReview(lane: Lane | null): DeriveReviewStateOrch
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (event.verb !== 'review_recorded') continue;
-    const payload = (event.payload ?? {}) as { approved?: unknown; summary?: unknown };
+    const payload = (event.payload ?? {}) as { approved?: unknown; summary?: unknown; reviewedHeadSha?: unknown; runEvidence?: unknown };
     if (typeof payload.approved !== 'boolean') continue;
     return {
+      ...reviewExecution(payload.approved, payload.reviewedHeadSha, payload.runEvidence),
       verdict: payload.approved ? 'approved' : 'rejected',
       ts: event.timestamp,
       summary: typeof payload.summary === 'string' ? payload.summary : '',
@@ -399,6 +406,7 @@ export async function GET(request: NextRequest) {
     });
 
     return viewerJson({
+      reviewRunPolicy: reviewRunPolicy(),
       packetId,
       state,
       stateChangedAt,

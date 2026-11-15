@@ -1,5 +1,4 @@
 //! Read-only Git patch model. Parsing/highlighting happen off the GPUI thread.
-use crate::client::Client;
 use crate::theme::current as theme;
 use regex::Regex;
 use serde::Deserialize;
@@ -67,81 +66,9 @@ pub struct Document {
     pub source: String,
     pub unsupported: bool,
 }
-impl Target {
-    pub fn read(&self, client: &Client) -> Result<(Document, Value), String> {
-        let response: Response = match self {
-            Self::Commit { path, hash } => {
-                if !(7..=40).contains(&hash.len()) || !hash.bytes().all(|c| c.is_ascii_hexdigit()) {
-                    return Err("Invalid commit revision".into());
-                }
-                let value: Value = client.get(
-                    &format!("/api/panel/commits/{hash}"),
-                    &[("workspace", path)],
-                )?;
-                if value["error"].is_string() {
-                    return Err(value["error"]
-                        .as_str()
-                        .unwrap_or("Commit unavailable")
-                        .into());
-                }
-                let commit = &value["commit"];
-                let diff = commit["diff"]
-                    .as_str()
-                    .ok_or("Commit diff unavailable")?
-                    .to_owned();
-                let head = commit["hash"]
-                    .as_str()
-                    .ok_or("Commit identity unavailable")?;
-                if !head.to_lowercase().starts_with(&hash.to_lowercase()) {
-                    return Err("Commit response belongs to another revision".into());
-                }
-                Response {
-                    truncated: diff.ends_with("... (truncated at 50KB)"),
-                    diff,
-                    head_sha: head.into(),
-                    ..Default::default()
-                }
-            }
-            Self::Packet(packet) => {
-                // Packet ids occupy exactly one path segment.
-                let id: String = url::form_urlencoded::byte_serialize(packet.as_bytes()).collect();
-                client.get(&format!("/api/lanes/{id}/diff"), &[("maxBytes", "524288")])?
-            }
-            Self::Worktree { path, base, file } => {
-                let mut query = vec![("worktreePath", path.as_str())];
-                if let Some(base) = base {
-                    query.push(("baseBranch", base));
-                }
-                if let Some(file) = file {
-                    query.push(("file", file));
-                }
-                client.get("/api/worktrees/diff", &query)?
-            }
-        };
-        if response.error.is_some() {
-            return Err("Diff unavailable. Refresh the selected target.".into());
-        }
-        if response.head_sha.len() != 40
-            || !response.head_sha.bytes().all(|b| b.is_ascii_hexdigit())
-        {
-            return Err("Diff has no verifiable HEAD. Review is disabled.".into());
-        }
-        let state = match self {
-            Self::Packet(id) => client.review_state(id)?,
-            _ => Value::Null,
-        };
-        let mut document = if matches!(self, Self::Worktree { .. }) {
-            parse_worktree(&response.diff)
-        } else {
-            parse(&response.diff)
-        };
-        document.head = response.head_sha;
-        document.truncated = response.truncated;
-        document.revision = response.revision;
-        document.source = response.diff;
-        Ok((document, state))
-    }
-}
+#[path = "diff_read.rs"]
+mod review_read;
+pub(crate) use review_read::MissingCheckout;
 
 /// Git quotes unusual paths using C-style octal UTF-8, not JSON escaping.
 fn path(source: &str) -> String {

@@ -76,7 +76,13 @@ export function normalizeRequestedRuntime(value: unknown): OrchestratorRuntime |
 function runtimeText(value: unknown): string { return typeof value === 'string' ? value : `<${typeof value}>`; }
 
 export class RuntimeSelectionError extends Error {
-  constructor(readonly status: number, message: string) { super(message); }
+  constructor(readonly status: number, message: string, readonly code: 'invalid_runtime' | 'worker_not_enabled' = 'invalid_runtime') { super(message); }
+}
+
+/** Stable refusal contract, including the delegate API's existing client code. */
+export function runtimeSelectionRefusal(error: unknown) {
+  return { status: 400 as const, code: error instanceof RuntimeSelectionError ? error.code : 'invalid_runtime',
+    message: error instanceof Error ? error.message : 'Invalid requested runtime.' };
 }
 
 /** All dispatch entry points validate before choosing a runtime. */
@@ -86,7 +92,7 @@ export function validateRequestedRuntime(value: unknown, defaultRuntime?: unknow
   const runtime = normalizeRequestedRuntime(value);
   if (!runtime) throw new RuntimeSelectionError(400, `Unknown requested runtime: ${runtimeText(value)}.`);
   if (runtime !== 'cloud' && !listDispatchableRuntimes({ includeExperimental: true }).includes(runtime)) {
-    throw new RuntimeSelectionError(409, `Requested runtime ${runtime} is not dispatchable.`);
+    throw new RuntimeSelectionError(400, `Requested runtime ${runtime} is not dispatchable.`, 'worker_not_enabled');
   }
   return runtime;
 }

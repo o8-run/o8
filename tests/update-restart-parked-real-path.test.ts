@@ -50,7 +50,7 @@ afterAll(async () => {
 const { createLane, setLaneStatus, getLane, attachSession } = await import('@/lib/lane/registry');
 const { GET, POST } = await import('@/app/api/panel/update/apply/route');
 const { setAppUpdateState } = await import('@/lib/app-update/relaunch-state');
-const { describeUpdateBlockers } = await import('@/components/desktop/UpdateCard');
+const { describeUpdateBlockers } = await import('@/lib/app-update/update-card-view');
 
 type IdlePayload = Parameters<typeof describeUpdateBlockers>[0] & {
   idle: { idle: boolean; idleExceptParked: boolean; parkedLanes: Array<{ label: string; status: string }> };

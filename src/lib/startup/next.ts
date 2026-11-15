@@ -46,11 +46,6 @@ async function initialize(): Promise<void> {
   } catch {
     warn('transcript-repair');
   }
-  if (process.platform === 'darwin' && process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
-    void import('@/lib/symon/messages-receiver/loop')
-      .then(({ startMessagesReceiver }) => startMessagesReceiver())
-      .catch(() => console.warn('[symon] Messages receiver failed to start'));
-  }
   try {
     const { startStatusBootHooks } = await import('@/lib/panel/status-boot');
     startStatusBootHooks();

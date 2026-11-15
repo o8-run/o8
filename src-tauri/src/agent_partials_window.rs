@@ -279,6 +279,7 @@ fn reposition(
                 if !crate::overlay_geometry::set_frame_points(&win, frame, primary_top) {
                     log::warn!("[agent-partials] failed to apply caret point geometry");
                 }
+                publish_placement(&app, "caret", frame.x, frame.y, frame.width, frame.height);
             }
             return;
         }
@@ -344,7 +345,21 @@ fn reposition(
             (x, y)
         };
         let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+        publish_placement(&app, "hud", x, y, frame_width, frame_height);
     });
+}
+
+/// Hand the computed anchor to the page, which passes it to the native HUD
+/// panel (experimental `native_dictation_hud`) so the window binary never
+/// repeats the Accessibility query. Top-left desktop points, as applied above.
+#[cfg(target_os = "macos")]
+fn publish_placement(app: &tauri::AppHandle, surface: &str, x: f64, y: f64, width: f64, height: f64) {
+    use tauri::Emitter;
+    let _ = app.emit_to(
+        PARTIALS_LABEL,
+        "o8:agent-partials-placement",
+        serde_json::json!({ "surface": surface, "x": x, "y": y, "width": width, "height": height }),
+    );
 }
 
 // ── Non-macOS no-ops ──

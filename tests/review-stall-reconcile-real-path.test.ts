@@ -211,6 +211,9 @@ async function approveHighRiskHead(input: {
 }
 
 beforeEach(() => {
+  // These cases exercise automatic direct integration after operator opt-in.
+  getSqlite().prepare('INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, ?)')
+    .run('project-merge-mode:default', 'direct', Date.now());
   h.dispatch.mockClear();
   h.reviewerCalls.length = 0;
   h.mergeResult = { ok: true, laneId: '', note: 'merged' };
@@ -796,4 +799,24 @@ describe('stale review cancellation must not suppress a successor (#1856)', () =
     expect(h.reviewerCalls).toHaveLength(0);
     assertEveryTerminalRowCarriesAReceipt(lane.id);
   });
+});
+
+
+it('PR-first agreed review settles through drain and stall reconciliation without dispatch or retry', async () => {
+  const repoDir = createRepo();
+  git(repoDir, ['checkout', '-q', '-b', 'inline/pr-first-agreement']);
+  const packetId = 'pkt-pr-first-agreement';
+  const lane = createLane({ repoPath: repoDir, worktreePath: repoDir, branch: 'inline/pr-first-agreement', baseBranch: 'main', runtime: 'codex', packetId, projectId: 'pr-first-review-project' });
+  const headSha = commitHighRiskChange(repoDir, 'pr-first-agreement');
+  setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+  const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
+  markSecondPassAgreed(approvalId);
+  await drainReviewQueue();
+  await reconcileReviewStalls();
+  await reconcileReviewStalls();
+  expect(h.dispatch).not.toHaveBeenCalled();
+  expect(eventsWithVerb(lane.id, 'merge_dispatch_attempted')).toHaveLength(1);
+  expect(eventsWithVerb(lane.id, 'merge_dispatch_failed')).toHaveLength(1);
+  expect(JSON.stringify(eventsWithVerb(lane.id, 'merge_dispatch_failed'))).toContain('Branch retained');
+  expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
 });

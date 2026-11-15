@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setImmediate, setTimeout as delay } from 'node:timers/promises';
-import { act, createElement, Fragment, useState, type ComponentProps } from 'react';
+import { act, createElement, Fragment, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -55,7 +55,9 @@ class AudioContextFixture {
 }
 let directory: string; let root: Root; let container: HTMLDivElement;
 let voice: typeof import('./route');
-let Button: typeof import('@/components/desktop/thoughts/chat-panel/ManagedLiveButton').ManagedLiveButton;
+let controller: typeof import('@/components/desktop/thoughts/chat-panel/useChatLiveController');
+let presentation: typeof import('@/components/desktop/thoughts/chat-panel/useManagedVoicePresentation');
+let formatUsage: typeof import('@/lib/voice/managed-live/usage').formatGptLiveUsage;
 let Overlay: typeof import('@/app/managed-chat-voice/page').default;
 let admissions: Array<{ id: string; context: string; binding: string; source: string }>;
 let creations: Array<{ body: { session: { model: string; delegation: { type: string }; instructions: string } }; authorization: string | null }>;
@@ -75,24 +77,42 @@ async function waitForAdmission(count: number) {
   for (let attempt = 0; attempt < 200 && admissions.length < count; attempt++) await act(flush);
   expect(admissions, container.textContent ?? '').toHaveLength(count);
 }
+// The browser composer button is gone. This harness drives the kept live
+// controller (shared with the voice host) the way that button did for a
+// personal-key session: one talk control and the usage line.
 function Conversation() {
   const [messages, setMessages] = useState<MobileTranscriptEntry[]>([
     { id: 'cli-task', role: 'user', text: 'Check the fixture repository.', timestamp: 1 },
     { id: 'cli-result', role: 'assistant', text: 'The fixture branch is clean.', timestamp: 2 },
   ]);
-  const props: ComponentProps<typeof Button> = {
+  const { state, stateRef, detail, level, session, startLive, stopLive } = controller.useChatLiveController({
     binding: 'fixture-repo:existing-chat:cli', messages, terminals: {}, busy: false, send, interrupt: vi.fn(),
     answerVisual: async () => 'The fixture result is ready.',
     transcript: entries => setMessages(current => [...new Map([...current, ...entries].map(entry => [entry.id, entry])).values()]),
-  };
-  return createElement(Button, props);
+  });
+  presentation.useManagedVoicePresentation({ state, stateRef, session, level, label: 'This chat', personalKey: true });
+  const [usage, setUsage] = useState('');
+  useEffect(() => {
+    const refresh = () => {
+      const seconds = session.current?.elapsedSeconds ?? session.current?.usage?.providerConnectedSeconds;
+      setUsage(seconds == null ? '' : formatUsage(seconds));
+    };
+    refresh();
+    if (!['connecting', 'live', 'closing'].includes(state)) return;
+    const timer = setInterval(refresh, 250);
+    return () => clearInterval(timer);
+  }, [state, session]);
+  const active = ['live', 'connecting', 'closing'].includes(state);
+  return createElement(Fragment, null,
+    createElement('button', { type: 'button', 'aria-pressed': active, onClick: () => {
+      void (['live', 'connecting', 'closing'].includes(stateRef.current) ? stopLive() : startLive('byok'));
+    } }),
+    createElement('span', { role: 'status' }, `${usage}${state === 'closed' ? ` · ${detail || 'Voice paused.'}` : ''}`));
 }
 async function start() {
   await act(async () => { root.render(createElement(Fragment, null, createElement(Conversation),
     provider.native ? createElement('div', { 'data-fixture-overlay': true }, createElement(Overlay)) : null)); await flush(); });
   await click(talk());
-  const choose = [...document.querySelectorAll('button')].find(button => button.textContent === 'Start Live with my key');
-  expect(choose).toBeDefined(); await click(choose!);
   await waitForAdmission(1);
   expect(talk().getAttribute('aria-pressed'), container.textContent ?? '').toBe('true');
 }
@@ -111,7 +131,9 @@ beforeEach(async () => {
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: stopTrack }] }) } });
   voice = await import('./route');
-  Button = (await import('@/components/desktop/thoughts/chat-panel/ManagedLiveButton')).ManagedLiveButton;
+  controller = await import('@/components/desktop/thoughts/chat-panel/useChatLiveController');
+  presentation = await import('@/components/desktop/thoughts/chat-panel/useManagedVoicePresentation');
+  formatUsage = (await import('@/lib/voice/managed-live/usage')).formatGptLiveUsage;
   Overlay = (await import('@/app/managed-chat-voice/page')).default;
   vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
     if (String(input) === 'https://api.openai.com/v1/live/sessions') {
@@ -136,7 +158,7 @@ afterEach(async () => {
   container.remove(); rmSync(directory, { recursive: true, force: true });
   vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers();
 });
-it('shows elapsed time and estimated voice cost matching recorded provider duration', async () => {
+it('reports elapsed time and estimated voice cost matching recorded provider duration', async () => {
   await start(); await advance(2000);
   emit({ type: 'session.usage.updated', event_id: 'usage-2', usage: { seconds: 2 } });
   await advance(10_000);
@@ -145,7 +167,6 @@ it('shows elapsed time and estimated voice cost matching recorded provider durat
   await advance(500);
   const status = container.querySelector('[role="status"]');
   expect(status?.textContent ?? '').toContain('0:12 · Est. $0.01');
-  expect((status as HTMLElement).style.clipPath).not.toBe('inset(50%)');
   await click(talk()); await advance(500);
   const final = receipt();
   expect(final.finalSeconds).toBe(12.5);
@@ -186,7 +207,7 @@ it('keeps queued narration alive, then closes after its quiet window', async () 
   await advance(29_000); expect(receipt().state).toBe('active');
   await advance(2000); expect(receipt().state).toBe('closed');
 });
-it('shows the session-limit notice and continues once without changing key or context', async () => {
+it('reports the session-limit notice and continues once without changing key or context', async () => {
   await start();
   for (let i = 1; i <= 15; i++) {
     await advance(19_000);
@@ -196,8 +217,6 @@ it('shows the session-limit notice and continues once without changing key or co
   await advance(8000);
   expect(receipt()).toMatchObject({ state: 'closed', finalSeconds: 300 });
   expect(container.textContent).toContain('5:00 · Est. $0.25 · Session limit reached.');
-  expect(talk().textContent).toContain('Continue');
-  expect(talk().getAttribute('aria-label')).toBe('Continue GPT Live for this conversation');
   await click(talk()); await waitForAdmission(2);
   expect(admissions[1].context).toContain('The fixture branch is clean.');
   expect(creations.every(item => item.authorization === 'Bearer sk-live-key-fixture')).toBe(true);

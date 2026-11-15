@@ -1,3 +1,4 @@
+import { isNewImplementation, readReviewBackpressure } from '../review-backpressure';
 import { machineLoadBlocker } from '@/lib/orchestrator/machine-load';
 import { listActiveLanes } from '@/lib/lane/registry';
 import { resolveParallelCapSync } from '@/lib/operator/defaults';
@@ -8,7 +9,7 @@ import { fetchUnreachableCooldownRetrySeconds } from '@/lib/runtime/fetch-unreac
 
 export interface DispatchQueueEntry {
   packetId: string;
-  reason: 'concurrency-limit' | 'runtime-concurrency-limit' | 'fetch-unreachable' | 'storage-admission' | 'scheduler-deferred';
+  reason: 'concurrency-limit' | 'runtime-concurrency-limit' | 'fetch-unreachable' | 'storage-admission' | 'scheduler-deferred' | 'review-backpressure';
   detail: string;
   limit: number;
   running: number;
@@ -26,6 +27,8 @@ export function missionDispatchQueue(state: OrchestratorMissionState): DispatchQ
     .filter((packet) => !packet.archivedAt && !packet.operatorStopped)
     .map<DispatchQueueEntry>((packet, index) => {
       const base = { packetId: packet.id, limit, running: active.length, position: index + 1, positionScope: 'mission' as const };
+      const pressure = isNewImplementation(packet) ? readReviewBackpressure() : null;
+      if (pressure?.reason) return { ...base, reason: 'review-backpressure', detail: pressure.reason };
       const retryInSeconds = fetchUnreachableCooldownRetrySeconds(packet.workspaceTargetPath!, {
         packetId: packet.id, stage: 'pre_lane_receipt',
       });

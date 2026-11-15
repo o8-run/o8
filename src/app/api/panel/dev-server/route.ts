@@ -1,3 +1,4 @@
+import { readJsonObject } from '@/lib/panel/read-json-object';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 export const dynamic = 'force-dynamic';
 
@@ -44,12 +45,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Starting a dev server is operator-only.' }, { status: 403 });
   }
   try {
-    const body = await req.json().catch(() => null) as {
+    const body = await readJsonObject<{
       repoPath: string;
       command: string;
       port?: number;
-    };
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    }>(req);
+    if (!body) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
 
@@ -147,8 +148,8 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Stopping a dev server is operator-only.' }, { status: 403 });
   }
   try {
-    const body = await req.json().catch(() => null) as { repoPath: string };
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    const body = await readJsonObject<{ repoPath: string }>(req);
+    if (!body) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     const id = `dev-${body.repoPath}`;

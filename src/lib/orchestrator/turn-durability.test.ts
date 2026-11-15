@@ -44,10 +44,8 @@ afterEach(() => {
 const REPO = '/tmp/repo';
 
 describe('orchestrator turn durability + reattach', () => {
-  it('routes desktop undo-send through the WebSocket entry point into durable transcript truncation', async () => {
-    const clientSource = readFileSync(join(process.cwd(), 'src/components/desktop/thoughts/useOrchestratorStream.ts'), 'utf-8');
+  it('routes undo-send through the WebSocket entry point into durable transcript truncation', async () => {
     const serverSource = readFileSync(join(process.cwd(), 'src/ws-server.ts'), 'utf-8');
-    expect(clientSource).toContain("type: 'orchestrator-undo-send'");
     expect(serverSource).toContain("case 'orchestrator-undo-send':");
     expect(serverSource).toContain('truncateMobileOrchestratorThreadFromMessage({');
 

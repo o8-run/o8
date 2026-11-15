@@ -110,6 +110,14 @@ async function measure(terminalDaemon) {
     if (!daemon.healthy || (originalPid && originalPid !== daemon.pid)) throw new Error('Healthy daemon was not reused');
     // Fresh state is saved by the shell only after its session/workspace load succeeds.
     JSON.parse(readFileSync(join(data, 'next-shell.json'), 'utf8'));
+    // A mapped process alone is insufficient: first-paint readiness must release the claim.
+    await until(() => {
+      try { execFileSync('flock', ['--nonblock', join(data, 'linux-desktop.lock'), '/usr/bin/true'], { env, stdio: 'ignore' }); return true; }
+      catch { return false; }
+    }, `${name} launch claim released after readiness`, 10_000);
+    const windowEnv = readFileSync(`/proc/${windows(data)[0]}/environ`, 'utf8').split('\0');
+    const libraryPath = windowEnv.find(value => value.startsWith('LD_LIBRARY_PATH=')) || '';
+    if (libraryPath.includes(installed)) throw new Error('Window inherited a bundled global library path');
     cli(env); // A repeated desktop launch must reuse this window.
     if (windows(data).length !== 1) throw new Error('Repeated launch duplicated the window');
     await delay(2_000);
@@ -143,7 +151,7 @@ async function measure(terminalDaemon) {
     await stop(reopened);
     const result = { case: name, connected: true, firstFrameMs, idleRssMiB: Math.round(Math.max(...rss) * 100) / 100,
       serverIdleRssMiB: Math.round(Math.max(...serverRss) * 100) / 100,
-      windowOwner, repeatedLaunchWindows: 1, reopened: true, daemonReused: true, bundledRuntime: true };
+      windowOwner, launchClaimReleased: true, bundledGlobalLibraryPath: false, repeatedLaunchWindows: 1, reopened: true, daemonReused: true, bundledRuntime: true };
     results.push(result);
     console.log(JSON.stringify(result));
   } finally {

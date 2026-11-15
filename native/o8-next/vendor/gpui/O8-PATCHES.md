@@ -1,4 +1,4 @@
-# Published GPUI 0.2.2 with local macOS scheduling changes
+# Published GPUI 0.2.2 with local platform changes
 
 Source: the crates.io `gpui` 0.2.2 package, Apache-2.0, checksum
 `979b45cfa6ec723b6f42330915a1b3769b930d02b2d505f9697f8ca602bee707`.
@@ -13,6 +13,9 @@ check, whatever its labels. To run it before pushing:
 `node scripts/next/check-surface-boundary.mjs --base origin/main --head HEAD --select-only`.
 
 Local changes:
+
+- `src/platform/linux/x11/client.rs`, `src/platform/linux/x11/window.rs`: select
+  an opaque visual without a compositor so software Vulkan can present to X11.
 
 - `src/platform/mac/frame_clock.rs`: a deterministic 100 ms idle policy.
 - `src/platform/mac/window.rs`: pause idle links, wake on invalidation and

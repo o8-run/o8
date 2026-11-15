@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -11,6 +11,15 @@ const bundleDir = mkdtempSync(path.join(tmpdir(), 'o8-heavy-cli-'));
 const bundle = path.join(bundleDir, 'o8.mjs');
 beforeAll(async () => { await build(cliBuildOptions({ outfile: bundle, version: 'test' })); }, 60_000);
 afterAll(() => rmSync(bundleDir, { recursive: true, force: true }));
+
+it('keeps the application database and the compiler out of the command-line bundle', () => {
+  // The lease runs on its own store. Reaching the default store pulls the whole server in:
+  // the bundle grew from about 3.5 MB to 34.9 MB and the release size gate refused the package.
+  expect(statSync(bundle).size).toBeLessThan(8 * 1024 * 1024);
+  const text = readFileSync(bundle, 'utf8');
+  expect(text).not.toContain('node_modules/typescript/lib/typescript.js');
+  expect(text).not.toContain('src/lib/leases/resource-lease-default-store.ts');
+});
 
 const children: ChildProcess[] = [];
 const dirs: string[] = [];

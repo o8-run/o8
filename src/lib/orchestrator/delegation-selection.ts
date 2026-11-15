@@ -1,6 +1,6 @@
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
-import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
+import { validateRequestedRuntime, resolveWorkerRouting, runtimeSelectionRefusal } from '@/lib/agents/routing';
 import { assertExecutionCarrierDispatchable } from '@/lib/runtimes/shared/execution-carrier-preflight';
 import { assertRuntimeDispatchable } from '@/lib/runtimes/shared/auth-detect';
 import { resolveEffortAliases, resolveEffortPin } from './effort-pin';
@@ -15,7 +15,7 @@ export async function resolveDelegationSelection(body: Record<string, unknown>, 
   const defaults = snapshot.values;
   let runtime;
   try { runtime = validateRequestedRuntime(body.runtime, defaults.defaultDispatchRuntime); }
-  catch (error) { throw new DelegationSelectionError('worker_not_enabled', (error as Error).message); }
+  catch (error) { const refusal = runtimeSelectionRefusal(error); throw new DelegationSelectionError(refusal.code, refusal.message); }
   if (!runtime || !configuredWorkerPool(snapshot).includes(runtime)) {
     throw new DelegationSelectionError('worker_not_enabled', 'This worker is not in the configured pool. Choose one from cortex_worker_catalog or enable it in Settings > Models.');
   }

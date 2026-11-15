@@ -1,3 +1,4 @@
+import type { ReviewRunEvidence, ReviewMode } from '@/lib/orchestrator/review-run-evidence';
 export const HARNESS_BUNDLE_SCHEMA = 'o8/harness-bundle/v1' as const;
 export const HARNESS_CAPABILITIES_SCHEMA = 'o8/harness-capabilities/v1' as const;
 
@@ -165,6 +166,9 @@ export interface HarnessEvaluationFinding {
 }
 
 export interface HarnessEvaluationResult {
+  runEvidence: ReviewRunEvidence;
+  reviewMode: ReviewMode;
+  verdictLabel: string;
   schema: 'o8/evaluate-diff/v1';
   verdict: HarnessEvaluationVerdict;
   summary: string;

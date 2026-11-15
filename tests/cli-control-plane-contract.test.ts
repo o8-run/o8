@@ -65,11 +65,22 @@ beforeAll(async () => {
       }));
       return;
     }
+    if (requestUrl.pathname === '/api/orchestrator/create-mission' && request.method === 'POST') {
+      response.writeHead(201, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ ok: true, result: { missionId: 'mission-held', packets: [{ id: 'pkt-held', title: 'held', wave: 1 }] } }));
+      return;
+    }
     if (requestUrl.pathname === '/api/orchestrator/dispatch' && request.method === 'POST') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
       response.writeHead(200, { 'Content-Type': 'application/json' });
+      // A mission with a lifecycle hold is answered as the server answers it, with an idempotency key.
       response.end(JSON.stringify({
         ok: true,
-        result: { initiated: true, async: true, missionId: null },
+        result: body.missionId === 'mission-held'
+          ? { initiated: false, async: true, missionId: 'mission-held', blocked: true }
+          : { initiated: true, async: true, missionId: null },
       }));
       return;
     }
@@ -122,5 +133,17 @@ describe('o8 CLI control-plane contracts', () => {
       schema: 'o8/cli/error/v1',
       error: { code: 'dispatch_not_initiated' },
     });
+  });
+
+  it('fails mission create --dispatch on a held dispatch the way mission dispatch does, after printing the mission', async () => {
+    const created = await runCli(['mission', 'create', '--title', 'held', '--body', 'x', '--repo', process.cwd(), '--dispatch']);
+    const dispatched = await runCli(['mission', 'dispatch', '--mission', 'mission-held']);
+
+    for (const result of [created, dispatched]) {
+      expect(result.exitCode, result.stderr).toBe(5);
+      expect(JSON.parse(result.stderr)).toMatchObject({ schema: 'o8/cli/error/v1', error: { code: 'dispatch_blocked' } });
+    }
+    expect(JSON.parse(created.stdout)).toMatchObject({ mission: { missionId: 'mission-held' }, dispatch: { blocked: true } });
+    expect(JSON.parse(created.stderr).error.message).toContain('o8 mission dispatch --mission mission-held');
   });
 });

@@ -396,6 +396,9 @@ export async function apiFetch<T = unknown>(
       : typeof json?.message === 'string'
         ? json.message
         : typeof errorText === 'string' ? errorText : '';
+    if ((json?.code ?? typedCode) === 'worker_not_enabled') {
+      throw new CliError('worker_not_enabled', detail, EXIT.INVALID_ARGS);
+    }
     if (typedCode === 'mission_store_busy') {
       throw new CliError(
         typedCode,

@@ -26,7 +26,7 @@ import {
 } from '@/lib/lane/agent-report';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import type { AgentReportReason, Lane, LaneEventActor } from '@/lib/lane/types';
-import { validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
+import { RuntimeSelectionError, validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { resolveEffortAliases, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -147,7 +147,7 @@ async function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof res
   try {
     const requestedRuntime = validateRequestedRuntime(input.requestedRuntime, resolveDefaultDispatchRuntimeSync());
     routing = resolveWorkerRouting({ ...input, requestedRuntime });
-  } catch (error) { throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
+  } catch (error) { if (error instanceof RuntimeSelectionError) throw error; throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
   const pin = await resolveRuntimeEffortPin({
     requestedEffort: input.requestedEffort,
     runtime: routing.selectedRuntime,
@@ -511,7 +511,7 @@ export async function claimTask(taskId: string, input: TaskClaimInput = {}): Pro
 export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}): Promise<TaskMutationResult> {
   if (runtimeOwnerRequired() && !isNativeCortexReader()) {
     try { validateRequestedRuntime(input.requestedRuntime); }
-    catch (error) { throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
+    catch (error) { if (error instanceof RuntimeSelectionError) throw error; throw new TaskMutationError((error as { status?: number }).status ?? 400, (error as Error).message); }
     return callTaskDispatchOwner(taskId, input);
   }
   const actor = normalizeActor(input.actor);

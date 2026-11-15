@@ -1,0 +1,108 @@
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { afterAll, expect, it, vi } from 'vitest';
+const location = vi.hoisted(() => ({ url: '' }));
+vi.mock('@/lib/pi/sdk/scripts', async original => {
+  const actual = await original<typeof import('@/lib/pi/sdk/scripts')>();
+  const resolve = (env = process.env) => (actual.piWriteHelperPath as (env: NodeJS.ProcessEnv, url: string) => string)(env, location.url);
+  return { ...actual, piWriteHelperPath: resolve, nativeProcessHelperPath: resolve };
+});
+import { execDependencyInstallProcess } from '@/lib/workspace/dependency-install-process';
+const root = mkdtempSync(join(tmpdir(), 'o8-helper-discovery-'));
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+function supervisorFixture(file: string, label = '') {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `#!/usr/bin/env node\nconsole.log(${JSON.stringify(label)});const fs=require("node:fs"),cp=require("node:child_process");const r=cp.spawnSync(process.argv[4],process.argv.slice(5),{stdio:"inherit"});fs.writeSync(3,JSON.stringify({confirmed:true}));process.exit(r.status??1);\n`);
+  chmodSync(file, 0o755);
+}
+
+it.each(['source', 'packaged', 'packaged-unmarked'])('supervises preparation from a packet cwd using %s server resources', async kind => {
+  const server = join(root, kind);
+  location.url = pathToFileURL(kind === 'source' ? join(server, 'src/lib/pi/sdk/scripts.ts') : join(server, 'Contents/Resources/server/helper.mjs')).href;
+  const helper = kind === 'source' ? join(server, 'src-tauri/sidecars/pi-write/target/release/o8-pi-write') : join(server, 'Contents/MacOS/o8-pi-write');
+  supervisorFixture(helper);
+  if (kind === 'source') writeFileSync(join(server, 'package.json'), JSON.stringify({ name: 'o8' }));
+  const packet = join(root, `packet-${kind}`); mkdirSync(packet);
+  const cwd = process.cwd();
+  vi.stubEnv('O8_PI_WRITE_BIN', ''); vi.stubEnv('O8_PACKAGED_APP', kind === 'packaged' ? '1' : '');
+  try {
+    process.chdir(packet);
+    const result = await execDependencyInstallProcess(process.execPath, ['-e', 'console.log("installer reached")'], { cwd: packet, timeout: 5000 });
+    expect(result.stdout).toContain('installer reached');
+  } finally { process.chdir(cwd); vi.unstubAllEnvs(); }
+});
+
+it('ignores a source-module sibling and keeps the source-release candidate', async () => {
+  const server = join(root, 'source-sibling');
+  const entry = join(server, 'src/lib/pi/sdk');
+  location.url = pathToFileURL(join(entry, 'scripts.ts')).href;
+  supervisorFixture(join(entry, 'o8-pi-write'), 'fixture sibling');
+  supervisorFixture(join(server, 'src-tauri/sidecars/pi-write/target/release/o8-pi-write'), 'fixture source release');
+  writeFileSync(join(server, 'package.json'), JSON.stringify({ name: 'o8' }));
+  vi.stubEnv('O8_PI_WRITE_BIN', ''); vi.stubEnv('O8_PACKAGED_APP', '');
+  try {
+    const result = await execDependencyInstallProcess(process.execPath, ['-e', 'console.log("installer reached")'], { cwd: server });
+    expect(result.stdout).toContain('fixture source release');
+    expect(result.stdout).not.toContain('fixture sibling');
+  } finally { vi.unstubAllEnvs(); }
+});
+
+it.each(['override', 'packaged-sibling', 'bundle', 'source'].flatMap(candidate =>
+  ['directory', 'symlink', 'non-executable'].map(kind => ({ candidate, kind }))))('refuses a $kind helper at the $candidate candidate', async ({ candidate, kind }) => {
+  const server = join(root, `invalid-${candidate}-${kind}`);
+  const packaged = candidate === 'packaged-sibling' || candidate === 'bundle';
+  const entry = packaged ? join(server, 'Contents/Resources/server') : join(server, 'src/lib/pi/sdk');
+  mkdirSync(entry, { recursive: true });
+  writeFileSync(join(server, 'package.json'), JSON.stringify({ name: 'o8' }));
+  location.url = pathToFileURL(join(entry, 'scripts.mjs')).href;
+  const candidatePath = candidate === 'override' ? join(server, 'override-helper')
+    : candidate === 'packaged-sibling' ? join(entry, 'o8-pi-write')
+      : candidate === 'bundle' ? join(server, 'Contents/MacOS/o8-pi-write')
+        : join(server, 'src-tauri/sidecars/pi-write/target/release/o8-pi-write');
+  mkdirSync(dirname(candidatePath), { recursive: true });
+  if (kind === 'directory') mkdirSync(candidatePath);
+  else if (kind === 'symlink') {
+    const target = join(server, 'linked-helper'); supervisorFixture(target); symlinkSync(target, candidatePath);
+  } else { supervisorFixture(candidatePath); chmodSync(candidatePath, 0o644); }
+  const marker = join(server, 'installer-executed');
+  vi.stubEnv('O8_PI_WRITE_BIN', candidate === 'override' ? candidatePath : '');
+  vi.stubEnv('O8_PACKAGED_APP', packaged ? '1' : '');
+  try {
+    await expect(execDependencyInstallProcess(process.execPath, ['-e', 'require("node:fs").writeFileSync(process.argv[1],"ran")', marker], { cwd: server }))
+      .rejects.toThrow(/helper.*missing/i);
+    expect(existsSync(marker)).toBe(false);
+  } finally { vi.unstubAllEnvs(); }
+});
+
+it('keeps packaged sibling ahead of the bundle helper', async () => {
+  const server = join(root, 'packaged-order');
+  const entry = join(server, 'Contents/Resources/server');
+  location.url = pathToFileURL(join(entry, 'helper.mjs')).href;
+  supervisorFixture(join(entry, 'o8-pi-write'), 'fixture packaged sibling');
+  supervisorFixture(join(server, 'Contents/MacOS/o8-pi-write'), 'fixture bundle helper');
+  vi.stubEnv('O8_PI_WRITE_BIN', ''); vi.stubEnv('O8_PACKAGED_APP', '1');
+  try {
+    const result = await execDependencyInstallProcess(process.execPath, ['-e', 'console.log("installer reached")'], { cwd: server });
+    expect(result.stdout).toContain('fixture packaged sibling');
+    expect(result.stdout).not.toContain('fixture bundle helper');
+  } finally { vi.unstubAllEnvs(); }
+});
+
+it('refuses a packet-controlled helper when trusted server resources are missing', async () => {
+  const server = join(root, 'missing-server'); mkdirSync(server);
+  writeFileSync(join(server, 'package.json'), JSON.stringify({ name: 'o8' }));
+  location.url = pathToFileURL(join(server, 'src/lib/pi/sdk/scripts.ts')).href;
+  const packet = join(root, 'decoy-packet'); mkdirSync(packet);
+  supervisorFixture(join(packet, 'src-tauri/sidecars/pi-write/target/release/o8-pi-write'));
+  const marker = join(root, 'untrusted-execution');
+  const cwd = process.cwd();
+  vi.stubEnv('O8_PI_WRITE_BIN', ''); vi.stubEnv('O8_PACKAGED_APP', '');
+  try {
+    process.chdir(packet);
+    await expect(execDependencyInstallProcess(process.execPath, ['-e', 'require("node:fs").writeFileSync(process.argv[1],"ran")', marker], { cwd: packet }))
+      .rejects.toThrow(/helper.*missing/i);
+    expect(existsSync(marker)).toBe(false);
+  } finally { process.chdir(cwd); vi.unstubAllEnvs(); }
+});

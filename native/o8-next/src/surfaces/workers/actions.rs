@@ -18,17 +18,22 @@ impl Card {
         }
         let base = self.task.lane["baseBranch"].as_str().map(str::to_owned);
         let client = self.client.clone();
+        let lane = self.task.lane_id();
+        let discard_allowed = self.task.can_discard_missing();
         self.diff = Some(cx.new(|cx| {
-            DiffSurface::new(
+            let mut view = DiffSurface::in_lane(
                 client,
                 Target::Worktree {
                     path,
                     base,
                     file: None,
                 },
+                (!lane.is_empty()).then_some(lane),
                 window,
                 cx,
-            )
+            );
+            view.allow_orphan_discard(discard_allowed);
+            view
         }));
         cx.notify();
     }

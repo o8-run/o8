@@ -135,6 +135,25 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
     const eventId = retained?.eventId ?? (!previous && currentSourceId ? `${currentSourceId}:${kind}${callId ? `:${callId}` : ''}` : undefined);
     return { nativeTimestamp: retained?.nativeTimestamp ?? currentNativeTimestamp, ...(eventId ? { eventId } : {}) };
   };
+  /**
+   * An older rollout writes each reply twice, as an `agent_message` event and
+   * as an assistant `message` item; a newer one writes only the item. Each
+   * form waiting for its twin is counted by text, so a reply is shown once
+   * while the same text in a later turn is still shown.
+   */
+  const unpaired = { event: new Map<string, number>(), item: new Map<string, number>() };
+  const pushAssistant = (ts: string, text: string, form: 'event' | 'item') => {
+    if (!text) return;
+    const key = text.replace(/\s+/g, ' ').trim();
+    const twin = unpaired[form === 'event' ? 'item' : 'event'];
+    const waiting = twin.get(key) ?? 0;
+    if (waiting > 0) {
+      twin.set(key, waiting - 1);
+      return;
+    }
+    unpaired[form].set(key, (unpaired[form].get(key) ?? 0) + 1);
+    out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...nativeId('assistant') });
+  };
   const nextSeq = () => (seq += 1);
   const nextSyntheticCallId = (prefix: string) => `${prefix}-synthetic-${syntheticCallSeq += 1}`;
 
@@ -249,11 +268,15 @@ export function createCodexEventNormalizer(fallbackTimestamp = new Date().toISOS
 
       // Assistant text
       if (type === 'event_msg' && payloadType === 'agent_message') {
-        const text = clip(
+        pushAssistant(ts, clip(
           typeof payload!.message === 'string' ? payload!.message : extractText(payload!.content),
           MAX_ASSISTANT_TEXT, true,
-        );
-        if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text, ...nativeId('assistant') });
+        ), 'event');
+        continue;
+      }
+
+      if (type === 'response_item' && payloadType === 'message' && readStr(payload, 'role') === 'assistant') {
+        pushAssistant(ts, clip(extractText(payload!.content), MAX_ASSISTANT_TEXT, true), 'item');
         continue;
       }
 

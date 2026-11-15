@@ -205,7 +205,7 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
         #[cfg(all(feature = "driver", unix))]
         crate::driver::listen(handle.into(), cx);
         cx.on_window_closed(|cx| {
-            if cx.windows().is_empty() {
+            if !crate::native_pill::has_real_windows(cx) {
                 cx.quit();
             }
         })

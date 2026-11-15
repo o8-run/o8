@@ -8,6 +8,8 @@ const fixture = vi.hoisted(() => ({
   statusReads: 0,
   connectionReads: 0,
   delayMs: 0,
+  leadAdvanceMs: 0,
+  leadFail: false,
   blocked: undefined as Promise<void> | undefined,
   fail: false,
 }));
@@ -37,6 +39,7 @@ type Status = {
     agents: Array<{ sessionKey: string; status: string }>;
     approvals: unknown[]; approvalCount: number; recentActivity: unknown[]; spendCapHits: unknown[];
     runtimeConnections: unknown;
+    leadsUnavailable?: boolean;
     snapshot: { capturedAt: string; ageMs: number; refreshAfterMs: number; maxAgeMs: number };
   };
 };
@@ -71,6 +74,8 @@ beforeEach(async () => {
   fixture.statusReads = 0;
   fixture.connectionReads = 0;
   fixture.delayMs = 0;
+  fixture.leadAdvanceMs = 0;
+  fixture.leadFail = false;
   fixture.blocked = undefined;
   fixture.fail = false;
   fixture.discover.mockReset().mockImplementation(async () => [{
@@ -82,6 +87,11 @@ beforeEach(async () => {
   invalidateRuntimeInventoryCache();
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = new URL(String(input));
+    if (url.pathname === '/api/orchestrator/lead') {
+      if (fixture.leadAdvanceMs) vi.mocked(Date.now).mockReturnValue(clock + fixture.leadAdvanceMs);
+      if (fixture.leadFail) return Response.json({ error: 'Fixture lead store unavailable' }, { status: 400 });
+      return Response.json({ cursor: 0, leads: [] });
+    }
     if (url.pathname === '/api/operator/status') {
       fixture.statusReads += 1;
       if (fixture.delayMs) await new Promise((resolve) => setTimeout(resolve, fixture.delayMs));
@@ -100,6 +110,35 @@ beforeEach(async () => {
 afterEach(() => { vi.restoreAllMocks(); invalidateRuntimeInventoryCache(); });
 
 describe('o8_status coalesced snapshot through /api/mcp (#4392)', () => {
+  it('refreshes expired runtime evidence after a failed lead read', async () => {
+    await call();
+    vi.mocked(Date.now).mockReturnValue(clock + 14_000);
+    fixture.leadAdvanceMs = 16_000;
+    fixture.leadFail = true;
+
+    const degraded = await call();
+
+    expect(degraded.data.leadsUnavailable).toBe(true);
+    expect(degraded.data.agents).not.toHaveLength(0);
+    expect(degraded.data.snapshot.ageMs).toBeLessThan(15_000);
+  });
+
+  it('rejects runtime observations that expire while live lead receipts are read', async () => {
+    await call();
+    const log = vi.spyOn(console, 'error');
+    fixture.leadAdvanceMs = 15_000;
+    const response = await POST(new Request('http://localhost/api/mcp', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'o8_status', arguments: {} } }),
+    }));
+    const body = await response.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('Failed to fetch status');
+    expect(log).toHaveBeenCalledWith('[o8-operator] o8_status failed: ',
+      expect.objectContaining({ message: expect.stringContaining('freshness bound') }));
+  });
+
   it('coalesces concurrent cold callers into one status and connection inventory refresh', async () => {
     let release!: () => void;
     fixture.blocked = new Promise<void>((resolve) => { release = resolve; });
