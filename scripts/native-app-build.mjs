@@ -120,7 +120,9 @@ function main() {
   const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
   const started = Date.now();
   if (!process.argv.includes('--skip-prebuild')) {
-    timed('prebuild', () => run('npm', ['run', 'tauri:prebuild']));
+    // The helper builds read this to produce both chips, as the classic build asked them to.
+    const env = { ...process.env, O8_TAURI_BUILD_TARGET: 'universal-apple-darwin' };
+    timed('prebuild', () => run('npm', ['run', 'tauri:prebuild'], { env }));
   }
   const server = join(root, 'out/server');
   if (!existsSync(join(server, 'server.js'))) throw new Error('out/server is missing; run the prebuild first.');
