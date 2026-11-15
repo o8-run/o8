@@ -3062,6 +3062,15 @@
       ]
     },
     {
+      "path": "tests/device-merge-publication-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/device-owner-handoff-paging.test.ts",
       "reasons": [
         "network-listener"
@@ -3623,6 +3632,22 @@
       "path": "tests/hermes-worker-real-path.test.ts",
       "reasons": [
         "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/hosting-publication-native-fixture-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/hosting-publication-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },

@@ -201,6 +201,7 @@ export async function POST(req: NextRequest) {
   }
   const command: LaneCommand = {
     ...body,
+    ...(body.verb === 'merge' ? { authorizingPrincipal: principal.role === 'operator' ? 'operator' as const : undefined, authorizingApprovalId: undefined } : {}),
     actor: principal.role === 'operator' ? (body.actor ?? 'user') : 'orchestrator',
   };
 

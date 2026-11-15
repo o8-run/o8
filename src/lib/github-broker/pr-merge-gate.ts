@@ -41,9 +41,10 @@ export function countPrChecks(pr: CheckRollup) {
   const pending = (c: (typeof rollup)[number]) => !c.conclusion || c.status?.toLowerCase() !== 'completed';
   const statuses = required ? pr.requiredStatuses ?? [] : [];
   const statusState = (s: { state: string }) => s.state.toUpperCase();
+  const missingChecks = required ? [...required].filter(name => !rollup.some(c => c.name === name) && !statuses.some(s => s.context === name)).length : 0;
   return {
     failedChecks: blocking.filter(failing).length + statuses.filter(s => ['FAILURE', 'ERROR'].includes(statusState(s))).length,
-    pendingChecks: blocking.filter(pending).length + statuses.filter(s => !['SUCCESS', 'FAILURE', 'ERROR'].includes(statusState(s))).length,
+    pendingChecks: blocking.filter(pending).length + statuses.filter(s => !['SUCCESS', 'FAILURE', 'ERROR'].includes(statusState(s))).length + missingChecks,
     optionalFailures: required ? [...new Set(rollup.filter(c => !required.has(c.name) && failed(c)).map(c => c.name))].sort() : [],
   };
 }
@@ -113,7 +114,7 @@ export async function assessPrMergeGate(repo: string, pr: Detail, discussion: Di
     checks: pr.statusCheckRollup, requiredChecks: pr.requiredChecks ?? null, requiredStatuses: pr.requiredStatuses ?? [],
     mergeQueue: pr.mergeQueue ?? null, inMergeQueue: pr.inMergeQueue ?? false, checksUnavailable: pr.checksUnavailable, reviewsIncomplete: discussion.reviewsIncomplete,
     reviewDecision: pr.reviewDecision, reviews: reviews.map(r => [r.id, r.state]), membership, gates: checks })).digest('hex');
-  // Only running required checks may stand between this PR and the queue; a failure, a missing
+  // Only pending required checks may stand between this PR and the queue; a failure, a missing
   // check list or any other gate still refuses.
   const waitingOnly = !pr.checksUnavailable && failedChecks === 0;
   return { repo, number: pr.number, headSha: pr.headSha, baseSha: pr.baseSha, baseRefName: pr.baseRefName,
@@ -132,9 +133,10 @@ export async function assertPrMergeAllowed(repo: string, number: number, head: s
   try {
   const comments = fetchGitHubPullRequestComments(repo, number);
   const [pr, discussion] = await Promise.all([fetchGitHubPullRequestDetail(repo, number,
-    comments.then(c => [...c.reviews].reverse().find(r => r.state && r.state !== 'COMMENTED')?.state ?? null)), comments]);
+    comments.then(c => [...c.reviews].reverse().find(r => r.state && r.state !== 'COMMENTED')?.state ?? null), 'interactive', true), comments]);
   const gate = await assessPrMergeGate(repo, pr, discussion);
   const changed = Boolean(expectedSnapshot && expectedSnapshot !== gate.snapshot) || head !== pr.headSha;
-  if (changed || !(action === 'merge' ? gate.allowed : gate.autoMergeAllowed) || !pr.allowedMergeMethods.includes(method as 'merge' | 'squash' | 'rebase')) throw new PrMergeRefused(gate, changed);
+  if (changed || !((action === 'merge' && pr.mergeQueue !== true) ? gate.allowed : gate.autoMergeAllowed) || !pr.allowedMergeMethods.includes(method as 'merge' | 'squash' | 'rebase')) throw new PrMergeRefused(gate, changed);
+  return { gate, pr };
   } catch (error) { if (error instanceof PrMergeRefused) throw error; throw new PrMergeRefused(null, false); }
 }

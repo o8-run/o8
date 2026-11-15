@@ -97,6 +97,8 @@ export interface ApprovalReferee {
 }
 
 export interface ApprovalAuditEvent {
+  authorizingPrincipal?: 'operator' | 'device';
+  approvedHeadSha?: string;
   runEvidence?: import('@/lib/orchestrator/review-run-evidence').ReviewRunEvidence;
   runEvidenceWarning?: string;
   reviewMode?: import('@/lib/orchestrator/review-run-evidence').ReviewMode;
@@ -225,6 +227,8 @@ export interface ApprovalRecord {
   resolution?: {
     action: Exclude<ApprovalStatus, 'pending'>;
     actor: ApprovalActor;
+    authorizingPrincipal?: 'operator' | 'device';
+    approvedHeadSha?: string;
     note?: string;
     /** Unique compare-and-swap owner for post-resolution continuation work. */
     claimId?: string;
