@@ -3,7 +3,7 @@
 The classic web page archive for #5243 starts at restore commit
 `ed8f01ffb6506432b69b85ba6248964e49804af5`. Recover an archived file from that
 commit with `git restore --source=<restore-commit> -- <path>` on a new branch.
-All `src/app/api/**` files remain unchanged. Phone APIs, the WS server, the MCP
+The `src/app/api/**` endpoints remain available. Phone APIs, the WS server, the MCP
 server, the CLI, and shared desktop modules remain available.
 
 The source inventory at that commit has 32 pages (20 preview pages). This archive
@@ -23,7 +23,7 @@ can remain when retained pages import them; they do not create routes.
 | `/point-overlay` | `src-tauri/src/point_overlay.rs` hosts the pointer overlay. |
 | `/spatial-ink` | `src-tauri/src/spatial_ink_window.rs` hosts the ink overlay. |
 | `/agent-partials` | `src-tauri/src/agent_partials_window.rs` hosts partial agent output. |
-| `/mobile` | Static notice. Push notification payloads still carry `/mobile?view=...` links. The native phone app loads no web page. |
+| `/mobile` | Static notice for old bookmarks and web installs. Push payloads no longer link here. The native phone app loads no web page. |
 
 Removed pages:
 
