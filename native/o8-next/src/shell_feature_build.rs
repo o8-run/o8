@@ -17,6 +17,10 @@ fn main() {
     let mut output = String::new();
     for path in &modules {
         let name = path.file_stem().unwrap().to_str().unwrap();
+        // A deleted feature file leaves no newer timestamp in the directory, so
+        // a restored build cache would keep the old list. A missing tracked
+        // path always reruns this script.
+        println!("cargo:rerun-if-changed=src/shell_features/{name}.rs");
         assert!(
             name.as_bytes()[0].is_ascii_lowercase()
                 && name
