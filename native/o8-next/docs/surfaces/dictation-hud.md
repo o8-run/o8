@@ -39,17 +39,21 @@ loop, in a second panel. HUD frames report no clicks.
 
 Exactly one surface draws, and the web always starts the session. The page
 paints every session from its first frame, as without the flag, so feedback
-appears within the paint grace of Fn whatever the native side is doing. Its
-first native frame of a session is sent unarmed: the panel acknowledges it and
-stays hidden. On that acknowledgement the hook reports the session `drawn`, the
-web bar is removed without its exit fade, and the next frame, sent only after
-that render has committed, is armed; the panel then shows at full opacity
-without its own entrance. So the handover never shows both bars, and costs one
-pipe round trip during which only the web bar is on screen.
+appears within the paint grace of Fn whatever the native side is doing. Frames
+go to the panel at once. A panel that is not on screen yet places itself, lets
+GPUI draw and present that frame, then orders front and only then
+acknowledges (keep-alive frames in between are held for the same receipt). On
+that acknowledgement the hook reports the session `drawn` and the web bar is
+removed without its exit fade; the panel appears at full opacity without its
+own entrance. Both bars are on screen at the same place for one pipe round
+trip and a React commit; neither surface is ever blank.
 
 If a frame misses its deadline or the native side answers anything but ok,
 the page paints the same session at once and sends a best-effort immediate
 release naming the session, so a responsive panel hides without its exit fade.
+A session retired because a newer one started is also released immediately,
+so the old bar never fades under the new session's web bar; a session that
+simply ends fades out over 160 ms.
 If that release is lost the panel hides itself when its 750 ms lease runs out.
 A native main thread hung with a frame on screen cannot be hidden from the web
 (the dock shares this; tracked on #6145). The next session starts on the web
@@ -81,7 +85,13 @@ binary makes no Accessibility query. The route rejects a rectangle outside
 ±100000 points or larger than 2048×1024. A placement for the other surface is
 ignored. Without an anchor for the session the frame stays idle and the web
 keeps drawing; the native panel never shows an unplaced frame, so there is no
-fallback position and no jump.
+fallback position and no jump. Native keeps the rectangle on one screen: the
+one it overlaps most, or the nearest, never the gap between displays; a capped
+height keeps the shell's top edge.
+
+Once its exit fade settles the panel drops the session's content and requests
+no further frames, so an ordered-out panel never redraws and the next session
+never shows the previous one's last frame.
 
 ## Window posture
 
@@ -96,7 +106,7 @@ activation, so the paste target never changes. It does not keep the shell alive.
 | Web HUD | Native | Remaining difference |
 | --- | --- | --- |
 | Caret: 420 wide, radius 14, padding 10/14; legacy: 680 wide, radius 22, padding 16/26, bottom-centred | Same geometry inside the shell's 460×138 or 820×220 frame | None known |
-| Glass: rgba(9,10,13,0.82) with a 22 px backdrop blur; Solid: rgb(20,22,28) | Same tint and solid fill; glass blurs the backdrop with GPUI's own blurred-window view cut to the bar's painted bounds and corner radius and faded with it (no toolkit change) | The system material's blur radius and saturation, not exactly 22 px / 140%; needs the live check |
+| Glass: rgba(9,10,13,0.82) with a 22 px backdrop blur; Solid: rgb(20,22,28) | Same tint and solid fill | No backdrop blur behind the glass tint (#6179): it was cut because it could not be shown correct without a live check |
 | 1 px white 12% border, two-layer shadow | Same | None known |
 | Symon mark (active ring while listening), uppercase `Symon · …` label at 10 px | Same mark asset and wording (computed by the page), 0.4 px tracking | None known |
 | 30-bar Symon waveform at 90 px from the measured level | Same bars, weights, gain and gradient colours; each level eases over 70 ms (none under reduced motion) | Ease curve (0.22, 1, 0.36, 1) instead of (0.16, 1, 0.3, 1) |
@@ -108,17 +118,20 @@ activation, so the paste target never changes. It does not keep the shell alive.
 ## Tests
 
 - native_hud_tests.rs: phases and visibility, malformed and dock-shaped frames,
-  unarmed and unplaced frames staying hidden, takeover at full opacity, lease
+  unplaced frames staying hidden, takeover at full opacity, lease
   expiry without a fade, stale releases, AppKit conversion and clamping, the
-  squiggle dash, the 70 ms level easing, and an off-screen draw of every phase
-  on both surfaces with glass, solid and reduced motion, with the measured bar
-  bounds the blur follows.
+  squiggle dash, the 70 ms level easing, no animation and no content after a
+  release or lease expiry from a processing state, one-screen clamping, and an
+  off-screen draw of every phase on both surfaces with glass, solid and
+  reduced motion.
 - native-hud-feed.test.ts: phase mapping, wording and level clamping, claim and
   grace yield, placement filtering, freshness and limits, the per-session flag
-  check, web-first handover with a delayed acknowledgement, release on a claim,
-  and web takeover with an immediate release after acknowledgements stop.
+  check, the web bar staying until native acknowledges a frame it has drawn on
+  screen, release on a claim, immediate release when a newer session retires
+  one, and web takeover with an immediate release after acknowledgements stop.
 - page-placement.test.ts: the real event order (placement, then start) reaches
-  the native frame.
+  the native frame; an anchor older than 1 s is not used; an anchor arriving
+  after the start event is.
 - route.test.ts: the HUD uses only its own flag and frame type, and
   out-of-range placements are rejected.
 
@@ -134,7 +147,9 @@ activation, so the paste target never changes. It does not keep the shell alive.
    words. Release: Transcribing/Polishing, then the pasted words for about a
    second, then it fades. The words paste into that field and keyboard focus
    never moves to o8. Only one HUD is visible throughout, with no jump or
-   flicker when the native panel takes over a few milliseconds in.
+   blank or flicker when the native panel takes over a few milliseconds in.
+   Start a second dictation right after the first: the first bar disappears
+   at once, with no fade under the new one.
 5. Click where the HUD is drawn while it is visible: the click reaches the app
    underneath.
 6. Repeat in a full-screen app and on another Space, and with the caret on a
@@ -143,8 +158,7 @@ activation, so the paste target never changes. It does not keep the shell alive.
    bottom-centred (above the o8 window's bottom chrome when o8 is focused) and
    shows m:ss after 10 s of listening.
 8. Switch the o8 appearance between Glass and Solid: the bar switches between glass
-   and solid on the next session. In glass, the app behind the bar is blurred
-   only inside the rounded bar, and the blur fades out with it. With the system Reduce motion setting on, it
+   and solid on the next session. With the system Reduce motion setting on, it
    fades without the rise and the polishing track does not travel.
 9. Hold Right-Option with the o8 canvas composer visible: the composer claims
    the partials and neither HUD paints.

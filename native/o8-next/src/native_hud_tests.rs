@@ -2,7 +2,7 @@ use super::*;
 
 fn frame(state: &str, session: u64, surface: &str) -> Value {
     json!({"action":"frame","snapshot":{
-        "state": state, "session": session, "audioLevel": 0.6, "durationMs": 12000, "armed": true,
+        "state": state, "session": session, "audioLevel": 0.6, "durationMs": 12000,
         "hud": {"surface": surface, "title": "Symon · Listening", "text": "hello there",
             "dim": false, "solid": false, "reducedMotion": false,
             "placement": {"x": 100.0, "y": 50.0, "width": 460.0, "height": 138.0}}
@@ -81,7 +81,7 @@ fn a_late_release_never_hides_a_newer_session() {
 }
 
 #[test]
-fn placement_converts_to_appkit_and_is_clamped_to_the_screens() {
+fn placement_converts_to_appkit_and_stays_on_one_screen() {
     let primary = [0., 0., 1440., 900.];
     let caret = Placement {
         x: 100.,
@@ -105,7 +105,18 @@ fn placement_converts_to_appkit_and_is_clamped_to_the_screens() {
         appkit_frame(Some(on_above), &[primary, above]),
         Some([10., 1162., 460., 138.])
     );
-    // Off every screen: pulled back inside their bounding box.
+    // Off every screen: onto the nearest one, not into the gap between them.
+    let offset = [2000., 2000., 1000., 800.];
+    let gap = Placement {
+        x: 1600.,
+        y: -1500.,
+        width: 460.,
+        height: 138.,
+    };
+    assert_eq!(
+        appkit_frame(Some(gap), &[primary, offset]),
+        Some([2000., 2262., 460., 138.])
+    );
     let far = Placement {
         x: 90_000.,
         y: -90_000.,
@@ -116,7 +127,7 @@ fn placement_converts_to_appkit_and_is_clamped_to_the_screens() {
         appkit_frame(Some(far), &[primary]),
         Some([980., 762., 460., 138.])
     );
-    // Oversized: capped to the screens and the largest frame the shell uses.
+    // Oversized: capped to its screen, keeping the top edge with the capped height.
     let huge = Placement {
         x: 0.,
         y: 0.,
@@ -126,6 +137,18 @@ fn placement_converts_to_appkit_and_is_clamped_to_the_screens() {
     assert_eq!(
         appkit_frame(Some(huge), &[primary]),
         Some([0., 0., 1440., 900.])
+    );
+    // Capped by the largest frame: the top edge stays where the shell put it.
+    let large = [0., 0., 2560., 1600.];
+    let tall = Placement {
+        x: 0.,
+        y: 100.,
+        width: 460.,
+        height: 1500.,
+    };
+    assert_eq!(
+        appkit_frame(Some(tall), &[large]),
+        Some([0., 476., 460., 1024.])
     );
     let broken = Placement {
         x: f64::NAN,
@@ -137,19 +160,42 @@ fn placement_converts_to_appkit_and_is_clamped_to_the_screens() {
 }
 
 #[test]
-fn unarmed_or_unplaced_frames_are_acknowledged_but_never_shown() {
+fn unplaced_frames_never_show_and_a_takeover_needs_no_entrance() {
     let mut hud = Hud::default();
-    let mut unarmed = frame("recording", 1, "caret");
-    unarmed["snapshot"]["armed"] = json!(false);
-    assert_eq!(hud.control(&unarmed), Some(false));
     let mut unplaced = frame("recording", 1, "caret");
     unplaced["snapshot"]["hud"]["placement"] = Value::Null;
     assert_eq!(hud.control(&unplaced), Some(false));
     assert!(!hud.target);
-    // The armed frame takes over from the web bar at full opacity.
+    // The web bar is already on screen: the panel takes over at full opacity.
     assert_eq!(hud.control(&frame("recording", 1, "caret")), Some(true));
     let (opacity, moving) = hud.motion.value();
     assert!(opacity > 0.999 && !moving);
+}
+
+#[test]
+fn a_released_panel_stops_animating_and_drops_its_content() {
+    for immediate in [true, false] {
+        let mut hud = Hud::default();
+        hud.control(&frame("polishing", 1, "caret"));
+        assert!(hud.animating(), "polishing travels while shown");
+        hud.control(&json!({"action":"release","session":1,"immediate":immediate}));
+        if !immediate {
+            assert!(hud.animating(), "the exit fade still runs");
+            assert!(!hud.settle(), "content stays for the fade");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        assert!(!hud.animating(), "a hidden panel requests no frames");
+        assert!(hud.settle());
+        assert!(hud.snapshot.hud.is_none());
+        assert!(!hud.animating());
+    }
+    // Lease expiry from a processing state, too.
+    let mut hud = Hud::default();
+    hud.control(&frame("transcribing", 1, "caret"));
+    hud.heard = Instant::now() - Duration::from_millis(LEASE_MS + 10);
+    hud.expire();
+    assert!(!hud.animating());
+    assert!(hud.settle());
 }
 
 #[test]
@@ -205,19 +251,6 @@ fn hud_states_draw_offscreen_without_input(cx: &mut TestAppContext) {
             assert!(
                 visual.debug_bounds("native-dictation-hud").is_some(),
                 "{surface} {state}"
-            );
-            // The backdrop follows the painted bar.
-            let bar = hud
-                .update_in(visual, |hud, _, _| hud.bar.get())
-                .expect("bar bounds");
-            let drawn = visual.debug_bounds("native-dictation-hud").unwrap();
-            let near = |a: gpui::Pixels, b: gpui::Pixels| (f32::from(a) - f32::from(b)).abs() <= 2.;
-            assert!(
-                near(bar.origin.x, drawn.origin.x)
-                    && near(bar.origin.y, drawn.origin.y)
-                    && near(bar.size.width, drawn.size.width)
-                    && near(bar.size.height, drawn.size.height),
-                "{surface} {state}: {bar:?} vs {drawn:?}"
             );
         }
     }

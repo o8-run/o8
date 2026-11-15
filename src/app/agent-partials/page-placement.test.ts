@@ -48,3 +48,33 @@ it('carries the anchor the shell sends just before the start event into the nati
   expect(frames.length).toBeGreaterThan(0);
   expect(frames.at(-1)?.snapshot?.hud).toMatchObject({ surface: 'caret', placement: { x: 300, y: 200, width: 460, height: 138 } });
 });
+
+async function mountPage() {
+  const { default: AgentPartialsPage } = await import('./page');
+  await act(async () => { root.render(createElement(AgentPartialsPage)); });
+  await tick(50);
+}
+const start = async () => {
+  await emit('o8:stt-event', { type: 'system-start', origin: 'system', hud: true, surface: 'caret', mode: 'dictation' });
+  await emit('o8:stt-event', { type: 'status', origin: 'system', text: 'listening' });
+};
+const nativeFrames = () => bodies.filter(body => body.action === 'frame');
+
+it('never uses an anchor left from more than a second before the session', async () => {
+  await mountPage();
+  await emit('o8:agent-partials-placement', { surface: 'caret', x: 300, y: 200, width: 460, height: 138 });
+  await tick(1500);
+  await start(); await tick(300);
+  // No anchor for this session: native gets nothing to draw and the web keeps the bar.
+  expect(nativeFrames()).toHaveLength(0);
+  expect(document.querySelector('[role="status"]')).not.toBeNull();
+});
+
+it('applies an anchor that arrives after the start event', async () => {
+  await mountPage();
+  await start(); await tick(100);
+  expect(nativeFrames()).toHaveLength(0);
+  await emit('o8:agent-partials-placement', { surface: 'caret', x: 500, y: 90, width: 460, height: 138 });
+  await tick(200);
+  expect(nativeFrames().at(-1)?.snapshot?.hud).toMatchObject({ placement: { x: 500, y: 90 } });
+});

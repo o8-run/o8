@@ -124,7 +124,7 @@ describe('HUD feed through the shared dock hook', () => {
     expect(drawn).toBe(true);
   });
 
-  it('paints on the web until the first frame of the session is acknowledged, then arms native', async () => {
+  it('keeps the web bar until native acknowledges a frame it has drawn on screen, with no blank in between', async () => {
     await render(idle()); expect(native).toBe(true);
     const pending: ((value: Record<string, unknown>) => void)[] = [];
     vi.mocked(fetch).mockImplementation((_url, init) => {
@@ -132,19 +132,31 @@ describe('HUD feed through the shared dock hook', () => {
       return new Promise<Response>(resolve => { pending.push(value => resolve(new Response(JSON.stringify(value)))); });
     });
     await render(nativeHudFrame(base)); await tick(5);
+    // The visible frame goes out at once while the web still paints.
     expect(sent('frame')).toHaveLength(1);
-    expect(sent('frame')[0]).toMatchObject({ snapshot: { armed: false } });
+    expect(sent('frame')[0]).toMatchObject({ snapshot: { state: 'recording', hud: { placement: { x: 40 } } } });
+    await tick(300);
     expect(drawn).toBe(false);
     expect(webHudPaints(listening, false, true, drawn)).toBe(true);
+    // Native acknowledges once it is on screen; only then does the web bar go.
     await act(async () => { pending.shift()!({ native: true, enabled: true }); });
     expect(drawn).toBe(true);
     expect(webHudPaints(listening, false, true, drawn)).toBe(false);
-    await tick(5);
-    expect(sent('frame').at(-1)).toMatchObject({ snapshot: { armed: true, state: 'recording', hud: { placement: { x: 40 } } } });
-    await act(async () => { pending.shift()!({ native: true, enabled: true }); });
     // A new session starts on the web again.
     session = 2; await render(nativeHudFrame(base));
     expect(drawn).toBe(false);
+  });
+
+  it('hides a session at once when a newer one retires it', async () => {
+    await render(idle()); await render(nativeHudFrame(base)); await tick(150);
+    expect(drawn).toBe(true);
+    // The next session is in its paint grace (idle) when the old one retires.
+    session = 2; await render(idle()); await tick(10);
+    expect(sent('release').at(-1)).toMatchObject({ session: 1, immediate: true });
+    // A session that simply ends fades out.
+    await render(nativeHudFrame(base)); await tick(150);
+    await render(idle()); await tick(10);
+    expect(sent('release').at(-1)).toMatchObject({ session: 2, immediate: false });
   });
 
   it('releases when a claim lands', async () => {

@@ -49,17 +49,12 @@ pub(crate) struct HudSnapshot {
     pub duration_ms: u64,
     #[serde(default)]
     pub hud: Option<HudDetail>,
-    /// Sent once the web has stopped painting this session; earlier frames
-    /// are acknowledged but stay hidden, so the two never show together.
-    #[serde(default)]
-    pub armed: bool,
 }
 impl HudSnapshot {
-    /// Only an armed, placed, known dictation phase ever becomes visible: the
-    /// panel never shows somewhere the shell did not anchor it.
+    /// Only a placed, known dictation phase ever becomes visible: the panel
+    /// never shows somewhere the shell did not anchor it.
     pub fn visible(&self) -> bool {
-        self.armed
-            && self.hud.as_ref().is_some_and(|hud| hud.placement.is_some())
+        self.hud.as_ref().is_some_and(|hud| hud.placement.is_some())
             && matches!(
                 self.state.as_str(),
                 "requesting-mic" | "recording" | "transcribing" | "polishing" | "success" | "error"
@@ -70,9 +65,10 @@ impl HudSnapshot {
     }
 }
 
-/// The AppKit frame (bottom-left origin) for a top-left placement, clamped
-/// into the bounding box of the screens and to the largest frame the shell
-/// uses. `screens` are AppKit frames, the primary first; None without either.
+/// The AppKit frame (bottom-left origin) for a top-left placement, kept on one
+/// screen: the one the rectangle overlaps most, or the nearest when it overlaps
+/// none, and no larger than that screen or the largest frame the shell uses.
+/// `screens` are AppKit frames, the primary first; None without either.
 pub(crate) fn appkit_frame(placement: Option<Placement>, screens: &[[f64; 4]]) -> Option<[f64; 4]> {
     let p = placement?;
     let finite = |values: &[f64]| values.iter().all(|v| v.is_finite());
@@ -80,29 +76,39 @@ pub(crate) fn appkit_frame(placement: Option<Placement>, screens: &[[f64; 4]]) -
         return None;
     }
     let primary = *screens.first()?;
-    let screens: Vec<_> = screens
-        .iter()
-        .filter(|s| finite(&s[..]) && s[2] > 0. && s[3] > 0.)
-        .collect();
-    if screens.is_empty() || !finite(&primary) {
+    if !finite(&primary) {
         return None;
     }
-    let left = screens.iter().map(|s| s[0]).fold(f64::INFINITY, f64::min);
-    let bottom = screens.iter().map(|s| s[1]).fold(f64::INFINITY, f64::min);
-    let right = screens
+    // The requested rectangle in AppKit coordinates, top edge kept.
+    let top = primary[1] + primary[3] - p.y;
+    let wanted = [p.x, top - p.height, p.width, p.height];
+    let overlap = |s: &[f64; 4]| {
+        let w = (wanted[0] + wanted[2]).min(s[0] + s[2]) - wanted[0].max(s[0]);
+        let h = (wanted[1] + wanted[3]).min(s[1] + s[3]) - wanted[1].max(s[1]);
+        w.max(0.) * h.max(0.)
+    };
+    let distance = |s: &[f64; 4]| {
+        let dx = (s[0] - (wanted[0] + wanted[2]))
+            .max(wanted[0] - (s[0] + s[2]))
+            .max(0.);
+        let dy = (s[1] - (wanted[1] + wanted[3]))
+            .max(wanted[1] - (s[1] + s[3]))
+            .max(0.);
+        dx * dx + dy * dy
+    };
+    let screen = screens
         .iter()
-        .map(|s| s[0] + s[2])
-        .fold(f64::NEG_INFINITY, f64::max);
-    let top = screens
-        .iter()
-        .map(|s| s[1] + s[3])
-        .fold(f64::NEG_INFINITY, f64::max);
-    let width = p.width.min(MAX_SIZE.0).min(right - left);
-    let height = p.height.min(MAX_SIZE.1).min(top - bottom);
-    let y = primary[1] + primary[3] - p.y - p.height;
+        .filter(|s| finite(&s[..]) && s[2] > 0. && s[3] > 0.)
+        .max_by(|a, b| {
+            overlap(a)
+                .total_cmp(&overlap(b))
+                .then(distance(b).total_cmp(&distance(a)))
+        })?;
+    let width = p.width.min(MAX_SIZE.0).min(screen[2]);
+    let height = p.height.min(MAX_SIZE.1).min(screen[3]);
     Some([
-        p.x.clamp(left, right - width),
-        y.clamp(bottom, top - height),
+        p.x.clamp(screen[0], screen[0] + screen[2] - width),
+        (top - height).clamp(screen[1], screen[1] + screen[3] - height),
         width,
         height,
     ])
@@ -115,10 +121,9 @@ pub(crate) struct Hud {
     shown: bool,
     target: bool,
     level: marks::LevelEase,
-    /// The bar's window bounds from the last paint, for the backdrop blur.
-    pub(super) bar: std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
-    /// The blur view's last frame, corner radius and alpha (macOS).
-    pub(super) blur: Option<([f64; 4], f64, f64)>,
+    /// Receipts held until the panel has drawn and presented its first frame
+    /// and is on screen; the web keeps its bar until then.
+    pub(super) awaiting: Vec<String>,
     pub(super) presentation: Presentation,
 }
 impl Default for Hud {
@@ -130,8 +135,7 @@ impl Default for Hud {
             shown: false,
             target: false,
             level: marks::LevelEase::default(),
-            bar: Default::default(),
-            blur: None,
+            awaiting: Vec::new(),
             presentation: Presentation::default(),
         }
     }
@@ -157,6 +161,28 @@ impl Hud {
             self.apply(HudSnapshot::default());
             self.motion = crate::motion::Transition::settled(160, false);
         }
+    }
+    /// Whether a render must ask for another frame: only while the panel is
+    /// shown or fading, never for a hidden panel.
+    pub(crate) fn animating(&self) -> bool {
+        let (_, moving) = self.motion.value();
+        let Some(hud) = self.snapshot.hud.as_ref() else {
+            return false;
+        };
+        let processing = matches!(self.snapshot.state.as_str(), "transcribing" | "polishing");
+        moving
+            || self.target
+                && (self.level.value(hud.reduced_motion).1 || processing && !hud.reduced_motion)
+    }
+    /// Once the exit fade has settled, drop the last session's content so a
+    /// hidden panel draws nothing and the next one never shows it. Returns
+    /// whether anything was cleared.
+    pub(crate) fn settle(&mut self) -> bool {
+        if self.target || self.motion.value().1 || self.snapshot.hud.is_none() {
+            return false;
+        }
+        self.snapshot = HudSnapshot::default();
+        true
     }
     /// The dock's presentation contract: prepare, frame, release. Returns
     /// whether the panel shows, or None for a malformed control.
@@ -202,15 +228,15 @@ fn white(alpha: f32) -> gpui::Rgba {
 
 impl Render for Hud {
     fn render(&mut self, w: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let (opacity, moving) = self.motion.value();
+        let (opacity, _) = self.motion.value();
         let root = div().size_full().flex();
         let Some(hud) = self.snapshot.hud.clone() else {
             return root;
         };
         let state = self.snapshot.state.as_str();
         let processing = matches!(state, "transcribing" | "polishing");
-        let (level, easing) = self.level.value(hud.reduced_motion);
-        if moving || easing || processing && !hud.reduced_motion {
+        let (level, _) = self.level.value(hud.reduced_motion);
+        if self.animating() {
             w.request_animation_frame();
         }
         let caret = self.snapshot.caret();
@@ -305,15 +331,6 @@ impl Render for Hud {
                 },
             ])
             .font_family(crate::theme::current().font_ui)
-            .child({
-                // Measures the bar each paint so the backdrop blur follows it.
-                let cell = self.bar.clone();
-                gpui::canvas(move |bounds, _, _| cell.set(Some(bounds)), |_, _, _, _| {})
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-            })
             .child(header)
             .child(transcript);
         if caret {
@@ -395,7 +412,39 @@ pub(super) fn deliver(
                 return reply(false);
             };
             #[cfg(target_os = "macos")]
-            macos::present_hud(window, show, &view, cx);
+            {
+                let on_screen = view.read(cx).presentation.visible;
+                if !show || on_screen {
+                    macos::present_hud(window, show, &view, cx, true);
+                    // A release also settles anything held for a reveal.
+                    if !show {
+                        for held in view.update(cx, |hud, _| std::mem::take(&mut hud.awaiting)) {
+                            crate::app_parent::browser_result(&held, json!({"ok":true}));
+                        }
+                    }
+                } else {
+                    // Place it, let GPUI draw and present this frame, and only
+                    // then order the panel front and acknowledge: until that
+                    // reply the web bar stays up, so neither surface is blank.
+                    macos::present_hud(window, true, &view, cx, false);
+                    let first = view.update(cx, |hud, _| {
+                        hud.awaiting.push(reply_id.clone());
+                        hud.awaiting.len() == 1
+                    });
+                    if first {
+                        let view = view.downgrade();
+                        window.on_next_frame(move |window, _| {
+                            window.on_next_frame(move |window, cx| {
+                                if let Some(view) = view.upgrade() {
+                                    reveal(window, &view, cx);
+                                }
+                            });
+                        });
+                    }
+                    let _ = WAKE.0.try_send(());
+                    return;
+                }
+            }
             #[cfg(not(target_os = "macos"))]
             let _ = (window, show);
             let _ = WAKE.0.try_send(());
@@ -405,6 +454,17 @@ pub(super) fn deliver(
     if result.is_err() {
         *handle = None;
         crate::app_parent::browser_result(&id, json!({"ok":false}));
+    }
+}
+
+/// After the panel's first frame has been drawn and presented: order it front
+/// (if it is still wanted) and release the held receipts.
+#[cfg(target_os = "macos")]
+fn reveal(window: &mut Window, view: &Entity<Hud>, cx: &mut App) {
+    let (show, held) = view.update(cx, |hud, _| (hud.target, std::mem::take(&mut hud.awaiting)));
+    macos::present_hud(window, show, view, cx, true);
+    for id in held {
+        crate::app_parent::browser_result(&id, json!({"ok":true}));
     }
 }
 
@@ -419,24 +479,24 @@ pub(super) fn tick(handle: &mut Option<WindowHandle<Hud>>, cx: &mut gpui::AsyncA
         let Ok(view) = root.downcast::<Hud>() else {
             return;
         };
-        let (show, was_shown) = view.update(cx, |hud, cx| {
+        let (show, was_shown, front) = view.update(cx, |hud, cx| {
             let was_active = hud.target;
             hud.expire();
-            if was_active != hud.target {
+            if was_active != hud.target | hud.settle() {
                 cx.notify();
             }
             let show = hud.target || hud.shown && hud.motion.value().1;
             let was_shown = hud.shown;
             hud.shown = show;
-            (show, was_shown)
+            (show, was_shown, hud.awaiting.is_empty())
         });
         visible = show;
         #[cfg(target_os = "macos")]
         if show || was_shown {
-            macos::present_hud(window, show, &view, cx);
+            macos::present_hud(window, show, &view, cx, front);
         }
         #[cfg(not(target_os = "macos"))]
-        let _ = (window, was_shown);
+        let _ = (window, was_shown, front);
     });
     if result.is_err() {
         *handle = None;
@@ -457,7 +517,15 @@ mod macos {
 
     /// The caret/HUD panel: the dock's nonactivating class and level, fully
     /// click-through, on every Space, at the classic shell's placement.
-    pub(super) fn present_hud(window: &Window, visible: bool, view: &Entity<Hud>, cx: &mut App) {
+    /// `front` false places a visible panel without ordering it front, while
+    /// its first frame is still being drawn.
+    pub(super) fn present_hud(
+        window: &Window,
+        visible: bool,
+        view: &Entity<Hud>,
+        cx: &mut App,
+        front: bool,
+    ) {
         let Ok(handle) = HasWindowHandle::window_handle(window) else {
             return;
         };
@@ -477,8 +545,6 @@ mod macos {
                 // CanJoinAllSpaces | Stationary | IgnoresCycle | FullScreenAuxiliary,
                 // as the classic HUD window.
                 let _: () = msg_send![panel, setCollectionBehavior: 1_u64 | 16 | 64 | 256];
-                // GPUI's blurred-window view backs the glass bar (see backdrop).
-                window.set_background_appearance(WindowBackgroundAppearance::Blurred);
             }
             let screens: id = msg_send![class!(NSScreen), screens];
             let count: usize = msg_send![screens, count];
@@ -512,6 +578,18 @@ mod macos {
                 let _: () = msg_send![panel, orderOut: nil];
                 return;
             };
+            if !front {
+                let moved = view.update(cx, |hud, _| {
+                    let moved = hud.presentation.geometry != Some([x, y, width, height]);
+                    hud.presentation.geometry = Some([x, y, width, height]);
+                    moved
+                });
+                if moved {
+                    let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(width, height));
+                    let _: () = msg_send![panel, setFrame: frame display: NO];
+                }
+                return;
+            }
             let (_, set_frame, order_front) = view.update(cx, |hud, _| {
                 hud.presentation.tick(true, Some([x, y, width, height]))
             });
@@ -521,71 +599,9 @@ mod macos {
             }
             // Never key, never main, never takes a click.
             let _: () = msg_send![panel, setIgnoresMouseEvents: YES];
-            backdrop(content, view, cx);
             if order_front {
                 let _: () = msg_send![panel, orderFrontRegardless];
             }
-        }
-    }
-
-    /// The glass bar's backdrop blur: GPUI's own blurred-window view (no
-    /// toolkit change), cut to the bar's last painted bounds and corner
-    /// radius and faded with it; hidden for the solid material.
-    unsafe fn backdrop(content: id, view: &Entity<Hud>, cx: &mut App) {
-        let (wanted, previous) = view.update(cx, |hud, _| {
-            let solid = hud.snapshot.hud.as_ref().is_none_or(|detail| detail.solid);
-            let radius = if hud.snapshot.caret() { 14. } else { 22. };
-            let (opacity, _) = hud.motion.value();
-            let wanted = hud.bar.get().filter(|_| !solid).map(|bar| {
-                (
-                    [
-                        f64::from(f32::from(bar.origin.x)),
-                        f64::from(f32::from(bar.origin.y)),
-                        f64::from(f32::from(bar.size.width)),
-                        f64::from(f32::from(bar.size.height)),
-                    ],
-                    radius,
-                    f64::from(opacity),
-                )
-            });
-            (wanted, std::mem::replace(&mut hud.blur, wanted))
-        });
-        if wanted == previous {
-            return;
-        }
-        unsafe {
-            let subviews: id = msg_send![content, subviews];
-            let count: usize = msg_send![subviews, count];
-            let effect = (0..count)
-                .map(|index| -> id { msg_send![subviews, objectAtIndex: index] })
-                .find(|&subview| {
-                    let kind: cocoa::base::BOOL =
-                        msg_send![subview, isKindOfClass: class!(NSVisualEffectView)];
-                    kind == YES
-                });
-            let Some(effect) = effect else {
-                return;
-            };
-            let Some(([x, top, width, height], radius, alpha)) = wanted else {
-                let _: () = msg_send![effect, setHidden: YES];
-                return;
-            };
-            // The content view is not flipped: AppKit y runs up from the bottom.
-            let bounds: NSRect = msg_send![content, bounds];
-            let frame = NSRect::new(
-                NSPoint::new(x, bounds.size.height - top - height),
-                NSSize::new(width, height),
-            );
-            let _: () = msg_send![effect, setAutoresizingMask: 0_u64];
-            let _: () = msg_send![effect, setFrame: frame];
-            let _: () = msg_send![effect, setWantsLayer: YES];
-            let layer: id = msg_send![effect, layer];
-            if !layer.is_null() {
-                let _: () = msg_send![layer, setCornerRadius: radius];
-                let _: () = msg_send![layer, setMasksToBounds: YES];
-            }
-            let _: () = msg_send![effect, setAlphaValue: alpha];
-            let _: () = msg_send![effect, setHidden: NO];
         }
     }
 }
