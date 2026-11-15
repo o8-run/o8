@@ -1,3 +1,4 @@
+import { checkLaneMergeHead } from '@/lib/approvals/merge-head';
 import { checkReviewRunPreflight, reviewRunPolicyConfiguration } from './review-run-policy';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
@@ -774,6 +775,8 @@ async function dispatchUnlocked(
       if (lane.status === 'completed' && !lane.worktreePath && (lane.runtime as string) !== 'remote-customer') {
         return { ok: false, laneId: lane.id, note: 'No worktree to merge. Lane is on the main working tree.' };
       }
+      const approvedHeadRefusal = command.authorizingApprovalId ? await checkLaneMergeHead(lane.id, command.expectedHeadSha) : null;
+      if (approvedHeadRefusal) return { ok: false, laneId: lane.id, reason: approvedHeadRefusal.code, note: approvedHeadRefusal.message };
       const prOnlyNote = await prFirstMergeRefusal(lane);
       if (prOnlyNote) return { ok: false, laneId: command.laneId, note: prOnlyNote, reason: 'pr_only' };
       const spokenEvidence = validateSpokenReviewEvidenceBundle(command);
