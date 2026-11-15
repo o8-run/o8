@@ -3723,6 +3723,16 @@
       ]
     },
     {
+      "path": "tests/integration-queue-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "integration",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/interrupted-supervisor-recovery-real-path.test.ts",
       "reasons": [
         "child-process",

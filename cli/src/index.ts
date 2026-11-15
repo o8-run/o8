@@ -1,3 +1,4 @@
+import { runIntegrationQueue } from './commands/integration-queue.js';
 import { runPacketPolicy } from './commands/packet/policy.js';
 import { runHeavy } from './commands/run-heavy.js';
 import { runPrStack } from './commands/pr-stack.js';
@@ -364,6 +365,7 @@ ${OPERATOR_PACKET_COMMAND_LINES}
   session resume <key> --message <text> [--idempotency-key <key>]  admit a continuation turn
   session dismiss-pending <key> --confirm-no-continuation  clear an unresolved attempt after provider inspection
   task list            current task pool grouped by ready/running/review/etc.
+  integration-queue read|prepare --repo-id <id> [--spec <file.json>]
   task adopt-pr        adopt a GitHub PR into a durable review task
   task create          add a project-backed task to the ready pool
   task brief <id>      project-backed task brief for a packet or lane
@@ -542,6 +544,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'mcp':
       return runMcp(args.mode, secondary, args.rest);
     case 'setup': return runSetup(args.mode, secondary, args.rest);
+    case 'integration-queue': return runIntegrationQueue(args.mode, secondary, args.rest);
     case 'repo':
       return runRepo(args.mode, secondary, args.rest);
     case 'project':

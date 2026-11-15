@@ -1,3 +1,4 @@
+import { laneGit } from '@/lib/lane/lane-git';
 import { resolveGitBinary } from '@/lib/git/binary';
 import type { ApprovalRecord, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { allFindingsResolved } from '@/lib/approvals/orchestrator-review';
@@ -226,15 +227,11 @@ const UNCOMMITTED_PATHS_SHOWN = 10;
  * Paths with uncommitted changes (tracked or untracked, respecting ignores).
  * Returns null when git cannot answer, so callers fail closed.
  */
-async function listUncommittedPaths(cwd: string, readOnly = false): Promise<string[] | null> {
-  const { execFile } = await import('@/lib/providers/child-process');
-  const { promisify } = await import('node:util');
+async function listUncommittedPaths(cwd: string, repoPath: string, readOnly = false): Promise<string[] | null> {
   try {
-    const { stdout } = await promisify(execFile)(
-      resolveGitBinary(),
+    const { stdout } = await laneGit(cwd, repoPath,
       [...(readOnly ? ['--no-optional-locks'] : []), 'status', '--porcelain=v1', '-z', '--untracked-files=all'],
-      { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 },
-    );
+      { timeout: 5000, maxBuffer: 8 * 1024 * 1024 });
     const entries = stdout.split('\0');
     const paths: string[] = [];
     for (let index = 0; index < entries.length; index += 1) {
@@ -357,7 +354,7 @@ export async function assessDurableApprovedReview(
     // The review approves the commit at its pinned HEAD and nothing else. Edits
     // left in the worktree after that commit would be auto-committed into the
     // publication, so they withhold authorization until committed and reviewed.
-    const uncommitted = await listUncommittedPaths(cwd, options.readOnly);
+    const uncommitted = await listUncommittedPaths(cwd, lane.repoPath, options.readOnly);
     if (uncommitted === null) {
       return { approved: false, diffBudgetWaived, highConfidence: false, approvalId: null, contractCoverage: coverage, reason: 'Uncommitted worktree changes could not be checked against the reviewed HEAD.' };
     }
