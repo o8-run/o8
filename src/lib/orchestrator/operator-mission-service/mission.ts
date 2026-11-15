@@ -1,3 +1,4 @@
+import { reviewBackpressureStatus } from '../review-backpressure';
 import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { readLeadStatuses } from '@/lib/orchestrator/lead-status';
@@ -542,13 +543,13 @@ export async function getMissionStatus(input: MissionStatusInput) {
   const completionContextByPacketId = new Map(await Promise.all(state.packets.map(async (packet) => (
     [packet.id, await readPacketCompletionContext(packet.id)] as const
   ))));
-  const mergePolicy = currentLaneMergePolicy();
   const agents = state.packets
     .map((packet) => {
       const lane = laneByPacketId.get(packet.id);
       if (!lane) {
         return null;
       }
+      const mergePolicy = currentLaneMergePolicy(lane.projectId);
       const activity = lane.sessionKey ? transcriptActivityBySession.get(lane.sessionKey) : undefined;
       const lastTranscriptAt = activity?.lastTranscriptAt ?? null;
       const lastLifecycleEventAt = lane.lastEventAt;
@@ -611,6 +612,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
 
   return {
     missionId: state.missionId || '',
+    backpressure: await reviewBackpressureStatus(),
     ...missionLeadFields(state.packets),
     prompt: state.prompt,
     summary: state.summary,
@@ -622,6 +624,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
     packets: graph.map((node) => {
       const packet = packetById.get(node.packetId)!;
       const lane = laneByPacketId.get(node.packetId);
+      const mergePolicy = currentLaneMergePolicy(lane?.projectId ?? packet.projectId ?? null);
       const recovery = packet.releaseState === 'released' || (lane?.status === 'completed' && lane.outcome === 'merged') ? null : packet.recovery ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
       const laneSessionKey = lane ? lane.sessionKey : packet.lane?.sessionKey ?? null;
       const activity = laneSessionKey ? transcriptActivityBySession.get(laneSessionKey) : undefined;

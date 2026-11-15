@@ -9,12 +9,14 @@
 //
 // Fail-closed: the packaged servers refuse approved writes without the helper,
 // so a failed build never falls back to a previously staged binary.
+import { releaseCompileEnvironment } from './lib/release-compile-cache.mjs';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const compileEnv = releaseCompileEnvironment(root);
 const crate = join(root, 'src-tauri', 'sidecars', 'pi-write');
 const targetDir = join(crate, 'target');
 const helpersDir = join(root, 'src-tauri', 'helpers');
@@ -37,7 +39,7 @@ for (const path of [...staged, ...stagedLinux]) rmSync(path, { force: true });
 
 function build(triple) {
   execFileSync('cargo', ['build', '--release', '--locked', '--manifest-path', join(crate, 'Cargo.toml'),
-    '--target', triple, '--target-dir', targetDir], { stdio: 'inherit', timeout: 15 * 60_000 });
+    '--target', triple, '--target-dir', targetDir], { stdio: 'inherit', env: compileEnv, timeout: 15 * 60_000 });
   return join(targetDir, triple, 'release', NAME);
 }
 

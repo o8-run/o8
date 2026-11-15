@@ -639,7 +639,7 @@ impl Inbox {
         if !card.session.is_empty() {
             cx.emit(OpenSession(card.session.clone()));
         } else if let Some(url) = github_url(&card.url) {
-            cx.open_url(&url);
+            crate::external_open::url(cx, &url);
         } else {
             self.notice = "Related session or GitHub thread is unavailable.".into();
             cx.notify();

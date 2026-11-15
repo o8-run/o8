@@ -1,5 +1,3 @@
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +16,6 @@ const { createLane, getLane, getLaneEvents, setLaneStatus, updateLane } = await 
 const { recordLaneEvent } = await import('@/lib/lane/events');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { closeDb } = await import('@/lib/db');
-const { SwarmStatusCard } = await import('@/components/desktop/thoughts/chat-panel/SwarmStatusCard');
 
 afterAll(async () => {
   closeDb();
@@ -82,12 +79,8 @@ async function readMissionPacket(packetId: string): Promise<OrchestratorPacket> 
   return packet!;
 }
 
-function renderCard(packet: OrchestratorPacket): string {
-  return renderToStaticMarkup(createElement(SwarmStatusCard, { packets: [packet], defaultExpanded: true }));
-}
-
 describe('#1635 swarm status reconciliation', () => {
-  it('renders a persisted terminal lane as Failed despite a stale session_launched event', async () => {
+  it('reads a persisted terminal lane as failed despite a stale session_launched event', async () => {
     const packetId = 'pkt-terminal-stale-event';
     const lane = createLane({
       repoPath: dataDir,
@@ -104,11 +97,8 @@ describe('#1635 swarm status reconciliation', () => {
     persistStaleMission(packetFixture(packetId, lane.id));
 
     const packet = await readMissionPacket(packetId);
-    const markup = renderCard(packet);
 
     expect(packet.status).toBe('failed');
-    expect(markup).toContain('Failed');
-    expect(markup).not.toContain('Running');
   });
 
   it('maps a newer runtime_process_exit event to Failed on the real state read', async () => {
@@ -131,7 +121,6 @@ describe('#1635 swarm status reconciliation', () => {
     });
 
     const packet = await readMissionPacket(packetId);
-    const markup = renderCard(packet);
 
     const persistedLane = getLane(lane.id);
     const exitEvidence = getLaneEvents(lane.id)
@@ -143,9 +132,6 @@ describe('#1635 swarm status reconciliation', () => {
       exitEvidence,
     })).toBe('failed');
     expect(packet.blockedReason).toBe('runtime_process_exit');
-    expect(markup).toContain('Failed');
-    expect(markup).toContain('runtime_process_exit');
-    expect(markup).not.toContain('Running');
   });
 
   it.each([
@@ -199,9 +185,6 @@ describe('#1635 swarm status reconciliation', () => {
       const packet = await readMissionPacket(packetId);
       expect(packet.status).toBe(expected);
       expect(packet.blockedReason).toBe(expected === 'failed' ? 'runtime_process_exit' : null);
-      const markup = renderCard(packet);
-      expect(markup).toContain(expected === 'failed' ? 'Failed' : 'Running');
-      expect(markup).not.toContain(expected === 'failed' ? 'Running' : 'Failed');
     };
     await assertOutcome();
     closeDb();
@@ -232,10 +215,8 @@ describe('#1635 swarm status reconciliation', () => {
     });
 
     const packet = await readMissionPacket(packetId);
-    const markup = renderCard(packet);
 
     expect(packet.status).toBe('awaiting_review');
     expect(packet.blockedReason).toBeNull();
-    expect(markup).not.toContain('Failed');
   });
 });

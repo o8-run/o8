@@ -53,6 +53,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
     route('/api/tasks', 'GET POST', () => import('@/app/api/tasks/route')),
+    route('/api/repos/[id]/integration-queue', 'GET POST', () => import('@/app/api/repos/[id]/integration-queue/route')),
+    route('/api/tasks/adopt-pr', 'POST', () => import('@/app/api/tasks/adopt-pr/route')),
     route('/api/tasks/worker-availability', 'GET', () => import('@/app/api/tasks/worker-availability/route')),
     route('/api/tasks/[taskId]', 'GET', () => import('@/lib/tasks/detail-route')),
     route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route'), ARTIFACT_REQUEST_MAX_BYTES),
@@ -292,6 +294,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/lanes/[id]/heartbeat', 'POST', () => import('@/app/api/lanes/[id]/heartbeat/route')),
     route('/api/lanes/[id]/events', 'GET POST', () => import('@/app/api/lanes/[id]/events/route')),
     route('/api/lanes/[id]/scope', 'GET POST', () => import('@/app/api/lanes/[id]/scope/route')),
+    route('/api/panel/inbox/decisions', 'GET', () => import('@/app/api/panel/inbox/decisions/route')),
+    route('/api/lanes/[id]/policy', 'GET', () => import('@/app/api/lanes/[id]/policy/route')),
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/lane-events', 'GET', () => import('@/app/api/orchestrator/lane-events/route')),
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),

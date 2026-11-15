@@ -25,6 +25,7 @@ export function projectTaskPool(pool: TaskPool, includeDetails: boolean) {
   return {
     schema: 'o8/mcp/task.pool/v1',
     tasks: includeDetails ? pool.tasks : pool.tasks.map((task) => ({
+      externalReview: task.externalReview,
       id: task.id,
       packetId: task.packetId,
       laneId: task.laneId,
@@ -37,6 +38,8 @@ export function projectTaskPool(pool: TaskPool, includeDetails: boolean) {
       queueState: task.queueState,
       releaseState: task.releaseState,
       blockedReason: task.blockedReason,
+      ...(task.failureReason ? { failureReason: task.failureReason } : {}),
+      ...(task.cleanup ? { cleanup: task.cleanup } : {}),
       lastEventAt: task.lastEventAt,
       execution: task.execution,
     })),

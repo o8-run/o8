@@ -153,7 +153,7 @@ impl PullRequests {
                     .child(crate::icon::stroke(EXTERNAL, theme().accent, 11., 1.8))
                     .on_click(move |_, _, cx| {
                         if commits.starts_with("https://") {
-                            cx.open_url(&commits)
+                            crate::external_open::url(cx, &commits)
                         }
                     }),
             )
@@ -521,7 +521,7 @@ impl PullRequests {
                                     .hover(|b| b.bg(theme().hover).text_color(theme().text))
                                     .child("View run")
                                     .child(crate::icon::stroke(EXTERNAL, theme().text_faint, 11., 1.8))
-                                    .on_click(move |_, _, cx| cx.open_url(&url)),
+                                    .on_click(move |_, _, cx| crate::external_open::url(cx, &url)),
                             )
                         }),
                 );

@@ -1,13 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, request as httpRequest } from 'node:http';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
-import { buildSync } from 'esbuild';
+import { build, stop } from 'esbuild';
 import { NextRequest, NextResponse } from 'next/server';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
@@ -85,12 +85,20 @@ async function prepareFixture() {
   ].map(name => [name, ''])));
   writeFileSync(join(root, 'server.js'), wrapper);
   stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: root, platform: 'darwin' });
+  if (process.platform === 'linux') {
+    // The same host binary must serve the real host and the simulated shell probe.
+    const prebuild = join(root, 'node_modules/better-sqlite3/prebuilds', `node-v${process.versions.modules}`);
+    const host = join(prebuild, `linux-${process.arch}`);
+    mkdirSync(host, { recursive: true });
+    copyFileSync(join(prebuild, `darwin-${process.arch}`, 'better_sqlite3.node'), join(host, 'better_sqlite3.node'));
+  }
   copyFileSync('scripts/lib/http-request-boundary.cjs', join(root, 'http-request-boundary.cjs'));
-  buildSync({
+  await build({
     entryPoints: ['src/lib/browser-engine/egress-proxy.ts'],
     outfile: join(root, 'egress-proxy.cjs'), bundle: true, platform: 'node', format: 'cjs',
     alias: { 'server-only': join(process.cwd(), 'tests/stubs/server-only.ts') },
   });
+  await stop();
   writeFileSync(join(root, 'server-impl.js'), `
 const http = require('node:http');
 const { BrowserEgressProxy } = require('./egress-proxy.cjs');
@@ -108,6 +116,8 @@ server.listen(0, '127.0.0.1', async () => {
   const { panelGateMiddleware, config } = await import('@/middleware');
   const { POST } = await import('@/app/api/mcp/route');
   const { default: RootLayout } = await import('@/app/layout');
+  const { default: VoiceHostLayout } = await import('@/app/voice-host/layout');
+  const { DesktopAppNotice } = await import('@/components/desktop-app-notice');
   child = spawn(process.execPath, [join(root, 'server.js')], { env: { ...process.env,
     O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   const ready = fixtureReady(child);
@@ -125,7 +135,9 @@ server.listen(0, '127.0.0.1', async () => {
         else if (message.url.startsWith('/api/')) response = Response.json({ ok: true });
         else {
           context.headers = new Headers(message.headers);
-          response = new Response(renderToStaticMarkup(await RootLayout({ children: null })), { headers: { 'content-type': 'text/html' } });
+          const children = message.url === '/voice-host'
+            ? await VoiceHostLayout({ children: null }) : DesktopAppNotice();
+          response = new Response(renderToStaticMarkup(RootLayout({ children })), { headers: { 'content-type': 'text/html' } });
         }
       }
       child.send({ id: message.id, status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() });
@@ -271,7 +283,7 @@ it.each(['untrusted.invalid', 'sub.localhost', 'localhost.untrusted.invalid', '1
 });
 
 it.each(['localhost', '127.0.0.1', '[::1]'])('serves loopback Host %s at the app port', async host => {
-  const response = await request(`${host}:${port}`);
+  const response = await request(`${host}:${port}`, '/voice-host');
   expect(response.status).toBe(200); expect(response.body.includes(bearer)).toBe(true);
 });
 
@@ -282,7 +294,7 @@ it('checks Host before an upgrade reaches its handler', async () => {
 });
 
 it('serves the exact shell host without injecting the operator bearer', async () => {
-  const response = await request('tauri.localhost');
+  const response = await request('tauri.localhost', '/voice-host');
   expect(response.status).toBe(200); expect(response.body.includes(bearer)).toBe(false);
 });
 
@@ -335,7 +347,7 @@ it('retains authenticated native and same-origin browser MCP calls', async () =>
 });
 
 it('preserves the relay-forward marker and keeps its page free of the bearer', async () => {
-  const response = await request(`127.0.0.1:${port}`, '/', { headers: { 'x-o8-relay-forward': '1', 'x-o8-relay-surface': 'web-machine' } });
+  const response = await request(`127.0.0.1:${port}`, '/voice-host', { headers: { 'x-o8-relay-forward': '1', 'x-o8-relay-surface': 'web-machine' } });
   expect(response.status).toBe(200); expect(response.body.includes(bearer)).toBe(false);
   expect(response.body.includes('web-machine')).toBe(true);
   const before = nativeState.boundaryCount;
@@ -366,9 +378,18 @@ it('keeps the legacy MCP route origin check ahead of tool dispatch', async () =>
   expect(response.status).toBe(403); expect(nativeCalls).toBe(before);
 });
 
-it('does not bootstrap a bearer for a foreign Host with a loopback peer stamp', async () => {
-  const { default: RootLayout } = await import('@/app/layout');
+it('does not bootstrap a shell bearer for a foreign Host with a loopback peer stamp', async () => {
+  const { default: ShellLayout } = await import('@/app/voice-host/layout');
   context.headers = new Headers({ host: `untrusted.invalid:${port}`, 'x-o8-client-addr': '127.0.0.1' });
-  const html = renderToStaticMarkup(await RootLayout({ children: null }));
+  const html = renderToStaticMarkup(await ShellLayout({ children: null }));
   expect(html.includes(bearer)).toBe(false);
+});
+
+it.each(['/', '/dashboard', '/mobile'])('serves the %s notice over loopback HTTP without operator bootstrap', async path => {
+  const response = await request(`127.0.0.1:${port}`, path);
+  expect(response.status).toBe(200);
+  expect(response.body).toContain('The browser console has been removed');
+  expect(response.body).not.toContain(bearer);
+  expect(response.body).not.toContain('ws-token');
+  expect(response.body).not.toContain('__O8_WS_PORT__');
 });

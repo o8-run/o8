@@ -1,3 +1,4 @@
+import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   createProject,
@@ -13,7 +14,9 @@ const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' };
 export async function GET() {
   try {
     const ledger = await reconcileProjectsWithRegistry();
-    return NextResponse.json(ledger, { headers: NO_STORE });
+    return NextResponse.json({ ...ledger, projects: ledger.projects.map(project => ({
+      ...project, mergePolicy: currentLaneMergePolicy(project.id),
+    })) }, { headers: NO_STORE });
   } catch (error) {
     console.error('[api] panel/projects failed:', error);
     const message = 'Failed to read projects.';
@@ -29,7 +32,9 @@ async function handlePOST(request: NextRequest) {
   }
   try {
     const ledger = await createProject(name);
-    return NextResponse.json(ledger, { headers: NO_STORE });
+    return NextResponse.json({ ...ledger, projects: ledger.projects.map(project => ({
+      ...project, mergePolicy: currentLaneMergePolicy(project.id),
+    })) }, { headers: NO_STORE });
   } catch (error) {
     console.error('[api] panel/projects failed:', error);
     const message = 'Failed to create project.';

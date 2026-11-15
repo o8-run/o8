@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { publishRealtimeMutation, getUpdateIdleWindow } = vi.hoisted(() => ({
@@ -68,12 +67,6 @@ describe('native freshness through the production apply and state routes', () =>
     expect(await response.json()).toMatchObject({ checkedAt: expect.any(String), checkAgeMs: 0,
       error: { code: 'update_signal_unavailable', retryable: true, retryAfterMs: expect.any(Number) } });
     expect(await (await route.POST(post({ force: 'yes' }))).json()).toMatchObject({ checkedAt: expect.any(String), checkAgeMs: 0 });
-  });
-
-  it('keeps the check schedule out of UpdateCard', () => {
-    const card = readFileSync('src/components/desktop/UpdateCard.tsx', 'utf8');
-    expect(card).not.toContain('UPDATE_CHECK_INTERVAL');
-    expect(card).toContain('subscribeRecordedUpdate');
   });
 
   it('joins an explicit check and apply even when the previous current result is recent', async () => {

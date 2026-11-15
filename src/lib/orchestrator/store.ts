@@ -967,7 +967,7 @@ export function reconcileOrchestratorMissionState(
           : null,
       lastEventAt: runtime?.lastEventAt ?? packet.lastEventAt ?? packet.lane?.lastHeartbeatAt ?? null,
       lastEventLabel: runtime?.currentTask ?? runtime?.workflowStageLabel ?? packet.lastEventLabel ?? packet.lane?.lastEventLabel ?? null,
-      blockedReason: packet.storageAdmission?.state === 'held' ? packet.blockedReason ?? `Dispatch held by storage admission (${packet.storageAdmission.reason}).` : null,
+      blockedReason: packet.blockedReason?.startsWith('Review backlog:') ? packet.blockedReason : packet.storageAdmission?.state === 'held' ? packet.blockedReason ?? `Dispatch held by storage admission (${packet.storageAdmission.reason}).` : null,
     };
 
     if (packet.archivedAt || packet.status === 'archived') {

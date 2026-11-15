@@ -6,9 +6,7 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { TelemetryConsentCard } from '@/components/desktop/TelemetryConsentCard';
-import { GeneralTab } from '@/components/desktop/settings/GeneralTab';
-import { fetchOperatorDefaults, invalidateOperatorDefaultsSnapshot } from '@/components/desktop/settings/operator-defaults-client';
+import { invalidateOperatorDefaultsSnapshot } from '@/components/desktop/settings/operator-defaults-client';
 import { PRODUCT_TELEMETRY_READY_EVENT, useAppOpenedTelemetry } from '@/lib/analytics/startup';
 import { emitProductEvent } from '@/lib/analytics/server';
 import { GET as getDefaults, POST as postDefaults } from '@/app/api/panel/operator-defaults/route';
@@ -23,7 +21,6 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
 vi.mock('@/lib/entitlement/license', () => ({
   readCachedEntitlement: () => ({ licenseKey: 'fixture-license' }),
 }));
-vi.mock('@/lib/entitlement/context', () => ({ useEntitlement: () => ({ plan: 'free' }) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const dataDir = process.env.CORTEX_IDE_DATA_DIR!;
@@ -44,27 +41,30 @@ const request = (init: RequestInit = {}) => {
   requests.push(response);
   return response;
 };
-const button = (label: string) => Array.from(document.querySelectorAll('button'))
-  .find((item) => item.textContent?.trim() === label)!;
-async function click(label: string) {
-  expect(button(label), label).toBeDefined();
-  await act(async () => { button(label).click(); await Promise.all(requests); });
-}
-const usageSwitch = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="switch"]'))
-  .find((item) => item.parentElement?.textContent?.includes('Share usage data'));
+// The first-run privacy card and the Settings switch were browser console UI.
+// These helpers send the same requests they sent, through the real routes, and
+// mount the kept startup hook that emits app.opened.
 function Startup() { useAppOpenedTelemetry(); return null; }
-async function render(settings = false) {
+async function mountStartup() {
   const container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  await act(async () => root!.render(createElement('div', null,
-    createElement(Startup),
-    settings ? createElement(GeneralTab) : createElement(TelemetryConsentCard),
-  )));
+  await act(async () => root!.render(createElement(Startup)));
   await act(async () => { await Promise.all(requests); });
-  await vi.waitFor(async () => {
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(settings ? usageSwitch() : document.querySelector('[role="dialog"]')).toBeTruthy();
+}
+async function saveDefaults(body: Record<string, unknown>) {
+  return fetch('/api/panel/operator-defaults', { method: 'POST', body: JSON.stringify(body) });
+}
+async function setUsage(next: boolean) {
+  return saveDefaults({ productTelemetryEnabled: next });
+}
+async function savePrivacyChoices() {
+  const productUsage = getOperatorDefaultsSync().values.productTelemetryEnabled;
+  const response = await saveDefaults({ crashReportsEnabled: false, productTelemetryEnabled: productUsage, telemetryConsentAnswered: true });
+  expect(response.status).toBe(200);
+  await act(async () => {
+    window.dispatchEvent(new Event(PRODUCT_TELEMETRY_READY_EVENT));
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
@@ -114,7 +114,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('default-on usage analytics through persisted routes and first-run UI', () => {
+describe('default-on usage analytics through persisted routes and the startup hook', () => {
   it('keeps never-chosen state through unrelated saves and all three API values', async () => {
     expect(getOperatorDefaultsSync().values.productTelemetryEnabled).toBeNull();
     expect(resolveProductTelemetryEnabledSync()).toBe(true);
@@ -144,45 +144,21 @@ describe('default-on usage analytics through persisted routes and first-run UI',
     expect(egress).not.toHaveBeenCalled();
   });
 
-  it('discloses every event and example visibly, and persists one-click off before acknowledgment', async () => {
-    await render();
-    expect(document.body.textContent).toContain('on by default');
-    expect(document.querySelectorAll('button')).not.toHaveLength(0);
-    expect(Array.from(document.querySelectorAll('button')).filter((item) => item.textContent?.trim() === 'Turn off')).toHaveLength(1);
-    const example = Array.from(document.querySelectorAll('pre')).find((item) => item.textContent?.includes('repo.added'))!;
-    expect(example.closest('details:not([open])')).toBeNull();
-    expect(JSON.parse(example.textContent!)).toEqual({ event: 'repo.added', props: { hasRemote: true, isGitRepo: true } });
-    for (const event of ['app.opened', 'brain.asked', 'orchestrator.message', 'dispatch.started', 'merge.approved', 'repo.added', 'worker.first_launched', 'merge.first_completed', 'session.ended']) {
-      expect(document.body.textContent).toContain(event);
-    }
-    for (const never of ['Code', 'prompts', 'repo names', 'file paths', 'file contents']) expect(document.body.textContent).toContain(never);
-    await click('Turn off');
+  it('persists a first-run opt-out before acknowledgment', async () => {
+    await mountStartup();
+    expect((await setUsage(false)).status).toBe(200);
     expect(getOperatorDefaultsSync().values).toMatchObject({ productTelemetryEnabled: false, telemetryConsentAnswered: false, crashReportsEnabled: false });
     expect(egress).not.toHaveBeenCalled();
-    await click('Keep crash reports off');
-    await click('Save privacy choices');
+    await savePrivacyChoices();
     expect(getOperatorDefaultsSync().values).toMatchObject({ productTelemetryEnabled: false, telemetryConsentAnswered: true, crashReportsEnabled: false });
     expect(egress).not.toHaveBeenCalled();
   });
 
-  it('refreshes cached defaults before showing an earlier opt-out on the first-run screen', async () => {
-    await fetchOperatorDefaults({}, { includeRuntime: false });
-    await request({ method: 'POST', body: JSON.stringify({ productTelemetryEnabled: false }) });
-    await render();
-    expect(button('Turn off')).toBeUndefined();
-    expect(document.body.textContent).toContain('Usage analytics are off.');
-    await click('Keep crash reports off');
-    await click('Save privacy choices');
-    expect(getOperatorDefaultsSync().values.productTelemetryEnabled).toBe(false);
-    expect(egress).not.toHaveBeenCalled();
-  });
-
-  it('emits app.opened once after a fresh install finishes the privacy screen', async () => {
-    await render();
+  it('emits app.opened once after a fresh install saves its privacy choices', async () => {
+    await mountStartup();
     expect(egress).not.toHaveBeenCalled();
     expect(await emitProductEvent('repo.added', { hasRemote: true, isGitRepo: true })).toBe(false);
-    await click('Keep crash reports off');
-    await click('Save privacy choices');
+    await savePrivacyChoices();
     await vi.waitFor(() => expect(egress).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String(egress.mock.calls[0]?.[1]?.body))).toEqual({ event: 'app.opened' });
     expect(getOperatorDefaultsSync().values).toMatchObject({ productTelemetryEnabled: null, telemetryConsentAnswered: true, crashReportsEnabled: false });
@@ -191,10 +167,10 @@ describe('default-on usage analytics through persisted routes and first-run UI',
     expect(egress).toHaveBeenCalledTimes(1);
   });
 
-  it('stages off-then-on until the unanswered privacy screen is saved, including a reopened startup hook', async () => {
-    await render();
-    await click('Turn off');
-    await click('Turn on');
+  it('stages off-then-on until the unanswered privacy choices are saved, including a reopened startup hook', async () => {
+    await mountStartup();
+    await setUsage(false);
+    await setUsage(true);
     expect(getOperatorDefaultsSync().values).toMatchObject({
       productTelemetryEnabled: true, telemetryConsentAnswered: false, crashReportsEnabled: false,
     });
@@ -203,13 +179,12 @@ describe('default-on usage analytics through persisted routes and first-run UI',
     document.body.innerHTML = '';
     invalidateOperatorDefaultsSnapshot();
     egress.mockClear();
-    await render();
+    await mountStartup();
     expect(egress.mock.calls.length).toBe(0);
     expect(await (await getTelemetry()).json()).toEqual({ enabled: false });
     expect(await emitProductEvent('app.opened')).toBe(false);
     expect(egress.mock.calls.length).toBe(0);
-    await click('Keep crash reports off');
-    await click('Save privacy choices');
+    await savePrivacyChoices();
     await vi.waitFor(() => expect(egress.mock.calls.length).toBe(1));
     expect(JSON.parse(String(egress.mock.calls[0]?.[1]?.body))).toEqual({ event: 'app.opened' });
     expect(getOperatorDefaultsSync().values).toMatchObject({
@@ -217,48 +192,33 @@ describe('default-on usage analytics through persisted routes and first-run UI',
     });
   });
 
-  it('keeps off-then-on staged across a cold process until the privacy screen is saved', async () => {
-    await render();
-    await click('Turn off');
-    await click('Turn on');
+  it('keeps off-then-on staged across a cold process until the privacy choices are saved', async () => {
+    await setUsage(false);
+    await setUsage(true);
     expect(coldEgressCapture()).toEqual({ enabled: false, emitted: false, payloads: [] });
-    await click('Keep crash reports off');
-    await click('Save privacy choices');
+    await savePrivacyChoices();
     expect(coldEgressCapture()).toEqual({ enabled: true, emitted: true, payloads: [{ event: 'app.opened' }] });
     expect(getOperatorDefaultsSync().values.crashReportsEnabled).toBe(false);
   });
 
   it('keeps a requested opt-out when its successful disk write loses the response', async () => {
-    await render();
     loseOptOutResponse = true;
-    await click('Turn off');
-    expect(document.body.textContent).toContain('Save response unavailable.');
+    expect((await setUsage(false)).status).toBe(503);
     expect(getOperatorDefaultsSync().values.productTelemetryEnabled).toBe(false);
-    await click('Keep crash reports off');
-    await click('Save privacy choices');
+    await savePrivacyChoices();
     expect(getOperatorDefaultsSync().values).toMatchObject({ productTelemetryEnabled: false, telemetryConsentAnswered: true });
     expect(egress).not.toHaveBeenCalled();
   });
 
-  it('shows the effective default in Settings and flips persisted egress immediately', async () => {
+  it('applies the effective default at startup and flips persisted egress immediately', async () => {
     await request({ method: 'POST', body: JSON.stringify({ productTelemetryEnabled: null, crashReportsEnabled: false, telemetryConsentAnswered: true }) });
-    await render(true);
-    const toggle = () => usageSwitch()!;
-    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    await mountStartup();
     await vi.waitFor(() => expect(egress).toHaveBeenCalledTimes(1));
     egress.mockClear();
-    await act(async () => { toggle().click(); await Promise.all(requests); });
-    await vi.waitFor(async () => {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-      expect(toggle().getAttribute('aria-checked')).toBe('false');
-    });
+    expect((await setUsage(false)).status).toBe(200);
     expect(await emitProductEvent('app.opened')).toBe(false);
     expect(egress).not.toHaveBeenCalled();
-    await act(async () => { toggle().click(); await Promise.all(requests); });
-    await vi.waitFor(async () => {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-      expect(toggle().getAttribute('aria-checked')).toBe('true');
-    });
+    expect((await setUsage(true)).status).toBe(200);
     expect(await emitProductEvent('app.opened')).toBe(true);
     expect(egress).toHaveBeenCalledTimes(1);
     expect(getOperatorDefaultsSync().values.crashReportsEnabled).toBe(false);

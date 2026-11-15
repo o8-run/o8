@@ -31,7 +31,7 @@ export async function reconcileSqliteProjectRepos(project: ProjectRecord, repoPa
   const targetRepoIds = new Set(repoPaths.map((repoPath) => idByPath.get(normalizeRepoPath(repoPath))).filter((id): id is string => Boolean(id)));
   let sqlite = getProjectWithRepos(project.sqliteProjectId ?? project.id);
   if (!sqlite) {
-    const created = createProject({ name: project.name, slug: projectNameToSlug(project.name), description: null });
+    const created = createProject({ name: project.name, slug: projectNameToSlug(project.name), description: null, mergeModeSourceProjectId: project.id });
     sqlite = getProjectWithRepos(created.id);
   }
   if (!sqlite) return;

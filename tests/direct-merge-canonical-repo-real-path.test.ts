@@ -16,6 +16,8 @@ const priorOwnedRoot = process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
 const ownedRoot = realpathSync(mkdtempSync(join(os.tmpdir(), 'o8-canonical-owned-')));
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedRoot;
 
+const { getSqlite } = await import('@/lib/db');
+const { projectMergeModeKey } = await import('@/lib/lane/project-merge-mode-migration');
 const { recordMission } = await import('@/lib/db/missions-store');
 const operatorCheckoutMerge = await import('@/lib/lane/operator-checkout-merge');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
@@ -190,6 +192,9 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
     sessionKey,
     label: `Canonical merge ${label}`,
   });
+  // This suite exercises the operator-enabled direct integration path.
+  getSqlite().prepare('INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, ?)')
+    .run(projectMergeModeKey(lane.projectId ?? 'default'), 'direct', Date.now());
   setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
 
   const packet = packetFixture(packetId, canonicalRepo, branch);

@@ -302,7 +302,7 @@ impl Issues {
         }
         let Some(index) = self.repo_index(slug) else {
             self.opening = None;
-            cx.open_url(&format!("https://github.com/{slug}/issues/{number}"));
+            crate::external_open::url(cx, &format!("https://github.com/{slug}/issues/{number}"));
             return;
         };
         if index != self.selected {
@@ -378,7 +378,7 @@ impl Issues {
                             .map(|(slug, number)| (this.repo_index(slug), slug.clone(), *number));
                         if let Some((None, slug, number)) = &opening {
                             this.opening = None;
-                            cx.open_url(&format!("https://github.com/{slug}/issues/{number}"));
+                            crate::external_open::url(cx, &format!("https://github.com/{slug}/issues/{number}"));
                         }
                         this.selected = opening
                             .and_then(|(index, _, _)| index)

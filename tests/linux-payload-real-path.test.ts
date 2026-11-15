@@ -154,7 +154,14 @@ beforeAll(async () => {
         fs.writeFileSync(process.env.O8_DATA_DIR + '/health-probe-failed', 'done');
       }
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ product: 'o8' }));
+      const countFile = process.env.O8_DATA_DIR + '/identity-count';
+      if (req.url === '/api/setup/identity' && fs.existsSync(countFile)) {
+        fs.writeFileSync(countFile, String(Number(fs.readFileSync(countFile, 'utf8')) + 1));
+      }
+      const respond = () => res.end(JSON.stringify({ product: 'o8' }));
+      const delayFile = process.env.O8_DATA_DIR + '/identity-delay';
+      if (fs.existsSync(delayFile)) setTimeout(respond, 750);
+      else respond();
     }).listen(Number(process.env.PORT), '127.0.0.1', () => {
       if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_MAIN_WINDOW === '1'
         && !process.env.O8_FIXTURE_SKIP_WINDOW_BOOTSTRAP) {
@@ -178,8 +185,12 @@ beforeAll(async () => {
     });
   `);
   writeFileSync(join(server, 'ws-server.mjs'), `
-    import { createServer } from 'node:net';
-    createServer(s => s.end()).listen(Number(process.env.O8_WS_PORT), '127.0.0.1');
+    import { createServer } from 'node:http';
+    import { writeFileSync } from 'node:fs';
+    createServer((req, res) => {
+      if (req.url === '/internal/realtime') writeFileSync(process.env.O8_DATA_DIR + '/activated', 'yes');
+      res.end('{}');
+    }).listen(Number(process.env.O8_WS_PORT), '127.0.0.1');
   `);
   const source = join(root, 'next.c');
   writeFileSync(source, `
@@ -192,6 +203,13 @@ beforeAll(async () => {
       for (int i = 0; i < argc; i++) fprintf(log, "%s%s", i ? "|" : "", argv[i]);
       // Server-owned windows inherit the parent pipe; CLI fallback windows do not.
       fprintf(log, "%s\\n", getenv("O8_NEXT_PARENT_PIPE") ? "|<parent-pipe>" : ""); fclose(log);
+      if (getenv("O8_FIXTURE_NO_DEVICE") &&
+          (!getenv("VK_ICD_FILENAMES") || !strstr(getenv("VK_ICD_FILENAMES"), "lvp_icd.json")
+            || getenv("O8_FIXTURE_FALLBACK_FAILS"))) {
+        fputs("Unable to init GPU context: NoSupportedDeviceFound\\n", stderr); fflush(stderr);
+        if (getenv("O8_FIXTURE_WAIT_STOP")) for (;;) pause();
+        return 101;
+      }
       if (getenv("O8_FIXTURE_FAIL_SERVER_WINDOW") && getenv("O8_NEXT_PARENT_PIPE")) {
         usleep(500000); return 2;
       }
@@ -204,7 +222,14 @@ beforeAll(async () => {
       for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--shell-state")) {
         FILE *state = fopen(argv[i + 1], "w"); fputs("{}", state); fclose(state);
       }
-      fputs("o8-next-ready\\n", stdout); fflush(stdout);
+      if ((getenv("O8_NEXT_PARENT_PIPE") && !strcmp(getenv("O8_NEXT_PARENT_PIPE"), "1")) ||
+          (getenv("O8_NEXT_READY_STDOUT") && !strcmp(getenv("O8_NEXT_READY_STDOUT"), "1"))) {
+        fputs("o8-next-ready\\n", stdout); fflush(stdout);
+      }
+      if (getenv("O8_FIXTURE_LATE_GPU_ERROR")) {
+        while (access(getenv("O8_FIXTURE_LATE_GPU_ERROR"), F_OK)) usleep(10000);
+        fputs("Unable to init GPU context: NoSupportedDeviceFound\\n", stderr); return 101;
+      }
       for (;;) pause();
     }
   `);
@@ -502,6 +527,7 @@ it.skipIf(process.platform !== 'linux')('preserves unrelated serve failures with
   expect(app.stderr()).toBe(rejected.stderr);
   expect(app.stdout()).toBe(rejected.stdout);
   expect(events(f.env)).toHaveLength(0);
+  expect(app.stderr()).not.toContain('Check that a usable Vulkan graphics device');
   for (const [index, code] of ['serve_already_running', 'serve_desktop_owns_data_dir'].entries()) {
     const allowed = launch(f.launcher, { ...f.env, O8_FIXTURE_SERVE_ERROR: code, O8_FIXTURE_CLI_WARNING: '1' });
     await until(() => events(f.env).length === index + 1);
@@ -539,3 +565,116 @@ it.skipIf(process.platform !== 'linux')('refuses to overwrite an existing stage 
   expect(bad.status).toBe(1);
   expect(existsSync(join(root, 'bad-stage'))).toBe(false);
 });
+
+
+it.skipIf(process.platform !== 'linux')('retries no-device startup once and respects explicit driver settings', async () => {
+  for (const terminal of [false, true]) {
+    for (const mode of ['fallback', 'disabled', 'explicit', 'explicit-icd', 'fails', 'system']) {
+      const f = installation(`vulkan-${terminal}-${mode}`);
+      const software = join(f.relocated, 'usr/lib/o8/vulkan');
+      mkdirSync(software);
+      writeFileSync(join(software, 'lvp_icd.json'), '{}');
+      const env: NodeJS.ProcessEnv = { ...f.env, O8_FIXTURE_NO_DEVICE: '1',
+        O8_APPIMAGE_VULKAN_DIR: software };
+      delete env.VK_ICD_FILENAMES;
+      delete env.VK_DRIVER_FILES;
+      if (mode === 'disabled') env.O8_DISABLE_BUNDLED_VULKAN = '1';
+      if (mode === 'explicit') env.VK_DRIVER_FILES = '/explicit-driver.json';
+      if (mode === 'explicit-icd') env.VK_ICD_FILENAMES = '';
+      if (mode === 'system') delete env.O8_FIXTURE_NO_DEVICE;
+      if (terminal) expect(command(f.launcher, ['serve'], env).status).toBe(0);
+      const before = terminal ? JSON.parse(command(f.launcher, ['serve', 'status'], env).stdout) : undefined;
+      if (terminal) writeFileSync(join(f.data, 'identity-count'), '0');
+      if (mode === 'fails') env.O8_FIXTURE_FALLBACK_FAILS = '1';
+      const app = captureLaunch(f.launcher, env);
+      if (mode === 'fallback' || mode === 'system') {
+        await until(() => existsSync(join(f.data, 'next-shell.json')));
+        await launchUnlocked(f.data, env);
+        expect(app.stderr().includes('Using bundled software Vulkan driver')).toBe(mode === 'fallback');
+        await stop(app.child);
+      } else {
+        await until(() => app.child.exitCode !== null);
+        await app.closed;
+        expect(app.child.exitCode).not.toBe(0);
+        expect(app.stderr()).toContain('NoSupportedDeviceFound');
+        expect(app.stderr()).toContain('Check that a usable Vulkan graphics device');
+        expect(app.stderr().includes('Using bundled software Vulkan driver')).toBe(mode === 'fails');
+      }
+      const attempts = mode === 'system' ? 1 : mode === 'fallback' || mode === 'fails' ? 3 : 2;
+      expect(events(env)).toHaveLength(attempts - (terminal && mode !== 'system' ? 1 : 0));
+      // Only the launcher's initial serve-status decision may probe the daemon.
+      if (terminal) expect(readFileSync(join(f.data, 'identity-count'), 'utf8')).toBe('1');
+      const after = JSON.parse(command(f.launcher, ['serve', 'status'], env).stdout);
+      expect(after.healthy).toBe(true);
+      if (before) expect(after.pid).toBe(before.pid);
+    }
+  }
+}, 120_000);
+
+
+it.skipIf(process.platform !== 'linux')('reuses a terminal daemon whose identity response exceeds one startup polling interval', async () => {
+  const f = installation('slow-terminal-health');
+  expect(command(f.launcher, ['serve'], f.env).status).toBe(0);
+  const daemon = JSON.parse(command(f.launcher, ['serve', 'status'], f.env).stdout);
+  writeFileSync(join(f.data, 'identity-delay'), '750');
+  const status = command(f.launcher, ['serve', 'status'], f.env);
+  expect(status.status, status.stdout + status.stderr).toBe(0);
+  const app = launch(f.launcher, f.env);
+  await until(() => events(f.env).length === 1 || app.exitCode !== null);
+  expect(events(f.env)).toHaveLength(1);
+  const reused = JSON.parse(command(f.launcher, ['serve', 'status'], f.env).stdout);
+  expect(reused.healthy).toBe(true);
+  expect(reused.pid).toBe(daemon.pid);
+  await stop(app);
+}, 60_000);
+
+
+it.skipIf(process.platform !== 'linux')('suppresses the Vulkan hint when a stop signal was forwarded', async () => {
+  const f = installation('vulkan-interrupted');
+  expect(command(f.launcher, ['serve'], f.env).status).toBe(0);
+  const before = JSON.parse(command(f.launcher, ['serve', 'status'], f.env).stdout);
+  const app = captureLaunch(f.launcher, { ...f.env, O8_FIXTURE_NO_DEVICE: '1', O8_FIXTURE_WAIT_STOP: '1' });
+  await until(() => app.stderr().includes('NoSupportedDeviceFound'));
+  await stop(app.child);
+  await app.closed;
+  expect(app.stderr()).not.toContain('Check that a usable Vulkan graphics device');
+  expect(app.stderr()).not.toContain('Using bundled software Vulkan driver');
+  const after = JSON.parse(command(f.launcher, ['serve', 'status'], f.env).stdout);
+  expect(after.healthy).toBe(true);
+  expect(after.pid).toBe(before.pid);
+}, 60_000);
+
+
+it.skipIf(process.platform !== 'linux')('releases the software-capable launch claim at real readiness and activates on a second launch', async () => {
+  const f = installation('ready-claim');
+  expect(command(f.launcher, ['serve'], f.env).status).toBe(0);
+  const software = join(f.relocated, 'usr/lib/o8/vulkan');
+  mkdirSync(software); writeFileSync(join(software, 'lvp_icd.json'), '{}');
+  const env = { ...f.env, O8_APPIMAGE_VULKAN_DIR: software };
+  const app = launch(f.launcher, env);
+  await until(() => existsSync(join(f.data, 'next-shell.json')));
+  await delay(300);
+  expect(command('flock', ['--nonblock', join(f.data, 'linux-desktop.lock'), '/usr/bin/true'], env).status).toBe(0);
+  expect(command(f.launcher, [], env).status).toBe(0);
+  expect(existsSync(join(f.data, 'activated'))).toBe(true);
+  expect(events(env)).toHaveLength(1);
+  await stop(app);
+}, 60_000);
+
+it.skipIf(process.platform !== 'linux')('never retries a no-device error emitted after the window became ready', async () => {
+  const f = installation('late-gpu-error');
+  expect(command(f.launcher, ['serve'], f.env).status).toBe(0);
+  const software = join(f.relocated, 'usr/lib/o8/vulkan');
+  mkdirSync(software); writeFileSync(join(software, 'lvp_icd.json'), '{}');
+  const trigger = join(f.data, 'crash-now');
+  const env = { ...f.env, O8_APPIMAGE_VULKAN_DIR: software, O8_FIXTURE_LATE_GPU_ERROR: trigger };
+  const app = captureLaunch(f.launcher, env);
+  await until(() => existsSync(join(f.data, 'next-shell.json')));
+  await delay(300);
+  writeFileSync(trigger, 'crash');
+  await app.closed;
+  expect(app.child.exitCode).not.toBe(0);
+  expect(events(env)).toHaveLength(1);
+  expect(app.stderr()).not.toContain('Using bundled software Vulkan driver');
+  expect(app.stderr()).not.toContain('Could not open the native window');
+}, 60_000);

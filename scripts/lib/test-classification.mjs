@@ -12,11 +12,7 @@ export function selectedTestsRequireBrowser(files, classification) {
 // extensions are helpers, not independently scheduled tests.
 const TEST_FILE_RE = /\.test\.ts$/;
 const TEST_ROOTS = ['src', 'tests', 'cli'];
-const EXTRA_TEST_FILES = new Set([
-  'src/components/desktop/file-viewer/RichMarkdownEditor.test.tsx',
-  'src/components/desktop/thoughts/chat-panel/useComposerAutosize.test.tsx',
-  'src/components/desktop/thoughts/chat-panel/useComposerDraftLifecycle.test.tsx',
-]);
+const EXTRA_TEST_FILES = new Set([]);
 
 const PATH_RULES = [
   ['real-path', /(?:^|[-/])real-path(?:[-.]|$)/i],

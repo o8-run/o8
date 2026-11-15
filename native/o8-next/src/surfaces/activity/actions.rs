@@ -59,12 +59,12 @@ impl ActivityPane {
                 else { self.expanded = Some(row.key()); if row.kind == "packet" { self.packet_read(row,false,cx); } else { self.detail(row,false,cx); } }
             }
             Action::RetryDetail(row) => self.detail(row,true,cx),
-            Action::Link(url) => cx.open_url(&url),
+            Action::Link(url) => crate::external_open::url(cx, &url),
             Action::Open(row) => {
                 if row.kind == "commit" {
                     cx.emit(ActivityEvent::Commit(row));
                 } else if row.kind == "pr" && self.pr_browser == Some(true) {
-                    if let Some(url) = row.url() { cx.open_url(&url); }
+                    if let Some(url) = row.url() { crate::external_open::url(cx, &url); }
                 } else if let Some(url) = row.url() {
                     cx.emit(ActivityEvent::Open(url));
                 }

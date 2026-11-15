@@ -4,13 +4,28 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChildProcess } from '@/lib/providers/child-process';
 import { browserAgentSource } from '../../../scripts/next/browser-agent-source';
-import { bindNextBrowserPipe, requestNextBrowser } from './browser-pipe';
+import { bindNextBrowserPipe, requestNextBrowser, requestNextPill } from './browser-pipe';
 
 function child() {
   return Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
 }
 afterEach(() => vi.useRealTimers());
 describe('Next Browser parent pipe', () => {
+  it('delivers pill snapshots on the existing pipe and requires a correlated acknowledgement', async () => {
+    const process = child();
+    bindNextBrowserPipe(process as unknown as ChildProcess);
+    const frames: string[] = [];
+    process.stdin.on('data', chunk => frames.push(String(chunk)));
+    const pending = requestNextPill({ action: 'frame', snapshot: { state: 'recording', audioLevel: 0.7 } });
+    const frame = JSON.parse(frames[0]);
+    expect(frame.type).toBe('dictation-pill');
+    expect(frame.args.snapshot.audioLevel).toBe(0.7);
+    process.stdout.write('o8-next-browser-result:' + JSON.stringify({ id: frame.id, result: { ok: true } }) + '\n');
+    expect(await pending).toEqual({ ok: true });
+    process.emit('exit');
+    expect(requestNextPill({ action: 'prepare' })).toBeNull();
+  });
+
   it('bakes the same classic native page agent without drift', () => {
     expect(readFileSync(new URL('../../../native/o8-next/src/browser_panel/agent.js', import.meta.url), 'utf8')).toBe(browserAgentSource());
   });
@@ -27,6 +42,19 @@ describe('Next Browser parent pipe', () => {
     process.stdout.write('o8-next-browser-result:' + JSON.stringify({ id: a.id, result: { ok: true, title: 'Fixture' } }) + '\n');
     expect(await one).toEqual({ ok: true, title: 'Fixture' });
     expect(await two).toEqual({ ok: true, clicked: '#link' });
+    process.emit('exit');
+  });
+  it('bounds pill delivery below its lease and carries the caller deadline', async () => {
+    vi.useFakeTimers();
+    const process = child();
+    bindNextBrowserPipe(process as unknown as ChildProcess);
+    let frame: { expiresAt: number } | undefined;
+    process.stdin.on('data', chunk => { frame = JSON.parse(chunk.toString()); });
+    const deadline = Date.now() + 300;
+    const pending = requestNextPill({ action: 'frame', deadline });
+    expect(frame?.expiresAt).toBe(deadline);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(await pending).toMatchObject({ ok: false, timedOut: true });
     process.emit('exit');
   });
   it('never replays an unconfirmed mutation or falls back after child death', async () => {

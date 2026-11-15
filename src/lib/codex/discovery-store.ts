@@ -35,7 +35,20 @@ export type CodexProcessBinding = {
 export type CodexDiscoveryHome = {
   configHomeRef: string;
   identityId?: string;
+  /** The home Codex uses when no saved identity is selected (`CODEX_HOME` or `~/.codex`). */
+  isDefault?: boolean;
 };
+
+/**
+ * The identity a Codex launch records when no saved identity is selected. It
+ * is not in the identity catalog: it stands for the default home.
+ */
+export const CODEX_LOCAL_DEFAULT_IDENTITY_ID = 'codex-local-default';
+
+/** Whether a discovery home belongs to the identity a session recorded. */
+export function codexHomeMatchesIdentity(home: CodexDiscoveryHome, identityId: string): boolean {
+  return home.identityId === identityId || (identityId === CODEX_LOCAL_DEFAULT_IDENTITY_ID && home.isDefault === true);
+}
 
 export function defaultCodexHome(): string {
   return process.env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex');
@@ -44,7 +57,7 @@ export function defaultCodexHome(): string {
 export async function listCodexDiscoveryHomes(): Promise<CodexDiscoveryHome[]> {
   const identities = await listRuntimeIdentitiesForServer('codex').catch(() => []);
   const candidates: CodexDiscoveryHome[] = [
-    { configHomeRef: defaultCodexHome() },
+    { configHomeRef: defaultCodexHome(), isDefault: true },
     ...identities.map((identity) => ({
       configHomeRef: identity.configHomeRef,
       identityId: identity.id,
@@ -65,6 +78,7 @@ export async function listCodexDiscoveryHomes(): Promise<CodexDiscoveryHome[]> {
       configHomeRef,
       identityId: candidate.identityId
         ?? canonicalIdentities.find((identity) => identity.configHomeRef === configHomeRef)?.identityId,
+      ...(candidate.isDefault ? { isDefault: true } : {}),
     });
   }
   return homes;

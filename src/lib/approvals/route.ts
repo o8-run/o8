@@ -1,3 +1,5 @@
+import { checkApprovalMergeHead } from './merge-head';
+import { isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { pageApprovalAudit } from '@/lib/approvals/audit-page';
 import { isNativeApprovalContinuation, RUNTIME_APPROVAL_OPERATION } from '@/lib/approvals/runtime-owner';
 import { viewerJson } from '@/lib/viewers/response';
@@ -270,6 +272,9 @@ export async function POST(request: NextRequest) {
   if (!current) {
     return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
   }
+  if (current.toolName === 'orchestrator_review' && isExternalReviewPacket(typeof current.args?.packetId === 'string' ? current.args.packetId : null)) {
+    return NextResponse.json({ ok: false, code: 'external_reviewer_required', error: 'External review decisions require their queued reviewer.' }, { status: 409 });
+  }
   // Scope the operation using the exact record resolved below, after caller admission.
   // A changed continuation cannot fall through into LLM grant issuance.
   if (process.env.O8_NEXT_O8D === '1' && body[RUNTIME_APPROVAL_OPERATION] === true
@@ -355,6 +360,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const mergeHeadRefusal = action === 'approve' ? await checkApprovalMergeHead(current, spokenReviewEvidence?.reviewedHeadSha) : null;
+    if (mergeHeadRefusal) {
+      // An old card without a pin cannot authorize publication. Retire that card
+      // with a reason so it does not remain an impossible pending inbox action.
+      const approval = mergeHeadRefusal.code === 'approved_head_required'
+        ? claimApprovalResolution(id, 'reject', 'system', mergeHeadRefusal.message, current.updatedAt).approval
+        : current;
+      invalidateApprovalCaches();
+      return viewerJson({ ok: false, code: mergeHeadRefusal.code, error: mergeHeadRefusal.message, approval, returnedToReview: true }, { status: 409 });
+    }
+
     const reviewedLaneStatus = current.continuation?.kind === 'lane'
       ? getLane(current.continuation.laneId)?.status
       : undefined;
@@ -378,6 +394,7 @@ export async function POST(request: NextRequest) {
       action === 'approve' ? approvedFromCardFact(body.via, current) : undefined,
       terminalAdapter,
       terminalAdapter ? () => terminalApprovalClaimMatches(terminalAdapter) : undefined,
+      { authorizingPrincipal: principal, approvedHeadSha: (spokenReviewEvidence?.reviewedHeadSha ?? (current.continuation?.kind === 'lane' && current.continuation.verb === 'merge' ? current.continuation.expectedHeadSha : undefined))?.toLowerCase() },
     );
     const approval = resolutionClaim.approval;
     if (!approval) {
@@ -514,9 +531,10 @@ export async function POST(request: NextRequest) {
       const { dispatch } = await import('@/lib/lane/commands');
       const result = await dispatch({
         verb: continuation.verb,
+        ...(continuation.verb === 'merge' ? { authorizingPrincipal: principal, authorizingApprovalId: approval.id } : {}),
         laneId: continuation.laneId,
         commitMessage: continuation.commitMessage,
-        expectedHeadSha: spokenReviewEvidence?.reviewedHeadSha ?? continuation.expectedHeadSha,
+        expectedHeadSha: (spokenReviewEvidence?.reviewedHeadSha ?? continuation.expectedHeadSha)?.toLowerCase(),
         expectedDiffFingerprint: spokenReviewEvidence?.reviewedDiffFingerprint,
         expectedGovernanceFingerprint: spokenReviewEvidence?.reviewedGovernanceFingerprint,
         spokenReviewApprovalId: spokenReviewEvidence?.approvalId,
@@ -529,6 +547,8 @@ export async function POST(request: NextRequest) {
       const spokenReviewDrift = result.reason === 'diff_changed_since_spoken_review'
         || result.reason === 'governance_changed_since_spoken_review'
         || result.reason === 'head_moved_since_review'
+        || result.reason === 'approved_head_unavailable'
+        || Boolean(result.expectedHeadSha && result.currentHeadSha)
         || (Boolean(spokenReviewEvidence) && Boolean(result.expectedHeadSha));
       const runPolicyRefusal = !result.ok && result.reason?.startsWith('review_run_') ? result.reason : null;
       if (spokenReviewDrift || runPolicyRefusal) {
@@ -556,7 +576,7 @@ export async function POST(request: NextRequest) {
         return viewerJson({
           ok: false,
           error: result.note,
-          code: runPolicyRefusal ?? 'spoken_review_changed',
+          code: runPolicyRefusal ?? (result.reason === 'approved_head_unavailable' ? result.reason : 'spoken_review_changed'),
           approval: reopened,
         }, {
           status: 409,

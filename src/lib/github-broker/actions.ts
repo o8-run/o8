@@ -259,27 +259,14 @@ export async function getGitHubPullRequestHeadRef(repoFullName: string, prNumber
 export async function mergeGitHubPullRequest(
   repoFullName: string,
   prNumber: number,
-  options?: { deleteBranch?: boolean; mergeMethod?: 'squash' | 'merge' | 'rebase'; expectedHeadSha?: string; beforePublish?: () => Promise<void> },
+  options?: { deleteBranch?: boolean; mergeMethod?: 'squash' | 'merge' | 'rebase'; expectedHeadSha?: string; expectedMergeGate?: string; principal?: string; beforePublish?: () => Promise<void> },
 ) {
-  const head = await getGitHubPullRequestHeadRef(repoFullName, prNumber);
-  const mergeMethod = options?.mergeMethod ?? 'squash';
-  // Squash merges through o8 stamp the [via-o8] attribution marker in the
-  // commit title — the public changelog sync forwards it and o8.run renders
-  // the "via o8" pill (product-builds-the-product proof). The worktree-side
-  // merge path stamps the same marker; PR-mode merges were the silent gap.
-  const commitTitle = mergeMethod === 'squash' && head.title && !head.title.includes('[via-o8]')
-    ? `${head.title} (#${prNumber}) [via-o8]`
-    : undefined;
-  await options?.beforePublish?.();
-  const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/merge`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ merge_method: mergeMethod, ...(options?.expectedHeadSha ? { sha: options.expectedHeadSha } : {}), ...(commitTitle ? { commit_title: commitTitle } : {}) }),
-  });
-  const merged = await parseGitHubJson<{ merged?: boolean; sha?: string | null }>(response);
-  if (merged.merged !== true) throw new Error('GitHub did not confirm a merge.');
+  const { publishGitHubPullRequest } = await import('./publication');
+  const publication = await publishGitHubPullRequest(repoFullName, prNumber, 'merge', options ?? {});
+  const merged = { merged: publication.status === 'merged', sha: publication.mergedSha, publication };
+  const head = options?.deleteBranch && merged.merged ? await getGitHubPullRequestHeadRef(repoFullName, prNumber) : null;
 
-  if (options?.deleteBranch && merged.merged && head.ref && head.headRepoFullName === repoFullName) {
+  if (options?.deleteBranch && merged.merged && head?.ref && head.headRepoFullName === repoFullName) {
     const deleteResponse = await githubInstallationFetch(
       repoFullName,
       `/repos/${repoFullName}/git/refs/heads/${encodeURIComponent(head.ref)}`,

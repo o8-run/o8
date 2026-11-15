@@ -1,26 +1,15 @@
-// @vitest-environment jsdom
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { act, createElement, useEffect } from 'react';
-import { createRoot } from 'react-dom/client';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
 import { resolveDisplayMessages } from '@/components/desktop/thoughts/chat-panel/resolve-display-messages';
 import { mergeSameThreadHistoryLoad } from '@/components/desktop/thoughts/utils';
-import { ChatMessageList } from '@/components/desktop/thoughts/chat-panel/ChatMessageList';
-import { useOrchestratorStream } from '@/components/desktop/thoughts/useOrchestratorStream';
-import type { OrchestratorStreamResult } from '@/components/desktop/thoughts/use-orchestrator-stream/types';
 
-const transport = vi.hoisted(() => ({ socket: null as WebSocket | null, summarize: () => {}, prompts: [] as string[] }));
-vi.mock('@/components/desktop/thoughts/use-orchestrator-stream/shared', async original => ({
-  ...await original<typeof import('@/components/desktop/thoughts/use-orchestrator-stream/shared')>(),
-  openOrchestratorWebSocket: () => transport.socket,
-}));
-vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: () => {} }));
+const transport = vi.hoisted(() => ({ summarize: () => {}, prompts: [] as string[] }));
 vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
 vi.mock('@/lib/repos/repo-path-registry', () => ({ resolveRepoPathFromRegistry: async (repoRoot: string) => ({ ok: true, repoRoot }) }));
 vi.mock('@/lib/operator/defaults', () => ({ resolveInAppOrchestratorEnabledSync: () => true }));
@@ -39,8 +28,6 @@ vi.mock('@/lib/providers/child-process', async original => ({
     return child;
   },
 }));
-// Use the real transcript and iframe boundary. Canvas metrics are absent in jsdom.
-vi.mock('@/lib/pretext/hooks', () => ({ usePretextHeight: () => 24 }));
 const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'o8-owner-chronology-')));
 const repo = join(fixture, 'repo'); mkdirSync(repo);
 // This fixture models an existing installation, after its historical migrations.
@@ -63,18 +50,19 @@ const entries: MobileTranscriptEntry[] = Array.from({ length: 35 }, (_, i) => [
   { id: `reply-${i}`, role: 'assistant' as const, text: `Answer ${i}`, timestamp: at + i * 1000 + 500,
     ...(i === 0 ? { toolCalls: [{ id: 'render', name: 'o8_html_render', args: {}, status: 'done' as const, result: JSON.stringify({ visualization: visual }) }] } : {}) },
 ]).flat();
-let host: HTMLDivElement;
-let root: ReturnType<typeof createRoot>;
-let stream: OrchestratorStreamResult;
-function Harness({ restored = [], history = [] }: { restored?: MobileTranscriptEntry[]; history?: MobileTranscriptEntry[] }) {
-  const current = useOrchestratorStream(repo, { threadId });
-  useEffect(() => { stream = current; }, [current]);
-  return createElement(ChatMessageList, { displayMessages: resolveDisplayMessages({ historyEntries: history, chatMessages: restored, streamMessages: current.messages }),
-    displayWaiting: false, threadId, isOrchestratorMode: true, activeTargetLabel: 'Fixture', activeTargetColor: 'var(--t-accent)',
-    thoughtsMutedGlass: 'transparent', thoughtsElevatedBorder: 'none', thoughtsElevatedShadow: 'none', emptyStateFallback: null });
+// The browser chat list is gone. The displayed order is what the kept
+// display resolver returns for the stream, restored and history entries.
+let streamMessages: MobileTranscriptEntry[] = [];
+let view: { restored: MobileTranscriptEntry[]; history: MobileTranscriptEntry[] } = { restored: [], history: [] };
+const stream = {
+  get messages() { return streamMessages; },
+  replaceTranscript(next: MobileTranscriptEntry[]) { streamMessages = next; },
+};
+function show({ restored = [], history = [] }: { restored?: MobileTranscriptEntry[]; history?: MobileTranscriptEntry[] } = {}) {
+  view = { restored, history };
 }
 const ids = (messages: readonly { id: string }[]) => messages.map(entry => entry.id);
-const renderedIds = () => [...host.querySelectorAll('[data-o8-message-id]')].map(node => node.getAttribute('data-o8-message-id'));
+const renderedIds = () => ids(resolveDisplayMessages({ historyEntries: view.history, chatMessages: view.restored, streamMessages }));
 function persist(messages: MobileTranscriptEntry[]) {
   store.persistCanonicalChatHistoryRecord(threadId, { repoPath: repo, messages: serializeTranscriptForStorage(messages) });
 }
@@ -85,33 +73,30 @@ async function page(before?: string) {
   return await response.json() as { messages: Parameters<typeof store.mapLlmHistoryToMobileTranscript>[0]; page: { beforeCursor: string } };
 }
 beforeEach(async () => {
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({})));
-  transport.socket = { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() } as unknown as WebSocket;
   persist(entries);
-  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  await act(async () => root.render(createElement(Harness)));
+  streamMessages = [];
+  show();
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); localStorage.clear(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.unstubAllGlobals(); });
 afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(fixture, { recursive: true, force: true }); });
 
 it('keeps an earlier live block before a fetched tail page, then backfills and reconnects without moving it below the tail', async () => {
-  await act(async () => stream.replaceTranscript(entries));
+  stream.replaceTranscript(entries);
   const tail = await page();
   const loaded = store.mapLlmHistoryToMobileTranscript(tail.messages);
   const merged = mergeSameThreadHistoryLoad(stream.messages, loaded);
-  await act(async () => stream.replaceTranscript(merged.entries));
+  stream.replaceTranscript(merged.entries);
   expect(renderedIds()).toEqual(ids(entries));
   const older = await page(tail.page.beforeCursor);
-  await act(async () => root.render(createElement(Harness, { restored: loaded, history: store.mapLlmHistoryToMobileTranscript(older.messages) })));
+  show({ restored: loaded, history: store.mapLlmHistoryToMobileTranscript(older.messages) });
   expect(renderedIds()).toEqual(ids(entries));
   expect(placeTranscriptVisualizations([visual], stream.messages).size).toBe(0); // Original tool result owns the chart.
 });
 
 it('weaves overlapping retained history and stream by identity instead of appending older rows', async () => {
-  await act(async () => stream.replaceTranscript(entries));
-  await act(async () => root.render(createElement(Harness, { restored: entries.slice(-20) })));
+  stream.replaceTranscript(entries);
+  show({ restored: entries.slice(-20) });
   expect(renderedIds()).toEqual(ids(entries));
 });
 
@@ -119,7 +104,7 @@ it('preserves causal source order through hydration with equal, missing and late
   const causal = entries.slice(0, 6).map((entry, index) => ({ ...entry,
     timestamp: index === 1 ? at + 90_000 : index === 3 ? undefined : at,
   }));
-  await act(async () => stream.replaceTranscript(causal));
+  stream.replaceTranscript(causal);
   expect(renderedIds()).toEqual(ids(causal));
 });
 
@@ -160,7 +145,7 @@ it('keeps visualization revisions at the producing identity through partial page
 });
 
 it('retains all visible turns and tools through a real compaction, racing output, reload and repeated compaction', async () => {
-  await act(async () => stream.replaceTranscript(entries));
+  stream.replaceTranscript(entries);
   for (let iteration = 0; iteration < 2; iteration++) {
     const before = store.readPersistedLlmChat(threadId)!.history.messages;
     const run = compact(new NextRequest('http://localhost/api/orchestrator/compact', { method: 'POST',
@@ -185,15 +170,7 @@ it('retains all visible turns and tools through a real compaction, racing output
     expect(saved.at(-1)?.type).toBe('compaction');
     expect(saved[1].toolCalls).toEqual(entries[1].toolCalls);
     const reloaded = store.mapLlmHistoryToMobileTranscript(saved);
-    await act(async () => stream.replaceTranscript(reloaded));
-    // Earlier assistant progress in a settled turn lives in Work details.
-    // Expand via the existing disclosure before checking every retained row.
-    await act(async () => {
-      for (const details of host.querySelectorAll('details')) {
-        details.open = true;
-        details.dispatchEvent(new Event('toggle'));
-      }
-    });
+    stream.replaceTranscript(reloaded);
     expect(renderedIds()).toEqual(ids(reloaded));
     expect(placeTranscriptVisualizations([visual], reloaded).size).toBe(0);
     previousSummary = previous;

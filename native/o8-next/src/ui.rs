@@ -1163,7 +1163,7 @@ fn frame(
     (start.elapsed().as_secs_f64() * 1000., cost)
 }
 fn rss() -> f64 {
-    let output = Command::new("ps")
+    let output = crate::child_command::command("ps")
         .args(["-p", &std::process::id().to_string(), "-o", "rss="])
         .output()
         .unwrap();
