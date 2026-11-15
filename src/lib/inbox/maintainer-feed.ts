@@ -1,17 +1,13 @@
+import { readIdleDrafts } from '@/lib/github-broker/idle-drafts';
 import 'server-only';
-import { listRepos } from '@/lib/repos/registry';
-import { normalizeRepoSlug } from '@/lib/github-broker/repo';
+import { registeredGitHubRepos } from '@/lib/github-broker/repo';
 import { listGitHubAttentionThreads, listGitHubIssues, listGitHubPullRequests, readGitHubSyncState } from '@/lib/github-broker/store';
 import { findWaitingOutsiders } from '@/lib/supervisor/outsider-attention';
 import type { MaintainerContribution, MaintainerFeed } from './maintainer-types';
 
-/** Read the connected mirrors. Missing or stale sync is visible, never a clean bill of health. */
+/** Read connected mirrors and the existing paged PR summaries for idle-draft decisions. Missing or stale sync is visible, never a clean bill of health. */
 export async function readMaintainerFeed(repoPaths?: string[]): Promise<MaintainerFeed> {
-  const bySlug = new Map<string, string[]>();
-  for (const entry of await listRepos()) {
-    const slug = normalizeRepoSlug(entry.remoteUrl)?.toLowerCase();
-    if (slug) bySlug.set(slug, [...(bySlug.get(slug) ?? []), entry.localPath]);
-  }
+  const bySlug = await registeredGitHubRepos();
   if (repoPaths) for (const [slug, paths] of bySlug) if (!paths.some((path) => repoPaths.includes(path))) bySlug.delete(slug);
   const contributions: MaintainerContribution[] = [];
   const sources: MaintainerFeed['sources'] = [];
@@ -27,7 +23,27 @@ export async function readMaintainerFeed(repoPaths?: string[]): Promise<Maintain
       contributions.push({ id: `github:${repo}:issue:${issue.number}`, kind: 'claim', repo, repoPaths, number: issue.number, title: issue.title, author: issue.author?.login ?? null, assignees: issue.assignees.map((person) => person.login), url: issue.url, createdAt: issue.createdAt, updatedAt: issue.updatedAt });
     }
   }
-  contributions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+  const idleDraftsUnavailable: string[] = [];
+  const idleDraftNextPages: Record<string, number> = {};
+  await Promise.all([...bySlug].map(async ([repo, repoPaths]) => {
+    try {
+      const page = await readIdleDrafts(repo);
+      if (page.error) { idleDraftsUnavailable.push(repo); return; }
+      if (page.nextPage !== null) idleDraftNextPages[repo] = page.nextPage;
+      for (const pr of page.drafts) {
+        const id = `github:${repo}:pr:${pr.number}`;
+        const item: MaintainerContribution = {
+          id, kind: 'pull_request', repo, repoPaths, number: pr.number,
+          title: `Idle draft · ${pr.ageDays}d · checks ${pr.checks ?? 'unknown'} · conflicts with main ${pr.conflictsWithMain === null ? 'unknown' : pr.conflictsWithMain ? 'yes' : 'no'} · Continue / Handoff / Close: ${pr.title}`,
+          author: pr.author, assignees: [], url: pr.url, createdAt: pr.createdAt, updatedAt: pr.updatedAt,
+          baseRefName: pr.baseRefName, headRefName: pr.headRefName, idleDraft: pr,
+        };
+        const index = contributions.findIndex(existing => existing.id === id);
+        if (index === -1) contributions.push(item); else contributions[index] = item;
+      }
+    } catch { idleDraftsUnavailable.push(repo); }
+  }));
+  contributions.sort((a, b) => Number(Boolean(b.idleDraft)) - Number(Boolean(a.idleDraft)) || b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   const attention = listGitHubAttentionThreads().filter((thread) => bySlug.has(thread.repo.toLowerCase()));
   const associationByThread = new Map(attention.map((thread) => [`${thread.repo.toLowerCase()}:${thread.kind}:${thread.number}`, thread.lastHumanCommentAuthorAssociation]));
   const replies = findWaitingOutsiders(attention, new Date(), 0).map((thread): MaintainerContribution => ({
@@ -36,5 +52,5 @@ export async function readMaintainerFeed(repoPaths?: string[]): Promise<Maintain
     title: thread.title, author: thread.waitingLogin, authorAssociation: associationByThread.get(`${thread.repo.toLowerCase()}:${thread.kind}:${thread.number}`), assignees: [], url: thread.url,
     createdAt: thread.waitingSince, updatedAt: thread.waitingSince, waitingSince: thread.waitingSince, threadKind: thread.kind,
   })).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-  return { contributions: contributions.slice(0, 200), replies: replies.slice(0, 200), sources, truncated: contributions.length > 200, repliesTruncated: replies.length > 200 };
+  return { contributions: contributions.slice(0, 200), replies: replies.slice(0, 200), sources, truncated: contributions.length > 200, idleDraftNextPages, ...(idleDraftsUnavailable.length ? { idleDraftsUnavailable: idleDraftsUnavailable.sort() } : {}), repliesTruncated: replies.length > 200 };
 }

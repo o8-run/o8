@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { resolveCliDataDir, resolveConfig } from './config.js';
@@ -31,7 +31,7 @@ function record(text: string): Record<string, unknown> | undefined {
   return undefined;
 }
 
-type CliResult = { code: number; stdout: string; stderr: string };
+type CliResult = { code: number; stdout: string; stderr: string; probed?: boolean };
 function reusableServeError(result: CliResult): boolean {
   // Prefer the structured stdout response. The ordinary CLI currently emits
   // error envelopes on stderr, one pretty-printed JSON object per write; keep
@@ -54,20 +54,36 @@ function healthy(result: CliResult): boolean {
     && typeof status.pid === 'number' && Number.isSafeInteger(status.pid) && status.pid > 0;
 }
 
-async function runCli(args: string[], capture = false, timeoutMs?: number): Promise<CliResult> {
+// The renderer's own words when no graphics device or driver can be used.
+const NO_GRAPHICS_DEVICE = /NoSupportedDeviceFound|Unable to init GPU context/;
+
+// Set when this launcher forwards a stop signal, so a requested exit is not
+// reported as a failed start.
+let interrupted = false;
+
+async function runCli(args: string[], capture = false, timeoutMs?: number, stderrProbe?: RegExp, env = process.env, onReady?: () => void): Promise<CliResult> {
   return new Promise((done, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
-      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', timeout: timeoutMs, killSignal: 'SIGKILL',
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : stderrProbe ? ['inherit', 'pipe', 'pipe'] : 'inherit',
+      timeout: timeoutMs, killSignal: 'SIGKILL', env,
     });
     let stdout = '';
     let stderr = '';
-    child.stdout?.on('data', chunk => { stdout += String(chunk); });
-    child.stderr?.on('data', chunk => { stderr += String(chunk); });
-    const forward = () => { child.kill('SIGTERM'); };
+    child.stdout?.on('data', chunk => {
+      stdout = capture ? stdout + String(chunk) : (stdout + String(chunk)).slice(-8192);
+      if (!capture) process.stdout.write(chunk);
+      if (stdout.split('\n').includes('o8-next-ready')) onReady?.();
+    });
+    child.stderr?.on('data', chunk => {
+      // A probed run still shows its errors live; only the tail is kept to match.
+      if (!capture) { process.stderr.write(chunk); stderr = (stderr + String(chunk)).slice(-8192); }
+      else stderr += String(chunk);
+    });
+    const forward = () => { interrupted = true; child.kill('SIGTERM'); };
     process.once('SIGINT', forward); process.once('SIGTERM', forward);
     const cleanup = () => { process.off('SIGINT', forward); process.off('SIGTERM', forward); };
     child.once('error', error => { cleanup(); reject(error); });
-    child.once('close', code => { cleanup(); done({ code: code ?? 1, stdout, stderr }); });
+    child.once('close', code => { cleanup(); done({ code: code ?? 1, stdout, stderr, probed: stderrProbe ? stderrProbe.test(stderr) : false }); });
   });
 }
 
@@ -220,15 +236,36 @@ async function openDesktop(): Promise<number> {
     }
     // A terminal daemon cannot inherit this launcher's packaged environment.
     // The existing CLI resolves its health, ports, credentials and shell state.
-    let finished = false;
-    const next = runCli(['next', '--binary', binary]);
-    void next.then(() => { finished = true; }, () => { finished = true; });
-    while (!finished && !windowIsOpen()) await delay(100);
-    // Keep the CLI's signal/exit lifecycle, but release launch exclusion once
-    // /proc can identify the window. Later clicks can check daemon health.
-    closeSync(lock);
-    released = true;
-    return (await next).code;
+    const software = process.env.O8_APPIMAGE_VULKAN_DIR;
+    const canRetry = software && isAbsolute(software) && existsSync(join(software, 'lvp_icd.json'))
+      && process.env.O8_DISABLE_BUNDLED_VULKAN !== '1'
+      && process.env.VK_ICD_FILENAMES === undefined && process.env.VK_DRIVER_FILES === undefined;
+    // Serve has already resolved ownership and health. Explicit attach keeps
+    // next from probing or starting the daemon again, including on retry.
+    const origin = resolveConfig().apiBase;
+    // First-paint notification only: no stdin lifeline or updater ownership.
+    let env: NodeJS.ProcessEnv = { ...process.env, O8_NEXT_READY_STDOUT: '1' };
+    for (let retry = 0; ; retry += 1) {
+      let finished = false;
+      let ready = false;
+      const next = runCli(['next', '--binary', binary, '--server', origin], false, undefined, NO_GRAPHICS_DEVICE, env, () => { ready = true; });
+      void next.then(() => { finished = true; }, () => { finished = true; });
+      while (!finished && !(ready && windowIsOpen())) await delay(100);
+      if (!finished && !released) {
+        closeSync(lock);
+        released = true;
+      }
+      const { code, probed } = await next;
+      if (code !== 0 && probed && !interrupted && !ready) {
+        if (retry === 0 && canRetry && !ready && !released) {
+          process.stderr.write('o8: Using bundled software Vulkan driver; performance will be lower.\n');
+          env = { ...process.env, O8_NEXT_READY_STDOUT: '1', O8_APPIMAGE_SOFTWARE_VULKAN: '1', VK_ICD_FILENAMES: join(software, 'lvp_icd.json') };
+          continue;
+        }
+        process.stderr.write('o8: Could not open the native window. Check that a usable Vulkan graphics device and driver are available. See the startup error above.\n');
+      }
+      return code;
+    }
   } finally {
     // Keep unresolved claims across launcher exits and failed health probes.
     try { if (attempt) cleanFinishedAttempt(attempt); }

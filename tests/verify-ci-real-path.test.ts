@@ -301,7 +301,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
     `);
     writeFileSync(preload, "import { register } from 'node:module'; register(new URL('./contention-loader.mjs', import.meta.url));");
   }
-  const result = spawnSync(process.execPath, [...(contend ? ['--import', preload] : []), path.join(directory, 'scripts/verify-ci.mjs')], {
+  const result = spawnSync(process.execPath, [...(contend ? ['--import', preload] : []), path.join(directory, 'scripts/verify-ci.mjs'), '--allow-concurrent'], {
     cwd: directory, encoding: 'utf8', timeout: 60_000,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
       VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,
@@ -633,7 +633,7 @@ describe('local CI verification through its command entry point', () => {
   });
 
   it.each(['architecture', 'missing install', 'cache dependencies only', 'cache without source key',
-    'registration without headless gate', 'registration without dependency key',
+    'registration without headless gate', 'registration without dependency key', 'registration prefix restore',
     'registration restored before native'])('rejects uncovered native prerequisite changes: %s', setupChange => {
     const result = executeFixture('tests/fixture.test.ts', false, { setupChange });
     expect(result.error).toBeUndefined();
@@ -807,7 +807,19 @@ describe('local CI verification through its command entry point', () => {
     expect(ignores.every(id => /^RUSTSEC-\d{4}-\d{4}$/.test(id))).toBe(true);
     // cargo-audit is provisioned without the action.
     expect(steps.some(step => step.uses?.startsWith('dtolnay/rust-toolchain@'))).toBe(true);
-    expect(steps.some(step => step.run?.trim().startsWith('cargo install cargo-audit'))).toBe(true);
+    const install = steps.find(step => step.name === 'Install cargo-audit')!;
+    expect(install.run).toBe('bash scripts/ci/install-audit-tool.sh');
+    const receipt = path.join(root, 'audit-provisioning.jsonl');
+    writeFileSync(receipt, '');
+    const provisioned = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', install.run!], {
+      cwd: repo, encoding: 'utf8', env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        CARGO_HOME: path.join(root, 'audit-home'), AUDIT_TOOL_CACHEABLE: 'false',
+        VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: '', VERIFY_FIXTURE_BARRIER: '', VERIFY_FIXTURE_CONTENTION: '' },
+    });
+    expect(provisioned.status, provisioned.stderr).toBe(0);
+    const commands = readFileSync(receipt, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    expect(commands.some(command => command.tool === 'cargo'
+      && JSON.stringify(command.args) === JSON.stringify(['install', 'cargo-audit', '--locked']))).toBe(true);
   });
 
   it('uses the CI merge-base selector for committed, staged, unstaged and untracked classified files', () => {

@@ -104,8 +104,9 @@ Use the returned review item ids for subsequent actions and preserve operator pr
 
 CLI output is JSON by default; `--human` selects formatted output. Exit codes are
 0 success, 1 invalid arguments, 2 unreachable API, 3 unauthorized, 4 not found,
-5 conflict, and 6 server timeout with an uncertain outcome. Follow the error's
-message and corrective hint. For exit 6, inspect status before repeating a mutation.
+5 conflict, 6 server timeout with an uncertain outcome, and 7 lead turn is unreported
+(send new work or stop the lead). Follow the error's message and corrective hint.
+For exit 6, inspect status before repeating a mutation.
 For an unauthorized call, check the configured server/profile and token source.
 For an unavailable tool, repeat discovery and use an exact exposed name.
 

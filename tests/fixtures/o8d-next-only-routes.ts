@@ -44,10 +44,8 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
 
 
-  '/api/orchestrator/merge': seek('operator merge mutation'),
 
 
-  '/api/orchestrator/reload': seek('operator reload'),
 
 
 
@@ -60,9 +58,7 @@ export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
 export const NEXT_ONLY_WS_PATHS: NextOnlyTable = {
 
 
-  '/api/mobile/symon/text-turn': security('Symon relay: operator credential only'),
 
-  '/api/mobile/symon/tool': security('Symon relay: operator credential only'),
 
   '/api/v2/proxy/llm': security('o8 lane model calls: provider keys and spend'),
 };
@@ -79,9 +75,7 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
 
 
-  '/api/orchestrator/lead': seek('lead session control'),
 
-  '/api/orchestrator/merge': seek('operator merge mutation'),
 
 
 
@@ -94,9 +88,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
   '/api/task-artifacts/[id]/actions': seek('operator task artifact actions'),
 
 
-  // The CLI builds `/api/tasks/${id}/${action}`, which this inventory cannot resolve to the
-  // explicit report, block and operator-verb registrations.
-  '/api/tasks/[id]/[id]': seek('dynamic CLI task URL; every verb is registered at its explicit path'),
 };
 export const NEXT_ONLY_CLI_METHODS: NextOnlyTable = {
 };

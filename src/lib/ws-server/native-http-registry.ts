@@ -37,18 +37,31 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
     route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
     route('/api/harness', 'POST', () => import('@/lib/harness/route')),
+    route('/api/mobile/symon/text-turn', 'POST DELETE', () => import('@/lib/symon/http/text-turn')),
+    route('/api/panel/symon/conversations', 'GET', () => import('@/lib/symon/http/conversations')),
+    route('/api/panel/symon/conversations/continue', 'POST', () => import('@/lib/symon/http/continue')),
+    route('/api/panel/symon/conversations/transcript', 'GET', () => import('@/lib/symon/http/transcript')),
+    route('/api/panel/symon/conversations/record', 'POST', () => import('@/lib/symon/http/record')),
+    route('/api/symon/managed-messages/inbound', 'POST', () => import('@/lib/symon/http/managed-inbound')),
 
     route('/api/mobile/symon', 'GET POST', () => import('@/lib/mobile/symon-relay-route')),
     route('/api/mobile/symon/confirm', 'POST', () => import('@/lib/mobile/symon-confirm-route')),
+    route('/api/mobile/symon/tool', 'POST DELETE', () => import('@/lib/mobile/symon-tool-route')),
+    route('/api/panel/symon/messages-receiver', 'GET POST', () => import('@/lib/symon/messages-receiver/control-route')),
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
     route('/api/tasks', 'GET POST', () => import('@/app/api/tasks/route')),
+    route('/api/repos/[id]/integration-queue', 'GET POST', () => import('@/app/api/repos/[id]/integration-queue/route')),
+    route('/api/tasks/adopt-pr', 'POST', () => import('@/app/api/tasks/adopt-pr/route')),
     route('/api/tasks/worker-availability', 'GET', () => import('@/app/api/tasks/worker-availability/route')),
     route('/api/tasks/[taskId]', 'GET', () => import('@/lib/tasks/detail-route')),
     route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route'), ARTIFACT_REQUEST_MAX_BYTES),
     route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
     route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
+    route('/api/tasks/dispatch-owner', 'POST', () => import('@/lib/tasks/dispatch-owner-route')),
+    route('/api/runtime/owner', 'GET', () => import('@/lib/runtime/owner-status-route')),
+    route('/api/orchestrator/steer-owner', 'POST', () => import('@/lib/orchestrator/operator-mission-service/steer-owner-route')),
     route('/api/runtime/discovered-sessions', 'GET', () => import('@/app/api/runtime/discovered-sessions/route')),
     route('/api/runtime/discovered-sessions/import', 'POST', () => import('@/app/api/runtime/discovered-sessions/import/route')),
     route('/api/panel/branches', 'GET', repositoryRead(() => import('@/app/api/panel/branches/route'))),
@@ -96,6 +109,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/create-mission', 'POST', () => import('@/lib/orchestrator/http/create-mission')),
     route('/api/orchestrator/dispatch', 'POST', () => import('@/lib/orchestrator/http/dispatch')),
     route('/api/orchestrator/propose-spec', 'POST', () => import('@/lib/orchestrator/http/propose-spec')),
+    route('/api/orchestrator/merge', 'POST', () => import('@/lib/orchestrator/http/merge')),
+    route('/api/orchestrator/reload', 'POST', () => import('@/lib/orchestrator/http/reload')),
+    route('/api/orchestrator/lead', 'GET POST', () => import('@/lib/orchestrator/http/lead')),
     route('/api/orchestrator/status', 'GET', () => import('@/app/api/orchestrator/status/route')),
     route('/api/orchestrator/archive', 'GET', () => import('@/app/api/orchestrator/archive/route')),
     route('/api/task-artifacts/[id]/decision', 'GET POST', () => import('@/app/api/task-artifacts/[id]/decision/route')),
@@ -277,6 +293,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/lanes/[id]/heartbeat', 'POST', () => import('@/app/api/lanes/[id]/heartbeat/route')),
     route('/api/lanes/[id]/events', 'GET POST', () => import('@/app/api/lanes/[id]/events/route')),
     route('/api/lanes/[id]/scope', 'GET POST', () => import('@/app/api/lanes/[id]/scope/route')),
+    route('/api/panel/inbox/decisions', 'GET', () => import('@/app/api/panel/inbox/decisions/route')),
+    route('/api/lanes/[id]/policy', 'GET', () => import('@/app/api/lanes/[id]/policy/route')),
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/lane-events', 'GET', () => import('@/app/api/orchestrator/lane-events/route')),
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),
@@ -419,6 +437,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // (tests/o8d-backend-models-native-real-path.test.ts). The OpenRouter metadata cache is per process and
     // the probe cache is on disk, so neither needs a single owner. (#5243)
     route('/api/orchestrator/backend-models', 'GET', () => import('@/app/api/orchestrator/backend-models/route')),
+    // Existing local operator review; account, epoch and single-attempt admission stay in the handlers.
+    route('/api/plugins/task-drafts', 'GET', () => import('@/app/api/plugins/task-drafts/route')),
+    route('/api/plugins/task-drafts/control', 'POST', () => import('@/app/api/plugins/task-drafts/control/route')),
     // MCP config generator (Settings > MCP). GET only, no handler-level auth: gated by
     // panelGateMiddleware, which does not public-allowlist /api/setup/* (hardening #1562).
     // It is not one of the gate's loopback reads, so it is operator-ws-token-only, whatever the
@@ -463,7 +484,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
     route('/api/worktrees/retention-usage', 'GET', () => import('@/app/api/worktrees/retention-usage/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
-    route('/api/setup/cli-updates', 'GET POST', () => import('@/app/api/setup/cli-updates/route')),
     route('/api/cortex/sources', 'GET POST', () => import('@/lib/cortex/knowledge/sources-route')),
     route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/handler')),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('@/app/api/v2/keys/route')),
@@ -511,12 +531,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   ],
   inbox: [
     route('/api/panel/supervisor-inbox', 'GET', () => import('@/app/api/panel/supervisor-inbox/route')),
-    route('/api/panel/approvals', 'GET POST', () => import('@/app/api/panel/approvals/route')),
+    route('/api/panel/approvals', 'GET POST', () => import('@/lib/approvals/route')),
   ],
   diff: [
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/orchestrator/review-state', 'GET', () => import('@/app/api/orchestrator/review-state/route')),
     route('/api/orchestrator/review', 'POST', () => import('@/app/api/orchestrator/review/route')),
+    // Reuse the operator-only handler; it proves the recorded checkout is absent.
+    route('/api/lanes/discard-orphaned', 'POST', () => import('@/app/api/lanes/discard-orphaned/route')),
     route('/api/lanes/[id]/diff', 'GET', () => import('@/app/api/lanes/[id]/diff/route')),
     route('/api/worktrees/diff', 'GET', () => import('@/app/api/worktrees/diff/route')),
     route('/api/review/last-turn', 'GET', () => import('@/app/api/review/last-turn/route')),
@@ -588,4 +610,10 @@ export function matchNativeHttpRoute(pathname: string, method?: string) {
   const matches = routes.map(route => ({ route, params: parameters(route.path, pathname) })).filter(entry => entry.params !== null);
   // Surfaces can share a path with different methods, so match on both.
   return method === undefined ? matches[0] : matches.find(entry => entry.route.methods.includes(method));
+}
+
+/** Every verb dispatch can resolve for this concrete path, including split registrations. */
+export function nativeHttpMethods(pathname: string): string[] {
+  return [...new Set(routes.filter(route => parameters(route.path, pathname) !== null)
+    .flatMap(route => route.methods))].sort();
 }

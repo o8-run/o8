@@ -1213,6 +1213,7 @@ async function handleAsk(args: Record<string, unknown>): Promise<McpToolResult> 
       classifyMs: data.classifyMs ?? null,
     });
   } catch (err) {
+    if (err instanceof O8ApiError && err.managedBrainUnavailable) return jsonResult(err.managedBrainUnavailable);
     return textResult(`cortex_ask failed: ${safeErrorText(err)}`, true);
   }
 }

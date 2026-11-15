@@ -1,3 +1,4 @@
+import type { ReviewRunEvidence, ReviewMode } from './review-run-evidence';
 import type { OutcomeMemoryProvenance } from '@/lib/cortex/memory-provenance';
 // Orchestrator domain types — runtimes, packets, lanes
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
@@ -11,7 +12,6 @@ import type { PacketContextTelemetry } from '@/lib/orchestrator/packet-context-t
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
-
 export type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 export type OrchestratorExecutionMode = 'fleet' | 'single' | 'fusion';
 export type OrchestrationMode = OrchestratorExecutionMode | 'chat';
@@ -47,6 +47,7 @@ export interface WorkerLaunchContext {
 }
 
 export interface WorkerRouting {
+  runtimeSubstitution?: { requestedRuntime: string; reason: string };
   workerIntent: WorkerIntent;
   requestedProvider: WorkerProvider | null;
   requestedRuntime: OrchestratorRuntime | null;
@@ -64,7 +65,7 @@ export interface WorkerRouting {
   enforcement: 'dispatchable_runtimes';
   confidence: WorkerRoutingConfidence;
   reason: string;
-  decidedAt: string;
+  decidedAt?: string;
 }
 
 export type OrchestratorPacketStatus =
@@ -161,6 +162,10 @@ export interface OrchestratorPacketReviewDirectiveViolation {
 }
 
 export interface OrchestratorPacketReview {
+  runEvidence?: ReviewRunEvidence;
+  runEvidenceWarning?: string;
+  reviewMode?: ReviewMode;
+  verdictLabel?: string;
   approved: boolean;
   findings: OrchestratorPacketReviewFinding[];
   recordedAt: string;

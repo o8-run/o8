@@ -11,7 +11,7 @@ impl Tool {
             .iter()
             .flat_map(|(_, tools)| tools.iter())
             .copied()
-            .chain([Self::Launcher, Self::Prs, Self::Compare])
+            .chain([Self::Launcher, Self::Prs, Self::Issues, Self::Compare])
             .find(|t| t.slug() == value)
     }
     pub(super) fn utility(self) -> bool {
@@ -93,6 +93,18 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         contextual::refresh(s, window, cx);
         return;
     }
+    let before = s.state.right_panel.clone();
+    side::cancel_focus(s);
+    // Hidden tools must leave every retained layout, including the global empty scope.
+    let saved = &mut s.state.right_panel;
+    for tabs in saved.utility_tabs.values_mut() {
+        tabs.retain(|value| Tool::find(value).is_some_and(Tool::utility));
+    }
+    for tabs in saved.secondary_tabs.values_mut() {
+        tabs.retain(|value| Tool::find(value).is_some());
+    }
+    saved.selected_tools.retain(|_, value| Tool::find(value).is_some());
+    saved.lower_tools.retain(|_, value| Tool::find(value).is_some());
     let saved = s.state.right_panel.clone();
     let p = s.features.get::<Panel>();
     p.scope = Some(scope.clone());
@@ -110,14 +122,14 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
             out
         });
     // A saved tool that is no longer offered gives way to the first saved tab.
-    p.selected = Tool::find(&saved.primary)
+    p.selected = saved.selected_tools.get(&scope)
+        .and_then(|v| Tool::find(v))
+        .filter(|tool| !tool.utility() || p.tabs.contains(tool))
         .or_else(|| p.tabs.first().copied())
         .unwrap_or(Tool::Launcher);
     p.active = p.tabs.iter().position(|t| *t == p.selected).unwrap_or(0);
-    p.lower = saved
-        .split
-        .then(|| Tool::find(&saved.secondary))
-        .flatten()
+    p.lower = saved.lower_tools.get(&scope)
+        .and_then(|v| Tool::find(v))
         .map(|t| {
             if t == p.selected {
                 if t == Tool::Browser {
@@ -152,23 +164,25 @@ pub(super) fn sync(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
         saved.pr_selected.get(&scope),
     );
     if saved.visible && fits {
-        match contextual::unopened(s).filter(|_| upper == Tool::Prs) {
-            Some((repo, n)) => contextual::open_pr(s, repo, n, window, cx),
-            None => show(s, upper, window, cx),
-        }
+        restore_tool(s, upper, window, cx);
         if let Some(lower) = lower {
-            s.features.get::<Panel>().into_lower = true;
-            show(s, lower, window, cx);
-            let p = s.features.get::<Panel>();
-            p.into_lower = false;
-            p.selected = upper;
+            restore_tool(s, lower, window, cx);
         }
-        save(s);
     }
     contextual::refresh(s, window, cx);
+    if s.state.right_panel != before {
+        store(s);
+        s.persist();
+    }
+    cx.notify();
 }
 
 pub(super) fn save(s: &mut Shell) {
+    store(s);
+    s.persist();
+}
+
+fn store(s: &mut Shell) {
     let p = s.features.get::<Panel>();
     let (scope, tabs, primary, lower) = (
         p.scope.clone().unwrap_or_default(),
@@ -184,14 +198,22 @@ pub(super) fn save(s: &mut Shell) {
         None => saved.pr_selected.remove(&scope),
     };
     saved.pr_tabs.insert(scope.clone(), prs);
-    saved.primary = primary;
+    saved.primary = primary.clone();
+    saved.selected_tools.insert(scope.clone(), primary);
+    match lower {
+        Some(tool) => {
+            saved.lower_tools.insert(scope.clone(), tool.slug());
+        }
+        None => {
+            saved.lower_tools.remove(&scope);
+        }
+    }
     saved.secondary_tabs.insert(scope.clone(), lower_tabs);
     saved.utility_tabs.insert(scope, tabs);
     saved.split = lower.is_some();
     if let Some(t) = lower {
         saved.secondary = t.slug();
     }
-    s.persist();
 }
 
 pub(super) fn select(s: &mut Shell, tool: Tool, _: &mut Window, cx: &mut Context<Shell>) {
@@ -352,7 +374,10 @@ pub(super) fn split(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
     let p = s.features.get::<Panel>();
     if p.lower.take().is_none() {
         let upper = p.selected;
-        let lower = Tool::find(&s.state.right_panel.secondary).unwrap_or(Tool::Spec);
+        let lower = s.state.right_panel.lower_tools.get(p.scope.as_deref().unwrap_or(""))
+            .and_then(|value| Tool::find(value))
+            .or_else(|| p.lower_tabs.first().copied())
+            .unwrap_or(Tool::Spec);
         let lower = if lower == upper {
             if upper == Tool::Browser {
                 Tool::Spec
@@ -643,5 +668,16 @@ pub(super) struct SplitDrag;
 impl Render for SplitDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         gpui::Empty
+    }
+}
+
+/// Restore resources without selecting, saving tabs, starting chat or focusing.
+fn restore_tool(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    let focus = window.focused(cx);
+    show_mode(s, tool, false, window, cx);
+    if let Some(focus) = focus {
+        focus.focus(window);
+    } else {
+        window.blur();
     }
 }

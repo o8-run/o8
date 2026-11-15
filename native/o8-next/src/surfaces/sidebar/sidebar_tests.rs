@@ -431,6 +431,13 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
             }]})).unwrap();
         assert_eq!(response.status(), 200);
     };
+    // A running thread waits in the Working drawer; open it to see the row.
+    shell.update(cx, |s, cx| {
+        s.surfaces.sidebar.view.clone().unwrap().update(cx, |l, cx| {
+            l.open_drawer();
+            cx.notify();
+        })
+    });
     write_turn("user", 1791000000000);
     wait_for(&shell, cx, |s, cx| {
         s.surfaces

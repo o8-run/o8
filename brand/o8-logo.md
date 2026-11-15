@@ -1,4 +1,6 @@
-# o8 — brand logo (current, since 2026-07-05)
+# o8 — brand logo (retired 2026-11-12)
+
+> **Retired.** The o8 logo is now the Ring. See [docs/design/BRAND.md](../docs/design/BRAND.md). Kept for history only.
 
 The official o8 app/brand mark. **Agents: use this as the o8 logo.** It replaces the
 older amber/teal glowing icon.

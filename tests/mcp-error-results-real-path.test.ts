@@ -134,6 +134,8 @@ globalThis.fetch = (url, init) => new Promise((resolve, reject) => {
           routeResponse = await answerRoute.POST(new NextRequest(message.url, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: raw,
           }));
+        } else if (question === 'managed-unavailable') {
+          routeResponse = Response.json({ ok: false, code: 'managed_brain_unavailable', message: 'Managed Brain inference is unavailable or its allowance is reached. Select Subscription in Brain settings to use a connected CLI.', citations: [{ kind: 'directive', title: 'Testing rules', rowId: 'rule-1', table: 'directives' }], sourcesConsidered: 1 }, { status: 503 });
         } else if (question === 'actionable') {
           routeResponse = Response.json({ error: 'packet not found', detail: marker }, { status: 404 });
         } else if (question === 'controls') {
@@ -156,6 +158,9 @@ globalThis.fetch = (url, init) => new Promise((resolve, reject) => {
       child.stderr.on('data', (chunk: string) => { stderr += chunk; });
       const call = toolCaller(child);
       try {
+        const degraded = await call('cortex_ask', { question: 'managed-unavailable' });
+        expect(degraded.isError).toBe(false);
+        expect(JSON.parse(degraded.content[0].text)).toMatchObject({ ok: false, code: 'managed_brain_unavailable', message: expect.stringContaining('Select Subscription in Brain settings'), citations: [{ kind: 'directive', title: 'Testing rules', rowId: 'rule-1', table: 'directives' }], sourcesConsidered: 1 });
         for (const question of ['route-failure', 'raw-failure', 'multiline', 'oversized', 'unparseable', 'network']) {
           const result = await call('cortex_ask', { question });
           expect(result.isError, question).toBe(true);

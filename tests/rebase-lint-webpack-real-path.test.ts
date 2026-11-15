@@ -26,7 +26,7 @@ beforeAll(async () => {
   const externals: Record<string, string> = {};
   // Only these imports bypass this focused compilation. Each bridge loads the
   // actual source implementation, preserving Git and process confinement.
-  for (const request of ['@/lib/lane/lane-git', '@/lib/sandbox/run-confined', '@/lib/git/binary', '@/lib/providers/child-process']) {
+  for (const request of ['@/lib/data-dir-migration', '@/lib/lane/lane-git', '@/lib/sandbox/run-confined', '@/lib/git/binary', '@/lib/providers/child-process']) {
     const bridge = path.join(root, path.basename(request) + '.cjs');
     const source = path.resolve('src', request.slice(2) + '.ts');
     writeFileSync(bridge, `module.exports = require(${JSON.stringify(require.resolve('tsx/cjs/api'))}).require(${JSON.stringify(source)}, __filename);\n`);

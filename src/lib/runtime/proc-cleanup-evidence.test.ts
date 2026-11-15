@@ -172,3 +172,23 @@ describe.skipIf(process.platform !== 'linux')('cleanup without lsof', () => {
       .toEqual({ allowed: false, refusal: 'inconclusive' });
   });
 });
+
+
+it('retries an unattributed descriptor once and shares fresh evidence with cwd probes', async () => {
+  native.run.mockReset()
+    .mockResolvedValueOnce({ stdout: 'p12\ncnode\nf4\ntREG\nn\n', stderr: '' })
+    .mockResolvedValueOnce({ stdout: 'p12\ncnode\nfcwd\ntDIR\nn/outside\n', stderr: '' });
+  await withCloseProcessObservation(async () => {
+    expect((await readCloseOpenFileRows())[0].file).toBe('/outside');
+    expect((await readCloseOpenFileRows())[0].file).toBe('/outside');
+    expect(native.run).toHaveBeenCalledTimes(2);
+  });
+});
+
+it('retains an unknown descriptor after a bounded retry and identifies the failed probe', async () => {
+  native.run.mockReset().mockResolvedValue({ stdout: 'p12\ncnode\nf4\ntREG\nn\n', stderr: '' });
+  await withCloseProcessObservation(async () => {
+    await expect(readCloseOpenFileRows()).rejects.toThrow(/pid 12.*fd 4.*REG/);
+    expect(native.run).toHaveBeenCalledTimes(2);
+  });
+});

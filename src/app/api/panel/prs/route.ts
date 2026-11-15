@@ -1,3 +1,4 @@
+import { idleDraftPage } from '@/lib/github-broker/idle-drafts';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
@@ -40,19 +41,22 @@ export async function GET(request: Request) {
       : await resolveRepoSlug(searchParams.get('repo'), '') || DEFAULT_REPO;
 
   if (!repo) {
+    if (searchParams.get('view') === 'idle-drafts') return NextResponse.json({ error: 'Choose a GitHub repository to read idle drafts.' }, { status: 400 });
     return NextResponse.json({ prs: [], repo: null, unavailable: true });
   }
 
-  if (searchParams.get('view') === 'list') {
+  if (['list', 'idle-drafts'].includes(searchParams.get('view') ?? '')) {
     const state = searchParams.get('state') ?? 'open';
     const page = Number(searchParams.get('page') ?? 1);
-    const sort = searchParams.get('sort') ?? 'updated';
+    const idle = searchParams.get('view') === 'idle-drafts';
+    const sort = idle ? 'oldest' : searchParams.get('sort') ?? 'updated';
     if (!['open', 'closed', 'all'].includes(state) || !['updated', 'oldest', 'newest'].includes(sort) || !Number.isSafeInteger(page) || page < 1) {
       return NextResponse.json({ error: 'Choose a valid pull request state and page.' }, { status: 400 });
     }
     const provider = gitlab ? gitlabProvider : githubProvider;
     try {
-      return NextResponse.json(await provider.listPullRequests(repo, { state: state as PullRequestListState, page, signal: request.signal, sort: sort as PullRequestListSort, fresh: searchParams.get('fresh') === '1' }));
+      const result = await provider.listPullRequests(repo, { state: idle ? 'open' : state as PullRequestListState, page, signal: request.signal, sort: sort as PullRequestListSort, fresh: searchParams.get('fresh') === '1' });
+      return NextResponse.json(idle ? idleDraftPage(result) : result);
     } catch (error) {
       if (error instanceof GitHubOrgNotCoveredError) return NextResponse.json({ code: error.code, error: error.message, prs: [], repo }, { status: 422 });
       return NextResponse.json({ error: `Pull requests could not be loaded. Check your ${gitlab ? 'GitLab' : 'GitHub'} connection in Settings, then retry.` }, { status: 502 });

@@ -94,6 +94,7 @@ impl Shell {
                         }
                         None => {}
                     }
+                    super::sidebar::navigation(this, cx);
                     for registration in registrations() {
                         (registration.catalog_changed)(this, cx);
                     }
@@ -107,6 +108,7 @@ impl Shell {
             projects.update(cx, |view, cx| view.load(cx));
         }
         self.surfaces.projects.open = true;
+        super::sidebar::navigation(self, cx);
         self.palette = false;
         self.focus.focus(window);
         cx.notify();

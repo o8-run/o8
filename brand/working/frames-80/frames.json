@@ -1,0 +1,58 @@
+[
+  {
+    "key": "thinking",
+    "frames": 80,
+    "fps": 20,
+    "px": 80,
+    "loop_seconds": 4.0
+  },
+  {
+    "key": "arrive",
+    "frames": 130,
+    "fps": 20,
+    "px": 80,
+    "loop_seconds": 6.5
+  },
+  {
+    "key": "review",
+    "frames": 150,
+    "fps": 20,
+    "px": 80,
+    "loop_seconds": 7.5
+  },
+  {
+    "key": "sendback",
+    "frames": 120,
+    "fps": 20,
+    "px": 80,
+    "loop_seconds": 6.0
+  },
+  {
+    "key": "waiting",
+    "frames": 140,
+    "fps": 20,
+    "px": 80,
+    "loop_seconds": 7.0
+  },
+  {
+    "key": "rereview",
+    "frames": 160,
+    "fps": 20,
+    "px": 80,
+    "loop_seconds": 8.0
+  },
+  {
+    "key": "merging",
+    "frames": 140,
+    "fps": 20,
+    "px": 80,
+    "loop_seconds": 7.0
+  },
+  {
+    "key": "approved",
+    "frames": 140,
+    "fps": 20,
+    "px": 80,
+    "loop_seconds": 7.0
+  }
+]

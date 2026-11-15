@@ -54,6 +54,21 @@ The thoughts composer shares this admission only after its thread is bound to a 
 
 Workers dispatched by the lead carry the lead's thread and turn IDs. Review, failure, and context-needed returns are admitted as deduplicated turns on the same lead with the same provider session and routing pins. The lead must record a structured outcome with `o8 lead report`; completion requires a `completed` outcome with evidence plus no authoritative pending worker, review, or approval obligation. Process success, freeform prose, and the absence of workers are never completion proof.
 
+A turn that exits without a structured report and has no outstanding worker obligation becomes
+`unreported`, with reason `turn ended without an outcome report`. This is terminal for that turn,
+not a completed handback. `o8 lead wait` prints the JSON receipt (including the turn id, status,
+and reason) and exits immediately with code **7** (`lead_unreported`). The turn's `error` remains
+null. Late reports are not supported after the provider exits; send new work or stop the lead.
+Scripts that previously received `blocked` with exit 0 for this case now receive `unreported`
+with exit 7. Only turns without an outcome report give worker failure precedence over worker
+approval or active-worker obligations. Turns with a recorded outcome retain main's classification
+order: bound-worker approval obligations, active workers, unresolved worker review/failure
+obligations, then the reported outcome. A `reviewing`
+lane alone is unresolved (`blocked`) for both kinds of turn. Its per-attempt review return may
+already be consumed, so its status cannot promise another wake; send new work or stop the lead.
+A new worker attempt's return can admit a new continuation, but a failed merge does not restart
+that worker or create a new return key.
+
 Human approval remains separate. A lead can surface `needs_approval`, but it cannot approve a card, grant itself merge authority, or bypass the existing governance inbox.
 
 ## Stop and recovery
@@ -62,7 +77,7 @@ Human approval remains separate. A lead can surface `needs_approval`, but it can
 o8 lead stop <lead-id> --reason "Operator stopped this bounded run."
 ```
 
-Stop is persisted before the live lead process is interrupted. Queued, running, and `waiting_workers` lead turns become `stopped`, new sends are refused, and restart recovery cannot relaunch the lead. Stop does not implicitly kill already dispatched child workers; their later returns are consumed without waking the stopped lead. If a process dies during a turn without a stop, o8 preserves that turn as `interrupted`, marks the lead `blocked`, and requires an explicit new `lead send` to recover; it never guesses whether the interrupted provider caused side effects.
+Stop is persisted before the live lead process is interrupted. Queued, running, `waiting_workers`, and `unreported` lead turns become `stopped`, new sends are refused, and restart recovery cannot relaunch the lead. Stop does not implicitly kill already dispatched child workers; their later returns are consumed without waking the stopped lead. If a process dies during a turn without a stop, o8 preserves that turn as `interrupted`, marks the lead `blocked`, and requires an explicit new `lead send` to recover; it never guesses whether the interrupted provider caused side effects.
 
 Only the operator principal can use this route. Worker, paired-device, spectator, and anonymous credentials are denied by the default-deny middleware.
 

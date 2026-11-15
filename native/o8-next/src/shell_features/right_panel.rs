@@ -1,3 +1,9 @@
+#[cfg(test)]
+#[path = "right_panel/review_tests.rs"]
+mod review_tests;
+#[cfg(test)]
+#[path = "right_panel/restore_tests.rs"]
+mod restore_tests;
 use super::*;
 use crate::motion::Transition;
 use gpui::SharedString;
@@ -336,7 +342,8 @@ struct Panel {
     resizing: bool,
     /// Where the press on the edge began and the width then (useColumnResize's
     /// startX and startWidth), so the drag threshold never shifts the edge.
-    drag_from: Option<(f32, f32)>,
+    /// The zoom it began at: a zoom change cancels the drag.
+    drag_from: Option<(f32, f32, f32)>,
     /// The edge takes focus when pressed, so Left and Right resize by 16 px.
     edge: Option<gpui::FocusHandle>,
     /// The composer `!` line still running, and the view whose card shows it.
@@ -640,9 +647,14 @@ impl gpui::Render for Resize {
 
 /// Moves the edge with the pointer from where the press began.
 pub(super) fn resize(s: &mut Shell, event: &gpui::DragMoveEvent<Resize>, window: &Window) {
-    let Some((from, start)) = s.features.read::<Panel>().and_then(|panel| panel.drag_from) else {
+    let Some((from, start, zoom)) = s.features.read::<Panel>().and_then(|panel| panel.drag_from)
+    else {
         return;
     };
+    if zoom != window.zoom() {
+        s.features.get::<Panel>().drag_from = None;
+        return;
+    }
     let width = start + from - f32::from(event.event.position.x);
     let (min, max) = width_bounds(s, f32::from(window.viewport_size().width));
     layout::set_width(s, width.clamp(min, max));
@@ -692,7 +704,8 @@ pub(super) fn edge(
             gpui::MouseButton::Left,
             cx.listener(|this, event: &gpui::MouseDownEvent, window, _| {
                 let width = full_width(this, f32::from(window.viewport_size().width));
-                this.features.get::<Panel>().drag_from = Some((f32::from(event.position.x), width));
+                this.features.get::<Panel>().drag_from =
+                    Some((f32::from(event.position.x), width, window.zoom()));
             }),
         )
         .on_drag(Resize, |_, _, _, cx| cx.new(|_| Resize))
@@ -717,10 +730,19 @@ fn ensure_side_chat(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
 }
 
 fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    show_mode(s, tool, true, window, cx);
+}
+fn show_mode(
+    s: &mut Shell,
+    tool: Tool,
+    interactive: bool,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
     if tool == Tool::Subagents {
         subagents::prepare(s, cx);
     }
-    if tool == Tool::SideChat {
+    if interactive && tool == Tool::SideChat {
         side_chat(s, cx);
     }
     let workspace = s.state.selected.clone().unwrap_or_default();
@@ -732,7 +754,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         if !matches!(tab, Tab::Inbox | Tab::Activity)
             && !s.state.workspaces.contains_key(&workspace)
         {
-            layout::select(s, tool, window, cx);
+            if interactive {
+                layout::select(s, tool, window, cx);
+            }
             return;
         }
         if let Some(content) = (tab.registration().create)(s, tab, workspace.clone(), window, cx) {
@@ -744,7 +768,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     {
         // Notes can target settings without a workspace; Files cannot.
         if workspace.is_empty() && tool == Tool::Files {
-            layout::select(s, tool, window, cx);
+            if interactive {
+                layout::select(s, tool, window, cx);
+            }
             return;
         }
         let mode = if tool == Tool::Files {
@@ -781,8 +807,10 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     if tool == Tool::Prs {
         contextual::ensure_prs(s, window, cx);
     }
-    layout::select(s, tool, window, cx);
-    if tool == Tool::Subagents {
+    if interactive {
+        layout::select(s, tool, window, cx);
+    }
+    if interactive && tool == Tool::Subagents {
         subagents::focus(s, window, cx);
     }
     if tool == Tool::Subagents && !fits(s, f32::from(window.viewport_size().width)) {
@@ -791,6 +819,9 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
         panel.motion.set(true);
         panel.morph.set(true);
         s.state.right_panel.visible = true;
+    }
+    if !interactive {
+        return;
     }
     if let Some(content) = s.content.get(&key) {
         content.focus(tool == Tool::SideChat, window, cx);

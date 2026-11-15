@@ -1,3 +1,4 @@
+import { checkReviewRunPolicy, reviewRunPolicy } from './review-run-policy';
 import type { DurableReviewAssessment } from '@/lib/lane/durable-review-approval';
 import type { OversizedChangedFile } from '@/lib/lane/file-size-policy';
 import type { MergeCheckResult } from '@/lib/lane/preview-merge';
@@ -86,7 +87,10 @@ export async function mergeReviewPrerequisites(lane: Lane, packet: OrchestratorP
   const reviewActions = review.secondPassPending
     ? [`Complete the required blind second-pass AI review at HEAD ${head}; inspect it with o8 packet info ${packetId}. The second reviewer must agree before an automatic merge.`]
     : [`Resolve the AI review findings and record an approved review at HEAD ${head} using ${reviewCommand}.`, ...contractActions];
+  const runGate = await checkReviewRunPolicy(lane);
   const checks: MergeCheckResult[] = [
+    ...(reviewRunPolicy().enabled ? [{ name: runGate.ok ? 'review-run-evidence' as const : runGate.code, verdict: runGate.ok ? 'pass' as const : 'fail' as const, detail: runGate.message,
+      actions: ['Exercise the exact reviewed commit and submit structured runEvidence; prose does not count.'] }] : []),
     { name: 'durable-review', verdict: actor === 'user' || review.approved ? 'pass' : 'fail', detail: review.reason, actions: reviewActions },
     { name: 'file-size-approval', verdict: sizeApprovalRequired ? 'fail' : 'pass',
       detail: oversizedFiles.length ? `${formatOversizedFiles(oversizedFiles)}. ${sizeApprovalRequired ? 'Operator size approval is required.' : 'Size policy is satisfied.'}` : 'No oversized changed files require approval.',
@@ -124,9 +128,10 @@ export async function mergeReviewPrerequisites(lane: Lane, packet: OrchestratorP
   if (packet?.review?.approved === false) {
     checks.push({ name: 'packet-review', verdict: 'fail', detail: 'Packet review is not approved.', actions: reviewActions });
   }
-  const { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } = await import('@/lib/lane/dogfood-guard');
-  checks.push({ name: 'pr-only', verdict: dogfoodPrOnlyActive() ? 'fail' : 'pass', detail: DOGFOOD_PR_ONLY_NOTE,
-    actions: ['Stop the autonomous PR-only loop through its operator control before requesting a direct merge.'] });
+  const { prFirstMergeRefusal } = await import('@/lib/lane/pr-first-delivery');
+  const prOnlyNote = await prFirstMergeRefusal(lane);
+  checks.push({ name: 'pr-only', verdict: prOnlyNote ? 'fail' : 'pass', detail: prOnlyNote ?? 'Direct integration is enabled.',
+    actions: prOnlyNote ? [prOnlyNote] : [] });
   const actions = [...contractActions, ...checks.filter(check => check.verdict === 'fail').flatMap(check => check.actions ?? [])];
   const requirements: MergeReviewRequirements = { contractKind, contractVersion: contract?.version ?? null,
     captured: Boolean(contract), requirementIds: contract?.requirements.map(r => r.id) ?? [],

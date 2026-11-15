@@ -73,6 +73,11 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
                 .painted
                 .get()
         });
+        // Painting reads the drawer's place and run times from the last
+        // rebuild; a frame never scans the rows or sessions for them.
+        let scans = shell.read_with(cx, |s, cx| {
+            s.surfaces.sidebar.view.as_ref().unwrap().read(cx).drawer_scans.get()
+        });
         for i in 0..50 {
             shell.read_with(cx, |s, cx| {
                 s.surfaces
@@ -129,41 +134,24 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
                 });
             }
         }
-        // First/last navigation also crosses the complete virtual inventory.
         shell.read_with(cx, |s, cx| {
-            s.surfaces
-                .sidebar
-                .view
-                .as_ref()
-                .unwrap()
-                .read(cx)
-                .scroll
-                .scroll_to_item(
-                    s.surfaces
-                        .sidebar
-                        .view
-                        .as_ref()
-                        .unwrap()
-                        .read(cx)
-                        .rows
-                        .len()
-                        - 1,
-                    ScrollStrategy::Top,
-                )
+            let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+            assert_eq!(list.drawer_scans.get(), scans, "50 scroll frames made no drawer scan");
+        });
+        // First/last navigation also crosses the complete virtual inventory;
+        // running threads end it in the Working drawer's own virtual list.
+        shell.read_with(cx, |s, cx| {
+            let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+            list.scroll_row(list.rows.len() - 1, ScrollStrategy::Top, false)
         });
         draw(cx);
         shell.read_with(cx, |s, cx| {
-            assert!(
-                s.surfaces
-                    .sidebar
-                    .view
-                    .as_ref()
-                    .unwrap()
-                    .read(cx)
-                    .painted
-                    .get()
-                    > 1900
-            )
+            let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+            let last = [list.painted.get(), list.drawer_painted.get()]
+                .into_iter()
+                .filter(|i| *i != usize::MAX)
+                .max();
+            assert!(last.is_some_and(|i| i > 1900), "{last:?}")
         });
         assert!(cx.simulate_close());
     }

@@ -110,7 +110,7 @@ export function parseOpenFileSnapshot(files: string): OpenFileRow[] {
   let hasFile = false;
   let namedFile = false;
   let fileType = '';
-  const pathlessKernelTypes = new Set(['PIPE', 'NPOLICY', 'NEXUS']);
+  const pathlessKernelTypes = new Set(['PIPE', 'NPOLICY', 'NEXUS', 'rte']);
   const checkComplete = () => {
     if (pid !== null && (!hasCommand || !hasFile || !namedFile)) {
       throw new Error('lsof returned incomplete open-file protocol');
@@ -142,7 +142,7 @@ export function parseOpenFileSnapshot(files: string): OpenFileRow[] {
       if (!hasFile || namedFile || fileType || !line.slice(1)) throw new Error('lsof returned malformed file type coverage');
       fileType = line.slice(1);
     } else if (line.startsWith('n')) {
-      if (pid === null || !hasFile || namedFile || (!line.slice(1) && !pathlessKernelTypes.has(fileType))) throw new Error('lsof returned an unbound open file');
+      if (pid === null || !hasFile || namedFile || (!line.slice(1) && !pathlessKernelTypes.has(fileType))) throw new Error(`lsof returned an unbound open file (pid ${pid ?? 'unknown'}, ${name}, fd ${descriptor || 'unknown'}, type ${fileType || 'unknown'}). The process check is incomplete; inspect this descriptor and retry Close`);
       namedFile = true;
       // These native kernel objects have no filesystem namespace. An empty
       // regular/unknown file name still refuses rather than hiding a holder.
@@ -159,18 +159,29 @@ export function parseOpenFileSnapshot(files: string): OpenFileRow[] {
   return entries;
 }
 
+async function captureOpenFiles(): Promise<string> {
+  try {
+    const { stdout, stderr } = await run('lsof', ['-nP', '-FpcLftn'], {
+      encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
+    });
+    if (stderr.trim() || !stdout.trim()) throw new Error('Native open-file snapshot is incomplete.');
+    return stdout;
+  } catch (error) {
+    if (!missingLinuxLsof(error)) throw error;
+    return readProcOpenFiles();
+  }
+}
+
 export function readCloseOpenFiles(): Promise<string> {
   return observeCloseProcess('open-files', async () => {
-    try {
-      const { stdout, stderr } = await run('lsof', ['-nP', '-FpcLftn'], {
-        encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
-      });
-      if (stderr.trim() || !stdout.trim()) throw new Error('Native open-file snapshot is incomplete.');
-      return stdout;
-    } catch (error) {
-      if (!missingLinuxLsof(error)) throw error;
-      return readProcOpenFiles();
+    let files = await captureOpenFiles();
+    try { parseOpenFileSnapshot(files); } catch {
+      // A process may exit while lsof emits its descriptors. Take one new
+      // snapshot, never re-parse cached uncertainty or reset helper attestations.
+      files = await observeCloseProcess('open-files-retry', captureOpenFiles);
+      parseOpenFileSnapshot(files);
     }
+    return files;
   });
 }
 

@@ -1,10 +1,12 @@
+import { admitReviewBackpressure, readReviewBackpressure, ReviewBackpressureHeldError, applyReviewBackpressure, isNewImplementation } from './review-backpressure';
+import { machineLoadBlocker, MachineLoadDeferredError, type MachineLoadOptions } from './machine-load';
 import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { observeWsHealthHandler } from '@/lib/ws-server/handler-activity';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
-import { getLane, findLaneByPacket, listActiveLanes } from '@/lib/lane/registry';
+import { getLane, findLaneByPacket } from '@/lib/lane/registry';
 import { salvagedWorkBlockReason } from '@/lib/supervisor/heal-guard';
 import { isGitWorkTreeSync } from '@/lib/lane/repo-preflight';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
@@ -48,29 +50,9 @@ export const MAX_RECOVERY_DISPATCHES = 2;
 // resets when a fresh lane is minted on redispatch, so it never accumulated — the
 // launching<->idle thrash. This counter lives on the packet so it survives.
 export const MAX_LAUNCH_ATTEMPTS = 5;
-export const RUNTIME_PARALLEL_CAP: Partial<Record<OrchestratorRuntime, number>> = {
-  gemini: 3,
-};
-export interface DispatchLaunchBudget {
-  maxLaunches: number;
-  perRuntime?: Partial<Record<OrchestratorRuntime, number>>;
-}
-
-export function buildRemainingLaunchBudget(): DispatchLaunchBudget {
-  const parallelCap = resolveParallelCapSync();
-  const activeLanes = listActiveLanes().filter((lane) => lane.status === 'launching' || lane.status === 'running');
-  const perRuntime: Partial<Record<OrchestratorRuntime, number>> = {};
-  for (const runtime of Object.keys(RUNTIME_PARALLEL_CAP) as OrchestratorRuntime[]) {
-    const cap = RUNTIME_PARALLEL_CAP[runtime];
-    if (cap === undefined) continue;
-    const active = activeLanes.filter((lane) => lane.runtime === runtime).length;
-    perRuntime[runtime] = Math.max(0, cap - active);
-  }
-  return {
-    maxLaunches: Math.max(0, parallelCap - activeLanes.length),
-    perRuntime,
-  };
-}
+export { RUNTIME_PARALLEL_CAP, buildRemainingLaunchBudget } from './scheduling-budget';
+import { RUNTIME_PARALLEL_CAP, type DispatchLaunchBudget } from './scheduling-budget';
+export type { DispatchLaunchBudget } from './scheduling-budget';
 
 const RECOVERY_COOLDOWN_MS = 60_000;
 const STORAGE_ADMISSION_RETRY_BASE_MS = 10_000;
@@ -82,7 +64,6 @@ const execFileAsync = promisify(execFile);
 // preflights (repo-preflight.ts) so the dispatch gate and the spawn gate can
 // never drift.
 const isGitRepoSync = isGitWorkTreeSync;
-
 
 function packetLaunchContext(packet: OrchestratorPacket) {
   return bindWorkerLaunchParent(packet.launchContext, {
@@ -177,6 +158,7 @@ async function dispatchOrRecoverPacket(
   allPackets: OrchestratorPacket[],
   recoveryContext?: RecoveryDispatchContext | null,
   storageAdmission = getStoragePressureAdmissionCoordinator(),
+  loadOptions: MachineLoadOptions = {},
 ): Promise<DispatchResult> {
   if (packet.status === 'recovering' && recoveryContext?.worktreePath) {
     const worktreePath = recoveryContext.worktreePath;
@@ -242,7 +224,7 @@ async function dispatchOrRecoverPacket(
   const workerRouting = resolveWorkerRouting({
     workerIntent: launchPacket.workerIntent,
     requestedProvider: launchPacket.workerRouting?.requestedProvider,
-    requestedRuntime: launchPacket.workerRouting?.requestedRuntime ?? launchPacket.runtime,
+    requestedRuntime: launchPacket.workerRouting?.runtimeSubstitution?.requestedRuntime ?? launchPacket.workerRouting?.requestedRuntime ?? launchPacket.runtime,
     requestedModel: launchPacket.workerRouting?.requestedModel ?? launchPacket.assignedModel, requestedEffort: launchPacket.workerRouting?.requestedEffort,
     source: 'scheduler-dispatch',
   });
@@ -251,6 +233,8 @@ async function dispatchOrRecoverPacket(
     allPackets,
     workerRouting,
     storageAdmission,
+    force: loadOptions.force,
+    readLoad: loadOptions.readLoad,
   });
   return {
     kind: 'launched',
@@ -270,6 +254,7 @@ async function dispatchOrRecoverPacket(
 export function getDispatchBlocker(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
+  loadOptions: MachineLoadOptions = {},
 ): string | null {
   const candidate = packet.status === 'recovering' ? clearStaleLaneBinding(packet) : packet;
 
@@ -340,7 +325,11 @@ export function getDispatchBlocker(
       return 'Already dispatched';
     }
   }
-  return null;
+  if (isNewImplementation(candidate)) {
+    const pressure = readReviewBackpressure();
+    if (pressure.reason) return pressure.reason;
+  }
+  return machineLoadBlocker(loadOptions);
 }
 
 /**
@@ -382,6 +371,8 @@ export function mergeDispatchTickOutcome(
 export const runDispatchTick = observeWsHealthHandler('dispatch', async function runDispatchTick(
   state: OrchestratorMissionState,
   options: {
+    force?: boolean;
+    readLoad?: () => number[];
     launchBudget?: DispatchLaunchBudget;
     enforceBootRecoveryGuard?: boolean;
     missionArchived?: boolean;
@@ -403,7 +394,10 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
   if (isDispatchHalted()) {
     return nextState;
   }
+  nextState = { ...nextState, packets: nextState.packets.map(packet => packet.blockedReason?.startsWith('Machine busy:') ? { ...packet, blockedReason: null } : packet) };
   nextState = fanOutComparisonPackets(nextState);
+  const pressure = admitReviewBackpressure();
+  nextState = { ...nextState, packets: applyReviewBackpressure(nextState.packets, pressure) };
   const recoveryContextByPacketId = new Map(
     nextState.packets.flatMap((packet) => {
       if (packet.status !== 'recovering') return [];
@@ -454,7 +448,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
       const routing = resolveWorkerRouting({
         workerIntent: packet.workerIntent,
         requestedProvider: packet.workerRouting?.requestedProvider,
-        requestedRuntime: packet.workerRouting?.requestedRuntime ?? packet.runtime,
+        requestedRuntime: packet.workerRouting?.runtimeSubstitution?.requestedRuntime ?? packet.workerRouting?.requestedRuntime ?? packet.runtime,
         requestedModel: packet.workerRouting?.requestedModel ?? packet.assignedModel, requestedEffort: packet.workerRouting?.requestedEffort,
         source: 'scheduler-enrichment',
       });
@@ -526,7 +520,9 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
         return false;
       }
       forgetRecoverySkip(packet.id);
-      if (getDispatchBlocker(packet, nextState.packets) !== null) {
+      if (isNewImplementation(packet) && pressure.reason) return false;
+      const dispatchBlocker = getDispatchBlocker(packet, nextState.packets, options);
+      if (dispatchBlocker !== null) {
         return false;
       }
       // #455 — Recovery cooldown: skip packets that were recovered too recently
@@ -569,7 +565,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
       const runtime = resolveWorkerRouting({
         workerIntent: candidate.packet.workerIntent,
         requestedProvider: candidate.packet.workerRouting?.requestedProvider,
-        requestedRuntime: candidate.packet.workerRouting?.requestedRuntime ?? candidate.packet.runtime,
+        requestedRuntime: candidate.packet.workerRouting?.runtimeSubstitution?.requestedRuntime ?? candidate.packet.workerRouting?.requestedRuntime ?? candidate.packet.runtime,
         requestedModel: candidate.packet.workerRouting?.requestedModel ?? candidate.packet.assignedModel,
         source: 'scheduler-budget',
       }).selectedRuntime;
@@ -604,8 +600,16 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
         nextState.packets,
         recoveryContext,
         options.storageAdmission,
+        options,
       )),
     );
+    results.forEach((result, index) => {
+      if (result.status === 'rejected' && result.reason instanceof MachineLoadDeferredError) {
+        launchedThisTick -= 1;
+        const runtime = effectiveRuntimeByPacket.get(batch[index].packet.id)!;
+        runtimeCountsInTick[runtime] = (runtimeCountsInTick[runtime] ?? 1) - 1;
+      }
+    });
     nextState = normalizeOrchestratorMissionState({
       ...nextState,
       packets: nextState.packets.map((candidate) => {
@@ -634,6 +638,9 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
         // degrades that single packet to 'blocked' (terminal for getDispatchBlocker).
         try {
           const result = results[batchIndex];
+          if (result.status === 'rejected' && result.reason instanceof MachineLoadDeferredError) {
+            return { ...candidate, blockedReason: null };
+          }
           if (result.status === 'fulfilled') {
             if (result.value.kind === 'awaiting_review') {
               return {
@@ -705,6 +712,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
             };
           }
 
+          if (result.reason instanceof ReviewBackpressureHeldError) return { ...candidate, blockedReason: result.reason.message, lastEventLabel: 'review_backpressure_held' };
           const reason = result.reason instanceof Error ? result.reason.message : 'Dispatch failed.';
           const storageReceipt = result.reason instanceof PacketStorageAdmissionError
             ? result.reason.receipt

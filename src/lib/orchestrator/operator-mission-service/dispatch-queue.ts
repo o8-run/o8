@@ -1,3 +1,5 @@
+import { isNewImplementation, readReviewBackpressure } from '../review-backpressure';
+import { machineLoadBlocker } from '@/lib/orchestrator/machine-load';
 import { listActiveLanes } from '@/lib/lane/registry';
 import { resolveParallelCapSync } from '@/lib/operator/defaults';
 import { getDispatchableWave } from '@/lib/orchestrator/dag';
@@ -7,7 +9,7 @@ import { fetchUnreachableCooldownRetrySeconds } from '@/lib/runtime/fetch-unreac
 
 export interface DispatchQueueEntry {
   packetId: string;
-  reason: 'concurrency-limit' | 'runtime-concurrency-limit' | 'fetch-unreachable' | 'storage-admission' | 'scheduler-deferred';
+  reason: 'concurrency-limit' | 'runtime-concurrency-limit' | 'fetch-unreachable' | 'storage-admission' | 'scheduler-deferred' | 'review-backpressure';
   detail: string;
   limit: number;
   running: number;
@@ -20,10 +22,13 @@ export interface DispatchQueueEntry {
 export function missionDispatchQueue(state: OrchestratorMissionState): DispatchQueueEntry[] {
   const active = listActiveLanes().filter((lane) => lane.status === 'launching' || lane.status === 'running');
   const limit = resolveParallelCapSync();
+  const loadBlocker = machineLoadBlocker({ runningWorkers: active.length });
   return getDispatchableWave(state.packets)
     .filter((packet) => !packet.archivedAt && !packet.operatorStopped)
     .map<DispatchQueueEntry>((packet, index) => {
       const base = { packetId: packet.id, limit, running: active.length, position: index + 1, positionScope: 'mission' as const };
+      const pressure = isNewImplementation(packet) ? readReviewBackpressure() : null;
+      if (pressure?.reason) return { ...base, reason: 'review-backpressure', detail: pressure.reason };
       const retryInSeconds = fetchUnreachableCooldownRetrySeconds(packet.workspaceTargetPath!, {
         packetId: packet.id, stage: 'pre_lane_receipt',
       });
@@ -45,7 +50,7 @@ export function missionDispatchQueue(state: OrchestratorMissionState): DispatchQ
         return { ...base, limit: runtimeLimit, running: runtimeRunning, reason: 'runtime-concurrency-limit',
           detail: `Queued behind the ${runtime} concurrency limit (${runtimeRunning}/${runtimeLimit}); mission queue position ${index + 1}.` };
       }
-      return { ...base, reason: 'scheduler-deferred', detail: packet.blockedReason
+      return { ...base, reason: 'scheduler-deferred', detail: packet.blockedReason ?? loadBlocker
         ?? `Queued for a scheduler launch; mission queue position ${index + 1}.` };
     });
 }

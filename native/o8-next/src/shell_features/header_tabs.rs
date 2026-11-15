@@ -37,7 +37,7 @@ impl ShellFeature for HeaderTabs {
 const MAX_LABEL: usize = 80;
 
 struct Rename {
-    index: usize,
+    key: String,
     field: Entity<Composer>,
     _subscriptions: [gpui::Subscription; 2],
 }
@@ -46,7 +46,7 @@ struct Rename {
 struct Tabs {
     rename: Option<Rename>,
     /// Where a dragged tab would land: before, or after, this tab.
-    insertion: Option<(usize, bool)>,
+    insertion: Option<(Tab, bool)>,
     scroll: super::tab_scroll::Strip,
 }
 
@@ -58,7 +58,8 @@ pub(super) fn scroll(s: &Shell) -> Option<super::tab_scroll::Strip> {
 /// A dragged tab, drawn as a pill that follows the pointer.
 #[derive(Clone)]
 pub(super) struct Dragged {
-    pub index: usize,
+    pub tab: Tab,
+    pub scope: Option<String>,
     pub label: SharedString,
     pub glyph: &'static str,
 }
@@ -106,12 +107,16 @@ pub(super) fn editing(s: &Shell, index: usize) -> Option<Entity<Composer>> {
     s.features
         .read::<Tabs>()
         .and_then(|tabs| tabs.rename.as_ref())
-        .filter(|rename| rename.index == index)
+        .filter(|rename| {
+            s.current()
+                .and_then(|w| w.tabs.get(index))
+                .is_some_and(|tab| s.key(tab) == rename.key)
+        })
         .map(|rename| rename.field.clone())
 }
 
-pub(super) fn insertion(s: &Shell) -> Option<(usize, bool)> {
-    s.features.read::<Tabs>().and_then(|tabs| tabs.insertion)
+pub(super) fn insertion(s: &Shell) -> Option<(Tab, bool)> {
+    s.features.read::<Tabs>().and_then(|tabs| tabs.insertion.clone())
 }
 
 /// Opens the inline field with the current name selected.
@@ -123,6 +128,10 @@ pub(super) fn rename(
     cx: &mut Context<Shell>,
 ) {
     finish(s, true, window, cx);
+    let Some(tab) = s.current().and_then(|w| w.tabs.get(index)) else {
+        return;
+    };
+    let key = s.key(tab);
     let field = cx.new(|cx| {
         let mut field = Composer::new(cx);
         field.inline = true;
@@ -137,7 +146,7 @@ pub(super) fn rename(
     let blur = cx.on_blur(&focus, window, |s, window, cx| finish(s, true, window, cx));
     focus.focus(window);
     s.features.get::<Tabs>().rename = Some(Rename {
-        index,
+        key,
         field,
         _subscriptions: [submit, blur],
     });
@@ -159,10 +168,11 @@ fn finish(s: &mut Shell, save: bool, window: &mut Window, cx: &mut Context<Shell
         .collect();
     if save
         && !text.is_empty()
-        && let Some(tab) = s.current().and_then(|w| w.tabs.get(rename.index)).cloned()
+        && s.state.workspaces.iter().any(|(scope, w)| {
+            w.tabs.iter().any(|tab| format!("{scope}|{tab:?}") == rename.key)
+        })
     {
-        let key = s.key(&tab);
-        s.state.tab_labels.insert(key, text);
+        s.state.tab_labels.insert(rename.key, text);
         s.persist();
     }
     s.restore_focus(window, cx);
@@ -191,17 +201,29 @@ pub(super) fn hover(
     cx: &mut Context<Shell>,
 ) {
     let position = event.event.position;
-    if index == event.drag(cx).index || !event.bounds.contains(&position) {
+    if s.state.selected != event.drag(cx).scope
+        || s.current().and_then(|w| w.tabs.get(index)) == Some(&event.drag(cx).tab)
+        || !event.bounds.contains(&position)
+    {
         return;
     }
     let after = position.x >= event.bounds.center().x;
-    s.features.get::<Tabs>().insertion = Some((index, after));
+    let Some(tab) = s.current().and_then(|w| w.tabs.get(index)).cloned() else {
+        return;
+    };
+    s.features.get::<Tabs>().insertion = Some((tab, after));
     cx.notify();
 }
 
 /// Moves the dropped tab to the line and keeps the same tab active.
-pub(super) fn drop(s: &mut Shell, from: usize, window: &mut Window, cx: &mut Context<Shell>) {
+pub(super) fn drop(s: &mut Shell, drag: &Dragged, window: &mut Window, cx: &mut Context<Shell>) {
     finish(s, true, window, cx);
+    if s.state.selected != drag.scope {
+        return;
+    }
+    let Some(from) = s.current().and_then(|w| w.tabs.iter().position(|t| t == &drag.tab)) else {
+        return;
+    };
     let Some((target, after)) = s.features.get::<Tabs>().insertion.take() else {
         return;
     };
@@ -210,6 +232,9 @@ pub(super) fn drop(s: &mut Shell, from: usize, window: &mut Window, cx: &mut Con
         .workspaces
         .get_mut(s.state.selected.as_deref().unwrap_or(""))
     else {
+        return;
+    };
+    let Some(target) = saved.tabs.iter().position(|tab| tab == &target) else {
         return;
     };
     if from == target || from >= saved.tabs.len() || target >= saved.tabs.len() {

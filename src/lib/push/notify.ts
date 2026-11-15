@@ -59,7 +59,6 @@ export function notifyApprovalCreated(opts: {
     title: 'Approval needed',
     body: opts.title,
     tag: `approval-${opts.approvalId}`,
-    url: '/mobile?view=approvals',
     data: { approvalId: opts.approvalId, risk: opts.risk, kind: 'approval' },
   }, { kind: 'approval_created', approvalId: opts.approvalId });
 }
@@ -79,7 +78,6 @@ export function notifyAgentFinished(opts: {
     title: `${opts.sessionName} ${labelByState[opts.state]}`,
     body: opts.exitCode !== undefined ? `exit ${opts.exitCode}` : labelByState[opts.state],
     tag: `agent-${opts.sessionName}`,
-    url: '/mobile?view=agents',
     data: { sessionName: opts.sessionName, state: opts.state, kind: 'agent' },
   }, { kind: 'agent_finished', sessionKey: opts.sessionName, terminalState: opts.state });
 }
@@ -92,7 +90,6 @@ export function notifyMergeConflict(opts: {
     title: 'Merge conflict',
     body: `${opts.fileCount} file${opts.fileCount === 1 ? '' : 's'} on ${opts.repo} need attention`,
     tag: `conflict-${opts.repo}`,
-    url: '/mobile?view=approvals',
     data: { repo: opts.repo, fileCount: opts.fileCount, kind: 'conflict' },
   }, { kind: 'merge_conflict' });
 }
@@ -105,7 +102,6 @@ export function notifyOrchestratorReady(opts: {
     title: 'Orchestrator ready',
     body: opts.summary ?? 'Awaiting your input',
     tag: opts.threadId ? `orchestrator-${opts.threadId}` : 'orchestrator',
-    url: '/mobile?view=orchestrator',
     data: { threadId: opts.threadId, kind: 'orchestrator' },
   }, { kind: 'orchestrator_ready' });
 }
@@ -132,7 +128,6 @@ export function notifyReviewReady(opts: {
     title: 'Ready for review',
     body: opts.label,
     tag: `review-ready-${opts.laneId}`,
-    url: '/mobile?view=agents',
     data: { laneId: opts.laneId, packetId: opts.packetId ?? undefined, repoPath: opts.repoPath, kind: 'review-ready' },
   }, { kind: 'review_ready', laneId: opts.laneId, packetId: opts.packetId });
 }

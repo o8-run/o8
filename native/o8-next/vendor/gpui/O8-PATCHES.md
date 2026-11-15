@@ -1,4 +1,4 @@
-# Published GPUI 0.2.2 with local macOS scheduling changes
+# Published GPUI 0.2.2 with local platform changes
 
 Source: the crates.io `gpui` 0.2.2 package, Apache-2.0, checksum
 `979b45cfa6ec723b6f42330915a1b3769b930d02b2d505f9697f8ca602bee707`.
@@ -13,6 +13,9 @@ check, whatever its labels. To run it before pushing:
 `node scripts/next/check-surface-boundary.mjs --base origin/main --head HEAD --select-only`.
 
 Local changes:
+
+- `src/platform/linux/x11/client.rs`, `src/platform/linux/x11/window.rs`: select
+  an opaque visual without a compositor so software Vulkan can present to X11.
 
 - `src/platform/mac/frame_clock.rs`: a deterministic 100 ms idle policy.
 - `src/platform/mac/window.rs`: pause idle links, wake on invalidation and
@@ -82,6 +85,31 @@ Local changes:
   second naming mechanism would have to be added at about 745 call sites, and
   `dispatch_event` returns a crate-private type, so it cannot be called from
   outside the toolkit.
+
+- Per-window interface zoom. GPUI's own zoom (`Window::set_rem_size`) only
+  scales rem lengths, and o8 next sizes everything in fixed `px`, so the
+  toolkit scales the window instead of the app converting every length.
+  The zoom multiplies the scale factor and divides the layout viewport, so
+  every primitive, glyph and image paints and rasterizes larger.
+  - `src/window/zoom.rs` (new, the whole mechanism): `Window::zoom`,
+    `Window::set_zoom` (it rescales the stored mouse position into the new
+    window coordinates, and defers the bounds observers until after the
+    caller's update, so a key handler inside an entity update can zoom),
+    `read_platform_metrics`, the conversions `to_platform` and
+    `from_platform`, `input_from_platform` (pointer positions, pixel scroll
+    deltas and file-drop positions), and the test-support
+    `painted_quad_bounds`.
+  - `src/window.rs`: `mod zoom;`, the `zoom` field and its `1.` initializer,
+    `bounds_changed` calls `read_platform_metrics`, and `dispatch_event`
+    matches on `input_from_platform(event)`.
+  - `src/platform.rs` (`PlatformInputHandler`): `bounds_for_range` and
+    `selected_bounds` return `to_platform` bounds, and
+    `character_index_for_point` reads a `from_platform` point, for IME.
+  `Window::show_window_menu` and `Window::set_client_inset` (Wayland and X11
+  client-side decorations) still pass window coordinates unconverted; o8
+  never calls them, and they need `to_platform` if it ever does. The app
+  converts the coordinates it hands AppKit itself (native web view frames,
+  `Window::resize`, the minimum window size).
 
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit

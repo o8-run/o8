@@ -12,8 +12,34 @@ import { formatReleaseSummary, prepareReleaseSummary } from './release-summary.m
 const REPO = 'o8-run/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
 const SOURCE_REPO = process.env.O8_SOURCE_REPO || '';
-const PING_MIN_BULLETS = Number(process.env.O8_PING_MIN_BULLETS || 4);
+// A release pings everyone only when nobody can safely skip it. Set
+// O8_PING_MIN_BULLETS to also ping for a release with at least that many lines.
+const PING_MIN_BULLETS = Number(process.env.O8_PING_MIN_BULLETS || 0);
+const ANNOUNCEMENT_MAX_BULLETS = 6;
 const PING_ALWAYS_RE = /\b(security|vulnerabilit|CVE|breaking change|breaking:|data loss|corrupt|hotfix|urgent|must update|required update)\b/i;
+
+/**
+ * The community announcement says what changed in the reviewed release notes'
+ * own words. Commit subjects are the fallback for a release without notes:
+ * they are written for the repository, and read as internal shorthand.
+ */
+export function announcementBullets(notesMarkdown, commitSubjects) {
+  // The notes are used as written, so "o8" keeps its lowercase. A file that is
+  // not a plain bullet list is not reviewed notes, and the fallback applies.
+  const written = String(notesMarkdown ?? '').split(/\r?\n/).filter((line) => line.trim());
+  const parsed = written.map((line) => line.match(/^\s*[-*+]\s+(.+?)\s*$/));
+  const notes = parsed.every(Boolean)
+    ? parsed.map((match) => scrubPublicText(match[1])).filter(Boolean)
+    : [];
+  const lines = notes.length
+    ? notes
+    : commitSubjects
+      .filter((s) => /^(feat|perf|design)(\(.*\))?:/.test(s))
+      .map((s) => scrubPublicText(s.replace(/^(feat|perf|design)(\([^)]*\))?:\s*/, '')))
+      .filter(Boolean)
+      .map((s) => `${s.charAt(0).toUpperCase()}${s.slice(1)}`);
+  return lines.slice(0, ANNOUNCEMENT_MAX_BULLETS).map((line) => `- ${line}`);
+}
 
 /** Shared by direct stable publication and promotion of authenticated beta bytes. */
 export function stableReleaseEffects({ root, version, tag, range, notesRef }) {
@@ -119,9 +145,8 @@ export function stableReleaseEffects({ root, version, tag, range, notesRef }) {
   }
 
   /**
-   * Bullets are the release range's public feat/perf/design subjects. A trailing
-   * parenthetical is stripped because commit-local context does not belong in a
-   * community announcement.
+   * Bullets are the reviewed release notes, or the release range's public
+   * feat/perf/design subjects when the release has no notes.
    */
   function composeReleaseAnnouncement() {
     const range = releaseMetadataRange();
@@ -130,17 +155,7 @@ export function stableReleaseEffects({ root, version, tag, range, notesRef }) {
       allSubjects = execFileSync('git', ['log', '--format=%s', '--no-merges', range], { encoding: 'utf8' })
         .split('\n').filter(Boolean);
     } catch {}
-    let subjects = [];
-    try {
-      subjects = execFileSync('git', ['log', '--format=%s', '--no-merges', range], { encoding: 'utf8' })
-        .split('\n')
-        .filter((s) => /^(feat|perf|design)(\(.*\))?:/.test(s));
-    } catch {}
-    const bullets = subjects
-      .map((s) => scrubPublicText(s.replace(/^(feat|perf|design)(\([^)]*\))?:\s*/, '')))
-      .filter(Boolean)
-      .slice(0, 6)
-      .map((s) => `- ${s.charAt(0).toUpperCase()}${s.slice(1)}`);
+    const bullets = announcementBullets(releaseNotesMarkdown(), allSubjects);
     const date = new Date().toISOString().slice(0, 10);
     // Source links remain opt-in: set O8_SOURCE_REPO=o8-run/o8 to include the code repository.
     // The release mirror remains the download destination for announcements.
@@ -149,14 +164,14 @@ export function stableReleaseEffects({ root, version, tag, range, notesRef }) {
       : null;
     // Ping only when it earns it: a big ship, or something nobody can safely skip.
     const necessary = allSubjects.some((x) => PING_ALWAYS_RE.test(x));
-    const ping = necessary || bullets.length >= PING_MIN_BULLETS;
+    const ping = necessary || (PING_MIN_BULLETS > 0 && bullets.length >= PING_MIN_BULLETS);
     const content = [
       ...(ping ? ['@everyone'] : []),
       `**o8 ${tag}** — ${date}`,
       '',
       ...(bullets.length ? bullets : ['- Fixes and maintenance.']),
       '',
-      `Update: relaunch o8 (auto-updates within 30 min), or grab it fresh: https://github.com/${PUBLIC_MIRROR}/releases/tag/${tag}`,
+      `Update from the app, or download this release: https://github.com/${PUBLIC_MIRROR}/releases/tag/${tag}`,
       ...(sourceLine ? [sourceLine] : []),
     ].join('\n');
     return { content, ping, reason: necessary ? 'necessary update' : (ping ? `big ship (${bullets.length} bullets)` : `small ship (${bullets.length} bullets)`) };

@@ -1,3 +1,4 @@
+use super::inbox_card::tabular;
 use super::*;
 use crate::theme::current as theme;
 use gpui::{Render, Styled, canvas, div, px, uniform_list};
@@ -14,6 +15,41 @@ const STAGGER_ROWS: usize = 10;
 const SETTLE_PX: f32 = 6.;
 
 impl ThreadList {
+    /// Dispatch a thread-row click; tests use the same production entry point.
+    pub(crate) fn click_thread(
+        &mut self,
+        id: String,
+        modifiers: gpui::Modifiers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.picked.is_empty() && modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.shift {
+            if self.rows.iter().any(|row| row.id.as_ref() == Some(&id)) {
+                self.choose_mode(id, true, cx);
+            }
+            return;
+        }
+        if self.pick(&id, modifiers, cx) {
+            return;
+        }
+        if self.rows.iter().any(|r| r.id.as_ref() == Some(&id)) {
+            self.focus.focus(window);
+            self.choose(id.clone(), cx);
+            let generation = self.edit_generation;
+            // Opening another workspace can restore its content
+            // focus while handling Selected. Keep row navigation
+            // focused after that event, unless a newer edit won.
+            cx.defer_in(window, move |this, window, _| {
+                if this.edit_generation == generation
+                    && this.choice.as_ref() == Some(&id)
+                    && !this.editing
+                {
+                    this.focus.focus(window);
+                }
+            });
+        }
+    }
+
     /// Fades the rows in top-down, as the column opens.
     pub(crate) fn stagger_in(&mut self, cx: &mut Context<Self>) {
         // The first row waits for the card to clear the rail's mark.
@@ -46,6 +82,7 @@ impl Render for ThreadList {
                 self.reveal = None;
             }
         }
+        let openness = self.drawer_openness(window, cx);
         self.tick_working(cx);
         self.tick_fade(cx);
         if !self.mark_pace {
@@ -153,7 +190,7 @@ impl Render for ThreadList {
                 } else {
                     uniform_list(
                         "native-threads",
-                        self.rows.len(),
+                        self.top_len(),
                         cx.processor(|this, range: std::ops::Range<usize>, window, cx| {
                             this.materialized.set(range.len());
                             let keyboard = this.focus.is_focused(window);
@@ -169,7 +206,7 @@ impl Render for ThreadList {
                 },
             ),
             )
-            .children(self.shelves(window, cx))
+            .children(self.shelves(openness, window, cx))
             .children(self.row_menu(cx))
             .children(self.pr_hover_list(cx))
     }
@@ -214,7 +251,7 @@ impl ThreadList {
             )
             .on_click(cx.listener(|this, _, window, cx| this.search(window, cx)))
     }
-    fn render_row(
+    pub(super) fn render_row(
         &mut self,
         i: usize,
         keyboard: bool,
@@ -257,7 +294,13 @@ impl ThreadList {
                             .insert(id.clone(), title.layout().clone());
                     }
                     let selected = row.id.as_ref() == this.selected.as_ref() && thread;
-                    let painted = this.painted.clone();
+                    // The paint probes: the scrolling list's, and the drawer's
+                    // (it shows on every frame, so it keeps its own).
+                    let painted = if this.drawer_at().is_some_and(|at| i > at) {
+                        this.drawer_painted.clone()
+                    } else {
+                        this.painted.clone()
+                    };
                     let identity = row
                         .id
                         .as_ref()
@@ -396,7 +439,11 @@ impl ThreadList {
                                             .text_color(theme().text_faint)
                                             .children(row.id.as_deref().and_then(|id| this.pin_mark(id)))
                                             .children(row.id.as_deref().and_then(|id| this.auto_off_mark(id)))
-                                            .child(row.age.clone())
+                                            .map(|v| match this.drawer_age(i) {
+                                                // A running thread counts its run.
+                                                Some(run) => v.child(tabular(div()).child(run)),
+                                                None => v.child(row.age.clone()),
+                                            })
                                             .when(row.branch, |v| v.child("⑂")),
                                     )
                                     .children(row.id.as_deref().and_then(|id| {
@@ -441,13 +488,6 @@ impl ThreadList {
                                 ))
                             },
                         )
-                        .when(row.kind == "section" && row.status == "working", |view| {
-                            view.debug_selector(|| "sidebar-working-header".into())
-                                .cursor_pointer()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toggle_working_closed(cx);
-                                }))
-                        })
                         .when(
                             row.kind == "section" && row.title == "Archived",
                             |view| {
@@ -532,27 +572,7 @@ impl ThreadList {
                         })
                         .when(thread, |view| {
                             view.on_click(cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                                let id = row.id.clone().unwrap();
-                                if this.pick(&id, event.modifiers(), cx) {
-                                    return;
-                                }
-                                if this.rows.iter().any(|r| r.id.as_ref() == Some(&id))
-                                {
-                                    this.focus.focus(window);
-                                    this.choose(id.clone(), cx);
-                                    let generation = this.edit_generation;
-                                    // Opening another workspace can restore its content
-                                    // focus while handling Selected. Keep row navigation
-                                    // focused after that event, unless a newer edit won.
-                                    cx.defer_in(window, move |this, window, _| {
-                                        if this.edit_generation == generation
-                                            && this.choice.as_ref() == Some(&id)
-                                            && !this.editing
-                                        {
-                                            this.focus.focus(window);
-                                        }
-                                    });
-                                }
+                                this.click_thread(row.id.clone().unwrap(), event.modifiers(), window, cx);
                             }))
                         })
                         .child(
@@ -568,9 +588,18 @@ impl ThreadList {
                         )
     }
 
-    /// The Inbox's foot: the Working, Snoozed and Settled shelves under the
-    /// scrolling list, as T3 Code pins them to the bottom of its sidebar.
-    fn shelves(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+    /// The foot under the scrolling list: the Inbox's Snoozed, Settled and
+    /// Archived shelves, as T3 Code pins them to the bottom of its sidebar,
+    /// else the Working drawer.
+    fn shelves(
+        &mut self,
+        openness: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        if self.view() != folders::View::Inbox {
+            return self.drawer(openness, window, cx);
+        }
         let start = self.top_len();
         if start >= self.rows.len() {
             return None;

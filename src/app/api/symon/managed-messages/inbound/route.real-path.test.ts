@@ -32,9 +32,9 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   } }),
 }));
 import { POST as mintTextSession } from '@/app/api/mobile/symon/text-session/route';
-import { POST as runTextTurn } from '@/app/api/mobile/symon/text-turn/route';
+import { POST as runTextTurn } from '@/lib/symon/http/text-turn';
 
-import { POST } from './route';
+import { POST } from '@/lib/symon/http/managed-inbound';
 import { createSymonTextSession, loadSymonTextSession } from '@/lib/mobile/symon-text-session-store';
 let dataDir: string;
 let previousDataDir: string | undefined;

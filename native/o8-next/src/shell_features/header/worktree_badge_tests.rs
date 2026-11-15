@@ -74,8 +74,11 @@ fn thread_header_worktree_badge_follows_flag_and_legacy_fallback(cx: &mut TestAp
                     );
                     assert_eq!(badge.size.height, title.size.height);
                     assert_eq!(badge.center().y, title.center().y);
-                    assert!(badge.left() >= title.right());
-                    assert!(badge.left() - title.right() <= px(4.));
+                    let strip = visual.debug_bounds("surface-tabs").unwrap();
+                    assert!(badge.left() >= strip.right(), "badge sits outside the tab flow");
+                    // Controls move between the header and Activity; protect the whole cluster.
+                    let controls = visual.debug_bounds("thread-header-controls").unwrap();
+                    assert!(badge.right() <= controls.left(), "badge leaves header controls clear");
                     assert!(badge.bottom() <= transcript.top());
                 }
             }

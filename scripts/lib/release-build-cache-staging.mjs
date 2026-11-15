@@ -57,8 +57,12 @@ export async function beginCacheStaging(cacheRoot, projectRoot, phase, source, o
   if (owner.state !== 'live') throw new Error('Cache staging owner identity is unknown.');
   const operationId = randomUUID();
   const path = join(parent.canonicalPath, `.${options.action}-${operationId}`);
+  // Journal the identity digests, not the compatibility input list: that list grows with the
+  // checkout (thousands of native inputs) and would push every record past the snapshot bound.
+  const journalSource = { phase: source.phase, compatibilitySha256: source.compatibilitySha256,
+    source: source.source, sourceSha256: source.sourceSha256, entrySha256: source.entrySha256 };
   const record = { schema: 'o8/release-cache-staging/v1', runId, operationId, phase,
-    action: options.action, source, parent, workspace, runs, run, journal, stagingPath: path,
+    action: options.action, source: journalSource, parent, workspace, runs, run, journal, stagingPath: path,
     owner: { pid: process.pid, identity: owner.identity }, state: 'intent', staging: null, promotions: [] };
   let sequence = 0;
   let held = false;
@@ -119,9 +123,14 @@ export async function beginCacheStaging(cacheRoot, projectRoot, phase, source, o
       try {
         await save('populating', outputName ? { output: identity(join(path, outputName), 'file') } : {});
         const invocation = guardedWorkspaceInvocation('tar', args, record.staging);
-        const env = { ...process.env };
-        // Cache archives are uncompressed. Updater gzip options must stay with the caller.
-        delete env.TAR_WRITER_OPTIONS;
+        // Sanitize before launching the Node guard: its policy checks its own
+        // environment as well as the tar child's. Archive work needs no secrets,
+        // policy stamp, Node preload, or updater compression options.
+        const env = Object.fromEntries(
+          ['PATH', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'TZ', 'SystemRoot', 'WINDIR']
+            .filter(key => process.env[key] !== undefined)
+            .map(key => [key, process.env[key]]),
+        );
         const child = spawnSync(invocation.command, invocation.args, { cwd: path,
           env, encoding: 'utf8', stdio: ['ignore', output ?? 'pipe', 'pipe'], timeout: 20 * 60_000, maxBuffer: 1024 * 1024 });
         if (child.error || child.status !== 0 || child.signal) {

@@ -56,3 +56,11 @@ it('retains validation and unregistered destructive methods', async () => {
     authorization: `Bearer ${server.token}`, 'content-type': 'application/json',
   }, body: JSON.stringify({ path: repo, branch: 'fixture-created', force: true }) })).status).toBe(405);
 });
+
+it.each(['', '{', 'null', '[]', '"text"', '42', 'true'])('refuses invalid object body %j through native HTTP', async (body) => {
+  const response = await fetch(`${origin}/api/panel/branches`, {
+    method: 'POST', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' }, body,
+  });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: 'Request body must be a JSON object.' });
+});

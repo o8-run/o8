@@ -257,6 +257,41 @@ impl Settings {
                 }),
             );
         }
+        // The whole window's zoom, as the primary modifier with = - 0 sets it.
+        let percent = theme::zoom_percent();
+        let mut zoom = div().flex().items_center().gap(px(12.));
+        for (id, label, enabled, steps) in [
+            ("out", "−", percent > theme::ZOOM_MIN, -1),
+            ("reset", "Reset", percent != theme::ZOOM_DEFAULT, 0),
+            ("in", "+", percent < theme::ZOOM_MAX, 1),
+        ] {
+            let button = self.button(
+                format!("setting-zoom-{id}"),
+                label.into(),
+                enabled,
+                false,
+                window,
+                cx,
+                move |this, window, cx| {
+                    match steps {
+                        0 => crate::zoom::reset(window, cx),
+                        steps => crate::zoom::step(steps, window, cx),
+                    }
+                    this.changed(cx);
+                },
+            );
+            zoom = zoom.child(button.border_1().border_color(theme().border));
+            if id == "out" {
+                zoom = zoom.child(
+                    div()
+                        .debug_selector(|| "setting-zoom-level".into())
+                        .min_w(px(44.))
+                        .flex()
+                        .justify_center()
+                        .child(crate::zoom::label(percent)),
+                );
+            }
+        }
         let installed = self
             .font_families
             .get_or_insert_with(|| window.text_system().all_font_names())
@@ -318,6 +353,8 @@ impl Settings {
             .child(glass)
             .child(div().text_color(theme().text_muted).child("Chat width"))
             .child(widths)
+            .child(div().text_color(theme().text_muted).child("Zoom"))
+            .child(zoom)
             .child(fonts)
             .child(div().text_size(px(11.)).text_color(theme().text_muted)
                 .child("Changes apply immediately and are saved for the next launch. Glass uses the macOS desktop material where supported; other platforms may use solid surfaces."))

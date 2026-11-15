@@ -1,3 +1,5 @@
+import { getSqlite } from '@/lib/db';
+import { projectMergeModeKey } from './project-merge-mode-migration';
 import { describe, expect, it } from 'vitest';
 
 import { createLane, getLane, getLaneEvents, setLaneStatus } from './registry';
@@ -114,8 +116,10 @@ describe('terminal lane status guard - real callers', () => {
     expect(getLane(lane.id)?.status).toBe('completed');
   });
 
-  it('refuses merge command fallback paths that try to re-open a completed lane', async () => {
-    const lane = laneFixture('inline/terminal-merge-command');
+  it.each(['pr_only', 'direct'])('refuses merge command fallback paths that try to re-open a completed lane (%s)', async (mode) => {
+    const lane = laneFixture(`inline/terminal-merge-command-${mode}`);
+    getSqlite().prepare('INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, ?)')
+      .run(projectMergeModeKey(lane.projectId ?? 'default'), mode, Date.now());
     setLaneStatus(lane.id, 'completed', 'system', 'merged');
 
     const result = await dispatch({

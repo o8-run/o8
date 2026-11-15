@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "bounds": [
+    100.0,
+    100.0,
+    1200.0,
+    816.0
+  ],
+  "selected": "/fixture/project-p",
+  "workspaces": {
+    "/fixture/project-p": {
+      "tabs": [
+        {
+          "surface": "Session",
+          "session": "legacy-tab"
+        },
+        {
+          "surface": "Terminal"
+        }
+      ],
+      "active": 0,
+      "composer": false,
+      "selections": {
+        "legacy-tab": "thoughts-composer-first"
+      }
+    }
+  },
+  "right_panel": {
+    "visible": false,
+    "primary": "launcher",
+    "utility_tabs": {},
+    "split": false,
+    "secondary": "o8-md",
+    "ratio": 50.0,
+    "tool_widths": {},
+    "secondary_tabs": {},
+    "side_chats": {},
+    "pr_tabs": {},
+    "pr_selected": {}
+  },
+  "tab_labels": {
+    "/fixture/project-p|Session(\"legacy-tab\")": "Saved title"
+  },
+  "browser_pip_wide": false,
+  "notes": {
+    "target_override": null,
+    "recents": [],
+    "color": null
+  }
+}

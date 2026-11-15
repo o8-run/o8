@@ -675,6 +675,18 @@ impl Surface {
             cx,
         );
         let keep_end = self.pinned && crate::retained::at_end(&self.list);
+        // A zoom or window resize changes the transcript's viewport in window
+        // units and rewraps its rows; the list keeps its top, so a reader at
+        // the end is put back there before this frame lays it out.
+        let viewport = window.viewport_size();
+        if self
+            .end_viewport
+            .replace(viewport)
+            .is_some_and(|old| old != viewport)
+            && keep_end
+        {
+            crate::retained::pin_end(&self.list);
+        }
         let mut card = div()
             .id("composer-card")
             .debug_selector(|| "composer-card".into())

@@ -38,7 +38,6 @@ const { isOrchestratorBackendId } = await import('@/lib/lane/orchestrator-backen
 const { piBackend } = await import('@/lib/lane/orchestrator-backends/pi');
 const { sendOrchestratorBackendTurn } = await import('@/lib/lane/orchestrator-send-entry');
 const { O8_MANAGED_PI_MODEL } = await import('@/lib/pi/sdk/live-contract');
-const { COMPOSER_MODEL_GROUPS } = await import('@/components/desktop/thoughts/ModelThinkingChip');
 const { buildOrchestratorSendPayload } = await import('@/components/desktop/thoughts/use-orchestrator-stream/send-payload');
 const { appendMobileOrchestratorUserMessage, upsertMobileOrchestratorAssistantMessage } = await import('@/lib/mobile/orchestrator-thread-history');
 const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
@@ -145,8 +144,8 @@ afterAll(async () => {
  * turn also carries its receipt context and is persisted to the thread the way ws-server persists it.
  */
 async function composerO8Turn(repo: string, text: string, threadId: string, turnId?: string, thinkingEffort: ThinkingEffort = 'adaptive') {
-  const option = COMPOSER_MODEL_GROUPS.flatMap(group => group.options).find(entry => entry.label === 'o8');
-  if (!option || option.backend === 'auto') throw new Error('The composer offers no o8 choice');
+  // The o8 choice the removed browser composer sent: the o8 backend with the managed free model.
+  const option = { backend: 'o8' as const, model: 'o8-free' };
   const turn = prepareOrchestratorTurn(text, { backend: option.backend, model: option.model, thinkingEffort });
   const wire = JSON.parse(buildOrchestratorSendPayload({
     repoPath: repo, threadId, clientMessageId: `${threadId}-client`, wireMessage: turn.wireMessage,

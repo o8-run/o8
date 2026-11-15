@@ -21,7 +21,7 @@ vi.mock('@/lib/voice/realtime-client', async (importOriginal) => ({
   },
 }));
 
-import { POST as recordRoute } from '@/app/api/panel/symon/conversations/record/route';
+import { POST as recordRoute } from '@/lib/symon/http/record';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { createSymonVoiceTranscriptRecorder } from '@/lib/symon/voice-transcript-recorder';
 

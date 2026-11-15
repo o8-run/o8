@@ -97,7 +97,7 @@ pub(super) mod rail_more_dock {
     pub(crate) use super::rail_more::Dock;
 }
 pub(super) use profile_menu::button as profile;
-pub(super) use header::toggle_sidebar;
+pub(super) use header::{toggle_sidebar, close_tab};
 pub(super) use right_panel::chrome_focused as panel_chrome_focused;
 
 /// Stable public API; the host remains one discovered shell feature.

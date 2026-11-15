@@ -14,7 +14,6 @@ import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
  */
 export function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').MissionRecord) {
   const lanesByPacket = new Map<string, ReturnType<typeof findLatestLaneByPacket>>();
-  const mergePolicy = currentLaneMergePolicy();
   for (const meta of record.packetMeta) {
     lanesByPacket.set(meta.id, findLatestLaneByPacket(meta.id));
   }
@@ -53,6 +52,7 @@ export function buildHistoricalMissionStatus(record: import('@/lib/db/missions-s
 
   const packets = record.packetMeta.map((meta) => {
     const lane = lanesByPacket.get(meta.id) ?? null;
+    const mergePolicy = currentLaneMergePolicy(lane?.projectId ?? null);
     const recovery = lane?.outcome === 'merged' ? null : lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null;
     return {
       id: meta.id,

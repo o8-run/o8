@@ -1,0 +1,74 @@
+{
+  "version": "v1",
+  "crossfade_ms": 300,
+  "switch_rule": "switch only at the end of the current loop",
+  "composer": {
+    "size_px": 40,
+    "fog": "tight",
+    "file": "composer/<key>.svg"
+  },
+  "stage": {
+    "size_px": 96,
+    "fog": "fog",
+    "file": "stage/<key>.svg"
+  },
+  "timer": "m:ss \u00b7 esc to stop",
+  "states": [
+    {
+      "key": "thinking",
+      "label": "Thinking",
+      "example_line": "Thinking about what changed",
+      "motion": "thinking (new)",
+      "loop_seconds": 4.0
+    },
+    {
+      "key": "arrive",
+      "label": "Taking in work",
+      "example_line": "Taking in 3 changes from Codex and Claude Code",
+      "motion": "many-in-one-out",
+      "loop_seconds": 6.5
+    },
+    {
+      "key": "review",
+      "label": "Reviewing",
+      "example_line": "Reviewing #5938 \u00b7 14 files",
+      "motion": "read-the-diff",
+      "loop_seconds": 7.5
+    },
+    {
+      "key": "sendback",
+      "label": "Sending back",
+      "example_line": "Sending 2 findings back to Codex",
+      "motion": "sendback (new)",
+      "loop_seconds": 6.0
+    },
+    {
+      "key": "waiting",
+      "label": "Waiting on CI",
+      "example_line": "Waiting on CI \u00b7 3 checks running",
+      "motion": "fan-out",
+      "loop_seconds": 7.0
+    },
+    {
+      "key": "rereview",
+      "label": "Re-reviewing",
+      "example_line": "Re-reviewing the fix against 2 saved findings",
+      "motion": "branch-review",
+      "loop_seconds": 8.0
+    },
+    {
+      "key": "merging",
+      "label": "Merging",
+      "example_line": "Merging #5938 into main",
+      "motion": "glance-to-merge (open)",
+      "loop_seconds": 7.0
+    },
+    {
+      "key": "approved",
+      "label": "Approved",
+      "example_line": "Approved and merged \u00b7 a3f9c21 \u00b7 receipt saved",
+      "motion": "approve",
+      "loop_seconds": 7.0
+    }
+  ]
+}

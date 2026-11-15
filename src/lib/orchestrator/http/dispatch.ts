@@ -1,3 +1,5 @@
+import { runtimeSelectionRefusal, validateRequestedRuntime } from '@/lib/agents/routing';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { RepoDispatchAdmissionError } from '@/lib/lane/repo-preflight';
@@ -12,7 +14,6 @@ import { PacketStorageAdmissionError } from '@/lib/orchestrator/storage-admissio
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { DispatchRegistryConflictError } from '@/lib/orchestrator/operator-mission-service/dispatch-registry-publication';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { formatDispatchableRuntimeChoices, isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import {
   bindIdempotencyClientMutation,
   deriveIdempotencyKey,
@@ -110,16 +111,16 @@ export async function POST(request: NextRequest) {
   }
 
   const record = asRecord(body) ?? {};
+  const force = record.force === true;
+  if (force && resolveRequestPrincipal(request) !== 'operator') {
+    return operatorError('forbidden', 'Force dispatch is operator-only; workers cannot bypass machine load admission.', 403);
+  }
   const missionId = typeof record.missionId === 'string' && record.missionId.trim()
     ? record.missionId.trim()
     : undefined;
   let requestedRuntime: OrchestratorRuntime | undefined;
-  if (record.runtime !== undefined) {
-    if (!isDispatchableRuntime(record.runtime)) {
-      return operatorError('invalid_request', `runtime must be one of: ${formatDispatchableRuntimeChoices()}.`, 400);
-    }
-    requestedRuntime = record.runtime;
-  }
+  try { requestedRuntime = validateRequestedRuntime(record.runtime) ?? undefined; }
+  catch (error) { const refusal = runtimeSelectionRefusal(error); return operatorError(refusal.code, refusal.message, refusal.status); }
   let targetMissionId: string;
   try {
     targetMissionId = resolveMissionDispatchTarget(missionId);
@@ -146,7 +147,7 @@ export async function POST(request: NextRequest) {
     ? record.idempotencyKey.trim()
     : null;
   const wait = record.wait !== false;
-  const canonicalBody = JSON.stringify({ missionId: targetMissionId, wait, runtime: requestedRuntime });
+  const canonicalBody = JSON.stringify({ missionId: targetMissionId, wait, runtime: requestedRuntime, ...(force ? { force: true } : {}) });
   if (clientKey) {
     const binding = bindIdempotencyClientMutation({
       namespace: 'dispatch_mission',
@@ -178,11 +179,11 @@ export async function POST(request: NextRequest) {
         const outcome = await withIdempotency(
           { key: idemKey, verb: 'dispatch_mission', scopeId: targetMissionId },
           async () => {
-            const admitted = await prepareMissionDispatch({ missionId: targetMissionId, runtime: requestedRuntime });
+            const admitted = await prepareMissionDispatch({ missionId: targetMissionId, runtime: requestedRuntime, force });
             if (admitted.blocked) {
               return { initiated: false, async: true, missionId: targetMissionId, blocked: true };
             }
-            void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }).catch((error) => {
+            void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime, force }).catch((error) => {
               console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
             });
             return { initiated: true, async: true, missionId: targetMissionId, status: 'queued', queued: admitted.queued,
@@ -192,7 +193,7 @@ export async function POST(request: NextRequest) {
         if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'mission dispatch') ?? operatorSuccess(replayShape(outcome), 202);
         return operatorSuccess(replayShape(outcome));
       }
-      const admitted = await prepareMissionDispatch({ missionId: targetMissionId, runtime: requestedRuntime });
+      const admitted = await prepareMissionDispatch({ missionId: targetMissionId, runtime: requestedRuntime, force });
       if (admitted.blocked) {
         return operatorError(
           'dispatch_blocked',
@@ -200,7 +201,7 @@ export async function POST(request: NextRequest) {
           409,
         );
       }
-      void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }).catch((error) => {
+      void dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime, force }).catch((error) => {
         console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
       });
       return operatorSuccess({ initiated: true, async: true, missionId: targetMissionId, status: 'queued', queued: admitted.queued,
@@ -220,14 +221,14 @@ export async function POST(request: NextRequest) {
           key: idemKey,
           verb: 'dispatch_mission',
           scopeId: targetMissionId,
-          reconcileUnresolved: () => dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }),
+          reconcileUnresolved: () => dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime, force }),
         },
-        () => dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime }),
+        () => dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime, force }),
       );
       if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'mission dispatch') ?? operatorSuccess(replayShape(outcome), 202);
       return operatorSuccess(replayShape(outcome));
     }
-    const result = await dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime });
+    const result = await dispatchMission({ missionId: targetMissionId, runtime: requestedRuntime, force });
     return operatorSuccess(result);
   } catch (error) {
     const translated = dispatchErrorResponse(error);

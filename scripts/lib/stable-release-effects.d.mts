@@ -3,6 +3,9 @@ export interface StableReleaseEffects {
   prepareNotes(): string;
 }
 
+/** Announcement lines: the reviewed release notes, or public commit subjects when there are none. */
+export function announcementBullets(notesMarkdown: string, commitSubjects: string[]): string[];
+
 export function stableReleaseEffects(input: {
   root: string;
   version: string;

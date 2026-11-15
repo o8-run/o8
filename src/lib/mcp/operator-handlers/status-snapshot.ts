@@ -21,6 +21,24 @@ interface Source {
 // Include the backend so a port switch cannot reuse another process's data.
 const sources = new Map<string, Source>();
 const connectionRefreshes = new Map<string, Promise<{ value: Connections; capturedAt: number }>>();
+type LeadStatuses = ReturnType<typeof import('@/lib/orchestrator/lead-status').readLeadStatuses>;
+const leadReads = new Map<string, Promise<LeadStatuses>>();
+
+function readLeads(base: string, sessionKey: string | undefined) {
+  const key = JSON.stringify([base, sessionKey || '']);
+  const pending = leadReads.get(key);
+  if (pending) return pending;
+  const query = new URLSearchParams({ list: 'true', ...(sessionKey ? { sessionKey } : {}) });
+  const request = Promise.resolve(apiFetch(`/api/orchestrator/lead?${query}`)).then(value => {
+    const result = value as LeadStatuses;
+    if (!Array.isArray(result?.leads) || !Number.isSafeInteger(result.cursor)) throw new Error('Lead status unavailable');
+    return result;
+  });
+  leadReads.set(key, request);
+  const settled = () => { leadReads.delete(key); };
+  void request.then(settled, settled);
+  return request;
+}
 
 function readConnections(base: string) {
   const pending = connectionRefreshes.get(base);
@@ -59,7 +77,6 @@ function refresh(source: Source, base: string, sessionKey: string | undefined): 
     }
     const snapshot = { data, runtimeConnections: connections.value, capturedAt };
     source.snapshot = snapshot;
-    publishNativeStatus(base, sessionKey, snapshot);
     return snapshot;
   });
   source.inflight = request;
@@ -87,8 +104,31 @@ export async function readStatusSnapshot(sessionKey: string | undefined, fresh: 
     }
     value = cached;
   }
+  // Runtime observations can be cached; a durable lead handback cannot survive a new turn.
+  let live: LeadStatuses | undefined;
+  try {
+    live = await readLeads(base, sessionKey);
+  } catch {
+    // A failed lead read must neither erase runtime evidence nor reuse a handback.
+    removeNativeStatus(key);
+  }
+  if (!live && Date.now() - value.capturedAt >= MAX_AGE_MS) {
+    value = await refresh(source, base, sessionKey);
+  }
+  if (Date.now() - value.capturedAt >= MAX_AGE_MS) throw new Error('Status refresh exceeded its freshness bound');
+  const data: Record<string, unknown> = { ...value.data };
+  delete data.leads;
+  delete data.leadsUnavailable;
+  delete data.leadsTruncated;
+  if (live) {
+    if (live.leads.length) data.leads = live.leads;
+    if (live.truncated) data.leadsTruncated = true;
+    publishNativeStatus(base, sessionKey, { ...value, data, leadCursor: live.cursor });
+  } else {
+    data.leadsUnavailable = true;
+  }
   return {
-    data: value.data,
+    data,
     runtimeConnections: value.runtimeConnections,
     snapshot: {
       capturedAt: new Date(value.capturedAt).toISOString(),
