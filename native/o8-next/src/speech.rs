@@ -30,6 +30,7 @@ mod prefs;
 mod server;
 #[cfg(test)]
 mod server_tests;
+mod spawn;
 #[cfg(test)]
 mod tests;
 

@@ -3,12 +3,12 @@
 //! `src-tauri/helpers/speech_recognizer.swift`: `start:<id>`, `stop:<id>` and
 //! `quit` on stdin; one `{"type","text","session_id"}` object per stdout line.
 use super::engine::Input;
+use super::spawn::{Process, Spawned, spawn};
 use serde::Deserialize;
 use std::{
     ffi::OsString,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, Stdio},
     sync::mpsc::Sender,
     time::{Duration, Instant},
 };
@@ -93,8 +93,8 @@ pub(crate) struct Line {
 
 /// A running helper. Dropping it asks the helper to quit, then kills it.
 pub(super) struct Helper {
-    child: Child,
-    stdin: ChildStdin,
+    process: Process,
+    stdin: Box<dyn Write + Send>,
 }
 
 impl Helper {
@@ -105,19 +105,11 @@ impl Helper {
         generation: u64,
         inputs: Sender<Input>,
     ) -> Result<Self, String> {
-        let mut child = crate::child_command::command(&launch.program)
-            .args(&launch.args)
-            .envs(launch.envs.iter().map(|(key, value)| (key, value)))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|error| format!("The speech helper could not start: {error}."))?;
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("The speech helper could not start.".into());
-        };
+        let Spawned {
+            mut process,
+            stdin,
+            stdout,
+        } = spawn(launch)?;
         std::thread::Builder::new()
             .name("o8-speech-helper".into())
             .spawn(move || {
@@ -131,8 +123,11 @@ impl Helper {
                 }
                 let _ = inputs.send(Input::Exited(generation));
             })
-            .map_err(|_| "The speech helper could not start.".to_string())?;
-        Ok(Self { child, stdin })
+            .map_err(|_| {
+                process.kill();
+                "The speech helper could not start.".to_string()
+            })?;
+        Ok(Self { process, stdin })
     }
 
     pub(super) fn send(&mut self, command: &str) -> Result<(), String> {
@@ -147,13 +142,12 @@ impl Drop for Helper {
         let _ = self.send("quit");
         let deadline = Instant::now() + Duration::from_millis(500);
         while Instant::now() < deadline {
-            if !matches!(self.child.try_wait(), Ok(None)) {
+            if self.process.exited() {
                 return;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.process.kill();
     }
 }
 
