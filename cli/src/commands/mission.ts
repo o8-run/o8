@@ -64,6 +64,25 @@ interface DispatchMissionResult {
   inProgress?: boolean;
   status?: string;
   note?: string;
+  /** The server held the dispatch: the mission has an active lifecycle hold. */
+  blocked?: boolean;
+}
+
+/**
+ * The error for a dispatch the server answered without starting, the same from
+ * `mission dispatch` and `mission create --dispatch`. With `created`, the
+ * mission was just made and stays, so the error says how to dispatch it later.
+ */
+function dispatchNotStarted(result: DispatchMissionResult, inProgress: boolean, created?: string): CliError | null {
+  if (inProgress || (result.initiated === true && result.missionId?.trim())) return null;
+  const id = created ?? result.missionId?.trim();
+  const retry = created ? ` It was created; dispatch it with \`o8 mission dispatch --mission ${created}\`.` : '';
+  if (result.blocked) {
+    return new CliError('dispatch_blocked', `Mission ${id ?? '(active)'} has an active lifecycle hold and was not dispatched.${retry}`, EXIT.CONFLICT);
+  }
+  return created
+    ? new CliError('dispatch_not_initiated', `Mission ${created} was not dispatched.${retry}`, EXIT.NOT_FOUND)
+    : new CliError('dispatch_not_initiated', 'No mission was dispatched. Create or select a mission first.', EXIT.NOT_FOUND);
 }
 
 interface MissionStatusPacket {
@@ -413,6 +432,7 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   const result = unwrap(res.data, 'Mission creation was rejected.');
 
   let dispatch: DispatchMissionResult | null = null;
+  let notStarted: CliError | null = null;
   if (hasFlag(rest, 'dispatch')) {
     const dispatchResponse = await fetchCorrelatedPacketMutation<OperatorResponse<DispatchMissionResult>>(
       cfg,
@@ -423,6 +443,8 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
       { acceptQueuedAdmission: true },
     );
     dispatch = unwrap(dispatchResponse.data, 'Mission dispatch was rejected.');
+    const inProgress = dispatchResponse.status === 202 || dispatch.inProgress === true || dispatch.status === 'in_progress';
+    notStarted = dispatchNotStarted(dispatch, inProgress, result.missionId);
   }
 
   const payload = { schema: 'o8/cli/mission.create/v1', mission: result, ...(dispatch ? { dispatch } : {}) };
@@ -431,12 +453,14 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
     printHumanKv([
       ['mission', result.missionId],
       ['packets', String(result.packets.length)],
-      ...(dispatch ? [['dispatch', dispatch.initiated === false ? 'not initiated' : dispatch.status === 'queued' ? 'admitted, awaiting launch' : 'initiated']] as Array<[string, string]> : []),
+      ...(dispatch ? [['dispatch', notStarted ? (dispatch.blocked ? 'blocked, not dispatched' : 'not dispatched') : dispatch.status === 'queued' ? 'admitted, awaiting launch' : 'initiated']] as Array<[string, string]> : []),
       ...result.packets.map((p) => [`  · ${p.id}`, `${p.title} (wave ${p.wave})`] as [string, string]),
     ]);
   } else {
     printJson(payload);
   }
+  // The mission is printed first, since it was created either way; then the command fails as `mission dispatch` would.
+  if (notStarted) throw notStarted;
   return 0;
 }
 
@@ -456,13 +480,8 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
   );
   const result = unwrap(res.data, 'Mission dispatch was rejected.');
   const inProgress = res.status === 202 || result.inProgress === true || result.status === 'in_progress';
-  if (!wait && !inProgress && (result.initiated !== true || !result.missionId?.trim())) {
-    throw new CliError(
-      'dispatch_not_initiated',
-      'No mission was dispatched. Create or select a mission first.',
-      EXIT.NOT_FOUND,
-    );
-  }
+  const notStarted = wait ? null : dispatchNotStarted(result, inProgress);
+  if (notStarted) throw notStarted;
 
   const payload = { schema: 'o8/cli/mission.dispatch/v1', inProgress, dispatch: result };
   if (mode.human) {
