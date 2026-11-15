@@ -473,7 +473,7 @@ fn present_pumping(config: &Config, native: &native::Native, stopped: &AtomicBoo
 fn run(config: &mut Config, relaunch: &update::Relaunch) -> Result<(), Option<String>> {
     if !config.data_dir.is_absolute()
         || !config.server_dir.is_absolute()
-        || !config.node.is_absolute()
+        || !(config.node.is_absolute() || config.node.as_os_str().is_empty())
         || !config.window.is_absolute()
     {
         return Err(Some("Launch paths must be absolute".into()));
@@ -905,19 +905,29 @@ fn main() {
         args: args.iter().skip(1).cloned().collect(),
         env: std::env::vars_os().collect(),
     };
-    if args.len() != 3 || args[1] != "--config" {
-        o8_launcher::note!("usage: o8-launcher --config <file>");
+    // With no arguments the launcher is the app bundle's main program and
+    // reads its paths from the bundle it runs in.
+    let loaded: Option<Config> = if args.len() == 1 {
+        std::env::current_exe().ok().and_then(|exe| {
+            o8_launcher::bundle::configuration(
+                &exe,
+                std::env::var_os("O8_DATA_DIR").map(PathBuf::from),
+                std::env::var_os("CORTEX_IDE_DATA_DIR").map(PathBuf::from),
+                std::env::var_os("HOME").map(PathBuf::from),
+            )
+            .and_then(|value| serde_json::from_value(value).ok())
+        })
+    } else if args.len() == 3 && args[1] == "--config" {
+        fs::read(&args[2])
+            .ok()
+            .and_then(|s| serde_json::from_slice(&s).ok())
+    } else {
+        o8_launcher::note!("usage: o8-launcher [--config <file>]");
         std::process::exit(2);
-    }
-    let mut config: Config = match fs::read(&args[2])
-        .ok()
-        .and_then(|s| serde_json::from_slice(&s).ok())
-    {
-        Some(c) => c,
-        None => {
-            o8_launcher::note!("Invalid launch configuration");
-            std::process::exit(2);
-        }
+    };
+    let Some(mut config) = loaded else {
+        o8_launcher::note!("Invalid launch configuration");
+        std::process::exit(2);
     };
     match run(&mut config, &relaunch) {
         Ok(()) => {}

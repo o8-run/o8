@@ -137,7 +137,9 @@ fn prepare_here(config: &Config) -> Result<serde_json::Value, String> {
     for (key, value) in &shell.keys {
         std::env::set_var(key, value);
     }
-    let selected = preflight::run_node_preflight(config.node.to_str(), &config.server_dir)
+    // An empty runtime path means "find one", as the classic shell does.
+    let preferred = config.node.to_str().filter(|path| !path.is_empty());
+    let selected = preflight::run_node_preflight(preferred, &config.server_dir)
         .map_err(|_| "Node runtime preflight failed")?;
     Ok(serde_json::json!({"path": shell.path, "keys": shell.keys, "node": selected}))
 }
