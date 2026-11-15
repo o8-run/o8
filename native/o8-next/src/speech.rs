@@ -16,8 +16,6 @@
 //! finishing is refused, so o8 next has a single microphone owner here. The
 //! helper starts on the first recording, stays alive between recordings and is
 //! started again by the next recording after it exits.
-// The composer adopts the client in the next change.
-#![allow(dead_code, unused_imports)]
 
 #[cfg(test)]
 mod device_tests;

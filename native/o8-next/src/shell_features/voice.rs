@@ -117,6 +117,12 @@ impl Shell {
             stop(self, cx);
             return;
         }
+        // Composer dictation holds the microphone.
+        if self.dictating() {
+            toasts::error("Another voice input is active.", cx);
+            cx.notify();
+            return;
+        }
         let Some(view) = active_view(self) else {
             toasts::info("Open a chat to talk to it.", cx);
             cx.notify();

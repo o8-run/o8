@@ -1,15 +1,24 @@
 use super::*;
 use crate::ui::{DictationState, VoiceTarget};
 use serde_json::{Value, json};
-// Composer dictation through the hidden voice host's HeadlessDictationHost
-// (docs/development/native-voice-host.md, Composer dictation). The composer
-// mic is classic MicButton in toggle mode: a tap starts dictation for the chat
-// in front and the next tap stops it and sends what was said. Ctrl+Z held
-// dictates until it is released, on macOS, where Ctrl+Z is not undo. The host
-// relays full transcript snapshots; each replaces what follows the draft the
-// recording started from, and the final one goes out through the chat's own
-// send. GPT Live keeps the waveform (voice.rs); the host refuses a second
-// microphone owner.
+#[path = "dictation/native.rs"]
+mod native;
+#[cfg(test)]
+#[path = "dictation/native_tests.rs"]
+mod native_tests;
+// Composer dictation (docs/development/native-voice-host.md, Composer
+// dictation). The composer mic is classic MicButton in toggle mode: a tap
+// starts dictation for the chat in front and the next tap stops it and sends
+// what was said. Ctrl+Z held dictates until it is released, on macOS, where
+// Ctrl+Z is not undo. Full transcript snapshots each replace what follows the
+// draft the recording started from, and the final one goes out through the
+// chat's own send. GPT Live keeps the waveform (voice.rs); one of the two holds
+// the microphone at a time.
+//
+// Where the speech helper is installed, o8 next records in process
+// (native.rs, crate::speech). Otherwise, or with O8_NEXT_DICTATION=host, the
+// hidden voice host's HeadlessDictationHost records and relays frames, and it
+// refuses a second microphone owner too.
 struct Dictation;
 register_shell_feature!(Dictation);
 impl ShellFeature for Dictation {
@@ -47,11 +56,16 @@ struct Mic {
     started: bool,
     /// When the stop was asked for; a host restart never answers it.
     finishing_since: Option<std::time::Instant>,
+    /// The in-process recording, when o8 next records itself.
+    native: Option<u64>,
 }
 
 /// A recording that never answers its stop gives the microphone back. Long
 /// enough for a slow polish of a long recording.
 const FINISH_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
+/// The in-process client always ends a recording; Whisper and polish each
+/// take up to about 75 seconds before their own timeouts answer.
+const NATIVE_FINISH_WITHIN: std::time::Duration = std::time::Duration::from_secs(180);
 
 impl Mic {
     fn active(&self) -> bool {
@@ -60,6 +74,7 @@ impl Mic {
     /// The broker's binding fields and the start request every frame carries.
     fn owns(&self, payload: &Value) -> bool {
         self.active()
+            && self.native.is_none()
             && payload["requestId"] == self.request.as_str()
             && self.target.as_ref().is_some_and(|target| {
                 payload["binding"] == target.binding.as_str()
@@ -120,6 +135,10 @@ fn show(s: &mut Shell, state: DictationState, cx: &mut Context<Shell>) {
 }
 
 impl Shell {
+    /// Composer dictation holds the microphone; Live must not start.
+    pub(crate) fn dictating(&mut self) -> bool {
+        self.features.get::<Mic>().active()
+    }
     pub(crate) fn toggle_dictation(&mut self, cx: &mut Context<Shell>) {
         match self.features.get::<Mic>().state {
             DictationState::Off => start(self, false, cx),
@@ -173,9 +192,15 @@ fn start(s: &mut Shell, held: bool, cx: &mut Context<Shell>) {
         cx.notify();
         return;
     };
+    if s.voice_live() {
+        toasts::error("Another voice input is active.", cx);
+        cx.notify();
+        return;
+    }
     // Dictation and Live hold separate bindings on the host.
     target.binding = json!(["composer", target.repo, target.thread]).to_string();
     let request = format!("m-{}", stamp());
+    let repo = target.repo.clone();
     *s.features.get::<Mic>() = Mic {
         state: DictationState::Off,
         target: Some(target),
@@ -187,7 +212,23 @@ fn start(s: &mut Shell, held: bool, cx: &mut Context<Shell>) {
         sent: false,
         started: false,
         finishing_since: None,
+        native: None,
     };
+    if native::enabled(s) {
+        match native::start(s, &repo, cx) {
+            Ok(id) => {
+                let mic = s.features.get::<Mic>();
+                mic.native = Some(id);
+                mic.started = true;
+                show(s, DictationState::Starting, cx);
+            }
+            Err(error) => {
+                retire(s, cx);
+                toasts::error(error, cx);
+            }
+        }
+        return;
+    }
     show(s, DictationState::Starting, cx);
     let (body, late_stop) = {
         let mic = s.features.get::<Mic>();
@@ -216,6 +257,12 @@ fn start(s: &mut Shell, held: bool, cx: &mut Context<Shell>) {
 
 /// Stops the recording and asks for the polished transcript, then sends it.
 fn stop(s: &mut Shell, cx: &mut Context<Shell>) {
+    if let Some(id) = s.features.get::<Mic>().native {
+        show(s, DictationState::Finishing, cx);
+        s.features.get::<Mic>().finishing_since = Some(std::time::Instant::now());
+        native::stop(s, id);
+        return;
+    }
     let mic = s.features.get::<Mic>();
     let request = mic.request.clone();
     let body = mic.control(
@@ -238,6 +285,12 @@ fn stop(s: &mut Shell, cx: &mut Context<Shell>) {
 fn cancel(s: &mut Shell, cx: &mut Context<Shell>) {
     let mic = s.features.get::<Mic>();
     if !mic.active() {
+        return;
+    }
+    if let Some(id) = mic.native {
+        native::cancel(s, id);
+        restore(s, cx);
+        retire(s, cx);
         return;
     }
     let started = mic.started;
@@ -271,13 +324,30 @@ fn retire(s: &mut Shell, cx: &mut Context<Shell>) {
 
 /// Another chat in front, or this one closing or changing, cancels.
 fn follow(s: &mut Shell, cx: &mut Context<Shell>) {
-    let (state, target, finishing_since) = {
+    let (state, target, finishing_since, native) = {
         let mic = s.features.get::<Mic>();
-        (mic.state, mic.target.clone(), mic.finishing_since)
+        (
+            mic.state,
+            mic.target.clone(),
+            mic.finishing_since,
+            mic.native,
+        )
+    };
+    let within = if native.is_some() {
+        NATIVE_FINISH_WITHIN
+    } else {
+        FINISH_WITHIN
     };
     if state == DictationState::Finishing
-        && finishing_since.is_some_and(|since| since.elapsed() >= FINISH_WITHIN)
+        && finishing_since.is_some_and(|since| since.elapsed() >= within)
     {
+        if let Some(id) = native {
+            native::cancel(s, id);
+            restore(s, cx);
+            retire(s, cx);
+            toasts::error("Dictation did not finish. Try again.", cx);
+            return;
+        }
         let mic = s.features.get::<Mic>();
         let sent = mic.sent;
         // Release the host's recording too, so the next start is not refused.

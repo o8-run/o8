@@ -89,6 +89,19 @@ confirmation gate changes are made.
 
 ## Composer dictation
 
+Where the speech helper is installed beside `o8-next` (the app bundle keeps
+`speech_recognizer` in `Contents/MacOS`), o8 next records composer dictation
+in process and does not use this host. `native/o8-next/src/speech.rs` runs the
+helper in daemon mode as o8 next's own child, streams Apple's partial snapshots
+into the composer, and on stop takes Apple's final text. When that text is
+empty, it posts the recorded WAV to `/api/dictation/transcribe` (Whisper). It
+then polishes through `/api/dictation/polish` and sends through the chat's own
+send. One recording at a time; Live does not start while dictation holds the
+microphone, and dictation does not start while Live is on.
+`O8_NEXT_DICTATION=host` keeps the host path below, and `O8_NEXT_DICTATION=native`
+refuses to fall back to it. `O8_SPEECH_RECOGNIZER` points at another helper
+build.
+
 Only `/voice-host` mounts `HeadlessDictationHost`. It shares the native STT
 invoke/event contract from `useNativeDictation`; Classic `DictationHost` and
 its textarea routing and shortcuts stay unchanged. Next owns the composer,

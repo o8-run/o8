@@ -18,6 +18,7 @@ export default async function register(): Promise<SurfaceRoutes> {
   if (!process.argv.includes('--voice-host')) return {};
   const controls: Body[] = [];
   const rejected: Body[] = [];
+  const polishes: Body[] = [];
   const receipts = new Map<string, string>();
   let active: (Body & { state: string }) | null = null;
   // Composer dictation: one microphone, frames fenced to the start request.
@@ -78,7 +79,17 @@ export default async function register(): Promise<SurfaceRoutes> {
         (response.ok ? controls : rejected).push(body);
         return response;
       },
-      'GET /api/next/voice-host': async () => reply(200, { ok: true, available: true, active, dictation, confirmations: [], controls, rejected }),
+      'GET /api/next/voice-host': async () => reply(200, { ok: true, available: true, active, dictation, confirmations: [], controls, rejected, polishes }),
+      // In-process dictation finishes through /api/dictation/polish. Same
+      // request and reply shape ({transcript, surface, context} -> {text}),
+      // answered without a model call so the test spends nothing.
+      'POST /api/dictation/polish': async request => {
+        let body: Body;
+        try { body = await request.json(); } catch { return reply(400, { error: 'Expected JSON body.' }); }
+        polishes.push(body);
+        const transcript = typeof body.transcript === 'string' ? body.transcript.trim() : '';
+        return reply(200, { text: transcript && `${transcript[0].toUpperCase()}${transcript.slice(1)}.`, polished: Boolean(transcript) });
+      },
       // The test plays the host: settle the recording the way its frames do.
       'POST /api/next/voice-host/dictation-fixture': async request => {
         const { state } = await request.json() as { state: string };
