@@ -40,8 +40,15 @@ if Path(sys.argv[0]).name=='dialog':
  while (root/'hold-dialog').exists(): time.sleep(0.02)
  (root/'dialog-exited').write_text('1'); sys.exit(0)
 if Path(sys.argv[0]).name=='probe':
+ (root/'probe-ran').open('a').write('1\n')
+ if (root/'probe-background').exists() and os.fork()==0:
+  null=os.open(os.devnull,os.O_RDWR)
+  for fd in (0,1,2): os.dup2(null,fd)
+  (root/'background-pid').write_text(str(os.getpid()))
+  while root.exists(): time.sleep(0.1)
+  os._exit(0)
  if (root/'hold-probe').exists():
-  (root/'probe-entered').write_text('1')
+  (root/'probe-entered').write_text(str(os.getpid()))
   while (root/'hold-probe').exists(): time.sleep(0.02)
  print('__O8_PATH='+os.environ['PATH']); print('__O8_NODE='+str(root/'node')); print('GEMINI_API_KEY=fixture-key'); sys.exit(0)
 if Path(sys.argv[0]).name=='focus':
@@ -51,7 +58,7 @@ if Path(sys.argv[0]).name=='window':
  (root/'window-ready').write_text(str(os.getpid()))
  sys.stdin.buffer.read(); sys.exit(0)
 api=sys.argv[1].endswith('server.js')
-keys=['O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','PATH']
+keys=['O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','O8_FORGED_KEY','PATH']
 (root/('api-env' if api else 'ws-env')).write_text(json.dumps({k:os.environ.get(k) for k in keys}))
 def terminated(*args):
  (root/'events').open('a').write(('api' if api else 'ws')+'-stop\n'); sys.exit(0)
@@ -233,6 +240,7 @@ impl Drop for Fixture {
     }
 }
 
+#[allow(dead_code)]
 pub fn control(f: &Fixture, request: serde_json::Value) -> serde_json::Value {
     use std::io::{Read, Write};
     let mut stream = std::os::unix::net::UnixStream::connect(f.root.join("launcher.sock")).unwrap();

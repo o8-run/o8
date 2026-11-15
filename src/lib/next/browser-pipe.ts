@@ -54,20 +54,32 @@ export function requestNextPill(args: Record<string, unknown>): Promise<unknown>
   return requestNextControl('dictation-pill', 'present', args);
 }
 
+/** The caret/HUD dictation feedback panel: the same presentation contract, its own window. */
+export function requestNextHud(args: Record<string, unknown>): Promise<unknown> | null {
+  return requestNextControl('dictation-hud', 'present', args);
+}
+
+/** The draw-on-screen ink panel: the same receipts and deadline, its own window and pointer. */
+export function requestNextInk(args: Record<string, unknown>): Promise<unknown> | null {
+  return requestNextControl('spatial-ink', 'present', args);
+}
+
+const PRESENTATION = new Set(['dictation-pill', 'dictation-hud', 'spatial-ink']);
+
 function requestNextControl(type: string, verb: string, args: Record<string, unknown>): Promise<unknown> | null {
   const bridge = runtime.__o8NextBrowserPipe;
   if (!bridge || bridge.child.exitCode !== null || bridge.child.signalCode !== null) return null;
   if (bridge.failed) return Promise.resolve({ ok: false, error: 'The o8 next Browser pipe is unavailable', actionDispatched: false });
   if (bridge.pending.size >= 32) return Promise.resolve({ ok: false, error: 'Browser action queue is full', actionDispatched: false });
   const id = randomUUID();
-  const deadline = type === 'dictation-pill' ? Math.min(Number(args.deadline) || Date.now() + pillTiming.pipeMs, Date.now() + pillTiming.pipeMs) : Date.now() + 7000;
+  const deadline = PRESENTATION.has(type) ? Math.min(Number(args.deadline) || Date.now() + pillTiming.pipeMs, Date.now() + pillTiming.pipeMs) : Date.now() + 7000;
   const frame = JSON.stringify({ type, id, verb, args, expiresAt: deadline }) + '\n';
   if (Buffer.byteLength(frame) > 1024 * 1024) return Promise.resolve({ ok: false, error: 'Browser request exceeds 1 MiB', actionDispatched: false });
   return new Promise(resolve => {
     const timer = setTimeout(() => {
       bridge.pending.delete(id);
       resolve({ ok: false, error: 'o8 next Browser action timed out', timedOut: true, actionDispatched: null, automaticReplay: false });
-    }, type === 'dictation-pill' ? Math.max(0, deadline - Date.now()) : 8000);
+    }, PRESENTATION.has(type) ? Math.max(0, deadline - Date.now()) : 8000);
     bridge.pending.set(id, { resolve, timer });
     bridge.child.stdin?.write(frame, error => {
       if (!error || !bridge.pending.delete(id)) return;

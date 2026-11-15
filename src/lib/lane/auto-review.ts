@@ -1,3 +1,4 @@
+import { reviewBackpressurePolicy } from '@/lib/orchestrator/review-backpressure';
 import { isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { getSqlite } from '@/lib/db';
 /**
@@ -399,6 +400,13 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
     throw new Error(`Lane ${review.lane_id} not found`);
   }
 
+  if (reviewBackpressurePolicy().enabled) {
+    const { readEffectivePolicy } = await import('./effective-policy-read');
+    const policy = await readEffectivePolicy(lane.id);
+    const hold = policy?.holds.value.find(hold => hold.blocks.includes('review'));
+    if (!policy?.headSha || !policy.reviewMode.value || hold) return deferred(hold?.reason ?? 'Review policy is unavailable; operator inspection is required.');
+  }
+
   if (lane.status !== 'reviewing') {
     console.log(`[auto-review] Lane ${lane.id} is no longer reviewing (${lane.status}) — skipping`);
     return skipped(`Lane is no longer reviewing (${lane.status}).`);
@@ -449,6 +457,14 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   const reviewRisk = classifyReviewRisk(diffSummary.changedFiles, diffSummary.addedDiffLines);
   const { appendEvent } = await import('@/lib/lane/registry');
   appendEvent(lane.id, 'review_risk_classified', 'system', {
+    reviewedHeadSha: review.head_sha,
+    diffBase: mergeGateResult.diffBase ? {
+      comparisonRef: mergeGateResult.diffBase.comparisonRef,
+      mergeBase: mergeGateResult.diffBase.mergeBase,
+      usedFallback: mergeGateResult.diffBase.usedFallback,
+      // Preserve uncertainty without copying Git stderr into read surfaces.
+      warning: Boolean(mergeGateResult.diffBase.warning),
+    } : null,
     tier: reviewRisk.tier,
     reasons: reviewRisk.reasons,
     responsibleFiles: reviewRisk.responsibleFiles,

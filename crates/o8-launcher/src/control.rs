@@ -24,6 +24,9 @@ pub enum Request {
     PrepareRestart,
     CancelRestart { reservation: String },
     Restart { reservation: String },
+    UpdateCheck,
+    UpdateApply,
+    UpdateStatus,
 }
 struct Pending {
     request: Request,
@@ -94,6 +97,11 @@ impl Instance {
             }
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
+                // A startup helper outliving a force-quit launcher holds the lock
+                // until it ends; claim it as soon as it does.
+                if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                    break;
+                }
                 if let Ok(mut peer) = UnixStream::connect(&socket) {
                     peer.set_read_timeout(Some(Duration::from_secs(5)))?;
                     peer.write_all(b"{\"op\":\"show\"}\n")?;
@@ -177,6 +185,10 @@ impl Instance {
             worker: Some(worker),
             socket,
         }))
+    }
+    /// The descriptor holding the instance lock, handed to the startup helper.
+    pub fn lock_fd(&self) -> std::os::unix::io::RawFd {
+        self._lock.as_raw_fd()
     }
     pub fn receive(&self) -> io::Result<Option<(Request, Option<UnixStream>)>> {
         if self.show.swap(false, Ordering::SeqCst) {

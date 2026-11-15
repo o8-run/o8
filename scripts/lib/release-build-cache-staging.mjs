@@ -57,8 +57,12 @@ export async function beginCacheStaging(cacheRoot, projectRoot, phase, source, o
   if (owner.state !== 'live') throw new Error('Cache staging owner identity is unknown.');
   const operationId = randomUUID();
   const path = join(parent.canonicalPath, `.${options.action}-${operationId}`);
+  // Journal the identity digests, not the compatibility input list: that list grows with the
+  // checkout (thousands of native inputs) and would push every record past the snapshot bound.
+  const journalSource = { phase: source.phase, compatibilitySha256: source.compatibilitySha256,
+    source: source.source, sourceSha256: source.sourceSha256, entrySha256: source.entrySha256 };
   const record = { schema: 'o8/release-cache-staging/v1', runId, operationId, phase,
-    action: options.action, source, parent, workspace, runs, run, journal, stagingPath: path,
+    action: options.action, source: journalSource, parent, workspace, runs, run, journal, stagingPath: path,
     owner: { pid: process.pid, identity: owner.identity }, state: 'intent', staging: null, promotions: [] };
   let sequence = 0;
   let held = false;

@@ -1,9 +1,97 @@
 //! Main-thread AppKit lifecycle. Fixture runs explicitly disable native activation.
 use crate::shutdown::Shutdown;
 use std::{
-    path::Path,
-    sync::{atomic::AtomicBool, Arc},
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex, PoisonError,
+    },
+    time::Duration,
 };
+type MainWork = Box<dyn FnOnce() + Send>;
+/// Answers a platform termination request (Quit, logout, restart): sets the stop
+/// flag and starts the bounded shutdown. The platform then waits; `allow` lets it
+/// exit with status 0. A stop that cannot be proven complete exits with status 1
+/// instead, so a supervisor and the updater can tell the two apart. Cleanup that
+/// already ran (after a failed start, while its alert is open) answers at once:
+/// the alert's dialog is reaped and the status is 1.
+fn terminate(stop: &AtomicBool, shutdown: &Arc<Shutdown>, on_main: fn(MainWork), allow: fn()) {
+    stop.store(true, Ordering::SeqCst);
+    let begun = shutdown.begin(move |complete| {
+        on_main(Box::new(move || {
+            if complete {
+                allow();
+            } else {
+                std::process::exit(1);
+            }
+        }))
+    });
+    if !begun {
+        on_main(Box::new(|| {
+            crate::reap_dialogs(std::time::Instant::now() + Duration::from_millis(400));
+            std::process::exit(1)
+        }));
+    }
+}
+static FAKE_MAIN_QUEUE: Mutex<Option<mpsc::Sender<MainWork>>> = Mutex::new(None);
+/// Debug-build stand-in for AppKit termination, driven through files by the
+/// fixture tests. The system accepts Quit only once the launcher's event loop
+/// has run (live: `terminate` returned false while the main thread had not yet
+/// pumped events, true once it had), so the first pump publishes
+/// `terminate-ready`. A delivered Quit waits for the next pump, which answers it
+/// as AppKit does: the main thread waits inside termination, draining only the
+/// main queue, and an allowed termination exits with status 0.
+struct Fake {
+    dir: PathBuf,
+    stop: Arc<AtomicBool>,
+    shutdown: Arc<Shutdown>,
+    main_queue: mpsc::Receiver<MainWork>,
+}
+impl Fake {
+    fn new(enabled: bool, stop: &Arc<AtomicBool>, shutdown: &Arc<Shutdown>) -> Option<Self> {
+        if !cfg!(debug_assertions) || enabled {
+            return None;
+        }
+        let dir = PathBuf::from(std::env::var_os("O8_LAUNCHER_FAKE_TERMINATE")?);
+        let (send, main_queue) = mpsc::channel();
+        *FAKE_MAIN_QUEUE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(send);
+        Some(Self {
+            dir,
+            stop: stop.clone(),
+            shutdown: shutdown.clone(),
+            main_queue,
+        })
+    }
+    fn pump(&self) {
+        let _ = std::fs::write(self.dir.join("terminate-ready"), b"1");
+        if std::fs::remove_file(self.dir.join("terminate-request")).is_err() {
+            return;
+        }
+        terminate(
+            &self.stop,
+            &self.shutdown,
+            |work| {
+                if let Some(queue) = FAKE_MAIN_QUEUE
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .as_ref()
+                {
+                    let _ = queue.send(work);
+                }
+            },
+            || std::process::exit(0),
+        );
+        // AppKit's wait: no launcher code runs here except main-queue work.
+        while let Ok(work) = self.main_queue.recv() {
+            work();
+        }
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
+}
 pub fn owned_window(
     parent: Option<u32>,
     api: u32,
@@ -25,9 +113,8 @@ mod mac {
         NSApplicationDelegate, NSApplicationTerminateReply, NSEventMask, NSRunningApplication,
     };
     use objc2_foundation::{
-        MainThreadMarker, NSDate, NSDefaultRunLoopMode, NSNotification, NSObject, NSObjectProtocol,
+        MainThreadMarker, NSDate, NSDefaultRunLoopMode, NSObject, NSObjectProtocol,
     };
-    use std::sync::atomic::Ordering;
     use std::{
         ffi::{CStr, OsStr},
         os::unix::ffi::OsStrExt,
@@ -51,20 +138,18 @@ mod mac {
             work: extern "C" fn(*mut std::ffi::c_void),
         );
     }
-    extern "C" fn reply_on_main(context: *mut std::ffi::c_void) {
-        let allowed = !context.is_null();
-        if let Some(mtm) = MainThreadMarker::new() {
-            NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(allowed);
-        }
+    extern "C" fn run_on_main(context: *mut std::ffi::c_void) {
+        let work = unsafe { Box::from_raw(context.cast::<MainWork>()) };
+        work();
     }
-    fn reply_through_main_queue(allowed: bool) {
-        // The context pointer carries only the boolean; nothing is freed.
-        let context = if allowed {
-            std::ptr::NonNull::<u8>::dangling().as_ptr().cast()
-        } else {
-            std::ptr::null_mut()
-        };
-        unsafe { dispatch_async_f(&_dispatch_main_q, context, reply_on_main) };
+    fn on_main(work: MainWork) {
+        let context = Box::into_raw(Box::new(work)).cast();
+        unsafe { dispatch_async_f(&_dispatch_main_q, context, run_on_main) };
+    }
+    fn allow() {
+        if let Some(mtm) = MainThreadMarker::new() {
+            NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(true);
+        }
     }
     define_class!(
         #[unsafe(super = NSObject)]
@@ -81,24 +166,17 @@ mod mac {
             #[unsafe(method(applicationShouldTerminate:))]
             fn quit(&self, _: &NSApplication) -> NSApplicationTerminateReply {
                 let state = self.ivars();
-                state.stop.store(true, Ordering::SeqCst);
                 // The main thread stays inside AppKit's wait from here until the
                 // reply, so servers stop on the coordinator's thread.
-                state.shutdown.begin(reply_through_main_queue);
+                terminate(&state.stop, &state.shutdown, on_main, allow);
                 NSApplicationTerminateReply::TerminateLater
-            }
-            #[unsafe(method(applicationWillTerminate:))]
-            fn will_terminate(&self, _: &NSNotification) {
-                // AppKit exits with status 0 after this; report a failed stop instead.
-                if self.ivars().shutdown.failed() {
-                    std::process::exit(1);
-                }
             }
         }
     );
     pub struct Native {
         app: Option<Retained<NSApplication>>,
         _delegate: Option<Retained<LauncherDelegate>>,
+        fake: Option<Fake>,
     }
     impl Native {
         pub fn new(
@@ -111,6 +189,7 @@ mod mac {
                 return Ok(Self {
                     app: None,
                     _delegate: None,
+                    fake: Fake::new(enabled, &stop, &shutdown),
                 });
             }
             let mtm = MainThreadMarker::new().ok_or("Native lifecycle requires the main thread")?;
@@ -127,9 +206,13 @@ mod mac {
             Ok(Self {
                 app: Some(app),
                 _delegate: Some(delegate),
+                fake: None,
             })
         }
         pub fn pump(&self) {
+            if let Some(fake) = &self.fake {
+                fake.pump();
+            }
             if let Some(app) = &self.app {
                 autoreleasepool(|_| {
                     while let Some(event) = app.nextEventMatchingMask_untilDate_inMode_dequeue(
@@ -204,18 +287,26 @@ mod mac {
 #[cfg(target_os = "macos")]
 pub use mac::Native;
 #[cfg(not(target_os = "macos"))]
-pub struct Native;
+pub struct Native {
+    fake: Option<Fake>,
+}
 #[cfg(not(target_os = "macos"))]
 impl Native {
     pub fn new(
-        _: bool,
+        enabled: bool,
+        stop: Arc<AtomicBool>,
         _: Arc<AtomicBool>,
-        _: Arc<AtomicBool>,
-        _: Arc<Shutdown>,
+        shutdown: Arc<Shutdown>,
     ) -> Result<Self, String> {
-        Ok(Self)
+        Ok(Self {
+            fake: Fake::new(enabled, &stop, &shutdown),
+        })
     }
-    pub fn pump(&self) {}
+    pub fn pump(&self) {
+        if let Some(fake) = &self.fake {
+            fake.pump();
+        }
+    }
     pub fn focus(&self, _: u32, _: &Path) -> bool {
         false
     }

@@ -30,6 +30,7 @@ import { currentMissionState, log } from './shared';
 import type { SubmitReviewInput } from './types';
 import { ReviewValidationError } from './review-validation';
 import { completedCorrectionReviewTurn, prepareCorrectionReview } from '../correction-review';
+import { reusableReviewOutcome } from '@/lib/cortex/review-outcomes';
 
 function highestReviewRisk(findings: OrchestratorPacketReviewFinding[]) {
   if (findings.some((finding) => finding.severity === 'high')) {
@@ -199,10 +200,12 @@ function recordPacketReviewAudit(
   missingContractWaiverReason: string | undefined,
   reviewTurn: { id: string; outcome: 'active' | 'completed' },
   runEvidence: ReviewRunEvidence,
+  reusableOutcome: ReturnType<typeof reusableReviewOutcome>,
 ) {
   const lane = findLaneByPacket(packet.id);
   const requiresSecondPass = requiresSecondPassForLane(lane, approved);
   const approval = createApproval({
+    projectId: lane?.projectId ?? packet.projectId,
     source: 'runtime',
     runtime: lane?.runtime ?? packet.runtime,
     agent: lane?.label ?? packet.title,
@@ -223,6 +226,7 @@ function recordPacketReviewAudit(
       secondPassAgreed: false,
       reviewTurnId: reviewTurn.id,
       reviewTurnOutcome: reviewTurn.outcome,
+      reusableOutcome,
     },
     risk: deriveApprovalRisk(findings, approved),
     metadata: {
@@ -454,6 +458,21 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
   const submittedEvidence = prepareRunEvidence(input.runEvidence, reviewedHeadSha, evidencePrincipal);
   const execution = reviewExecution(input.approved, reviewedHeadSha, submittedEvidence);
   const summary = buildReviewSummary(input.findings, execution.verdictLabel);
+  let changedFiles: string[] = [];
+  if (verdictLane && reviewedHeadSha && input.findings.length === 0) {
+    const { listChangedPathsForCoverage } = await import('@/lib/lane/durable-review-approval');
+    const changed = await listChangedPathsForCoverage(verdictLane, reviewCwd ?? '', reviewedHeadSha);
+    if (changed.resolved) changedFiles = changed.paths;
+  }
+  const reusableOutcome = verdictLane ? reusableReviewOutcome({
+    projectId: verdictLane.projectId, repoPath: verdictLane.repoPath, packetId: packet.id,
+    headSha: reviewedHeadSha, approved: input.approved, findings: input.findings, changedFiles,
+    summary: packet.summary || packet.title,
+    verification: evidencePrincipal?.role === 'operator' ? 'operator_decision'
+      : execution.runEvidence.status === 'run' ? 'reviewer_reported_run'
+        : evidencePrincipal?.role === 'assigned_reviewer' ? 'independent_review' : null,
+    correction,
+  }) : null;
   if (input.submissionPrincipal) assertReviewSubmissionCurrent(input.submissionPrincipal);
   const auditReview = recordPacketReviewAudit(
     packet,
@@ -465,6 +484,7 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
     missingContractWaiverReason,
     reviewTurn,
     execution.runEvidence,
+    reusableOutcome,
   );
 
   // Only update mission state when the packet actually lives there — orphan

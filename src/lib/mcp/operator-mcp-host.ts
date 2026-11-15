@@ -1,3 +1,6 @@
+import { INBOX_DECISIONS_TOOL, handleGetInboxDecisions } from './operator-handlers/inbox-decisions';
+import { INTEGRATION_QUEUE_TOOLS, handleIntegrationQueue } from './operator-handlers/integration-queue';
+import { EFFECTIVE_POLICY_TOOL, handleGetEffectivePolicy } from './operator-handlers/effective-policy';
 import { ADOPT_PR_TOOL, handleAdoptPr } from './operator-handlers/adopt-pr';
 import { IDLE_DRAFT_TOOLS, handleIdleDrafts } from './operator-handlers/idle-drafts';
 import { CONVERSATION_PR_TOOLS, handleConversationPrs } from './operator-handlers/conversation-prs';
@@ -316,6 +319,9 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((tool) => tool.name === 'get_mission_status'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'mission_tail'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'get_packet_scope'),
+  EFFECTIVE_POLICY_TOOL,
+  INBOX_DECISIONS_TOOL,
+  ...INTEGRATION_QUEUE_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_packet_diff'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_list'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_create'),
@@ -448,6 +454,9 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   get_mission_status: handleGetMissionStatus,
   mission_tail: handleMissionTail,
   get_packet_scope: handleGetPacketScope,
+  get_effective_policy: handleGetEffectivePolicy,
+  get_inbox_decisions: handleGetInboxDecisions,
+  o8_integration_queue: handleIntegrationQueue,
   o8_packet_diff: handlePacketDiff,
   o8_task_list: handleTaskList,
   o8_task_create: handleTaskCreate,

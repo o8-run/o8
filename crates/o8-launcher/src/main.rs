@@ -1,11 +1,14 @@
 //! Opt-in launcher. No bundle selects this executable yet.
-use o8_launch_core::{next_main_startup, ports, preflight, restart::*};
+use o8_launch_core::{next_main_startup, ports, restart::*};
 use o8_launcher::ownership::{self, identity, private_write, Pending, Receipt};
-use serde::Deserialize;
+use o8_launcher::update;
+use serde::{Deserialize, Serialize};
 mod control;
 mod native;
+mod prepare;
 mod shutdown;
 use control::{Instance, Request};
+use prepare::{kill_group, prepare};
 use shutdown::{Shutdown, SHUTDOWN_BOUND};
 use std::{
     fs::{self, OpenOptions},
@@ -20,7 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     data_dir: PathBuf,
@@ -38,6 +41,8 @@ struct Config {
     focus: Option<PathBuf>,
     #[serde(default = "native_enabled")]
     native_lifecycle: bool,
+    /// Updater settings; see `UPDATER.md`.
+    update: Option<update::UpdateConfig>,
 }
 struct Server {
     child: Child,
@@ -445,47 +450,153 @@ fn default_ws_port() -> u16 {
 fn native_enabled() -> bool {
     cfg!(target_os = "macos")
 }
-fn run(config: &mut Config) -> Result<(), String> {
+/// Pumps once between startup steps; true when a stop was requested.
+fn stop_requested(native: &native::Native, stopped: &AtomicBool) -> bool {
+    native.pump();
+    stopped.load(Ordering::SeqCst)
+}
+/// Shows a startup failure while the main thread keeps answering events, so a
+/// Quit or a signal ends it.
+fn present_pumping(config: &Config, native: &native::Native, stopped: &AtomicBool, reason: &str) {
+    let config = config.clone();
+    let reason = reason.to_owned();
+    let shown = std::thread::spawn(move || present_with(&config, &reason, true));
+    while !shown.is_finished() {
+        if stop_requested(native, stopped) {
+            reap_dialogs(Instant::now() + Duration::from_millis(400));
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+/// `Err(None)`: the failure was already reported, or a stop was requested.
+fn run(config: &mut Config, relaunch: &update::Relaunch) -> Result<(), Option<String>> {
     if !config.data_dir.is_absolute()
         || !config.server_dir.is_absolute()
         || !config.node.is_absolute()
         || !config.window.is_absolute()
     {
-        return Err("Launch paths must be absolute".into());
+        return Err(Some("Launch paths must be absolute".into()));
     }
-    fs::create_dir_all(config.data_dir.join("logs")).map_err(|_| "Data directory unavailable")?;
+    fs::create_dir_all(config.data_dir.join("logs"))
+        .map_err(|_| Some("Data directory unavailable".into()))?;
     let Some(instance_lock) = Instance::claim(&config.data_dir)
-        .map_err(|error| format!("Instance unavailable: {error}"))?
+        .map_err(|error| Some(format!("Instance unavailable: {error}")))?
     else {
         return Ok(());
     };
-    ownership::cleanup(&config.data_dir, &config.server_dir)?;
+    // Settles an interrupted install while this instance holds the lock.
+    let mut updates = update::Controller::new(update::Updater::new(
+        &config.version,
+        &config.data_dir,
+        config.update.as_ref(),
+    ));
+    let mut install: Option<update::Staged> = None;
+    // Finish launching first, then keep the main thread answering events through
+    // every startup step: the system delivers Quit only to a launched app whose
+    // event loop runs. Native termination and the headless exit share one
+    // bounded shutdown, armed before anything starts.
     let stopped = Arc::new(AtomicBool::new(false));
+    let reopen = Arc::new(AtomicBool::new(false));
+    let shutdown = Arc::new(Shutdown::new(SHUTDOWN_BOUND));
+    let native = native::Native::new(
+        config.native_lifecycle,
+        stopped.clone(),
+        reopen.clone(),
+        shutdown.clone(),
+    )
+    .map_err(Some)?;
+    let servers = Arc::new(Mutex::new(Some(Servers {
+        api: None,
+        ws: None,
+    })));
+    let preparing: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+    let control = Arc::new(Mutex::new(Some(instance_lock)));
+    {
+        let servers = servers.clone();
+        let preparing = preparing.clone();
+        let control = control.clone();
+        shutdown.arm(
+            move |deadline| {
+                if let Some(mut child) = lock(&preparing).take() {
+                    kill_group(&mut child);
+                }
+                let taken = lock(&servers).take();
+                match taken {
+                    Some(mut servers) => servers.stop(deadline),
+                    None => Ok(()),
+                }
+            },
+            move || {
+                // Dropping the instance closes the lock and removes the socket
+                // file; AppKit exits right after the termination reply.
+                drop(lock(&control).take());
+                reap_dialogs(Instant::now() + Duration::from_millis(400));
+            },
+        );
+    }
+    let outcome = serve(
+        config,
+        &native,
+        &stopped,
+        &reopen,
+        &servers,
+        &control,
+        &preparing,
+        &mut updates,
+        &mut install,
+    );
+    let stopped_cleanly = shutdown.run();
+    // The staged bundle replaces the installed one only after every server was
+    // proven stopped and the instance lock and socket were released.
+    if let (Some(staged), Some(updater)) = (install, updates.updater()) {
+        return match (&outcome, &stopped_cleanly) {
+            (Ok(()), Ok(())) => updater.install(staged, relaunch).map_err(|error| {
+                o8_launcher::note!("Update not installed: {error}");
+                None
+            }),
+            _ => {
+                updater.abandon(staged, "The servers were not proven stopped");
+                Err(None)
+            }
+        };
+    }
+    match outcome {
+        Err(reason) if !stopped.load(Ordering::SeqCst) => {
+            present_pumping(config, &native, &stopped, &reason);
+            Err(None)
+        }
+        Err(reason) => {
+            o8_launcher::note!("{reason}");
+            Err(None)
+        }
+        Ok(()) => stopped_cleanly.map_err(|_| None),
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn serve(
+    config: &mut Config,
+    native: &native::Native,
+    stopped: &Arc<AtomicBool>,
+    reopen: &AtomicBool,
+    servers: &Mutex<Option<Servers>>,
+    control: &Mutex<Option<Instance>>,
+    preparing: &Mutex<Option<Child>>,
+    updates: &mut update::Controller,
+    install: &mut Option<update::Staged>,
+) -> Result<(), String> {
     for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         signal_hook::flag::register(signal, stopped.clone())
             .map_err(|_| "Shutdown handler unavailable")?;
     }
-    let shell = if let Some(probe) = &config.probe {
-        let result = Command::new(probe)
-            .output()
-            .map_err(|_| "Login shell probe unavailable")?;
-        if !result.status.success() {
-            return Err("Login shell probe failed".into());
-        }
-        o8_launch_core::shell_env::parse_probe(&String::from_utf8_lossy(&result.stdout))
-    } else {
-        o8_launch_core::shell_env::probe_login_shell()
-    };
-    if stopped.load(Ordering::SeqCst) {
+    let Some(prepared) = prepare(config, native, stopped, preparing, control)? else {
         return Ok(());
-    }
-    o8_launch_core::path_env::augment_process_path(&shell.path);
-    for (key, value) in shell.keys {
+    };
+    o8_launch_core::path_env::augment_process_path(&prepared.path);
+    for (key, value) in prepared.keys {
         std::env::set_var(key, value);
     }
-    let selected = preflight::run_node_preflight(config.node.to_str(), &config.server_dir)
-        .map_err(|_| "Node runtime preflight failed")?;
-    config.node = selected.into();
+    config.node = prepared.node;
     if config.api_port == ports::PROD_API_DEFAULT_PORT {
         config.api_port = ports::find_free_port(ports::PROD_API_PORT_RANGE, None)
             .unwrap_or_else(|| ports::bind_ephemeral_port(None));
@@ -513,7 +624,7 @@ fn run(config: &mut Config) -> Result<(), String> {
     std::env::set_var("O8_NODE_BIN", &config.node);
     std::env::set_var("CORTEX_IDE_API_PORT", config.api_port.to_string());
     std::env::set_var("CORTEX_IDE_WS_PORT", config.ws_port.to_string());
-    if stopped.load(Ordering::SeqCst) {
+    if stop_requested(native, stopped) {
         return Ok(());
     }
     let data_dir = config.data_dir.to_string_lossy();
@@ -540,60 +651,45 @@ fn run(config: &mut Config) -> Result<(), String> {
         let path = config.data_dir.join("logs").join(name);
         let _ = fs::rename(&path, path.with_file_name(format!("{name}.prev")));
     }
-    // Native termination and the headless exit share one bounded shutdown.
-    let reopen = Arc::new(AtomicBool::new(false));
-    let shutdown = Arc::new(Shutdown::new(SHUTDOWN_BOUND));
-    let native = native::Native::new(
-        config.native_lifecycle,
-        stopped.clone(),
-        reopen.clone(),
-        shutdown.clone(),
-    )?;
-    let servers = Arc::new(Mutex::new(Some(Servers {
-        api: None,
-        ws: None,
-    })));
-    let control = Arc::new(Mutex::new(Some(instance_lock)));
-    {
-        let servers = servers.clone();
-        let control = control.clone();
-        shutdown.arm(
-            move |deadline| {
-                let taken = lock(&servers).take();
-                match taken {
-                    Some(mut servers) => servers.stop(deadline),
-                    None => Ok(()),
-                }
-            },
-            move || {
-                // Dropping the instance closes the lock and removes the socket
-                // file; AppKit exits right after the termination reply.
-                drop(lock(&control).take());
-                reap_dialogs(Instant::now() + Duration::from_millis(400));
-            },
-        );
+    // Each server is recorded under the shutdown before the next pump, so a Quit
+    // answered there always stops it. A failed start stops what did start under
+    // the coordinator's one bound.
+    if stop_requested(native, stopped) {
+        return Ok(());
     }
-    // A failed start stops whatever did start under the coordinator's one bound.
-    let started = (|| -> Result<(), String> {
-        let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
-        if let Some(servers) = lock(&servers).as_mut() {
+    let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
+    // The shutdown already took the slot: stop the server here, unlocked.
+    let unrecorded = match lock(servers).as_mut() {
+        Some(servers) => {
             servers.api = Some(api);
+            None
         }
-        let ws = spawn(
-            config,
-            "ws-server.mjs",
-            &boot,
-            &instance,
-            "launcher-ws.json",
-        )?;
-        if let Some(servers) = lock(&servers).as_mut() {
+        None => Some(api),
+    };
+    if let Some(mut api) = unrecorded {
+        api.stop(Instant::now() + SHUTDOWN_BOUND)?;
+        return Ok(());
+    }
+    if stop_requested(native, stopped) {
+        return Ok(());
+    }
+    let ws = spawn(
+        config,
+        "ws-server.mjs",
+        &boot,
+        &instance,
+        "launcher-ws.json",
+    )?;
+    let unrecorded = match lock(servers).as_mut() {
+        Some(servers) => {
             servers.ws = Some(ws);
+            None
         }
-        Ok(())
-    })();
-    if let Err(error) = started {
-        let _ = shutdown.run();
-        return Err(error);
+        None => Some(ws),
+    };
+    if let Some(mut ws) = unrecorded {
+        ws.stop(Instant::now() + SHUTDOWN_BOUND)?;
+        return Ok(());
     }
     let restart_stop = stopped.clone();
     let restart = o8_launch_core::restart_job_drain::guard(
@@ -620,12 +716,24 @@ fn run(config: &mut Config) -> Result<(), String> {
             // Never call this while holding the server lock: a native quit waits in here.
             native.pump();
             pending_show |= reopen.swap(false, Ordering::SeqCst);
-            let received = match lock(&control).as_ref() {
+            let received = match lock(control).as_ref() {
                 Some(instance) => instance.receive().map_err(|_| "Instance control stopped")?,
                 None => break,
             };
             if let Some((request, peer)) = received {
                 let result = match request {
+                    Request::UpdateCheck => match updates.check() {
+                        Some(answer) => Ok(answer),
+                        None => {
+                            // Answered when the check finishes; the loop keeps running.
+                            if let Some(peer) = peer {
+                                updates.wait(peer);
+                            }
+                            continue;
+                        }
+                    },
+                    Request::UpdateApply => Ok(updates.apply()),
+                    Request::UpdateStatus => Ok(updates.status()),
                     Request::Show => {
                         pending_show = true;
                         Ok(serde_json::json!({"ok": true}))
@@ -647,10 +755,21 @@ fn run(config: &mut Config) -> Result<(), String> {
                     let _ = writeln!(peer, "{response}");
                 }
             }
+            if updates.poll().is_some() {
+                // The same final work inspection and drain as an admitted restart;
+                // admission stops the main loop and the bounded shutdown follows.
+                match restart.before_restart(None) {
+                    Ok(()) => *install = updates.take_ready(),
+                    Err(error) => {
+                        o8_launcher::note!("Update deferred: {error}");
+                        updates.deferred(error);
+                    }
+                }
+            }
             if stopped.load(Ordering::SeqCst) {
                 break;
             }
-            let mut guard = lock(&servers);
+            let mut guard = lock(servers);
             let Some(Servers {
                 api: Some(api),
                 ws: Some(ws),
@@ -774,12 +893,18 @@ fn run(config: &mut Config) -> Result<(), String> {
         }
         Ok(())
     })();
-    let stopped_cleanly = shutdown.run();
-    outcome?;
-    stopped_cleanly
+    outcome
 }
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.len() == 2 && args[1] == "--prepare" {
+        std::process::exit(prepare::helper_main());
+    }
+    // Captured before startup changes the environment, for an updated relaunch.
+    let relaunch = update::Relaunch {
+        args: args.iter().skip(1).cloned().collect(),
+        env: std::env::vars_os().collect(),
+    };
     if args.len() != 3 || args[1] != "--config" {
         o8_launcher::note!("usage: o8-launcher --config <file>");
         std::process::exit(2);
@@ -794,9 +919,13 @@ fn main() {
             std::process::exit(2);
         }
     };
-    if let Err(reason) = run(&mut config) {
-        present(&config, &reason);
-        std::process::exit(1);
+    match run(&mut config, &relaunch) {
+        Ok(()) => {}
+        Err(Some(reason)) => {
+            present(&config, &reason);
+            std::process::exit(1);
+        }
+        Err(None) => std::process::exit(1),
     }
 }
 

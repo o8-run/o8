@@ -21,7 +21,7 @@ export function validateManifest() {
 async function main() {
   const args = process.argv.slice(2);
   const options = { output: resolve('work/next-parity'), binary: resolve('native/o8-next/target/debug/o8-next'),
-    browser: process.env.O8_PARITY_BROWSER || '', only: '', nativeTest: '', webHost: resolve('scripts/parity/web-server.ts') };
+    browser: process.env.O8_PARITY_BROWSER || '', only: '', nativeTest: '', webHost: '' };
   let comparison;
   let listing = false;
   let checking = false;

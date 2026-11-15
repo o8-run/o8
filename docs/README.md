@@ -33,6 +33,7 @@ For operators who want to understand the product and run governed agent work wit
 | [Operator MCP bridge](user/operator-mcp-bridge.md) | How terminal and MCP clients drive the same governed control plane as the app. |
 | [Local PII MCP](user/local-pii-mcp.md) | Attach an on-device PII detect/redact MCP to the tool-spine and workers. |
 | [Persistent terminals](user/persistent-terminals.md) | How terminal sessions survive restarts and recover their scrollback. |
+| [o8 inside Rex](user/o8-in-rex.md) | Watch every worker in its own Rex pane, read the tab marks, and set up the one-key shortcut. |
 | [Telemetry privacy](user/product-telemetry-privacy.md) | What optional product telemetry can contain and how consent is enforced. |
 | [Vocabulary](user/vocabulary.md) | The precise meanings of runtime, agent, session, packet, lane, mission, review, and approval. |
 

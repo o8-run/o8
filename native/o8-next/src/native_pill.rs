@@ -1,8 +1,12 @@
-//! Passive dictation drawing. Capture and all interactive dock surfaces keep their owners.
+//! Passive dock drawing: dictation, the speech, live voice, agent working and
+//! fleet capsules, and the edit chip and glints below them. Capture, voice,
+//! agent and edit commands keep their web owners. The caret/HUD dictation
+//! feedback panel (native_hud.rs) and the draw-on-screen ink panel
+//! (native_ink.rs) share this queue and loop.
 #[cfg(test)]
 use gpui::TestAppContext;
 use gpui::{
-    AnyWindowHandle, App, Application, Bounds, Context, Entity, IntoElement, Render, Window,
+    AnyWindowHandle, App, Bounds, Context, Entity, IntoElement, Render, Window,
     WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, div, point,
     prelude::*, px, size,
 };
@@ -58,13 +62,55 @@ pub(crate) struct Snapshot {
     pub error: Option<String>,
     #[serde(default)]
     pub pasted_text: Option<String>,
+    #[serde(default)]
+    pub paused: bool,
+    #[serde(default)]
+    pub speed: f32,
+    #[serde(default)]
+    pub tool: Option<String>,
+    /// Epoch milliseconds, sent once per working session; the timer ticks here.
+    #[serde(default)]
+    pub started_at: u64,
+    #[serde(default)]
+    pub connecting: bool,
+    #[serde(default)]
+    pub edit: Option<extras::EditChip>,
+    #[serde(default)]
+    pub glint: Option<extras::Glint>,
+    #[serde(default)]
+    pub workers: Option<capsules::Workers>,
+    #[serde(default)]
+    pub expanded: bool,
+    /// Static frames only: how long this frame holds the panel (capped).
+    #[serde(default)]
+    pub hold_ms: u64,
+    #[serde(default)]
+    pub ask: Option<ask::Ask>,
+    #[serde(default)]
+    pub confirm: Option<confirm::Card>,
+    #[serde(default)]
+    pub staged: Option<drop::Staged>,
 }
 impl Snapshot {
     pub fn visible(&self) -> bool {
         matches!(
             self.state.as_str(),
-            "requesting-mic" | "recording" | "transcribing" | "polishing" | "success" | "error"
-        )
+            "requesting-mic"
+                | "recording"
+                | "transcribing"
+                | "polishing"
+                | "success"
+                | "error"
+                | "speaking"
+                | "working"
+                | "voice"
+                | "workers"
+                | "sliver"
+        ) || self.state == "ask" && self.ask.is_some()
+            || self.state == "confirm" && self.confirm.as_ref().is_some_and(confirm::Card::valid)
+            || self.state == "drop"
+            || self.state == "staged" && self.staged.as_ref().is_some_and(drop::Staged::valid)
+            || self.state == "extras" && self.extras_live(capsules::now_ms())
     }
     fn label(&self) -> &str {
         match self.state.as_str() {
@@ -78,12 +124,23 @@ impl Snapshot {
                 .filter(|s| !s.is_empty())
                 .unwrap_or("Pasted"),
             "error" => self.error.as_deref().unwrap_or("Mic error"),
+            "speaking" if self.paused => "Paused",
+            "speaking" => "Speaking",
+            "working" if self.tool.as_deref() == Some("o8_ask") => "Synthesizing…",
+            "working" => "Working…",
+            "voice" if self.connecting => "Connecting…",
+            "voice" => "Voice live",
             _ => "",
         }
     }
 }
 /// AppKit logical points, primary screen only, exactly as the web dock. Scale never enters placement.
+#[cfg(test)]
 pub(crate) fn placement(screen: [f64; 4], notch: f64) -> Option<[f64; 4]> {
+    sized_placement(screen, notch, 120.)
+}
+/// The same placement for a panel `height` points tall (the Ask panel grows it).
+pub(crate) fn sized_placement(screen: [f64; 4], notch: f64, height: f64) -> Option<[f64; 4]> {
     if !screen.into_iter().all(f64::is_finite)
         || screen[2] <= 0.
         || screen[3] <= 0.
@@ -93,7 +150,7 @@ pub(crate) fn placement(screen: [f64; 4], notch: f64) -> Option<[f64; 4]> {
         return None;
     }
     let width = 520_f64.min(screen[2]);
-    let height = 120_f64.min(screen[3]);
+    let height = height.min(screen[3]);
     Some([
         screen[0] + (screen[2] - width) / 2.,
         screen[1] + screen[3] - notch - if notch > 0. { 4. } else { 0. } - height,
@@ -130,6 +187,15 @@ pub(crate) struct Pill {
     target: bool,
     finish_pending: bool,
     finish_sent: bool,
+    actions: Vec<Value>,
+    hover: bool,
+    second: Option<u64>,
+    lease: u64,
+    revert_sent: Option<u64>,
+    extras_phase: (bool, u8),
+    ask_scroll: gpui::ScrollHandle,
+    ask_active_sent: bool,
+    decided: Option<(String, String)>,
     presentation: Presentation,
 }
 impl Default for Pill {
@@ -142,19 +208,34 @@ impl Default for Pill {
             target: false,
             finish_pending: false,
             finish_sent: false,
+            actions: Vec::new(),
+            hover: false,
+            second: None,
+            lease: 750,
+            revert_sent: None,
+            extras_phase: (false, 2),
+            ask_scroll: gpui::ScrollHandle::new(),
+            ask_active_sent: false,
+            decided: None,
             presentation: Presentation::default(),
         }
     }
 }
 impl Pill {
     fn expire(&mut self) {
-        if self.heard.elapsed() > Duration::from_millis(750) && self.target {
+        if self.heard.elapsed() > Duration::from_millis(self.lease) && self.target {
             self.apply(Snapshot::default());
             self.motion = crate::motion::Transition::settled(160, false);
         }
     }
+    /// The clickable footprints (capsule and chip) while they are on screen.
+    fn hit(&self) -> Vec<[f64; 3]> {
+        self.hit_rects(capsules::now_ms())
+    }
     fn finish(&mut self) {
-        if self.target && self.snapshot.state == "recording" && !self.finish_sent {
+        let recording = self.snapshot.state == "recording"
+            || self.snapshot.state == "ask" && self.snapshot.ask.as_ref().is_some_and(ask::Ask::recording);
+        if self.target && recording && !self.finish_sent {
             self.finish_pending = true;
             self.finish_sent = true;
         }
@@ -163,11 +244,27 @@ impl Pill {
         if snapshot.session != self.snapshot.session || snapshot.state != self.snapshot.state {
             self.finish_pending = false;
             self.finish_sent = false;
+            self.actions.clear();
+            self.hover = false;
+            self.second = None;
+            self.revert_sent = None;
+            self.ask_active_sent = false;
+            self.decided = None;
         }
+        // A revert stays sent until the web shows the chip's next status.
+        if snapshot
+            .edit
+            .as_ref()
+            .is_none_or(|edit| edit.status != "ready")
+        {
+            self.revert_sent = None;
+        }
+        self.lease = Self::lease_for(&snapshot);
         self.motion.set(snapshot.visible());
         self.target = snapshot.visible();
         if self.target {
-            self.snapshot = snapshot;
+            let previous = std::mem::replace(&mut self.snapshot, snapshot);
+            self.ask_follow(previous.ask.as_ref().filter(|_| previous.state == "ask"));
         }
         self.heard = Instant::now();
     }
@@ -185,78 +282,111 @@ impl Render for Pill {
         } else {
             0.
         };
-        div()
+        let root = div()
             .size_full()
             .flex()
-            .justify_center()
-            .items_start()
-            .pt(px(8.))
-            .child(
-                div()
-                    .id("native-dictation-pill")
-                    .debug_selector(|| "native-dictation-pill".into())
-                    .on_click(cx.listener(|pill, _, _, cx| {
-                        pill.finish();
-                        cx.notify();
-                    }))
-                    .when(listening, |d| {
-                        d.cursor_pointer()
-                            .hover(|s| s.bg(t.hover))
-                            .active(|s| s.opacity(0.85))
-                    })
-                    .w(px(
-                        if self.snapshot.state == "success" || self.snapshot.state == "error" {
-                            420.
-                        } else {
-                            248.
-                        },
-                    ))
-                    .h(px(44.))
-                    .px(px(16.))
-                    .rounded(px(22.))
-                    .overflow_hidden()
-                    .bg(t.surface_raised)
-                    .border_1()
-                    .border_color(t.border)
-                    .text_color(match self.snapshot.state.as_str() {
-                        "error" => t.danger,
-                        "success" => t.success,
-                        _ => t.text,
-                    })
-                    .text_size(px(12.))
-                    .font_family(t.font_ui)
-                    .font_weight(gpui::FontWeight::LIGHT)
-                    .opacity(opacity)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(8.))
-                    .child(if listening {
-                        let mut bars = div().flex().items_center().gap(px(3.)).h(px(22.));
-                        for i in 0..26 {
-                            let weight = 1. - ((i as f32 - 12.5) / 13.).abs();
-                            bars = bars.child(
-                                div()
-                                    .w(px(2.))
-                                    .h(px(2. + 18. * level * weight))
-                                    .rounded(px(1.))
-                                    .bg(t.accent),
-                            );
-                        }
-                        bars.into_any_element()
+            .flex_col()
+            .items_center()
+            .justify_start()
+            .pt(px(8.));
+        let extras = self.render_extras(opacity, w, cx);
+        if self.snapshot.state == "extras" {
+            return root.children(extras);
+        }
+        if self.snapshot.state == "ask" {
+            return root.child(self.render_ask(opacity, cx)).children(extras);
+        }
+        if self.snapshot.state == "confirm" {
+            return root.child(self.render_confirm(opacity, cx)).children(extras);
+        }
+        if matches!(self.snapshot.state.as_str(), "drop" | "staged") {
+            return root.child(self.render_drop(opacity)).children(extras);
+        }
+        if capsules::is_capsule(&self.snapshot.state) {
+            let capsule = div()
+                .id("native-dock-capsule")
+                .debug_selector(|| "native-dock-capsule".into())
+                .opacity(opacity)
+                .on_click(cx.listener(|pill, event: &gpui::ClickEvent, _, cx| {
+                    pill.capsule_click();
+                    // The resting dock's double click opens Voice settings, as
+                    // the web dock's own double click does.
+                    if event.click_count() == 2 {
+                        pill.act("voice-settings", None);
+                    }
+                    cx.notify();
+                }));
+            return root
+                .child(self.render_capsule(capsule, cx))
+                .children(extras);
+        }
+        root.child(
+            div()
+                .id("native-dictation-pill")
+                .debug_selector(|| "native-dictation-pill".into())
+                .on_click(cx.listener(|pill, _, _, cx| {
+                    pill.capsule_click();
+                    cx.notify();
+                }))
+                .when(listening, |d| {
+                    d.cursor_pointer()
+                        .hover(|s| s.bg(t.hover))
+                        .active(|s| s.opacity(0.85))
+                })
+                .w(px(
+                    if self.snapshot.state == "success" || self.snapshot.state == "error" {
+                        420.
                     } else {
-                        div()
-                            .child(self.snapshot.label().chars().take(100).collect::<String>())
-                            .into_any_element()
-                    })
-                    .when(listening, |d| {
-                        d.child(format!(
-                            "{:02}:{:02}",
-                            self.snapshot.duration_ms / 60000,
-                            self.snapshot.duration_ms / 1000 % 60
-                        ))
-                    }),
-            )
+                        248.
+                    },
+                ))
+                .h(px(44.))
+                .px(px(16.))
+                .rounded(px(22.))
+                .overflow_hidden()
+                .bg(t.surface_raised)
+                .border_1()
+                .border_color(t.border)
+                .text_color(match self.snapshot.state.as_str() {
+                    "error" => t.danger,
+                    "success" => t.success,
+                    _ => t.text,
+                })
+                .text_size(px(12.))
+                .font_family(t.font_ui)
+                .font_weight(gpui::FontWeight::LIGHT)
+                .opacity(opacity)
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(8.))
+                .child(if listening {
+                    let mut bars = div().flex().items_center().gap(px(3.)).h(px(22.));
+                    for i in 0..26 {
+                        let weight = 1. - ((i as f32 - 12.5) / 13.).abs();
+                        bars = bars.child(
+                            div()
+                                .w(px(2.))
+                                .h(px(2. + 18. * level * weight))
+                                .rounded(px(1.))
+                                .bg(t.accent),
+                        );
+                    }
+                    bars.into_any_element()
+                } else {
+                    div()
+                        .child(self.snapshot.label().chars().take(100).collect::<String>())
+                        .into_any_element()
+                })
+                .when(listening, |d| {
+                    d.child(format!(
+                        "{:02}:{:02}",
+                        self.snapshot.duration_ms / 60000,
+                        self.snapshot.duration_ms / 1000 % 60
+                    ))
+                }),
+        )
+        .children(extras)
     }
 }
 
@@ -302,7 +432,24 @@ fn dispatch(
                     };
                     pill.apply(snapshot);
                 }
-                Some("release") => pill.apply(Snapshot::default()),
+                Some("release") => {
+                    // A release names the session it retires; a late one never
+                    // hides a newer session that is already on screen.
+                    // Capsule kinds number sessions independently, so the kind
+                    // is part of the identity.
+                    let kind = capsules::kind(&pill.snapshot.state);
+                    let stale = pill.target
+                        && (args["session"]
+                            .as_u64()
+                            .is_some_and(|session| session != pill.snapshot.session)
+                            || args["kind"].as_str().is_some_and(|named| named != kind));
+                    if !stale {
+                        pill.apply(Snapshot::default());
+                        if args["immediate"] == true {
+                            pill.motion = crate::motion::Transition::settled(160, false);
+                        }
+                    }
+                }
                 _ => return None,
             }
             let show = pill.target || pill.motion.value().1;
@@ -313,19 +460,16 @@ fn dispatch(
             } else {
                 None
             };
-            Some((
-                show,
-                pill.target && pill.snapshot.state == "recording",
-                finish,
-            ))
+            pill.ask_active_sent = false;
+            Some((show, pill.hit(), finish, pill.take_actions()))
         });
-        if let Some((show, interactive, finish)) = result {
+        if let Some((show, hit, finish, actions)) = result {
             #[cfg(target_os = "macos")]
-            macos::present(window, show, interactive, &view, cx);
+            macos::present(window, show, hit, &view, cx);
             #[cfg(not(target_os = "macos"))]
-            let _ = (window, show, interactive);
+            let _ = (window, show, hit);
             let _ = WAKE.0.try_send(());
-            reply(json!({"ok":true, "finishSession":finish}));
+            reply(json!({"ok":true, "finishSession":finish, "actions":actions}));
         } else {
             reply(json!({"ok":false}));
         }
@@ -345,9 +489,11 @@ fn deliver(handle: WindowHandle<Pill>, frame: Value, cx: &mut gpui::AsyncApp) ->
 }
 
 pub(crate) fn has_real_windows(cx: &App) -> bool {
-    cx.windows()
-        .iter()
-        .any(|window| window.downcast::<Pill>().is_none())
+    cx.windows().iter().any(|window| {
+        window.downcast::<Pill>().is_none()
+            && window.downcast::<hud::Hud>().is_none()
+            && window.downcast::<ink::Ink>().is_none()
+    })
 }
 
 async fn wait_for_work(
@@ -368,6 +514,8 @@ pub(crate) fn install(cx: &mut App) {
     #[cfg(target_os = "macos")]
     cx.spawn(async move |cx| {
         let mut handle: Option<WindowHandle<Pill>> = None;
+        let mut hud_handle: Option<WindowHandle<hud::Hud>> = None;
+        let mut ink_handle: Option<WindowHandle<ink::Ink>> = None;
         let mut visible = false;
         loop {
             wait_for_work(visible, &WAKE.1, cx.background_executor()).await;
@@ -376,6 +524,14 @@ pub(crate) fn install(cx: &mut App) {
                 let id = frame["id"].as_str().unwrap_or_default();
                 if expired(&frame) {
                     crate::app_parent::browser_result(id, json!({"ok":false}));
+                    continue;
+                }
+                if frame["type"] == "dictation-hud" {
+                    hud::deliver(&mut hud_handle, frame, cx);
+                    continue;
+                }
+                if frame["type"] == "spatial-ink" {
+                    ink::deliver(&mut ink_handle, frame, cx);
                     continue;
                 }
                 if handle.is_none() && frame["args"]["action"] == "release" {
@@ -423,24 +579,22 @@ pub(crate) fn install(cx: &mut App) {
                     let Ok(view) = root.downcast::<Pill>() else {
                         return;
                     };
-                    let (show, was_shown, interactive) = view.update(cx, |pill, cx| {
+                    let (show, was_shown, hit) = view.update(cx, |pill, cx| {
                         let was_active = pill.target;
                         pill.expire();
-                        if was_active != pill.target {
+                        let now = capsules::now_ms();
+                        let redraw = pill.timer_tick(now) | pill.extras_tick(now);
+                        if was_active != pill.target || redraw {
                             cx.notify();
                         }
                         let show = pill.target || pill.shown && pill.motion.value().1;
                         let was_shown = pill.shown;
                         pill.shown = show;
-                        (
-                            show,
-                            was_shown,
-                            pill.target && pill.snapshot.state == "recording",
-                        )
+                        (show, was_shown, pill.hit())
                     });
                     visible = show;
                     if show || was_shown {
-                        macos::present(window, show, interactive, &view, cx);
+                        macos::present(window, show, hit, &view, cx);
                     }
                 });
                 if result.is_err() {
@@ -448,6 +602,8 @@ pub(crate) fn install(cx: &mut App) {
                     visible = false;
                 }
             }
+            visible |= hud::tick(&mut hud_handle, cx);
+            visible |= ink::tick(&mut ink_handle, cx);
         }
     })
     .detach();
@@ -518,7 +674,7 @@ mod macos {
     pub(super) fn present(
         window: &Window,
         visible: bool,
-        interactive: bool,
+        hit: Vec<[f64; 3]>,
         pill: &Entity<Pill>,
         cx: &mut App,
     ) {
@@ -532,7 +688,9 @@ mod macos {
         unsafe {
             let view = handle.ns_view.as_ptr() as id;
             let panel: id = msg_send![view, window];
-            let configure = pill.update(cx, |pill, _| !pill.presentation.configured);
+            let (configure, tall) = pill.update(cx, |pill, _| {
+                (!pill.presentation.configured, ask::panel_height(&pill.snapshot))
+            });
             if configure {
                 object_setClass(panel, nonactivating_class(panel));
                 let _: () = msg_send![panel, setIgnoresMouseEvents: YES];
@@ -558,7 +716,7 @@ mod macos {
             let screen: id = msg_send![screens, objectAtIndex: 0_usize];
             let rect: NSRect = msg_send![screen, frame];
             let insets: Insets = msg_send![screen, safeAreaInsets];
-            if let Some([x, y, width, height]) = placement(
+            if let Some([x, y, width, height]) = sized_placement(
                 [
                     rect.origin.x,
                     rect.origin.y,
@@ -566,6 +724,7 @@ mod macos {
                     rect.size.height,
                 ],
                 insets.top,
+                tall,
             ) {
                 let (_, set_frame, order_front) = pill.update(cx, |pill, _| {
                     pill.presentation.tick(true, Some([x, y, width, height]))
@@ -575,11 +734,13 @@ mod macos {
                     let _: () = msg_send![panel, setFrame: frame display: NO];
                 }
                 let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
-                let hit = interactive
-                    && mouse.x >= x + (width - 248.) / 2.
-                    && mouse.x <= x + (width + 248.) / 2.
-                    && mouse.y >= y + height - 52.
-                    && mouse.y <= y + height - 8.;
+                // Each footprint is centered, `top` points below the panel top.
+                let hit = hit.iter().any(|&[w, top, h]| {
+                    mouse.x >= x + (width - w) / 2.
+                        && mouse.x <= x + (width + w) / 2.
+                        && mouse.y >= y + height - top - h
+                        && mouse.y <= y + height - top
+                });
                 let _: () = msg_send![panel, setIgnoresMouseEvents: if hit { NO } else { YES }];
                 if order_front {
                     let _: () = msg_send![panel, orderFrontRegardless];
@@ -587,69 +748,60 @@ mod macos {
             }
         }
     }
+
+    /// The dock's never-key, never-main panel class, shared with the caret/HUD panel.
+    /// The subclass is registered once, from the first panel's class, so
+    /// every panel given it must be of that same GPUI class (or already it).
+    pub(super) unsafe fn make_nonactivating(panel: id) {
+        unsafe {
+            let class = nonactivating_class(panel);
+            let current = (&*panel).class() as *const Class;
+            debug_assert!(
+                std::ptr::eq(current, class)
+                    || (&*class)
+                        .superclass()
+                        .is_some_and(|base| std::ptr::eq(base, current)),
+                "never-key panel subclass built from another window class"
+            );
+            object_setClass(panel, class);
+        }
+    }
 }
 
+#[path = "native_pill_ask.rs"]
+mod ask;
+#[path = "native_pill_capsules.rs"]
+mod capsules;
+#[path = "native_pill_confirm.rs"]
+mod confirm;
+#[path = "native_pill_drop.rs"]
+mod drop;
+#[path = "native_pill_extras.rs"]
+mod extras;
+#[path = "native_hud.rs"]
+mod hud;
+#[path = "native_ink.rs"]
+mod ink;
+
+#[cfg(test)]
+#[path = "native_pill_extras_tests.rs"]
+mod extras_tests;
 #[cfg(test)]
 #[path = "native_pill_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "native_pill_ask_tests.rs"]
+mod ask_tests;
+#[cfg(test)]
+#[path = "native_pill_confirm_tests.rs"]
+mod confirm_tests;
+#[cfg(test)]
+#[path = "native_pill_drop_tests.rs"]
+mod drop_tests;
+#[cfg(test)]
+#[path = "native_pill_sliver_tests.rs"]
+mod sliver_tests;
 
-/// Explicit fixture entry point for the isolated Linux display capture harness.
-/// It uses the production renderer, no server, capture device or input simulation.
-pub(crate) fn try_fixture(args: &[String]) -> Result<bool, String> {
-    if args.first().map(String::as_str) != Some("--pill-fixture") {
-        return Ok(false);
-    }
-    #[cfg(not(target_os = "linux"))]
-    return Err("Pill raster fixtures require an isolated Linux display".into());
-    #[cfg(target_os = "linux")]
-    {
-        let state = args
-            .get(1)
-            .filter(|_| args.len() == 2)
-            .ok_or("Expected a pill fixture state")?
-            .clone();
-        if ![
-            "idle",
-            "requesting-mic",
-            "recording",
-            "transcribing",
-            "polishing",
-            "success",
-            "error",
-        ]
-        .contains(&state.as_str())
-        {
-            return Err("Unknown pill fixture state".into());
-        }
-        Application::new().run(move |cx| {
-            cx.open_window(
-                WindowOptions {
-                    focus: false,
-                    window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-                        point(px(0.), px(0.)),
-                        size(px(520.), px(120.)),
-                    ))),
-                    titlebar: None,
-                    ..Default::default()
-                },
-                |_, cx| {
-                    cx.new(|_| {
-                        let mut pill = Pill::default();
-                        pill.apply(Snapshot {
-                            state,
-                            audio_level: 0.7,
-                            duration_ms: 6500,
-                            pasted_text: Some("Delivered fixture words".into()),
-                            error: Some("Microphone unavailable".into()),
-                            ..Default::default()
-                        });
-                        pill.motion = crate::motion::Transition::settled(160, pill.target);
-                        pill
-                    })
-                },
-            )
-            .unwrap();
-        });
-        Ok(true)
-    }
-}
+#[path = "native_pill_fixture.rs"]
+mod fixture;
+pub(crate) use fixture::try_fixture;

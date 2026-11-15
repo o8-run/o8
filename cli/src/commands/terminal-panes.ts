@@ -13,10 +13,15 @@
 import { execFileSync } from 'node:child_process';
 
 import { CliError, EXIT } from '../api.js';
+import type { TerminalStatusReport } from '../terminal-status.js';
 
 export const PANE_LIMIT_DEFAULT = 8;
 export const PANE_LIMIT_MAX = 16;
 const TAB_LABEL = 'o8 terminals';
+/** The label of the pane a watcher started by the Rex shortcut runs in. */
+export const WATCHER_LABEL = 'o8 watcher';
+/** How much of the tab the first pane takes from the watcher beside it. */
+const BESIDE_WATCHER_RATIO = 75;
 /**
  * A pane's label reads `o8: <title> [<id>]`, with the title first so it stays
  * visible when the pane header is cut short. Only a label of exactly this
@@ -42,6 +47,11 @@ export type PaneExec = (file: string, args: string[]) => string;
 export interface PaneTerminal {
   id: string;
   title?: string | null;
+  /**
+   * What the pane shows. A `terminal` (the default) is observed. A `packet` is
+   * a running packet whose worker has no terminal, so its transcript is followed.
+   */
+  kind?: 'terminal' | 'packet';
 }
 
 export interface TerminalPanesInput {
@@ -52,6 +62,11 @@ export interface TerminalPanesInput {
   /** The command that starts this same CLI, such as `[node, /path/o8.mjs]`. */
   self: string[];
   exec?: PaneExec;
+  /**
+   * Open the first pane beside this pane (`REX_BLOCK`), in its tab, instead of
+   * in a new tab. Ignored when that pane is not in the session.
+   */
+  here?: boolean;
 }
 
 export interface TerminalPanesResult {
@@ -145,6 +160,93 @@ export function workerTerminals(fleet: unknown): PaneTerminal[] {
   });
 }
 
+/** Lane states in which a packet's worker is, or is about to be, working. */
+const WORKING_LANE_STATES = new Set(['launching', 'running']);
+
+/**
+ * Packets with a working worker in a lane list, titled as o8 titles them. A
+ * packet's newest lane decides, as it does for `o8 packet transcript
+ * --follow`: lanes are listed oldest first, and an older lane that still says
+ * `running` does not bring a finished packet back.
+ */
+export function runningPackets(lanes: unknown): PaneTerminal[] {
+  if (!Array.isArray(lanes)) return [];
+  const newest = new Map<string, { working: boolean; title: string }>();
+  for (const entry of lanes) {
+    if (!entry || typeof entry !== 'object') continue;
+    const lane = entry as { packetId?: unknown; status?: unknown; label?: unknown };
+    if (typeof lane.packetId !== 'string' || !lane.packetId) continue;
+    const label = typeof lane.label === 'string' ? lane.label : '';
+    newest.set(lane.packetId, {
+      working: typeof lane.status === 'string' && WORKING_LANE_STATES.has(lane.status),
+      // A lane without a label keeps the title an earlier lane gave the packet.
+      title: label || newest.get(lane.packetId)?.title || '',
+    });
+  }
+  return [...newest].flatMap(([id, lane]) => (lane.working ? [{ id, title: lane.title, kind: 'packet' as const }] : []));
+}
+
+/** Each packet's newest lane state. Lanes are listed oldest first. */
+export function newestLaneStates(lanes: unknown): Map<string, string> {
+  const states = new Map<string, string>();
+  if (!Array.isArray(lanes)) return states;
+  for (const entry of lanes) {
+    const lane = entry && typeof entry === 'object' ? entry as { packetId?: unknown; status?: unknown } : null;
+    if (lane && typeof lane.packetId === 'string' && lane.packetId && typeof lane.status === 'string') states.set(lane.packetId, lane.status);
+  }
+  return states;
+}
+
+// Grouped as the server maps lane states to packet states (`packetStatusFromLaneStatus`).
+const SUMMARY_GROUPS: Record<string, 'running' | 'needs' | 'failed' | 'stopped' | 'done'> = {
+  launching: 'running', running: 'running', recovering: 'running',
+  awaiting_input: 'needs', awaiting_orchestrator: 'needs', awaiting_human: 'needs',
+  failed: 'failed',
+  paused: 'stopped', idle: 'stopped',
+  // A merged or dismissed lane ends archived: finished, with nothing left to do.
+  reviewing: 'done', merging: 'done', completed: 'done', archived: 'done',
+};
+
+/**
+ * The watcher tab's own mark: every packet the watcher has followed since it
+ * started, by where each stands now, such as `2 running · 1 needs you`.
+ * Anything waiting on the operator, or failed, marks the tab for attention.
+ */
+export function watcherSummary(seen: Iterable<string>, states: ReadonlyMap<string, string>): TerminalStatusReport {
+  const counts = { running: 0, needs: 0, failed: 0, stopped: 0, done: 0 };
+  for (const id of seen) {
+    const group = SUMMARY_GROUPS[states.get(id) ?? ''];
+    if (group) counts[group] += 1;
+  }
+  const parts = [
+    counts.running ? `${counts.running} running` : '',
+    counts.needs ? `${counts.needs} need${counts.needs === 1 ? 's' : ''} you` : '',
+    counts.failed ? `${counts.failed} failed` : '',
+    counts.stopped ? `${counts.stopped} paused` : '',
+    counts.done ? `${counts.done} done` : '',
+  ].filter(Boolean);
+  const title = WATCHER_LABEL;
+  if (parts.length === 0) return { state: 'idle', title, msg: 'No workers yet' };
+  const state = counts.needs || counts.failed ? 'error' : counts.running ? 'working' : counts.done ? 'done' : 'idle';
+  return { state, title, msg: parts.join(' · ') };
+}
+
+/** The watcher's mark while o8 does not answer, so old counts do not stand as current. */
+export const WATCHER_UNREACHABLE: TerminalStatusReport = { state: 'idle', title: WATCHER_LABEL, msg: 'Cannot reach o8; trying again' };
+
+/**
+ * The command a packet's pane runs: this CLI, following that packet's
+ * transcript. `--hold` keeps the pane open after the worker stops, so its
+ * final report stays on screen until the operator closes it.
+ */
+export function followCommand(input: Pick<TerminalPanesInput, 'self' | 'env'>, id: string): string[] {
+  const routing = ROUTING_ENV.flatMap((name) => {
+    const value = input.env[name];
+    return value ? [`${name}=${value}`] : [];
+  });
+  return [...(routing.length > 0 ? ['env', ...routing] : []), ...input.self, '--human', 'packet', 'transcript', id, '--follow', '--hold'];
+}
+
 /** The command one pane runs: this CLI, observing one terminal, read-only. */
 export function observeCommand(input: Pick<TerminalPanesInput, 'self' | 'env' | 'machineKey'>, id: string): string[] {
   const routing = ROUTING_ENV.flatMap((name) => {
@@ -208,7 +310,11 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
   const key = (id: string) => paneKey(id, input.machineKey);
 
   const titles = new Map<string, string | null | undefined>();
+  const packets = new Set<string>();
   for (const terminal of input.terminals) {
+    // Packets are local to this machine. A remote machine's panes only observe its shells.
+    if (terminal.kind === 'packet' && input.machineKey) continue;
+    if (terminal.kind === 'packet') packets.add(terminal.id);
     if (!titles.has(terminal.id) || (terminal.title && !titles.get(terminal.id))) titles.set(terminal.id, terminal.title);
   }
   const unique = [...titles.keys()];
@@ -222,9 +328,14 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
   );
   const panes: string[] = [];
   const paneByKey = new Map<string, string>();
+  const self = input.env.REX_BLOCK;
+  let anchor: string | null = null;
   for (const block of listed.blocks ?? []) {
-    if (typeof block.block_id !== 'string' || typeof block.label !== 'string') continue;
+    if (typeof block.block_id !== 'string') continue;
     if (block.placement !== undefined && block.placement !== 'placed') continue;
+    // The caller's pane can be an anchor whatever its label, or with none.
+    if (input.here && self && block.block_id === self) anchor = self;
+    if (typeof block.label !== 'string') continue;
     const match = PANE_LABEL.exec(block.label);
     if (!match) continue;
     panes.push(block.block_id);
@@ -239,21 +350,24 @@ export function openTerminalPanes(input: TerminalPanesInput): TerminalPanesResul
   for (const id of wanted) {
     if (panes.length >= limit) break;
     try {
-      const run = ['--label', paneLabel({ id, title: titles.get(id) }, input.machineKey), '--focus=false', '--json', '--', ...observeCommand(input, id)];
+      const run = ['--label', paneLabel({ id, title: titles.get(id) }, input.machineKey), '--focus=false', '--json', '--', ...(packets.has(id) ? followCommand(input, id) : observeCommand(input, id))];
       const first = panes.length === 0;
       const index = panes.length;
-      const raw = first
+      // With `here`, the first pane takes most of this tab beside the caller's pane.
+      const parent = first ? anchor : panes[Math.floor((index - 1) / 2)];
+      const raw = parent === null
         ? rex(exec, ['run', '-s', session, ...run], 'open a tab')
         : rex(exec, [
-          'split', '-s', session, '-b', panes[Math.floor((index - 1) / 2)],
-          `--split=${index % 2 === 1 ? 'right' : 'below'}`, ...run,
+          'split', '-s', session, '-b', parent,
+          ...(first ? ['--split=right', `--ratio=${BESIDE_WATCHER_RATIO}`] : [`--split=${index % 2 === 1 ? 'right' : 'below'}`]),
+          ...run,
         ], 'split a pane');
       const created = parseJson<{ block_ids?: unknown; window_id?: unknown }>(raw, 'pane result');
       const pane = Array.isArray(created.block_ids) && typeof created.block_ids[0] === 'string' ? created.block_ids[0] : null;
       if (!pane) throw new CliError('multiplexer_error', 'Rex did not report the pane it opened.', EXIT.CONFLICT);
       panes.push(pane);
       opened.push({ id, pane });
-      if (first && typeof created.window_id === 'string') {
+      if (first && parent === null && typeof created.window_id === 'string') {
         // Naming the tab is a courtesy. The pane already carries its label.
         try { exec('rex', ['window', 'rename', '-s', session, created.window_id, TAB_LABEL]); } catch { /* keep the default name */ }
       }
@@ -308,14 +422,23 @@ export function confirmOpenedPanes(
   };
 }
 
-const PANES_USAGE = 'Use `terminal panes [--limit 1..16] [--machine <label-or-id>]`.';
+const PANES_USAGE = 'Use `terminal panes [--watch] [--here] [--limit 1..16] [--machine <label-or-id>]`.';
 
-/** Parse `terminal panes` flags. Each flag may appear once and needs a value. */
-export function parsePanesArgs(rest: string[]): { limit: number; machineKey: string | null } {
+/** Parse `terminal panes` flags. `--watch` and `--here` take no value. Each other flag may appear once and needs a value. */
+export function parsePanesArgs(rest: string[]): { limit: number; machineKey: string | null; watch: boolean; here: boolean } {
   let machineKey: string | null = null;
   let limit: number | null = null;
-  if (rest.length % 2 !== 0) throw new CliError('invalid_args', PANES_USAGE, EXIT.INVALID_ARGS);
-  for (let i = 0; i < rest.length; i += 2) {
+  let watch = false;
+  let here = false;
+  for (let i = 0; i < rest.length; i += 1) {
+    if (rest[i] === '--watch' && !watch) {
+      watch = true;
+      continue;
+    }
+    if (rest[i] === '--here' && !here) {
+      here = true;
+      continue;
+    }
     const value = rest[i + 1] ?? '';
     if (rest[i] === '--machine' && machineKey === null && SAFE_MACHINE_KEY.test(value)) {
       machineKey = value;
@@ -325,6 +448,110 @@ export function parsePanesArgs(rest: string[]): { limit: number; machineKey: str
     } else {
       throw new CliError('invalid_args', PANES_USAGE, EXIT.INVALID_ARGS);
     }
+    i += 1;
   }
-  return { limit: limit ?? PANE_LIMIT_DEFAULT, machineKey };
+  return { limit: limit ?? PANE_LIMIT_DEFAULT, machineKey, watch, here };
+}
+
+export interface WatchChanges {
+  opened: string[];
+  closed: string[];
+  /** Standing conditions, such as a terminal left without a pane, said once while they last. */
+  notices: string[];
+}
+
+/**
+ * What one round of `--watch` is worth saying. A pane that opened or closed
+ * is always news. A standing condition is said when it appears and not again
+ * until it has gone away and come back. `standing` holds what was standing
+ * after the last round and is updated in place.
+ */
+export function watchChanges(
+  result: Pick<TerminalPanesResult, 'opened' | 'closed' | 'remaining' | 'skipped' | 'error'>,
+  warnings: readonly string[],
+  standing: Set<string>,
+): WatchChanges {
+  const now = [
+    ...result.remaining.map((id) => `not shown ${id}`),
+    ...(result.skipped.length > 0 ? ['skipped   (session ID is unsafe or too long to label)'] : []),
+    ...warnings.map((warning) => `warning   ${warning}`),
+    ...(result.error ? [`error     ${result.error}`] : []),
+  ];
+  const notices = now.filter((notice) => !standing.has(notice));
+  standing.clear();
+  for (const notice of now) standing.add(notice);
+  return { opened: result.opened.map((pane) => pane.id), closed: [...result.closed], notices };
+}
+
+/**
+ * A watcher opens a pane once for each packet or terminal it finds. After a
+ * round, everything it opened, and everything whose pane closed at once, is
+ * settled: it is not opened again while it stays listed. So a pane that
+ * cannot attach is not opened over and over, and a pane the operator closed
+ * stays closed. Once a thing is no longer listed it is forgotten, so a packet
+ * that runs again later gets a pane again. `settled` is updated in place.
+ * `listed` is `null` when a list failed this round.
+ */
+export function settledAfterRound(
+  settled: Set<string>,
+  result: Pick<TerminalPanesResult, 'opened' | 'closed'>,
+  listed: readonly string[] | null,
+): void {
+  for (const pane of result.opened) settled.add(pane.id);
+  for (const id of result.closed) settled.add(id);
+  // `null` means a list could not be read this round. Forgetting then would
+  // re-open every pane the operator closed, so nothing is forgotten.
+  if (listed === null) return;
+  const live = new Set(listed);
+  for (const id of [...settled]) if (!live.has(id)) settled.delete(id);
+}
+
+/** Mistakes in how the command was run. Waiting will not fix them, so `--watch` stops on them. */
+const WATCH_FATAL = new Set([
+  'invalid_args', 'multiplexer_required', 'operator_required', 'unauthorized',
+  'machine_not_found', 'machine_disabled', 'machine_usage_only',
+]);
+
+/** Whether a watcher should try again after a failed round, rather than stop. */
+export function watchRetries(error: unknown): error is CliError {
+  return error instanceof CliError && !WATCH_FATAL.has(error.code);
+}
+
+/** Reads a JSON answer. A body cut off mid-read, as when o8 restarts, counts as no answer. */
+export async function readAnswer<T>(response: Response): Promise<T> {
+  try {
+    return await response.json() as T;
+  } catch {
+    throw new CliError('connection_refused', 'The o8 terminal host stopped answering.', EXIT.CONNECTION_REFUSED);
+  }
+}
+
+/**
+ * Before a watcher started with `--here` begins: names its tab, and says
+ * whether another watcher already runs in this session, so a second press of
+ * the Rex shortcut does not start a second watcher. Best effort: a Rex
+ * failure here leaves the tab unnamed and lets the watcher run.
+ */
+export function prepareWatcherTab(env: Readonly<Record<string, string | undefined>>, exec: PaneExec = defaultExec): { duplicate: boolean } {
+  const session = env.REX_SESSION;
+  const self = env.REX_BLOCK;
+  if (!session || !self) return { duplicate: false };
+  let blocks: Array<{ block_id?: unknown; label?: unknown; placement?: unknown; window_id?: unknown }>;
+  try {
+    blocks = parseJson<{ blocks?: typeof blocks }>(exec('rex', ['block', 'ls', '-s', session, '--json']), 'pane list').blocks ?? [];
+  } catch {
+    return { duplicate: false };
+  }
+  const placed = blocks.filter((block) => block.placement === undefined || block.placement === 'placed');
+  const mine = placed.find((block) => block.block_id === self);
+  // Only a watcher the shortcut started owns its tab. One run by hand leaves the tab alone.
+  if (mine?.label !== WATCHER_LABEL) return { duplicate: false };
+  // Two presses at once start two watchers that each see the other: the older pane ID stays.
+  const older = (block: (typeof placed)[number]) => typeof block.block_id === 'string' && block.block_id < self;
+  if (placed.some((block) => block.label === WATCHER_LABEL && older(block))) return { duplicate: true };
+  const window = mine.window_id;
+  if (typeof window === 'string' && window) {
+    try { exec('rex', ['window', 'rename', '-s', session, window, TAB_LABEL]); } catch { /* keep the default name */ }
+  }
+  return { duplicate: false };
 }

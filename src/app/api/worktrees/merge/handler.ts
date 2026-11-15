@@ -7,6 +7,7 @@
  */
 
 import path from 'node:path';
+import { prFirstMergeRefusal } from '@/lib/lane/pr-first-delivery';
 import { NextResponse, type NextRequest } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { pushLfsObjects } from '@/lib/git/lfs-push';
@@ -157,6 +158,10 @@ export async function handlePost(
     } satisfies MergeResult, { status: 409 });
   }
   const lane = lanes[0]!;
+  if (body.action === 'merge') {
+    const note = await prFirstMergeRefusal(lane);
+    if (note) return NextResponse.json({ action: 'merge', ok: false, reason: 'pr_only', note }, { status: 409 });
+  }
 
   try {
     const result = await withWorkspaceMaterializedMutation(lane, async (): Promise<MergeResult> => {

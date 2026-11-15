@@ -64,6 +64,25 @@ interface DispatchMissionResult {
   inProgress?: boolean;
   status?: string;
   note?: string;
+  /** The server held the dispatch: the mission has an active lifecycle hold. */
+  blocked?: boolean;
+}
+
+/**
+ * The error for a dispatch the server answered without starting, the same from
+ * `mission dispatch` and `mission create --dispatch`. With `created`, the
+ * mission was just made and stays, so the error says how to dispatch it later.
+ */
+function dispatchNotStarted(result: DispatchMissionResult, inProgress: boolean, created?: string): CliError | null {
+  if (inProgress || (result.initiated === true && result.missionId?.trim())) return null;
+  const id = created ?? result.missionId?.trim();
+  const retry = created ? ` It was created; dispatch it with \`o8 mission dispatch --mission ${created}\`.` : '';
+  if (result.blocked) {
+    return new CliError('dispatch_blocked', `Mission ${id ?? '(active)'} has an active lifecycle hold and was not dispatched.${retry}`, EXIT.CONFLICT);
+  }
+  return created
+    ? new CliError('dispatch_not_initiated', `Mission ${created} was not dispatched.${retry}`, EXIT.NOT_FOUND)
+    : new CliError('dispatch_not_initiated', 'No mission was dispatched. Create or select a mission first.', EXIT.NOT_FOUND);
 }
 
 interface MissionStatusPacket {
@@ -292,7 +311,45 @@ function packetSignature(packets: MissionStatusPacket[] | undefined): string {
   return (packets ?? []).map((p) => `${p.id}:${p.status ?? ''}`).sort().join('|');
 }
 
+/** Flags `mission create` reads that take a value, and those that stand alone. */
+const CREATE_VALUE_FLAGS = new Set([
+  'title', 'body', 'repo', 'number', 'compare', 'existingBranchPolicy', 'effort', 'quality-search-contract',
+  'runtime', 'model', 'carrier', 'constraints', 'caller', 'idempotency-key',
+]);
+const CREATE_SWITCHES = new Set(['dispatch', 'read-only', 'sequential', 'huddle', 'brain']);
+
+/**
+ * Refuse what `mission create` would otherwise drop without a word: an
+ * unknown flag, or text that belongs to no flag. A dropped `--task` used to
+ * send a worker off with only the title.
+ */
+export function checkMissionCreateArgs(rest: string[]): void {
+  // The refused word is echoed back, so it is shown without control characters and kept short.
+  const shown = (word: string) => word.replace(/[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, '').slice(0, 80);
+  const knownFlag = (word: string | undefined) => word !== undefined && word.startsWith('--')
+    && (CREATE_VALUE_FLAGS.has(word.slice(2).split('=', 1)[0]) || CREATE_SWITCHES.has(word.slice(2).split('=', 1)[0]));
+  for (let i = 0; i < rest.length; i += 1) {
+    const tok = rest[i];
+    const name = tok.startsWith('--') ? tok.slice(2).split('=', 1)[0] : null;
+    if (name !== null && CREATE_VALUE_FLAGS.has(name)) {
+      if (!tok.includes('=') && knownFlag(rest[i + 1])) {
+        throw new CliError('invalid_args', `--${name} needs a value.`, EXIT.INVALID_ARGS);
+      }
+      if (!tok.includes('=')) i += 1;
+      continue;
+    }
+    if (name !== null && CREATE_SWITCHES.has(name) && !tok.includes('=')) continue;
+    throw new CliError(
+      'invalid_args',
+      name !== null ? `Unknown flag for o8 mission create: --${shown(name)}.` : `Unexpected argument for o8 mission create: ${shown(tok)}`,
+      EXIT.INVALID_ARGS,
+      'Put the task in --body, for example: o8 mission create --title "Add a health route" --body "Create /api/health returning 200." Run `o8 mission create --help` for every flag.',
+    );
+  }
+}
+
 async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<number> {
+  checkMissionCreateArgs(rest);
   const title = flag(rest, 'title');
   if (!title?.trim()) {
     throw new CliError(
@@ -375,13 +432,19 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   const result = unwrap(res.data, 'Mission creation was rejected.');
 
   let dispatch: DispatchMissionResult | null = null;
+  let notStarted: CliError | null = null;
   if (hasFlag(rest, 'dispatch')) {
     const dispatchResponse = await fetchCorrelatedPacketMutation<OperatorResponse<DispatchMissionResult>>(
       cfg,
       '/api/orchestrator/dispatch',
       { missionId: result.missionId, wait: false, idempotencyKey: randomUUID() },
+      // The server answers `queued` once it has admitted the dispatch, and keeps
+      // answering that while workers launch. That is this command's answer too.
+      { acceptQueuedAdmission: true },
     );
     dispatch = unwrap(dispatchResponse.data, 'Mission dispatch was rejected.');
+    const inProgress = dispatchResponse.status === 202 || dispatch.inProgress === true || dispatch.status === 'in_progress';
+    notStarted = dispatchNotStarted(dispatch, inProgress, result.missionId);
   }
 
   const payload = { schema: 'o8/cli/mission.create/v1', mission: result, ...(dispatch ? { dispatch } : {}) };
@@ -390,12 +453,14 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
     printHumanKv([
       ['mission', result.missionId],
       ['packets', String(result.packets.length)],
-      ...(dispatch ? [['dispatch', dispatch.initiated === false ? 'not initiated' : 'initiated']] as Array<[string, string]> : []),
+      ...(dispatch ? [['dispatch', notStarted ? (dispatch.blocked ? 'blocked, not dispatched' : 'not dispatched') : dispatch.status === 'queued' ? 'admitted, awaiting launch' : 'initiated']] as Array<[string, string]> : []),
       ...result.packets.map((p) => [`  · ${p.id}`, `${p.title} (wave ${p.wave})`] as [string, string]),
     ]);
   } else {
     printJson(payload);
   }
+  // The mission is printed first, since it was created either way; then the command fails as `mission dispatch` would.
+  if (notStarted) throw notStarted;
   return 0;
 }
 
@@ -415,13 +480,8 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
   );
   const result = unwrap(res.data, 'Mission dispatch was rejected.');
   const inProgress = res.status === 202 || result.inProgress === true || result.status === 'in_progress';
-  if (!wait && !inProgress && (result.initiated !== true || !result.missionId?.trim())) {
-    throw new CliError(
-      'dispatch_not_initiated',
-      'No mission was dispatched. Create or select a mission first.',
-      EXIT.NOT_FOUND,
-    );
-  }
+  const notStarted = wait ? null : dispatchNotStarted(result, inProgress);
+  if (notStarted) throw notStarted;
 
   const payload = { schema: 'o8/cli/mission.dispatch/v1', inProgress, dispatch: result };
   if (mode.human) {

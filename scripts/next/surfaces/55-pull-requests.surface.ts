@@ -37,7 +37,7 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
     const path = url.pathname; const method = init?.method ?? 'GET';
     const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
     if (method !== 'GET') providerWrites.push({ method, path, publication: (method === 'PUT' && path.endsWith('/merge'))
-      || (path === '/graphql' && String(body.query).includes('enablePullRequestAutoMerge')) });
+      || (path === '/graphql' && /enablePullRequestAutoMerge|enqueuePullRequest/.test(String(body.query))) });
     const match = path.match(/\/(?:pulls|issues)\/(\d+)/); const number = Number(match?.[1]);
     const pull = pulls.get(number);
     if (path.endsWith('/stacks')) return Response.json([]);
@@ -47,6 +47,18 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
         number: p.number, additions: 1, deletions: 1, reviewRequests: { nodes: [{ requestedReviewer: { login: 'fixture-author' } }] },
         commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
       })) } });
+      if (query.includes('PullRequestRequirements')) return Response.json({ data: { repository: {
+        mergeQueue: null, pullRequest: { isInMergeQueue: false }, object: { statusCheckRollup: { contexts: {
+          pageInfo: { hasNextPage: false }, nodes: ['CI', ...(process.argv.includes('--check-buckets') ? Array.from({ length: 10 }, (_, i) => `Fixture check ${i}`) : [])]
+            .map(name => ({ __typename: 'CheckRun', name, isRequired: true })),
+        } } },
+      } } });
+      if (query.includes('PublicationState')) {
+        const id = (body.variables as { id: string }).id;
+        const target = pulls.get(Number(id.split('-')[1]))!;
+        return Response.json({ data: { node: { headRefOid: (target.head as { sha: string }).sha,
+          isInMergeQueue: false, autoMergeRequest: target.auto_merge || null } } });
+      }
       const mutation = query.match(/\{\s*(\w+)\(input:/)?.[1];
       const id = (body.variables as { input: { pullRequestId: string } }).input.pullRequestId;
       const target = pulls.get(Number(id.split('-')[1]))!;
@@ -89,7 +101,9 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
     if (path.endsWith('/merge') && pull) {
       if (scenario === 'merge-refused') return Response.json({ message: 'Fixture GitHub merge rule refused' }, { status: 409 });
       if (body.sha !== (pull.head as { sha: string }).sha || pull.draft || pull.state !== 'open' || (body.merge_method === 'rebase' && number !== 10)) return Response.json({ message: 'Merge refused' }, { status: 409 });
-      pull.state = 'closed'; pull.merged_at = new Date().toISOString();
+      if (scenario === 'merge-request-unconfirmed') throw new Error('Fixture request outcome unknown');
+      pull.state = 'closed'; pull.merged_at = new Date().toISOString(); pull.merge_commit_sha = 'c'.repeat(40);
+      if (scenario === 'merge-response-lost') throw new Error('Fixture merge response lost');
       return Response.json({ merged: true, sha: 'c'.repeat(40) });
     }
     if (pull && path.endsWith(`/pulls/${number}`)) {
@@ -116,6 +130,7 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
         ].map(review => ({ ...review, state: 'COMMENTED', user: { login: 'fixture-reviewer' },
           html_url: `https://github.com/example/repo/pull/7#pullrequestreview-${review.id}` })));
       }
+      if (name === 'confirm-lost-merge') Object.assign(pulls.get(10)!, { state: 'closed', merged_at: new Date().toISOString(), merge_commit_sha: 'c'.repeat(40) });
       if (name === 'head-advanced') (pulls.get(7)!.head as { sha: string }).sha = 'd'.repeat(40);
       if (name === 'review-changes' || name === 'review-approved') reviews.push({ id: 99,
         state: name === 'review-changes' ? 'CHANGES_REQUESTED' : 'APPROVED', user: { login: 'fixture-reviewer' } });

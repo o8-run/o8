@@ -6,8 +6,14 @@ import { resolveConfig, type ResolvedConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
 import { runRemoteTerminal } from './machine.js';
 import { TerminalProbeReplyFilter } from './terminal-probe-filter.js';
-import { confirmOpenedPanes, openTerminalPanes, parsePanesArgs, workerTerminals, type PaneTerminal } from './terminal-panes.js';
+import {
+  confirmOpenedPanes, newestLaneStates, openTerminalPanes, parsePanesArgs, prepareWatcherTab, readAnswer, runningPackets, settledAfterRound, watchChanges, WATCHER_UNREACHABLE, watcherSummary, watchRetries, workerTerminals,
+  type PaneTerminal, type TerminalPanesResult,
+} from './terminal-panes.js';
+import { forgetRemoved, rememberRemoved } from '../rex-auto-shortcut.js';
+import { installShortcut, parseShortcutArgs, removeShortcut } from './terminal-shortcut.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
+import { createTerminalStatusReporter } from '../terminal-status.js';
 
 interface TerminalSession { id: string; cols?: number; rows?: number }
 
@@ -48,7 +54,7 @@ async function terminalGet<T>(cfg: ResolvedConfig, url: URL): Promise<T> {
   if (!response.ok) {
     throw new CliError('terminal_unavailable', `Terminal host returned ${response.status}.`, EXIT.CONFLICT);
   }
-  return response.json() as Promise<T>;
+  return readAnswer<T>(response);
 }
 
 async function listSessions(cfg: ResolvedConfig): Promise<TerminalSession[]> {
@@ -72,6 +78,22 @@ async function listWorkerTerminals(cfg: ResolvedConfig): Promise<{ terminals: Pa
     return { terminals: workerTerminals(response.data?.fleetSessions), failed: false };
   } catch {
     return { terminals: [], failed: true };
+  }
+}
+
+/**
+ * Packets whose worker is running. Most workers have no terminal, so a pane
+ * follows the packet's transcript instead. `failed` is set when the lane list
+ * could not be read.
+ */
+async function listRunningPackets(cfg: ResolvedConfig): Promise<{ terminals: PaneTerminal[]; failed: boolean; states: Map<string, string> }> {
+  try {
+    // Every lane, not only active ones: a packet's newest lane decides, and a finished one must be seen to count.
+    const response = await apiFetch<{ lanes?: unknown }>(cfg, '/api/lanes', { query: { active: 'false' }, timeoutMs: 8_000 });
+    if (!Array.isArray(response.data?.lanes)) return { terminals: [], failed: true, states: new Map() };
+    return { terminals: runningPackets(response.data.lanes), failed: false, states: newestLaneStates(response.data.lanes) };
+  } catch {
+    return { terminals: [], failed: true, states: new Map() };
   }
 }
 
@@ -368,45 +390,149 @@ function listRemoteSessionIds(machineKey: string): string[] {
   }
 }
 
-async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<number> {
-  const { limit, machineKey } = parsePanesArgs(rest);
-  // Both paths need the local operator credential before anything is listed or opened.
-  const cfg = operatorConfig();
+type PanesOptions = { limit: number; machineKey: string | null; here: boolean };
+
+/** One pass: list what is running, open a pane for each one that has none, and confirm they stayed open. */
+async function panesRound(
+  cfg: ResolvedConfig,
+  { limit, machineKey, here }: PanesOptions,
+  settled?: Set<string>,
+): Promise<{ result: TerminalPanesResult; warnings: string[]; listed: string[] | null; packets: { running: string[]; states: Map<string, string> } | null }> {
   const workers = machineKey ? { terminals: [], failed: false } : await listWorkerTerminals(cfg);
   const workerIds = new Set(workers.terminals.map((worker) => worker.id));
   const shellIds = machineKey ? listRemoteSessionIds(machineKey) : (await listSessions(cfg)).map((session) => session.id);
-  // Workers first, so a short limit shows agents before idle shells. A worker keeps its own title.
-  const terminals = [
+  const packets = machineKey ? { terminals: [], failed: false, states: new Map<string, string>() } : await listRunningPackets(cfg);
+  // Work first, so a short limit shows agents before idle shells. A worker keeps its own title.
+  const listed = [
+    ...packets.terminals,
     ...workers.terminals,
     ...shellIds.filter((id) => !workerIds.has(id)).map((id) => ({ id, title: 'shell' })),
   ];
-  const warnings = workers.failed ? ['Could not list worker terminals. Only shells are shown.'] : [];
-  const started = openTerminalPanes({ terminals, limit, machineKey, env: process.env, self: selfCommand() });
+  // A watcher opens a pane once for each thing it finds. See `settledAfterRound`.
+  const terminals = settled ? listed.filter((terminal) => !settled.has(terminal.id)) : listed;
+  const warnings = [
+    ...(packets.failed ? ['Could not list running packets.'] : []),
+    ...(workers.failed ? ['Could not list worker terminals.'] : []),
+  ];
+  const started = openTerminalPanes({ terminals, limit, machineKey, here, env: process.env, self: selfCommand() });
   // Give each observer a moment to attach, then report any pane that is already gone.
   if (started.opened.length > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
-  const result = confirmOpenedPanes(started, process.env);
+  return {
+    result: confirmOpenedPanes(started, process.env),
+    warnings,
+    // A list that failed would look like everything stopped; report it as unknown.
+    listed: packets.failed || workers.failed ? null : listed.map((terminal) => terminal.id),
+    // A remote machine's list has no packets, so it has nothing to summarise.
+    packets: packets.failed || machineKey ? null : { running: packets.terminals.map((packet) => packet.id), states: packets.states },
+  };
+}
+
+const WATCH_POLL_MS = 3_000;
+/**
+ * Keeps the tab filled: every few seconds, opens a pane for anything that
+ * started since the last pass. It runs until it is interrupted. A pass that
+ * fails, such as when o8 is restarting, is said once and tried again.
+ */
+async function watchTerminalPanes(mode: OutputMode, cfg: ResolvedConfig, options: PanesOptions): Promise<number> {
+  const standing = new Set<string>();
+  const settled = new Set<string>();
+  if (options.here && prepareWatcherTab(process.env).duplicate) {
+    if (mode.human) process.stdout.write('o8 is already watching this session.\n');
+    else process.stdout.write(`${JSON.stringify({ schema: 'o8/cli/terminal.panes.watch/v1', opened: [], closed: [], notices: ['o8 is already watching this session.'] })}\n`);
+    return EXIT.OK;
+  }
+  if (mode.human) process.stdout.write('Watching for running packets and live terminals. Press Ctrl-C to stop.\n');
+  // The watcher's own tab mark counts the packets it has seen run, by where each stands now.
+  const status = createTerminalStatusReporter(mode);
+  const followed = new Set<string>();
+  while (true) {
+    let round: { result: Pick<TerminalPanesResult, 'opened' | 'closed' | 'remaining' | 'skipped' | 'error'>; warnings: string[] };
+    try {
+      const done = await panesRound(cfg, options, settled);
+      settledAfterRound(settled, done.result, done.listed);
+      round = done;
+      if (done.packets) {
+        for (const id of done.packets.running) followed.add(id);
+        status.report(watcherSummary(followed, done.packets.states));
+      } else if (!options.machineKey) {
+        status.report(WATCHER_UNREACHABLE);
+      }
+    } catch (error) {
+      if (!watchRetries(error)) throw error;
+      round = { result: { opened: [], closed: [], remaining: [], skipped: [], error: error.message }, warnings: [] };
+      if (!options.machineKey) status.report(WATCHER_UNREACHABLE);
+    }
+    const changes = watchChanges(round.result, round.warnings, standing);
+    if (mode.human) {
+      const lines = [
+        ...changes.opened.map((id) => `opened    ${id}`),
+        ...changes.closed.map((id) => `closed    ${id}`),
+        ...changes.notices,
+      ];
+      if (lines.length > 0) process.stdout.write(`${lines.join('\n')}\n`);
+    } else if (changes.opened.length + changes.closed.length + changes.notices.length > 0) {
+      process.stdout.write(`${JSON.stringify({ schema: 'o8/cli/terminal.panes.watch/v1', ...changes })}\n`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, WATCH_POLL_MS));
+  }
+}
+
+async function runTerminalPanes(mode: OutputMode, rest: string[]): Promise<number> {
+  const { watch, ...options } = parsePanesArgs(rest);
+  // Both paths need the local operator credential before anything is listed or opened.
+  const cfg = operatorConfig();
+  if (watch) return watchTerminalPanes(mode, cfg, options);
+  const { result, warnings } = await panesRound(cfg, options);
   if (mode.human) {
     const lines = [
       ...result.opened.map((pane) => `opened    ${pane.id}`),
       ...result.closed.map((id) => `closed    ${id}`),
       ...result.existing.map((id) => `existing  ${id}`),
       ...result.remaining.map((id) => `not shown ${id}`),
-      ...result.skipped.map(() => 'skipped   (unsafe session ID)'),
+      ...result.skipped.map(() => 'skipped   (session ID is unsafe or too long to label)'),
       ...warnings.map((warning) => `warning   ${warning}`),
       ...(result.error ? [`error     ${result.error}`] : []),
     ];
-    process.stdout.write(lines.length ? `${lines.join('\n')}\n` : 'No live terminals.\n');
+    process.stdout.write(lines.length ? `${lines.join('\n')}\n` : 'No running packets or live terminals.\n');
   } else {
     printJson({ schema: 'o8/cli/terminal.panes/v1', ...result, warnings });
   }
   return result.error ? EXIT.CONFLICT : EXIT.OK;
 }
 
+/** Add or remove the Rex action that opens the terminals tab. It only edits Rex's config. */
+function runTerminalShortcut(mode: OutputMode, rest: string[]): number {
+  const { key, remove } = parseShortcutArgs(rest);
+  const result = remove
+    ? removeShortcut({ env: process.env })
+    : installShortcut({ self: selfCommand(), key, env: process.env });
+  // A removal is remembered so o8 does not add the shortcut back on its own; asking for it again forgets that.
+  if (remove) rememberRemoved();
+  else forgetRemoved();
+  if (mode.human) {
+    const lines = result.action === 'installed'
+      ? [
+        `Added "Show o8 Terminals" to Rex${result.key ? `, bound to ${result.key}` : ''}.`,
+        `Find it in the Rex command palette, or run \`rex do o8_terminals\`.`,
+        `File: ${result.file}`,
+      ]
+      : result.action === 'removed'
+        ? ['Removed "Show o8 Terminals" from Rex.']
+        : ['The Rex shortcut is not installed.'];
+    if (result.hint) lines.push(result.hint);
+    process.stdout.write(`${lines.join('\n')}\n`);
+  } else {
+    printJson({ schema: 'o8/cli/terminal.shortcut/v1', ...result });
+  }
+  return EXIT.OK;
+}
+
 export async function runTerminal(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
-  if (!['list', 'show', 'observe', 'control', 'wait', 'panes'].includes(sub ?? '')) {
-    throw new CliError('invalid_args', 'Use `o8 terminal list|show|observe|control|wait|panes`.', EXIT.INVALID_ARGS);
+  if (!['list', 'show', 'observe', 'control', 'wait', 'panes', 'shortcut'].includes(sub ?? '')) {
+    throw new CliError('invalid_args', 'Use `o8 terminal list|show|observe|control|wait|panes|shortcut`.', EXIT.INVALID_ARGS);
   }
   if (sub === 'panes') return runTerminalPanes(mode, rest);
+  if (sub === 'shortcut') return runTerminalShortcut(mode, rest);
   const machineAt = rest.indexOf('--machine');
   if (machineAt >= 0) {
     const key = rest[machineAt + 1];
