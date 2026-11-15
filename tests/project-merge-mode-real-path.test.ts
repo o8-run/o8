@@ -1,4 +1,4 @@
-import { afterAll, expect, it } from 'vitest';
+import { afterAll, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,7 +50,7 @@ it('fresh lane refuses direct integration at the remote merge entry point', asyn
   const lane = createLane({ projectId: project.id, repoPath: root, branch: 'feature', runtime: 'codex' });
   const result = await performRemoteCustomerMerge(lane, { verb: 'merge', laneId: lane.id }, 'user');
   expect(result).toMatchObject({ ok: false, reason: 'pr_only' });
-  expect(result.note).toContain('pull request');
+  expect(result.note).toContain('Branch retained');
   const { dispatch } = await import('@/lib/lane/commands');
   expect(await dispatch({ verb: 'merge', laneId: lane.id, actor: 'user' })).toMatchObject({ ok: false, reason: 'pr_only' });
   expect(getLane(lane.id)?.status).toBe(lane.status);
@@ -95,10 +95,11 @@ it('existing project without a saved mode retains direct through database startu
   sqlite.exec(`CREATE TRIGGER interrupt_carry_over BEFORE INSERT ON app_state
     WHEN NEW.key = 'project-merge-mode:default' BEGIN SELECT RAISE(ABORT, 'upgrade interruption'); END;`);
   const { closeDb } = await import('@/lib/db'); closeDb();
-  expect(() => currentLaneMergePolicy(old.id)).toThrow('upgrade interruption');
+  expect(currentLaneMergePolicy(old.id).mode).toBe('direct');
+  expect(getSqlite().prepare('SELECT 1').get()).toBeTruthy();
   const inspect = new Database(join(root, 'test.db'));
   expect(inspect.prepare('SELECT value FROM app_state WHERE key = ?').get(`project-merge-mode:${old.id}`)).toBeUndefined();
-  inspect.exec('DROP TRIGGER interrupt_carry_over'); inspect.close();
+  inspect.exec('DROP TRIGGER interrupt_carry_over'); inspect.close(); closeDb();
   expect(currentLaneMergePolicy(old.id).mode).toBe('direct');
   closeDb();
   expect(currentLaneMergePolicy(old.id).mode).toBe('direct');
@@ -113,4 +114,26 @@ it('retains an imported legacy project choice when its SQLite identity is create
   const imported = createProject({ name: 'Imported project', mergeModeSourceProjectId: 'legacy-import' });
   expect(currentLaneMergePolicy(imported.id).mode).toBe('direct');
   expect(currentLaneMergePolicy(createProject({ name: 'Unrelated new project' }).id).mode).toBe('pr_only');
+});
+
+
+it('answers PR-only if storage is unavailable, and checks the sentinel without opening storage', async () => {
+  const db = await import('@/lib/db');
+  const unavailable = vi.spyOn(db, 'getSqlite').mockImplementation(() => { throw new Error('fixture database unavailable'); });
+  try {
+    expect(currentLaneMergePolicy('missing')).toMatchObject({ mode: 'pr_only', note: expect.stringContaining('unavailable') });
+    unavailable.mockClear(); writeFileSync(join(root, '.dogfood-pr-only'), '');
+    expect(currentLaneMergePolicy('missing').mode).toBe('pr_only');
+    expect(unavailable).not.toHaveBeenCalled();
+  } finally { unavailable.mockRestore(); unlinkSync(join(root, '.dogfood-pr-only')); }
+});
+
+it('rejects combined panel settings before saving an opt-in', async () => {
+  const { PATCH } = await import('@/app/api/panel/projects/[id]/route');
+  const project = createProject({ name: 'Atomic policy' });
+  const response = await PATCH(new NextRequest(`http://localhost/api/panel/projects/${project.id}`, {
+    method: 'PATCH', headers: { host: 'localhost', authorization: 'Bearer operator-policy-fixture' },
+    body: JSON.stringify({ mergeMode: 'direct', name: '', repoPaths: ['missing-repository'] }),
+  }), { params: Promise.resolve({ id: project.id }) });
+  expect(response.status).toBe(400); expect(currentLaneMergePolicy(project.id).mode).toBe('pr_only');
 });

@@ -47,7 +47,7 @@ import { assertLaneHeadOnBranch, laneGit, LaneGitMetadataError } from '@/lib/lan
 import { commitLaneWork } from '@/lib/supervisor/completion-verification';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
-import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
+import { prFirstMergeRefusal } from '@/lib/lane/pr-first-delivery';
 import { isPacketMergeHeld, MERGE_HOLD_POLICY_RULE_ID } from '@/lib/lane/merge-hold';
 import { assertSessionMergeAllowed } from '@/lib/orchestrator/session-merge-restriction';
 import { RuntimeSelectionError, runtimeSelectionRefusal, validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
@@ -771,8 +771,11 @@ async function dispatchUnlocked(
     case 'merge': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
-      const projectMergePolicy = currentLaneMergePolicy(lane.projectId);
-      if (projectMergePolicy.mode === 'pr_only') return { ok: false, laneId: command.laneId, note: projectMergePolicy.note ?? 'Open a pull request.', reason: 'pr_only' };
+      if (lane.status === 'completed' && !lane.worktreePath && (lane.runtime as string) !== 'remote-customer') {
+        return { ok: false, laneId: lane.id, note: 'No worktree to merge. Lane is on the main working tree.' };
+      }
+      const prOnlyNote = await prFirstMergeRefusal(lane);
+      if (prOnlyNote) return { ok: false, laneId: command.laneId, note: prOnlyNote, reason: 'pr_only' };
       const spokenEvidence = validateSpokenReviewEvidenceBundle(command);
       if (!spokenEvidence.complete) {
         return {

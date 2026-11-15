@@ -58,6 +58,9 @@ export async function PATCH(
   }
 
   if (body.mergeMode !== undefined) {
+    if (Object.keys(body).some(key => key !== 'mergeMode')) {
+      return NextResponse.json({ error: 'Save mergeMode separately from other project settings.' }, { status: 400 });
+    }
     if (resolveRequestPrincipalContext(req).role !== 'operator') {
       return NextResponse.json({ error: 'Project merge policy requires an operator credential.' }, { status: 403 });
     }

@@ -5,7 +5,7 @@ import { readLaneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { NO_REPOSITORY_HOOKS } from '@/lib/git/no-repository-hooks';
 import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { cleanupRemoteMergeWorktree, fetchWorkerBranch } from '@/lib/lane/remote-fetch';
-import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
+import { prFirstMergeRefusal } from '@/lib/lane/pr-first-delivery';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
 import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
 import { resolveGovernedMergeHistoryPlan } from '@/lib/lane/governed-merge-history';
@@ -32,8 +32,8 @@ export async function performRemoteCustomerMerge(
   command: MergeCommand,
   actor: LaneEventActor,
 ): Promise<LaneCommandResult> {
-  const mergePolicy = currentLaneMergePolicy(lane.projectId);
-  if (mergePolicy.mode === 'pr_only') return { ok: false, laneId: command.laneId, note: mergePolicy.note ?? 'Open a pull request.', reason: 'pr_only' };
+  const prOnlyNote = await prFirstMergeRefusal(lane);
+  if (prOnlyNote) return { ok: false, laneId: command.laneId, note: prOnlyNote, reason: 'pr_only' };
   const workerRun = fetchWorkerRun(lane.id);
   if (!workerRun?.remoteBranch) {
     setLaneStatus(command.laneId, 'reviewing', 'system', 'remote_branch_missing');

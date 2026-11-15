@@ -32,6 +32,9 @@ async function handlePATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: 'invalid body' }, { status: 400, headers: NO_STORE });
   }
   try {
+    if (body.mergeMode !== undefined && Object.keys(body).some(key => key !== 'mergeMode')) {
+      return NextResponse.json({ error: 'Save mergeMode separately from other project settings.' }, { status: 400 });
+    }
     let ledger;
     if (body.mergeMode !== undefined) {
       if (resolveRequestPrincipalContext(request).role !== 'operator') {

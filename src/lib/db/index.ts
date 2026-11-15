@@ -3,13 +3,15 @@ import { addColumnTolerant, tableColumnExists } from '@/lib/db/schema-columns';
  * Database Connection — SQLite via Drizzle ORM
  *
  * Single connection per process (Next.js server).
- * Database file: DATA_DIR/cortex-ide.db. Tables are ensured before use.
+ * Database file lives at DATA_DIR/cortex-ide.db (defaults to ~/.o8/).
+ * Ensures tables on first connection until a schema marker is written.
  *
- * Drizzle wraps the local SQLite connection.
+ * For production multi-tenant: swap better-sqlite3 for @neondatabase/serverless
+ * or postgres.js — Drizzle supports both with minimal changes.
  */
 
 import Database from 'better-sqlite3';
-import { carryOverProjectMergeModes } from '@/lib/lane/project-merge-mode-migration';
+import { initializeProjectMergeModes } from '@/lib/lane/project-merge-mode-migration';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -87,39 +89,29 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
 
   const db = drizzle!(sqlite, { schema });
 
-  // #859 — the old gate skipped `ensureIdempotentColumnAdds` whenever the
-  // top-version marker was missing, leaving installs that landed before v4
-  // pinned at v3 forever and silently skipping the per-boot column-add +
-  // backfill helpers. New behaviour:
-  //   1. Existing DBs missing the top-version marker run the narrow migrations
-  //      for columns referenced by base-schema indexes before `ensureTables`.
-  //   2. Run `ensureTables` (CREATE TABLE IF NOT EXISTS) for new or upgrading
-  //      DBs, then ALWAYS repeat `ensureIdempotentColumnAdds` so column-add + backfill
-  //      helpers can never be silently skipped for existing installs whose
-  //      marker drifted out of sync with DB_SCHEMA_VERSION.
-  //   3. Backfill any missing v1..v12 markers in order so installs upgraded
-  //      from older schemas show the full migration history on disk and
-  //      brand-new installs don't appear to have skipped versions.
+  // Serialize schema/bootstrap and merge-policy classification across processes.
+  // A database file created by a concurrent fresh start is not legacy storage.
   try {
-    const topMarkerExists = existsSync(migrationMarkerPath(DB_SCHEMA_VERSION));
-    // Upgrade only columns referenced by current base-schema indexes here.
-    // The full idempotent migration path expects the base tables to exist and
-    // therefore runs after ensureTables below.
-    if (dbFilePreviouslyExisted && !topMarkerExists) {
-      ensureSessionOutcomeColumns(sqlite);
-      ensureV57CostLedgerAttributionSchema(sqlite);
-    }
-    if (!dbFilePreviouslyExisted || !topMarkerExists) {
-      ensureTables(sqlite);
-    }
-    ensureIdempotentColumnAdds(sqlite);
-    ensureOutcomeExclusionStorage(sqlite);
-    carryOverProjectMergeModes(sqlite, DATA_DIR, dbFilePreviouslyExisted);
+    sqlite.transaction(() => {
+      const existingPolicyStorage = Boolean(sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_state'").get());
+      const topMarkerExists = existsSync(migrationMarkerPath(DB_SCHEMA_VERSION));
+      // Upgrade only columns referenced by current base-schema indexes here.
+      // The full idempotent migration path expects the base tables to exist and
+      // therefore runs after ensureTables below.
+      if (dbFilePreviouslyExisted && !topMarkerExists) {
+        ensureSessionOutcomeColumns(sqlite);
+        ensureV57CostLedgerAttributionSchema(sqlite);
+      }
+      if (!dbFilePreviouslyExisted || !topMarkerExists) {
+        ensureTables(sqlite);
+      }
+      ensureIdempotentColumnAdds(sqlite);
+      ensureOutcomeExclusionStorage(sqlite);
+      initializeProjectMergeModes(sqlite, DATA_DIR, existingPolicyStorage);
+    }).immediate();
     writeAllMissingMigrationMarkers();
   } catch (error) {
-    // Never publish a half-initialized singleton. A later request must retry
-    // the complete migration path rather than receiving a Drizzle handle whose
-    // schema setup failed partway through.
+    // Schema failures never publish a half-initialized singleton.
     try { sqlite.close(); } catch { /* best effort */ }
     throw error;
   }
