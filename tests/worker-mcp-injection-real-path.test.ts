@@ -377,11 +377,10 @@ describe.sequential('worker MCP injection real path', () => {
       prompt: skippedPrompt,
       actor: 'orchestrator',
     });
-    // The opt-in OS sandbox is available only on macOS. Other hosts must
-    // refuse this second launch before spawning a worker.
-    if (process.platform !== 'darwin') {
-      expect(skippedLaunch.ok).toBe(false);
-      expect(skippedLaunch.note).toContain('Worker sandbox is macOS-only');
+    // A host that cannot provide the OS sandbox must refuse this second
+    // launch before spawning a worker.
+    if (process.platform !== 'darwin' && !skippedLaunch.ok) {
+      expect(skippedLaunch.note).toContain('could not be provided');
       expect(spawnMock.mock.calls.length).toBe(skippedCall);
       process.env.O8_WORKER_SANDBOX = 'off';
       return;
