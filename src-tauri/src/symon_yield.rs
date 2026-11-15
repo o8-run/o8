@@ -3,8 +3,10 @@
 //! Symon (bundle `com.misterlabs.symon`) carries o8's Fn dictation, read-back
 //! and Right Option gestures as its own app. When both run, each one's
 //! listen-only key tap sees every press, so one Fn hold would record twice and
-//! paste twice. While Symon is running, o8's key tap ignores voice keys; when
-//! Symon quits, o8 handles them again on the next poll.
+//! paste twice. While Symon is running, o8's key tap starts no voice gesture
+//! (a press already in progress still ends normally); when Symon quits, o8
+//! handles them again on the next poll, at most ~2 s later. macOS only: this
+//! is a small bridge until o8's system-wide voice hook is removed.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -29,10 +31,8 @@ fn symon_running() -> bool {
     use objc2_app_kit::NSRunningApplication;
     use objc2_foundation::NSString;
 
-    crate::paste::run_on_main_thread(|| {
-        let bundle_id = NSString::from_str(SYMON_BUNDLE_ID);
-        NSRunningApplication::runningApplicationsWithBundleIdentifier(&bundle_id).count() > 0
-    })
+    let bundle_id = NSString::from_str(SYMON_BUNDLE_ID);
+    NSRunningApplication::runningApplicationsWithBundleIdentifier(&bundle_id).count() > 0
 }
 
 /// Start the 2 s poll. A second call is a no-op.
@@ -53,9 +53,6 @@ pub fn start_watcher() {
         std::thread::sleep(std::time::Duration::from_secs(2));
     });
 }
-
-#[cfg(not(target_os = "macos"))]
-pub fn start_watcher() {}
 
 #[cfg(test)]
 mod tests {

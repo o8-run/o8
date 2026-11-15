@@ -1530,15 +1530,6 @@ pub fn start(app: tauri::AppHandle) {
                     return None;
                 }
 
-                // Symon owns the voice keys while it runs (see symon_yield).
-                // Drop any held latch so a press that began before Symon
-                // started can't fire a stale release here.
-                if crate::symon_yield::symon_active() {
-                    fn_held_cb.store(false, Ordering::SeqCst);
-                    OPTION_HELD.store(false, Ordering::SeqCst);
-                    return None;
-                }
-
                 // The entire body is wrapped in catch_unwind: a panic here would
                 // unwind across the extern "C" tap boundary and ABORT all of o8
                 // (killing the Node sidecars). Convert any panic into a logged
@@ -1619,6 +1610,10 @@ pub fn start(app: tauri::AppHandle) {
                             event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE), flags);
                     }
                     let fn_is_down = (flags & FN_FLAG) != 0;
+                    // While Symon runs it owns the voice gestures (symon_yield):
+                    // no new press starts here. A press already latched still
+                    // gets its release, so in-flight sessions end normally.
+                    let yielding = crate::symon_yield::symon_active();
                     let smart_compose = (flags & CONTROL_FLAG) != 0;
 
                     // TEMP #1534 gesture debug — every Fn-relevant FlagsChanged,
@@ -1634,6 +1629,7 @@ pub fn start(app: tauri::AppHandle) {
                     // events (macOS delivers them 2-3x on some keyboards) don't
                     // double-fire start/stop.
                     let down_edge = fn_is_down
+                        && !yielding
                         && fn_held_cb
                             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                             .is_ok();
@@ -1763,6 +1759,7 @@ pub fn start(app: tauri::AppHandle) {
                         if keycode == RIGHT_OPTION_KEYCODE {
                             let option_down = (flags & RIGHT_OPTION_DEVICE_FLAG) != 0;
                             let opt_down_edge = option_down
+                                && !yielding
                                 && OPTION_HELD
                                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                                     .is_ok();
@@ -1827,6 +1824,7 @@ pub fn start(app: tauri::AppHandle) {
                         {
                             let control_down = is_left_control_fn_event(true, keycode, flags);
                             let control_down_edge = control_down
+                                && !yielding
                                 && LEFT_CONTROL_STATE
                                     .compare_exchange(
                                         LEFT_CONTROL_IDLE,
@@ -1918,6 +1916,7 @@ pub fn start(app: tauri::AppHandle) {
                         if keycode == RIGHT_COMMAND_KEYCODE {
                             let cmd_down = (flags & COMMAND_FLAG) != 0;
                             let cmd_down_edge = cmd_down
+                                && !yielding
                                 && RIGHT_CMD_HELD
                                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                                     .is_ok();
