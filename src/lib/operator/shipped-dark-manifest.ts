@@ -77,6 +77,11 @@ export const SHIPPED_DARK_FLAG_MANIFEST: Readonly<
     lifecycle: 'deliberate-default-off',
     rationale: 'Opt-in native caret-local dictation feedback; the web HUD stays the default and takes over whenever the native window stops acknowledging.',
   },
+  nativeSpatialInk: {
+    landedRelease: '0.1.821',
+    lifecycle: 'deliberate-default-off',
+    rationale: 'Opt-in native draw-on-screen ink; the web overlay stays the default and takes the pointer back whenever the native window stops acknowledging.',
+  },
   nativeBrowserView: {
     landedRelease: '0.1.681',
     lifecycle: 'promoted',

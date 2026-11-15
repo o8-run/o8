@@ -1019,6 +1019,19 @@ pub fn dictation_hud_fill(solid: bool) -> Rgba {
         gpui::rgba(0x090a0dd1)
     }
 }
+/// The draw-on-screen ink: ember (--t-brand-orange, the web overlay's ORANGE)
+/// at `alpha`, so the operator's marks and Symon's point-backs are one language.
+pub fn ink_ember(alpha: f32) -> Rgba {
+    let mut ember = brand_orange();
+    ember.a = alpha.clamp(0., 1.);
+    ember
+}
+/// The ink's warm-white hot core over the glow (the web overlay's CORE_HOT).
+pub fn ink_core(alpha: f32) -> Rgba {
+    let mut core = rgb(0xffe2cf);
+    core.a = alpha.clamp(0., 1.);
+    core
+}
 /// The HUD's polishing track under the travelling Symon segment.
 pub fn symon_track() -> Rgba {
     gpui::rgba(0xb1b4e529)
