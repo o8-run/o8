@@ -33,7 +33,7 @@ mod tests;
 
 use std::sync::{Arc, mpsc};
 
-pub(crate) use helper::{Launch, helper_path};
+pub(crate) use helper::Launch;
 pub(crate) use prefs::VoicePrefs;
 pub(crate) use server::ServerFinish;
 

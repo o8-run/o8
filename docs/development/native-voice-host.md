@@ -89,18 +89,18 @@ confirmation gate changes are made.
 
 ## Composer dictation
 
-Where the speech helper is installed beside `o8-next` (the app bundle keeps
-`speech_recognizer` in `Contents/MacOS`), o8 next records composer dictation
-in process and does not use this host. `native/o8-next/src/speech.rs` runs the
-helper in daemon mode as o8 next's own child, streams Apple's partial snapshots
-into the composer, and on stop takes Apple's final text. When that text is
-empty, it posts the recorded WAV to `/api/dictation/transcribe` (Whisper). It
-then polishes through `/api/dictation/polish` and sends through the chat's own
-send. One recording at a time; Live does not start while dictation holds the
-microphone, and dictation does not start while Live is on.
-`O8_NEXT_DICTATION=host` keeps the host path below, and `O8_NEXT_DICTATION=native`
-refuses to fall back to it. `O8_SPEECH_RECOGNIZER` points at another helper
-build.
+With `O8_NEXT_DICTATION=native`, o8 next records composer dictation in process
+and does not use this host. `native/o8-next/src/speech.rs` runs the speech
+helper (`speech_recognizer`, which the app bundle keeps beside `o8-next` in
+`Contents/MacOS`) in daemon mode as o8 next's own child, streams Apple's
+partial snapshots into the composer, and on stop takes Apple's final text.
+When that text is empty, it posts the recorded WAV to `/api/dictation/transcribe`
+(Whisper). It then polishes through `/api/dictation/polish` and sends through
+the chat's own send. One recording at a time; Live does not start while
+dictation holds the microphone, and dictation does not start while Live is on.
+`O8_SPEECH_RECOGNIZER` points at another helper build. The path stays opt-in
+until it matches the shell's polish preferences, Voice History, and saved
+microphone, locale and on-device retry (#6217).
 
 Only `/voice-host` mounts `HeadlessDictationHost`. It shares the native STT
 invoke/event contract from `useNativeDictation`; Classic `DictationHost` and

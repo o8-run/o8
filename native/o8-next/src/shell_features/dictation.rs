@@ -15,10 +15,9 @@ mod native_tests;
 // chat's own send. GPT Live keeps the waveform (voice.rs); one of the two holds
 // the microphone at a time.
 //
-// Where the speech helper is installed, o8 next records in process
-// (native.rs, crate::speech). Otherwise, or with O8_NEXT_DICTATION=host, the
-// hidden voice host's HeadlessDictationHost records and relays frames, and it
-// refuses a second microphone owner too.
+// With O8_NEXT_DICTATION=native, o8 next records in process (native.rs,
+// crate::speech). By default the hidden voice host's HeadlessDictationHost
+// records and relays frames, and it refuses a second microphone owner too.
 struct Dictation;
 register_shell_feature!(Dictation);
 impl ShellFeature for Dictation {

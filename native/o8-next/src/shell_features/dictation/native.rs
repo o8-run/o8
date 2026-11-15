@@ -13,18 +13,13 @@ pub(super) struct Native {
     launch: Option<Launch>,
 }
 
-/// `O8_NEXT_DICTATION=host` keeps the hidden voice page and `native` needs the
-/// helper; otherwise dictation is native wherever the helper is installed.
+/// Opt-in until the in-process path matches the shell's (#6217: polish
+/// dictionary, replacements and instructions, Voice History, and the saved
+/// microphone, locale and on-device retry). `O8_NEXT_DICTATION=native` turns it
+/// on; otherwise the hidden voice host records.
 pub(super) fn enabled(s: &mut Shell) -> bool {
-    if s.features.get::<Native>().launch.is_some() {
-        return true;
-    }
-    match std::env::var("O8_NEXT_DICTATION").as_deref() {
-        Ok("host") => false,
-        Ok("native") => true,
-        // Tests keep the host path unless they bring a helper.
-        _ => !cfg!(test) && crate::speech::helper_path().is_some(),
-    }
+    s.features.get::<Native>().launch.is_some()
+        || std::env::var("O8_NEXT_DICTATION").as_deref() == Ok("native")
 }
 
 impl Shell {
