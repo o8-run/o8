@@ -71,4 +71,48 @@ describe('handleCreateMission inline issue numbering', () => {
       expect(number).toBeGreaterThanOrEqual(90001);
     }
   }, 20_000);
+
+  it('carries an inline task file scope to the packet, and a lead grant widens what the scope read returns', async () => {
+    const repoPath = createTempRepo();
+    vi.stubGlobal('fetch', vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const { createMission } = await import('@/lib/orchestrator/operator-mission-service/mission');
+      const result = await createMission(JSON.parse(String(init?.body ?? '{}')) as Parameters<typeof createMission>[0]);
+      return new Response(JSON.stringify({ ok: true, result }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+    const { handleCreateMission } = await import('./mission');
+
+    const refused = await handleCreateMission({
+      issues_inline: [{ title: 'bad scope', allowedFiles: ['src/a.ts', 7] }],
+      repoPath, runtime: 'codex', dispatch: false,
+    });
+    expect(refused.isError).toBe(true);
+    expect(textContent(refused)).toContain('allowedFiles must be a list');
+
+    const created = await handleCreateMission({
+      issues_inline: [{ title: 'scoped inline task', body: 'edit one file', allowedFiles: ['src/a.ts', ' docs/** '] }],
+      repoPath, runtime: 'codex', dispatch: false,
+    });
+    expect(created.isError).not.toBe(true);
+
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.title === 'scoped inline task');
+    expect(packet?.allowedFiles).toEqual(['src/a.ts', 'docs/**']);
+
+    const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+    const lane = createLane({ repoPath, branch: packet!.branchTarget ?? 'o8/scoped', runtime: 'codex', packetId: packet!.id });
+    const { getPacketScope } = await import('@/lib/lanes/scope');
+    expect((await getPacketScope({ packetId: packet!.id }))?.allowedPaths).toEqual(['src/a.ts', 'docs/**']);
+
+    const { requestPacketScopeExpansion } = await import('@/lib/orchestrator/packet-scope-expansion');
+    const grant = await requestPacketScopeExpansion({
+      packetId: packet!.id, paths: ['src/b.ts'], reason: 'the fix also needs the caller', grantedBy: 'lead',
+    });
+    expect(grant).toMatchObject({ grantedBy: 'lead', expanded: true, laneId: lane.id });
+    expect(getLaneEvents(lane.id).find((event) => event.verb === 'scope_granted')?.payload).toMatchObject({
+      requestedPaths: ['src/b.ts'], reason: 'the fix also needs the caller',
+    });
+    expect((await getPacketScope({ packetId: packet!.id }))?.allowedPaths).toEqual(['src/a.ts', 'docs/**', 'src/b.ts']);
+    expect(readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packet!.id)?.lastEventLabel)
+      .toBe('scope_granted');
+  }, 20_000);
 });

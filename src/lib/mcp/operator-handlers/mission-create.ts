@@ -59,7 +59,15 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         const title = typeof e.title === 'string' ? e.title.trim() : '';
         if (!title) throw new McpInputError('Each inline issue must have a title.');
         const syntheticNumber = syntheticNumbers[index]!;
-        return { number: syntheticNumber, title, body: typeof e.body === 'string' ? e.body : '' };
+        if (e.allowedFiles !== undefined
+          && (!Array.isArray(e.allowedFiles) || e.allowedFiles.some((file) => typeof file !== 'string' || !file.trim()))) {
+          throw new McpInputError('allowedFiles must be a list of non-empty repository-relative paths.');
+        }
+        const allowedFiles = (e.allowedFiles as string[] | undefined)?.map((file) => file.trim());
+        return {
+          number: syntheticNumber, title, body: typeof e.body === 'string' ? e.body : '',
+          ...(allowedFiles?.length ? { allowedFiles } : {}),
+        };
       });
       const createResult = await createMissionInline({
         issues_inline: parsed,
