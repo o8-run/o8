@@ -5,6 +5,7 @@ import type { DictationSnapshot, DictationState } from '@/components/desktop/dic
 import { dockOwner, type DockPrecedenceInput } from '@/components/desktop/dictation/dockPrecedence';
 import { useEditRevert, type EditChipState } from './EditRevertChip';
 import type { TimedGlint } from './DockGlint';
+import { askFrame, useAskCopy, useRevision, type NativeAskInput } from './nativeDockAsk';
 import {
   IDLE_SNAPSHOT, useNativeDictationPill, useNativePillDockExtent, type DockWorkers, type NativeDockAction, type NativeDockSnapshot,
 } from './useNativeDictationPill';
@@ -22,8 +23,13 @@ export interface NativeDockInput extends Omit<DockPrecedenceInput, 'dictationSta
   edit?: EditChipState | null;
   glint?: TimedGlint | null;
   workers?: DockWorkers;
+  /** The Ask panel's content while it is open, its thread revision and the
+   * answer whose copy just succeeded. */
+  ask?: NativeAskInput;
+  askRev?: number;
+  askCopied?: number | null;
 }
-type Sessions = { speaking: number; voice: number; workers?: number; extras?: number };
+type Sessions = { speaking: number; voice: number; workers?: number; extras?: number; ask?: number };
 
 /** A session number for each idle-to-active edge; it holds while active. The
  * frame state names the capsule, so numbers only need to differ within one kind. */
@@ -48,11 +54,19 @@ export function nativeDockFrame(input: NativeDockInput, sessions: Sessions): { f
   const below = (frame: NativeDockSnapshot): NativeDockSnapshot => (input.edit || input.glint ? {
     ...frame, ...(input.edit ? { edit: input.edit } : {}), ...(input.glint ? { glint: input.glint } : {}),
   } : frame);
+  // An agent dictation that is a pending turn inside the open panel is drawn
+  // there, as on the web; otherwise dictation wins and Ask is drawn nowhere.
+  const panelPending = !!input.ask?.pending;
+  const owner = dockOwner({ ...input, dictationState: input.snapshot.state, panelPending });
+  if (owner === 'ask') {
+    const ask = askFrame(input.ask ?? { mode: 'answer', thread: [], pending: null }, input.askRev ?? 0, input, input.askCopied ?? null);
+    const level = input.snapshot.state === 'recording' ? input.snapshot.audioLevel : 0;
+    return { frame: below({ ...IDLE_SNAPSHOT, state: 'ask', audioLevel: level, ask }), session: sessions.ask ?? 0 };
+  }
   if (input.snapshot.state !== 'idle') {
-    const webBeside = input.askOpen || input.agentConfirm || input.dropActive || input.stagedFiles;
+    const webBeside = input.agentConfirm || input.dropActive || input.stagedFiles;
     return { frame: webBeside ? input.snapshot : below(input.snapshot), session: input.dictationSession };
   }
-  const owner = dockOwner({ ...input, dictationState: 'idle', panelPending: false });
   if (owner === 'speaking') {
     return { frame: below({ ...IDLE_SNAPSHOT, state: 'speaking', paused: input.ttsState === 'paused', speed: input.speechSpeed }), session: sessions.speaking };
   }
@@ -82,7 +96,8 @@ export function useNativeDockFrame(input: NativeDockInput) {
   const voice = useEdgeSession(input.realtimeVoice !== 'off');
   const workerSession = useEdgeSession(input.workerCount > 0);
   const extras = useEdgeSession(!!input.edit || !!input.glint);
-  const { snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, topPill } = input;
+  const askSession = useEdgeSession(input.askOpen);
+  const { snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, topPill, ask, askRev, askCopied } = input;
   // The page builds the fleet detail per render; its values, not its identity, change the frame.
   const { count, working, waiting, label } = input.workers ?? {};
   const repos = input.workers?.repos.join('\n');
@@ -90,14 +105,14 @@ export function useNativeDockFrame(input: NativeDockInput) {
     count, working: working ?? 0, waiting: waiting ?? 0, label: label ?? 'waiting', repos: repos ? repos.split('\n') : [],
   }), [count, working, waiting, label, repos]);
   return useMemo(() => nativeDockFrame({
-    snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill,
-  }, { speaking, voice, workers: workerSession, extras }), [snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, speaking, voice, workerSession, extras]);
+    snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, ask, askRev, askCopied,
+  }, { speaking, voice, workers: workerSession, extras, ask: askSession }), [snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, ask, askRev, askCopied, speaking, voice, workerSession, extras, askSession]);
 }
 
 /** What the web dock draws beside the native panel. With native off this is the
  * identity, so the default path draws exactly as before. While native draws the
- * winning state the web never draws a capsule under it; with a native capsule the
- * web notch surface is not drawn at all. Native draws the fleet orbit and detail
+ * winning state the web never draws a capsule or the Ask panel under it; with a
+ * native capsule or Ask panel the web notch surface is not drawn at all. Native draws the fleet orbit and detail
  * capsule (or dictation hides them, as on the web), and the chip or glint a
  * drawn frame carries. */
 export function webDockView(native: boolean, frame: NativeDockSnapshot, dictation: DictationState, live: {
@@ -107,11 +122,12 @@ export function webDockView(native: boolean, frame: NativeDockSnapshot, dictatio
   const nativeDrawn = native && frame.state !== 'idle';
   return {
     nativeDrawn,
-    nativeCapsule: nativeDrawn && dictation === 'idle',
+    nativeCapsule: nativeDrawn && (dictation === 'idle' || frame.state === 'ask'),
     ttsState: nativeDrawn ? 'idle' as const : live.ttsState,
     realtimeVoice: nativeDrawn ? 'off' as const : live.realtimeVoice,
-    // The open Ask panel keeps its pending working row under native dictation.
-    agentWorking: nativeDrawn && !live.askOpen ? false : live.agentWorking,
+    // Native draws the Ask panel, or dictation hides it, as on the web.
+    askOpen: nativeDrawn ? false : live.askOpen,
+    agentWorking: nativeDrawn ? false : live.agentWorking,
     showWorkers: native ? false : live.showWorkers ?? false,
     workerCount: native ? 0 : live.workerCount ?? 0,
     nativeEdit: nativeDrawn && frame.edit !== undefined,
@@ -125,29 +141,36 @@ export function webDockView(native: boolean, frame: NativeDockSnapshot, dictatio
 export function webDockVisible(native: boolean, suppressed: boolean, view: ReturnType<typeof webDockView>,
   input: Pick<NativeDockInput, 'snapshot' | 'askOpen' | 'agentConfirm' | 'dropActive'>, retained: { topPillEnabled: boolean; staged: boolean }) {
   return (!native || !suppressed) && ((!native && (retained.topPillEnabled || input.snapshot.state !== 'idle'))
-    || view.ttsState !== 'idle' || input.askOpen || view.agentWorking || input.agentConfirm || view.realtimeVoice !== 'off'
+    || view.ttsState !== 'idle' || view.askOpen || view.agentWorking || input.agentConfirm || view.realtimeVoice !== 'off'
     || (native && !view.nativeCapsule && (input.dropActive || retained.staged)));
 }
 
 /** The dock page's native wiring: the frame, the hook, and the clicks it reports
  * routed to the same handlers the web controls call. */
-export function useNativeDock(input: Omit<NativeDockInput, 'edit'>, handlers: {
+export function useNativeDock(input: Omit<NativeDockInput, 'edit' | 'askRev' | 'askCopied'>, handlers: {
   finishSystemDictation: () => void; handleTogglePause: () => void; handleStop: () => void; handleInterrupt: () => void;
   stopRealtimeVoice: () => void; handleSpeechSpeed: (rate: number) => void; expandWorkers: () => void;
+  closeAsk?: () => void; armAskIdle?: () => void;
   invokeCmd: (command: string, args: Record<string, unknown>) => void; onError: (message: string) => void;
 }, retained: { topPillEnabled: boolean; staged: boolean }) {
   const { edit, revert } = useEditRevert(handlers.onError);
-  const nativeFrame = useNativeDockFrame({ ...input, edit, topPill: retained.topPillEnabled });
-  const { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers } = handlers;
+  const thread = input.ask?.thread;
+  const askRev = useRevision(thread);
+  const { copied: askCopied, copy } = useAskCopy(thread ?? []);
+  const nativeFrame = useNativeDockFrame({ ...input, edit, topPill: retained.topPillEnabled, askRev, askCopied });
+  const { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, closeAsk, armAskIdle } = handlers;
   const onNativeAction = useCallback((clicked: NativeDockAction) => {
     if (clicked.action === 'revert') void revert();
+    else if (clicked.action === 'ask-close') closeAsk?.();
+    else if (clicked.action === 'ask-active') armAskIdle?.();
+    else if (clicked.action === 'ask-copy') { if (typeof clicked.value === 'number') void copy(clicked.value); }
     else if (clicked.action === 'workers-expand') expandWorkers();
     else if (clicked.action === 'pause') handleTogglePause();
     else if (clicked.action === 'stop') handleStop();
     else if (clicked.action === 'interrupt') handleInterrupt();
     else if (clicked.action === 'voice-stop') stopRealtimeVoice();
     else if (typeof clicked.value === 'number' && clicked.value >= 0.7 && clicked.value <= 1.2) handleSpeechSpeed(clicked.value);
-  }, [revert, expandWorkers, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed]);
+  }, [revert, closeAsk, armAskIdle, copy, expandWorkers, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed]);
   const { native, suppressed } = useNativeDictationPill(nativeFrame.frame, nativeFrame.session, finishSystemDictation, onNativeAction);
   const view = webDockView(native, nativeFrame.frame, input.snapshot.state, {
     ttsState: input.ttsState, realtimeVoice: input.realtimeVoice, agentWorking: input.agentWorking, askOpen: input.askOpen,
@@ -159,10 +182,10 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit'>, handlers: {
   if (view.nativeGlint && input.glint && nativeGlint !== input.glint) setNativeGlint(input.glint);
   const nativeActive = view.nativeDrawn && !suppressed;
   const dockVisible = webDockVisible(native, suppressed, view, input, retained);
-  useNativePillDockExtent(native, nativeActive, dockVisible, input.askOpen, suppressed, handlers.invokeCmd);
+  useNativePillDockExtent(native, nativeActive, dockVisible, view.askOpen, suppressed, handlers.invokeCmd);
   return {
     native, suppressed, dockVisible, nativeCapsule: view.nativeCapsule, nativeActive,
-    webSnapshot: native ? IDLE_SNAPSHOT : input.snapshot,
+    webSnapshot: native ? IDLE_SNAPSHOT : input.snapshot, webAskOpen: view.askOpen,
     webTts: view.ttsState, webRealtime: view.realtimeVoice, webAgentWorking: view.agentWorking,
     webShowWorkers: view.showWorkers, webWorkerCount: view.workerCount,
     edit, revertEdit: revert, webEdit: view.nativeEdit ? null : edit, webGlint: view.nativeGlint ? null : input.glint ?? null,

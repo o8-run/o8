@@ -5,7 +5,7 @@
 #[cfg(test)]
 use gpui::TestAppContext;
 use gpui::{
-    AnyWindowHandle, App, Application, Bounds, Context, Entity, IntoElement, Render, Window,
+    AnyWindowHandle, App, Bounds, Context, Entity, IntoElement, Render, Window,
     WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, div, point,
     prelude::*, px, size,
 };
@@ -83,6 +83,8 @@ pub(crate) struct Snapshot {
     /// Static frames only: how long this frame holds the panel (capped).
     #[serde(default)]
     pub hold_ms: u64,
+    #[serde(default)]
+    pub ask: Option<ask::Ask>,
 }
 impl Snapshot {
     pub fn visible(&self) -> bool {
@@ -98,7 +100,8 @@ impl Snapshot {
                 | "working"
                 | "voice"
                 | "workers"
-        ) || self.state == "extras" && self.extras_live(capsules::now_ms())
+        ) || self.state == "ask" && self.ask.is_some()
+            || self.state == "extras" && self.extras_live(capsules::now_ms())
     }
     fn label(&self) -> &str {
         match self.state.as_str() {
@@ -123,7 +126,12 @@ impl Snapshot {
     }
 }
 /// AppKit logical points, primary screen only, exactly as the web dock. Scale never enters placement.
+#[cfg(test)]
 pub(crate) fn placement(screen: [f64; 4], notch: f64) -> Option<[f64; 4]> {
+    sized_placement(screen, notch, 120.)
+}
+/// The same placement for a panel `height` points tall (the Ask panel grows it).
+pub(crate) fn sized_placement(screen: [f64; 4], notch: f64, height: f64) -> Option<[f64; 4]> {
     if !screen.into_iter().all(f64::is_finite)
         || screen[2] <= 0.
         || screen[3] <= 0.
@@ -133,7 +141,7 @@ pub(crate) fn placement(screen: [f64; 4], notch: f64) -> Option<[f64; 4]> {
         return None;
     }
     let width = 520_f64.min(screen[2]);
-    let height = 120_f64.min(screen[3]);
+    let height = height.min(screen[3]);
     Some([
         screen[0] + (screen[2] - width) / 2.,
         screen[1] + screen[3] - notch - if notch > 0. { 4. } else { 0. } - height,
@@ -176,6 +184,8 @@ pub(crate) struct Pill {
     lease: u64,
     revert_sent: Option<u64>,
     extras_phase: (bool, u8),
+    ask_scroll: gpui::ScrollHandle,
+    ask_active_sent: bool,
     presentation: Presentation,
 }
 impl Default for Pill {
@@ -194,6 +204,8 @@ impl Default for Pill {
             lease: 750,
             revert_sent: None,
             extras_phase: (false, 2),
+            ask_scroll: gpui::ScrollHandle::new(),
+            ask_active_sent: false,
             presentation: Presentation::default(),
         }
     }
@@ -210,7 +222,9 @@ impl Pill {
         self.hit_rects(capsules::now_ms())
     }
     fn finish(&mut self) {
-        if self.target && self.snapshot.state == "recording" && !self.finish_sent {
+        let recording = self.snapshot.state == "recording"
+            || self.snapshot.state == "ask" && self.snapshot.ask.as_ref().is_some_and(ask::Ask::recording);
+        if self.target && recording && !self.finish_sent {
             self.finish_pending = true;
             self.finish_sent = true;
         }
@@ -223,6 +237,7 @@ impl Pill {
             self.hover = false;
             self.second = None;
             self.revert_sent = None;
+            self.ask_active_sent = false;
         }
         // A revert stays sent until the web shows the chip's next status.
         if snapshot
@@ -236,7 +251,8 @@ impl Pill {
         self.motion.set(snapshot.visible());
         self.target = snapshot.visible();
         if self.target {
-            self.snapshot = snapshot;
+            let previous = std::mem::replace(&mut self.snapshot, snapshot);
+            self.ask_follow(previous.ask.as_ref().filter(|_| previous.state == "ask"));
         }
         self.heard = Instant::now();
     }
@@ -264,6 +280,9 @@ impl Render for Pill {
         let extras = self.render_extras(opacity, w, cx);
         if self.snapshot.state == "extras" {
             return root.children(extras);
+        }
+        if self.snapshot.state == "ask" {
+            return root.child(self.render_ask(opacity, cx)).children(extras);
         }
         if capsules::is_capsule(&self.snapshot.state) {
             let capsule = div()
@@ -418,6 +437,7 @@ fn dispatch(
             } else {
                 None
             };
+            pill.ask_active_sent = false;
             Some((show, pill.hit(), finish, pill.take_actions()))
         });
         if let Some((show, hit, finish, actions)) = result {
@@ -637,7 +657,9 @@ mod macos {
         unsafe {
             let view = handle.ns_view.as_ptr() as id;
             let panel: id = msg_send![view, window];
-            let configure = pill.update(cx, |pill, _| !pill.presentation.configured);
+            let (configure, tall) = pill.update(cx, |pill, _| {
+                (!pill.presentation.configured, ask::panel_height(&pill.snapshot))
+            });
             if configure {
                 object_setClass(panel, nonactivating_class(panel));
                 let _: () = msg_send![panel, setIgnoresMouseEvents: YES];
@@ -663,7 +685,7 @@ mod macos {
             let screen: id = msg_send![screens, objectAtIndex: 0_usize];
             let rect: NSRect = msg_send![screen, frame];
             let insets: Insets = msg_send![screen, safeAreaInsets];
-            if let Some([x, y, width, height]) = placement(
+            if let Some([x, y, width, height]) = sized_placement(
                 [
                     rect.origin.x,
                     rect.origin.y,
@@ -671,6 +693,7 @@ mod macos {
                     rect.size.height,
                 ],
                 insets.top,
+                tall,
             ) {
                 let (_, set_frame, order_front) = pill.update(cx, |pill, _| {
                     pill.presentation.tick(true, Some([x, y, width, height]))
@@ -714,6 +737,8 @@ mod macos {
     }
 }
 
+#[path = "native_pill_ask.rs"]
+mod ask;
 #[path = "native_pill_capsules.rs"]
 mod capsules;
 #[path = "native_pill_extras.rs"]
@@ -727,64 +752,10 @@ mod extras_tests;
 #[cfg(test)]
 #[path = "native_pill_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "native_pill_ask_tests.rs"]
+mod ask_tests;
 
-/// Explicit fixture entry point for the isolated Linux display capture harness.
-/// It uses the production renderer, no server, capture device or input simulation.
-pub(crate) fn try_fixture(args: &[String]) -> Result<bool, String> {
-    if args.first().map(String::as_str) != Some("--pill-fixture") {
-        return Ok(false);
-    }
-    #[cfg(not(target_os = "linux"))]
-    return Err("Pill raster fixtures require an isolated Linux display".into());
-    #[cfg(target_os = "linux")]
-    {
-        let state = args
-            .get(1)
-            .filter(|_| args.len() == 2)
-            .ok_or("Expected a pill fixture state")?
-            .clone();
-        if ![
-            "idle",
-            "requesting-mic",
-            "recording",
-            "transcribing",
-            "polishing",
-            "success",
-            "error",
-        ]
-        .contains(&state.as_str())
-        {
-            return Err("Unknown pill fixture state".into());
-        }
-        Application::new().run(move |cx| {
-            cx.open_window(
-                WindowOptions {
-                    focus: false,
-                    window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-                        point(px(0.), px(0.)),
-                        size(px(520.), px(120.)),
-                    ))),
-                    titlebar: None,
-                    ..Default::default()
-                },
-                |_, cx| {
-                    cx.new(|_| {
-                        let mut pill = Pill::default();
-                        pill.apply(Snapshot {
-                            state,
-                            audio_level: 0.7,
-                            duration_ms: 6500,
-                            pasted_text: Some("Delivered fixture words".into()),
-                            error: Some("Microphone unavailable".into()),
-                            ..Default::default()
-                        });
-                        pill.motion = crate::motion::Transition::settled(160, pill.target);
-                        pill
-                    })
-                },
-            )
-            .unwrap();
-        });
-        Ok(true)
-    }
-}
+#[path = "native_pill_fixture.rs"]
+mod fixture;
+pub(crate) use fixture::try_fixture;

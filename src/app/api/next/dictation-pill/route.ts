@@ -57,9 +57,10 @@ export async function POST(request: NextRequest) {
 
 const ACTIONS: Record<string, string> = {
   pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice', 'workers-expand': 'workers',
+  'ask-close': 'ask', 'ask-copy': 'ask', 'ask-active': 'ask',
 };
 /** Frames the edit chip can be drawn under; a revert names one of them and its chip. */
-const CHIP_FRAMES = new Set(['requesting-mic', 'recording', 'transcribing', 'polishing', 'success', 'error', 'speaking', 'working', 'voice', 'workers', 'extras']);
+const CHIP_FRAMES = new Set(['requesting-mic', 'recording', 'transcribing', 'polishing', 'success', 'error', 'speaking', 'working', 'voice', 'workers', 'extras', 'ask']);
 
 /** Click intents from the native panel; only well-formed capsule intents pass. */
 function capsuleActions(value: unknown) {
@@ -73,6 +74,12 @@ function capsuleActions(value: unknown) {
     if (!Object.hasOwn(ACTIONS, item.action) || ACTIONS[item.action] !== item.state) return [];
     const value = typeof item.value === 'number' && Number.isFinite(item.value) ? item.value : null;
     if (item.action === 'speed' && value === null) return [];
+    // An Ask intent names the thread revision it was drawn for; a copy also names the answer.
+    if (item.action.startsWith('ask-')) {
+      if (typeof item.ref !== 'string' || !/^\d{1,15}$/.test(item.ref)) return [];
+      if (item.action === 'ask-copy' && !Number.isSafeInteger(value)) return [];
+      return [{ session: item.session, state: item.state, action: item.action, value, ref: item.ref }];
+    }
     return [{ session: item.session, state: item.state, action: item.action, value }];
   });
 }
