@@ -82,6 +82,10 @@ function capsuleActions(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.slice(0, 8).flatMap((item: Record<string, unknown> | null): Record<string, unknown>[] => {
     if (!item || typeof item !== 'object' || typeof item.session !== 'number' || typeof item.action !== 'string') return [];
+    if (item.action === 'voice-settings') {
+      if (item.state !== 'sliver' && item.state !== 'workers') return [];
+      return [{ session: item.session, state: item.state, action: 'voice-settings', value: null }];
+    }
     if (item.action === 'revert') {
       if (!CHIP_FRAMES.has(String(item.state)) || !Number.isSafeInteger(item.edit)) return [];
       return [{ session: item.session, state: item.state, action: 'revert', value: null, edit: item.edit }];

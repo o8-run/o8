@@ -317,9 +317,9 @@ describe('the drop target and staged chips through the real dock page', () => {
       { name: 'a.txt', size: '2 KB' }, { name: 'b.md', size: '1 KB' }, { name: 'c.ts', size: '3 KB' },
     ] } });
     expect(host.innerHTML).not.toContain('Staged — hold');
-    // The chips relax after 6 s, as on the web: one release names them.
+    // The chips relax after 6 s, as on the web, back to the resting sliver.
     await tick(6000); await tick(150);
-    expect(frames.at(-1)).toMatchObject({ action: 'release', kind: 'staged' });
+    expect(sent()).toMatchObject({ state: 'sliver' });
   });
 
   it('without the preference neither dock draws them, as on main; a stall returns the web chips', async () => {
@@ -342,6 +342,53 @@ describe('the drop target and staged chips through the real dock page', () => {
     await tick(4700);
     expect(host.innerHTML).toContain('Staged — hold');
     expect(frames.at(-1)).toMatchObject({ action: 'release', kind: 'staged', immediate: true });
+  });
+});
+
+describe('the idle sliver and the Voice settings shortcut through the real dock page', () => {
+  const settings = () => invoke.mock.calls.filter(([command]) => command === 'open_voice_settings').length;
+
+  it('draws the resting sliver natively only with the top-pill preference, and its double click opens Voice settings', async () => {
+    expect(frames.filter(frame => frame.action === 'frame')).toEqual([]);
+    await emit('o8:top-pill-preference', { enabled: true });
+    await tick(150);
+    const session = sent()?.session as number;
+    expect(sent()).toMatchObject({ state: 'sliver', holdMs: 5000 });
+    expect(web().visible).toBe(false);
+    reply = { native: true, enabled: true, actions: [
+      { session, state: 'sliver', action: 'voice-settings', value: null },
+      { session: session + 1, state: 'sliver', action: 'voice-settings', value: null },
+      { session, state: 'speaking', action: 'voice-settings', value: null },
+    ] };
+    await emit('o8:worker-status', { count: 0 });
+    await tick(4200);
+    expect(settings()).toBe(1);
+    // Over speech the dock is not resting: a late shortcut does nothing.
+    await emit('o8:tts-state', { state: 'playing' });
+    await tick(150);
+    expect(sent()?.state).toBe('speaking');
+    reply = { native: true, enabled: true, actions: [{ session, state: 'sliver', action: 'voice-settings', value: null }] };
+    await tick(300);
+    expect(settings()).toBe(1);
+    // The preference off: the sliver is released and nothing draws at idle.
+    await emit('o8:tts-state', { state: 'idle' });
+    await emit('o8:top-pill-preference', { enabled: false });
+    await tick(300);
+    expect(frames.at(-1)).toMatchObject({ action: 'release' });
+  });
+
+  it('the route forwards the shortcut only from the resting dock', async () => {
+    const { POST } = await import('@/app/api/next/dictation-pill/route');
+    pipe.requestNextPill.mockResolvedValue({ ok: true, actions: [
+      { session: 1, state: 'sliver', action: 'voice-settings', value: null },
+      { session: 1, state: 'workers', action: 'voice-settings', value: 2 },
+      { session: 1, state: 'ask', action: 'voice-settings', value: null },
+    ] });
+    const request = new Request('http://localhost/api/next/dictation-pill', { method: 'POST', body: JSON.stringify({ action: 'frame', checkSettings: true }) });
+    expect((await (await POST(request as never)).json()).actions).toEqual([
+      { session: 1, state: 'sliver', action: 'voice-settings', value: null },
+      { session: 1, state: 'workers', action: 'voice-settings', value: null },
+    ]);
   });
 });
 

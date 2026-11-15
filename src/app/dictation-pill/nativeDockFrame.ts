@@ -35,7 +35,7 @@ export interface NativeDockInput extends Omit<DockPrecedenceInput, 'dictationSta
   /** The staged-file chips (`stagedFiles` is their presence). */
   stagedChips?: StagedChip[] | null;
 }
-type Sessions = { speaking: number; voice: number; workers?: number; extras?: number; ask?: number; confirm?: number; drop?: number; staged?: number };
+type Sessions = { speaking: number; voice: number; workers?: number; extras?: number; ask?: number; confirm?: number; drop?: number; staged?: number; sliver?: number };
 
 /** DockNotchSurface's chip size label. */
 export function stagedSize(bytes: number) {
@@ -111,6 +111,8 @@ export function nativeDockFrame(input: NativeDockInput, sessions: Sessions): { f
   if (owner === 'workers' || owner === 'idle' && input.workerCount > 0) {
     return { frame: below({ ...IDLE_SNAPSHOT, state: 'workers', expanded: owner === 'workers', workers }), session: sessions.workers ?? 0 };
   }
+  // The resting sliver the top-pill preference shows, with the chip and glint below it.
+  if (owner === 'idle' && input.topPill === true) return { frame: below({ ...IDLE_SNAPSHOT, state: 'sliver' }), session: sessions.sliver ?? 0 };
   if (owner === 'idle' && (input.edit || input.glint)) return { frame: below({ ...IDLE_SNAPSHOT, state: 'extras' }), session: sessions.extras ?? 0 };
   return { frame: owner === 'idle' ? IDLE_SNAPSHOT : { ...IDLE_SNAPSHOT, handoff: true }, session: input.dictationSession };
 }
@@ -123,6 +125,7 @@ export function useNativeDockFrame(input: NativeDockInput) {
   const askSession = useEdgeSession(input.askOpen);
   // Each card is its own session, so a click queued for one is never run for the next.
   const dropSession = useEdgeSession(input.dropActive);
+  const sliverSession = useEdgeSession(input.topPill === true);
   const stagedSession = useRevision(input.stagedChips ?? null);
   const confirmSession = useRevision(input.confirmCard ? `${input.confirmCard.confirmationId}\n${input.confirmCard.taskId}` : '');
   const { snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, topPill, ask, askRev, askCopied, confirmCard, stagedChips } = input;
@@ -134,7 +137,7 @@ export function useNativeDockFrame(input: NativeDockInput) {
   }), [count, working, waiting, label, repos]);
   return useMemo(() => nativeDockFrame({
     snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, ask, askRev, askCopied, confirmCard, stagedChips,
-  }, { speaking, voice, workers: workerSession, extras, ask: askSession, confirm: confirmSession, drop: dropSession, staged: stagedSession }), [snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, ask, askRev, askCopied, confirmCard, stagedChips, speaking, voice, workerSession, extras, askSession, confirmSession, dropSession, stagedSession]);
+  }, { speaking, voice, workers: workerSession, extras, ask: askSession, confirm: confirmSession, drop: dropSession, staged: stagedSession, sliver: sliverSession }), [snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, ask, askRev, askCopied, confirmCard, stagedChips, speaking, voice, workerSession, extras, askSession, confirmSession, dropSession, stagedSession, sliverSession]);
 }
 
 /** What the web dock draws beside the native panel. With native off this is the
@@ -183,6 +186,7 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit' | 'askRev' | '
   stopRealtimeVoice: () => void; handleSpeechSpeed: (rate: number) => void; expandWorkers: () => void;
   closeAsk?: () => void; armAskIdle?: () => void;
   decideConfirm?: (confirmationId: string, taskId: string, allow: boolean) => void;
+  openVoiceSettings?: () => void;
   invokeCmd: (command: string, args: Record<string, unknown>) => void; onError: (message: string) => void;
 }, retained: { topPillEnabled: boolean; staged: boolean }) {
   const { edit, revert } = useEditRevert(handlers.onError);
@@ -190,9 +194,10 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit' | 'askRev' | '
   const askRev = useRevision(thread);
   const { copied: askCopied, copy } = useAskCopy(thread ?? []);
   const nativeFrame = useNativeDockFrame({ ...input, edit, topPill: retained.topPillEnabled, askRev, askCopied });
-  const { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, closeAsk, armAskIdle, decideConfirm } = handlers;
+  const { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, closeAsk, armAskIdle, decideConfirm, openVoiceSettings } = handlers;
   const onNativeAction = useCallback((clicked: NativeDockAction) => {
     if (clicked.action === 'revert') void revert();
+    else if (clicked.action === 'voice-settings') openVoiceSettings?.();
     else if (clicked.action === 'confirm-allow' || clicked.action === 'confirm-deny') {
       if (clicked.ref && clicked.task) decideConfirm?.(clicked.ref, clicked.task, clicked.action === 'confirm-allow');
     } else if (clicked.action === 'ask-close') closeAsk?.();
@@ -204,7 +209,7 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit' | 'askRev' | '
     else if (clicked.action === 'interrupt') handleInterrupt();
     else if (clicked.action === 'voice-stop') stopRealtimeVoice();
     else if (typeof clicked.value === 'number' && clicked.value >= 0.7 && clicked.value <= 1.2) handleSpeechSpeed(clicked.value);
-  }, [revert, decideConfirm, closeAsk, armAskIdle, copy, expandWorkers, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed]);
+  }, [revert, openVoiceSettings, decideConfirm, closeAsk, armAskIdle, copy, expandWorkers, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed]);
   const { native, suppressed } = useNativeDictationPill(nativeFrame.frame, nativeFrame.session, finishSystemDictation, onNativeAction);
   const view = webDockView(native, nativeFrame.frame, input.snapshot.state, {
     ttsState: input.ttsState, realtimeVoice: input.realtimeVoice, agentWorking: input.agentWorking, askOpen: input.askOpen,
