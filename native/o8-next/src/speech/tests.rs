@@ -9,14 +9,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct Stub {
+pub(super) struct Stub {
     heard: Result<String, String>,
     polished: Option<Result<Polished, String>>,
     calls: Mutex<Vec<String>>,
 }
 
 impl Stub {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             heard: Ok(String::new()),
             polished: None,
@@ -75,7 +75,7 @@ fn next(speech: &Speech) -> Event {
 }
 
 /// Updates for `id` until the first one that ends the recording.
-fn until_end(speech: &Speech, id: u64) -> Vec<Update> {
+pub(super) fn until_end(speech: &Speech, id: u64) -> Vec<Update> {
     let mut updates = Vec::new();
     loop {
         let event = next(speech);
@@ -95,7 +95,7 @@ fn until_end(speech: &Speech, id: u64) -> Vec<Update> {
 }
 
 /// Starts a recording and reads through its last partial.
-fn listen(speech: &mut Speech, repo: Option<&str>) -> u64 {
+pub(super) fn listen(speech: &mut Speech, repo: Option<&str>) -> u64 {
     let id = speech.start(repo.map(String::from));
     let mut updates = Vec::new();
     while updates.last() != Some(&Update::Partial("hello world".into())) {
@@ -478,7 +478,11 @@ fn speech_helper_path_prefers_the_override_then_the_bundle() {
 }
 
 /// A data directory with the desktop's two settings files.
-fn saved(fake: &Fake, dictation: serde_json::Value, overlay: Option<serde_json::Value>) -> PathBuf {
+pub(super) fn saved(
+    fake: &Fake,
+    dictation: serde_json::Value,
+    overlay: Option<serde_json::Value>,
+) -> PathBuf {
     let dir = fake.dir.join("data");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("dictation.json"), dictation.to_string()).unwrap();
@@ -694,88 +698,4 @@ fn speech_leaves_an_unreadable_history_alone() {
         Some(&Update::Done("hello world.".into()))
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
-}
-
-#[test]
-fn speech_tells_the_helper_the_saved_microphone_and_locale_once() {
-    let fake = Fake::new("mic");
-    let dir = saved(
-        &fake,
-        serde_json::json!({"dictation_microphone_uid": "BuiltInMic", "dictation_locale": "en-GB"}),
-        Some(serde_json::json!({"dictation_microphone_uid": " USB-Mic-1 "})),
-    );
-    let log = fake.dir.join("stdin.log");
-    let mut launch = fake.launch(&[
-        ("FAKE_FINAL", "hello world"),
-        ("FAKE_LOG", log.to_str().unwrap()),
-    ]);
-    launch.data = Some(dir.clone());
-    let mut speech = Speech::new(launch, Arc::new(Stub::new()));
-    let lines = || {
-        std::fs::read_to_string(&log)
-            .unwrap_or_default()
-            .lines()
-            .map(String::from)
-            .collect::<Vec<_>>()
-    };
-    let record = |speech: &mut Speech| {
-        let id = listen(speech, None);
-        speech.stop(id);
-        assert!(matches!(
-            until_end(speech, id).last(),
-            Some(Update::Done(_))
-        ));
-        id
-    };
-    let first = record(&mut speech);
-    let second = record(&mut speech);
-    // The saved choice first, then the start; nothing repeats while unchanged.
-    assert_eq!(
-        lines(),
-        [
-            "input_device:USB-Mic-1".to_owned(),
-            "locale:en-GB".into(),
-            format!("start:{first}"),
-            format!("stop:{first}"),
-            format!("start:{second}"),
-            format!("stop:{second}"),
-        ]
-    );
-    // Back to the system default is a change too.
-    std::fs::write(
-        dir.join("voice-prefs.json"),
-        r#"{"dictation_microphone_uid":"default"}"#,
-    )
-    .unwrap();
-    let third = record(&mut speech);
-    assert_eq!(
-        lines()[6..],
-        [
-            "input_device:default".to_owned(),
-            format!("start:{third}"),
-            format!("stop:{third}"),
-        ]
-    );
-}
-
-#[test]
-fn speech_sends_no_device_or_locale_without_saved_ones() {
-    let fake = Fake::new("mic-none");
-    let dir = saved(
-        &fake,
-        serde_json::json!({"dictation_microphone_uid": "default", "dictation_locale": "en-US\nstart:9"}),
-        None,
-    );
-    let log = fake.dir.join("stdin.log");
-    let mut launch = fake.launch(&[("FAKE_LOG", log.to_str().unwrap())]);
-    launch.data = Some(dir);
-    let mut speech = Speech::new(launch, Arc::new(Stub::new()));
-    let id = listen(&mut speech, None);
-    speech.stop(id);
-    until_end(&speech, id);
-    // "default" is the helper's own choice, and a value with a line break is ignored.
-    assert_eq!(
-        std::fs::read_to_string(&log).unwrap(),
-        format!("start:{id}\nstop:{id}\n")
-    );
 }

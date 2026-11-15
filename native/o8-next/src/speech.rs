@@ -19,6 +19,8 @@
 // The composer adopts the client in the next change.
 #![allow(dead_code, unused_imports)]
 
+#[cfg(test)]
+mod device_tests;
 mod engine;
 #[cfg(test)]
 pub(crate) mod fake;
