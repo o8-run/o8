@@ -3,10 +3,15 @@
 // classic shell (#6130). It writes the bundle where the classic build does, so
 // signing, notarization and the release checks run on it unchanged.
 //
-//   node scripts/native-app-build.mjs [--skip-prebuild]
+//   node scripts/native-app-build.mjs [--skip-prebuild | --candidate]
+//
+// --candidate builds for this machine only and keeps work between runs: one
+// chip, incremental compiles, and the packaged server is reused while its
+// sources are unchanged. Run it in a checkout that is kept between builds.
 //
 // Nothing in the release pipeline selects this script yet.
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
@@ -15,6 +20,7 @@ import process from 'node:process';
 
 export const APP_BUNDLE = 'src-tauri/target/universal-apple-darwin/release/bundle/macos/o8.app';
 const ARCHES = ['x86_64', 'aarch64'];
+const WEB_INPUTS = ['src', 'public', 'package-lock.json', 'next.config.ts', 'tsconfig.json', 'scripts/tauri-export.mjs'];
 const HELPERS = ['o8-next', 'o8-pi-write', 'speech-local'];
 
 function run(command, args, options = {}) {
@@ -84,23 +90,54 @@ ${body}
   execFileSync('plutil', ['-lint', file], { stdio: 'pipe' });
 }
 
-function buildLauncher(root, work) {
+function buildLauncher(root, work, arches, env) {
   const crate = join(root, 'crates/o8-launcher');
   const target = process.env.CARGO_TARGET_DIR ?? join(crate, 'target');
-  for (const arch of ARCHES) {
-    run('cargo', ['build', '--release', '--locked', '--target', `${arch}-apple-darwin`], { cwd: crate });
+  for (const arch of arches) {
+    run('cargo', ['build', '--release', '--locked', '--target', `${arch}-apple-darwin`], { cwd: crate, env });
   }
   const output = join(work, 'o8');
-  run('lipo', ['-create', ...ARCHES.map(arch => join(target, `${arch}-apple-darwin/release/o8-launcher`)), '-output', output]);
+  run('lipo', ['-create', ...arches.map(arch => join(target, `${arch}-apple-darwin/release/o8-launcher`)), '-output', output]);
   return output;
 }
 
+/** Tracked content plus uncommitted edits of everything the packaged server is built from. */
+function webKey(root) {
+  const git = args => execFileSync('git', args, { cwd: root, maxBuffer: 256 * 1024 * 1024 });
+  return createHash('sha256')
+    .update(git(['ls-files', '-s', '--', ...WEB_INPUTS]))
+    .update(git(['diff', 'HEAD', '--', ...WEB_INPUTS]))
+    .update(git(['ls-files', '--others', '--exclude-standard', '--', ...WEB_INPUTS]))
+    .digest('hex');
+}
+
+/**
+ * One chip, incremental. The whole prebuild runs only when the packaged server's
+ * sources changed; otherwise only the two Rust programs are brought up to date.
+ */
+function candidatePrebuild(root, triple, compile) {
+  const env = { ...compile, O8_TAURI_BUILD_TARGET: triple };
+  const keyFile = join(root, 'out/.candidate-web-key');
+  const key = webKey(root);
+  const current = existsSync(join(root, 'out/server/server.js')) && existsSync(keyFile)
+    && readFileSync(keyFile, 'utf8').trim() === key;
+  if (current) {
+    console.log('[native-app] packaged server reused: its sources are unchanged');
+    timed('write helper', () => run(process.execPath, ['scripts/build-pi-write.mjs'], { env }));
+    timed('native window', () => run(process.execPath, ['scripts/next/build-sidecar.mjs'], { env }));
+    return;
+  }
+  rmSync(keyFile, { force: true });
+  timed('prebuild', () => run('npm', ['run', 'tauri:prebuild'], { env }));
+  if (webKey(root) === key) writeFileSync(keyFile, `${key}\n`);
+}
+
 /** The same two slices and embedded plist the classic build script produced. */
-function buildSpeechRecognizer(root, work) {
+function buildSpeechRecognizer(root, work, arches) {
   const source = join(root, 'src-tauri/helpers/speech_recognizer.swift');
   const plist = join(root, 'src-tauri/helpers/speech_recognizer_info.plist');
   const deployment = process.env.MACOSX_DEPLOYMENT_TARGET ?? '11.0';
-  const slices = ARCHES.map((arch) => {
+  const slices = arches.map((arch) => {
     const slice = join(work, `speech_recognizer-${arch}`);
     run('swiftc', [
       '-O', '-target', `${arch === 'aarch64' ? 'arm64' : arch}-apple-macosx${deployment}`, '-o', slice, source,
@@ -119,7 +156,16 @@ function main() {
   const root = process.cwd();
   const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
   const started = Date.now();
-  if (!process.argv.includes('--skip-prebuild')) {
+  const candidate = process.argv.includes('--candidate');
+  const arches = candidate ? [process.arch === 'arm64' ? 'aarch64' : 'x86_64'] : ARCHES;
+  const staged = candidate ? `${arches[0]}-apple-darwin` : 'universal-apple-darwin';
+  // Finer-grained reuse between runs, at the cost of a slightly larger program.
+  const compile = candidate
+    ? { ...process.env, CARGO_PROFILE_RELEASE_INCREMENTAL: 'true', CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '256' }
+    : process.env;
+  if (candidate) {
+    candidatePrebuild(root, staged, compile);
+  } else if (!process.argv.includes('--skip-prebuild')) {
     // The helper builds read this to produce both chips, as the classic build asked them to.
     const env = { ...process.env, O8_TAURI_BUILD_TARGET: 'universal-apple-darwin' };
     timed('prebuild', () => run('npm', ['run', 'tauri:prebuild'], { env }));
@@ -129,8 +175,8 @@ function main() {
   const work = join(root, 'src-tauri/target/native-app');
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work, { recursive: true });
-  const launcher = timed('launcher', () => buildLauncher(root, work));
-  const recognizer = timed('speech recognizer', () => buildSpeechRecognizer(root, work));
+  const launcher = timed('launcher', () => buildLauncher(root, work, arches, compile));
+  const recognizer = timed('speech recognizer', () => buildSpeechRecognizer(root, work, arches));
 
   timed('assemble', () => {
     const app = join(root, APP_BUNDLE);
@@ -142,7 +188,7 @@ function main() {
     copyFileSync(launcher, join(macos, 'o8'));
     copyFileSync(recognizer, join(macos, 'speech_recognizer'));
     for (const name of HELPERS) {
-      const source = join(root, 'src-tauri/helpers', `${name}-universal-apple-darwin`);
+      const source = join(root, 'src-tauri/helpers', `${name}-${staged}`);
       if (!statSync(source, { throwIfNoEntry: false })?.isFile()) throw new Error(`${name} was not staged by the prebuild.`);
       copyFileSync(source, join(macos, name));
     }
@@ -152,7 +198,7 @@ function main() {
     cpSync(server, join(resources, 'server'), { recursive: true, verbatimSymlinks: true });
     writeInfoPlist(root, join(app, 'Contents/Info.plist'), version);
   });
-  console.log(`[native-app] ${APP_BUNDLE} assembled for v${version} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  console.log(`[native-app] ${APP_BUNDLE} assembled for v${version}${candidate ? ` (candidate, ${arches[0]})` : ''} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
