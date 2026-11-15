@@ -1,14 +1,13 @@
-- o8 on macOS now opens in its new native window.
-- The Ring is the new o8 mark: new app icons, and the Ring in the window header.
-- The window has o8's own themes with swatches, a glass clarity setting, and zoom in and out.
-- A Working drawer pins to the bottom of the sidebar, and an empty thread shows an overview under its composer.
-- The thread header is cleaner, and Activity reads in one scroll with short ids.
-- Review findings go back to the agent that wrote the code, and its fix is re-reviewed against the saved findings.
-- A pull request from another tool can be adopted into one review task.
-- An approval is tied to the exact commit and the run evidence it reviewed, and only the assigned reviewer can submit it.
-- Stop mission asks before it stops.
-- The terminal scrolls again under tmux.
-- macOS dictation runs without the app's servers.
-- o8 budgets machine load and queues heavy worker steps.
-- Workers read and act only inside their own packet.
-- More of o8's server runs natively.
+- New projects open pull requests by default. Existing projects keep their merge choice.
+- Dispatched workers run in the macOS sandbox by default. Set `O8_WORKER_SANDBOX=off` to turn it off.
+- The composer shows a pull request's checks and its conflicts, and can hand a conflict to an agent.
+- Reviews show a scorecard and a change map.
+- Every transcript has a prompt navigator, and worker and reviewer transcripts read like the main one.
+- A working strip shows what the agent is doing, with a timer, while a turn runs.
+- An experimental canvas holds saved diff cards. It stays off until you turn on canvas mode.
+- A publication is tied to the commit that was approved.
+- The lead can grant a packet more file scope, and inline tasks can set their own.
+- `o8 packet transcript` reads or follows a worker's work, and `o8 terminal panes --watch` keeps a terminal tab filled with live worker panes.
+- `o8 mission create --dispatch` returns once the dispatch is admitted and fails clearly when it does not start.
+- Codex sessions that use the default identity are found again, and replies in the newer format are read.
+- A sandboxed command-line agent can change the mode of its own state files.
