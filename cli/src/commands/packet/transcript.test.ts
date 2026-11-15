@@ -78,10 +78,33 @@ describe('what a tool call is about', () => {
     expect(toolDetail(call('exec', 'const x = await tools.list_mcp_resources({});'))).toBe('list_mcp_resources');
   });
 
+  it('never hides a later call, and reads a patch only where apply_patch gets it', () => {
+    const two = 'await tools.exec_command({"cmd":"ls"}); await tools.exec_command({"cmd":"rm -rf build"});';
+    expect(toolDetail(call('exec', two))).toBe('ls (+1 more call)');
+    expect(toolDetail(call('exec', 'await tools.exec_command({"cmd":"echo *** Delete File: x"})'))).toBe('echo *** Delete File: x');
+    const heredoc = 'await tools.exec_command({"cmd":"apply_patch <<\'EOF\'\\n*** Begin Patch\\n*** Update File: src/a.ts\\nEOF"})';
+    expect(toolDetail(call('exec', heredoc))).toMatch(/^apply_patch <<'EOF'/);
+    const long = `await tools.exec_command({"cmd":"${'x'.repeat(300)}"}); await tools.apply_patch(p); await tools.exec_command({"cmd":"y"});`;
+    expect(toolDetail(call('exec', long))).toMatch(/… \(\+2 more calls\)$/);
+  });
+
+  it('reads escapes in a patched path, and a patch cut short before its call', () => {
+    const at = (path: string) => `const p = "*** Begin Patch\\n*** Update File: ${path}\\n@@\\n*** End Patch"; await tools.apply_patch(p);`;
+    expect(toolDetail(call('exec', at('caf\\u00e9.ts')))).toBe('edit café.ts');
+    expect(toolDetail(call('exec', at('C:\\\\Users\\\\u\\\\a.ts')))).toBe('edit …/u/a.ts');
+    expect(toolDetail(call('exec', at("it\\'s.txt")))).toBe("edit it's.txt");
+    const cut = 'const p = "*** Begin Patch\\n*** Add File: /w/.cortex-worktrees/packet-1/docs/NEW.md\\n+line one\\n+line tw';
+    expect(toolDetail(call('exec', cut, cut))).toBe('add …/docs/NEW.md');
+  });
+
   it('keeps a Codex command readable when it arrives as JSON or cut short', () => {
     expect(toolDetail(call('exec_command', { cmd: 'npm test', workdir: '/w' }))).toBe('npm test');
     const cut = 'const r = await tools.exec_command({"cmd":"git log --oneline -5","workdir":"/w/.cortex-worktrees/packet-1","yield_ti';
     expect(toolDetail(call('exec', cut, cut))).toBe('git log --oneline -5');
+    expect(toolDetail(call('exec', 'await tools.exec_command({ cmd: "git status" })'))).toBe('git status');
+    expect(toolDetail(call('exec', "await tools.exec_command({ 'cmd': 'it\\'s' })"))).toBe("it's");
+    expect(toolDetail(call('exec', 'await tools.exec_command({"cmd":["bash","-lc","ls -a"],"workdir":"/w"})'))).toBe('bash -lc ls -a');
+    expect(toolDetail(call('exec', 'await tools.exec_command({"cmd":"git log --oneline -5 && sed -n'))).toBe('git log --oneline -5 && sed -n');
     // A JSON argument that mentions a tool program is still read as JSON.
     expect(toolDetail(call('Bash', '{"command":"grep tools.exec_command( src","timeo', 'x'))).toBe('grep tools.exec_command( src');
   });
