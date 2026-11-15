@@ -98,3 +98,130 @@ fn pr_status_many_checks_fits_zoomed_viewport_and_scrolls(cx: &mut TestAppContex
         );
     }
 }
+
+#[gpui::test]
+fn pr_status_resolve_prepares_thread_composer_without_losing_draft(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    surface.update(cx, |s, cx| {
+        s.fixture_pr_status(
+            json!({"number":128,"title":"Conflicts fixture","headSha":"abcdef012345",
+            "state":"open","mergeable":false,"baseRefName":"main","conflictingFiles":["src/a.rs"]}),
+        );
+        s.composer
+            .update(cx, |input, cx| input.set_text("Keep my draft", cx));
+        cx.notify();
+    });
+    click("composer-pr-pill", cx);
+    cx.simulate_keystrokes("escape");
+    cx.simulate_keystrokes("enter");
+    draw(cx);
+    click("composer-pr-resolve", cx);
+    surface.read_with(cx, |s, cx| {
+        assert!(
+            s.composer
+                .read(cx)
+                .text
+                .starts_with("Keep my draft\n\nMerge main")
+        );
+        assert!(s.composer.read(cx).text.contains("PR #128"));
+    });
+    assert!(cx.debug_bounds("composer-pr-card").is_none());
+}
+
+#[gpui::test]
+fn pr_status_zoomed_conflict_handoff_uses_the_same_thread_queue(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    let (thread, other) = surface.read_with(cx, |s, _| {
+        (
+            s.sessions
+                .iter()
+                .find(|session| session.id == "thoughts-composer-first")
+                .unwrap()
+                .clone(),
+            s.sessions
+                .iter()
+                .find(|session| session.id == "thoughts-composer-second")
+                .unwrap()
+                .clone(),
+        )
+    });
+    let before = fixture.client.queue(&thread).unwrap()["items"].clone();
+    let other_before = fixture.client.queue(&other).unwrap()["items"].clone();
+    surface.update(cx, |s, cx| {
+        s.fixture_pr_status(json!({"number":128,"title":"Many conflicts","headSha":"abcdef012345",
+            "state":"open","mergeable":false,"baseRefName":"main",
+            "conflictingFiles":(0..40).map(|index| format!("src/conflict-{index}.rs")).collect::<Vec<_>>()}));
+        s.composer.update(cx, |input, cx| input.set_text("", cx));
+        cx.notify();
+    });
+    click("composer-pr-pill", cx);
+    cx.simulate_keystrokes("escape enter");
+    cx.simulate_resize(gpui::size(px(500.), px(500.)));
+    cx.update(|window, cx| window.set_zoom(2., cx));
+    draw(cx);
+    let viewport = cx.update(|window, _| window.viewport_size());
+    let card = cx.debug_bounds("composer-pr-card").unwrap();
+    let resolve = cx
+        .debug_bounds("composer-pr-resolve")
+        .expect("resolve action");
+    assert!(
+        card.left() >= px(0.)
+            && card.top() >= px(0.)
+            && card.right() <= viewport.width
+            && card.bottom() <= viewport.height,
+        "conflict card must retain the parent viewport cap: {card:?} in {viewport:?}"
+    );
+    assert!(
+        resolve.top() >= card.top() && resolve.bottom() <= card.bottom(),
+        "resolve action must remain reachable below the scrolling conflicts: {resolve:?} in {card:?}"
+    );
+    cx.simulate_click(resolve.center().map(|v| v * 2.), Modifiers::default());
+    cx.run_until_parked();
+    draw(cx);
+    let prepared = surface.update_in(cx, |s, window, cx| {
+        assert_eq!(s.selected.as_deref(), Some(thread.id.as_str()));
+        assert!(s.composer.read(cx).focus.is_focused(window));
+        s.composer.read(cx).text.clone()
+    });
+    assert!(prepared.starts_with("Merge main into the branch for PR #128"));
+    assert!(cx.debug_bounds("composer-pr-card").is_none());
+    assert_eq!(
+        fixture.client.queue(&thread).unwrap()["items"],
+        before,
+        "preparation must not submit"
+    );
+    surface.update(cx, |s, cx| {
+        s.send_next = true;
+        cx.notify();
+    });
+    cx.simulate_keystrokes("enter");
+    for _ in 0..500 {
+        cx.run_until_parked();
+        draw(cx);
+        if surface.read_with(cx, |s, _| {
+            !s.saving
+                && s.queue["items"].as_array().is_some_and(|items| {
+                    items.iter().any(|item| item["payload"]["text"] == prepared)
+                })
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let saved = fixture.client.queue(&thread).unwrap();
+    assert!(
+        saved["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["payload"]["text"] == prepared),
+        "normal submission must persist the prepared request in its original thread: {saved}"
+    );
+    assert_eq!(fixture.client.queue(&other).unwrap()["items"], other_before);
+    assert_eq!(
+        surface.read_with(cx, |s, _| s.selected.clone()),
+        Some(thread.id)
+    );
+}
