@@ -20,8 +20,14 @@ export function copyRuntimeArchive(source: string, archive: string, signature: s
     stageRuntimeInputs(server);
     if (missingRuntime) rmSync(join(server, missingRuntime), { recursive: true });
     execFileSync('tar', ['czf', archive, '-C', root, 'o8.app']);
-    writeFileSync(signature, wrap(Buffer.concat([Buffer.from('Ed'), keyId,
-      sign(null, readFileSync(archive), privateKey)])));
+    const bytes = sign(null, readFileSync(archive), privateKey);
+    const trustedComment = 'synthetic runtime fixture';
+    const packet = Buffer.concat([Buffer.from('Ed'), keyId, bytes]);
+    const global = sign(null, Buffer.concat([bytes, Buffer.from(trustedComment)]), privateKey);
+    writeFileSync(signature, Buffer.from([
+      'untrusted comment: fixture', packet.toString('base64'),
+      `trusted comment: ${trustedComment}`, global.toString('base64'),
+    ].join('\n') + '\n').toString('base64'));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

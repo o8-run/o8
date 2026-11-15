@@ -22,6 +22,11 @@ export const CREATE_MISSION_TOOL: McpTool = {
           properties: {
             title: { type: 'string', description: 'Task summary / issue title.' },
             body: { type: 'string', description: 'Detailed description (optional).' },
+            allowedFiles: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional file scope for this task: repository-relative paths, or a directory with a trailing /**. Omit for the default repository-wide scope.',
+            },
           },
           required: ['title'],
         },
