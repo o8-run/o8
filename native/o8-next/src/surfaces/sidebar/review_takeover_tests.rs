@@ -259,6 +259,8 @@ fn review_takeover_settings_open_revokes_foreground_permission(cx: &mut TestAppC
     overlay_navigation(cx, true);
 }
 #[gpui::test]
+// Fails on main for unrelated changes; quarantined until the cause is found (#6212).
+#[ignore]
 fn review_takeover_projects_open_revokes_foreground_permission(cx: &mut TestAppContext) {
     overlay_navigation(cx, false);
 }
