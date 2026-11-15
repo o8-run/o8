@@ -25,6 +25,9 @@ pub(super) const SPEECH_DENIED: &str = "Speech recognition is off for o8. Allow 
 pub(super) const HELPER_STOPPED: &str = "The speech helper stopped. Try again.";
 pub(super) const ENDED_EARLY: &str = "Dictation ended before it was submitted.";
 pub(super) const BUSY: &str = "Another dictation is still active.";
+/// The locale a helper starts on (`currentLocaleIdentifier` in
+/// `speech_recognizer.swift`); clearing the saved locale goes back to it.
+const HELPER_LOCALE: &str = "en-US";
 
 pub(crate) enum Input {
     Start {
@@ -265,13 +268,10 @@ impl Engine {
             ready = self.command(&format!("input_device:{uid}"));
             self.device = saved.microphone;
         }
-        if ready
-            && let Some(locale) = saved
-                .locale
-                .filter(|locale| self.locale.as_ref() != Some(locale))
-        {
+        if ready && saved.locale != self.locale {
+            let locale = saved.locale.as_deref().unwrap_or(HELPER_LOCALE);
             ready = self.command(&format!("locale:{locale}"));
-            self.locale = Some(locale);
+            self.locale = saved.locale;
         }
         if ready && self.command(&format!("start:{id}")) {
             if let Some(run) = &mut self.run {
@@ -498,6 +498,11 @@ pub(super) fn finish_text(
     if text.is_empty() {
         return Update::Empty;
     }
+    // A spoken cancel never goes out, even when polish (which also checks
+    // it) cannot be reached.
+    if spoken_cancel(&text) {
+        return Update::Dropped;
+    }
     progress(Phase::Polishing);
     let text = match finish.polish(&text, repo, prefs) {
         Ok(polished) if polished.cancelled => return Update::Dropped,
@@ -507,4 +512,24 @@ pub(super) fn finish_text(
     };
     // The saved replacements apply whether or not polish ran, as on the desktop.
     Update::Done(apply_replacements(&text, &prefs.replacements))
+}
+
+/// A whole recording that only cancels: the composer's own phrases
+/// (`src/lib/dictation/voice-commands.ts`), with the period Apple may add.
+pub(super) fn spoken_cancel(text: &str) -> bool {
+    let text = text.trim();
+    let text = text
+        .strip_suffix('.')
+        .unwrap_or(text)
+        .trim_end()
+        .to_lowercase();
+    let words: Vec<&str> = text.split_whitespace().collect();
+    matches!(
+        words.as_slice(),
+        ["cancel"]
+            | ["nevermind"]
+            | ["never", "mind"]
+            | ["scratch", "that"]
+            | ["forget", "that" | "it"]
+    )
 }
