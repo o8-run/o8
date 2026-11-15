@@ -201,9 +201,10 @@ export function newestLaneStates(lanes: unknown): Map<string, string> {
 const SUMMARY_GROUPS: Record<string, 'running' | 'needs' | 'failed' | 'stopped' | 'done'> = {
   launching: 'running', running: 'running', recovering: 'running',
   awaiting_input: 'needs', awaiting_orchestrator: 'needs', awaiting_human: 'needs',
-  failed: 'failed', archived: 'failed',
+  failed: 'failed',
   paused: 'stopped', idle: 'stopped',
-  reviewing: 'done', merging: 'done', completed: 'done',
+  // A merged or dismissed lane ends archived: finished, with nothing left to do.
+  reviewing: 'done', merging: 'done', completed: 'done', archived: 'done',
 };
 
 /**
@@ -226,9 +227,12 @@ export function watcherSummary(seen: Iterable<string>, states: ReadonlyMap<strin
   ].filter(Boolean);
   const title = WATCHER_LABEL;
   if (parts.length === 0) return { state: 'idle', title, msg: 'No workers yet' };
-  const state = counts.needs || counts.failed ? 'error' : counts.running ? 'working' : 'done';
+  const state = counts.needs || counts.failed ? 'error' : counts.running ? 'working' : counts.done ? 'done' : 'idle';
   return { state, title, msg: parts.join(' · ') };
 }
+
+/** The watcher's mark while o8 does not answer, so old counts do not stand as current. */
+export const WATCHER_UNREACHABLE: TerminalStatusReport = { state: 'idle', title: WATCHER_LABEL, msg: 'Cannot reach o8; trying again' };
 
 /**
  * The command a packet's pane runs: this CLI, following that packet's

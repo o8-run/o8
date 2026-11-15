@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CliError, EXIT } from '../api';
 import {
-  confirmOpenedPanes, followCommand, newestLaneStates, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, prepareWatcherTab, readAnswer, runningPackets, settledAfterRound, watchChanges, watcherSummary, watchRetries, workerTerminals,
+  confirmOpenedPanes, followCommand, newestLaneStates, observeCommand, openTerminalPanes, paneLabel, parsePanesArgs, prepareWatcherTab, readAnswer, runningPackets, settledAfterRound, watchChanges, WATCHER_UNREACHABLE, watcherSummary, watchRetries, workerTerminals,
   type PaneExec,
 } from './terminal-panes';
 
@@ -668,5 +668,20 @@ describe('the watcher tab mark', () => {
     expect(watcherSummary(['b', 'c', 'd', 'e'], states)).toEqual({ state: 'error', title: 'o8 watcher', msg: '2 need you · 1 failed · 1 paused' });
     // A state o8 does not know yet is left out, not guessed.
     expect(watcherSummary(['x'], new Map([['x', 'teleporting']]))).toEqual({ state: 'idle', title: 'o8 watcher', msg: 'No workers yet' });
+  });
+});
+
+describe('the watcher tab mark after a packet stops', () => {
+  it('counts a merged or dismissed packet as done, so the tab does not stay red', () => {
+    expect(watcherSummary(['m'], new Map([['m', 'archived']]))).toEqual({ state: 'done', title: 'o8 watcher', msg: '1 done' });
+  });
+
+  it('is idle, not done, when every packet it saw is paused', () => {
+    expect(watcherSummary(['p'], new Map([['p', 'paused']]))).toEqual({ state: 'idle', title: 'o8 watcher', msg: '1 paused' });
+    expect(watcherSummary(['p', 'q'], new Map([['p', 'paused'], ['q', 'completed']]))).toEqual({ state: 'done', title: 'o8 watcher', msg: '1 paused · 1 done' });
+  });
+
+  it('says o8 cannot be reached instead of keeping old counts', () => {
+    expect(WATCHER_UNREACHABLE).toEqual({ state: 'idle', title: 'o8 watcher', msg: 'Cannot reach o8; trying again' });
   });
 });

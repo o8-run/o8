@@ -41,7 +41,7 @@ Rex marks a tab while a program in it reports its state. o8 reports from:
 | Where | Working | Then |
 |---|---|---|
 | A packet's pane | while its worker runs | error when the packet failed, is blocked on a decision, or was archived; done for any other stop, such as awaiting review |
-| The `o8 watcher` pane (`o8 terminal panes --watch`) | while a packet it has seen runs | a count of the packets it has seen run since it started, by where each stands now, such as `2 running · 1 needs you`; error when one waits on you or failed, done when all stopped; idle ("No workers yet") before the first |
+| The `o8 watcher` pane (`o8 terminal panes --watch`) | while a packet it has seen runs | a count of the packets it has seen run since it started, by where each stands now, such as `2 running · 1 needs you`; error when one waits on you or failed; done when none runs and at least one finished (a merged or dismissed packet counts as done); idle before the first ("No workers yet"), when only paused ones are left, and while o8 does not answer ("Cannot reach o8") |
 | `o8 mission dispatch --watch`, `o8 mission wait` | while it waits | done when the packet reaches review or release; error when it fails, blocks or is archived; cleared on a timeout or any other wake |
 | `o8 mission tail` | while packets run | one mark per packet (up to 60), and one for the mission |
 | `o8 chat` | while a turn runs | done when a reply to a message you sent from that chat is ready; error when the connection drops or the chat shows an error |
