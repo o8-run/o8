@@ -26,6 +26,8 @@ mod engine;
 pub(crate) mod fake;
 mod helper;
 mod history;
+#[cfg(all(test, target_os = "macos"))]
+mod live_tests;
 mod prefs;
 mod server;
 #[cfg(test)]
