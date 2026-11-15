@@ -58,6 +58,12 @@ describe('mission existing-branch policy', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       paths.push(new URL(String(input)).pathname);
       bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+      // The dispatch route answers an admitted dispatch as the real server does.
+      if (new URL(String(input)).pathname === '/api/orchestrator/dispatch') {
+        return new Response(JSON.stringify({ ok: true, result: { initiated: true, async: true, missionId: 'mission-3', status: 'queued', queued: [] } }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
       return new Response(JSON.stringify({
         ok: true,
         result: {
