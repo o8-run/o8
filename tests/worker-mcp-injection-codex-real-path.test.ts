@@ -183,7 +183,7 @@ describe.sequential('Codex worker MCP injection real path', () => {
     process.env.O8_CODEX_BIN = process.execPath;
     process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
     process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
-    delete process.env.O8_WORKER_SANDBOX;
+    process.env.O8_WORKER_SANDBOX = 'off';
 
     spawnMock.mockImplementation(() => ({
       pid: 424_242,

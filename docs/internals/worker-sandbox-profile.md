@@ -1,8 +1,8 @@
 # Worker sandbox compatibility profile
 
-o8 does not sandbox dispatched workers by default, and that is a stated posture rather than an omission — see [SECURITY.md](../../SECURITY.md), "How dispatched workers run". `O8_WORKER_SANDBOX` opts in, and an enabled sandbox is fail-closed.
+On macOS, o8 runs dispatched workers in this sandbox by default, and `O8_WORKER_SANDBOX=off` turns it off. On Linux it is off by default, and `O8_WORKER_SANDBOX=on` turns it on. An enabled sandbox is fail-closed; see [SECURITY.md](../../SECURITY.md), "How dispatched workers run".
 
-This document is the map for anyone who wants to make that sandbox good enough to be a default: what a real worker actually touches, and why a naive profile breaks it. Contributions welcome — see [issue #1657](https://github.com/o8-run/o8/issues/1657).
+This document is the map for anyone who wants to make that sandbox good enough to be the default everywhere: what a real worker actually touches, and why a naive profile breaks it. Contributions welcome — see [issue #1657](https://github.com/o8-run/o8/issues/1657).
 
 ## Headline findings
 
@@ -53,8 +53,8 @@ Known differences from the macOS profile:
 - Denials surface as `EROFS`/`ENOENT` rather than seatbelt reports, so they do not produce `sandbox_denied` lane events yet.
 - Shared Git metadata is mounted read-only, then `objects/`, the worker's own worktree directory and its branch's ref directory (for example `refs/heads/inline`) are mounted read-write. Git updates a ref by renaming a lock file beside it, so the whole ref directory has to be writable, including other branches in it. A worker branch directly under `refs/heads` is refused. A mount needs an existing target, so missing protected entries (`objects/info`, the worktree's `config.worktree`) are created empty before launch.
 
-## Dogfood exit criteria
+## Dogfood criteria for the macOS default
 
-Run a full dispatch cycle with `O8_WORKER_SANDBOX=1` on both Apple Silicon and Intel macOS. Include Node with npm and pnpm, a Cargo packet, Codex and Claude Code workers, a packet that invokes `o8 packet scope/report/commit/approve-merge`, dependency installation, a worktree commit, and a deliberate denied read outside the packet.
+The macOS default rests on this run. Repeat it after any profile change. Run a full dispatch cycle with the sandbox on, on both Apple Silicon and Intel macOS. Include Node with npm and pnpm, a Cargo packet, Codex and Claude Code workers, a packet that invokes `o8 packet scope/report/commit/approve-merge`, dependency installation, a worktree commit, and a deliberate denied read outside the packet.
 
-Watch for persisted `sandbox_denied` lane events. Each event must name the blocked operation and resource, and the owned-session summary must carry the same operator-facing explanation. Treat repeated denials for global installs or authenticated `gh` as expected policy decisions; treat denials for worktree Git metadata, local package caches, test toolchains, model session state, or the local o8 API as profile bugs to resolve before considering a default flip.
+Watch for persisted `sandbox_denied` lane events. Each event must name the blocked operation and resource, and the owned-session summary must carry the same operator-facing explanation. Treat repeated denials for global installs or authenticated `gh` as expected policy decisions; treat denials for worktree Git metadata, local package caches, test toolchains, model session state, or the local o8 API as profile bugs to fix before release.

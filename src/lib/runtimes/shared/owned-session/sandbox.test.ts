@@ -43,20 +43,32 @@ afterEach(() => {
   }
 });
 
-describe('workerSandboxEnabled — feature gate default OFF', () => {
-  it('is off when unset (dispatch must never brick on day one)', () => {
+describe('workerSandboxEnabled — feature gate, on by default on macOS', () => {
+  it('is on when unset on macOS and off when unset elsewhere', () => {
     delete process.env.O8_WORKER_SANDBOX;
-    expect(workerSandboxEnabled()).toBe(false);
+    expect(workerSandboxEnabled('darwin')).toBe(true);
+    expect(workerSandboxEnabled('linux')).toBe(false);
+    expect(workerSandboxEnabled('win32')).toBe(false);
   });
 
-  it('accepts on/1/true/yes and rejects off/anything else', () => {
-    for (const on of ['on', '1', 'true', 'yes', 'ON', 'Yes']) {
-      process.env.O8_WORKER_SANDBOX = on;
-      expect(workerSandboxEnabled()).toBe(true);
+  it('turns on with on/1/true/yes and off with off/0/false/no on every platform', () => {
+    for (const platform of ['darwin', 'linux'] as const) {
+      for (const on of ['on', '1', 'true', 'yes', 'ON', 'Yes']) {
+        process.env.O8_WORKER_SANDBOX = on;
+        expect(workerSandboxEnabled(platform)).toBe(true);
+      }
+      for (const off of ['off', '0', 'false', 'no', 'OFF', ' No ']) {
+        process.env.O8_WORKER_SANDBOX = off;
+        expect(workerSandboxEnabled(platform)).toBe(false);
+      }
     }
-    for (const off of ['off', '0', 'false', 'no', '', 'maybe']) {
-      process.env.O8_WORKER_SANDBOX = off;
-      expect(workerSandboxEnabled()).toBe(false);
+  });
+
+  it('keeps the platform default for an empty or unknown value', () => {
+    for (const value of ['', 'maybe']) {
+      process.env.O8_WORKER_SANDBOX = value;
+      expect(workerSandboxEnabled('darwin')).toBe(true);
+      expect(workerSandboxEnabled('linux')).toBe(false);
     }
   });
 });

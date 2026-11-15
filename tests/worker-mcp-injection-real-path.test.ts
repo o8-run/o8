@@ -169,7 +169,7 @@ describe.sequential('worker MCP injection real path', () => {
     process.env.O8_CLAUDE_CODE_BIN = process.execPath;
     process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
     process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
-    delete process.env.O8_WORKER_SANDBOX;
+    process.env.O8_WORKER_SANDBOX = 'off';
     process.env.ANTHROPIC_API_KEY = '';
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'synthetic-mcp-fixture';
 
@@ -320,7 +320,8 @@ describe.sequential('worker MCP injection real path', () => {
     });
     const replacement = continued.workerMcp;
     expect(continued.args[continued.args.indexOf('--mcp-config') + 1]).toBe(replacement.configPath);
-    expect(JSON.parse(continued.stdinPayload!).message.content).toBe('Verify the attached tools again');
+    // A verified o8 command on PATH appends its own note after the prompt.
+    expect(JSON.parse(continued.stdinPayload!).message.content.split('\n\n')[0]).toBe('Verify the attached tools again');
     expect(existsSync(configPath)).toBe(false);
     expect(existsSync(staleConfigPath)).toBe(false);
     expect(replacement.configPath).toBe(path.join(
@@ -376,13 +377,12 @@ describe.sequential('worker MCP injection real path', () => {
       prompt: skippedPrompt,
       actor: 'orchestrator',
     });
-    // The opt-in OS sandbox is available only on macOS. Other hosts must
-    // refuse this second launch before spawning a worker.
-    if (process.platform !== 'darwin') {
-      expect(skippedLaunch.ok).toBe(false);
-      expect(skippedLaunch.note).toContain('Worker sandbox is macOS-only');
+    // A host that cannot provide the OS sandbox must refuse this second
+    // launch before spawning a worker.
+    if (process.platform !== 'darwin' && !skippedLaunch.ok) {
+      expect(skippedLaunch.note).toContain('could not be provided');
       expect(spawnMock.mock.calls.length).toBe(skippedCall);
-      delete process.env.O8_WORKER_SANDBOX;
+      process.env.O8_WORKER_SANDBOX = 'off';
       return;
     }
     expect(skippedLaunch.ok, JSON.stringify(skippedLaunch)).toBe(true);
@@ -398,7 +398,7 @@ describe.sequential('worker MCP injection real path', () => {
         }),
       }),
     ]));
-    delete process.env.O8_WORKER_SANDBOX;
+    process.env.O8_WORKER_SANDBOX = 'off';
   }, 120_000);
 
   it('ignores mission-supplied server fields at the real handler boundary', async () => {

@@ -39,6 +39,10 @@ if (!fs || !os || !path) {
   throw new Error('Vitest setup requires Node built-in modules.');
 }
 
+// The worker sandbox is on by default on macOS. Tests turn it on explicitly,
+// so an unset switch means off here on every platform.
+if (process.env.O8_WORKER_SANDBOX === undefined) process.env.O8_WORKER_SANDBOX = 'off';
+
 if (!process.env.O8_TEST_DATA_DIR_PINNED) {
   const runRoot = process.env.O8_TEST_RUN_DATA_ROOT?.trim();
   const configuredDir = process.env.CORTEX_IDE_DATA_DIR?.trim();

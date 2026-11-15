@@ -22,8 +22,9 @@
  * canonical policy is rendered as a bubblewrap mount namespace instead (see
  * `sandbox-linux.ts`) without touching the spawn chokepoint.
  *
- * FEATURE GATE: off by default. Enable with `O8_WORKER_SANDBOX=on` (or
- * 1/true/yes). When ON the semantics are FAIL-CLOSED — if the profile cannot be
+ * FEATURE GATE: on by default on macOS, off by default elsewhere. Set
+ * `O8_WORKER_SANDBOX=off` (or 0/false/no) to turn it off, or on (1/true/yes)
+ * to turn it on. When ON the semantics are FAIL-CLOSED — if the profile cannot be
  * built (unsupported host, missing `sandbox-exec`/`bwrap`, unwritable profile) the
  * caller refuses to spawn rather than silently running the worker unsandboxed.
  */
@@ -57,14 +58,19 @@ const execFileAsync = promisify(execFile);
 /** Absolute path to Apple's seatbelt runner. */
 export const SANDBOX_EXEC_PATH = '/usr/bin/sandbox-exec';
 
+const SANDBOX_ON = new Set(['1', 'on', 'true', 'yes']);
+const SANDBOX_OFF = new Set(['0', 'off', 'false', 'no']);
+
 /**
- * Is Tier-2 worker sandboxing enabled? Off by default so day-one dispatch can
- * never be bricked; the operator opts in via `O8_WORKER_SANDBOX`.
+ * Is Tier-2 worker sandboxing enabled? On by default on macOS and off by
+ * default elsewhere. `O8_WORKER_SANDBOX=off` (or 0/false/no) turns it off and
+ * on/1/true/yes turns it on; any other value keeps the platform default.
  */
-export function workerSandboxEnabled(): boolean {
-  const raw = process.env.O8_WORKER_SANDBOX?.trim().toLowerCase();
-  if (!raw) return false;
-  return raw === '1' || raw === 'on' || raw === 'true' || raw === 'yes';
+export function workerSandboxEnabled(platform: NodeJS.Platform = process.platform): boolean {
+  const raw = process.env.O8_WORKER_SANDBOX?.trim().toLowerCase() ?? '';
+  if (SANDBOX_ON.has(raw)) return true;
+  if (SANDBOX_OFF.has(raw)) return false;
+  return platform === 'darwin';
 }
 
 /** SBPL string-literal escaping — backslashes and double-quotes. */

@@ -96,5 +96,5 @@ export function detectRunSandboxDenial(runtime: string, stdout: string, stderr: 
 
 export function sandboxDenialOperatorMessage(runtime: string, denial: SandboxDenial): string {
   return `${runtime} worker sandbox blocked ${denial.operation} access to ${denial.resource}. `
-    + 'Review the opt-in sandbox profile before retrying the blocked operation.';
+    + 'Review the worker sandbox profile before retrying the blocked operation.';
 }

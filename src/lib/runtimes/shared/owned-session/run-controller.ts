@@ -449,8 +449,8 @@ export function createOwnedRunController({
       }
     }
 
-    // A read-only packet FORCES the sandbox: `O8_WORKER_SANDBOX` is an opt-in
-    // for normal packets and defaults off. See resolveReadOnlySandboxPlan.
+    // A read-only packet FORCES the sandbox: `O8_WORKER_SANDBOX` decides it for
+    // normal packets (on by default on macOS). See resolveReadOnlySandboxPlan.
     const readOnlySandbox = resolveReadOnlySandboxPlan(session);
     const sandboxEnabled = workerSandboxEnabled() || readOnlySandbox.enforced;
     const credentialPolicy = credentialPolicyFingerprint(runtimeId);
@@ -523,7 +523,7 @@ export function createOwnedRunController({
         await preparedLaunch.workerO8?.cleanupUnstarted(true);
         const why = readOnlySandbox.enforced
           ? 'this is a read-only packet, which requires an OS-enforced sandbox'
-          : 'worker sandbox is enabled (O8_WORKER_SANDBOX)';
+          : 'worker sandbox is on (O8_WORKER_SANDBOX; set it to off to dispatch unsandboxed)';
         const message = error instanceof SandboxUnavailableError
           ? `${humanLabel} dispatch refused: ${why} but it could not be provided — ${error.message}`
           : `${humanLabel} dispatch refused: worker sandbox preparation failed — ${(error as Error).message}`;

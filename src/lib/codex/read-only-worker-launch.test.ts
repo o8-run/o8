@@ -265,7 +265,7 @@ describe('owned Codex read-only argv', () => {
       // The argv policy is Codex's own; the kernel denial is o8's. A read-only
       // packet gets BOTH, and the seatbelt layer is not gated on the opt-in
       // env var the way a normal packet's hardening is.
-      delete process.env.O8_WORKER_SANDBOX;
+      process.env.O8_WORKER_SANDBOX = 'off';
       const args = await spawnedArgs('read-only');
       const sandboxIdx = args.indexOf(SANDBOX_EXEC_PATH);
       expect(sandboxIdx).toBeGreaterThan(-1);
@@ -281,7 +281,7 @@ describe('owned Codex read-only argv', () => {
   it.skipIf(process.platform !== 'darwin')(
     'does not force the OS sandbox for a normal write packet (control)',
     async () => {
-      delete process.env.O8_WORKER_SANDBOX;
+      process.env.O8_WORKER_SANDBOX = 'off';
       const args = await spawnedArgs();
       expect(args).not.toContain(SANDBOX_EXEC_PATH);
     },
