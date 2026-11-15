@@ -16,6 +16,9 @@ const { getWorktreeManager } = await import('@/lib/worktree/launch');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const reviewRoute = await import('@/app/api/orchestrator/review/route');
 const stateRoute = await import('@/app/api/orchestrator/review-state/route');
+const lanesRoute = await import('@/app/api/lanes/route');
+const { runPacketReview } = await import('../cli/src/commands/packet/review');
+const { handleSubmitReview } = await import('@/lib/mcp/operator-handlers/mission');
 const roots: string[] = [];
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
 afterEach(() => vi.unstubAllEnvs());
@@ -136,9 +139,6 @@ it('rejects incomplete or unbounded observations through the review route', asyn
 it('CLI and MCP submit and report the same structured review through owned HTTP routes', async () => {
   const f = await fixture();
   const { createServer } = await import('node:http');
-  const lanesRoute = await import('@/app/api/lanes/route');
-  const { runPacketReview } = await import('../cli/src/commands/packet/review');
-  const { handleSubmitReview } = await import('@/lib/mcp/operator-handlers/mission');
   const server = createServer(async (req, res) => {
     try {
       const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.from(chunk));

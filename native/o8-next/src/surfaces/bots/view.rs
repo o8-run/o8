@@ -321,7 +321,7 @@ impl Render for BotThread {
                                 .border_color(theme().border)
                                 .hover(|v| v.bg(theme().hover))
                                 .child("Open in app")
-                                .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
+                                .on_click(cx.listener(move |_, _, _, cx| crate::external_open::url(cx, &url))),
                         )
                     }),
             )

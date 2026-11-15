@@ -154,12 +154,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (!isByok && currentCount >= FREE_TIER_DAILY_LIMIT) {
       return jsonError(
         'free_tier_rate_limit',
-        'You have used your 10 free chat turns for today. Upgrade to continue, or switch to Bring your own key.',
+        'You have used your 10 free chat turns for today. Switch to Bring your own key in desktop Settings to continue.',
         429,
         {
           limit: FREE_TIER_DAILY_LIMIT,
           remaining: 0,
-          upgradeUrl: '/dashboard?settings=api-keys',
         },
       );
     }

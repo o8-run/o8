@@ -99,8 +99,7 @@ describe('test factory classification', () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  it.each(['tests/next-speed-receipt-real-path.test.ts', 'tests/transcript-tab-reuse-real-path.test.ts',
-    'tests/outside-transcript-background-real-path.test.ts'])('records the existing indirect Chromium requirement in %s', file => {
+  it.each(['tests/next-parity-harness-real-path.test.ts', 'tests/next-parity-preflight-real-path.test.ts'])('records the existing indirect Chromium requirement in %s', file => {
     expect(classifyTestSource(file, readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'))).toContain('browser');
   });
 

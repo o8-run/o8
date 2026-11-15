@@ -128,9 +128,10 @@ export async function mergeReviewPrerequisites(lane: Lane, packet: OrchestratorP
   if (packet?.review?.approved === false) {
     checks.push({ name: 'packet-review', verdict: 'fail', detail: 'Packet review is not approved.', actions: reviewActions });
   }
-  const { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } = await import('@/lib/lane/dogfood-guard');
-  checks.push({ name: 'pr-only', verdict: dogfoodPrOnlyActive() ? 'fail' : 'pass', detail: DOGFOOD_PR_ONLY_NOTE,
-    actions: ['Stop the autonomous PR-only loop through its operator control before requesting a direct merge.'] });
+  const { prFirstMergeRefusal } = await import('@/lib/lane/pr-first-delivery');
+  const prOnlyNote = await prFirstMergeRefusal(lane);
+  checks.push({ name: 'pr-only', verdict: prOnlyNote ? 'fail' : 'pass', detail: prOnlyNote ?? 'Direct integration is enabled.',
+    actions: prOnlyNote ? [prOnlyNote] : [] });
   const actions = [...contractActions, ...checks.filter(check => check.verdict === 'fail').flatMap(check => check.actions ?? [])];
   const requirements: MergeReviewRequirements = { contractKind, contractVersion: contract?.version ?? null,
     captured: Boolean(contract), requirementIds: contract?.requirements.map(r => r.id) ?? [],

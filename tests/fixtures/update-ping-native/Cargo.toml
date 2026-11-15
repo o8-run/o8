@@ -22,6 +22,7 @@ chrono = "0.4"
 log = "0.4"
 tauri-plugin-notification = "2"
 o8-restart-safety = { path = "../../../crates/o8-restart-safety" }
+o8-launch-core = { path = "../../../crates/o8-launch-core" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = "0.3"

@@ -15,6 +15,19 @@ import { withPacketLifecycleMutationLock } from './lifecycle-mutation-lock';
 import { samePrRepairRepo } from './pr-repair-owner';
 import { correctWorkers, listCorrectableWorkers, readWorkerCorrection } from './worker-corrections';
 import type { ComposerQueueTarget } from './composer-queue-types';
+import { saveCorrectionReviewSource } from './correction-review';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
+
+export const REVIEW_CORRECTION_MAXIMUM = 2;
+
+/** Shared read of the existing budget; never creates a correction. */
+export function readReviewCorrectionBounds(packet: import('./types').OrchestratorPacket) {
+  const scope = `review-author-${createHash('sha256').update(packet.id).digest('hex').slice(0, 24)}-`;
+  const spent = (getSqlite().prepare('SELECT COUNT(*) AS count FROM worker_corrections WHERE id LIKE ?')
+    .get(`${scope}%`) as { count: number }).count;
+  const existingRepairs = Math.max(packet.attemptCount ?? 0, packet.typecheckAutoRetries ?? 0, packet.recoveryCount ?? 0);
+  return { maximum: REVIEW_CORRECTION_MAXIMUM, used: spent + existingRepairs };
+}
 
 export interface ReviewCorrectionSource {
   packetId: string;
@@ -56,7 +69,6 @@ function correctionIdentity(review: ReviewCorrectionSource) {
 function prepare(input: ReviewInput) {
   const target = validateComposerQueueTarget(input);
   const review = source(input.review);
-  const { scope } = correctionIdentity(review);
   const currentState = () => {
     const packet = readOrchestratorControlPlaneState().packets.find(item => item.id === review.packetId)
       ?? findMissionRegistryEntryByPacketId(review.packetId)?.mission.packets.find(item => item.id === review.packetId);
@@ -91,10 +103,8 @@ function prepare(input: ReviewInput) {
     }
   };
   const { packet } = currentState();
-  const spent = (getSqlite().prepare('SELECT COUNT(*) AS count FROM worker_corrections WHERE id LIKE ?')
-    .get(`${scope}%`) as { count: number }).count;
-  const existingRepairs = Math.max(packet.attemptCount ?? 0, packet.typecheckAutoRetries ?? 0, packet.recoveryCount ?? 0);
-  if (spent + existingRepairs >= 2) throw new Error('The two-round correction budget is exhausted. Inspect prior attempts before deciding how to continue.');
+  const bounds = readReviewCorrectionBounds(packet);
+  if (bounds.used >= bounds.maximum) throw new Error('The two-round correction budget is exhausted. Inspect prior attempts before deciding how to continue.');
   const findings = packet.review!.findings.filter(finding => finding.resolution === 'deferred');
   if (!findings.length) throw new Error('This review has no unresolved findings to send.');
   const context = [
@@ -107,7 +117,7 @@ function prepare(input: ReviewInput) {
   const maxNoteLength = Math.min(1000, Math.max(0, 2000 - baseMessage.length - `\n\n${OPERATOR_NOTE_LABEL}\n`.length));
   const note = operatorNote(input.note, maxNoteLength);
   const message = [...context, ...(note ? [boundedNote(note)] : []), REVIEW_SCOPE_LIMITS].join('\n\n');
-  return { message, maxNoteLength, currentState, checkCode };
+  return { message, maxNoteLength, currentState, checkCode, findings };
 }
 
 /** Read-only availability for the saved rejection; POST repeats every check under its lock. */
@@ -183,10 +193,13 @@ export async function correctAuthorFromReview(input: ReviewInput) {
       }
       return prior;
     }
-    const { message, currentState, checkCode } = prepare(input);
+    const { message, currentState, checkCode, findings } = prepare(input);
+    const { lane } = currentState();
+    const registeredRepo = await findRepoByLocalPath(target.repoPath);
     return correctWorkers({ ...target, id, payload: { message, mode: 'send', holdMerges: false,
       targets: [{ surfaceId: review.surfaceId, runId: review.runId }] } }, {
       state: () => { currentState(); }, code: checkCode,
+      persist: () => saveCorrectionReviewSource(id, lane, { ...review, ...target, findings, repositoryUuid: registeredRepo?.id ?? null }),
     });
   });
 }

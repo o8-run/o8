@@ -64,7 +64,12 @@ function testBinary(options) {
   if (files.length !== 1) throw new Error('Native test executable missing');
   return files[0];
 }
+// The browser console was removed (#6163), so the real web host now serves a
+// static notice. Without an explicit --webHost the run captures the native side
+// only and notes why; a supplied host (the harness tests) still runs both sides.
+const WEB_SIDE_SKIPPED = 'web side skipped: the browser console was removed (#6163)';
 export async function capture(manifest, options) {
+  const webSide = Boolean(options.webHost);
   const selected = options.only ? manifest.surfaces.filter(row => row.id === options.only) : manifest.surfaces;
   if (!selected.length) throw new CaptureError(`Unknown surface: ${options.only}`);
   if (!process.env.DISPLAY || !existsSync(options.binary)) throw new Error('Build o8 next and run inside a private Xvfb display');
@@ -86,22 +91,26 @@ export async function capture(manifest, options) {
     return reason;
   };
   try {
-    web = launch(process.execPath, ['--import', 'tsx', options.webHost], {
-      ...env, NODE_ENV: 'development', NEXT_PHASE: 'phase-production-build', O8_DATA_DIR: data,
-      CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'web.db'),
-    }, join(logs, 'web.log'), true);
-    webReceipt = receipt(web);
-    const binary = testBinary(options);
-    await until(web, () => webReceipt.value.webOrigin, 120_000);
-    browser = await chromium.launch({ executablePath: options.browser || chromium.executablePath(), headless: true,
-      args: ['--no-sandbox', '--disable-background-networking'] });
-    // Compile the real route before starting two-minute fixture hosts.
-    const warm = await fetch(webReceipt.value.webOrigin + '/dashboard', { signal: AbortSignal.timeout(240_000) });
-    if (!warm.ok) {
-      return selected.flatMap(scenario => manifest.sizes.map(size => ({ surface: scenario.id, size,
-        crash: failed(scenario, size, new CaptureError(`surface route HTTP ${warm.status}`)) })));
+    if (webSide) {
+      web = launch(process.execPath, ['--import', 'tsx', options.webHost], {
+        ...env, NODE_ENV: 'development', NEXT_PHASE: 'phase-production-build', O8_DATA_DIR: data,
+        CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'web.db'),
+      }, join(logs, 'web.log'), true);
+      webReceipt = receipt(web);
     }
-    await warm.arrayBuffer();
+    const binary = testBinary(options);
+    if (webSide) {
+      await until(web, () => webReceipt.value.webOrigin, 120_000);
+      browser = await chromium.launch({ executablePath: options.browser || chromium.executablePath(), headless: true,
+        args: ['--no-sandbox', '--disable-background-networking'] });
+      // Compile the real route before starting two-minute fixture hosts.
+      const warm = await fetch(webReceipt.value.webOrigin + '/dashboard', { signal: AbortSignal.timeout(240_000) });
+      if (!warm.ok) {
+        return selected.flatMap(scenario => manifest.sizes.map(size => ({ surface: scenario.id, size,
+          crash: failed(scenario, size, new CaptureError(`surface route HTTP ${warm.status}`)) })));
+      }
+      await warm.arrayBuffer();
+    } else console.log(WEB_SIDE_SKIPPED);
     for (const scenario of selected) {
       const host = launch(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
         'scripts/next/dev-server.ts', '--shell', '--parity', ...scenario.flags], env, join(logs, `${scenario.id}-host.log`), true);
@@ -135,6 +144,12 @@ export async function capture(manifest, options) {
             const receipt = JSON.parse(readFileSync(join(root, 'native-metrics.json'), 'utf8'));
             if (receipt.errors?.length) throw new CaptureError('native capture is an error frame', JSON.stringify(receipt.errors));
             entry.native = receipt.metrics;
+            if (!webSide) {
+              entry.notes = [WEB_SIDE_SKIPPED, ...(scenario.remaining ? [scenario.remaining] : [])];
+              captures.push(entry);
+              writeFileSync(join(options.output, 'captures.json'), JSON.stringify(captures, null, 2) + '\n');
+              continue;
+            }
             const webResult = await captureWeb(browser, webReceipt.value.webOrigin, fixture, scenario, size, manifest.elements, join(directory, 'web.png'));
             entry.web = webResult.measured;
             entry.notes = [...webResult.missing, ...(scenario.remaining ? [scenario.remaining] : [])];

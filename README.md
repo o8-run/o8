@@ -7,22 +7,33 @@
 
 # o8
 
-[![CI](https://github.com/o8-run/o8/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/o8-run/o8/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/o8-run/o8)](https://github.com/o8-run/o8/releases)
+[![CI](https://github.com/o8-run/o8/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/o8-run/o8/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/o8-run/o8)](https://github.com/o8-run/o8/releases) [![License: MIT](https://img.shields.io/github/license/o8-run/o8)](./LICENSE) [![Stars](https://img.shields.io/github/stars/o8-run/o8?style=flat)](https://github.com/o8-run/o8/stargazers) [![Discord](https://img.shields.io/badge/discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/TFK2x9A5WS) [![Follow @o8dotrun on X](https://img.shields.io/badge/follow-%40o8dotrun-000000?logo=x&logoColor=white)](https://x.com/o8dotrun)
 
 **Your agents write the code. o8 reviews it, sends it back until it's right, and merges it.**
 
 o8 is a free, open-source review and merge layer for coding agents. Write code wherever you like: T3 Code, Codex, Claude Code, Cursor, or your own editor. o8 takes the work in, and an independent agent, ideally a different model, reviews the actual diff. o8 sends the findings back to the author, re-reviews the fix, and merges the approved commit with a receipt. It runs on one machine, usually your biggest, and serves every tool and machine you connect.
 
-[**Download for macOS**](https://o8.run/download) · [Linux](#linux) · [Build from source](#from-source)
+[**Download for macOS**](https://o8.run/download) · [Linux](#linux) · [Build from source](#from-source) · [Follow @o8dotrun for updates](https://x.com/o8dotrun)
 
-![A session reviews the working tree, gives its verdict, commits when asked, and shows the log](./assets/review-and-commit.gif)
+Featured in [Awesome Mac](https://github.com/jaywcjlove/awesome-mac) and [Awesome GPUI](https://github.com/zed-industries/awesome-gpui).
+
+[![The o8 launch film: a week of commits pours past, a second agent reads the real diff and gives each change a verdict, one change is sent back, and only the approved commit merges](./assets/launch-film.gif)](https://x.com/marquisehurtt/status/2121680773774262489)
+
+[Watch the film with sound](https://x.com/marquisehurtt/status/2121680773774262489)
+
+<details>
+<summary>Play the video here</summary>
+
+https://github.com/user-attachments/assets/4dba20b4-58d6-4f1a-b65d-911e7c4ebfa4
+
+</details>
 
 - **Independent review.** The agent that wrote the code never approves it. A separate reviewer reads the real diff, and its approval is tied to the exact commit it reviewed.
 - **Findings go back to the author.** Rejected work returns to the agent that wrote it, with the saved findings. Each handoff has a receipt, corrections are capped at two rounds, and a stopped worker is never restarted.
 - **Merges you can audit.** The commit that was reviewed is the commit that merges, and every step leaves evidence. A single governed merge operation is being built.
 - **Works with your tools.** Reach o8 from the `o8` CLI or any MCP client. It runs the agent CLIs already on your machine, on your own subscriptions or keys, as reviewers and fixers.
 
-**Where this stands.** On `main`: findings go back to their author, and submitted reviews show with the commit they reviewed. Being built, in order: re-review of a fix, autonomous merge within a policy the project sets once, intake of pull requests from any tool, and reviewers that learn from past outcomes. The [roadmap](./ROADMAP.md) tracks each one.
+**Where this stands.** On `main`: findings go back to their author, submitted reviews show with the commit they reviewed, a fix is re-reviewed against the saved findings, and a pull request from another tool can be adopted into one review task. Being built, in order: one governed merge operation, autonomous merge within a policy the project sets once, and reviewers that learn from past outcomes. The [roadmap](./ROADMAP.md) tracks each one.
 
 | Platform | Status |
 |---|---|
@@ -41,8 +52,6 @@ o8 is a free, open-source review and merge layer for coding agents. Write code w
 
 Reviewers keep every tool they need. A reviewer can spawn workers to reproduce a bug, run the tests or try a fix, and each one runs in its own git worktree.
 
-![One ask, three workers: the task splits into packets, each worker builds its page in its own worktree, and every tile reports as it goes](./assets/three-workers.gif)
-
 A merge that fails climbs a five-step ladder that ends at a human card. The same verbs work from the app, the `o8` CLI and any MCP client. The long version is [How o8 works](./docs/user/how-o8-works.md).
 
 ## Runtimes
@@ -54,8 +63,6 @@ A merge that fails climbs a five-step ladder that ends at a human card. The same
 | | 3code · Prime Agent · DeepSeek Harness |
 
 o8 finds the coding-agent CLIs you already have installed and runs them behind one adapter contract, as reviewers, fixers and workers. The table lists every runtime o8 can detect today, and a test keeps it equal to the registry. Readiness differs by CLI version and platform, so the first-run picker shows what is installed and working on your machine. Adding a runtime is a small documented patch: [runtime adapter contract](./docs/internals/runtime-adapter-contract.md). Claude Code can also keep its tools and session behavior while another model supplies inference: [model carriers](./docs/user/claude-code-model-carriers.md).
-
-![Before sending: the Lead chip sets the model and its thinking effort, and the mode chip sets Solo, Multitask, Compare plans, or Fusion](./assets/choose-before-you-send.gif)
 
 ## Get it
 
@@ -97,7 +104,7 @@ Managed source builds register generated output before the compiler runs. The [g
 
 `npm run tauri:dev` builds the native shell (a much longer first build). After a hard kill, `node scripts/dev.mjs cleanup` recovers the ports. Bring at least one agent CLI you already use (`claude`, `codex`, `grok`, `opencode`, `gemini`); no API keys are needed to start, and [`.env.example`](./.env.example) documents every optional one.
 
-- **Phone:** pair by QR. The mobile web surface ships in this repo and works from any phone on your network; the iPhone app is below.
+- **Phone:** pair the iPhone app by QR; see below.
 - **Headless:** `o8 serve` runs the control plane on a machine with no screen, same gates. Pair a phone or attach the desktop later.
 - **MCP:** Settings → MCP → Install exposes the operator tools (`create_mission`, `submit_review`, `approve_and_merge`, `cortex_ask`, and the webview controls) to Claude Desktop, Claude Code, or any MCP client.
 
@@ -135,7 +142,9 @@ o8 aims to be the best substrate for reviewing and merging agent work. Any agent
 
 Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and the issues labeled [`claimable`](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3Aclaimable) or [`help wanted`](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). UI changes read [`docs/design`](./docs/design/DESIGN.md) first. The full documentation index is [`docs/README.md`](./docs/README.md); the detailed agent and `o8` CLI reference is [`AGENT_REFERENCE.md`](./AGENT_REFERENCE.md).
 
-Community: [Discord](https://discord.gg/TFK2x9A5WS) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
+[![Contributors to o8](https://contrib.rocks/image?repo=o8-run/o8&max=24)](https://github.com/o8-run/o8/graphs/contributors)
+
+Follow [@o8dotrun](https://x.com/o8dotrun) on X for updates: release notes and dev clips post there first. Community: [Discord](https://discord.gg/TFK2x9A5WS) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
 
 ## License
 

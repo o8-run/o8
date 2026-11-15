@@ -1887,7 +1887,7 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
                         .hover(|link| link.text_color(theme().text))
                         .child("View release on GitHub")
                         .child(crate::icon::stroke(EXTERNAL, theme().text_secondary, 11., 1.8))
-                        .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
+                        .on_click(cx.listener(move |_, _, _, cx| crate::external_open::url(cx, &url))),
                 )
         });
 

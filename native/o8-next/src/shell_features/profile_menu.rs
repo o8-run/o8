@@ -389,7 +389,7 @@ fn menu(s: &mut Shell, viewport_width: f32, cx: &mut Context<Shell>) -> gpui::An
                             "Community Discord",
                             crate::icon::stroke(EXTERNAL, theme().text_faint, 11., 1.8),
                         )
-                        .on_click(cx.listener(|_, _, _, cx| cx.open_url(DISCORD_URL))),
+                        .on_click(cx.listener(|_, _, _, cx| crate::external_open::url(cx, DISCORD_URL))),
                     )
                     .child(
                         row(
@@ -398,7 +398,7 @@ fn menu(s: &mut Shell, viewport_width: f32, cx: &mut Context<Shell>) -> gpui::An
                             "Documentation",
                             crate::icon::stroke(EXTERNAL, theme().text_faint, 11., 1.8),
                         )
-                        .on_click(cx.listener(|_, _, _, cx| cx.open_url(DOCS_URL))),
+                        .on_click(cx.listener(|_, _, _, cx| crate::external_open::url(cx, DOCS_URL))),
                     ),
             )
         });
