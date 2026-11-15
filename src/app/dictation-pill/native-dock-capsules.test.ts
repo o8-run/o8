@@ -137,28 +137,28 @@ describe('dock precedence', () => {
                 : owner === 'speaking' || owner === 'working' || owner === 'voice' ? owner
                   : (owner === 'workers' || owner === 'idle') && !shownOnMain ? 'idle'
                     : owner === 'workers' || owner === 'idle' && workerCount > 0 ? 'workers'
-                      : owner === 'idle' ? 'extras' : 'idle';
-              const webBeside = active && owner !== 'ask' && (input.dropActive || input.stagedFiles);
-              const handoff = !active && ['drop', 'staged'].includes(owner);
-              const siblings = state !== 'idle' && !webBeside ? 'native' : webBeside || handoff ? 'web' : 'hidden';
+                      : owner === 'idle' ? 'extras' : shownOnMain ? owner : 'idle';
+              // Every surface is native now: nothing is drawn beside it on the web.
+              const siblings = state !== 'idle' ? 'native' : 'hidden';
               const { frame } = nativeDockFrame({
                 ...input, snapshot: { ...IDLE, state: dictationState }, dictationSession: 1, speechSpeed: 1, agentTool: '', agentStartedAt: 1, edit, glint, topPill,
                 ask: { mode: 'answer', thread: [{ role: 'assistant', text: 'Answer' }], pending: input.panelPending ? { phase: 'listening', text: '' } : null },
                 confirmCard: input.agentConfirm ? { confirmationId: 'c', taskId: 't', tool: 'tool', summary: 'Review' } : null,
-              }, { speaking: 1, voice: 1, workers: 1, extras: 1, ask: 1, confirm: 1 });
-              const view = webDockView(true, frame, dictationState, { ...input, showWorkers: input.showWorkers, workerCount, agentConfirm: input.agentConfirm });
-              const visible = webDockVisible(true, false, view, { ...input, snapshot: { ...IDLE, state: dictationState } }, { topPillEnabled: topPill, staged: input.stagedFiles });
+                stagedChips: input.stagedFiles ? [{ name: 'notes.txt', size: 2048 }] : null,
+              }, { speaking: 1, voice: 1, workers: 1, extras: 1, ask: 1, confirm: 1, drop: 1, staged: 1 });
+              const view = webDockView(true, frame, dictationState, { ...input, showWorkers: input.showWorkers, workerCount });
+              const visible = webDockVisible(true, false, view, { ...input, snapshot: { ...IDLE, state: dictationState } }, { topPillEnabled: topPill });
               const label = JSON.stringify({ ...input, topPill });
               expect(frame.state, label).toBe(state);
               const drawnBy = view.nativeEdit && view.nativeGlint ? 'native' : view.nativeEdit || view.nativeGlint ? 'split' : visible ? 'web' : 'hidden';
               expect(drawnBy, label).toBe(siblings);
               expect(view.workerCount, label).toBe(0);
               // The web never draws Ask while the native panel draws anything.
-              if (view.nativeDrawn) expect([view.askOpen, view.agentConfirm], label).toEqual([false, false]);
+              if (view.nativeDrawn) expect([view.askOpen, view.agentConfirm, view.dropActive, view.stagedFiles], label).toEqual([false, false, false, false]);
               seen.add(`${state}:${siblings}`);
             }
     expect([...seen].sort()).toEqual([
-      'ask:native', 'confirm:native', 'extras:native', 'idle:hidden', 'idle:web', 'recording:native', 'recording:web', 'speaking:native', 'success:native', 'success:web',
+      'ask:native', 'confirm:native', 'drop:native', 'extras:native', 'idle:hidden', 'recording:native', 'speaking:native', 'staged:native', 'success:native',
       'voice:native', 'workers:native', 'working:native',
     ]);
   });
@@ -173,9 +173,10 @@ describe('dock precedence', () => {
     expect(markup).not.toContain('>work<');
     // Without the staged chips the same dock shows the orbit, so the marker is real.
     expect(renderToStaticMarkup(createElement(DockNotchSurface, { snapshot: IDLE, ttsState: 'idle', workerCount: 2, workerWorking: 2 }))).toContain('>work<');
-    // Natively: staged is a handoff (web draws the chips), then the orbit returns natively.
+    // Natively: the staged chips replace the orbit, then the orbit returns.
     const base = { snapshot: IDLE, dictationSession: 1, speechSpeed: 1, agentTool: '', agentStartedAt: 1, topPill: true };
-    expect(nativeDockFrame({ ...input, ...base }, { speaking: 1, voice: 1 }).frame).toMatchObject({ state: 'idle', handoff: true });
+    expect(nativeDockFrame({ ...input, ...base, stagedChips: [{ name: 'notes.txt', size: 2048 }] }, { speaking: 1, voice: 1 }).frame)
+      .toMatchObject({ state: 'staged', staged: { files: [{ name: 'notes.txt', size: '2 KB' }], extra: 0 } });
     expect(nativeDockFrame({ ...input, ...base, stagedFiles: false }, { speaking: 1, voice: 1 }).frame).toMatchObject({ state: 'workers', expanded: false });
   });
 
@@ -269,23 +270,14 @@ describe('native dock capsules through the real hook', () => {
     expect(sent()?.state).toBe('speaking');
   });
 
-  it('a still-web surface takes the dock: the native capsule is released at once and the web draws it', async () => {
+  it('a drop takes the panel from speaking natively and gives it back; Ask outranks a drop', async () => {
     await render({ ttsState: 'playing' }); await tick(200);
-    // Ask is native: it replaces the speaking capsule in the same panel.
-    await render({ askOpen: true }); await tick(200);
-    expect(sent()).toMatchObject({ state: 'ask', ask: { listening: false, turns: [] } });
-    // A drop wins over speaking (Ask beats a drop), and the web draws it.
-    await render({ askOpen: false, dropActive: true }); await tick(200);
-    expect(frames.at(-1)).toMatchObject({ action: 'release', immediate: true, kind: 'ask' });
-    const count = frames.length;
-    await tick(2000);
-    expect(frames).toHaveLength(count);
-    for (const patch of [{ dropActive: true }]) {
-      await render({ askOpen: false, stagedFiles: false, dropActive: false }); await tick(200);
-      expect(sent()?.state).toBe('speaking');
-      await render(patch); await tick(200);
-      expect(frames.at(-1)).toMatchObject({ action: 'release', immediate: true });
-    }
+    await render({ dropActive: true }); await tick(200);
+    expect(sent()).toMatchObject({ state: 'drop', holdMs: 5000 });
+    await render({ dropActive: false }); await tick(200);
+    expect(sent()?.state).toBe('speaking');
+    await render({ askOpen: true, dropActive: true }); await tick(200);
+    expect(sent()).toMatchObject({ state: 'ask' });
   });
 
   it('runs each reported click exactly once, only for the capsule on screen', async () => {
@@ -365,7 +357,7 @@ describe('native dock capsules through the real hook', () => {
     for (const state of ['speaking', 'working', 'voice', 'recording', 'idle'] as const) {
       const live = { ttsState: 'paused', realtimeVoice: 'live', agentWorking: true, askOpen: false } as const;
       expect(webDockView(false, { ...IDLE, state }, 'idle', live)).toEqual({
-        nativeDrawn: false, nativeCapsule: false, ttsState: 'paused', realtimeVoice: 'live', askOpen: false, agentConfirm: false, agentWorking: true,
+        nativeDrawn: false, nativeCapsule: false, ttsState: 'paused', realtimeVoice: 'live', askOpen: false, agentConfirm: false, dropActive: false, stagedFiles: false, agentWorking: true,
         showWorkers: false, workerCount: 0, nativeEdit: false, nativeGlint: false,
       });
     }

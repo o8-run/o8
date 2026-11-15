@@ -7,6 +7,7 @@ import { useEditRevert, type EditChipState } from './EditRevertChip';
 import type { TimedGlint } from './DockGlint';
 import { askFrame, useAskCopy, useRevision, type NativeAskInput } from './nativeDockAsk';
 import type { AgentConfirmation } from '@/components/desktop/dictation/useAgentConfirmations';
+import type { StagedChip } from '@/components/desktop/dictation/useDockFileDrop';
 import {
   IDLE_SNAPSHOT, useNativeDictationPill, useNativePillDockExtent, type DockWorkers, type NativeDockAction, type NativeDockSnapshot,
 } from './useNativeDictationPill';
@@ -31,8 +32,15 @@ export interface NativeDockInput extends Omit<DockPrecedenceInput, 'dictationSta
   askCopied?: number | null;
   /** The pending confirmation card (`agentConfirm` is its presence). */
   confirmCard?: AgentConfirmation | null;
+  /** The staged-file chips (`stagedFiles` is their presence). */
+  stagedChips?: StagedChip[] | null;
 }
-type Sessions = { speaking: number; voice: number; workers?: number; extras?: number; ask?: number; confirm?: number };
+type Sessions = { speaking: number; voice: number; workers?: number; extras?: number; ask?: number; confirm?: number; drop?: number; staged?: number };
+
+/** DockNotchSurface's chip size label. */
+export function stagedSize(bytes: number) {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
 
 /** A session number for each idle-to-active edge; it holds while active. The
  * frame state names the capsule, so numbers only need to differ within one kind. */
@@ -72,11 +80,9 @@ export function nativeDockFrame(input: NativeDockInput, sessions: Sessions): { f
     const confirm = { id: card.confirmationId, task: card.taskId, kind: plan ? 'plan' as const : 'action' as const, summary: card.summary, ...(plan ? { steps: plan } : {}) };
     return { frame: below({ ...IDLE_SNAPSHOT, state: 'confirm', confirm }), session: sessions.confirm ?? 0 };
   }
-  if (input.snapshot.state !== 'idle') {
-    // A confirmation waits behind a real dictation on both surfaces, as on the web.
-    const webBeside = input.dropActive || input.stagedFiles;
-    return { frame: webBeside ? input.snapshot : below(input.snapshot), session: input.dictationSession };
-  }
+  // A confirmation, a drop or staged files wait behind a real dictation on
+  // both surfaces, as on the web.
+  if (input.snapshot.state !== 'idle') return { frame: below(input.snapshot), session: input.dictationSession };
   if (owner === 'speaking') {
     return { frame: below({ ...IDLE_SNAPSHOT, state: 'speaking', paused: input.ttsState === 'paused', speed: input.speechSpeed }), session: sessions.speaking };
   }
@@ -93,6 +99,14 @@ export function nativeDockFrame(input: NativeDockInput, sessions: Sessions): { f
   // the expanded fleet capsule, live voice. Otherwise neither dock draws them.
   const webShown = input.topPill === true || input.ttsState !== 'idle' || input.askOpen || input.agentWorking
     || input.agentConfirm || input.realtimeVoice !== 'off';
+  // The drop target and staged chips follow the same rule (main hides the web dock without it).
+  if (!webShown && (owner === 'drop' || owner === 'staged')) return { frame: IDLE_SNAPSHOT, session: input.dictationSession };
+  if (owner === 'drop') return { frame: below({ ...IDLE_SNAPSHOT, state: 'drop' }), session: sessions.drop ?? 0 };
+  if (owner === 'staged' && input.stagedChips?.length) {
+    const chips = input.stagedChips;
+    const staged = { files: chips.slice(0, 3).map(chip => ({ name: chip.name, size: stagedSize(chip.size) })), extra: Math.max(0, chips.length - 3) };
+    return { frame: below({ ...IDLE_SNAPSHOT, state: 'staged', staged }), session: sessions.staged ?? 0 };
+  }
   if (!webShown && (owner === 'workers' || owner === 'idle')) return { frame: IDLE_SNAPSHOT, session: input.dictationSession };
   if (owner === 'workers' || owner === 'idle' && input.workerCount > 0) {
     return { frame: below({ ...IDLE_SNAPSHOT, state: 'workers', expanded: owner === 'workers', workers }), session: sessions.workers ?? 0 };
@@ -108,8 +122,10 @@ export function useNativeDockFrame(input: NativeDockInput) {
   const extras = useEdgeSession(!!input.edit || !!input.glint);
   const askSession = useEdgeSession(input.askOpen);
   // Each card is its own session, so a click queued for one is never run for the next.
+  const dropSession = useEdgeSession(input.dropActive);
+  const stagedSession = useRevision(input.stagedChips ?? null);
   const confirmSession = useRevision(input.confirmCard ? `${input.confirmCard.confirmationId}\n${input.confirmCard.taskId}` : '');
-  const { snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, topPill, ask, askRev, askCopied, confirmCard } = input;
+  const { snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, topPill, ask, askRev, askCopied, confirmCard, stagedChips } = input;
   // The page builds the fleet detail per render; its values, not its identity, change the frame.
   const { count, working, waiting, label } = input.workers ?? {};
   const repos = input.workers?.repos.join('\n');
@@ -117,8 +133,8 @@ export function useNativeDockFrame(input: NativeDockInput) {
     count, working: working ?? 0, waiting: waiting ?? 0, label: label ?? 'waiting', repos: repos ? repos.split('\n') : [],
   }), [count, working, waiting, label, repos]);
   return useMemo(() => nativeDockFrame({
-    snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, ask, askRev, askCopied, confirmCard,
-  }, { speaking, voice, workers: workerSession, extras, ask: askSession, confirm: confirmSession }), [snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, ask, askRev, askCopied, confirmCard, speaking, voice, workerSession, extras, askSession, confirmSession]);
+    snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, ask, askRev, askCopied, confirmCard, stagedChips,
+  }, { speaking, voice, workers: workerSession, extras, ask: askSession, confirm: confirmSession, drop: dropSession, staged: stagedSession }), [snapshot, dictationSession, ttsState, askOpen, agentConfirm, agentWorking, dropActive, stagedFiles, showWorkers, workerCount, realtimeVoice, speechSpeed, agentTool, agentStartedAt, edit, glint, workers, topPill, ask, askRev, askCopied, confirmCard, stagedChips, speaking, voice, workerSession, extras, askSession, confirmSession, dropSession, stagedSession]);
 }
 
 /** What the web dock draws beside the native panel. With native off this is the
@@ -129,12 +145,15 @@ export function useNativeDockFrame(input: NativeDockInput) {
  * drawn frame carries. */
 export function webDockView(native: boolean, frame: NativeDockSnapshot, dictation: DictationState, live: {
   ttsState: DockPrecedenceInput['ttsState']; realtimeVoice: DockPrecedenceInput['realtimeVoice']; agentWorking: boolean; askOpen: boolean;
-  showWorkers?: boolean; workerCount?: number; agentConfirm?: boolean;
+  showWorkers?: boolean; workerCount?: number; agentConfirm?: boolean; dropActive?: boolean; stagedFiles?: boolean;
 }) {
   const nativeDrawn = native && frame.state !== 'idle';
   return {
     nativeDrawn,
     nativeCapsule: nativeDrawn && (dictation === 'idle' || frame.state === 'ask' || frame.state === 'confirm'),
+    // Native draws the drop target and chips, or a drawn state outranks them, as on the web.
+    dropActive: nativeDrawn ? false : live.dropActive ?? false,
+    stagedFiles: nativeDrawn ? false : live.stagedFiles ?? false,
     ttsState: nativeDrawn ? 'idle' as const : live.ttsState,
     realtimeVoice: nativeDrawn ? 'off' as const : live.realtimeVoice,
     // Native draws the Ask panel, or dictation hides it, as on the web.
@@ -149,14 +168,12 @@ export function webDockView(native: boolean, frame: NativeDockSnapshot, dictatio
   };
 }
 
-/** Whether the web dock window shows. Retained still-web surfaces keep it
- * visible under native ownership; the chip and glint never do on their own
- * (native draws them, or a still-web surface they sit under is already shown). */
+/** Whether the web dock window shows. Under native ownership only what the
+ * web still draws keeps it visible; the chip and glint never do on their own. */
 export function webDockVisible(native: boolean, suppressed: boolean, view: ReturnType<typeof webDockView>,
-  input: Pick<NativeDockInput, 'snapshot' | 'askOpen' | 'agentConfirm' | 'dropActive'>, retained: { topPillEnabled: boolean; staged: boolean }) {
+  input: Pick<NativeDockInput, 'snapshot'>, retained: { topPillEnabled: boolean }) {
   return (!native || !suppressed) && ((!native && (retained.topPillEnabled || input.snapshot.state !== 'idle'))
-    || view.ttsState !== 'idle' || view.askOpen || view.agentWorking || view.agentConfirm || view.realtimeVoice !== 'off'
-    || (native && !view.nativeCapsule && (input.dropActive || retained.staged)));
+    || view.ttsState !== 'idle' || view.askOpen || view.agentWorking || view.agentConfirm || view.realtimeVoice !== 'off');
 }
 
 /** The dock page's native wiring: the frame, the hook, and the clicks it reports
@@ -192,6 +209,7 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit' | 'askRev' | '
   const view = webDockView(native, nativeFrame.frame, input.snapshot.state, {
     ttsState: input.ttsState, realtimeVoice: input.realtimeVoice, agentWorking: input.agentWorking, askOpen: input.askOpen,
     showWorkers: input.showWorkers, workerCount: input.workerCount, agentConfirm: input.agentConfirm,
+    dropActive: input.dropActive, stagedFiles: input.stagedFiles,
   });
   // The glint the native panel last drew; if the web takes that same glint
   // over, it is a hand-back and must not replay its fade-in.
@@ -202,7 +220,7 @@ export function useNativeDock(input: Omit<NativeDockInput, 'edit' | 'askRev' | '
   useNativePillDockExtent(native, nativeActive, dockVisible, view.askOpen, suppressed, handlers.invokeCmd);
   return {
     native, suppressed, dockVisible, nativeCapsule: view.nativeCapsule, nativeActive,
-    webSnapshot: native ? IDLE_SNAPSHOT : input.snapshot, webAskOpen: view.askOpen, webAgentConfirm: view.agentConfirm,
+    webSnapshot: native ? IDLE_SNAPSHOT : input.snapshot, webAskOpen: view.askOpen, webAgentConfirm: view.agentConfirm, webDropActive: view.dropActive, webStaged: view.stagedFiles,
     webTts: view.ttsState, webRealtime: view.realtimeVoice, webAgentWorking: view.agentWorking,
     webShowWorkers: view.showWorkers, webWorkerCount: view.workerCount,
     edit, revertEdit: revert, webEdit: view.nativeEdit ? null : edit, webGlint: view.nativeGlint ? null : input.glint ?? null,

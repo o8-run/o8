@@ -839,7 +839,7 @@ export default function DictationPillPage() {
   const dock = useNativeDock({
     snapshot, dictationSession: startTimeRef.current, ttsState, askOpen, agentConfirm: !!agentConfirm, agentWorking, dropActive, showWorkers,
     stagedFiles: !!stagedChips?.length, workerCount: displayedWorkers.count, realtimeVoice, speechSpeed, agentTool, agentStartedAt, glint,
-    ask: { mode: askMode, thread: askThread, pending: panelPending }, confirmCard: agentConfirm,
+    ask: { mode: askMode, thread: askThread, pending: panelPending }, confirmCard: agentConfirm, stagedChips,
     workers: { count: displayedWorkers.count, working: displayedWorkers.working, waiting: displayedWaiting, label: displayedWorkers.waitingLabel, repos: displayedWorkers.repos },
   }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, closeAsk, armAskIdle: armAskIdleTimer, decideConfirm: handleAgentConfirm, invokeCmd, onError: dockLog },
   { topPillEnabled, staged: !!stagedChips });
@@ -945,8 +945,8 @@ export default function DictationPillPage() {
             agentTool={agentTool}
             agentStartedAt={agentStartedAt}
             onAgentConfirm={handleAgentConfirm}
-            dropActive={dropActive}
-            stagedFiles={stagedChips}
+            dropActive={dock.webDropActive}
+            stagedFiles={dock.webStaged ? stagedChips : null}
             workerCount={dock.webWorkerCount}
             workerWorking={displayedWorkers.working}
             workerWaiting={displayedWorkers.waiting}

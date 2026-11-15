@@ -154,6 +154,8 @@ describe('native glints, chip and fleet through the real dock hook', () => {
     ['fleet capsule', { ...fleet(1), showWorkers: true }, 'workers'],
     ['nothing else', {}, 'extras'],
     ['Ask', { askOpen: true }, 'ask'],
+    ['a drop', { dropActive: true }, 'drop'],
+    ['dictation over a drop or staged files', { dropActive: true, stagedFiles: true, snapshot: { ...IDLE, state: 'recording' as const }, dictationSession: 3 }, 'recording'],
     ['Ask with dictation beside it', { askOpen: true, snapshot: { ...IDLE, state: 'recording' as const }, dictationSession: 3 }, 'recording'],
   ] as const)('the chip and glint compose below %s natively, and the web draws neither', async (_name, patch, state) => {
     await render({}); await tick(100);
@@ -164,26 +166,6 @@ describe('native glints, chip and fleet through the real dock hook', () => {
     expect(dock.webEdit).toBeNull();
     expect(dock.webGlint).toBeNull();
     expect(dock.edit).toMatchObject({ id: 1 });
-  });
-
-  it.each([
-    ['a drop', { dropActive: true }], ['staged files', { stagedFiles: true }],
-  ] as const)('beside native dictation, %s keeps the chip and glint on the web, under that surface', async (_name, patch) => {
-    await render({}); await tick(100);
-    await emit('o8:edit-applied', { app: 'Notes' });
-    await act(async () => { showGlint('Remembered'); });
-    await render({ ...patch, snapshot: { ...IDLE, state: 'recording' }, dictationSession: 4 }); await tick(150);
-    expect(sent()?.state).toBe('recording');
-    expect(sent()).not.toHaveProperty('edit');
-    expect(sent()).not.toHaveProperty('glint');
-    expect(dock.webEdit).toMatchObject({ id: 1 });
-    expect(dock.webGlint).toMatchObject({ text: 'Remembered' });
-    expect(dock.dockVisible).toBe(true);
-    // Without dictation the still-web surface wins: native releases at once, the web draws all of it.
-    await render({ snapshot: IDLE }); await tick(150);
-    expect(frames.at(-1)).toMatchObject({ action: 'release', immediate: true });
-    expect(dock.webEdit).toMatchObject({ id: 1 });
-    expect(dock.webGlint).not.toBeNull();
   });
 
   it('the chip dismisses from its timestamp: sent once, unchanged on every frame, then gone', async () => {

@@ -149,7 +149,26 @@ one decision per reply; a click for a card that has changed, been dismissed or
 expired does nothing. The API route forwards a decision only with a non-empty,
 bounded, printable confirmation id and task id.
 
-Releases now name the session and kind (dictation, speaking, working, voice, ask or confirm)
+File drop and staged files (#6145). The drop target (state `drop`, 320×64,
+Drop files for Symon / THEY RIDE YOUR NEXT QUESTION, accent ring) and the
+staged-file chips (state `staged`, 420×56, at most three chips with the web's
+size label and a `+N` chip, STAGED — HOLD ⌥ AND ASK) are drawn natively
+(native_pill_drop.rs). The drag, the drop, reading and staging the files
+(agent_files_stage) and the 6 s chip timer stay in the web dock: neither
+native state takes clicks, so the panel stays mouse-transparent and drags
+reach the web dock window under it. Both are static frames (no keep-alive
+inside the 5 s hold, one refresh every 4 s after that); the staged session
+changes with each new set of chips. They show only when origin/main would show
+the web dock for them (the top-pill preference or another visibility reason),
+which closes the batch 1 divergence where they showed without it, and a real
+dictation, a confirmation or Ask holds them back on both surfaces as on the
+web. There is no remove control: the web chips have none either.
+
+With these, no dock surface is drawn by the retained web dock beside or in
+place of a native frame; the web draws only on fallback, quiet mode or with
+the flag off (and the idle sliver, below).
+
+Releases now name the session and kind (dictation, speaking, working, voice, ask, confirm, drop or staged)
 they retire, so a late fallback release can no longer hide a newer session that
 is already drawn, including another kind with the same session number (closes
 that #6145 item).
@@ -211,7 +230,7 @@ port order; source references name the current implementation.
 | Speech playback, pause, stop and speed | src/app/dictation-pill/page.tsx:399; native/o8-next/src/native_pill_capsules.rs:1 | tts-state playing/paused | tts_toggle_pause, tts_stop, tts_set_speed, run by the web dock from a reported click | native (batch 2) |
 | Live voice presence and stop | src/app/dictation-pill/page.tsx:427; native/o8-next/src/native_pill_capsules.rs:1 | realtime-status connecting/live/off; safety timer stays in the web dock | Emits o8:realtime-toggle (dock-tap) from a reported click; no direct shell command | native (batch 2) |
 | Agent working/synthesizing capsule, current tool and elapsed timer | src/app/dictation-pill/page.tsx:700; native/o8-next/src/native_pill_capsules.rs:1 | running task set and tool_call/done/failed task events stay in the web dock | agent_interrupt, run by the web dock from a reported click | native (batch 2) |
-| File drop target and staged-file chips | src/components/desktop/dictation/useDockFileDrop.ts:33; src/app/dictation-pill/page.tsx:830 | drag/drop over dock, staged chip timeout | agent_files_stage | still web |
+| File drop target and staged-file chips | src/components/desktop/dictation/useDockFileDrop.ts:33; src/app/dictation-pill/page.tsx:830; native/o8-next/src/native_pill_drop.rs:1 | drag/drop over the web dock window, staged chip timeout; both stay in the web dock | agent_files_stage, run by the web dock on drop (no click is reported) | native (#6145) |
 | Worker orbit and expanded worker/ready capsule (and the live voice worker count) | src/app/dictation-pill/page.tsx:616; native/o8-next/src/native_pill_capsules.rs:1 | worker-status, parked-lanes-status and the stale-snapshot sweep stay in the web dock; idle tap reported as `workers-expand` | No direct action command | native (batch 3) |
 | Memory/progress/task-result glints | src/app/dictation-pill/DockGlint.tsx:11; native/o8-next/src/native_pill_extras.rs:1 | agent-task-event glint/plan progress/handoff; fade from `fadeAt` to `until` | No direct action command | native (batch 3) |
 | Idle sliver and Voice settings shortcut | src/app/dictation-pill/page.tsx:495,955; src/components/desktop/dictation/DockNotchSurface.tsx:783 | top-pill preference, resting dock double click | open_voice_settings | still web |
@@ -237,9 +256,8 @@ src/components/desktop/dictation/dockPrecedence.ts, is:
 
 The native frame follows the same order: the Ask panel when Ask wins
 (including a pending turn inside it), dictation when it is active, otherwise
-the confirmation card when it wins, otherwise
-the winning capsule (5, 6, 8 or 9). When a still-web surface (4 or 7) wins,
-the frame is idle with an immediate release and the web draws that surface. When nothing wins (10) and workers exist, the frame is the
+the confirmation card, drop target or staged chips when they win, otherwise
+the winning capsule (5, 6, 8 or 9). No surface in the order is still web. When nothing wins (10) and workers exist, the frame is the
 resting fleet orbit; with no workers but a chip or glint, it is `extras`. While the native panel draws the winner, the web dock does not
 draw speech, working or live voice under it; with a native capsule the web
 notch surface is not drawn at all (the edit/revert chip and glints remain,
@@ -255,13 +273,12 @@ belong under:
 | Dock state | Drawn by | Chip and glint |
 | --- | --- | --- |
 | Dictation, nothing still-web beside it | native | native, below the dictation capsule |
-| Dictation with a drop or staged files beside it (web, below the native capsule) | native and web | web, below the web surface |
 | Speaking, working, live voice | native | native, below the capsule |
 | Ask panel (or its listening capsule) | native | native, below the panel |
 | Confirmation card | native | native, below the card |
+| Drop target, staged chips (with the top-pill preference or another visibility reason) | native | native, below them |
 | Fleet orbit or capsule | native | native, below it |
 | Nothing (10) | native `extras` | native, alone at the capsule position |
-| Drop, staged files (handoff) | web | web, as today |
 | Flag off, fallback, quiet mode | web | web, as today |
 
 While native, the web never draws the fleet orbit or capsule (native draws
@@ -302,6 +319,8 @@ The idle sliver alone does not make it visible under native ownership.
 | Edit/revert chip | 248×24 below the capsule (alone at the capsule position otherwise), Rewrote in App — Revert, Reverting…, Reverted, Original copied | Fixed width with truncation (the web chip sizes to its text); no enter slide |
 | Glint | Below the chip, uppercase, tone colour from theme tokens, 0.5 s fade from `fadeAt`, gone at `until` | Theme surface instead of the dark gradient; no enter slide |
 | Confirmation card | 420×96, radius 24; SYMON WANTS TO or SYMON’S PLAN, the summary or numbered steps scrolling, Cancel and Allow/Run plan pinned right | Theme surface instead of the frosted card; Allow uses the theme text colour as its fill |
+| Drop target | 320×64, radius 24, two lines, accent border for the web's inset ring | Theme surface; a full accent border instead of the soft inset glow |
+| Staged chips | 420×56, radius 22, up to three 22-high chips (name truncated at 150, size label) and +N | Theme surface |
 | Ask listening | 248×40 capsule with the bars at rest | Static bars instead of the ambient gradient waveform |
 | Ask panel | 420×380, radius 26; header (mark, Symon, close); scrolling thread of You/Symon turns, paragraphs and bullet/numbered items, sources line, Copy/Copied per answer; pending You turn (words or Listening…, level bars, Polishing…); pending Symon turn (ring, Working…/Synthesizing…, timer); follows the newest turn | Theme surface instead of the frosted panel; accent dot instead of the gradient mark; inline `code` and **bold** drawn as plain text; Copy always visible (the web shows it on hover); only the newest turns within 4.5 KB are scrollable; Escape does not close it (the panel never takes keyboard focus) |
 
@@ -413,7 +432,14 @@ Physical focus retention is reserved for the lead's live check.
     the first) and click immediately: nothing is decided for the old card.
     Quit the native window process with a card up: the web card returns within
     about half a second and its buttons work.
-21. Set the flag false and repeat a dock-routed session and steps 7 to 20 to
+21. Drop: with the top-pill preference on, drag files from Finder over the
+    dock. The native drop target shows with no web zone; drop four files: the
+    native chips show three names with sizes and +1 for 6 s, and the next
+    Option ask carries them. Drag again with the preference off: neither dock
+    shows anything (as with the flag off). Hold Fn during a drag: dictation
+    shows instead. Quit the native window process while chips show: the web
+    chips return within the 4 s keep-alive plus half a second.
+22. Set the flag false and repeat a dock-routed session and steps 7 to 21 to
     verify web behavior.
 
 Gradient/shimmer, the squiggle loader and the spring geometry morph are follow-up

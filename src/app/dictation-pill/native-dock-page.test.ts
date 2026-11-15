@@ -294,6 +294,57 @@ describe('the confirmation card through the real dock page', () => {
   });
 });
 
+describe('the drop target and staged chips through the real dock page', () => {
+  /** A Finder drag as WKWebView delivers it: document-level DOM drag events carrying Files. */
+  async function drag(type: 'dragenter' | 'dragover' | 'drop', files: File[] = []) {
+    const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: { types: ['Files'], files, dropEffect: 'none' } });
+    await act(async () => { document.dispatchEvent(event); });
+  }
+  const file = (name: string, size: number) => new dom.window.File(['x'.repeat(size)], name, { type: 'text/plain' }) as File;
+
+  it('with the top-pill preference, a drag draws the native drop target and a drop the native chips', async () => {
+    await emit('o8:top-pill-preference', { enabled: true });
+    await drag('dragenter');
+    await tick(150);
+    expect(sent()).toMatchObject({ state: 'drop', holdMs: 5000 });
+    expect(host.innerHTML).not.toContain('Drop files for Symon');
+    expect(web().visible).toBe(false);
+    await drag('drop', [file('a.txt', 2048), file('b.md', 10), file('c.ts', 3000), file('d.json', 5)]);
+    await vi.waitFor(() => expect(invoke.mock.calls.some(([command]) => command === 'agent_files_stage')).toBe(true));
+    await tick(150);
+    expect(sent()).toMatchObject({ state: 'staged', staged: { extra: 1, files: [
+      { name: 'a.txt', size: '2 KB' }, { name: 'b.md', size: '1 KB' }, { name: 'c.ts', size: '3 KB' },
+    ] } });
+    expect(host.innerHTML).not.toContain('Staged — hold');
+    // The chips relax after 6 s, as on the web: one release names them.
+    await tick(6000); await tick(150);
+    expect(frames.at(-1)).toMatchObject({ action: 'release', kind: 'staged' });
+  });
+
+  it('without the preference neither dock draws them, as on main; a stall returns the web chips', async () => {
+    await drag('dragenter');
+    await tick(150);
+    expect(frames.filter(frame => frame.action === 'frame')).toEqual([]);
+    expect(web().visible).toBe(false);
+    await drag('dragleave' as 'drop');
+    await emit('o8:top-pill-preference', { enabled: true });
+    await drag('dragenter');
+    await drag('drop', [file('a.txt', 2048)]);
+    await vi.waitFor(() => expect(invoke.mock.calls.some(([command]) => command === 'agent_files_stage')).toBe(true));
+    await tick(150);
+    expect(sent()?.state).toBe('staged');
+    vi.mocked(fetch).mockImplementation((_url, init) => {
+      frames.push(JSON.parse(String(init?.body)));
+      return new Promise<Response>(() => undefined);
+    });
+    // A static frame's next request is its 4 s keep-alive; it stalls past the deadline.
+    await tick(4700);
+    expect(host.innerHTML).toContain('Staged — hold');
+    expect(frames.at(-1)).toMatchObject({ action: 'release', kind: 'staged', immediate: true });
+  });
+});
+
 describe('flag off', () => {
   it('the web page draws the Ask panel exactly as before and sends nothing after the probe', async () => {
     await act(async () => root.unmount());

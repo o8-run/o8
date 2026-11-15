@@ -79,7 +79,7 @@ impl Glint {
 }
 
 pub(crate) fn is_static(state: &str) -> bool {
-    matches!(state, "workers" | "extras")
+    matches!(state, "workers" | "extras" | "drop" | "staged")
 }
 
 impl Snapshot {

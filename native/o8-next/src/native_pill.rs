@@ -88,6 +88,8 @@ pub(crate) struct Snapshot {
     pub ask: Option<ask::Ask>,
     #[serde(default)]
     pub confirm: Option<confirm::Card>,
+    #[serde(default)]
+    pub staged: Option<drop::Staged>,
 }
 impl Snapshot {
     pub fn visible(&self) -> bool {
@@ -105,6 +107,8 @@ impl Snapshot {
                 | "workers"
         ) || self.state == "ask" && self.ask.is_some()
             || self.state == "confirm" && self.confirm.as_ref().is_some_and(confirm::Card::valid)
+            || self.state == "drop"
+            || self.state == "staged" && self.staged.as_ref().is_some_and(drop::Staged::valid)
             || self.state == "extras" && self.extras_live(capsules::now_ms())
     }
     fn label(&self) -> &str {
@@ -293,6 +297,9 @@ impl Render for Pill {
         }
         if self.snapshot.state == "confirm" {
             return root.child(self.render_confirm(opacity, cx)).children(extras);
+        }
+        if matches!(self.snapshot.state.as_str(), "drop" | "staged") {
+            return root.child(self.render_drop(opacity)).children(extras);
         }
         if capsules::is_capsule(&self.snapshot.state) {
             let capsule = div()
@@ -761,6 +768,8 @@ mod ask;
 mod capsules;
 #[path = "native_pill_confirm.rs"]
 mod confirm;
+#[path = "native_pill_drop.rs"]
+mod drop;
 #[path = "native_pill_extras.rs"]
 mod extras;
 #[path = "native_hud.rs"]
@@ -780,6 +789,9 @@ mod ask_tests;
 #[cfg(test)]
 #[path = "native_pill_confirm_tests.rs"]
 mod confirm_tests;
+#[cfg(test)]
+#[path = "native_pill_drop_tests.rs"]
+mod drop_tests;
 
 #[path = "native_pill_fixture.rs"]
 mod fixture;
