@@ -596,6 +596,8 @@ export interface LanePolicy {
 // ── Command Result ──
 
 export interface LaneCommandResult {
+  /** A launch may still own a process; retain the held receipt. */
+  effectStarted?: boolean;
   /** Runtime selection remains a command result for internal callers; HTTP preserves this refusal. */
   runtimeRefusal?: { status: number; code: string; message: string };
   ok: boolean;
