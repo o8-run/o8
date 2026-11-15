@@ -1,6 +1,7 @@
 //! Opt-in launcher. No bundle selects this executable yet.
 use o8_launch_core::{next_main_startup, ports, restart::*};
 use o8_launcher::ownership::{self, identity, private_write, Pending, Receipt};
+use o8_launcher::update;
 use serde::{Deserialize, Serialize};
 mod control;
 mod native;
@@ -40,6 +41,8 @@ struct Config {
     focus: Option<PathBuf>,
     #[serde(default = "native_enabled")]
     native_lifecycle: bool,
+    /// Updater settings; see `UPDATER.md`.
+    update: Option<update::UpdateConfig>,
 }
 struct Server {
     child: Child,
@@ -467,7 +470,7 @@ fn present_pumping(config: &Config, native: &native::Native, stopped: &AtomicBoo
     }
 }
 /// `Err(None)`: the failure was already reported, or a stop was requested.
-fn run(config: &mut Config) -> Result<(), Option<String>> {
+fn run(config: &mut Config, relaunch: &update::Relaunch) -> Result<(), Option<String>> {
     if !config.data_dir.is_absolute()
         || !config.server_dir.is_absolute()
         || !config.node.is_absolute()
@@ -482,6 +485,13 @@ fn run(config: &mut Config) -> Result<(), Option<String>> {
     else {
         return Ok(());
     };
+    // Settles an interrupted install while this instance holds the lock.
+    let mut updates = update::Controller::new(update::Updater::new(
+        &config.version,
+        &config.data_dir,
+        config.update.as_ref(),
+    ));
+    let mut install: Option<update::Staged> = None;
     // Finish launching first, then keep the main thread answering events through
     // every startup step: the system delivers Quit only to a launched app whose
     // event loop runs. Native termination and the headless exit share one
@@ -526,9 +536,31 @@ fn run(config: &mut Config) -> Result<(), Option<String>> {
         );
     }
     let outcome = serve(
-        config, &native, &stopped, &reopen, &servers, &control, &preparing,
+        config,
+        &native,
+        &stopped,
+        &reopen,
+        &servers,
+        &control,
+        &preparing,
+        &mut updates,
+        &mut install,
     );
     let stopped_cleanly = shutdown.run();
+    // The staged bundle replaces the installed one only after every server was
+    // proven stopped and the instance lock and socket were released.
+    if let (Some(staged), Some(updater)) = (install, updates.updater()) {
+        return match (&outcome, &stopped_cleanly) {
+            (Ok(()), Ok(())) => updater.install(staged, relaunch).map_err(|error| {
+                o8_launcher::note!("Update not installed: {error}");
+                None
+            }),
+            _ => {
+                updater.abandon(staged, "The servers were not proven stopped");
+                Err(None)
+            }
+        };
+    }
     match outcome {
         Err(reason) if !stopped.load(Ordering::SeqCst) => {
             present_pumping(config, &native, &stopped, &reason);
@@ -550,6 +582,8 @@ fn serve(
     servers: &Mutex<Option<Servers>>,
     control: &Mutex<Option<Instance>>,
     preparing: &Mutex<Option<Child>>,
+    updates: &mut update::Controller,
+    install: &mut Option<update::Staged>,
 ) -> Result<(), String> {
     for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         signal_hook::flag::register(signal, stopped.clone())
@@ -688,6 +722,18 @@ fn serve(
             };
             if let Some((request, peer)) = received {
                 let result = match request {
+                    Request::UpdateCheck => match updates.check() {
+                        Some(answer) => Ok(answer),
+                        None => {
+                            // Answered when the check finishes; the loop keeps running.
+                            if let Some(peer) = peer {
+                                updates.wait(peer);
+                            }
+                            continue;
+                        }
+                    },
+                    Request::UpdateApply => Ok(updates.apply()),
+                    Request::UpdateStatus => Ok(updates.status()),
                     Request::Show => {
                         pending_show = true;
                         Ok(serde_json::json!({"ok": true}))
@@ -707,6 +753,17 @@ fn serve(
             );
                 if let Some(mut peer) = peer {
                     let _ = writeln!(peer, "{response}");
+                }
+            }
+            if updates.poll().is_some() {
+                // The same final work inspection and drain as an admitted restart;
+                // admission stops the main loop and the bounded shutdown follows.
+                match restart.before_restart(None) {
+                    Ok(()) => *install = updates.take_ready(),
+                    Err(error) => {
+                        o8_launcher::note!("Update deferred: {error}");
+                        updates.deferred(error);
+                    }
                 }
             }
             if stopped.load(Ordering::SeqCst) {
@@ -843,6 +900,11 @@ fn main() {
     if args.len() == 2 && args[1] == "--prepare" {
         std::process::exit(prepare::helper_main());
     }
+    // Captured before startup changes the environment, for an updated relaunch.
+    let relaunch = update::Relaunch {
+        args: args.iter().skip(1).cloned().collect(),
+        env: std::env::vars_os().collect(),
+    };
     if args.len() != 3 || args[1] != "--config" {
         o8_launcher::note!("usage: o8-launcher --config <file>");
         std::process::exit(2);
@@ -857,7 +919,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    match run(&mut config) {
+    match run(&mut config, &relaunch) {
         Ok(()) => {}
         Err(Some(reason)) => {
             present(&config, &reason);

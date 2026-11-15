@@ -24,6 +24,9 @@ pub enum Request {
     PrepareRestart,
     CancelRestart { reservation: String },
     Restart { reservation: String },
+    UpdateCheck,
+    UpdateApply,
+    UpdateStatus,
 }
 struct Pending {
     request: Request,
