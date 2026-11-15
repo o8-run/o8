@@ -75,7 +75,9 @@ async function reconcile(host: string, receipt: PublicationReceipt, authorizatio
     return publicationResult(receipt);
   }
   savePublication(host, next);
-  return publicationResult(readPublication(host, receipt.repo, receipt.number)!);
+  const saved = readPublication(host, receipt.repo, receipt.number)!;
+  assertSameHead(saved, receipt.approvedSha.toLowerCase());
+  return publicationResult(saved);
 }
 function assertSameHead(receipt: PublicationReceipt, approvedSha: string): void {
   if (receipt.approvedSha.toLowerCase() !== approvedSha) throw new PublicationRefused({ ...receipt,
@@ -169,6 +171,7 @@ export async function publishGitHubPullRequest(repo: string, number: number, act
   receipt.reason = receipt.status === 'unknown' ? 'Host response was not confirmed; reconcile before any retry.' : receipt.status === 'refused' ? 'The host refused publication. The head may have changed; refresh and return to review.' : null;
   savePublication(host, receipt);
   const saved = readPublication(host, repo, number)!;
+  assertSameHead(saved, approvedSha);
   if (saved.status === 'unknown') throw new PublicationUnknown(saved);
   if (saved.status === 'refused') throw new PublicationRefused(saved);
   if (saved.status === 'queued' || saved.status === 'auto_merge_enabled') return reconcile(host, saved, authorization).catch(error => { if (error instanceof PublicationRefused || error instanceof PublicationUnknown) throw error; return saved; });

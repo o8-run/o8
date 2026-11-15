@@ -12,7 +12,7 @@ import { POST as publish } from '@/app/api/panel/prs/[number]/route';
 import { POST as legacy } from '@/app/api/panel/pr/review/route';
 
 const host = vi.hoisted(() => ({ installation: 9000, head: 'a'.repeat(40), merged: false, queue: false, queued: false,
-  closed: false, failRead: false, failStateRead: false, holdFinalRead: null as (() => Promise<void>) | null, lost: false, lostBeforeApply: false, raceHead: false, internalError: false, auto: false, failCheck: false, missingCheck: false, mutations: [] as Array<Record<string, unknown>>, reads: 0 }));
+  closed: false, failRead: false, failStateRead: false, holdFinalRead: null as (() => Promise<void>) | null, holdMutation: null as (() => Promise<void>) | null, holdStateRead: null as (() => Promise<void>) | null, lost: false, lostBeforeApply: false, raceHead: false, internalError: false, auto: false, failCheck: false, missingCheck: false, mutations: [] as Array<Record<string, unknown>>, reads: 0 }));
 vi.mock('@/lib/github-broker/env', () => ({ getGitHubAppConfig: () => null }));
 vi.mock('@/lib/github-broker/managed', () => ({ readManagedGithubToken: () => ({ installationId: host.installation, token: 'fixture', accountLogin: 'example' }), readActiveIdentity: () => 'fixture', readSignInEpoch: () => 1 }));
 const approved = 'a'.repeat(40);
@@ -28,11 +28,12 @@ const post = (old = false, extra: Record<string, unknown> = {}) => {
   return old ? legacy(request) : publish(request, { params: Promise.resolve({ number: String(number) }) });
 };
 beforeEach(() => {
-  number++; host.installation++; Object.assign(host, { head: approved, merged: false, queue: false, queued: false, lost: false, lostBeforeApply: false, raceHead: false, internalError: false, auto: false, failCheck: false, missingCheck: false, closed: false, failRead: false, failStateRead: false, holdFinalRead: null, mutations: [], reads: 0 });
+  number++; host.installation++; Object.assign(host, { head: approved, merged: false, queue: false, queued: false, lost: false, lostBeforeApply: false, raceHead: false, internalError: false, auto: false, failCheck: false, missingCheck: false, closed: false, failRead: false, failStateRead: false, holdFinalRead: null, holdMutation: null, holdStateRead: null, mutations: [], reads: 0 });
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     if (url.endsWith('/merge') || (url.endsWith('/graphql') && body.query?.startsWith('mutation'))) {
       host.mutations.push(body);
+      if (host.holdMutation) { const hold = host.holdMutation; host.holdMutation = null; await hold(); }
       if (host.raceHead) host.head = 'd'.repeat(40);
       if (host.lostBeforeApply) throw new Error('Connection lost after sending');
       if ((body.sha ?? body.variables?.input?.expectedHeadOid) !== host.head) return url.endsWith('/graphql') ? Response.json({ errors: [{ type: 'UNPROCESSABLE', message: 'Head changed' }], data: null }) : Response.json({ message: 'Head changed' }, { status: 409 });
@@ -42,6 +43,7 @@ beforeEach(() => {
       if (url.endsWith('/merge')) return Response.json({ merged: true, sha: mergedSha });
       return Response.json({ data: { enqueuePullRequest: { mergeQueueEntry: { id: 'entry' } }, enablePullRequestAutoMerge: { pullRequest: { id: 'node' } } } });
     }
+    if (body.query?.includes('query PublicationState') && host.holdStateRead) { const hold = host.holdStateRead; host.holdStateRead = null; await hold(); }
     if (body.query?.includes('query PublicationState') && host.failStateRead) throw new Error('Read unavailable');
     if (body.query?.includes('query PublicationState')) return Response.json({ data: { node: { headRefOid: host.head, isInMergeQueue: host.queued, autoMergeRequest: host.auto ? { enabledAt: '2026-01-01' } : null } } });
     if (url.endsWith('/graphql')) return Response.json({ data: { repository: { mergeQueue: host.queue ? { id: 'queue' } : null, pullRequest: { isInMergeQueue: host.queued }, object: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: [{ __typename: 'CheckRun', name: 'ci', isRequired: true }] } } } } } });
@@ -316,4 +318,38 @@ it('checks the winning claim SHA when concurrent callers approved different head
   const response = await first;
   expect(response.status).toBe(409);
   expect(host.mutations).toHaveLength(1);
+});
+
+it('a late response cannot return a newer head publication as its own success', async () => {
+  let entered!: () => void; let release!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const resumed = new Promise<void>(resolve => { release = resolve; });
+  host.holdMutation = async () => { entered(); await resumed; };
+  const first = post();
+  await ready;
+  try {
+    host.head = 'd'.repeat(40);
+    expect((await post(false, { commitSha: host.head })).status).toBe(409);
+    expect((await post(false, { commitSha: host.head })).status).toBe(200);
+  } finally { release(); }
+  expect((await first).status).toBe(409);
+  expect(host.mutations).toHaveLength(2);
+  expect(receipt()).toMatchObject({ status: 'merged', approvedSha: host.head });
+});
+
+it('late reconciliation cannot return a newer head publication as success', async () => {
+  let entered!: () => void; let release!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const resumed = new Promise<void>(resolve => { release = resolve; });
+  host.holdStateRead = async () => { entered(); await resumed; };
+  const first = post(false, { action: 'enable-auto-merge' });
+  await ready;
+  try {
+    host.head = 'd'.repeat(40); host.auto = false;
+    expect((await post(false, { commitSha: host.head })).status).toBe(409);
+    expect((await post(false, { commitSha: host.head })).status).toBe(200);
+  } finally { release(); }
+  expect((await first).status).toBe(409);
+  expect(host.mutations).toHaveLength(2);
+  expect(receipt()).toMatchObject({ status: 'merged', approvedSha: host.head });
 });
