@@ -167,15 +167,32 @@ describe('merge-queue reuse decision', () => {
     ]);
   });
 
-  it('reuses reportable Rust skips only alongside green classification and aggregate checks', async () => {
+  it('refuses Rust skips even alongside green classification and aggregate checks', async () => {
     const listing = green(prHead);
     for (const run of listing.check_runs) if (run.name.startsWith('Rust Compile Gate')) run.conclusion = 'skipped';
     arm(prHead, listing);
-    expect((await decide(group(7, unmoved, main0))).output).toBe('reuse=true\n');
+    expect((await decide(group(7, unmoved, main0))).output).toBe('reuse=false\n');
     listing.check_runs.find(run => run.name === 'Test Classification')!.conclusion = 'failure';
     arm(prHead, listing);
     expect((await decide(group(7, unmoved, main0))).output).toBe('reuse=false\n');
   });
+
+  it('refuses quick-only PR results and every individual skipped check', async () => {
+    for (const name of checkNames()) {
+      const listing = green(prHead);
+      listing.check_runs.find(run => run.name === name)!.conclusion = 'skipped';
+      arm(prHead, listing);
+      expect((await decide(group(7, unmoved, main0))).output, name).toBe('reuse=false\n');
+    }
+    const listing = green(prHead);
+    for (const run of listing.check_runs) {
+      if (!['Type Check', 'Lint', 'Test Classification', 'Security Audit', 'PR Review'].includes(run.name)) {
+        run.conclusion = 'skipped';
+      }
+    }
+    arm(prHead, listing);
+    expect((await decide(group(7, unmoved, main0))).output).toBe('reuse=false\n');
+  }, 60_000);
 
   it('runs fully when main moved, because the squashed tree differs', async () => {
     git(work, 'checkout', '-q', 'main');
@@ -365,7 +382,7 @@ describe('merge-queue reuse wiring', () => {
             if (cancelled || result === 'failure' || result === 'cancelled' || (event === 'merge_group' && result === 'skipped')) {
               expect(Function(`return (${expression})`)(), `${id} ${event} ${result}`).toBe(false);
             } else if (event === 'pull_request') {
-              expect(Function(`return (${expression})`)(), `${id} runs on PRs`).toBe(true);
+              expect(Function(`return (${expression})`)(), `${id} PR admission`).toBe(['typecheck', 'lint', 'classification', 'security'].includes(id));
             }
           }
         }
@@ -386,6 +403,6 @@ describe('merge-queue reuse wiring', () => {
       }
     }
     expect(jobs.test.needs).toEqual(['test-shards', 'o8-next-tests', 'classification']);
-    expect(jobs.test.if).toBe("always() && github.event.schedule != '41 13 * * 1'");
+    expect(jobs.test.if).toBe("always() && github.event.schedule != '41 13 * * 1' && github.event_name != 'pull_request'");
   });
 });
