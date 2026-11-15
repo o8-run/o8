@@ -88,7 +88,7 @@ pub(crate) fn is_capsule(state: &str) -> bool {
 /// The session kind a release names: each capsule, the chip/glint-only
 /// frame, or dictation for every dictation state.
 pub(crate) fn kind(state: &str) -> &str {
-    if is_capsule(state) || state == "extras" || state == "ask" {
+    if is_capsule(state) || matches!(state, "extras" | "ask" | "confirm") {
         state
     } else {
         "dictation"
@@ -104,6 +104,7 @@ pub(crate) fn size(snapshot: &Snapshot) -> (f64, f64) {
         "voice" => (268., 40.),
         "workers" if snapshot.expanded => (320., 44.),
         "workers" => (128., 16.),
+        "confirm" => super::confirm::CARD,
         "ask" => snapshot.ask.as_ref().map_or(super::ask::PANEL, super::ask::Ask::size),
         "working" => (248., 40.),
         _ => (248., 44.),
@@ -115,6 +116,7 @@ pub(crate) fn interactive(snapshot: &Snapshot) -> bool {
         "recording" | "speaking" | "working" | "workers" => true,
         "voice" => !snapshot.connecting,
         "ask" => snapshot.ask.as_ref().is_some_and(|ask| !ask.listening),
+        "confirm" => true,
         _ => false,
     }
 }

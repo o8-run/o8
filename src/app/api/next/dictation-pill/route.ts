@@ -57,10 +57,12 @@ export async function POST(request: NextRequest) {
 
 const ACTIONS: Record<string, string> = {
   pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice', 'workers-expand': 'workers',
-  'ask-close': 'ask', 'ask-copy': 'ask', 'ask-active': 'ask',
+  'ask-close': 'ask', 'ask-copy': 'ask', 'ask-active': 'ask', 'confirm-allow': 'confirm', 'confirm-deny': 'confirm',
 };
+/** A confirmation or task id: a bounded, printable string. */
+const identity = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 200 && !/[\u0000-\u001f]/.test(value);
 /** Frames the edit chip can be drawn under; a revert names one of them and its chip. */
-const CHIP_FRAMES = new Set(['requesting-mic', 'recording', 'transcribing', 'polishing', 'success', 'error', 'speaking', 'working', 'voice', 'workers', 'extras', 'ask']);
+const CHIP_FRAMES = new Set(['requesting-mic', 'recording', 'transcribing', 'polishing', 'success', 'error', 'speaking', 'working', 'voice', 'workers', 'extras', 'ask', 'confirm']);
 
 /** Click intents from the native panel; only well-formed capsule intents pass. */
 function capsuleActions(value: unknown) {
@@ -74,6 +76,11 @@ function capsuleActions(value: unknown) {
     if (!Object.hasOwn(ACTIONS, item.action) || ACTIONS[item.action] !== item.state) return [];
     const value = typeof item.value === 'number' && Number.isFinite(item.value) ? item.value : null;
     if (item.action === 'speed' && value === null) return [];
+    // A decision names the exact confirmation and task it was drawn for.
+    if (item.action.startsWith('confirm-')) {
+      if (!identity(item.ref) || !identity(item.task)) return [];
+      return [{ session: item.session, state: item.state, action: item.action, value: null, ref: item.ref, task: item.task }];
+    }
     // An Ask intent names the thread revision it was drawn for; a copy also names the answer.
     if (item.action.startsWith('ask-')) {
       if (typeof item.ref !== 'string' || !/^\d{1,15}$/.test(item.ref)) return [];
