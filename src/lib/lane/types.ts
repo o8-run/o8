@@ -230,6 +230,9 @@ export type LaneCommand =
   | {
       verb: 'merge';
       laneId: string;
+      /** Evidence only; authority continues to come from the authenticated approval route. */
+      authorizingPrincipal?: 'operator' | 'device';
+      authorizingApprovalId?: string;
       commitMessage?: string;
       /** Orchestrator review verdict — shown on the approval card */
       reviewSummary?: string;
@@ -593,6 +596,8 @@ export interface LanePolicy {
 // ── Command Result ──
 
 export interface LaneCommandResult {
+  /** A launch may still own a process; retain the held receipt. */
+  effectStarted?: boolean;
   /** Runtime selection remains a command result for internal callers; HTTP preserves this refusal. */
   runtimeRefusal?: { status: number; code: string; message: string };
   ok: boolean;

@@ -87,6 +87,7 @@ function insertResolutionEvent(
     actor: event.actor,
     note: event.note ?? null,
     detailsJson: JSON.stringify({
+      ...(event.authorizingPrincipal ? { authorizingPrincipal: event.authorizingPrincipal, approvedHeadSha: event.approvedHeadSha } : {}),
       ...(event.approvedFromCard ? { approvedFromCard: event.approvedFromCard } : {}),
       ...(event.terminalAdapter ? { terminalAdapter: event.terminalAdapter } : {}),
     }),
@@ -110,6 +111,7 @@ export function claimApprovalResolution(
   approvedFromCard?: ApprovalAuditEvent['approvedFromCard'],
   terminalAdapter?: ApprovalAuditEvent['terminalAdapter'],
   subjectStillCurrent?: () => boolean,
+  decisionIdentity?: Pick<ApprovalAuditEvent, 'authorizingPrincipal' | 'approvedHeadSha'>,
 ): ApprovalResolutionClaim {
   const existing = readApproval(id);
   if (!existing || existing.status !== 'pending') {
@@ -130,11 +132,13 @@ export function claimApprovalResolution(
     note,
     resolvedAt,
   );
+  Object.assign(event, decisionIdentity);
   if (approvedFromCard && action === 'approve') event.approvedFromCard = approvedFromCard;
   if (terminalAdapter) event.terminalAdapter = terminalAdapter;
   const resolution: NonNullable<ApprovalRecord['resolution']> = {
     action: nextStatus,
     actor,
+    ...decisionIdentity,
     note: note?.trim() || undefined,
     claimId,
     continuationStatus: action === 'approve' && (existing.continuation || existing.toolName === 'edit_file')

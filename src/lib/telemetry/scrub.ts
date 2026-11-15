@@ -1,9 +1,8 @@
 import { SECRET_PATTERNS, VIEWER_SECRET_PATTERNS } from '@/lib/acp/output-redaction-matchers';
 
 /**
- * Sentry payload scrubbing — the single, tested transform every JS Sentry layer
- * runs in `beforeSend` (@sentry/node in the Next server + ws-server, and
- * @sentry/browser in the desktop webview).
+ * Sentry payload scrubbing — the shared, tested `beforeSend` transform for
+ * @sentry/node in the Next server and ws-server.
  *
  * Privacy is brand (ruling: o8-desktop-error-telemetry-direction). Engineers'
  * stack traces can carry home paths (→ the operator's username), repo names, and

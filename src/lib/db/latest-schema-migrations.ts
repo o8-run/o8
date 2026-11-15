@@ -1,3 +1,4 @@
+import { ensureV82GitHubPublicationSchema } from './v82-github-publication-migration';
 import { ensureV81ExternalPrReviewSchema } from './v81-external-pr-review-migration';
 import { ensureV74ConversationPrProvenanceSchema } from '@/lib/db/v74-conversation-pr-provenance-migration';
 import { ensureV75ComposerQueueLedgerSchema } from '@/lib/db/v75-composer-queue-ledger-migration';
@@ -105,4 +106,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV79MissionCardsSchema(sqlite);
   ensureV80CorrectionReviewSchema(sqlite);
   ensureV81ExternalPrReviewSchema(sqlite);
+  ensureV82GitHubPublicationSchema(sqlite);
 }

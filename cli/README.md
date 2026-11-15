@@ -70,6 +70,11 @@ the mission as a whole: how many packets have finished, then one finished or
 failed mark once all of them have. A mission with more than 60 packets marks
 its first 60 and still counts all of them in the summary.
 
+`o8 chat` reports too: working while a turn runs, a finished mark when a reply
+to a message sent from that chat is ready to read, and a failed mark when the connection drops or the chat shows
+an error. Leaving chat removes its mark. Chat is always interactive, so it needs
+no `--human`; the terminal check and `O8_TERMINAL_STATUS` apply as above.
+
 Reports are written only with `--human`, when stdout is an interactive terminal,
 and when the terminal is known to read the sequence. Rex is detected through
 `REX_SESSION`. Set `O8_TERMINAL_STATUS=1` to send reports in any interactive
@@ -108,9 +113,11 @@ title and a fixed status phrase, and nothing else. o8 writes to its own record
 | `o8 terminal list` | List live dashboard shell IDs, including detached sessions |
 | `o8 terminal show <id> [--lines N]` | Read up to 1000 lines from an existing dashboard shell |
 | `o8 terminal observe <id>` | Stream an existing shell read-only; `--human` prints terminal text |
-| `o8 terminal panes` | Inside Rex, open one read-only pane per live shell; `--limit 1..16`, `--machine <label-or-id>` |
+| `o8 terminal panes` | Inside Rex, open one read-only pane per running packet (its transcript), worker terminal and live shell, labeled by title; `--watch` keeps opening panes as work starts, `--here` opens them beside the current pane, `--limit 1..16`, `--machine <label-or-id>` |
+| `o8 terminal shortcut` | Added on its own the first time you run o8 inside Rex (`O8_REX_SHORTCUT=0` turns that off). Add a "Show o8 Terminals" action to Rex that opens a tab running `o8 terminal panes --watch --here`; `--key <key>` binds a key, `--remove` takes it out |
 | `o8 terminal control <id>` | Claim one existing shell for input/output; refuses an active writer and releases on exit |
 | `o8 packet log <event>` | (Phase-1 stub) — will append a structured lane event once the backend route lands |
+| `o8 packet transcript [id]` | Read what a packet's worker is doing: tool calls, replies, steers and how it ended. `--follow` keeps reading until the worker stops, and `--hold` then keeps the command open until you press Enter; `--limit 1..200` sets how many recent events to show first |
 
 ## Configuration
 

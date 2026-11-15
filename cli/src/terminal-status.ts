@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 
 import type { OutputMode } from './output.js';
 
-export type TerminalStatusState = 'working' | 'done' | 'error' | 'clear';
+export type TerminalStatusState = 'idle' | 'working' | 'done' | 'error' | 'clear';
 
 export interface TerminalStatusReport {
   state: TerminalStatusState;

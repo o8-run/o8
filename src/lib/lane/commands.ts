@@ -1,3 +1,4 @@
+import { checkLaneMergeHead } from '@/lib/approvals/merge-head';
 import { checkReviewRunPreflight, reviewRunPolicyConfiguration } from './review-run-policy';
 import { resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
@@ -47,7 +48,7 @@ import { assertLaneHeadOnBranch, laneGit, LaneGitMetadataError } from '@/lib/lan
 import { commitLaneWork } from '@/lib/supervisor/completion-verification';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
-import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
+import { prFirstMergeRefusal } from '@/lib/lane/pr-first-delivery';
 import { isPacketMergeHeld, MERGE_HOLD_POLICY_RULE_ID } from '@/lib/lane/merge-hold';
 import { assertSessionMergeAllowed } from '@/lib/orchestrator/session-merge-restriction';
 import { RuntimeSelectionError, runtimeSelectionRefusal, validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
@@ -771,6 +772,13 @@ async function dispatchUnlocked(
     case 'merge': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+      if (lane.status === 'completed' && !lane.worktreePath && (lane.runtime as string) !== 'remote-customer') {
+        return { ok: false, laneId: lane.id, note: 'No worktree to merge. Lane is on the main working tree.' };
+      }
+      const approvedHeadRefusal = command.authorizingApprovalId ? await checkLaneMergeHead(lane.id, command.expectedHeadSha) : null;
+      if (approvedHeadRefusal) return { ok: false, laneId: lane.id, reason: approvedHeadRefusal.code, note: approvedHeadRefusal.message };
+      const prOnlyNote = await prFirstMergeRefusal(lane);
+      if (prOnlyNote) return { ok: false, laneId: command.laneId, note: prOnlyNote, reason: 'pr_only' };
       const spokenEvidence = validateSpokenReviewEvidenceBundle(command);
       if (!spokenEvidence.complete) {
         return {
@@ -780,8 +788,6 @@ async function dispatchUnlocked(
           reason: 'spoken_review_evidence_incomplete',
         };
       }
-      // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
-      if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
       const isRemoteCustomerLane = (lane.runtime as string) === 'remote-customer';
       if (!lane.worktreePath && !isRemoteCustomerLane) {
         return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };

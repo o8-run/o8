@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { runMission } from './mission';
-import { EXIT } from '../api';
+import { checkMissionCreateArgs, runMission } from './mission';
+import { CliError, EXIT } from '../api';
 
 const mode = { human: false, verbose: false };
 
@@ -19,6 +19,81 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete process.env.O8_API_PORT;
+});
+
+describe('o8 mission create --dispatch', () => {
+  it('returns as soon as the server has admitted the dispatch, without asking again', async () => {
+    process.env.O8_API_PORT = '47120';
+    const queued = { ok: true, result: { status: 'queued', initiated: true, missionId: 'mission-effort-pin', note: 'Dispatch admitted.' } };
+    const fetchMock = vi.fn(async (url: string | URL) => (String(url).includes('/api/orchestrator/dispatch')
+      ? new Response(JSON.stringify(queued), { status: 200 })
+      : new Response(JSON.stringify(missionResponse()), { status: 201 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+
+    await expect(runMission(mode, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch'])).resolves.toBe(0);
+
+    const paths = fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
+    expect(paths).toEqual(['/api/orchestrator/create-mission', '/api/orchestrator/dispatch']);
+    expect(JSON.parse(written.join('')).dispatch).toMatchObject({ status: 'queued', initiated: true });
+  });
+
+  it('says the dispatch was admitted in human output', async () => {
+    process.env.O8_API_PORT = '47120';
+    const queued = { ok: true, result: { status: 'queued', initiated: true, missionId: 'mission-effort-pin' } };
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => (String(url).includes('/api/orchestrator/dispatch')
+      ? new Response(JSON.stringify(queued), { status: 200 })
+      : new Response(JSON.stringify(missionResponse()), { status: 201 }))));
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+
+    await expect(runMission({ human: true, verbose: false }, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch']))
+      .resolves.toBe(0);
+    expect(written.join('')).toContain('admitted, awaiting launch');
+  });
+});
+
+describe('a dispatch that does not start', () => {
+  function serve(dispatchResult: Record<string, unknown>) {
+    process.env.O8_API_PORT = '47120';
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => (String(url).includes('/api/orchestrator/dispatch')
+      ? new Response(JSON.stringify({ ok: true, result: dispatchResult }), { status: 200 })
+      : new Response(JSON.stringify(missionResponse()), { status: 201 }))));
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+    return written;
+  }
+
+  it('fails mission create --dispatch after printing the mission it made, as mission dispatch fails', async () => {
+    const written = serve({ initiated: false, async: true, missionId: 'mission-effort-pin', blocked: true });
+    const error = await runMission(mode, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch']).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CliError);
+    expect(error).toMatchObject({ code: 'dispatch_blocked', exit: EXIT.CONFLICT });
+    expect((error as Error).message).toContain('o8 mission dispatch --mission mission-effort-pin');
+    expect(JSON.parse(written.join('')).mission.missionId).toBe('mission-effort-pin');
+  });
+
+  it('says blocked in human output, and not dispatched for any other refusal', async () => {
+    const human = { human: true, verbose: false };
+    const blocked = serve({ initiated: false, missionId: 'mission-effort-pin', blocked: true });
+    await expect(runMission(human, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch'])).rejects.toMatchObject({ code: 'dispatch_blocked' });
+    expect(blocked.join('')).toContain('blocked, not dispatched');
+    vi.restoreAllMocks();
+    const other = serve({ initiated: false });
+    await expect(runMission(human, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch'])).rejects.toMatchObject({ code: 'dispatch_not_initiated', exit: EXIT.NOT_FOUND });
+    expect(other.join('')).toContain('not dispatched');
+  });
+
+  it('names the hold from mission dispatch too, rather than asking for a mission', async () => {
+    serve({ initiated: false, async: true, missionId: 'mission-held', blocked: true });
+    await expect(runMission(mode, 'dispatch', ['--mission', 'mission-held'])).rejects.toMatchObject({
+      code: 'dispatch_blocked', exit: EXIT.CONFLICT, message: 'Mission mission-held has an active lifecycle hold and was not dispatched.',
+    });
+    vi.restoreAllMocks();
+    serve({ initiated: false });
+    await expect(runMission(mode, 'dispatch', [])).rejects.toMatchObject({ code: 'dispatch_not_initiated', exit: EXIT.NOT_FOUND });
+  });
 });
 
 describe('o8 mission create --effort', () => {
@@ -417,5 +492,54 @@ describe('o8 mission terminal status reports (#6137)', () => {
       expect(out).not.toContain(OSC);
       expect(out).not.toContain('\x1b]');
     });
+  });
+});
+
+describe('o8 mission create refuses what it would drop', () => {
+  it('takes every flag it reads, with values that look like flags', () => {
+    expect(() => checkMissionCreateArgs([
+      '--title', 'Add a route', '--body', '-- leading dashes are fine', '--repo=/r', '--dispatch', '--effort', 'low',
+      '--runtime', 'codex', '--read-only', '--existingBranchPolicy', 'reset', '--idempotency-key', 'k1',
+    ])).not.toThrow();
+  });
+
+  it('refuses an unknown flag and points at --body', () => {
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--task', 'run the tests']))
+      .toThrowError(expect.objectContaining({ code: 'invalid_args', exit: EXIT.INVALID_ARGS, message: expect.stringContaining('--task') }));
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--task=run']))
+      .toThrowError(expect.objectContaining({ hint: expect.stringContaining('--body') }));
+  });
+
+  it('refuses text that belongs to no flag, and a switch given a value', () => {
+    expect(() => checkMissionCreateArgs(['--title', 'x', 'run the tests'])).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--dispatch=yes'])).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
+  });
+
+  it('takes --flag=value and a value flag left last without a value, as before', () => {
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--effort=low', '--body'])).not.toThrow();
+  });
+
+  it('says a value flag needs a value when another flag follows it', () => {
+    expect(() => checkMissionCreateArgs(['--effort', '--title', 'x']))
+      .toThrowError(expect.objectContaining({ message: '--effort needs a value.' }));
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--body', '--repo=/r']))
+      .toThrowError(expect.objectContaining({ message: '--body needs a value.' }));
+  });
+
+  it('echoes a refused word without control characters, and short', () => {
+    let message = '';
+    try { checkMissionCreateArgs(['--title', 'x', `--a\x1b]0;pwn\x07${'b'.repeat(200)}`]); } catch (error) { message = (error as Error).message; }
+    expect(message).not.toMatch(/[\x00-\x1f]/);
+    try { checkMissionCreateArgs(['--title', 'x', 'a\u202eb']); } catch (error) { message = (error as Error).message; }
+    expect(message).toContain('ab');
+    expect(message.length).toBeLessThan(140);
+  });
+
+  it('refuses before anything reaches the server', async () => {
+    process.env.O8_API_PORT = '47120';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(runMission(mode, 'create', ['--title', 'x', '--task', 'y'])).rejects.toMatchObject({ code: 'invalid_args' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,7 @@ o8 is the review and merge layer for coding agents. Write code in the tool you l
 
 Direction set on 2026-11-10. o8 no longer competes as the app where code gets written. The o8 next window stays, re-aimed at work flowing in and the reviewers' transcripts. Work that served the earlier "agent app" framing is listed under [Parked](#parked).
 
-Last updated 2026-11-10. If this date is more than 14 days old, treat every number below as stale and recompute it with the commands in [Live status](#live-status).
+Last updated 2026-11-15. If this date is more than 14 days old, treat every number below as stale and recompute it with the commands in [Live status](#live-status).
 
 ## For agents: read this first
 
@@ -37,7 +37,7 @@ Snapshot from 2026-11-10. Rerun the command for the current value.
 | Stable release | 0.1.818 (2026-11-10) | `gh release list --repo hurttlocker/o8-releases --limit 5` |
 | Commits on `main` since stable | 7 | `git rev-list --count v0.1.818..origin/main` |
 | Review and merge loop progress | see command | `node scripts/roadmap-status.mjs` (tracking issue #5815) |
-| Open issues | 121 | `gh issue list --repo o8-run/o8 --state open --limit 1000 --json number -q length` |
+| Open issues | 209 (2026-11-15) | `gh issue list --repo o8-run/o8 --state open --limit 1000 --json number -q length` |
 | Tracking issues and checklist progress | see command | `node scripts/roadmap-status.mjs` |
 
 ## Now
@@ -54,6 +54,7 @@ Ranked. Work on a lower item does not delay a higher one.
 2. **Governance and security.** The reason to trust the loop. No lane stalls silently ([#2197](https://github.com/o8-run/o8/issues/2197)), and a worker cannot reach anything its packet does not grant ([#2198](https://github.com/o8-run/o8/issues/2198), security lane).
 3. **Other tools plug in.** Work written in another tool enters review without copy and paste. Its author sees verdicts and findings natively inside that tool, so nobody switches apps. o8's MCP server and CLI carry them ([#5841](https://github.com/o8-run/o8/issues/5841)).
 4. **The window shows the review.** o8 next keeps every surface it has. The sidebar lists work flowing in, and a selected item shows the reviewer's transcript. Reviewers can still spawn workers ([#5842](https://github.com/o8-run/o8/issues/5842)).
+   - In progress: worker and reviewer sessions use the chat transcript and grouped traces ([#5878](https://github.com/o8-run/o8/issues/5878)).
 5. **Linux as a home for o8.** The machine that hosts o8 is often a Linux server. A fresh Ubuntu machine goes from install to a merged review ([#1672](https://github.com/o8-run/o8/issues/1672)).
 6. **Finish the Rust server port.** It is close to done, so it gets finished rather than left half moved. The remaining o8 next API paths move from the web server to the native daemon, one pull request per surface, with login rules unchanged ([#5243](https://github.com/o8-run/o8/issues/5243); plan in [#5422](https://github.com/o8-run/o8/issues/5422)). The classic web pages that nothing still loads are archived after it.
 7. **Next release.** What has merged since 0.1.818 ships together once the [release gate](#release-gate) passes. The integration suite on `main` must be green first ([#5317](https://github.com/o8-run/o8/issues/5317)). Releases go through beta, then stable ([#2205](https://github.com/o8-run/o8/issues/2205)).
@@ -100,27 +101,28 @@ These pillars are what o8 is. The top three, set on 2026-11-10, are review and m
 - `active`: work is in flight now;
 - `open`: known gaps, not in Now;
 - `parked`: we know what it would take and are not doing it.
+- `done`: every child issue is closed and the tracking issue is closed. New defects get their own issue.
 
 | Pillar | Arc | Done means | State | Where |
 | --- | --- | --- | --- | --- |
 | Review and merge | Agent review and integration without manual handoffs | Work from any author moves through intake, independent review, correction and governed merge with durable evidence | active | [#5815](https://github.com/o8-run/o8/issues/5815) |
 | Plugs into every tool | Other tools plug into o8 review and merge | Work from any coding tool enters review, and its author sees verdicts and findings natively inside that tool, with no app switching | active | [#5841](https://github.com/o8-run/o8/issues/5841) |
-| Governance | Lane lifecycle and recovery honesty | No lane stalls silently; every terminal state is reachable from the UI and the CLI | open | [#2197](https://github.com/o8-run/o8/issues/2197) |
+| Governance | Lane lifecycle and recovery honesty | No lane stalls silently; every terminal state is reachable from the UI and the CLI | done | [#2197](https://github.com/o8-run/o8/issues/2197) |
 | Governance | Worker capability boundaries | A worker cannot read or reach anything its packet does not grant. Security lane | open | [#2198](https://github.com/o8-run/o8/issues/2198) |
-| Governance | Orchestrator prompt matches its turn | The prompt a turn runs with is the prompt it was built for | open | [#2903](https://github.com/o8-run/o8/issues/2903) |
-| Governance | Reliable agent workflows | Local reliability burn-down | open | [#3190](https://github.com/o8-run/o8/issues/3190) |
-| Subscriptions | Carrier coverage and auth probes | A new agent CLI lands as a registry entry plus a readiness probe, with no fork in dispatch | open | [#2200](https://github.com/o8-run/o8/issues/2200) |
+| Governance | Orchestrator prompt matches its turn | The prompt a turn runs with is the prompt it was built for | done | [#2903](https://github.com/o8-run/o8/issues/2903) |
+| Governance | Reliable agent workflows | Local reliability burn-down | done | [#3190](https://github.com/o8-run/o8/issues/3190) |
+| Subscriptions | Carrier coverage and auth probes | A new agent CLI lands as a registry entry plus a readiness probe, with no fork in dispatch | done | [#2200](https://github.com/o8-run/o8/issues/2200) |
 | Subscriptions | Local models first-class | Every surface names its local provider, and a test proves no egress for a full packet | parked | [#1451](https://github.com/o8-run/o8/issues/1451) |
 | Subscriptions | Conversation orchestration through a chat plan | Plan and follow CLI work with explicit account and usage boundaries | parked | [#2955](https://github.com/o8-run/o8/issues/2955) |
-| Every surface | Settings take effect everywhere | Change a setting once; every surface uses it on its next action | open | [#2217](https://github.com/o8-run/o8/issues/2217) |
+| Every surface | Settings take effect everywhere | Change a setting once; every surface uses it on its next action | done | [#2217](https://github.com/o8-run/o8/issues/2217) |
 | Every surface | Live terminals as a workspace surface | A tmux or vim session survives an update and a pane switch byte for byte | parked | [#1723](https://github.com/o8-run/o8/issues/1723) |
 | Every surface | Symon correctness and reliability | Desktop and phone voice flows reviewed; confirmed failures fixed through real entry points | parked | [#2534](https://github.com/o8-run/o8/issues/2534) |
 | Every surface | Durable Symon on the built-in agent | Symon survives restarts across app, phone and messages | parked | [#3456](https://github.com/o8-run/o8/issues/3456) |
 | Every surface | Faster operator decisions on the phone | Mobile surfaces ordered by what needs the operator first | parked | [#2445](https://github.com/o8-run/o8/issues/2445) |
 | People and agents | Design Mode loop | "Change this button" is one bounded loop with a before-and-after proof | parked | [#1695](https://github.com/o8-run/o8/issues/1695) |
-| Runs where you are | Speed and idle work | Interaction budgets hold under real load, not only at idle | open | [#2202](https://github.com/o8-run/o8/issues/2202) |
-| Runs where you are | Storage admission and reclaim | o8 never blocks a dispatch it could service and never fills the disk | open | [#2203](https://github.com/o8-run/o8/issues/2203) |
-| Runs where you are | Release channels and build integrity | Beta and stable are separable; a build reproduces from its tag | active | [#2205](https://github.com/o8-run/o8/issues/2205) |
+| Runs where you are | Speed and idle work | Interaction budgets hold under real load, not only at idle | done | [#2202](https://github.com/o8-run/o8/issues/2202) |
+| Runs where you are | Storage admission and reclaim | o8 never blocks a dispatch it could service and never fills the disk | done | [#2203](https://github.com/o8-run/o8/issues/2203) |
+| Runs where you are | Release channels and build integrity | Beta and stable are separable; a build reproduces from its tag | done | [#2205](https://github.com/o8-run/o8/issues/2205) |
 
 ### Platforms
 

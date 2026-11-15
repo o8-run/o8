@@ -20,7 +20,6 @@ export async function POST() {
       title: 'o8 — test push',
       body: 'If you see this, push notifications are working.',
       tag: 'o8-push-test',
-      url: '/mobile?view=approvals',
       data: { kind: 'test' },
     });
 

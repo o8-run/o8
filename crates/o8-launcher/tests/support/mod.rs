@@ -35,12 +35,20 @@ if '--version' in sys.argv:
  print('v22.0.0'); sys.exit(0)
 if '-e' in sys.argv: sys.exit(0)
 if Path(sys.argv[0]).name=='dialog':
+ (root/'dialog-pid').write_text(str(os.getpid()))
  (root/'dialog-reached').write_text(sys.argv[1])
  while (root/'hold-dialog').exists(): time.sleep(0.02)
  (root/'dialog-exited').write_text('1'); sys.exit(0)
 if Path(sys.argv[0]).name=='probe':
+ (root/'probe-ran').open('a').write('1\n')
+ if (root/'probe-background').exists() and os.fork()==0:
+  null=os.open(os.devnull,os.O_RDWR)
+  for fd in (0,1,2): os.dup2(null,fd)
+  (root/'background-pid').write_text(str(os.getpid()))
+  while root.exists(): time.sleep(0.1)
+  os._exit(0)
  if (root/'hold-probe').exists():
-  (root/'probe-entered').write_text('1')
+  (root/'probe-entered').write_text(str(os.getpid()))
   while (root/'hold-probe').exists(): time.sleep(0.02)
  print('__O8_PATH='+os.environ['PATH']); print('__O8_NODE='+str(root/'node')); print('GEMINI_API_KEY=fixture-key'); sys.exit(0)
 if Path(sys.argv[0]).name=='focus':
@@ -50,7 +58,7 @@ if Path(sys.argv[0]).name=='window':
  (root/'window-ready').write_text(str(os.getpid()))
  sys.stdin.buffer.read(); sys.exit(0)
 api=sys.argv[1].endswith('server.js')
-keys=['O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','PATH']
+keys=['O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','O8_FORGED_KEY','PATH']
 (root/('api-env' if api else 'ws-env')).write_text(json.dumps({k:os.environ.get(k) for k in keys}))
 def terminated(*args):
  (root/'events').open('a').write(('api' if api else 'ws')+'-stop\n'); sys.exit(0)
@@ -118,8 +126,26 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
         }
     }
     pub fn launch(&self) -> Child {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_o8-launcher"));
+        self.launch_with(
+            std::path::Path::new(env!("CARGO_BIN_EXE_o8-launcher")),
+            &self.root.join("config.json"),
+            &[],
+            "launcher-stderr",
+        )
+    }
+    /// Starts a launcher binary with extra environment, logging to `stderr` in the root.
+    pub fn launch_with(
+        &self,
+        binary: &std::path::Path,
+        config: &std::path::Path,
+        extra: &[(&str, &str)],
+        stderr: &str,
+    ) -> Child {
+        let mut command = Command::new(binary);
         command.env_clear();
+        for (key, value) in extra {
+            command.env(key, value);
+        }
         if self.root.join("memory-helper").exists() {
             command.env("O8_CODEBASE_MEMORY_BIN", self.root.join("memory-helper"));
         }
@@ -128,7 +154,7 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
         }
         command
             .arg("--config")
-            .arg(self.root.join("config.json"))
+            .arg(config)
             .env(
                 "PATH",
                 if self.root.join("minimal-path").exists() {
@@ -140,7 +166,7 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
             .env("HOME", &self.root)
             .env("LANG", "C")
             .stdout(Stdio::null())
-            .stderr(fs::File::create(self.root.join("launcher-stderr")).unwrap())
+            .stderr(fs::File::create(self.root.join(stderr)).unwrap())
             .spawn()
             .unwrap()
     }
@@ -167,6 +193,10 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
         }
         until(|| child.try_wait().unwrap().is_some());
         self.launcher = None;
+    }
+    #[allow(dead_code)]
+    pub fn log(&self, name: &str) -> String {
+        fs::read_to_string(self.root.join(name)).unwrap_or_default()
     }
     pub fn starts(&self, name: &str) -> Vec<u32> {
         fs::read_to_string(self.root.join(name))
@@ -210,6 +240,7 @@ impl Drop for Fixture {
     }
 }
 
+#[allow(dead_code)]
 pub fn control(f: &Fixture, request: serde_json::Value) -> serde_json::Value {
     use std::io::{Read, Write};
     let mut stream = std::os::unix::net::UnixStream::connect(f.root.join("launcher.sock")).unwrap();
@@ -221,4 +252,10 @@ pub fn control(f: &Fixture, request: serde_json::Value) -> serde_json::Value {
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes).unwrap();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+/// The process has exited and been reaped by whoever owned it.
+#[allow(dead_code)]
+pub fn gone(pid: u32) -> bool {
+    (unsafe { libc::kill(pid as i32, 0) }) != 0
 }
