@@ -605,3 +605,93 @@ fn speech_prefs_read_the_desktop_data_directory() {
         VoicePrefs::default()
     );
 }
+
+#[test]
+fn speech_appends_what_goes_out_to_voice_history() {
+    let fake = Fake::new("history");
+    let dir = saved(&fake, serde_json::json!({}), None);
+    let path = dir.join("dictation-history.json");
+    // A full file from the shell, with a field this client doesn't know.
+    let old: Vec<_> = (0..200)
+        .map(|n| {
+            serde_json::json!({"id": n.to_string(), "ts": n, "mode": "ask",
+            "text": format!("old {n}"), "app": "", "extra": n})
+        })
+        .collect();
+    std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    let mut launch = fake.launch(&[("FAKE_FINAL", "hello world")]);
+    launch.data = Some(dir.clone());
+    let mut speech = Speech::new(launch, Arc::new(Stub::new()));
+    let id = listen(&mut speech, None);
+    speech.stop(id);
+    assert_eq!(
+        until_end(&speech, id).last(),
+        Some(&Update::Done("hello world.".into()))
+    );
+    let saved: Vec<serde_json::Value> =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    // Capped at 200: the oldest went, the rest kept as they were.
+    assert_eq!(saved.len(), 200);
+    assert_eq!(saved[0], old[1]);
+    let entry = &saved[199];
+    assert_eq!(entry["mode"], "dictation");
+    assert_eq!(entry["text"], "hello world.");
+    assert_eq!(entry["app"], "ai.o8.desktop");
+    assert!(entry["id"].as_str().is_some_and(|id| !id.is_empty()));
+    assert!(entry["ts"].as_i64().is_some_and(|ts| ts > 1_700_000_000));
+    // Settings > Voice > History reads it, newest first.
+    let listed = crate::shell::settings::voice_history::read(&path);
+    assert_eq!(listed[0].text, "hello world.");
+    assert_eq!(listed[0].mode, "dictation");
+    // No temp file is left behind.
+    let names: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert!(
+        names.iter().all(|name| !name.ends_with(".tmp")),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn speech_keeps_nothing_in_history_that_did_not_go_out() {
+    let fake = Fake::new("history-none");
+    let dir = saved(&fake, serde_json::json!({}), None);
+    let stub = Arc::new(Stub {
+        polished: Some(Ok(Polished {
+            text: String::new(),
+            cancelled: true,
+        })),
+        ..Stub::new()
+    });
+    let mut launch = fake.launch(&[("FAKE_FINAL", "scratch that")]);
+    launch.data = Some(dir.clone());
+    let mut speech = Speech::new(launch, stub);
+    // A spoken cancel, then a cancelled recording.
+    let id = listen(&mut speech, None);
+    speech.stop(id);
+    assert_eq!(until_end(&speech, id).last(), Some(&Update::Dropped));
+    let id = listen(&mut speech, None);
+    speech.cancel(id);
+    assert_eq!(until_end(&speech, id), [Update::Phase(Phase::Idle)]);
+    assert!(!dir.join("dictation-history.json").exists());
+}
+
+#[test]
+fn speech_leaves_an_unreadable_history_alone() {
+    let fake = Fake::new("history-bad");
+    let dir = saved(&fake, serde_json::json!({}), None);
+    let path = dir.join("dictation-history.json");
+    std::fs::write(&path, "{not json").unwrap();
+    let mut launch = fake.launch(&[("FAKE_FINAL", "hello world")]);
+    launch.data = Some(dir);
+    let mut speech = Speech::new(launch, Arc::new(Stub::new()));
+    let id = listen(&mut speech, None);
+    speech.stop(id);
+    assert_eq!(
+        until_end(&speech, id).last(),
+        Some(&Update::Done("hello world.".into()))
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
+}

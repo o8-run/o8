@@ -2,6 +2,7 @@
 //! recording; commands, helper lines and finished server calls arrive on one
 //! channel, so they are handled in order without locks.
 use super::helper::{Helper, Launch, Line, remove_wav};
+use super::history;
 use super::prefs::{self, VoicePrefs, apply_replacements};
 use super::{Event, Finish, Phase, Update};
 use std::{
@@ -132,6 +133,10 @@ impl Engine {
                 }
                 Input::Finished(id, update) => {
                     if self.current(id).is_some() {
+                        // What goes out is kept in Voice History, as the shell does.
+                        if let (Update::Done(text), Some(dir)) = (&update, &self.launch.data) {
+                            history::record(dir, text);
+                        }
                         self.end(update);
                     }
                 }
