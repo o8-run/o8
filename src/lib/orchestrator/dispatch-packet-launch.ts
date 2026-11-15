@@ -1,3 +1,4 @@
+import { assertReviewBackpressure } from './review-backpressure';
 import { machineLoadBlocker, MachineLoadDeferredError } from './machine-load';
 import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 import { resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
@@ -208,6 +209,7 @@ export async function launchPacketWithStorageAdmission(input: {
   workerRouting: WorkerRouting;
   storageAdmission: PacketStorageAdmissionCoordinator;
 }): Promise<LaunchPacketResult> {
+  assertReviewBackpressure(input.packet);
   const busy = machineLoadBlocker(input);
   if (busy) throw new MachineLoadDeferredError(busy);
   const { packet, allPackets, storageAdmission } = input;
@@ -270,6 +272,7 @@ export async function launchPacketWithStorageAdmission(input: {
     ? await storageAdmission.prepareCreationBase(packet, creationInput)
     : await resolvePacketCreationBase(creationInput);
   baseBranch = creationBase.baseBranch;
+  assertReviewBackpressure(packet);
   const admissionLease = await storageAdmission.reserveForLaunch(packet, 0, {
     creationBaseCommit: creationBase.baseCommit,
   });

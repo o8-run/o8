@@ -1,13 +1,14 @@
 //! Opt-in launcher. No bundle selects this executable yet.
 use o8_launch_core::{next_main_startup, ports, restart::*};
 use o8_launcher::ownership::{self, identity, private_write, Pending, Receipt};
-use serde::Deserialize;
+use o8_launcher::update;
+use serde::{Deserialize, Serialize};
 mod control;
 mod native;
 mod prepare;
 mod shutdown;
 use control::{Instance, Request};
-use prepare::{kill_group, prepare, prepare_here};
+use prepare::{kill_group, prepare};
 use shutdown::{Shutdown, SHUTDOWN_BOUND};
 use std::{
     fs::{self, OpenOptions},
@@ -22,7 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     data_dir: PathBuf,
@@ -40,6 +41,8 @@ struct Config {
     focus: Option<PathBuf>,
     #[serde(default = "native_enabled")]
     native_lifecycle: bool,
+    /// Updater settings; see `UPDATER.md`.
+    update: Option<update::UpdateConfig>,
 }
 struct Server {
     child: Child,
@@ -467,7 +470,7 @@ fn present_pumping(config: &Config, native: &native::Native, stopped: &AtomicBoo
     }
 }
 /// `Err(None)`: the failure was already reported, or a stop was requested.
-fn run(config: &mut Config, config_path: &std::path::Path) -> Result<(), Option<String>> {
+fn run(config: &mut Config, relaunch: &update::Relaunch) -> Result<(), Option<String>> {
     if !config.data_dir.is_absolute()
         || !config.server_dir.is_absolute()
         || !config.node.is_absolute()
@@ -482,6 +485,13 @@ fn run(config: &mut Config, config_path: &std::path::Path) -> Result<(), Option<
     else {
         return Ok(());
     };
+    // Settles an interrupted install while this instance holds the lock.
+    let mut updates = update::Controller::new(update::Updater::new(
+        &config.version,
+        &config.data_dir,
+        config.update.as_ref(),
+    ));
+    let mut install: Option<update::Staged> = None;
     // Finish launching first, then keep the main thread answering events through
     // every startup step: the system delivers Quit only to a launched app whose
     // event loop runs. Native termination and the headless exit share one
@@ -527,15 +537,30 @@ fn run(config: &mut Config, config_path: &std::path::Path) -> Result<(), Option<
     }
     let outcome = serve(
         config,
-        config_path,
         &native,
         &stopped,
         &reopen,
         &servers,
         &control,
         &preparing,
+        &mut updates,
+        &mut install,
     );
     let stopped_cleanly = shutdown.run();
+    // The staged bundle replaces the installed one only after every server was
+    // proven stopped and the instance lock and socket were released.
+    if let (Some(staged), Some(updater)) = (install, updates.updater()) {
+        return match (&outcome, &stopped_cleanly) {
+            (Ok(()), Ok(())) => updater.install(staged, relaunch).map_err(|error| {
+                o8_launcher::note!("Update not installed: {error}");
+                None
+            }),
+            _ => {
+                updater.abandon(staged, "The servers were not proven stopped");
+                Err(None)
+            }
+        };
+    }
     match outcome {
         Err(reason) if !stopped.load(Ordering::SeqCst) => {
             present_pumping(config, &native, &stopped, &reason);
@@ -551,19 +576,20 @@ fn run(config: &mut Config, config_path: &std::path::Path) -> Result<(), Option<
 #[allow(clippy::too_many_arguments)]
 fn serve(
     config: &mut Config,
-    config_path: &std::path::Path,
     native: &native::Native,
     stopped: &Arc<AtomicBool>,
     reopen: &AtomicBool,
     servers: &Mutex<Option<Servers>>,
     control: &Mutex<Option<Instance>>,
     preparing: &Mutex<Option<Child>>,
+    updates: &mut update::Controller,
+    install: &mut Option<update::Staged>,
 ) -> Result<(), String> {
     for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         signal_hook::flag::register(signal, stopped.clone())
             .map_err(|_| "Shutdown handler unavailable")?;
     }
-    let Some(prepared) = prepare(config_path, native, stopped, preparing)? else {
+    let Some(prepared) = prepare(config, native, stopped, preparing, control)? else {
         return Ok(());
     };
     o8_launch_core::path_env::augment_process_path(&prepared.path);
@@ -632,8 +658,17 @@ fn serve(
         return Ok(());
     }
     let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
-    if let Some(servers) = lock(servers).as_mut() {
-        servers.api = Some(api);
+    // The shutdown already took the slot: stop the server here, unlocked.
+    let unrecorded = match lock(servers).as_mut() {
+        Some(servers) => {
+            servers.api = Some(api);
+            None
+        }
+        None => Some(api),
+    };
+    if let Some(mut api) = unrecorded {
+        api.stop(Instant::now() + SHUTDOWN_BOUND)?;
+        return Ok(());
     }
     if stop_requested(native, stopped) {
         return Ok(());
@@ -645,8 +680,16 @@ fn serve(
         &instance,
         "launcher-ws.json",
     )?;
-    if let Some(servers) = lock(servers).as_mut() {
-        servers.ws = Some(ws);
+    let unrecorded = match lock(servers).as_mut() {
+        Some(servers) => {
+            servers.ws = Some(ws);
+            None
+        }
+        None => Some(ws),
+    };
+    if let Some(mut ws) = unrecorded {
+        ws.stop(Instant::now() + SHUTDOWN_BOUND)?;
+        return Ok(());
     }
     let restart_stop = stopped.clone();
     let restart = o8_launch_core::restart_job_drain::guard(
@@ -679,6 +722,18 @@ fn serve(
             };
             if let Some((request, peer)) = received {
                 let result = match request {
+                    Request::UpdateCheck => match updates.check() {
+                        Some(answer) => Ok(answer),
+                        None => {
+                            // Answered when the check finishes; the loop keeps running.
+                            if let Some(peer) = peer {
+                                updates.wait(peer);
+                            }
+                            continue;
+                        }
+                    },
+                    Request::UpdateApply => Ok(updates.apply()),
+                    Request::UpdateStatus => Ok(updates.status()),
                     Request::Show => {
                         pending_show = true;
                         Ok(serde_json::json!({"ok": true}))
@@ -698,6 +753,17 @@ fn serve(
             );
                 if let Some(mut peer) = peer {
                     let _ = writeln!(peer, "{response}");
+                }
+            }
+            if updates.poll().is_some() {
+                // The same final work inspection and drain as an admitted restart;
+                // admission stops the main loop and the bounded shutdown follows.
+                match restart.before_restart(None) {
+                    Ok(()) => *install = updates.take_ready(),
+                    Err(error) => {
+                        o8_launcher::note!("Update deferred: {error}");
+                        updates.deferred(error);
+                    }
                 }
             }
             if stopped.load(Ordering::SeqCst) {
@@ -831,7 +897,15 @@ fn serve(
 }
 fn main() {
     let args: Vec<_> = std::env::args_os().collect();
-    if args.len() != 3 || (args[1] != "--config" && args[1] != "--prepare") {
+    if args.len() == 2 && args[1] == "--prepare" {
+        std::process::exit(prepare::helper_main());
+    }
+    // Captured before startup changes the environment, for an updated relaunch.
+    let relaunch = update::Relaunch {
+        args: args.iter().skip(1).cloned().collect(),
+        env: std::env::vars_os().collect(),
+    };
+    if args.len() != 3 || args[1] != "--config" {
         o8_launcher::note!("usage: o8-launcher --config <file>");
         std::process::exit(2);
     }
@@ -845,13 +919,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    if args[1] == "--prepare" {
-        let answer =
-            prepare_here(&config).unwrap_or_else(|error| serde_json::json!({"error": error}));
-        let _ = writeln!(std::io::stdout(), "{answer}");
-        return;
-    }
-    match run(&mut config, std::path::Path::new(&args[2])) {
+    match run(&mut config, &relaunch) {
         Ok(()) => {}
         Err(Some(reason)) => {
             present(&config, &reason);

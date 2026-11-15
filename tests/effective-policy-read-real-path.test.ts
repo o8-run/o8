@@ -44,8 +44,30 @@ it('reads persisted fresh policy through the route, retaining PR-first completio
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ schema: 'o8/effective-policy/v1', laneId: lane.id,
     reviewMode: { value: 'automatic', precedence: 'inherited' },
-    mergeMode: { value: 'direct', precedence: 'inherited' },
+    mergeMode: { value: 'pr_only', precedence: 'run-effective' },
     nextAction: { value: 'human', reason: expect.any(String) }, completion: 'pull_request' });
+});
+it('reads each persisted project merge choice through the policy route', async () => {
+  const optedIn = createProject({ name: 'Explicit direct project' });
+  const prFirst = createProject({ name: 'PR-first project' });
+  const { PATCH } = await import('@/app/api/projects/[id]/route');
+  const saved = await PATCH(new NextRequest(`http://localhost/api/projects/${optedIn.id}`, {
+    method: 'PATCH', headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` },
+    body: JSON.stringify({ mergeMode: 'direct' }),
+  }), { params: Promise.resolve({ id: optedIn.id }) });
+  expect(saved.status).toBe(200);
+  const choices = [[optedIn, 'direct'], [prFirst, 'pr_only']] as const;
+  const { GET } = await import('@/app/api/lanes/[id]/policy/route');
+  for (const [selectedProject, expectedMode] of choices) {
+    const selectedLane = createLane({ projectId: selectedProject.id, repoPath, worktreePath: repoPath,
+      branch: `policy-${expectedMode}`, runtime: 'codex' });
+    closeDb();
+    const response = await GET(new NextRequest(`http://localhost/api/lanes/${selectedLane.id}/policy`, {
+      headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` },
+    }), { params: Promise.resolve({ id: selectedLane.id }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).mergeMode.value).toBe(expectedMode);
+  }
 });
 it('distinguishes saved approval posture and run-effective review mode', async () => {
   persist();

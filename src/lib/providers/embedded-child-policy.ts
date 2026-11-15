@@ -32,9 +32,16 @@ function withO8ChildPolicy(create, options = {}) {
     catch (error) { if (error.code === 'ENOENT') return 'missing'; throw error; }
   };
   const Database = require(policy.sqliteModule);
+  // A packaged app keeps the addon under prebuilds/ and redirects to it only inside the server
+  // process. This child is plain Node, so it selects the build for its own ABI and architecture.
+  const sqliteRoot = policyPath.dirname(policyPath.dirname(policy.sqliteModule));
+  const nativeBinding = [
+    policyPath.join(sqliteRoot, 'prebuilds', 'node-v' + process.versions.modules, process.platform + '-' + process.arch, 'better_sqlite3.node'),
+    policyPath.join(sqliteRoot, 'prebuilds', process.platform + '-' + process.arch, 'better_sqlite3.node'),
+  ].find(candidate => policyFs.existsSync(candidate));
   // Match the parent store boundary's bounded acquisition wait. The empty lock
   // database needs no journal-mode change, which can itself fail under contention.
-  const lock = new Database(policyPath.join(policy.directory, '.provider-keys.lock'), { timeout: 1000 });
+  const lock = new Database(policyPath.join(policy.directory, '.provider-keys.lock'), { timeout: 1000, ...(nativeBinding ? { nativeBinding } : {}) });
   try {
     lock.exec('BEGIN EXCLUSIVE');
     if (hashFile(policy.policyFile) !== policy.policyHash) throw new Error('Child credential policy changed. Retry the launch.');
