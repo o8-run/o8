@@ -320,7 +320,8 @@ describe.sequential('worker MCP injection real path', () => {
     });
     const replacement = continued.workerMcp;
     expect(continued.args[continued.args.indexOf('--mcp-config') + 1]).toBe(replacement.configPath);
-    expect(JSON.parse(continued.stdinPayload!).message.content).toBe('Verify the attached tools again');
+    // A verified o8 command on PATH appends its own note after the prompt.
+    expect(JSON.parse(continued.stdinPayload!).message.content.split('\n\n')[0]).toBe('Verify the attached tools again');
     expect(existsSync(configPath)).toBe(false);
     expect(existsSync(staleConfigPath)).toBe(false);
     expect(replacement.configPath).toBe(path.join(
