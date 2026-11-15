@@ -33,8 +33,10 @@ export interface CreatePrApproval { requiresApproval: boolean; ruleId: string | 
  * reviewMode reads O8_REVIEW_MODE from the API server's environment.
  * mergeMode reports ONLY the PR-only safety wall: direct is not merge permission.
  * durableReview does not evaluate contract coverage in this read projection.
- * nextAction conservatively returns human for any hold, even a hold on another
- * operation; blocks explains its actual scope. Absence of holds never clears
+ * nextAction conservatively returns human for any hold other than approval-posture,
+ * even a hold on another operation; blocks explains its actual scope.
+ * approval_required carries exactly one hold, source approval-posture, and no
+ * other. Absence of holds never clears
  * unevaluatedControls or authorizes execution. */
 export interface EffectivePolicy {
   schema: 'o8/effective-policy/v1';

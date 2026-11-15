@@ -17,7 +17,9 @@ The review-mode override is `O8_REVIEW_MODE` in the **API server environment**.
 - `human`: inspect the listed holds or uncertainty. This conservative projection
   surfaces any hold, including holds that concern merge or correction only.
 - `approval_required`: obtain the existing create-PR approval card. This read
-  never creates or approves the card.
+  never creates or approves the card. The result carries exactly one hold, with
+  source `approval-posture`; any other hold yields `human` instead. Consumers
+  must branch on `nextAction.value`, not on whether `holds` is empty.
 - `prepare_pull_request`: preparation may proceed. Execute through the existing
   governed route, which must still check every unevaluated control.
 
