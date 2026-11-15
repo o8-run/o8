@@ -23,6 +23,7 @@ mod request_changes;
 mod request_changes_revision_tests;
 mod editor_command;
 mod files_panel;
+mod glance;
 mod grid_sessions;
 mod icon;
 mod inbox;
@@ -43,6 +44,7 @@ mod pane_layout;
 mod project_icon;
 mod projects;
 mod projects_model;
+mod prompt_navigator;
 mod retained;
 mod ring;
 mod rich;
@@ -73,11 +75,17 @@ mod subagents;
 mod transcript_actions;
 mod transcript_diagram;
 mod transcript_peek;
+mod transcript_view;
 mod turn_files;
 mod transport;
 mod ui;
 mod visualizations;
 mod wake;
+#[cfg(test)]
+mod worker_transcript_tests;
+#[cfg(test)]
+mod worker_transport_tests;
+mod worker_backfill;
 mod window_lights;
 mod zoom;
 use crate::{

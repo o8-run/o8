@@ -25,6 +25,8 @@ archive's filename, signature filename, channel, version, purpose, and SHA-256.
 
 Tests copy and extract these bytes and authenticate them through the production
 verifier. Tampering tests keep the original signature. Platform verification,
-Publication, announcement, and receipt effects are simulated and recorded. The test
-runner never creates signing keys, signs, notarizes, builds an installer, or
-contacts a publication service.
+Publication, announcement, and receipt effects are simulated and recorded. Tests that restage runtime inputs use the fixture-only signing helper to
+authenticate their new synthetic archive bytes. They never notarize, build an
+installer, use release credentials, or contact a publication service.
+
+All signatures also authenticate their trusted comments with the minisign global signature. The four-line signature files and public key were regenerated together with an ephemeral fixture-only key when global verification was added; archive bytes and hashes are unchanged.

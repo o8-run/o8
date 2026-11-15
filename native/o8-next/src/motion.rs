@@ -133,7 +133,7 @@ pub fn ease_out(t: f32) -> f32 {
     bezier(0.22, 1., 0.36, 1., t)
 }
 
-fn bezier(x1: f32, y1: f32, x2: f32, y2: f32, t: f32) -> f32 {
+pub(crate) fn bezier(x1: f32, y1: f32, x2: f32, y2: f32, t: f32) -> f32 {
     let t = t.clamp(0., 1.);
     let curve = |a: f32, b: f32, s: f32| {
         let u = 1. - s;

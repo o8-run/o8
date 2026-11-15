@@ -422,6 +422,8 @@ export type LaneEventVerb =
   // Worker-requested bounded scope expansion. Payload records requested paths,
   // effective allowlist, reason, and whether the request widened the scope.
   | 'scope_expansion_requested'
+  // Lead-granted bounded file scope. Same payload as the worker request above.
+  | 'scope_granted'
   // An owned runtime child exited. Payload includes exit code/signal, stderr,
   // and whether the runtime emitted its protocol-level result event.
   | 'runtime_process_exit'
@@ -596,6 +598,8 @@ export interface LanePolicy {
 // ── Command Result ──
 
 export interface LaneCommandResult {
+  /** A launch may still own a process; retain the held receipt. */
+  effectStarted?: boolean;
   /** Runtime selection remains a command result for internal callers; HTTP preserves this refusal. */
   runtimeRefusal?: { status: number; code: string; message: string };
   ok: boolean;

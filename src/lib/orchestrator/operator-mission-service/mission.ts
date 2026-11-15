@@ -267,6 +267,7 @@ export async function createMission(input: CreateMissionInput) {
       prompt: [issue.title, packetSummary].map((part) => part.trim()).filter(Boolean).join('\n\n'),
       ...(learnedRules.length > 0 ? { learnedRules } : {}),
       ...(issueMeta ? { issue: issueMeta } : {}),
+      ...(issue.allowedFiles?.length ? { allowedFiles: issue.allowedFiles } : {}),
       ...(typeof input.useBrain === 'boolean' ? { useBrain: input.useBrain } : {}),
       ...(input.holdMerges === true ? { mergeHold: true } : {}),
       ...(typeof input.huddle === 'boolean' ? { huddle: input.huddle } : {}),

@@ -160,6 +160,7 @@ impl Surface {
             .hover(|d| d.bg(theme().hover))
             .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Jump to latest".into())).into())
             .on_click(cx.listener(|this, _, _, cx| {
+                this.navigator.borrow_mut().resume();
                 let last = this.list.item_count().saturating_sub(1);
                 this.list.scroll_to_reveal_item(last);
                 this.pinned = true;
@@ -182,6 +183,12 @@ impl Surface {
         }
         let (label, add, del) = summary(&pill.files);
         let open = pill.over_pill || pill.over_list;
+        // The working strip floats in the same place; the pill rides above it.
+        let lift = if self.working_strip_shown() {
+            super::working_strip::STRIP_HEIGHT
+        } else {
+            0.
+        };
         let counts = |add: u64, del: u64| {
             div()
                 .flex()
@@ -198,7 +205,7 @@ impl Surface {
                     .left_0()
                     .right_0()
                     // Above the floating pill and its 8px of air.
-                    .bottom(px(PILL_HEIGHT + 8.))
+                    .bottom(px(PILL_HEIGHT + 8. + lift))
                     .flex()
                     .justify_center()
                     .child(
@@ -281,7 +288,7 @@ impl Surface {
                         .absolute()
                         .left_0()
                         .right_0()
-                        .bottom(px(8.))
+                        .bottom(px(8. + lift))
                         .flex()
                         .justify_center()
                         .items_center()
