@@ -9,7 +9,7 @@ import { cleanupPostshipOutputs } from '../scripts/postship-cleanup.mjs';
 it.runIf(process.platform === 'darwin')('keeps matching crash symbols outside stripped universal release executables and after cleanup', async () => {
   const manifest = readFileSync('src-tauri/Cargo.toml', 'utf8');
   const profile = (parse(manifest).profile as Record<string, Record<string, unknown>>).release;
-  expect(profile).toMatchObject({ strip: 'symbols', 'codegen-units': 1, debug: 1, 'split-debuginfo': 'packed' });
+  expect(profile).toMatchObject({ strip: 'symbols', 'codegen-units': 16, debug: 1, 'split-debuginfo': 'packed' });
   expect(profile.lto).toBe('thin');
   expect(profile.panic).not.toBe('abort');
   const root = mkdtempSync(join(tmpdir(), 'o8-release-symbols-'));

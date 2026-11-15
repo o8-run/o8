@@ -11,7 +11,9 @@ rust-version = "1.77.2"
 [profile.release]
 strip = "symbols"
 lto = "thin"
-codegen-units = 1
+# The app crate is large; one codegen unit compiled it on a single core for
+# about 22 minutes per architecture in a release build.
+codegen-units = 16
 # Keep crash line tables in separate dSYM artifacts, outside the app bundle.
 debug = 1
 split-debuginfo = "packed"
