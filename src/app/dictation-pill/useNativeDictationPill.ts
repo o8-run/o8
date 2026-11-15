@@ -18,7 +18,7 @@ export const IDLE_SNAPSHOT: DictationSnapshot = {
 /** Dock capsules the native panel draws besides dictation. `workers` is the
  * fleet orbit or its expanded capsule; `extras` is the edit chip and/or glint
  * with no capsule above them. */
-export type NativeCapsuleState = 'speaking' | 'working' | 'voice' | 'workers' | 'extras' | 'ask' | 'confirm';
+export type NativeCapsuleState = 'speaking' | 'working' | 'voice' | 'workers' | 'extras' | 'ask' | 'confirm' | 'drop' | 'staged';
 /** The fleet detail DockNotchSurface draws. */
 export interface DockWorkers { count: number; working: number; waiting: number; label: string; repos: string[] }
 /** One frame for the native panel: a dictation snapshot or one capsule. `handoff`
@@ -40,6 +40,8 @@ export type NativeDockSnapshot = Omit<DictationSnapshot, 'state'> & {
   ask?: NativeAskFrame;
   /** The confirmation card (state `confirm`): the exact identity the web decides on. */
   confirm?: NativeConfirmFrame;
+  /** The staged-file chips (state `staged`): at most three, then a count. */
+  staged?: { files: { name: string; size: string }[]; extra: number };
   /** Caret/HUD feedback (the `hud` surface only): what the panel draws and where. */
   hud?: NativeHudDetail;
 };
@@ -67,7 +69,7 @@ const CAPSULE_ACTIONS: Record<Exclude<NativeDockAction['action'], 'revert'>, Nat
   pause: 'speaking', stop: 'speaking', speed: 'speaking', interrupt: 'working', 'voice-stop': 'voice', 'workers-expand': 'workers',
   'ask-close': 'ask', 'ask-copy': 'ask', 'ask-active': 'ask', 'confirm-allow': 'confirm', 'confirm-deny': 'confirm',
 };
-const CAPSULES = new Set<string>(['speaking', 'working', 'voice', 'workers', 'extras', 'ask', 'confirm']);
+const CAPSULES = new Set<string>(['speaking', 'working', 'voice', 'workers', 'extras', 'ask', 'confirm', 'drop', 'staged']);
 /** A decision applies only to the exact card it was drawn for. */
 const cardCurrent = (clicked: NativeDockAction, frame: NativeDockSnapshot) => !clicked.action.startsWith('confirm-')
   || !!frame.confirm && clicked.ref === frame.confirm.id && clicked.task === frame.confirm.task;
@@ -83,7 +85,7 @@ const recording = (frame: NativeDockSnapshot) => frame.state === 'recording' || 
 const family = (state: NativeDockSnapshot['state']) => CAPSULES.has(state) ? state : 'dictation';
 /** Static frames draw nothing that changes between events, so they hold the
  * panel for up to `staticMs` and send a keep-alive only when they outlast it. */
-const isStatic = (state: NativeDockSnapshot['state']) => state === 'workers' || state === 'extras';
+const isStatic = (state: NativeDockSnapshot['state']) => state === 'workers' || state === 'extras' || state === 'drop' || state === 'staged';
 function holdFor(frame: NativeDockSnapshot, now: number) {
   if (!isStatic(frame.state)) return undefined;
   const ends = frame.state === 'extras' ? Math.max(frame.edit?.until ?? 0, frame.glint?.until ?? 0) - now : Infinity;
@@ -251,6 +253,7 @@ export function useNativeDictationPill(
           expanded: frame.expanded, holdMs, ask: frame.ask,
           confirm: frame.confirm && { ...frame.confirm, summary: bounded(frame.confirm.summary, 1500),
             steps: frame.confirm.steps?.slice(0, 5).map(step => ({ index: step.index, summary: bounded(step.summary, 300) })) },
+          staged: frame.staged && { extra: frame.staged.extra, files: frame.staged.files.slice(0, 3).map(file => ({ name: bounded(file.name, 200), size: file.size })) },
           hud: frame.hud && { ...frame.hud, title: bounded(frame.hud.title, 120), text: bounded(frame.hud.text, 2400) },
         } : undefined,
         // A HUD session retired by a newer one hides at once under the new web bar.
