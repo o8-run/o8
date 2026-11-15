@@ -26,6 +26,8 @@ export interface LoadedIssue {
    * mission-level `runtime` when unset; routing still validates dispatchability.
    */
   runtime?: OrchestratorRuntime;
+  /** Optional explicit file scope for this task's packet. Unset keeps the default scope policy. */
+  allowedFiles?: string[];
 }
 
 export type ExistingBranchPolicy = 'auto' | 'reset' | 'continue' | 'error';
