@@ -9,6 +9,9 @@
 //! - The text is polished by `/api/dictation/polish` and handed back once as
 //!   `Update::Done`. Polish is best effort: if it fails, the raw text goes out.
 //!
+//! - Each text that goes out is appended to Voice History
+//!   (`dictation-history.json`), as the shell does.
+//!
 //! One recording at a time. A start while another recording is listening or
 //! finishing is refused, so o8 next has a single microphone owner here. The
 //! helper starts on the first recording, stays alive between recordings and is
@@ -20,6 +23,7 @@ mod engine;
 #[cfg(test)]
 pub(crate) mod fake;
 mod helper;
+mod history;
 mod prefs;
 mod server;
 #[cfg(test)]
