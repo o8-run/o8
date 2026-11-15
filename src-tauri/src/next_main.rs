@@ -2,32 +2,11 @@
 //! Windows and Linux retain the classic main window. The server owns GPUI's
 //! credentials and process; the shell requests startup and presents failures.
 
-/// Environment variable the shell passes to the server it spawns.
-pub(crate) const SERVER_ENV: &str = "O8_NEXT_MAIN_WINDOW";
-
 pub(crate) fn enabled() -> bool {
     cfg!(target_os = "macos")
 }
 
-fn voice_only(value: Option<&str>) -> bool {
-    value.is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-}
-
-/// Suppress automatic GPUI startup in voice-only boots, including a saved opt-in.
-/// The hidden voice host still runs; no classic dashboard is created.
-pub(crate) fn configure_server(command: &mut std::process::Command) {
-    configure_server_launch(
-        command,
-        enabled(),
-        voice_only(std::env::var("O8_VOICE_ONLY").ok().as_deref()),
-    );
-}
-
-fn configure_server_launch(command: &mut std::process::Command, native: bool, voice: bool) {
-    if native && voice {
-        command.env("O8_NEXT_BIN", "");
-    }
-}
+use o8_launch_core::server_env::voice_only;
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn show(_app: &tauri::AppHandle) {}
@@ -132,41 +111,6 @@ fn is_next_executable(pid: i32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn voice_only_suppresses_gpui_even_with_a_saved_opt_in() {
-        for flag in [Some("1"), Some("true"), Some("TRUE")] {
-            assert!(super::voice_only(flag));
-        }
-        assert!(!super::voice_only(None));
-        assert!(!super::voice_only(Some("0")));
-        let mut command = std::process::Command::new("fixture-server");
-        command.env("O8_NEXT_BIN", "fixture-gpui");
-        super::configure_server_launch(&mut command, true, true);
-        assert_eq!(
-            command
-                .get_envs()
-                .find(|(k, _)| *k == "O8_NEXT_BIN")
-                .unwrap()
-                .1
-                .unwrap(),
-            ""
-        );
-        for (native, voice) in [(false, true), (false, false), (true, false)] {
-            let mut command = std::process::Command::new("fixture-server");
-            command.env("O8_NEXT_BIN", "fixture-gpui");
-            super::configure_server_launch(&mut command, native, voice);
-            assert_eq!(
-                command
-                    .get_envs()
-                    .find(|(k, _)| *k == "O8_NEXT_BIN")
-                    .unwrap()
-                    .1
-                    .unwrap(),
-                "fixture-gpui"
-            );
-        }
-    }
-
     #[test]
     fn macos_never_falls_back_to_classic_even_without_a_binary_or_in_dev() {
         assert_eq!(super::enabled(), cfg!(target_os = "macos"));

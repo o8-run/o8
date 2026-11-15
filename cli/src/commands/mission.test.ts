@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { runMission } from './mission';
-import { EXIT } from '../api';
+import { checkMissionCreateArgs, runMission } from './mission';
+import { CliError, EXIT } from '../api';
 
 const mode = { human: false, verbose: false };
 
@@ -19,6 +19,81 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete process.env.O8_API_PORT;
+});
+
+describe('o8 mission create --dispatch', () => {
+  it('returns as soon as the server has admitted the dispatch, without asking again', async () => {
+    process.env.O8_API_PORT = '47120';
+    const queued = { ok: true, result: { status: 'queued', initiated: true, missionId: 'mission-effort-pin', note: 'Dispatch admitted.' } };
+    const fetchMock = vi.fn(async (url: string | URL) => (String(url).includes('/api/orchestrator/dispatch')
+      ? new Response(JSON.stringify(queued), { status: 200 })
+      : new Response(JSON.stringify(missionResponse()), { status: 201 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+
+    await expect(runMission(mode, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch'])).resolves.toBe(0);
+
+    const paths = fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
+    expect(paths).toEqual(['/api/orchestrator/create-mission', '/api/orchestrator/dispatch']);
+    expect(JSON.parse(written.join('')).dispatch).toMatchObject({ status: 'queued', initiated: true });
+  });
+
+  it('says the dispatch was admitted in human output', async () => {
+    process.env.O8_API_PORT = '47120';
+    const queued = { ok: true, result: { status: 'queued', initiated: true, missionId: 'mission-effort-pin' } };
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => (String(url).includes('/api/orchestrator/dispatch')
+      ? new Response(JSON.stringify(queued), { status: 200 })
+      : new Response(JSON.stringify(missionResponse()), { status: 201 }))));
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+
+    await expect(runMission({ human: true, verbose: false }, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch']))
+      .resolves.toBe(0);
+    expect(written.join('')).toContain('admitted, awaiting launch');
+  });
+});
+
+describe('a dispatch that does not start', () => {
+  function serve(dispatchResult: Record<string, unknown>) {
+    process.env.O8_API_PORT = '47120';
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => (String(url).includes('/api/orchestrator/dispatch')
+      ? new Response(JSON.stringify({ ok: true, result: dispatchResult }), { status: 200 })
+      : new Response(JSON.stringify(missionResponse()), { status: 201 }))));
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+    return written;
+  }
+
+  it('fails mission create --dispatch after printing the mission it made, as mission dispatch fails', async () => {
+    const written = serve({ initiated: false, async: true, missionId: 'mission-effort-pin', blocked: true });
+    const error = await runMission(mode, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch']).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CliError);
+    expect(error).toMatchObject({ code: 'dispatch_blocked', exit: EXIT.CONFLICT });
+    expect((error as Error).message).toContain('o8 mission dispatch --mission mission-effort-pin');
+    expect(JSON.parse(written.join('')).mission.missionId).toBe('mission-effort-pin');
+  });
+
+  it('says blocked in human output, and not dispatched for any other refusal', async () => {
+    const human = { human: true, verbose: false };
+    const blocked = serve({ initiated: false, missionId: 'mission-effort-pin', blocked: true });
+    await expect(runMission(human, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch'])).rejects.toMatchObject({ code: 'dispatch_blocked' });
+    expect(blocked.join('')).toContain('blocked, not dispatched');
+    vi.restoreAllMocks();
+    const other = serve({ initiated: false });
+    await expect(runMission(human, 'create', ['--title', 'effort pin', '--repo', process.cwd(), '--dispatch'])).rejects.toMatchObject({ code: 'dispatch_not_initiated', exit: EXIT.NOT_FOUND });
+    expect(other.join('')).toContain('not dispatched');
+  });
+
+  it('names the hold from mission dispatch too, rather than asking for a mission', async () => {
+    serve({ initiated: false, async: true, missionId: 'mission-held', blocked: true });
+    await expect(runMission(mode, 'dispatch', ['--mission', 'mission-held'])).rejects.toMatchObject({
+      code: 'dispatch_blocked', exit: EXIT.CONFLICT, message: 'Mission mission-held has an active lifecycle hold and was not dispatched.',
+    });
+    vi.restoreAllMocks();
+    serve({ initiated: false });
+    await expect(runMission(mode, 'dispatch', [])).rejects.toMatchObject({ code: 'dispatch_not_initiated', exit: EXIT.NOT_FOUND });
+  });
 });
 
 describe('o8 mission create --effort', () => {
@@ -97,6 +172,374 @@ describe('o8 mission create --effort', () => {
       '--effort', 'high',
       '--effort', 'low',
     ])).rejects.toMatchObject({ code: 'invalid_args', exit: EXIT.INVALID_ARGS });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('o8 mission terminal status reports (#6137)', () => {
+  const human = { human: true, verbose: false };
+  const OSC = '\x1b]7501;';
+  const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+
+  afterEach(() => {
+    delete process.env.REX_SESSION;
+    delete process.env.O8_TERMINAL_STATUS;
+    if (ttyDescriptor) Object.defineProperty(process.stdout, 'isTTY', ttyDescriptor);
+    else delete (process.stdout as { isTTY?: boolean }).isTTY;
+  });
+
+  function statusResponse(status: string, title = 'Fix login redirect') {
+    return {
+      ok: true,
+      result: {
+        missionId: 'mission-tab',
+        packets: [{ id: 'pkt-tab', title, status, blockedReason: '/private/path/secret.ts failed' }],
+      },
+    };
+  }
+
+  /** Runs one mission subcommand against scripted status responses and returns stdout. */
+  async function run(
+    opts: { tty: boolean; mode: typeof mode; statuses: string[]; title?: string },
+    secondary: 'wait' | 'dispatch',
+    rest: string[],
+  ): Promise<string> {
+    process.env.O8_API_PORT = '47120';
+    Object.defineProperty(process.stdout, 'isTTY', { value: opts.tty, configurable: true });
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('/api/orchestrator/dispatch')) {
+        return new Response(JSON.stringify({ ok: true, result: { initiated: true, missionId: 'mission-tab', dispatched: 1 } }), { status: 200 });
+      }
+      const status = opts.statuses[Math.min(call, opts.statuses.length - 1)];
+      call += 1;
+      return new Response(JSON.stringify(statusResponse(status, opts.title)), { status: 200 });
+    }));
+    let out = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk);
+      return true;
+    });
+    await expect(runMission(opts.mode, secondary, rest)).resolves.toBe(0);
+    return out;
+  }
+
+  function reports(out: string): Array<Record<string, string>> {
+    return out.split(OSC).slice(1).map((part) => {
+      const body = part.slice(0, part.indexOf('\x1b\\'));
+      return Object.fromEntries(body.split(':').map((pair) => {
+        const at = pair.indexOf('=');
+        const key = pair.slice(0, at);
+        const value = pair.slice(at + 1);
+        return [key, key === 'title' || key === 'msg' ? Buffer.from(value, 'base64').toString('utf8') : value];
+      }));
+    });
+  }
+
+  const waitArgs = ['--mission', 'mission-tab', '--timeout', '5s', '--poll', '1000'];
+
+  it('mission wait: shows working, then keeps done for a packet that reaches review', async () => {
+    process.env.REX_SESSION = 'session:test';
+    const out = await run({ tty: true, mode: human, statuses: ['running', 'awaiting_review'] }, 'wait', waitArgs);
+    expect(reports(out)).toEqual([
+      { state: 'working', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Waiting for review' },
+      { state: 'done', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Awaiting review' },
+    ]);
+    // The final record is the last thing written, so it survives the exit.
+    expect(out.endsWith('\x1b\\')).toBe(true);
+  });
+
+  it('mission wait: reports error for a failed packet without leaking the blocked reason', async () => {
+    process.env.REX_SESSION = 'session:test';
+    const out = await run({ tty: true, mode: human, statuses: ['failed'] }, 'wait', waitArgs);
+    expect(reports(out)).toEqual([{ state: 'error', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Failed' }]);
+    const decoded = reports(out).map((r) => `${r.title} ${r.msg}`).join(' ');
+    expect(decoded).not.toContain('secret.ts');
+  });
+
+  it('mission wait: clears the record when the watcher times out', async () => {
+    process.env.REX_SESSION = 'session:test';
+    const out = await run({ tty: true, mode: human, statuses: ['running'] }, 'wait', ['--mission', 'mission-tab', '--timeout', '1s', '--poll', '1000']);
+    expect(reports(out).map((r) => r.state)).toEqual(['working', 'clear']);
+  });
+
+  it('mission dispatch --watch: shows working, then error for a blocked packet', async () => {
+    process.env.REX_SESSION = 'session:test';
+    const out = await run(
+      { tty: true, mode: human, statuses: ['running', 'blocked'] },
+      'dispatch',
+      ['--mission', 'mission-tab', '--watch', '--timeout', '5s', '--poll', '1000'],
+    );
+    expect(reports(out)).toEqual([
+      { state: 'working', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Waiting for review' },
+      { state: 'error', id: 'o8', app: 'o8', title: 'Fix login redirect', msg: 'Blocked: needs a decision' },
+    ]);
+  });
+
+  it('strips control characters from a packet title', async () => {
+    process.env.REX_SESSION = 'session:test';
+    const out = await run({ tty: true, mode: human, statuses: ['released'], title: 'bad\x1b[31m\ntitle' }, 'wait', waitArgs);
+    expect(reports(out)).toEqual([{ state: 'done', id: 'o8', app: 'o8', title: 'bad [31m title', msg: 'Released' }]);
+  });
+
+  it.each([
+    ['REX_SESSION unset', { tty: true, mode: human, rex: false }],
+    ['JSON output', { tty: true, mode, rex: true }],
+    ['piped stdout', { tty: false, mode: human, rex: true }],
+  ])('output is byte-identical to the disabled output: %s', async (_name, c) => {
+    for (const [secondary, rest] of [
+      ['wait', waitArgs],
+      ['dispatch', ['--mission', 'mission-tab', '--watch', '--timeout', '5s', '--poll', '1000']],
+    ] as const) {
+      if (c.rex) process.env.REX_SESSION = 'session:test';
+      else delete process.env.REX_SESSION;
+      delete process.env.O8_TERMINAL_STATUS;
+      const out = await run({ tty: c.tty, mode: c.mode, statuses: ['awaiting_review'] }, secondary, [...rest]);
+      vi.restoreAllMocks();
+      process.env.O8_TERMINAL_STATUS = '0';
+      const baseline = await run({ tty: c.tty, mode: c.mode, statuses: ['awaiting_review'] }, secondary, [...rest]);
+      vi.restoreAllMocks();
+      expect(out).not.toContain(OSC);
+      expect(out).toBe(baseline);
+    }
+  });
+
+  it('O8_TERMINAL_STATUS=0 disables reports in Rex and =1 forces them without Rex', async () => {
+    process.env.REX_SESSION = 'session:test';
+    process.env.O8_TERMINAL_STATUS = '0';
+    expect(await run({ tty: true, mode: human, statuses: ['awaiting_review'] }, 'wait', waitArgs)).not.toContain(OSC);
+    vi.restoreAllMocks();
+    delete process.env.REX_SESSION;
+    process.env.O8_TERMINAL_STATUS = '1';
+    const forced = await run({ tty: true, mode: human, statuses: ['awaiting_review'] }, 'wait', waitArgs);
+    expect(reports(forced).map((r) => r.state)).toEqual(['done']);
+  });
+
+  it('forced JSON output keeps stdout parseable and writes the report to stderr', async () => {
+    process.env.O8_TERMINAL_STATUS = '1';
+    const stderrTty = Object.getOwnPropertyDescriptor(process.stderr, 'isTTY');
+    Object.defineProperty(process.stderr, 'isTTY', { value: true, configurable: true });
+    let err = '';
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      err += String(chunk);
+      return true;
+    });
+    try {
+      const out = await run({ tty: true, mode, statuses: ['running', 'awaiting_review'] }, 'wait', waitArgs);
+      expect(out).not.toContain(OSC);
+      expect((JSON.parse(out) as { schema: string }).schema).toBe('o8/cli/mission.wait/v1');
+      expect(reports(err).map((r) => r.state)).toEqual(['working', 'done']);
+    } finally {
+      if (stderrTty) Object.defineProperty(process.stderr, 'isTTY', stderrTty);
+      else delete (process.stderr as { isTTY?: boolean }).isTTY;
+    }
+  });
+
+  it('clears the working record when a status read fails mid-watch', async () => {
+    process.env.REX_SESSION = 'session:test';
+    process.env.O8_API_PORT = '47120';
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call += 1;
+      if (call > 1) return new Response(JSON.stringify({ ok: false, error: 'boom' }), { status: 500 });
+      return new Response(JSON.stringify(statusResponse('running')), { status: 200 });
+    }));
+    let out = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk);
+      return true;
+    });
+    await expect(runMission(human, 'wait', waitArgs)).rejects.toBeDefined();
+    expect(reports(out).map((r) => r.state)).toEqual(['working', 'clear']);
+  });
+
+  it('labels a mission with several packets by count and reports the one that finished', async () => {
+    process.env.REX_SESSION = 'session:test';
+    process.env.O8_API_PORT = '47120';
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call += 1;
+      const packets = [
+        { id: 'pkt-a', title: 'First', status: 'running' },
+        { id: 'pkt-b', title: 'Second', status: call > 1 ? 'released' : 'running' },
+      ];
+      return new Response(JSON.stringify({ ok: true, result: { missionId: 'mission-tab', packets } }), { status: 200 });
+    }));
+    let out = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk);
+      return true;
+    });
+    await expect(runMission(human, 'wait', waitArgs)).resolves.toBe(0);
+    expect(reports(out).map((r) => [r.state, r.title])).toEqual([['working', '2 packets'], ['done', 'Second']]);
+  });
+
+  describe('mission tail', () => {
+    const tailArgs = ['--mission', 'mission-tab', '--timeout', '5s', '--poll', '1000'];
+
+    async function tail(
+      opts: { tty: boolean; mode: typeof mode },
+      script: Array<Array<{ id: string; title: string; status: string }>>,
+      rest = tailArgs,
+    ): Promise<string> {
+      process.env.O8_API_PORT = '47120';
+      Object.defineProperty(process.stdout, 'isTTY', { value: opts.tty, configurable: true });
+      let call = 0;
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        const packets = script[Math.min(call, script.length - 1)];
+        call += 1;
+        return new Response(JSON.stringify({ ok: true, result: { missionId: 'mission-tab', packets } }), { status: 200 });
+      }));
+      let out = '';
+      vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+        out += String(chunk);
+        return true;
+      });
+      await expect(runMission(opts.mode, 'tail', rest)).resolves.toBe(0);
+      return out;
+    }
+
+    const a = (status: string) => ({ id: 'pkt-a', title: 'First', status });
+    const b = (status: string) => ({ id: 'pkt-b', title: 'Second', status });
+
+    it('gives each packet its own record and keeps the outcome marks', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const out = await tail({ tty: true, mode: human }, [
+        [a('running'), b('queued')],
+        [a('awaiting_review'), b('failed')],
+      ]);
+      expect(reports(out)).toEqual([
+        { state: 'working', id: 'o8/pkt-a', app: 'o8', title: 'First', msg: 'Running' },
+        { state: 'working', id: 'o8/pkt-b', app: 'o8', title: 'Second', msg: 'Queued' },
+        { state: 'working', id: 'o8', app: 'o8', title: '2 packets', msg: '0 of 2 finished' },
+        { state: 'done', id: 'o8/pkt-a', app: 'o8', title: 'First', msg: 'Awaiting review' },
+        { state: 'error', id: 'o8/pkt-b', app: 'o8', title: 'Second', msg: 'Failed' },
+        { state: 'error', id: 'o8', app: 'o8', title: '2 packets', msg: '1 of 2 failed, blocked, or archived' },
+      ]);
+    });
+
+    it('clears every mark when the tail times out', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const out = await tail({ tty: true, mode: human }, [[a('running')]], ['--mission', 'mission-tab', '--timeout', '1s', '--poll', '1000']);
+      const all = reports(out);
+      expect(all[all.length - 1]).toEqual({ state: 'clear', id: 'o8' });
+    });
+
+    it('removes the mark of a packet that leaves the mission', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const out = await tail({ tty: true, mode: human }, [
+        [a('running'), b('running')],
+        [a('released')],
+      ]);
+      const all = reports(out);
+      expect(all).toContainEqual({ state: 'clear', id: 'o8/pkt-b' });
+      expect(all[all.length - 1]).toEqual({ state: 'done', id: 'o8', app: 'o8', title: '1 packet', msg: 'All 1 ready for review or released' });
+    });
+
+    it('marks only the first packets of a very large mission and still summarizes all', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const many = Array.from({ length: 70 }, (_unused, i) => ({ id: `pkt-${i}`, title: `P${i}`, status: 'released' }));
+      const all = reports(await tail({ tty: true, mode: human }, [many]));
+      expect(all.filter((r) => r.id.startsWith('o8/'))).toHaveLength(60);
+      expect(all[all.length - 1]).toMatchObject({ state: 'done', id: 'o8', title: '70 packets' });
+    });
+
+    it('with no packets yet, reports only the mission and clears on timeout', async () => {
+      process.env.REX_SESSION = 'session:test';
+      const all = reports(await tail({ tty: true, mode: human }, [[]], ['--mission', 'mission-tab', '--timeout', '1s', '--poll', '1000']));
+      expect(all).toEqual([
+        { state: 'working', id: 'o8', app: 'o8', title: '0 packets', msg: '0 of 0 finished' },
+        { state: 'clear', id: 'o8' },
+      ]);
+    });
+
+    it('clears every mark when a status read fails mid-tail', async () => {
+      process.env.REX_SESSION = 'session:test';
+      process.env.O8_API_PORT = '47120';
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      let call = 0;
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        call += 1;
+        if (call > 1) return new Response(JSON.stringify({ ok: false, error: 'boom' }), { status: 500 });
+        return new Response(JSON.stringify({ ok: true, result: { missionId: 'mission-tab', packets: [a('running')] } }), { status: 200 });
+      }));
+      let out = '';
+      vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+        out += String(chunk);
+        return true;
+      });
+      await expect(runMission(human, 'tail', tailArgs)).rejects.toBeDefined();
+      const all = reports(out);
+      expect(all[all.length - 1]).toEqual({ state: 'clear', id: 'o8' });
+    });
+
+    it('O8_TERMINAL_STATUS=0 writes no sequence across several polls in Rex', async () => {
+      process.env.REX_SESSION = 'session:test';
+      process.env.O8_TERMINAL_STATUS = '0';
+      const out = await tail({ tty: true, mode: human }, [[a('running')], [a('released')]]);
+      expect(out).not.toContain('\x1b]');
+    });
+
+    it.each([
+      ['JSON output', { tty: true, mode }, true],
+      ['piped stdout', { tty: false, mode: human }, true],
+      ['REX_SESSION unset', { tty: true, mode: human }, false],
+    ])('writes no sequence: %s', async (_name, opts, rex) => {
+      if (rex) process.env.REX_SESSION = 'session:test';
+      const out = await tail(opts, [[a('running'), b('queued')], [a('released'), b('failed')]]);
+      expect(out).not.toContain(OSC);
+      expect(out).not.toContain('\x1b]');
+    });
+  });
+});
+
+describe('o8 mission create refuses what it would drop', () => {
+  it('takes every flag it reads, with values that look like flags', () => {
+    expect(() => checkMissionCreateArgs([
+      '--title', 'Add a route', '--body', '-- leading dashes are fine', '--repo=/r', '--dispatch', '--effort', 'low',
+      '--runtime', 'codex', '--read-only', '--existingBranchPolicy', 'reset', '--idempotency-key', 'k1',
+    ])).not.toThrow();
+  });
+
+  it('refuses an unknown flag and points at --body', () => {
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--task', 'run the tests']))
+      .toThrowError(expect.objectContaining({ code: 'invalid_args', exit: EXIT.INVALID_ARGS, message: expect.stringContaining('--task') }));
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--task=run']))
+      .toThrowError(expect.objectContaining({ hint: expect.stringContaining('--body') }));
+  });
+
+  it('refuses text that belongs to no flag, and a switch given a value', () => {
+    expect(() => checkMissionCreateArgs(['--title', 'x', 'run the tests'])).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--dispatch=yes'])).toThrowError(expect.objectContaining({ code: 'invalid_args' }));
+  });
+
+  it('takes --flag=value and a value flag left last without a value, as before', () => {
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--effort=low', '--body'])).not.toThrow();
+  });
+
+  it('says a value flag needs a value when another flag follows it', () => {
+    expect(() => checkMissionCreateArgs(['--effort', '--title', 'x']))
+      .toThrowError(expect.objectContaining({ message: '--effort needs a value.' }));
+    expect(() => checkMissionCreateArgs(['--title', 'x', '--body', '--repo=/r']))
+      .toThrowError(expect.objectContaining({ message: '--body needs a value.' }));
+  });
+
+  it('echoes a refused word without control characters, and short', () => {
+    let message = '';
+    try { checkMissionCreateArgs(['--title', 'x', `--a\x1b]0;pwn\x07${'b'.repeat(200)}`]); } catch (error) { message = (error as Error).message; }
+    expect(message).not.toMatch(/[\x00-\x1f]/);
+    try { checkMissionCreateArgs(['--title', 'x', 'a\u202eb']); } catch (error) { message = (error as Error).message; }
+    expect(message).toContain('ab');
+    expect(message.length).toBeLessThan(140);
+  });
+
+  it('refuses before anything reaches the server', async () => {
+    process.env.O8_API_PORT = '47120';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(runMission(mode, 'create', ['--title', 'x', '--task', 'y'])).rejects.toMatchObject({ code: 'invalid_args' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

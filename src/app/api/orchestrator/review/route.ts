@@ -1,3 +1,5 @@
+import { redactThreadValue } from '@/lib/threads/redaction';
+import { reviewSubmissionPrincipal, ReviewSubmissionError } from '@/lib/auth/review-submission';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
@@ -35,6 +37,9 @@ export async function POST(request: NextRequest) {
   if (ownershipRefusal) {
     return operatorError(ownershipRefusal.code, ownershipRefusal.message, 403);
   }
+
+  const submissionPrincipal = reviewSubmissionPrincipal(principal, packetId);
+  if (!submissionPrincipal) return operatorError('reviewer_assignment_required', 'Review submission requires the assigned reviewer or an operator.', 403);
 
   if (typeof record.approved !== 'boolean') {
     return operatorError('invalid_request', 'approved is required.', 400);
@@ -80,6 +85,8 @@ export async function POST(request: NextRequest) {
 
   const reviewInput = {
       packetId,
+      runEvidence: redactThreadValue(record.runEvidence) as import('@/lib/orchestrator/review-run-evidence').ReviewRunEvidence | undefined,
+      submissionPrincipal,
       findings: parseReviewFindings(record.findings),
       approved: record.approved,
       reviewedHeadSha: typeof record.reviewedHeadSha === 'string' && record.reviewedHeadSha.trim()
@@ -115,8 +122,8 @@ export async function POST(request: NextRequest) {
         return {
           ok: false as const,
           message: error instanceof Error ? error.message : 'Unable to submit review.',
-          code: error instanceof ReviewValidationError ? error.code : 'review_failed',
-          status: error instanceof ReviewValidationError ? 422 : 500,
+          code: error instanceof ReviewValidationError || error instanceof ReviewSubmissionError ? error.code : 'review_failed',
+          status: error instanceof ReviewSubmissionError ? 403 : error instanceof ReviewValidationError ? 422 : 500,
         };
       }
     });

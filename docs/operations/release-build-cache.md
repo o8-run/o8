@@ -98,3 +98,18 @@ This historical compiler-state measurement predates executable skipping and pers
 | Whole command | 1,527.557 s | 905.022 s | 622.535 s |
 
 The cold receipt reported three misses and zero hits. The warm receipt reported three verified compatible hits and zero misses, restored 5,660,587,008 archive bytes, then completed every normal compiler, export, and native link step. Restore and recapture overhead is included in the whole-command comparison.
+
+## Optional Rust compiler cache
+
+Release Cargo calls automatically use `sccache` when its executable is on `PATH`.
+The application wrapper passes `RUSTC_WRAPPER` to both architecture builds; the
+next sidecar and approved-write helper use the same configuration when built
+independently during prebuild. Storage is the `sccache` subdirectory of the
+resolved release build-cache root, outside the checkout. Each script prints the
+cache state and, when enabled, its directory.
+
+Set `O8_RELEASE_SCCACHE=off` to disable automatic configuration. If the executable
+is absent, or a different `RUSTC_WRAPPER` is already configured, the Cargo
+environment is preserved. The scripts do not install tools, run a wrapper probe,
+change release profiles, or add credentials to the Cargo environment. This cache
+is separate from the verified executable cache and persistent Cargo target.

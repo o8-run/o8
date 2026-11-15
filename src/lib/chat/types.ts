@@ -25,5 +25,4 @@ export interface ChatErrorResponse {
   message: string;
   limit?: number;
   remaining?: number;
-  upgradeUrl?: string;
 }

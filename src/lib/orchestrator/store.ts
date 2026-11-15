@@ -1,3 +1,4 @@
+import { reviewExecution } from './review-run-evidence';
 import { normalizeReviewerPrSource } from '@/lib/orchestrator/reviewer-pr-source-types';
 import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketExecutionCarrier, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType, normalizePacketWorkspaceIdentity } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
@@ -256,6 +257,7 @@ function normalizePacketReview(value: unknown): OrchestratorPacketReview | null 
     : [];
 
   return {
+    ...reviewExecution(Boolean(review.approved), review.reviewedHeadSha, review.runEvidence),
     approved: Boolean(review.approved),
     findings,
     recordedAt: typeof review.recordedAt === 'string' ? review.recordedAt : nowIso(),
@@ -965,7 +967,7 @@ export function reconcileOrchestratorMissionState(
           : null,
       lastEventAt: runtime?.lastEventAt ?? packet.lastEventAt ?? packet.lane?.lastHeartbeatAt ?? null,
       lastEventLabel: runtime?.currentTask ?? runtime?.workflowStageLabel ?? packet.lastEventLabel ?? packet.lane?.lastEventLabel ?? null,
-      blockedReason: packet.storageAdmission?.state === 'held' ? packet.blockedReason ?? `Dispatch held by storage admission (${packet.storageAdmission.reason}).` : null,
+      blockedReason: packet.blockedReason?.startsWith('Review backlog:') ? packet.blockedReason : packet.storageAdmission?.state === 'held' ? packet.blockedReason ?? `Dispatch held by storage admission (${packet.storageAdmission.reason}).` : null,
     };
 
     if (packet.archivedAt || packet.status === 'archived') {

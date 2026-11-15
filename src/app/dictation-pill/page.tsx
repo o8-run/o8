@@ -6,7 +6,7 @@
  * owns recording, processing, delivered text and dismissal.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { SystemDictationSession } from '@/lib/dictation/system-dictation-session';
 import {
@@ -17,39 +17,18 @@ import {
 } from '@/lib/presentation/parked-lanes-snapshot';
 import { useMicLevel } from '@/components/desktop/dictation/useMicLevel';
 import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurface';
-import { formatPlanProgressGlint, type PlanProgressEvent, type PlanProgressGlint } from '@/components/desktop/dictation/planPresentation';
+import { formatPlanProgressGlint, type PlanProgressEvent } from '@/components/desktop/dictation/planPresentation';
 import { useDockFileDrop, type StagedChip } from '@/components/desktop/dictation/useDockFileDrop';
 import { useAgentConfirmations } from '@/components/desktop/dictation/useAgentConfirmations';
 import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 import { EditRevertChip } from './EditRevertChip';
-import { DockGlint } from './DockGlint';
+import { IDLE_SNAPSHOT } from './useNativeDictationPill';
+import { useNativeDock } from './nativeDockFrame';
+import { DockGlint, useDockGlint } from './DockGlint';
+import { dockLog, invokeCmd } from './dockCommands';
 
 export const dynamic = 'force-dynamic';
-
-/**
- * Dock-route morph instrumentation. This route runs in a SECOND webview whose
- * `console.log` does NOT reach `~/Library/Logs/ai.o8.desktop/o8.log`, so when
- * the dock fails to morph there is no server trace to inspect. `o8_dock_log`
- * (a thin Tauri command → `tracing::info!("[dock-route] …")`) lets us SEE which
- * `o8:stt-event` payloads actually arrive at the dock webview. Fire-and-forget;
- * never throws. Skip the high-frequency partial/level events at the call site.
- */
-function dockLog(msg: string) {
-  if (!isTauri()) return;
-  import('@tauri-apps/api/core')
-    .then(({ invoke }) => invoke('o8_dock_log', { msg }))
-    .catch(() => { /* noop — never let logging break the morph */ });
-}
-
-/** Fire a Tauri command from the dock webview (TTS controls, dock resize).
- * Fire-and-forget; never throws (the dock must never crash on a control tap). */
-function invokeCmd(cmd: string, args?: Record<string, unknown>) {
-  if (!isTauri()) return;
-  import('@tauri-apps/api/core')
-    .then(({ invoke }) => invoke(cmd, args))
-    .catch((err) => dockLog(`invoke ${cmd} failed: ${err instanceof Error ? err.message : String(err)}`));
-}
 
 /** TTS playback state mirrored from the native engine via `o8:tts-state`. */
 type TtsControlState = 'idle' | 'playing' | 'paused';
@@ -58,7 +37,6 @@ type TtsControlState = 'idle' | 'playing' | 'paused';
 type AskMode = 'idle' | 'listening' | 'answer';
 type WorkerSnapshot = { count: number; working: number; waiting: number; repos: string[] };
 type ParkedLaneSnapshot = { waiting: number; repos: string[]; tooltip: string | null; receivedAt: number };
-type DockGlint = PlanProgressGlint;
 const ASK_IDLE_COLLAPSE_MS = 45_000; // auto-collapse the panel after idle
 const ASK_RESUME_WINDOW_MS = 60_000; // preserve the thread if reopened within
 const ASK_MAX_TURNS = 16; // 8 exchanges before trimming the oldest
@@ -68,14 +46,6 @@ const ERROR_FLASH_MS = 2500;
 // Polish (Whisper/LLM cleanup + paste) normally lands in 1–4s; past this the
 // session is considered hung and the pill frees itself.
 const POLISH_WATCHDOG_MS = 20_000;
-
-const IDLE_SNAPSHOT: DictationSnapshot = {
-  state: 'idle',
-  audioLevel: 0,
-  durationMs: 0,
-  error: null,
-  partialTranscript: '',
-};
 
 interface SttEventPayload {
   type:
@@ -534,6 +504,13 @@ export default function DictationPillPage() {
     invokeCmd('tts_set_speed', { rate });
   }, []);
 
+  // While the native panel owns the dock, useNativePillDockExtent alone sizes
+  // the web window, so the Ask flow does not grow it under the native panel.
+  const nativeExtentRef = useRef(false);
+  const setDockExpanded = useCallback((expanded: boolean) => {
+    if (!nativeExtentRef.current) invokeCmd('dock_set_expanded', { expanded });
+  }, []);
+
   // Keep a ref of the live thread for the open-time resume decision.
   useEffect(() => { askThreadRef.current = askThread; }, [askThread]);
 
@@ -547,8 +524,8 @@ export default function DictationPillPage() {
     if (askIdleTimerRef.current) { clearTimeout(askIdleTimerRef.current); askIdleTimerRef.current = null; }
     setAskOpen(false);
     setAskMode('idle');
-    invokeCmd('dock_set_expanded', { expanded: false });
-  }, []);
+    setDockExpanded(false);
+  }, [setDockExpanded]);
 
   const armAskIdleTimer = useCallback(() => {
     if (askIdleTimerRef.current) clearTimeout(askIdleTimerRef.current);
@@ -560,9 +537,9 @@ export default function DictationPillPage() {
   const openPanel = useCallback(() => {
     askOpenRef.current = true;
     setAskOpen(true);
-    invokeCmd('dock_set_expanded', { expanded: true });
+    setDockExpanded(true);
     armAskIdleTimer();
-  }, [armAskIdleTimer]);
+  }, [armAskIdleTimer, setDockExpanded]);
 
   // ── Ask answer panel events (o8:ask-open / -answer / -error) ──
   useEffect(() => {
@@ -582,7 +559,7 @@ export default function DictationPillPage() {
           // Listening shows the compact capsule with the LIVE transcript +
           // waveform (driven by the system-origin dictation events) — don't grow
           // into the panel until the answer arrives.
-          invokeCmd('dock_set_expanded', { expanded: false });
+          setDockExpanded(false);
           armAskIdleTimer();
         }));
         add(await listen<{ question?: string; answer?: string }>('o8:ask-answer', (e) => {
@@ -609,7 +586,7 @@ export default function DictationPillPage() {
       disposed = true;
       for (const off of offs) { try { off(); } catch { /* noop */ } }
     };
-  }, [armAskIdleTimer, openPanel]);
+  }, [armAskIdleTimer, openPanel, setDockExpanded]);
 
   // Resolve a pending agent confirm card → tell Rust, clear the card locally.
   const handleAgentConfirm = useCallback((confirmationId: string, taskId: string, allow: boolean) => {
@@ -617,29 +594,8 @@ export default function DictationPillPage() {
     setAgentConfirm(null);
   }, [setAgentConfirm]);
 
-  // Memory glint (dossier #4): a quiet one-line chip under the dock that fades
-  // in, holds ~4s, fades out. Driven by `kind: glint` agent events.
-  const [glint, setGlint] = useState<DockGlint | null>(null);
-  const [glintFading, setGlintFading] = useState(false);
-  const glintTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const showGlint = useCallback((
-    text: string,
-    options: { key?: string; tone?: DockGlint['tone'] } = {},
-  ) => {
-    for (const t of glintTimersRef.current) clearTimeout(t);
-    glintTimersRef.current = [];
-    setGlint({
-      key: options.key ?? 'ambient',
-      text,
-      tone: options.tone ?? 'progress',
-    });
-    setGlintFading(false);
-    glintTimersRef.current.push(setTimeout(() => setGlintFading(true), 4200));
-    glintTimersRef.current.push(setTimeout(() => { setGlint(null); setGlintFading(false); }, 4800));
-  }, []);
-  useEffect(() => {
-    return () => { for (const t of glintTimersRef.current) clearTimeout(t); };
-  }, []);
+  // Memory glint (dossier #4), timed in useDockGlint.
+  const { glint, fading: glintFading, showGlint } = useDockGlint();
 
   // Fleet visibility (dossier #8): worker-pulse pushes `o8:worker-status`;
   // the idle sliver carries the orbit + count, tap expands the detail capsule.
@@ -860,9 +816,42 @@ export default function DictationPillPage() {
   // click-through except while the cursor is over the PAINTED pill. Report the
   // content wrapper's rect on every morph (ResizeObserver fires through the
   // 0.5s geometry transition; rAF-throttled so we invoke at most per-frame).
+  const displayedWaiting = parkedWorkers?.waiting ?? workers.waiting;
+  const displayedWorkers = {
+    count: parkedWorkers ? workers.working + displayedWaiting : workers.count,
+    working: workers.working,
+    waiting: displayedWaiting,
+    repos: parkedWorkers
+      ? Array.from(new Set([...workers.repos, ...parkedWorkers.repos])).filter(Boolean).slice(0, 4)
+      : workers.repos,
+    waitingLabel: parkedWorkers ? 'ready' : 'waiting',
+    tooltip: parkedWorkers?.tooltip ?? null,
+  };
+  // Tap the resting sliver while the worker orbit is up → transient capsule
+  // naming the in-flight packets (dossier #8). The native orbit reports the same tap.
+  const expandWorkers = useCallback(() => {
+    if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen && !agentWorking && displayedWorkers.count > 0) {
+      setShowWorkers(true);
+      if (showWorkersTimerRef.current) clearTimeout(showWorkersTimerRef.current);
+      showWorkersTimerRef.current = setTimeout(() => setShowWorkers(false), 5000);
+    }
+  }, [snapshot.state, ttsState, askOpen, agentWorking, displayedWorkers.count]);
+  // Double-tap the IDLE dock to open the standalone Voice settings window
+  // (works even with the main app closed); the native sliver reports the same.
+  // Gated to idle so it never fires over the ask panel / speaking controls.
+  const openVoiceSettings = useCallback(() => {
+    if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen) invokeCmd('open_voice_settings');
+  }, [snapshot.state, ttsState, askOpen]);
+  const dock = useNativeDock({
+    snapshot, dictationSession: startTimeRef.current, ttsState, askOpen, agentConfirm: !!agentConfirm, agentWorking, dropActive, showWorkers,
+    stagedFiles: !!stagedChips?.length, workerCount: displayedWorkers.count, realtimeVoice, speechSpeed, agentTool, agentStartedAt, glint,
+    ask: { mode: askMode, thread: askThread, pending: panelPending }, confirmCard: agentConfirm, stagedChips,
+    workers: { count: displayedWorkers.count, working: displayedWorkers.working, waiting: displayedWaiting, label: displayedWorkers.waitingLabel, repos: displayedWorkers.repos },
+  }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, closeAsk, armAskIdle: armAskIdleTimer, decideConfirm: handleAgentConfirm, openVoiceSettings, invokeCmd, onError: dockLog },
+  { topPillEnabled, staged: !!stagedChips });
+  const { native: nativeDictation, nativeActive, nativeCapsule, webSnapshot, webTts, webRealtime, webAgentWorking, dockVisible } = dock;
+  useLayoutEffect(() => { nativeExtentRef.current = nativeDictation; }, [nativeDictation]);
   const hitRectHostRef = useRef<HTMLDivElement | null>(null);
-  const dockVisible = topPillEnabled || snapshot.state !== 'idle' || ttsState !== 'idle'
-    || askOpen || agentWorking || !!agentConfirm || realtimeVoice !== 'off';
   useEffect(() => {
     if (!isTauri()) return;
     if (!dockVisible) {
@@ -905,18 +894,6 @@ export default function DictationPillPage() {
     };
   }, []);
 
-  const displayedWaiting = parkedWorkers?.waiting ?? workers.waiting;
-  const displayedWorkers = {
-    count: parkedWorkers ? workers.working + displayedWaiting : workers.count,
-    working: workers.working,
-    waiting: displayedWaiting,
-    repos: parkedWorkers
-      ? Array.from(new Set([...workers.repos, ...parkedWorkers.repos])).filter(Boolean).slice(0, 4)
-      : workers.repos,
-    waitingLabel: parkedWorkers ? 'ready' : 'waiting',
-    tooltip: parkedWorkers?.tooltip ?? null,
-  };
-
   return (
     <div
       style={{
@@ -927,7 +904,7 @@ export default function DictationPillPage() {
         justifyContent: 'center',
         // Keep a small internal inset so the rounded top corners are visible
         // when the dock window is floating instead of flush to a screen notch.
-        paddingTop: 8,
+        paddingTop: nativeActive ? 60 : 8,
         paddingLeft: 28,
         paddingRight: 28,
         boxSizing: 'border-box',
@@ -941,23 +918,8 @@ export default function DictationPillPage() {
       <div
         style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
         onMouseMove={() => { if (askOpenRef.current) armAskIdleTimer(); }}
-        onClick={() => {
-          // Tap the resting sliver while the worker orbit is up → transient
-          // capsule naming the in-flight packets (dossier #8).
-          if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen && !agentWorking && displayedWorkers.count > 0) {
-            setShowWorkers(true);
-            if (showWorkersTimerRef.current) clearTimeout(showWorkersTimerRef.current);
-            showWorkersTimerRef.current = setTimeout(() => setShowWorkers(false), 5000);
-          }
-        }}
-        onDoubleClick={() => {
-          // Double-tap the IDLE dock to open the standalone Voice settings
-          // window (Symon parity — works even with the main app closed). Gated
-          // to idle so it never fires over the ask panel / speaking controls.
-          if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen) {
-            invokeCmd('open_voice_settings');
-          }
-        }}
+        onClick={expandWorkers}
+        onDoubleClick={openVoiceSettings}
       >
         {/* The ONE morphing notch dock — idle ⇄ listening ⇄ thinking ⇄ done ⇄
             ask, in place (Symon NotchSurface). Not the in-window floating pill.
@@ -965,40 +927,40 @@ export default function DictationPillPage() {
             visual-only (pointer-events none) and must not extend the
             click-accepting zone over the menu bar. */}
         <div ref={hitRectHostRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <DockNotchSurface
-            snapshot={snapshot}
-            ttsState={ttsState}
+          {nativeCapsule ? null : <DockNotchSurface
+            snapshot={webSnapshot}
+            ttsState={webTts}
             onTogglePause={handleTogglePause}
             onStop={handleStop}
             onInterrupt={handleInterrupt}
             speechSpeed={speechSpeed}
             onSpeechSpeed={handleSpeechSpeed}
-            askOpen={askOpen}
+            askOpen={dock.webAskOpen}
             askMode={askMode}
             askThread={askThread}
             onCloseAsk={closeAsk}
-            agentConfirm={agentConfirm}
-            agentWorking={agentWorking}
+            agentConfirm={dock.webAgentConfirm ? agentConfirm : null}
+            agentWorking={webAgentWorking}
             agentTool={agentTool}
             agentStartedAt={agentStartedAt}
             onAgentConfirm={handleAgentConfirm}
-            dropActive={dropActive}
-            stagedFiles={stagedChips}
-            workerCount={displayedWorkers.count}
+            dropActive={dock.webDropActive}
+            stagedFiles={dock.webStaged ? stagedChips : null}
+            workerCount={dock.webWorkerCount}
             workerWorking={displayedWorkers.working}
             workerWaiting={displayedWorkers.waiting}
             workerWaitingLabel={displayedWorkers.waitingLabel}
             workerTooltip={displayedWorkers.tooltip}
             workerRepos={displayedWorkers.repos}
-            showWorkers={showWorkers}
-            panelPending={panelPending}
-            realtimeVoice={realtimeVoice}
+            showWorkers={dock.webShowWorkers}
+            panelPending={nativeDictation ? null : panelPending}
+            realtimeVoice={webRealtime}
             onStopRealtime={stopRealtimeVoice}
             onFinishDictation={finishSystemDictation}
-          />
-          <EditRevertChip onError={dockLog} />
+          />}
+          <EditRevertChip edit={dock.webEdit} onRevert={dock.revertEdit} />
         </div>
-        {glint ? <DockGlint key={glint.key} glint={glint} fading={glintFading} /> : null}
+        {dock.webGlint ? <DockGlint key={dock.webGlint.key} glint={dock.webGlint} fading={glintFading} handedBack={dock.webGlintHandedBack} /> : null}
       </div>
     </div>
   );

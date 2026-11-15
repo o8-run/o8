@@ -7,6 +7,10 @@ It renders the native shell and `/dashboard` at 1024×720 and 1440×900, with a
 fresh production-route fixture host for each surface. Both clients read that
 host; there is no alternate data implementation.
 
+The browser console was removed (#6163), so `/dashboard` now serves a static
+notice. Captures are native-only unless `--webHost` names a web host, and each
+case notes that the web side was skipped.
+
 From the repository root, with the prerequisites in
 [the shared Linux setup](../../.github/actions/next-linux-setup/action.yml):
 

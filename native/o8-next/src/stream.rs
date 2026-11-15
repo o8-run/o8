@@ -655,13 +655,16 @@ impl Transcript {
         let Some(id) = self.live.as_ref().map(|live| live.id.clone()) else {
             return false;
         };
-        // A replayed stop keeps the time the server saved for the turn.
+        // A replayed stop keeps the saved timestamp, including a local stand-in.
         let ended = self
             .entries
             .iter()
-            .find(|entry| entry.id == id)
-            .and_then(|entry| entry.extra.get("receipt"))
-            .and_then(|receipt| receipt["terminal"]["completedAt"].as_f64())
+            .chain(self.live.iter())
+            .filter(|entry| entry.id == id)
+            .find_map(|entry| {
+                entry.extra.get("receipt")
+                    .and_then(|receipt| receipt["terminal"]["completedAt"].as_f64())
+            })
             .unwrap_or_else(|| {
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -911,7 +914,15 @@ mod tests {
                 .flatten()
                 .all(|tool| tool["status"] != "running")
         );
+        // A fixed stamp makes replay proof independent of clock resolution.
+        let receipt = transcript.live.as_mut().unwrap().extra.get_mut("receipt").unwrap();
+        receipt["terminal"]["completedAt"] = serde_json::json!(1234.);
+        transcript.refresh();
         assert!(!transcript.interrupted(), "a second stop changes nothing");
+        assert_eq!(
+            transcript.live.as_ref().unwrap().extra["receipt"]["terminal"]["completedAt"],
+            serde_json::json!(1234.)
+        );
     }
     #[test]
     fn a_stop_before_any_output_still_leaves_a_stopped_row() {
@@ -930,7 +941,15 @@ mod tests {
         assert_eq!(live.extra["receipt"]["terminal"]["outcome"], "interrupted");
         assert!(transcript.rows.iter().any(|row| matches!(row,
             crate::model::Row::Activity { steps, trace, .. } if steps.is_empty() && trace.stopped && !trace.live)));
+        // A fixed stamp makes replay proof independent of clock resolution.
+        let receipt = transcript.live.as_mut().unwrap().extra.get_mut("receipt").unwrap();
+        receipt["terminal"]["completedAt"] = serde_json::json!(1234.);
+        transcript.refresh();
         assert!(!transcript.interrupted(), "a second stop changes nothing");
+        assert_eq!(
+            transcript.live.as_ref().unwrap().extra["receipt"]["terminal"]["completedAt"],
+            serde_json::json!(1234.)
+        );
     }
     #[test]
     fn a_stop_stand_in_retires_when_the_next_prompt_arrives() {

@@ -1,3 +1,5 @@
+import { listExternalReviews, type ExternalReviewTask } from './external-review-store';
+import { readLaneTerminalReason } from '@/lib/lane/terminal-reason';
 import 'server-only';
 
 import { basename } from 'node:path';
@@ -116,6 +118,7 @@ export interface TaskPoolRemoteExecution {
 }
 
 export interface TaskPoolTask {
+  externalReview?: ExternalReviewTask;
   id: string;
   packetId: string | null;
   laneId: string | null;
@@ -134,6 +137,8 @@ export interface TaskPoolTask {
   queueState: OrchestratorPacket['queueState'] | null;
   releaseState: OrchestratorPacket['releaseState'] | null;
   blockedReason: string | null;
+  failureReason?: string | null;
+  cleanup?: import('@/lib/worktree/preparation-failure').PreparationCleanup;
   lastEventAt: string | null;
   lastEventLabel: string | null;
   allowedFiles: string[];
@@ -160,6 +165,7 @@ export interface TaskPoolOptions {
   repoPath?: string | null;
   includeDone?: boolean;
   includeBrief?: boolean;
+  externalTaskId?: string;
 }
 
 const GROUP_ORDER: TaskPoolGroup[] = ['blocked', 'review', 'running', 'ready', 'done'];
@@ -323,11 +329,19 @@ async function resolveProjectContext(
   }
 }
 
+function preparationFields(lane: Lane | null) {
+  const reason = readLaneTerminalReason(lane);
+  return reason?.code === 'packet_worktree_provision_failed'
+    ? { failureReason: reason.cause, ...(reason.cleanup ? { cleanup: reason.cleanup } : {}) } : {};
+}
+
 export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPool> {
   const panelProjects = (await getProjectsLedger()).projects;
   const mission = currentMissionState();
+  let historyPackets: OrchestratorPacket[] | undefined;
+  const readHistory = () => historyPackets ??= listMissionRegistryEntries({ includeArchived: true }).flatMap(entry => entry.mission.packets);
   const packets = options.includeMissionHistory
-    ? [...new Map([...listMissionRegistryEntries({ includeArchived: true }).flatMap(entry => entry.mission.packets), ...mission.packets].map(packet => [packet.id, packet])).values()]
+    ? [...new Map([...readHistory(), ...mission.packets].map(packet => [packet.id, packet])).values()]
     : mission.packets;
   const lanes = listLanes();
   const lanesByPacketId = new Map(lanes.flatMap((lane) => (
@@ -358,6 +372,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
 
     const routing = packet.workerRouting ?? null;
     const task: TaskPoolTask = {
+      ...preparationFields(lane),
       id: packet.id,
       packetId: packet.id,
       laneId: lane?.id ?? packet.lane?.laneId ?? null,
@@ -417,6 +432,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
     if (!options.includeDone && group === 'done') continue;
 
     tasks.push({
+      ...preparationFields(lane),
       id: lane.id,
       packetId: null,
       laneId: lane.id,
@@ -454,6 +470,33 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
     });
   }
 
+  if (!options.packetId) {
+    const currentTasks = new Map(tasks.flatMap(task => task.packetId ? [[task.packetId, task] as const] : []));
+    const representedTasks: string[] = [];
+    for (const external of listExternalReviews({ taskId: options.externalTaskId, packets, lanes, historyPackets: readHistory })) {
+      if (options.repoPath && normalizePath(options.repoPath) !== normalizePath(external.repoPath)) continue;
+      const current = currentTasks.get(external.revision.packetId);
+      const context = await resolveProjectContext(projectCache, external.repoPath, null);
+      if (options.projectId && context?.id !== options.projectId && context?.slug !== options.projectId) continue;
+      representedTasks.push(external.taskId);
+      tasks.push({ id: external.taskId, packetId: external.revision.packetId, laneId: null, title: `Review PR #${external.pullRequest}`,
+        summary: external.revision.intendedOutcome ?? 'Intended outcome missing.', group: 'ready', status: 'draft', runtime: 'codex',
+        workerIntent: 'reviewer', workerRouting: null, branch: null, baseBranch: external.revision.baseRef, repoPath: external.repoPath,
+        repoName: basename(external.repoPath), queueState: 'held', releaseState: 'pending', blockedReason: null, lastEventAt: external.revision.adoptedAt,
+        lastEventLabel: external.state, allowedFiles: [], sourceIssue: null, problemDossierId: null, problemRemedyId: null,
+        project: context ? toProjectSummary(context, panelProjects) : null, lane: null, execution: null, ...current, externalReview: external,
+        ...(current ? { id: external.taskId } : {}) });
+    }
+    const revisionPackets = new Set((getSqlite().prepare(`SELECT r.packet_id FROM external_pr_review_revisions r
+      JOIN external_pr_review_tasks t ON t.id = r.task_id
+      WHERE r.packet_id IN (SELECT value FROM json_each(?))
+        AND (r.id != t.current_revision_id OR r.task_id IN (SELECT value FROM json_each(?)))`)
+      .all(JSON.stringify([...currentTasks.keys()]), JSON.stringify(representedTasks)) as Array<{ packet_id: string }>).map(row => row.packet_id));
+    for (let i = tasks.length - 1; i >= 0; i--) {
+      if (!tasks[i].externalReview && tasks[i].packetId && revisionPackets.has(tasks[i].packetId!)) tasks.splice(i, 1);
+    }
+  }
+
   tasks.sort((left, right) => {
     const groupDelta = groupSortRank(left.group) - groupSortRank(right.group);
     if (groupDelta !== 0) return groupDelta;
@@ -479,6 +522,6 @@ export async function getTaskPoolTask(
   taskId: string,
   options: Omit<TaskPoolOptions, 'includeBrief'> = {},
 ): Promise<TaskPoolTask | null> {
-  const pool = await getTaskPool({ ...options, includeDone: true, includeBrief: true });
+  const pool = await getTaskPool({ ...options, externalTaskId: taskId.startsWith('external-pr-') ? taskId : undefined, includeDone: true, includeBrief: true });
   return pool.tasks.find((task) => task.id === taskId || task.packetId === taskId || task.laneId === taskId) ?? null;
 }

@@ -1,3 +1,4 @@
+import { RUN_EVIDENCE_SCHEMA } from '@/lib/orchestrator/review-run-evidence';
 import { DISPATCH_MISSION_TOOL } from './mission-dispatch-tool';
 import { validateRequestedRuntime } from '@/lib/agents/routing';
 export { handleCreateMission } from './mission-create';
@@ -501,6 +502,7 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Optional 7- to 40-character hexadecimal worktree HEAD SHA that was reviewed. Abbreviated SHAs are expanded in the packet repository; if omitted, o8 captures the lane worktree HEAD at review time.',
         },
+        runEvidence: RUN_EVIDENCE_SCHEMA,
         contractCoverageEvidence: CONTRACT_COVERAGE_EVIDENCE_SCHEMA,
         directivesApplied: {
           type: 'array',
@@ -922,6 +924,7 @@ export async function handleSubmitReview(args: Record<string, unknown>): Promise
       findings: parseReviewFindings(args.findings),
       approved: args.approved,
       reviewedHeadSha: optionalString(args, 'reviewedHeadSha') || undefined,
+      runEvidence: args.runEvidence as import('@/lib/orchestrator/review-run-evidence').ReviewRunEvidence | undefined,
       contractCoverageEvidence: parseContractCoverageEvidenceInput(args.contractCoverageEvidence),
       directivesApplied: parseDirectivesApplied(args.directivesApplied),
       directivesViolated: parseDirectivesViolated(args.directivesViolated),

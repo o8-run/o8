@@ -1,3 +1,4 @@
+import { checkReviewRunPolicy, checkReviewRunPreflight, reviewRunPolicy } from './review-run-policy';
 import type {
   ApprovalConflictReport,
   ApprovalGateResult,
@@ -11,7 +12,7 @@ import { checkExpectedHeadSha, formatHeadShaMismatchNote, resolveHeadSha } from 
 import { assertLaneHeadOnBranch, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { blockIncompleteMergeDependencies } from '@/lib/lane/dependency-materialization-merge-blocker';
 import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
-import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
+import { prFirstMergeRefusal } from '@/lib/lane/pr-first-delivery';
 import {
   appendEvent,
   getLane,
@@ -20,7 +21,7 @@ import {
 import { runLaneRebaseVerify } from '@/lib/lane/rebase-verify';
 import { buildCheckList } from '@/lib/lane/preview-merge';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
-import { handlePostRebaseVerifyFailure } from '@/lib/lane/worktree-side-merge-verify';
+import { handlePostRebaseVerifyFailure, recordMergePublication } from '@/lib/lane/worktree-side-merge-verify';
 import { prepareDurableMergeRelease } from '@/lib/lane/durable-merge-release';
 import { settleSuccessfulMergeWorktreeCleanup } from '@/lib/lane/successful-merge-worktree-cleanup';
 import {
@@ -425,8 +426,8 @@ export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): P
 
 async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
   const { lane, command, actor } = input;
-  // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
-  if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
+  const prOnlyNote = await prFirstMergeRefusal(lane);
+  if (prOnlyNote) return { ok: false, laneId: command.laneId, note: prOnlyNote, reason: 'pr_only' };
   const worktreePath = lane.worktreePath;
   const lfsBase = readLaneCreationBaseCommit(lane.id);
   if (!worktreePath) {
@@ -534,8 +535,10 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       };
     }
 
+    const candidatePreflight = await checkReviewRunPreflight(lane);
+    if (!candidatePreflight.ok) return { ok: false, laneId: lane.id, reason: candidatePreflight.code, note: candidatePreflight.message };
     let reviewedSnapshotSha: string;
-    if (spokenEvidence.present && command.commitMessage) {
+    if (spokenEvidence.present && command.commitMessage && !reviewRunPolicy().enabled) {
       const commit = await commitSpokenReviewSnapshotWithDriftRecovery({
         lane,
         actor,
@@ -571,20 +574,17 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         }
         throw error;
       }
-    } else if (reviewedHead.reviewedHeadSha) {
+    } else if (reviewedHead.reviewedHeadSha || (command.authorizingApprovalId && command.expectedHeadSha)) {
       // A review pinned this commit: merge exactly it, never what the branch
       // points at now, and no uncommitted changes the review did not cover.
-      const pinned = await resolveHeadSha(worktreePath, reviewedHead.reviewedHeadSha, lane.repoPath);
+      const pinned = await resolveHeadSha(worktreePath, reviewedHead.reviewedHeadSha ?? command.expectedHeadSha!, lane.repoPath);
       if (!pinned) {
-        return {
-          ok: false,
-          laneId: command.laneId,
-          note: `The reviewed commit ${reviewedHead.reviewedHeadSha} could not be resolved in this lane's repository.`,
-        };
+        return { ok: false, laneId: command.laneId, reason: 'approved_head_unavailable',
+          note: `The reviewed commit ${reviewedHead.reviewedHeadSha ?? command.expectedHeadSha} could not be resolved in this lane's repository. Return to review.` };
       }
       reviewedSnapshotSha = pinned;
     } else {
-      if (command.commitMessage) {
+      if (command.commitMessage && !reviewRunPolicy().enabled) {
         try {
           await commitDirtyWorktree(
             worktreePath,
@@ -599,6 +599,8 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       reviewedSnapshotSha = await readLaneBranchSha(worktreePath, lane.repoPath, lane.branch);
     }
 
+    const candidateGate = await checkReviewRunPolicy(lane, { cwd: worktreePath, sha: reviewedSnapshotSha });
+    if (!candidateGate.ok) return { ok: false, laneId: lane.id, reason: candidateGate.code, note: candidateGate.message };
     const integration = await createDetachedIntegrationWorktree({
       repoPath: lane.repoPath,
       sourceWorktreePath: worktreePath,
@@ -772,7 +774,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       return { ...failure, reason: 'canonical_merge_ancestry_failed' };
     }
     const mergeSha = mergeCandidateSha;
-    appendEvent(command.laneId, 'merge', actor, { laneHeadSha: mergeSha, baseBranch: lane.baseBranch });
+    recordMergePublication(command, actor, reviewedSnapshotSha, mergeSha, lane.baseBranch, mergeChecks);
     let pushedToOrigin = false, pushError: string | undefined;
     if (originPushAvailable) {
       try {

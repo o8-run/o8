@@ -1,3 +1,8 @@
+import { INBOX_DECISIONS_TOOL, handleGetInboxDecisions } from './operator-handlers/inbox-decisions';
+import { INTEGRATION_QUEUE_TOOLS, handleIntegrationQueue } from './operator-handlers/integration-queue';
+import { EFFECTIVE_POLICY_TOOL, handleGetEffectivePolicy } from './operator-handlers/effective-policy';
+import { ADOPT_PR_TOOL, handleAdoptPr } from './operator-handlers/adopt-pr';
+import { IDLE_DRAFT_TOOLS, handleIdleDrafts } from './operator-handlers/idle-drafts';
 import { CONVERSATION_PR_TOOLS, handleConversationPrs } from './operator-handlers/conversation-prs';
 import { PR_STACK_TOOLS, handlePrStack } from './operator-handlers/pr-stack';
 import { THREAD_TOOLS, handleThreadsList } from './operator-handlers/threads';
@@ -278,6 +283,7 @@ async function handleUserContext(): Promise<McpToolResult> {
 
 const TOOLS: McpTool[] = [
   ...THREAD_TOOLS,
+  ADOPT_PR_TOOL,
   ...CONVERSATION_PR_TOOLS,
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_send'),
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_status'),
@@ -313,6 +319,9 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((tool) => tool.name === 'get_mission_status'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'mission_tail'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'get_packet_scope'),
+  EFFECTIVE_POLICY_TOOL,
+  INBOX_DECISIONS_TOOL,
+  ...INTEGRATION_QUEUE_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_packet_diff'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_list'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_create'),
@@ -325,6 +334,7 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_prune'),
   ...PROBLEM_TOOLS,
   ...PR_STACK_TOOLS,
+  ...IDLE_DRAFT_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'wait_for_mission_ready'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'submit_review'),
   ...CLOSE_PACKET_TOOLS,
@@ -371,6 +381,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_approve: handleApprove,
   o8_reject: handleReject,
   o8_history: handleHistory,
+  o8_adopt_pr: handleAdoptPr,
   o8_conversation_prs: handleConversationPrs,
   o8_lane_events: handleLaneEvents,
   o8_packet_transcript: handleTranscript,
@@ -443,6 +454,9 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   get_mission_status: handleGetMissionStatus,
   mission_tail: handleMissionTail,
   get_packet_scope: handleGetPacketScope,
+  get_effective_policy: handleGetEffectivePolicy,
+  get_inbox_decisions: handleGetInboxDecisions,
+  o8_integration_queue: handleIntegrationQueue,
   o8_packet_diff: handlePacketDiff,
   o8_task_list: handleTaskList,
   o8_task_create: handleTaskCreate,
@@ -454,6 +468,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_task_archive: handleTaskArchive,
   o8_task_prune: handleTaskPrune,
   o8_pr_stack: handlePrStack,
+  o8_idle_drafts: handleIdleDrafts,
   o8_problem_list: handleProblemList,
   o8_problem_get: handleProblemGet,
   wait_for_mission_ready: handleWaitForMissionReady,

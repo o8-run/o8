@@ -49,13 +49,9 @@ export function resolveSentryDsn(): string {
 /**
  * Which environment Sentry should tag events with.
  *
- * `isPackaged()` alone is not the answer. In the dev-bridge loop the
- * maintainers daily-drive, the PACKAGED app is pointed at a local Next dev
- * server via `O8_DEV_FRONTEND_URL` — so `O8_PACKAGED_APP` is set, the DSN
- * resolves, the browser SDK initializes, and dev-server errors arrived tagged
- * `production` in the same bucket as real user crashes (#1679). With the repo
- * public and installs starting, that is the signal that matters most in the
- * first weeks and it was the one getting buried.
+ * A packaged shell can point at a local dev server via
+ * `O8_DEV_FRONTEND_URL`. Keep those errors tagged as development even when
+ * a packaged build supplies the reporting DSN (#1679).
  */
 export function resolveSentryEnvironment(): string {
   if (process.env.O8_DEV_FRONTEND_URL?.trim()) return 'development';

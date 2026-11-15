@@ -15,6 +15,7 @@ import { truncateText } from '@/lib/util/text';
 import {
   codexSessionsRoot,
   defaultCodexHome,
+  codexHomeMatchesIdentity,
   listCodexDiscoveryHomes,
   queryCodexThreadByIdFromHome,
   queryCodexThreadsFromHome,
@@ -144,7 +145,7 @@ export async function queryCodexThreads(limit = 6) {
 async function findCodexThreadAcrossHomes(threadId: string, identityId?: string) {
   const homes = await listCodexDiscoveryHomes();
   const candidates = identityId
-    ? homes.filter((home) => home.identityId === identityId)
+    ? homes.filter((home) => codexHomeMatchesIdentity(home, identityId))
     : homes;
   const matches: Array<{
     thread: CodexThreadRow;

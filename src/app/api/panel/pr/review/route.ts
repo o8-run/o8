@@ -1,3 +1,6 @@
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
+import { PrMergeRefused } from '@/lib/github-broker/pr-merge-gate';
+import { PublicationUnknown, PublicationRefused } from '@/lib/github-broker/publication';
 import { NextResponse } from 'next/server';
 import {
   DEFAULT_GITHUB_REPO,
@@ -17,6 +20,9 @@ export async function POST(request: Request) {
     number?: number | string | null;
     action?: string | null;
     comment?: string | null;
+    commitSha?: string;
+    mergeMethod?: 'merge' | 'squash' | 'rebase';
+    expectedMergeGate?: string;
   } | null;
 
   const prNumber = typeof body?.number === 'number'
@@ -65,13 +71,18 @@ export async function POST(request: Request) {
     }
 
     if (action === 'merge') {
-      await mergeGitHubPullRequest(repo, prNumber, { deleteBranch: true });
+      if (typeof body?.commitSha !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(body.commitSha)) return NextResponse.json({ code: 'approved_head_required', message: 'The approved head SHA is required. Send it as commitSha.', error: 'The approved head SHA is required. Send it as commitSha.' }, { status: 400 });
+      const result = await mergeGitHubPullRequest(repo, prNumber, { deleteBranch: true, expectedHeadSha: body.commitSha,
+        mergeMethod: body.mergeMethod, expectedMergeGate: body.expectedMergeGate, principal: resolveRequestPrincipalContext(request).role });
       invalidateGitHubSync(repo, 'pull_requests');
-      return NextResponse.json({ ok: true, success: true, action: 'merged' });
+      return NextResponse.json({ ok: true, success: true, action: result.publication.status, publication: result.publication });
     }
 
     return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
   } catch (error) {
+    if (error instanceof PublicationRefused) return NextResponse.json({ ok: false, mergeRefused: true, error: error.message, publication: error.receipt }, { status: 409 });
+    if (error instanceof PublicationUnknown) return NextResponse.json({ ok: false, outcomeUnknown: true, error: error.message, publication: error.receipt }, { status: 202 });
+    if (error instanceof PrMergeRefused) return NextResponse.json({ ok: false, mergeRefused: true, error: error.message, mergeGate: error.gate }, { status: 409 });
     const message = error instanceof Error ? error.message : `${action} failed`;
     return NextResponse.json({ error: message }, { status: 500 });
   }

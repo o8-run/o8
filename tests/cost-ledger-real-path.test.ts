@@ -404,7 +404,7 @@ describe('cost ledger persisted real path', () => {
       'http://localhost/api/orchestrator/review',
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${(await import('@/lib/ws-auth')).getOrCreateWsToken()}` },
         body: JSON.stringify({
           packetId,
           clientMutationId: 'cost-ledger-real-path-review',
@@ -511,7 +511,7 @@ describe('cost ledger persisted real path', () => {
       'http://localhost/api/orchestrator/review',
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${(await import('@/lib/ws-auth')).getOrCreateWsToken()}` },
         body: JSON.stringify({
           packetId,
           clientMutationId: 'cost-ledger-rejected-review',

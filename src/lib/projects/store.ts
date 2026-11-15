@@ -10,6 +10,7 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
+import { projectMergeModeKey } from '@/lib/lane/project-merge-mode-migration';
 import type {
   Project,
   ProjectRepo,
@@ -116,6 +117,8 @@ export interface CreateProjectInput {
   slug?: string;
   description?: string | null;
   mainRepoId?: string | null;
+  /** Internal identity migration only; never accepted from a request body. */
+  mergeModeSourceProjectId?: string;
 }
 
 export function createProject(input: CreateProjectInput): Project {
@@ -134,10 +137,17 @@ export function createProject(input: CreateProjectInput): Project {
   const requested = (input.slug?.trim() || slugifyName(trimmedName)).toLowerCase();
   const slug = makeUniqueSlug(sqlite, requested);
 
-  sqlite.prepare(
-    `INSERT INTO projects (id, name, slug, description, main_repo_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, trimmedName, slug, description, mainRepoId, now, now);
+  sqlite.transaction(() => {
+    sqlite.prepare(
+      `INSERT INTO projects (id, name, slug, description, main_repo_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, trimmedName, slug, description, mainRepoId, now, now);
+    if (input.mergeModeSourceProjectId) {
+      sqlite.prepare(`INSERT OR IGNORE INTO app_state (key, value, updated_at)
+        SELECT ?, value, ? FROM app_state WHERE key = ?`)
+        .run(projectMergeModeKey(id), now, projectMergeModeKey(input.mergeModeSourceProjectId));
+    }
+  })();
 
   return {
     id,

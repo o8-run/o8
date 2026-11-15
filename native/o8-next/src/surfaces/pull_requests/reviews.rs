@@ -228,13 +228,13 @@ impl PullRequests {
                                                     .hover(|b| b.bg(theme().hover))
                                                     .focus(|b| b.border_color(theme().text))
                                                     .child("Open review")
-                                                    .on_click(move |_, _, cx| cx.open_url(&url))
+                                                    .on_click(move |_, _, cx| crate::external_open::url(cx, &url))
                                                     .on_key_down(
                                                         move |event: &gpui::KeyDownEvent, _, cx| {
                                                             if event.keystroke.key == "enter"
                                                                 || event.keystroke.key == "space"
                                                             {
-                                                                cx.open_url(&key_url);
+                                                                crate::external_open::url(cx, &key_url);
                                                                 cx.stop_propagation();
                                                             }
                                                         },
