@@ -773,7 +773,7 @@ impl Surface {
             .children(self.empty_chat_hero(cx))
             .children(self.shell_run_card(cx))
             .children(self.lineage_strip(cx))
-            .children(self.changes_pill(cx))
+            .children(self.changes_pill(window, cx))
             // Floats over the transcript's foot, so the transcript never moves.
             .children(self.working_strip())
             .child(self.composer_card(window, cx))

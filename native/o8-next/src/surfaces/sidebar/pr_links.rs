@@ -133,7 +133,7 @@ impl ThreadList {
         })
         .detach();
     }
-    pub(super) fn links_for(&self, id: &str) -> &[PrLink] {
+    pub(crate) fn links_for(&self, id: &str) -> &[PrLink] {
         self.pr_links.get(id).map(Vec::as_slice).unwrap_or(&[])
     }
     /// Plain click: the right panel's PR viewer. Cmd/Ctrl-click: GitHub.
