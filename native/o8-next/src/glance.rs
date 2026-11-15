@@ -11,11 +11,7 @@ use gpui::{
 };
 
 /// brand/tokens: ink, paper, orange, and the eye colour on a dark-mode body.
-pub(crate) const INK: u32 = 0x17140F;
-pub(crate) const PAPER: u32 = 0xF4F2EC;
-pub(crate) const ORANGE: u32 = 0xFF5A1F;
-/// tokens.json `graphite-eye`: Glance's eyes on a light (dark-mode) body.
-pub(crate) const GRAPHITE_EYE: u32 = 0x1C1A17;
+pub(crate) use crate::theme::brand::{GRAPHITE_EYE, INK, ORANGE, PAPER};
 
 /// One cut of the face in its 100×100 box (glance.py `FULL` / `SMALL`).
 #[derive(Clone, Copy, Debug, PartialEq)]
