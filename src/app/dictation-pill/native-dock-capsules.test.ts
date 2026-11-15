@@ -137,7 +137,8 @@ describe('dock precedence', () => {
                 : owner === 'speaking' || owner === 'working' || owner === 'voice' ? owner
                   : (owner === 'workers' || owner === 'idle') && !shownOnMain ? 'idle'
                     : owner === 'workers' || owner === 'idle' && workerCount > 0 ? 'workers'
-                      : owner === 'idle' ? 'extras' : shownOnMain ? owner : 'idle';
+                      : owner === 'idle' && topPill ? 'sliver'
+                        : owner === 'idle' ? 'extras' : shownOnMain ? owner : 'idle';
               // Every surface is native now: nothing is drawn beside it on the web.
               const siblings = state !== 'idle' ? 'native' : 'hidden';
               const { frame } = nativeDockFrame({
@@ -145,7 +146,7 @@ describe('dock precedence', () => {
                 ask: { mode: 'answer', thread: [{ role: 'assistant', text: 'Answer' }], pending: input.panelPending ? { phase: 'listening', text: '' } : null },
                 confirmCard: input.agentConfirm ? { confirmationId: 'c', taskId: 't', tool: 'tool', summary: 'Review' } : null,
                 stagedChips: input.stagedFiles ? [{ name: 'notes.txt', size: 2048 }] : null,
-              }, { speaking: 1, voice: 1, workers: 1, extras: 1, ask: 1, confirm: 1, drop: 1, staged: 1 });
+              }, { speaking: 1, voice: 1, workers: 1, extras: 1, ask: 1, confirm: 1, drop: 1, staged: 1, sliver: 1 });
               const view = webDockView(true, frame, dictationState, { ...input, showWorkers: input.showWorkers, workerCount });
               const visible = webDockVisible(true, false, view, { ...input, snapshot: { ...IDLE, state: dictationState } }, { topPillEnabled: topPill });
               const label = JSON.stringify({ ...input, topPill });
@@ -158,7 +159,7 @@ describe('dock precedence', () => {
               seen.add(`${state}:${siblings}`);
             }
     expect([...seen].sort()).toEqual([
-      'ask:native', 'confirm:native', 'drop:native', 'extras:native', 'idle:hidden', 'recording:native', 'speaking:native', 'staged:native', 'success:native',
+      'ask:native', 'confirm:native', 'drop:native', 'idle:hidden', 'recording:native', 'sliver:native', 'speaking:native', 'staged:native', 'success:native',
       'voice:native', 'workers:native', 'working:native',
     ]);
   });

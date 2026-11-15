@@ -105,6 +105,7 @@ impl Snapshot {
                 | "working"
                 | "voice"
                 | "workers"
+                | "sliver"
         ) || self.state == "ask" && self.ask.is_some()
             || self.state == "confirm" && self.confirm.as_ref().is_some_and(confirm::Card::valid)
             || self.state == "drop"
@@ -306,8 +307,13 @@ impl Render for Pill {
                 .id("native-dock-capsule")
                 .debug_selector(|| "native-dock-capsule".into())
                 .opacity(opacity)
-                .on_click(cx.listener(|pill, _, _, cx| {
+                .on_click(cx.listener(|pill, event: &gpui::ClickEvent, _, cx| {
                     pill.capsule_click();
+                    // The resting dock's double click opens Voice settings, as
+                    // the web dock's own double click does.
+                    if event.click_count() == 2 {
+                        pill.act("voice-settings", None);
+                    }
                     cx.notify();
                 }));
             return root
@@ -792,6 +798,9 @@ mod confirm_tests;
 #[cfg(test)]
 #[path = "native_pill_drop_tests.rs"]
 mod drop_tests;
+#[cfg(test)]
+#[path = "native_pill_sliver_tests.rs"]
+mod sliver_tests;
 
 #[path = "native_pill_fixture.rs"]
 mod fixture;

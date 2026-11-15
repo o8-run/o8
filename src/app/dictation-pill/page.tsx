@@ -836,12 +836,18 @@ export default function DictationPillPage() {
       showWorkersTimerRef.current = setTimeout(() => setShowWorkers(false), 5000);
     }
   }, [snapshot.state, ttsState, askOpen, agentWorking, displayedWorkers.count]);
+  // Double-tap the IDLE dock to open the standalone Voice settings window
+  // (works even with the main app closed); the native sliver reports the same.
+  // Gated to idle so it never fires over the ask panel / speaking controls.
+  const openVoiceSettings = useCallback(() => {
+    if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen) invokeCmd('open_voice_settings');
+  }, [snapshot.state, ttsState, askOpen]);
   const dock = useNativeDock({
     snapshot, dictationSession: startTimeRef.current, ttsState, askOpen, agentConfirm: !!agentConfirm, agentWorking, dropActive, showWorkers,
     stagedFiles: !!stagedChips?.length, workerCount: displayedWorkers.count, realtimeVoice, speechSpeed, agentTool, agentStartedAt, glint,
     ask: { mode: askMode, thread: askThread, pending: panelPending }, confirmCard: agentConfirm, stagedChips,
     workers: { count: displayedWorkers.count, working: displayedWorkers.working, waiting: displayedWaiting, label: displayedWorkers.waitingLabel, repos: displayedWorkers.repos },
-  }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, closeAsk, armAskIdle: armAskIdleTimer, decideConfirm: handleAgentConfirm, invokeCmd, onError: dockLog },
+  }, { finishSystemDictation, handleTogglePause, handleStop, handleInterrupt, stopRealtimeVoice, handleSpeechSpeed, expandWorkers, closeAsk, armAskIdle: armAskIdleTimer, decideConfirm: handleAgentConfirm, openVoiceSettings, invokeCmd, onError: dockLog },
   { topPillEnabled, staged: !!stagedChips });
   const { native: nativeDictation, nativeActive, nativeCapsule, webSnapshot, webTts, webRealtime, webAgentWorking, dockVisible } = dock;
   useLayoutEffect(() => { nativeExtentRef.current = nativeDictation; }, [nativeDictation]);
@@ -913,14 +919,7 @@ export default function DictationPillPage() {
         style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
         onMouseMove={() => { if (askOpenRef.current) armAskIdleTimer(); }}
         onClick={expandWorkers}
-        onDoubleClick={() => {
-          // Double-tap the IDLE dock to open the standalone Voice settings
-          // window (Symon parity — works even with the main app closed). Gated
-          // to idle so it never fires over the ask panel / speaking controls.
-          if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen) {
-            invokeCmd('open_voice_settings');
-          }
-        }}
+        onDoubleClick={openVoiceSettings}
       >
         {/* The ONE morphing notch dock — idle ⇄ listening ⇄ thinking ⇄ done ⇄
             ask, in place (Symon NotchSurface). Not the in-window floating pill.

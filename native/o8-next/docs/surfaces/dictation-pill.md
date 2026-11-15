@@ -164,9 +164,25 @@ which closes the batch 1 divergence where they showed without it, and a real
 dictation, a confirmation or Ask holds them back on both surfaces as on the
 web. There is no remove control: the web chips have none either.
 
+Idle sliver and the Voice settings shortcut (#6145). With the top-pill
+preference on and nothing else on the dock, the resting 128×16 sliver is drawn
+natively (state `sliver`, a static frame), with the chip and glint below it as
+on the web; before, the native panel drew nothing there and a lone chip or
+glint sat at the capsule position (state `extras`, now reached only if a later
+change makes the dock visible at idle for another reason). A double click on
+the sliver, or on the fleet orbit or capsule (the resting dock with workers),
+reports `voice-settings`; the web runs the page's own double-click handler,
+which opens Voice settings (`open_voice_settings`) only while dictation and
+speech are idle and Ask is closed, exactly as the web dock's double click does.
+The intent is dropped unless the frame on screen is still the sliver or the
+fleet in the same session, and the route forwards it only from those states.
+A single click on the sliver does nothing, as on the web. Like the resting
+orbit, the sliver costs a 4 s keep-alive and keeps the 16 ms native tick
+running for as long as the dock rests (see the #6145 CPU follow-up).
+
 With these, no dock surface is drawn by the retained web dock beside or in
 place of a native frame; the web draws only on fallback, quiet mode or with
-the flag off (and the idle sliver, below).
+the flag off.
 
 Releases now name the session and kind (dictation, speaking, working, voice, ask, confirm, drop or staged)
 they retire, so a late fallback release can no longer hide a newer session that
@@ -233,7 +249,7 @@ port order; source references name the current implementation.
 | File drop target and staged-file chips | src/components/desktop/dictation/useDockFileDrop.ts:33; src/app/dictation-pill/page.tsx:830; native/o8-next/src/native_pill_drop.rs:1 | drag/drop over the web dock window, staged chip timeout; both stay in the web dock | agent_files_stage, run by the web dock on drop (no click is reported) | native (#6145) |
 | Worker orbit and expanded worker/ready capsule (and the live voice worker count) | src/app/dictation-pill/page.tsx:616; native/o8-next/src/native_pill_capsules.rs:1 | worker-status, parked-lanes-status and the stale-snapshot sweep stay in the web dock; idle tap reported as `workers-expand` | No direct action command | native (batch 3) |
 | Memory/progress/task-result glints | src/app/dictation-pill/DockGlint.tsx:11; native/o8-next/src/native_pill_extras.rs:1 | agent-task-event glint/plan progress/handoff; fade from `fadeAt` to `until` | No direct action command | native (batch 3) |
-| Idle sliver and Voice settings shortcut | src/app/dictation-pill/page.tsx:495,955; src/components/desktop/dictation/DockNotchSurface.tsx:783 | top-pill preference, resting dock double click | open_voice_settings | still web |
+| Idle sliver and Voice settings shortcut | src/app/dictation-pill/page.tsx:495,955; src/components/desktop/dictation/DockNotchSurface.tsx:783; native/o8-next/src/native_pill_capsules.rs:1 | top-pill preference, resting dock double click | open_voice_settings, run by the web dock from a reported `voice-settings` intent | native (#6145) |
 | Window hit testing, expanded geometry and presentation suppression | src/app/dictation-pill/page.tsx:855; src-tauri/src/dock_window.rs:366 | ResizeObserver, dock visibility, Ask open/close | dock_set_hit_rect, dock_set_expanded, presentation_quiet_mode_get; o8_dock_log instrumentation | still web |
 
 ## Dock precedence
@@ -252,13 +268,13 @@ src/components/desktop/dictation/dockPrecedence.ts, is:
 7. Staged-file chips
 8. Worker detail capsule
 9. Live voice (connecting or live)
-10. Idle sliver
+10. Idle sliver (native: state `sliver`)
 
 The native frame follows the same order: the Ask panel when Ask wins
 (including a pending turn inside it), dictation when it is active, otherwise
 the confirmation card, drop target or staged chips when they win, otherwise
 the winning capsule (5, 6, 8 or 9). No surface in the order is still web. When nothing wins (10) and workers exist, the frame is the
-resting fleet orbit; with no workers but a chip or glint, it is `extras`. While the native panel draws the winner, the web dock does not
+resting fleet orbit; with no workers and the top-pill preference, the sliver. While the native panel draws the winner, the web dock does not
 draw speech, working or live voice under it; with a native capsule the web
 notch surface is not drawn at all (the edit/revert chip and glints remain,
 below the capsule). On fallback the web dock draws everything as before.
@@ -278,7 +294,7 @@ belong under:
 | Confirmation card | native | native, below the card |
 | Drop target, staged chips (with the top-pill preference or another visibility reason) | native | native, below them |
 | Fleet orbit or capsule | native | native, below it |
-| Nothing (10) | native `extras` | native, alone at the capsule position |
+| Nothing (10), top-pill preference on | native `sliver` | native, below the sliver |
 | Flag off, fallback, quiet mode | web | web, as today |
 
 While native, the web never draws the fleet orbit or capsule (native draws
@@ -298,11 +314,11 @@ When native owns dictation, the web snapshot is idle and its pending dictation
 waveform is suppressed. Other controls can still make the web dock visible. While native dictation is
 painted, retained web controls move below its capsule and use the existing
 expanded window extent so the edit/revert chip and Ask controls are not occluded.
-The idle sliver alone does not make it visible under native ownership.
+The idle sliver alone does not make the web dock visible under native ownership; the native panel draws it.
 
 | Web behavior | Native counterpart | Remaining difference |
 | --- | --- | --- |
-| Idle | Hidden | No persistent idle sliver for dictation |
+| Idle | Hidden, or the native sliver with the top-pill preference | Theme surface instead of the white glass sliver |
 | Requesting microphone | Connecting label | No browser microphone prompt changes |
 | Listening | Live level bars and timer | Native theme accent and nonactivating click-to-finish; original gradient/shimmer remains a follow-up |
 | Transcribing | Transcribing label | Squiggle loader remains unmatched |
@@ -439,7 +455,15 @@ Physical focus retention is reserved for the lead's live check.
     shows anything (as with the flag off). Hold Fn during a drag: dictation
     shows instead. Quit the native window process while chips show: the web
     chips return within the 4 s keep-alive plus half a second.
-22. Set the flag false and repeat a dock-routed session and steps 7 to 21 to
+22. Sliver: turn the top-pill preference on in Voice settings with nothing
+    else running. The native 128×16 sliver shows at the dock position and no
+    web sliver; a single click does nothing; a double click opens Voice
+    settings once without the keyboard focus moving from the front app until
+    that window opens. Double-click the fleet orbit with workers running: the
+    capsule expands and Voice settings opens. Turn the preference off: the
+    sliver disappears. Quit the native window process: the web sliver returns
+    within about 4.5 s.
+23. Set the flag false and repeat a dock-routed session and steps 7 to 22 to
     verify web behavior.
 
 Gradient/shimmer, the squiggle loader and the spring geometry morph are follow-up

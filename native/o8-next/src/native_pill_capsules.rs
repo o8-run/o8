@@ -82,7 +82,7 @@ const SPEED_TRACK: f32 = 58.;
 pub(crate) const ACTION_LIMIT: usize = 8;
 
 pub(crate) fn is_capsule(state: &str) -> bool {
-    matches!(state, "speaking" | "working" | "voice" | "workers")
+    matches!(state, "speaking" | "working" | "voice" | "workers" | "sliver")
 }
 
 /// The session kind a release names: each capsule, the chip/glint-only
@@ -103,7 +103,7 @@ pub(crate) fn size(snapshot: &Snapshot) -> (f64, f64) {
         "voice" if voice_workers(snapshot) > 0 => (348., 40.),
         "voice" => (268., 40.),
         "workers" if snapshot.expanded => (320., 44.),
-        "workers" => (128., 16.),
+        "workers" | "sliver" => (128., 16.),
         "confirm" => super::confirm::CARD,
         "drop" => super::drop::DROP,
         "staged" => super::drop::STAGED,
@@ -115,7 +115,7 @@ pub(crate) fn size(snapshot: &Snapshot) -> (f64, f64) {
 
 pub(crate) fn interactive(snapshot: &Snapshot) -> bool {
     match snapshot.state.as_str() {
-        "recording" | "speaking" | "working" | "workers" => true,
+        "recording" | "speaking" | "working" | "workers" | "sliver" => true,
         "voice" => !snapshot.connecting,
         "ask" => snapshot.ask.as_ref().is_some_and(|ask| !ask.listening),
         "confirm" => true,
@@ -163,6 +163,8 @@ impl Pill {
                 "interrupt" => state == "working",
                 "voice-stop" => state == "voice" && !self.snapshot.connecting,
                 "workers-expand" => state == "workers",
+                // Only the resting dock: the idle sliver or the fleet orbit/capsule.
+                "voice-settings" => state == "sliver" || state == "workers",
                 _ => false,
             };
         if !allowed || self.actions.len() >= ACTION_LIMIT {
@@ -345,6 +347,11 @@ impl Pill {
                             t.text_secondary,
                         ))
                 })
+                .into_any_element(),
+            // The resting sliver (top-pill preference, nothing else on the dock).
+            "sliver" => base
+                .rounded(px(14.))
+                .cursor_pointer()
                 .into_any_element(),
             "workers" => {
                 let workers = snapshot.workers.clone().unwrap_or_default();
