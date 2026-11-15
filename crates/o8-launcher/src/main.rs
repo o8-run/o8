@@ -710,6 +710,7 @@ fn serve(
     let mut opened = false;
     let mut pending_show = false;
     let mut window_failed = false;
+    let mut credential_deadline: Option<Instant> = None;
     let mut launch: Option<std::sync::mpsc::Receiver<Result<(), String>>> = None;
     let outcome = (|| -> Result<(), String> {
         while !stopped.load(Ordering::SeqCst) {
@@ -856,9 +857,22 @@ fn serve(
                         .ok()
                         .and_then(|r| r.json::<serde_json::Value>().ok())
                         .is_some_and(|v| v["bootId"].as_str() == Some(&boot));
-                    if healthy {
-                        let token = fs::read_to_string(config.data_dir.join("ws-token"))
-                            .map_err(|_| "Window credential unavailable")?;
+                    // On a first start the API answers before the WS server has
+                    // written the window credential. Give it a few seconds, then
+                    // fail the start as before.
+                    let token = healthy
+                        .then(|| fs::read_to_string(config.data_dir.join("ws-token")).ok())
+                        .flatten()
+                        .filter(|token| !token.trim().is_empty());
+                    if healthy && token.is_none() {
+                        let limit = *credential_deadline
+                            .get_or_insert_with(|| Instant::now() + Duration::from_secs(5));
+                        if Instant::now() >= limit {
+                            return Err("Window credential unavailable".into());
+                        }
+                    }
+                    if let Some(token) = token {
+                        credential_deadline = None;
                         let port = config.api_port;
                         let (send, receive) = std::sync::mpsc::channel();
                         std::thread::spawn(move || {
