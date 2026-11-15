@@ -27,6 +27,7 @@ export const PACKET_SUBCOMMANDS = [
 ] as const;
 
 export const OPERATOR_PACKET_SUBCOMMANDS = [
+  'policy',
   'retain',
   'release-retention',
   'restore-artifacts',
@@ -35,6 +36,7 @@ export const OPERATOR_PACKET_SUBCOMMANDS = [
 ] as const;
 
 export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; explicit packet/lane id overrides cwd
+  packet policy [id]   read effective review and merge policy (operator only)
   packet scope [id]    bounded worker context (--include-directives for bodies)
   packet expand-scope [id] request bounded paths (--paths <path[,path]> --reason <text>)
   packet diff [id]     the packet's code diff vs base (committed + uncommitted)

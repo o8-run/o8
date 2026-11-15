@@ -1,3 +1,4 @@
+import { admitReviewBackpressure, readReviewBackpressure, ReviewBackpressureHeldError, applyReviewBackpressure, isNewImplementation } from './review-backpressure';
 import { machineLoadBlocker, MachineLoadDeferredError, type MachineLoadOptions } from './machine-load';
 import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
@@ -63,7 +64,6 @@ const execFileAsync = promisify(execFile);
 // preflights (repo-preflight.ts) so the dispatch gate and the spawn gate can
 // never drift.
 const isGitRepoSync = isGitWorkTreeSync;
-
 
 function packetLaunchContext(packet: OrchestratorPacket) {
   return bindWorkerLaunchParent(packet.launchContext, {
@@ -325,6 +325,10 @@ export function getDispatchBlocker(
       return 'Already dispatched';
     }
   }
+  if (isNewImplementation(candidate)) {
+    const pressure = readReviewBackpressure();
+    if (pressure.reason) return pressure.reason;
+  }
   return machineLoadBlocker(loadOptions);
 }
 
@@ -392,6 +396,8 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
   }
   nextState = { ...nextState, packets: nextState.packets.map(packet => packet.blockedReason?.startsWith('Machine busy:') ? { ...packet, blockedReason: null } : packet) };
   nextState = fanOutComparisonPackets(nextState);
+  const pressure = admitReviewBackpressure();
+  nextState = { ...nextState, packets: applyReviewBackpressure(nextState.packets, pressure) };
   const recoveryContextByPacketId = new Map(
     nextState.packets.flatMap((packet) => {
       if (packet.status !== 'recovering') return [];
@@ -514,6 +520,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
         return false;
       }
       forgetRecoverySkip(packet.id);
+      if (isNewImplementation(packet) && pressure.reason) return false;
       const dispatchBlocker = getDispatchBlocker(packet, nextState.packets, options);
       if (dispatchBlocker !== null) {
         return false;
@@ -705,6 +712,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
             };
           }
 
+          if (result.reason instanceof ReviewBackpressureHeldError) return { ...candidate, blockedReason: result.reason.message, lastEventLabel: 'review_backpressure_held' };
           const reason = result.reason instanceof Error ? result.reason.message : 'Dispatch failed.';
           const storageReceipt = result.reason instanceof PacketStorageAdmissionError
             ? result.reason.receipt

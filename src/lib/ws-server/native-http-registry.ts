@@ -292,6 +292,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/lanes/[id]/heartbeat', 'POST', () => import('@/app/api/lanes/[id]/heartbeat/route')),
     route('/api/lanes/[id]/events', 'GET POST', () => import('@/app/api/lanes/[id]/events/route')),
     route('/api/lanes/[id]/scope', 'GET POST', () => import('@/app/api/lanes/[id]/scope/route')),
+    route('/api/lanes/[id]/policy', 'GET', () => import('@/app/api/lanes/[id]/policy/route')),
     route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/lane-events', 'GET', () => import('@/app/api/orchestrator/lane-events/route')),
     route('/api/orchestrator/steer-packet', 'POST', () => import('@/app/api/orchestrator/steer-packet/route')),

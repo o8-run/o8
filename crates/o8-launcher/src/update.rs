@@ -57,7 +57,7 @@ const LAST: &str = "update-last.json";
 /// Optional `update` block of the launcher configuration. Only `settings` is
 /// honoured in release builds; the rest exist for fixtures and are refused
 /// outside debug builds so a configuration file can never swap the key or feed.
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Default, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateConfig {
     /// Enrollment file (`update-ping.json`) shared with the classic shell.
