@@ -94,6 +94,11 @@ pub(crate) fn notice(target: &Target, document: &Document, label: String) -> Str
 }
 
 impl DiffSurface {
+    /// Embedded hosts focus the existing diff when its card is pressed.
+    pub(crate) fn focus(&self, window: &mut Window) {
+        self.focus.focus(window);
+    }
+
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
         if self.busy {
             return;

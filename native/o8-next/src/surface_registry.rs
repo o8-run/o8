@@ -90,6 +90,8 @@ pub(super) struct Registration {
     pub extension: Option<&'static dyn ShellExtension>,
     pub tab_label: &'static str,
     pub command_label: &'static str,
+    /// Runtime preference gates hide entry points and block restored content.
+    pub available: fn(&Shell) -> bool,
     pub command: Option<(usize, fn() -> Command)>,
     pub open: OpenSurface,
     pub create: fn(&mut Shell, Tab, String, &mut Window, &mut Context<Shell>) -> Option<Content>,
@@ -135,6 +137,7 @@ impl Registration {
             extension: None,
             tab_label,
             command_label,
+            available: |_| true,
             open,
             command: None,
             create: |_, _, _, _, _| None,

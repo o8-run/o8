@@ -111,6 +111,16 @@ Local changes:
   converts the coordinates it hands AppKit itself (native web view frames,
   `Window::resize`, the minimum window size).
 
+- `src/interactive.rs`, `src/platform/mac/events.rs`, `src/platform/mac/window.rs`:
+  trackpad pinch. The view answers `magnifyWithEvent:`, and an
+  `NSEventTypeMagnify` event arrives as a `ScrollWheelEvent` whose delta is the
+  new `ScrollDelta::Magnification`, a logarithmic zoom step (`100 * ln(1 + m)`,
+  so `exp(delta / 100)` is the zoom factor). Pinch steps coalesce by adding.
+  The event reaches every scroll handler under the pointer, as a wheel does;
+  `pixel_delta` reports zero for it, so lists, scroll views, the terminal and
+  the transcript diagram see no movement. Only the native canvas reads the
+  magnification and zooms.
+
 Other platforms keep the default no-op platform hooks. No GPL/AGPL application
 source or patches were copied. Regression policy tests and the native AppKit
 probe live in the parent crate.

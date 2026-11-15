@@ -197,9 +197,10 @@ fn canvas_mode(s: &mut Shell, on: bool, cx: &mut Context<Shell>) {
     });
     cx.spawn(async move |this, cx| {
         let result = task.await;
-        let _ = this.update(cx, |_, cx| {
+        let _ = this.update(cx, |s, cx| {
             match result {
                 Ok(()) => {
+                    crate::shell::canvas::apply_setting(s, on, cx);
                     toasts::show(
                         toasts::Kind::Success,
                         format!("Canvas mode {}.", if on { "on" } else { "off" }),

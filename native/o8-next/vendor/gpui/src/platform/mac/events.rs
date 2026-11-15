@@ -213,6 +213,19 @@ impl PlatformInput {
                         _ => None,
                     }
                 }
+                // Zoom surfaces consume pinch explicitly; ordinary scroll views
+                // see zero distance. Keep the conversion platform independent.
+                NSEventType::NSEventTypeMagnify => window_height.map(|height| {
+                    Self::ScrollWheel(ScrollWheelEvent {
+                        position: point(
+                            px(native_event.locationInWindow().x as f32),
+                            height - px(native_event.locationInWindow().y as f32),
+                        ),
+                        delta: ScrollDelta::from_magnification(native_event.magnification() as f32),
+                        modifiers: read_modifiers(native_event),
+                        touch_phase: TouchPhase::Moved,
+                    })
+                }),
                 NSEventType::NSScrollWheel => window_height.map(|window_height| {
                     let phase = match native_event.phase() {
                         NSEventPhase::NSEventPhaseMayBegin | NSEventPhase::NSEventPhaseBegan => {
