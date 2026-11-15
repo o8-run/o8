@@ -276,3 +276,117 @@ fn activity_packet_card_bounds_realistic_long_metadata(cx: &mut TestAppContext) 
         "summary should wrap and clamp to three lines: {summary:?}"
     );
 }
+
+fn wait_packet_map(view: &gpui::Entity<super::ActivityPane>, cx: &mut gpui::VisualTestContext) {
+    for _ in 0..200 {
+        cx.run_until_parked();
+        draw(cx);
+        if view.read_with(cx, |v, _| {
+            v.packet_evidence("activity-packet")["mapLoading"] == false
+        }) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("Packet map did not settle");
+}
+
+fn queue_packet_for_review(fixture: &Fixture) {
+    fixture.client.activity_request("PATCH", "/api/orchestrator/state", &[], Some(&serde_json::json!({"packetId":"activity-packet","updates":{"queueState":"queued","blockedReason":null}}))).unwrap();
+}
+
+#[gpui::test]
+fn activity_packet_change_map_precedes_files_and_explains_unavailable_source(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    queue_packet_for_review(&fixture);
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let view = activity_view(&shell, &mut visual);
+    activity_click(&mut visual, "activity-filter-packet");
+    activity_click(&mut visual, "activity-row-packet-local-activity-packet");
+    wait_packet(&view, &mut visual, "activity-packet");
+    wait_packet_map(&view, &mut visual);
+    activity_click(&mut visual, "activity-packet-tab-files");
+    let summary = visual
+        .debug_bounds("change-map-summary")
+        .expect("packet map summary");
+    let file = visual
+        .debug_bounds("activity-packet-file-0")
+        .expect("packet file");
+    assert!(summary.top() < file.top(), "map leads the file list");
+    assert!(visual.debug_bounds("change-map-empty").is_none());
+    activity_click(&mut visual, "change-map-summary");
+    assert!(
+        visual.debug_bounds("change-map-empty").is_some(),
+        "unmaterialized review must explain why its graph is unavailable"
+    );
+}
+
+#[gpui::test]
+fn activity_packet_change_map_selects_a_real_lane_file_and_diff(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--activity");
+    queue_packet_for_review(&fixture);
+    fixture
+        .client
+        .get::<Value>("/api/activity-fixture", &[("mode", "change-map")])
+        .unwrap();
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let view = activity_view(&shell, &mut visual);
+    activity_click(&mut visual, "activity-filter-packet");
+    activity_click(&mut visual, "activity-row-packet-local-activity-packet");
+    wait_packet(&view, &mut visual, "activity-packet");
+    wait_packet_map(&view, &mut visual);
+    activity_click(&mut visual, "change-map-summary");
+    assert!(
+        visual.debug_bounds("change-map-node-0").is_some(),
+        "materialized lane must show its graph"
+    );
+    activity_click(&mut visual, "change-map-node-0");
+    assert!(visual.debug_bounds("activity-packet-file-0").is_some());
+    assert!(
+        visual.debug_bounds("activity-packet-file-1").is_none(),
+        "node selection filters the file list"
+    );
+    assert!(
+        visual.debug_bounds("activity-map-diff").is_some(),
+        "selection opens that file's inline diff"
+    );
+    activity_click(&mut visual, "packet-activity-packet-clear");
+    assert!(visual.debug_bounds("activity-packet-file-1").is_some());
+}
+
+#[gpui::test]
+fn activity_packet_change_map_refuses_stale_revision_and_retry_refreshes_diff(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::start_mode(false, "--activity --change-map-stale");
+    queue_packet_for_review(&fixture);
+    fixture
+        .client
+        .get::<Value>("/api/activity-fixture", &[("mode", "change-map")])
+        .unwrap();
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let view = activity_view(&shell, &mut visual);
+    activity_click(&mut visual, "activity-filter-packet");
+    activity_click(&mut visual, "activity-row-packet-local-activity-packet");
+    wait_packet(&view, &mut visual, "activity-packet");
+    wait_packet_map(&view, &mut visual);
+    assert!(visual.debug_bounds("change-map-summary").is_some());
+    let evidence = view.read_with(&mut visual, |v, _| v.packet_evidence("activity-packet"));
+    assert_eq!(evidence["files"], 6);
+    assert!(evidence["mapStatus"].is_null(), "{evidence}");
+    assert!(
+        evidence["mapError"]
+            .as_str()
+            .is_some_and(|e| e.contains("Review changed")),
+        "{evidence}"
+    );
+    activity_click(&mut visual, "activity-packet-map-retry");
+    wait_packet(&view, &mut visual, "activity-packet");
+    wait_packet_map(&view, &mut visual);
+    assert_eq!(
+        view.read_with(&mut visual, |v, _| v.packet_evidence("activity-packet"))["mapStatus"],
+        "ready"
+    );
+}

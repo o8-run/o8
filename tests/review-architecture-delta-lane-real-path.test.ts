@@ -32,6 +32,7 @@ writeFileSync(path.join(repoPath, 'src/feature.ts'), "import { core } from '@/co
 git('add', '.');
 git('commit', '-qm', 'test: seed lane architecture');
 const baseCommit = git('rev-parse', 'HEAD');
+git('checkout', '-qb', 'architecture-lane');
 
 const { closeDb } = await import('@/lib/db');
 const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
@@ -39,13 +40,15 @@ const { createLane } = await import('@/lib/lane/registry');
 const { addRepo } = await import('@/lib/repos/registry');
 const { panelGateMiddleware } = await import('@/middleware');
 const { GET } = await import('@/app/api/review/architecture-delta/route');
+const laneDiff = await import('@/app/api/lanes/[id]/diff/route');
+const attention = await import('@/app/api/review/architecture-attention/route');
 
 await addRepo(repoPath);
 const packetId = 'packet-architecture-real-path';
 const lane = createLane({
   repoPath,
   worktreePath: repoPath,
-  branch: 'main',
+  branch: 'architecture-lane',
   baseBranch: 'main',
   baseCommit,
   runtime: 'codex',
@@ -58,14 +61,25 @@ writeFileSync(
   "import { nextCore } from '@/next-core';\nexport const feature = nextCore;\n",
 );
 
-function request(token: string) {
-  return new NextRequest(`http://o8.remote/api/review/architecture-delta?lane=${lane.id}`, {
+function request(token: string, expectedRevision?: string) {
+  const query = new URLSearchParams({ lane: lane.id });
+  if (expectedRevision !== undefined) query.set('expectedRevision', expectedRevision);
+  return new NextRequest(`http://127.0.0.1:3001/api/review/architecture-delta?${query}`, {
     headers: {
       authorization: `Bearer ${token}`,
-      host: 'o8.remote',
+      host: '127.0.0.1:3001',
       'x-o8-client-addr': '192.0.2.10',
     },
   });
+}
+
+async function displayedDiff() {
+  const response = await laneDiff.GET(new NextRequest(
+    `http://127.0.0.1:3001/api/lanes/${lane.id}/diff?maxBytes=524288`,
+    { headers: request(operatorBearer).headers },
+  ), { params: Promise.resolve({ id: lane.id }) });
+  expect(response.status).toBe(200);
+  return response.json();
 }
 
 afterAll(() => {
@@ -95,5 +109,31 @@ describe('architecture delta persisted lane entry point', () => {
     await expect(workerGate.json()).resolves.toMatchObject({
       error: 'Worker token is not authorized for this endpoint.',
     });
+  });
+
+  it('binds the map to the displayed lane revision across dirty edits and new commits', async () => {
+    const shown = await displayedDiff();
+    expect(shown.revision).toMatch(/^[a-f0-9]{64}$/);
+    const initial = await (await GET(request(operatorBearer, shown.revision))).json();
+    writeFileSync(path.join(repoPath, 'src/feature.ts'), "import { core } from '@/core';\nexport const feature = core + 1;\n");
+    expect((await GET(request(operatorBearer, shown.revision))).status).toBe(409);
+    const staleAttention = await attention.POST(new NextRequest(
+      `http://127.0.0.1:3001/api/review/architecture-attention?lane=${lane.id}&expectedRevision=${shown.revision}`,
+      { method: 'POST', headers: request(operatorBearer).headers,
+        body: JSON.stringify({ expectedAnalysisId: initial.analysisId, scopePaths: ['src/feature.ts'] }) },
+    ));
+    expect(staleAttention.status).toBe(409);
+    const dirty = await displayedDiff();
+    const bound = await (await GET(request(operatorBearer, dirty.revision))).json();
+    expect(bound).toMatchObject({ status: 'ready', reviewRevision: dirty.revision, summary: { changedModules: 1 } });
+    expect(bound.nodes.some((node: { path: string }) => node.path === 'src/next-core.ts')).toBe(false);
+    git('add', '.');
+    git('commit', '-qm', 'test: advance lane head');
+    expect((await GET(request(operatorBearer, dirty.revision))).status).toBe(409);
+    const committed = await displayedDiff();
+    expect(await (await GET(request(operatorBearer, committed.revision))).json()).toMatchObject({
+      status: 'ready', reviewRevision: committed.revision,
+    });
+    expect((await GET(request(operatorBearer, 'invalid'))).status).toBe(400);
   });
 });

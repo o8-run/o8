@@ -2,6 +2,7 @@ import { resolveGitBinary } from '@/lib/git/binary';
 import 'server-only';
 
 import { execFile } from '@/lib/providers/child-process';
+import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -77,6 +78,13 @@ export interface LaneReviewDiff {
   diffBase: PacketDiffBaseResolution;
   stat: string;
   full: string;
+}
+
+/** Binds optional review evidence to the exact diff, including tracked working changes. */
+export function laneReviewRevision(laneId: string, review: LaneReviewDiff): string {
+  return createHash('sha256').update(laneId).update('\0').update(review.headSha).update('\0')
+    .update(review.diffBase.mergeBase ?? review.diffBase.comparisonRef).update('\0')
+    .update(review.full).digest('hex');
 }
 
 function unavailable(snapshot: WorkspaceSnapshotRecord, reason: string): never {

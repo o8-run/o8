@@ -17,6 +17,9 @@ impl Drop for Server {
     }
 }
 fn fixture() -> (Server, Client) {
+    fixture_mode("--review-drop-first")
+}
+fn fixture_mode(mode: &str) -> (Server, Client) {
     let mut child = Command::new("node")
         .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .args([
@@ -26,7 +29,7 @@ fn fixture() -> (Server, Client) {
             "tsx",
             "scripts/next/dev-server.ts",
             "--review",
-            "--review-drop-first",
+            mode,
             "--owned-stdio",
         ])
         .env("O8_NEXT_API_TOKEN", "fixture-next-review-operator")
@@ -460,4 +463,335 @@ fn a_bare_blank_line_never_fills_a_short_packet_hunk() {
     ] {
         assert!(crate::diff::parse(patch).unsupported, "{patch}");
     }
+}
+
+#[gpui::test]
+fn change_map_leads_packet_diff(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let (_view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    visual.run_until_parked();
+    assert!(
+        visual.debug_bounds("change-map-summary").is_some(),
+        "packet review must lead with a collapsed change map"
+    );
+}
+
+fn change_map_fixture() -> crate::change_map::ChangeMap {
+    let v: Value = serde_json::from_str(include_str!("../fixtures/change-map.json")).unwrap();
+    crate::change_map::ChangeMap {
+        delta: v["delta"].clone(),
+        attention: v["attention"].clone(),
+        ..Default::default()
+    }
+}
+fn map_click(cx: &mut gpui::VisualTestContext, id: &'static str) {
+    cx.update(|w, cx| {
+        w.refresh();
+        w.draw(cx).clear();
+    });
+    let bounds = cx
+        .debug_bounds(id)
+        .unwrap_or_else(|| panic!("missing {id}"));
+    cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn change_map_fixture_graph_summary_filters_real_diff_and_attention(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    visual.run_until_parked();
+    view.update(visual, |s, cx| {
+        s.map = change_map_fixture();
+        cx.notify();
+    });
+    assert_eq!(
+        view.read_with(visual, |s, _| s.map.summary()),
+        "3 modules touched, 1 new dependency, 1 removed dependency, 1 area needs attention"
+    );
+    assert!(
+        visual.debug_bounds("change-map-node-0").is_none(),
+        "map starts collapsed"
+    );
+    map_click(visual, "change-map-summary");
+    for i in 0..3 {
+        assert!(
+            visual
+                .debug_bounds(Box::leak(format!("change-map-node-{i}").into_boxed_str()))
+                .is_some()
+        );
+    }
+    for edge in ["diff-map-edge-0", "diff-map-edge-1"] {
+        assert!(
+            visual.debug_bounds(edge).is_some(),
+            "changed dependency must be inspectable: {edge}"
+        );
+    }
+    let graph = visual.debug_bounds("change-map-graph").unwrap();
+    assert!(graph.size.width > gpui::px(0.) && graph.size.height > gpui::px(0.));
+    map_click(visual, "change-map-node-0");
+    visual.simulate_keystrokes("alt-down");
+    view.read_with(visual, |s, _| {
+        assert_eq!(
+            s.shown()
+                .iter()
+                .map(|i| s.document.files[*i].path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["added.ts"]
+        );
+        assert_eq!(s.document.files[s.selected].path, "added.ts");
+        assert!(s.row_count() > 0);
+    });
+    map_click(visual, "diff-map-attention-medium.ts");
+    view.read_with(visual, |s, _| {
+        assert_eq!(s.document.files[s.selected].path, "medium.ts");
+        assert_eq!(s.shown().len(), 1);
+    });
+    map_click(visual, "diff-map-clear");
+    assert!(view.read_with(visual, |s, _| s.shown().len() > 1));
+    map_click(visual, "change-map-summary");
+    for (w, h) in [(900., 700.), (1680., 1050.)] {
+        visual.simulate_resize(gpui::size(gpui::px(w), gpui::px(h)));
+        visual.update(|w, cx| {
+            w.refresh();
+            w.draw(cx).clear();
+        });
+        let b = visual.debug_bounds("change-map-node-0").unwrap();
+        assert!(b.right() <= gpui::px(w));
+    }
+}
+
+#[gpui::test]
+fn change_map_empty_has_an_explanation_and_no_nodes(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    visual.run_until_parked();
+    view.update(visual, |s, cx| {
+        s.map = crate::change_map::ChangeMap { delta: json!({"ok":true,"status":"ready","nodes":[],"edges":[],"summary":{"changedModules":0,"addedEdges":0,"removedEdges":0}}), ..Default::default() };
+        cx.notify();
+    });
+    map_click(visual, "change-map-summary");
+    assert!(visual.debug_bounds("change-map-empty").is_some());
+    assert!(visual.debug_bounds("change-map-node-0").is_none());
+}
+
+#[gpui::test]
+fn change_map_refuses_a_lane_revision_newer_than_the_displayed_diff(cx: &mut TestAppContext) {
+    let (_server, client) = fixture_mode("--change-map-stale");
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    for _ in 0..200 {
+        visual.run_until_parked();
+        if view.read_with(visual, |s, _| {
+            s.ready && (!s.map.delta.is_null() || s.map.error.is_some())
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(visual.debug_bounds("change-map-summary").is_some());
+    view.read_with(visual, |s, _| {
+        assert!(
+            s.map.delta.is_null(),
+            "a newer lane map must not annotate the old diff"
+        );
+        assert!(
+            s.map
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("Review changed")),
+            "{:?}",
+            s.map.error
+        );
+        assert!(!s.document.files.is_empty());
+    });
+}
+
+#[gpui::test]
+fn change_map_zoom_keeps_the_clear_target_visible_and_clickable(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    for _ in 0..1000 {
+        visual.run_until_parked();
+        if view.read_with(visual, |s, _| {
+            s.ready && (!s.map.delta.is_null() || s.map.error.is_some())
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(view.read_with(visual, |s, _| s.ready));
+    for zoom in [0.7, 1., 2.] {
+        view.update(visual, |s, cx| {
+            let mut map = change_map_fixture();
+            map.delta["nodes"] = json!((0..24).map(|index| json!({
+                "path": format!("module-{index}.ts"), "state": "changed", "focusPath": "added.ts"
+            })).collect::<Vec<_>>());
+            map.delta["edges"] = json!([]);
+            map.delta["summary"] = json!({"changedModules":24,"addedEdges":0,"removedEdges":0});
+            map.attention["items"] = json!([]);
+            map.expanded = true;
+            map.selected = vec!["added.ts".into()];
+            s.map = map;
+            cx.notify();
+        });
+        visual.simulate_resize(gpui::size(gpui::px(900.), gpui::px(700.)));
+        for _ in 0..2 {
+            visual.update(|w, cx| {
+                w.set_zoom(zoom, cx);
+                w.refresh();
+                w.draw(cx).clear();
+            });
+        }
+        let viewport = visual.update(|w, _| w.viewport_size());
+        let clear = visual
+            .debug_bounds("diff-map-clear")
+            .expect("clear map filter");
+        assert!(
+            clear.top() >= gpui::px(0.) && clear.bottom() <= viewport.height,
+            "clear must remain inside the zoomed review: zoom={zoom}, clear={clear:?}, viewport={viewport:?}"
+        );
+        visual.simulate_click(clear.center().map(|v| v * zoom), gpui::Modifiers::default());
+        visual.run_until_parked();
+        assert!(view.read_with(visual, |s, _| s.map.selected.is_empty()));
+    }
+}
+
+fn change_map_long_label_bounds(cx: &mut TestAppContext, zoom: f32) {
+    let (_server, client) = fixture();
+    let (view, visual) = cx.add_window_view(|w, cx| {
+        DiffSurface::new(client, Target::Packet("next-review-reject".into()), w, cx)
+    });
+    for _ in 0..1000 {
+        visual.run_until_parked();
+        if view.read_with(visual, |s, _| {
+            s.ready && (!s.map.delta.is_null() || s.map.error.is_some())
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(view.read_with(visual, |s, _| s.ready));
+    view.update(visual, |s, cx| {
+        let mut map = change_map_fixture();
+        let long_path = format!(
+            "src/{}/very long module name with many words.ts",
+            "long directory name ".repeat(30)
+        );
+        map.delta["nodes"] = json!([
+            {"path":long_path, "state":"changed", "focusPath":"added.ts"},
+            {"path":"second.ts", "state":"changed", "focusPath":"medium.ts"}
+        ]);
+        map.delta["edges"] = json!([]);
+        map.attention["items"] = json!([]);
+        map.expanded = true;
+        s.map = map;
+        cx.notify();
+    });
+    visual.simulate_resize(gpui::size(gpui::px(440.), gpui::px(900.)));
+    for _ in 0..2 {
+        visual.update(|w, cx| {
+            w.set_zoom(zoom, cx);
+            w.refresh();
+            w.draw(cx).clear();
+        });
+    }
+    let first = visual.debug_bounds("change-map-node-0").expect("long node");
+    let next = visual.debug_bounds("change-map-node-1").expect("next node");
+    let row = visual.debug_bounds("change-map-node-row-0").unwrap();
+    let (viewport, pixel) = visual.update(|w, _| {
+        (w.viewport_size(), gpui::px(1. / w.scale_factor()))
+    });
+    assert_change_map_bounds(zoom, pixel, first, next, row, viewport);
+    let map = view.read_with(visual, |s, _| s.map.clone());
+    let (_, tracked) = cx.add_window_view(|_, _| ChangeMapTrackedLabels(map));
+    tracked.simulate_resize(gpui::size(gpui::px(440.), gpui::px(900.)));
+    for _ in 0..2 {
+        tracked.update(|w, cx| {
+            w.set_zoom(zoom, cx);
+            w.refresh();
+            w.draw(cx).clear();
+        });
+    }
+    let first = tracked.debug_bounds("change-map-node-0").unwrap();
+    let next = tracked.debug_bounds("change-map-node-1").unwrap();
+    let row = tracked.debug_bounds("change-map-node-row-0").unwrap();
+    let (viewport, pixel) = tracked.update(|w, _| {
+        (w.viewport_size(), gpui::px(1. / w.scale_factor()))
+    });
+    assert_change_map_bounds(zoom, pixel, first, next, row, viewport);
+}
+fn assert_change_map_bounds(
+    zoom: f32,
+    pixel: gpui::Pixels,
+    first: gpui::Bounds<gpui::Pixels>,
+    next: gpui::Bounds<gpui::Pixels>,
+    row: gpui::Bounds<gpui::Pixels>,
+    viewport: gpui::Size<gpui::Pixels>,
+) {
+    // Taffy snaps absolute endpoints; an origin shift can change the rounded height.
+    assert!(
+        first.size.height >= gpui::px(32.) - pixel && first.size.height <= gpui::px(32.) + pixel,
+        "node height must be within one device pixel of 32px: zoom={zoom}, first={first:?}, pixel={pixel:?}"
+    );
+    assert!(
+        row.size.height >= gpui::px(36.) - pixel && row.size.height <= gpui::px(36.) + pixel,
+        "row must remain 36px within device-pixel snapping: zoom={zoom}, row={row:?}"
+    );
+    assert!(
+        first.top() >= row.top()
+            && first.bottom() <= row.bottom()
+            && first.left() >= row.left()
+            && first.right() <= row.right(),
+        "node must stay inside its row: zoom={zoom}, first={first:?}, row={row:?}"
+    );
+    assert!(
+        first.bottom() <= next.top(),
+        "nodes overlap: zoom={zoom}, first={first:?}, next={next:?}"
+    );
+    assert!(
+        first.left() >= gpui::px(0.)
+            && first.right() <= viewport.width
+            && first.top() >= gpui::px(0.)
+            && first.bottom() <= viewport.height,
+        "node must fit the pane: zoom={zoom}, first={first:?}, viewport={viewport:?}"
+    );
+}
+struct ChangeMapTrackedLabels(crate::change_map::ChangeMap);
+impl gpui::Render for ChangeMapTrackedLabels {
+    fn render(
+        &mut self,
+        _: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use gpui::prelude::*;
+        let mut pane =
+            gpui::div()
+                .size_full()
+                .min_w_0()
+                .child(self.0.view("tracked-map", cx, |_, _, _| {}));
+        // Exercise inherited glyph spacing: ellipsis measurement alone does not
+        // guarantee the shaped label stays on one line.
+        pane.text_style()
+            .get_or_insert_with(Default::default)
+            .letter_spacing = Some(gpui::px(0.4));
+        pane
+    }
+}
+#[gpui::test]
+fn change_map_long_labels_at_zoom_140(cx: &mut TestAppContext) {
+    change_map_long_label_bounds(cx, 1.4);
+}
+#[gpui::test]
+fn change_map_long_labels_at_zoom_200(cx: &mut TestAppContext) {
+    change_map_long_label_bounds(cx, 2.);
 }

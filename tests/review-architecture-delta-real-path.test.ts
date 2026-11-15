@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server';
 
 const architectureDeltaRoute = await import('@/app/api/review/architecture-delta/route');
 const { buildArchitectureDelta } = await import('@/lib/review/architecture-delta');
+const { collectWorktreeDiffSnapshot } = await import('@/lib/worktree/diff-transport');
 const fixturePaths = new Set<string>();
 
 afterEach(() => {
@@ -58,6 +59,22 @@ function requestFor(repoPath: string) {
 }
 
 describe('review architecture delta route', () => {
+  it('rejects a working map whose displayed diff revision changed', async () => {
+    const repoPath = createRepo();
+    write(repoPath, 'src/feature.ts', 'export const feature = 2;\n');
+    const shown = await collectWorktreeDiffSnapshot(repoPath, null);
+    const pinned = () => {
+      const request = requestFor(repoPath);
+      request.nextUrl.searchParams.set('expectedRevision', shown.revision);
+      return request;
+    };
+    expect(await (await architectureDeltaRoute.GET(pinned())).json()).toMatchObject({
+      status: 'ready', reviewRevision: shown.revision,
+    });
+    write(repoPath, 'src/feature.ts', 'export const feature = 3;\n');
+    expect((await architectureDeltaRoute.GET(pinned())).status).toBe(409);
+  });
+
   it('compares the real working tree with HEAD and bounds the result to changed modules and neighbors', async () => {
     const repoPath = createRepo();
     write(repoPath, 'src/feature.ts', "import { nextCore } from '@/next-core';\nexport const feature = nextCore;\n");
@@ -267,4 +284,29 @@ describe('review architecture delta route', () => {
       expect.objectContaining({ from: 'src/renamed-feature.ts', to: 'src/core.ts', state: 'added' }),
     ]));
   });
+});
+
+it('maps immutable PR commits independently of the checkout and local edits (#5880)', async () => {
+  const repoPath = createRepo();
+  const base = git(repoPath, ['rev-parse', 'HEAD']);
+  write(repoPath, 'src/core.ts', 'export const core = 2;\n');
+  git(repoPath, ['add', '.']);
+  git(repoPath, ['commit', '-m', 'test: PR head']);
+  const head = git(repoPath, ['rev-parse', 'HEAD']);
+  const request = (expectedHead = head, expectedBase = base) => new NextRequest(
+    `http://localhost:3001/api/review/architecture-delta?${new URLSearchParams({ workspace: repoPath, base: expectedBase, expectedHead })}`,
+    { headers: { host: 'localhost:3001' } },
+  );
+  const response = await architectureDeltaRoute.GET(request());
+  expect(response.status).toBe(200);
+  const original = await response.json();
+  expect(original).toMatchObject({ status: 'ready', summary: { changedModules: 1 },
+    nodes: expect.arrayContaining([expect.objectContaining({ path: 'src/core.ts', state: 'changed' })]) });
+  expect(await (await architectureDeltaRoute.GET(request(base))).json()).toMatchObject({ status: 'unsupported', summary: { changedModules: 0 } });
+  expect(await (await architectureDeltaRoute.GET(request('f'.repeat(40)))).json()).toMatchObject({ status: 'unavailable', nodes: [] });
+  write(repoPath, 'src/unrelated.ts', 'export const unrelated = false;\n');
+  git(repoPath, ['checkout', '--detach', base]);
+  expect(await (await architectureDeltaRoute.GET(request())).json()).toMatchObject({ status: 'ready', analysisId: original.analysisId, summary: { changedModules: 1 } });
+  expect((await architectureDeltaRoute.GET(request('bad'))).status).toBe(400);
+  expect((await architectureDeltaRoute.GET(request('', ''))).status).toBe(400);
 });

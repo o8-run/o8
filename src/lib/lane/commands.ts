@@ -49,6 +49,7 @@ import { commitLaneWork } from '@/lib/supervisor/completion-verification';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { prFirstMergeRefusal } from '@/lib/lane/pr-first-delivery';
+import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
 import { isPacketMergeHeld, MERGE_HOLD_POLICY_RULE_ID } from '@/lib/lane/merge-hold';
 import { assertSessionMergeAllowed } from '@/lib/orchestrator/session-merge-restriction';
 import { RuntimeSelectionError, runtimeSelectionRefusal, validateRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
@@ -777,6 +778,15 @@ async function dispatchUnlocked(
       }
       const approvedHeadRefusal = command.authorizingApprovalId ? await checkLaneMergeHead(lane.id, command.expectedHeadSha) : null;
       if (approvedHeadRefusal) return { ok: false, laneId: lane.id, reason: approvedHeadRefusal.code, note: approvedHeadRefusal.message };
+      // A stale expected HEAD is refused as a mismatch before any policy answer,
+      // so the caller learns its view is out of date rather than a policy result.
+      if (command.expectedHeadSha && lane.worktreePath && (lane.runtime as string) !== 'remote-customer') {
+        const headLock = await checkExpectedHeadSha(lane.worktreePath, command.expectedHeadSha, lane.repoPath).catch(() => null);
+        if (headLock && !headLock.ok) {
+          return { ok: false, laneId: lane.id, note: formatHeadShaMismatchNote(headLock),
+            expectedHeadSha: headLock.expectedHeadSha, currentHeadSha: headLock.currentHeadSha };
+        }
+      }
       const prOnlyNote = await prFirstMergeRefusal(lane);
       if (prOnlyNote) return { ok: false, laneId: command.laneId, note: prOnlyNote, reason: 'pr_only' };
       const spokenEvidence = validateSpokenReviewEvidenceBundle(command);

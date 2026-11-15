@@ -33,6 +33,7 @@ impl DiffSurface {
             _request_changes_observer: observer,
             discard_allowed: true,
             client,
+            map: Default::default(),
             target,
             document: Rc::new(Document::default()),
             selected: 0,

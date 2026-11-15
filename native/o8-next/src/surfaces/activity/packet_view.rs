@@ -264,6 +264,9 @@ impl ActivityPane {
                 }),
             );
         }
+        if status == "awaiting_review" || !p["review"].is_null() {
+            body = body.child(self.packet_map(row, &read, cx));
+        }
         body = body.child(tabs);
         let content = match tab {
             "context" => self.packet_context(row, &read, cx),
@@ -469,13 +472,21 @@ impl ActivityPane {
             .as_array()
             .filter(|v| !v.is_empty());
         let predicted = row.data["predictedFiles"].as_array();
-        let (title, files) = if let Some(paths) = allowed {
+        let (title, mut files) = if !read.map.selected.is_empty() && !read.files.is_empty() {
+            ("Changed files", read.files.clone())
+        } else if let Some(paths) = allowed {
             ("Allowed files", paths.clone())
         } else if !read.files.is_empty() {
             ("Changed files", read.files.clone())
         } else {
             ("Predicted files", predicted.cloned().unwrap_or_default())
         };
+        files.retain(|f| {
+            read.map.keeps(
+                f.as_str()
+                    .unwrap_or_else(|| f["path"].as_str().unwrap_or("")),
+            )
+        });
         let all = self.packet.all_files.contains(&row.id);
         let mut view = div()
             .flex()

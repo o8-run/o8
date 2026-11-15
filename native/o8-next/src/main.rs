@@ -7,6 +7,7 @@ mod child_command;
 mod external_open;
 mod brain;
 mod browser_panel;
+mod change_map;
 #[path = "shell_features/connection/client.rs"]
 mod client;
 mod clock;

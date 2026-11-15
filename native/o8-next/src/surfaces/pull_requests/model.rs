@@ -67,6 +67,7 @@ pub struct PullRequests {
     pub page: Value,
     pub rows: Vec<Value>,
     pub detail: Value,
+    pub(super) map: crate::change_map::ChangeMap,
     pub selected: Option<u64>,
     pub state: String,
     pub sort: String,
@@ -158,6 +159,7 @@ impl PullRequests {
             page: Value::Null,
             rows: vec![],
             detail: Value::Null,
+            map: Default::default(),
             selected: None,
             state: "open".into(),
             sort: "updated".into(),
@@ -247,7 +249,11 @@ impl PullRequests {
             self.state.clone()
         };
         // Merge readiness is ranked here from the updated-order page.
-        let sort = if self.sort == "ready" { "updated".to_string() } else { self.sort.clone() };
+        let sort = if self.sort == "ready" {
+            "updated".to_string()
+        } else {
+            self.sort.clone()
+        };
         let task = cx.background_executor().spawn(async move {
             let result = client.get::<Value>(
                 "/api/panel/prs",
@@ -341,7 +347,10 @@ impl PullRequests {
             }
             self.selected = (!listed || string(&self.page, "repo").eq_ignore_ascii_case(repo))
                 .then_some(number);
-            cx.emit(OpenPr { repo: repo.to_owned(), number });
+            cx.emit(OpenPr {
+                repo: repo.to_owned(),
+                number,
+            });
             self.changed(cx);
         } else if self.page.is_null() && self.loading {
             self.pending = Some((repo.to_owned(), number));
@@ -394,6 +403,7 @@ impl PullRequests {
         self.selected = Some(number);
         self.confirmation = None;
         self.detail_loading = true;
+        self.map = Default::default();
         self.detail_error.clear();
         self.preview = Value::Null;
         self.packet = None;
@@ -421,6 +431,29 @@ impl PullRequests {
                             && v["pr"]["resolvedRepo"] == s.page["repo"] =>
                     {
                         s.detail = v["pr"].clone();
+                        let paths = array(&s.detail, "files")
+                            .iter()
+                            .filter_map(|f| f["path"].as_str().map(str::to_owned))
+                            .collect();
+                        let query = vec![
+                            ("workspace".into(), s.workspace.clone()),
+                            ("expectedHead".into(), string(&s.detail, "headSha").into()),
+                            ("base".into(), string(&s.detail, "baseSha").into()),
+                        ];
+                        crate::change_map::ChangeMap::load(
+                            s.client.clone(),
+                            query,
+                            paths,
+                            cx,
+                            move |s, mut map, cx| {
+                                if s.detail_epoch != epoch || s.selected != Some(number) {
+                                    return;
+                                }
+                                map.expanded = s.map.expanded;
+                                s.map = map;
+                                s.changed(cx);
+                            },
+                        );
                         if s.review_head.is_empty() {
                             s.review_head = string(&s.detail, "headSha").into();
                         }
@@ -430,6 +463,10 @@ impl PullRequests {
                             "Pull request identity changed. Refresh before continuing.".into()
                     }
                     Err(e) => s.detail_error = e,
+                }
+                if !s.detail_error.is_empty() {
+                    s.map.error =
+                        Some("Change map unavailable until the pull request is refreshed.".into());
                 }
                 match governance {
                     Ok((packet, preview)) => {
@@ -449,7 +486,11 @@ impl PullRequests {
         let Some(number) = self.selected else {
             return;
         };
-        let page = if more { self.timeline_next.unwrap_or(1) } else { 1 };
+        let page = if more {
+            self.timeline_next.unwrap_or(1)
+        } else {
+            1
+        };
         self.timeline_epoch += 1;
         let epoch = self.timeline_epoch;
         self.timeline_loading = true;
