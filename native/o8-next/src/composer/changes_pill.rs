@@ -160,6 +160,7 @@ impl Surface {
             .hover(|d| d.bg(theme().hover))
             .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Jump to latest".into())).into())
             .on_click(cx.listener(|this, _, _, cx| {
+                this.navigator.borrow_mut().resume();
                 let last = this.list.item_count().saturating_sub(1);
                 this.list.scroll_to_reveal_item(last);
                 this.pinned = true;
