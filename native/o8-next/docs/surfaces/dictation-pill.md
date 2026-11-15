@@ -92,7 +92,42 @@ queues one revert per chip until the web shows its next status. Both are
 allow-listed in the API route and dropped, never replayed, on any mismatch,
 fallback, quiet mode or expiry, like the batch 2 clicks.
 
-Releases now name the session and kind (dictation, speaking, working or voice)
+Ask (#6145). The Ask conversation panel is drawn natively too
+(native_pill_ask.rs), as state `ask`. The frame carries `ask`: `rev` (a number
+that changes whenever the web thread changes), `listening` (the compact 248×40
+capsule shown while the first question is heard), `turns` (the newest turns
+that fit a 4.5 KB budget, each with its thread `index`, `role`, `text` and the
+web's sources line), `pending` (an agent dictation that is a pending You turn
+inside the open panel: `phase` and the live words), `working` (`tool` and
+`startedAt` while the agent runs) and `copied` (the answer whose copy the web
+just confirmed). Ask is interactive, so it keeps the 100 ms keep-alive and the
+750 ms lease; it is not a static frame. The native window grows from 120 to
+452 points for the 420×380 panel and the chip and glint rows below it.
+
+Precedence is the shared order: Ask wins over everything except a real
+dictation, a confirmation and a drop, and an agent dictation that is a pending
+turn inside the open panel is drawn inside the native panel (with its level
+bars), as on the web. A plain dictation over an open Ask hides Ask on both
+surfaces, as the web dock does with the flag off (it was drawn beside native
+dictation by the retained web dock before). While native draws Ask the web
+dock draws no Ask panel, its window is neither shown nor expanded (the Ask
+flow's own resize requests are routed through the native extent owner), and on
+fallback the web panel returns expanded.
+
+Ask clicks are intents named `ask-close`, `ask-copy` (with the answer's thread
+index as `value`) and `ask-active` (pointer movement over the panel, at most
+one per reply), each carrying the thread `rev` as `ref`. The web runs them only
+for the Ask session on screen and only when `ref` is the thread it still shows;
+a copy also needs that index to be an answer in the frame. Close runs the
+page's own close (which still refuses while a turn is pending or the agent is
+working); copy runs the panel's own clipboard write and shows Copied only after
+it succeeds; activity re-arms the 45 s idle collapse as the web wrapper's
+pointer movement does. A click on the panel body while the pending turn is
+recording finishes that dictation through the existing finish channel, as the
+web panel's body click does. The API route forwards an Ask intent only with a
+numeric `ref`, and a copy only with an integer index.
+
+Releases now name the session and kind (dictation, speaking, working, voice or ask)
 they retire, so a late fallback release can no longer hide a newer session that
 is already drawn, including another kind with the same session number (closes
 that #6145 item).
@@ -150,7 +185,7 @@ port order; source references name the current implementation.
 | Dictation requesting/listening/levels, transcribing, polishing, done, error | src/app/dictation-pill/page.tsx:196; native/o8-next/src/native_pill.rs:1 | System STT events and existing session fence | Presentation API only; capture/finish stay with their existing owners | native (batch 1) |
 | Edit/revert chip | src/app/dictation-pill/EditRevertChip.tsx:19; native/o8-next/src/native_pill_extras.rs:1 | edit-applied and edit-revert-settled; timed dismissal from `until` | agent_edit_revert, run by the web dock from a reported click | native (batch 3) |
 | Action and plan confirmation cards | src/components/desktop/dictation/useAgentConfirmations.ts:47; src/components/desktop/dictation/DockNotchSurface.tsx:843 | agent-confirm and agent-confirm-dismissed, exact confirmation/task identity | agent_confirm_exact | still web |
-| Ask conversation, pending user turn, answers, errors and sources | src/app/dictation-pill/page.tsx:530; src/components/desktop/dictation/DockAskPanel.tsx:214 | ask-open/answer/error and agent-task-event; pending agent dictation while panel is open | dock_set_expanded; agent_interrupt via shared stop control; clipboard copy and source links use browser APIs | still web |
+| Ask conversation, pending user turn, answers, errors and sources | src/app/dictation-pill/page.tsx:530; src/components/desktop/dictation/DockAskPanel.tsx:214; native/o8-next/src/native_pill_ask.rs:1 | ask-open/answer/error and agent-task-event; pending agent dictation while panel is open; thread, timers and idle collapse stay in the web dock | close, copy (browser clipboard) and idle re-arm run by the web dock from reported `ask-*` intents | native (#6145) |
 | Speech playback, pause, stop and speed | src/app/dictation-pill/page.tsx:399; native/o8-next/src/native_pill_capsules.rs:1 | tts-state playing/paused | tts_toggle_pause, tts_stop, tts_set_speed, run by the web dock from a reported click | native (batch 2) |
 | Live voice presence and stop | src/app/dictation-pill/page.tsx:427; native/o8-next/src/native_pill_capsules.rs:1 | realtime-status connecting/live/off; safety timer stays in the web dock | Emits o8:realtime-toggle (dock-tap) from a reported click; no direct shell command | native (batch 2) |
 | Agent working/synthesizing capsule, current tool and elapsed timer | src/app/dictation-pill/page.tsx:700; native/o8-next/src/native_pill_capsules.rs:1 | running task set and tool_call/done/failed task events stay in the web dock | agent_interrupt, run by the web dock from a reported click | native (batch 2) |
@@ -178,10 +213,10 @@ src/components/desktop/dictation/dockPrecedence.ts, is:
 9. Live voice (connecting or live)
 10. Idle sliver
 
-The native frame follows the same order: dictation when it is active,
-otherwise the winning capsule (5, 6, 8 or 9). When a still-web surface (2, 3, 4
-or 7) wins, the frame is idle with an immediate release and the web draws
-that surface. When nothing wins (10) and workers exist, the frame is the
+The native frame follows the same order: the Ask panel when Ask wins
+(including a pending turn inside it), dictation when it is active, otherwise
+the winning capsule (5, 6, 8 or 9). When a still-web surface (2, 4 or 7) wins,
+the frame is idle with an immediate release and the web draws that surface. When nothing wins (10) and workers exist, the frame is the
 resting fleet orbit; with no workers but a chip or glint, it is `extras`. While the native panel draws the winner, the web dock does not
 draw speech, working or live voice under it; with a native capsule the web
 notch surface is not drawn at all (the edit/revert chip and glints remain,
@@ -197,11 +232,12 @@ belong under:
 | Dock state | Drawn by | Chip and glint |
 | --- | --- | --- |
 | Dictation, nothing still-web beside it | native | native, below the dictation capsule |
-| Dictation with Ask, a confirmation, a drop or staged files beside it (web, below the native capsule) | native and web | web, below the web surface |
+| Dictation with a confirmation, a drop or staged files beside it (web, below the native capsule) | native and web | web, below the web surface |
 | Speaking, working, live voice | native | native, below the capsule |
+| Ask panel (or its listening capsule) | native | native, below the panel |
 | Fleet orbit or capsule | native | native, below it |
 | Nothing (10) | native `extras` | native, alone at the capsule position |
-| Confirmation, Ask, drop, staged files (handoff) | web | web, as today |
+| Confirmation, drop, staged files (handoff) | web | web, as today |
 | Flag off, fallback, quiet mode | web | web, as today |
 
 While native, the web never draws the fleet orbit or capsule (native draws
@@ -241,6 +277,8 @@ The idle sliver alone does not make it visible under native ownership.
 | Fleet capsule (expanded) | 320×44, ring or dot, DockNotchSurface wording, repos dimmed; tap re-arms the 5 s timer | No hover tooltip; static ring |
 | Edit/revert chip | 248×24 below the capsule (alone at the capsule position otherwise), Rewrote in App — Revert, Reverting…, Reverted, Original copied | Fixed width with truncation (the web chip sizes to its text); no enter slide |
 | Glint | Below the chip, uppercase, tone colour from theme tokens, 0.5 s fade from `fadeAt`, gone at `until` | Theme surface instead of the dark gradient; no enter slide |
+| Ask listening | 248×40 capsule with the bars at rest | Static bars instead of the ambient gradient waveform |
+| Ask panel | 420×380, radius 26; header (mark, Symon, close); scrolling thread of You/Symon turns, paragraphs and bullet/numbered items, sources line, Copy/Copied per answer; pending You turn (words or Listening…, level bars, Polishing…); pending Symon turn (ring, Working…/Synthesizing…, timer); follows the newest turn | Theme surface instead of the frosted panel; accent dot instead of the gradient mark; inline `code` and **bold** drawn as plain text; Copy always visible (the web shows it on hover); only the newest turns within 4.5 KB are scrollable; Escape does not close it (the panel never takes keyboard focus) |
 
 Raster fixtures use the production Pill renderer under an isolated Linux Xvfb
 display, matching the repository's parity capture approach. They establish
@@ -287,7 +325,7 @@ Physical focus retention is reserved for the lead's live check.
    a fresh dictation to check the error state. Restore that permission afterward.
    Transcribing and polishing can be brief for short speech; the attached
    deterministic captures cover every distinct state.
-6. Trigger an existing Ask or edit/revert flow to confirm its retained web
+6. Trigger an existing edit/revert flow to confirm its retained web
    controls appear without a second dictation waveform. Check each display
    arrangement, including changing the primary screen and a notched screen.
 7. Speech playback: ask Symon something that is answered aloud. The native
@@ -299,7 +337,7 @@ Physical focus retention is reserved for the lead's live check.
    the front application throughout.
 8. Hold Fn while speech plays: the native panel switches to dictation and back
    to the speaking capsule after the paste. Open an Ask answer while speech
-   plays: the native capsule disappears at once and the web Ask panel shows.
+   plays: the native panel switches to the Ask panel and no web panel shows.
 9. Live voice: double-tap right Command. Connecting… shows natively and a click
    does nothing; once Voice live shows, one click ends the session through the
    main window and the capsule retires.
@@ -325,7 +363,21 @@ Physical focus retention is reserved for the lead's live check.
     during speech and dictation to see it below the capsule.
 15. Quit the native window process with each of steps 12 to 14 showing: the web
     orbit, chip or glint returns within about half a second.
-16. Set the flag false and repeat a dock-routed session and steps 7 to 14 to
+16. Ask: hold Option and ask a question. The native compact capsule shows while
+    it listens, then the 420×380 panel with You and Symon turns, and no web
+    panel or second window appears. Move the pointer over the panel for more
+    than 45 s: it stays open; leave it alone for 45 s: it closes. Click Copy on
+    an answer: the answer is on the clipboard and the button reads Copied for
+    about 1.4 s. Click the close button: the panel retires. Keyboard focus stays
+    in the front application throughout.
+17. With the panel open, hold Option and speak a follow-up: the pending You
+    turn shows the words and level bars inside the native panel; click the
+    panel to finish, or release. Polishing… shows, then the working row with a
+    timer, then the answer, and the thread scrolls to it. Scroll the thread
+    with the trackpad while the panel is not focused.
+18. Quit the native window process with the panel open: the web panel returns
+    expanded within about half a second and its controls work.
+19. Set the flag false and repeat a dock-routed session and steps 7 to 17 to
     verify web behavior.
 
 Gradient/shimmer, the squiggle loader and the spring geometry morph are follow-up

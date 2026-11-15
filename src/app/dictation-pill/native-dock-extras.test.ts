@@ -153,6 +153,8 @@ describe('native glints, chip and fleet through the real dock hook', () => {
     ['fleet orbit', fleet(1), 'workers'],
     ['fleet capsule', { ...fleet(1), showWorkers: true }, 'workers'],
     ['nothing else', {}, 'extras'],
+    ['Ask', { askOpen: true }, 'ask'],
+    ['Ask with dictation beside it', { askOpen: true, snapshot: { ...IDLE, state: 'recording' as const }, dictationSession: 3 }, 'recording'],
   ] as const)('the chip and glint compose below %s natively, and the web draws neither', async (_name, patch, state) => {
     await render({}); await tick(100);
     await emit('o8:edit-applied', { app: 'Notes' });
@@ -165,7 +167,7 @@ describe('native glints, chip and fleet through the real dock hook', () => {
   });
 
   it.each([
-    ['Ask', { askOpen: true }], ['a confirmation', { agentConfirm: true }], ['a drop', { dropActive: true }], ['staged files', { stagedFiles: true }],
+    ['a confirmation', { agentConfirm: true }], ['a drop', { dropActive: true }], ['staged files', { stagedFiles: true }],
   ] as const)('beside native dictation, %s keeps the chip and glint on the web, under that surface', async (_name, patch) => {
     await render({}); await tick(100);
     await emit('o8:edit-applied', { app: 'Notes' });
