@@ -184,6 +184,7 @@ fn speech_polish_sends_the_saved_dictionary_and_instructions() {
         instructions: "Write o8 in lowercase.".into(),
         // Replacements stay local; the route never sees them.
         replacements: vec![("ask".into(), "Ask".into())],
+        ..VoicePrefs::default()
     };
     server.polish("ask cube control", None, &prefs).unwrap();
     let body: serde_json::Value = serde_json::from_slice(&received.recv().unwrap().body).unwrap();

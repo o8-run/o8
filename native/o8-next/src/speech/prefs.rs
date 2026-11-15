@@ -17,6 +17,10 @@ pub(crate) struct VoicePrefs {
     pub instructions: String,
     /// Trigger and replacement pairs applied to the final text.
     pub replacements: Vec<(String, String)>,
+    /// The saved microphone's unique ID; none is the system default.
+    pub microphone: Option<String>,
+    /// The saved recognition locale, such as `en-US`; none keeps the helper's.
+    pub locale: Option<String>,
 }
 
 /// The desktop's data directory, resolved as the desktop resolves it. Never
@@ -81,10 +85,21 @@ pub(crate) fn read(dir: &Path) -> VoicePrefs {
                 .collect()
         })
         .unwrap_or_default();
+    // One stdin line each; a value that could break the line is ignored.
+    let line = |key: &str| {
+        value(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty() && !text.chars().any(char::is_control))
+            .map(str::to_owned)
+    };
     VoicePrefs {
         dictionary,
         instructions,
         replacements,
+        // The shell treats "default" as the system default too.
+        microphone: line("dictation_microphone_uid").filter(|uid| uid != "default"),
+        locale: line("dictation_locale"),
     }
 }
 

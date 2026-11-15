@@ -66,6 +66,10 @@ struct Engine {
     mic_denied: bool,
     /// Why the helper is about to exit, when it said so.
     exit_reason: Option<&'static str>,
+    /// The microphone and locale this helper was last told; a new helper
+    /// starts on the system default microphone and its own locale.
+    device: Option<String>,
+    locale: Option<String>,
     run: Option<Run>,
 }
 
@@ -85,6 +89,8 @@ pub(super) fn spawn(
         ready: false,
         mic_denied: false,
         exit_reason: None,
+        device: None,
+        locale: None,
         run: None,
     };
     let _ = std::thread::Builder::new()
@@ -197,6 +203,8 @@ impl Engine {
     fn drop_helper(&mut self) {
         self.helper = None;
         self.ready = false;
+        self.device = None;
+        self.locale = None;
         // Lines and the exit of the dropped helper are now stale.
         self.generation += 1;
     }
@@ -242,7 +250,30 @@ impl Engine {
         let Some(id) = self.run.as_ref().filter(|run| !run.sent).map(|run| run.id) else {
             return;
         };
-        if self.command(&format!("start:{id}")) {
+        // The saved microphone and locale, as the shell sends them before a
+        // start; only a change is sent. The helper itself retries on device
+        // after Apple refuses the server path (errors 203 and 201).
+        let saved = self
+            .launch
+            .data
+            .as_deref()
+            .map(prefs::read)
+            .unwrap_or_default();
+        let mut ready = true;
+        if saved.microphone != self.device {
+            let uid = saved.microphone.as_deref().unwrap_or("default");
+            ready = self.command(&format!("input_device:{uid}"));
+            self.device = saved.microphone;
+        }
+        if ready
+            && let Some(locale) = saved
+                .locale
+                .filter(|locale| self.locale.as_ref() != Some(locale))
+        {
+            ready = self.command(&format!("locale:{locale}"));
+            self.locale = Some(locale);
+        }
+        if ready && self.command(&format!("start:{id}")) {
             if let Some(run) = &mut self.run {
                 run.sent = true;
             }

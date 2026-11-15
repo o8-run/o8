@@ -1,7 +1,8 @@
 //! A fake speech helper for tests: a bash script speaking the helper's
 //! stdin/stdout protocol. Environment variables shape what it says:
 //! `FAKE_FINAL` (Apple's final text), `FAKE_AUDIO` (a WAV path it writes and
-//! reports), `FAKE_BOOT` (a line before ready) and `FAKE_MODE`.
+//! reports), `FAKE_BOOT` (a line before ready), `FAKE_LOG` (a file it appends
+//! each stdin line to) and `FAKE_MODE`.
 use super::Launch;
 use std::path::PathBuf;
 
@@ -17,6 +18,7 @@ if [ "$FAKE_MODE" = late-ready ]; then
 fi
 emit '{"type":"ready","text":""}'
 while IFS= read -r line; do
+  [ -n "$FAKE_LOG" ] && printf '%s\n' "$line" >> "$FAKE_LOG"
   case "$line" in
     start:*) id=${line#start:}
       if [ "$FAKE_MODE" = exit-once ] && [ ! -e "$FAKE_MARK" ]; then : > "$FAKE_MARK"; exit 3; fi
