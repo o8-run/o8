@@ -22,6 +22,7 @@ pub struct Transcript {
     pub seq: u64,
     pub page: Option<crate::model::Page>,
     backfilled: bool,
+    worker_lookup: std::collections::HashMap<String, usize>,
     boot: Option<String>,
     /// The in-flight reply built from orchestrator events, shown until saved
     /// history carries that turn's work.
@@ -195,6 +196,11 @@ impl Transcript {
         self.merge(next, true)
     }
     pub fn new(history: History) -> Self {
+        let worker_active = !history.session_key.starts_with("llm-chat:")
+            && history
+                .transcript
+                .last()
+                .is_some_and(|e| e.extra.get("nativeWorkerActive") == Some(&Value::Bool(true)));
         let mut this = Self {
             key: history.session_key,
             entries: vec![],
@@ -202,12 +208,13 @@ impl Transcript {
             seq: 0,
             page: history.page,
             backfilled: false,
+            worker_lookup: Default::default(),
             boot: None,
             live: None,
             shown: vec![],
             live_seq: 0,
             live_backend: None,
-            context_busy: false,
+            context_busy: worker_active,
             context_epoch: CONTEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
             reveal: None,
             paced: !cfg!(test),
@@ -235,7 +242,12 @@ impl Transcript {
             retained.retain(|entry| !next.iter().any(|current| current.id == entry.id));
             retained.extend(next);
             next = retained;
-        } else if !self.backfilled && next.len() > 200 {
+        } else if !self.backfilled
+            && next.len() > 200
+            && !next
+                .last()
+                .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
+        {
             next.drain(..next.len() - 200);
         }
         if next == self.entries {
@@ -243,7 +255,79 @@ impl Transcript {
         }
         self.rows = self.render(&next);
         self.entries = next;
+        self.index_worker_entries();
         true
+    }
+    fn index_worker_entries(&mut self) {
+        self.worker_lookup.clear();
+        if self
+            .entries
+            .last()
+            .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
+        {
+            self.worker_lookup.extend(
+                self.entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| !e.extra.contains_key("nativeWorkerReadback"))
+                    .map(|(i, e)| (e.id.clone(), i)),
+            );
+        }
+    }
+    fn worker_entries(&mut self, mut incoming: Vec<Entry>, replace: bool, was_busy: bool) -> bool {
+        let marker = incoming.pop().unwrap();
+        let mut next = if replace {
+            self.worker_lookup.clear();
+            vec![]
+        } else {
+            std::mem::take(&mut self.entries)
+        };
+        if next
+            .last()
+            .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
+        {
+            next.pop();
+        }
+        let mut changed = replace || was_busy != self.context_busy;
+        let time = |e: &Entry| {
+            crate::shell::session::worker_transcript::saved_time(e).unwrap_or(
+                if e.extra.get("nativeWorkerEvent") == Some(&serde_json::json!(true)) {
+                    u64::MAX
+                } else {
+                    0
+                },
+            )
+        };
+        for entry in incoming {
+            if let Some(&index) = self.worker_lookup.get(&entry.id) {
+                if next[index] != entry {
+                    next[index] = entry;
+                    changed = true;
+                }
+            } else {
+                let at = if next.last().is_none_or(|last| time(last) <= time(&entry)) {
+                    next.len()
+                } else {
+                    next.partition_point(|old| time(old) <= time(&entry))
+                };
+                if at < next.len() {
+                    for index in self.worker_lookup.values_mut() {
+                        if *index >= at {
+                            *index += 1;
+                        }
+                    }
+                }
+                self.worker_lookup.insert(entry.id.clone(), at);
+                next.insert(at, entry);
+                changed = true;
+            }
+        }
+        next.push(marker);
+        if changed {
+            self.rows = self.render(&next);
+        }
+        self.entries = next;
+        changed
     }
     /// Rows for `entries` with the live reply over its saved placeholder; a saved
     /// reply with text or tools replaces the live one.
@@ -704,12 +788,38 @@ impl Transcript {
             return false;
         }
         self.page = history.page;
+        if let Some(marker) = self
+            .entries
+            .last()
+            .filter(|e| e.extra.contains_key("nativeWorkerReadback"))
+            .cloned()
+        {
+            let coverage = &marker.extra["nativeWorkerReadback"];
+            let first = coverage["coverage_start"].as_u64();
+            let mut incoming: Vec<_> = history
+                .transcript
+                .into_iter()
+                .filter(|entry| {
+                    // Backfill can predate even a complete normalized log.
+                    // Only replace prose inside its known coverage; unknown
+                    // times remain conservative, as on bounded tail readers.
+                    crate::shell::session::worker_transcript::retain_saved(entry, false, first)
+                        && !self.entries.iter().any(|current| current.id == entry.id)
+                })
+                .collect();
+            incoming.push(marker);
+            self.backfilled = true;
+            self.worker_entries(incoming, false, self.context_busy);
+            return true;
+        }
+
         let mut next = history.transcript;
         next.retain(|entry| !self.entries.iter().any(|current| current.id == entry.id));
         next.extend(self.entries.clone());
         self.backfilled = true;
         self.rows = self.render(&next);
         self.entries = next;
+        self.index_worker_entries();
         true
     }
     fn history(&mut self, payload: &Value) -> bool {
@@ -719,6 +829,23 @@ impl Transcript {
         let Ok(entries) = serde_json::from_value::<Vec<Entry>>(payload["entries"].clone()) else {
             return false;
         };
+        let was_busy = self.context_busy;
+        if let Some(active) = entries
+            .last()
+            .and_then(|e| e.extra.get("nativeWorkerActive"))
+            .and_then(Value::as_bool)
+        {
+            self.context_busy = active;
+        }
+        // Normalized worker frames contain only changed entries. The mobile
+        // merger intentionally trims windows and deduplicates equal commands;
+        // neither rule applies to distinct, cursor-addressed worker events.
+        if entries
+            .last()
+            .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
+        {
+            return self.worker_entries(entries, payload["replace"] == true, was_busy);
+        }
         let replace = payload["replace"].as_bool().unwrap_or(false);
         let overlaps = entries
             .iter()

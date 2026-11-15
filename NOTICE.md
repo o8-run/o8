@@ -431,3 +431,17 @@ The generated `linux-downloads.json` records each build's exact sizes and versio
 | `usr/share/doc/o8/common-licenses/GPL-1` | 12,632 | GPL-1 licence text |
 | `usr/share/doc/o8/common-licenses/GPL-2` | 18,092 | GPL-2 licence text |
 | `usr/share/doc/o8/common-licenses/GPL-3` | 35,147 | GPL-3 licence text |
+
+## o8 next prompt navigator
+
+- Native reimplementation of T3 Code's prompt navigator (MIT); no upstream code was copied.
+- Copyright: Copyright (c) 2026 T3 Tools Inc.
+- License: MIT
+- Upstream: <https://github.com/pingdotgg/t3code> at commit
+  `8f144827f680f4064cb3951b4b60d4e24043748d`, files
+  `apps/web/src/components/chat/TimelineMinimap.tsx` and
+  `apps/web/src/components/chat/timelineMinimapItems.ts`
+- Use in o8: prompt ticks, the keyboard-selected preview and final-answer
+  excerpts in `native/o8-next/src/prompt_navigator.rs`, implemented with
+  o8's native list, focus controls and theme.
+- Unmodified license text: [T3 Code](licenses/t3code-MIT.txt)

@@ -230,6 +230,95 @@ fn run(
 pub fn subscribe(client: Client, key: String) -> Subscription {
     subscribe_stream(client, format!("session:{key}"), None)
 }
+/// Select normalized readback only when the initial history established that
+/// capability. Legacy hosts retain their live socket, including on 404/501.
+pub(crate) fn subscribe_history(client: Client, history: &crate::model::History) -> Subscription {
+    let Some(mut state) = crate::shell::session::worker_transcript::State::from_history(history)
+    else {
+        return subscribe(client, history.session_key.clone());
+    };
+    let key = history.session_key.clone();
+    let (sender, receiver) = mpsc::sync_channel(64);
+    let cancel = Arc::new(Cancel::default());
+    let stopped = cancel.clone();
+    thread::spawn(move || {
+        // Keep the session socket after completion. Its flattened paragraphs
+        // only invalidate the normalized cursor; they never enter the renderer.
+        let updates = subscribe(client.clone(), key.clone());
+        let mut dirty = !state.done && state.cursor_available;
+        let mut next = Instant::now();
+        let mut socket_notice = "";
+        let mut read_notice = "";
+        let mut notice = "";
+        // A readback limit repeats on every re-read of the same cursor.
+        let mut halted = false;
+        while !stopped.is_stopped() {
+            for message in updates.receiver.try_iter().take(64) {
+                match message {
+                    Incoming::Frame(frame)
+                        if frame["channel"] == "history" || frame["channel"] == "realtime" =>
+                    {
+                        dirty = true
+                    }
+                    Incoming::Status(status) => {
+                        socket_notice = if status == "Live · read-only" {
+                            ""
+                        } else {
+                            status
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if !halted
+                && (dirty
+                    || (!state.done
+                        && state.active
+                        && state.cursor_available
+                        && Instant::now() >= next))
+            {
+                dirty = false;
+                match state.poll(&client) {
+                    Ok(entries) => {
+                        read_notice = "";
+                        if !entries.is_empty()
+                            && !emit(
+                                &sender,
+                                &stopped,
+                                &client,
+                                Incoming::Frame(json!({
+                                    "channel":"history","event":"update","data":{"sessionKey":key,"entries":entries,"replace":false}
+                                })),
+                            )
+                        {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        halted = error.halts();
+                        read_notice = error.notice();
+                    }
+                }
+                next = Instant::now() + Duration::from_secs(2);
+            }
+            let status = if !read_notice.is_empty() {
+                read_notice
+            } else if state.done {
+                socket_notice
+            } else {
+                ""
+            };
+            if status != notice {
+                if !emit(&sender, &stopped, &client, Incoming::Status(status)) {
+                    break;
+                }
+                notice = status;
+            }
+            pause(&stopped, Duration::from_millis(100));
+        }
+    });
+    Subscription { receiver, cancel }
+}
 /// A conversation's history plus its orchestrator stream, which carries the
 /// in-flight turn's thinking, tool calls and reply text as they happen.
 pub fn subscribe_live(

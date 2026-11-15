@@ -58,6 +58,29 @@ pub(crate) fn turn_ends(rows: &[Rc<RefCell<RowState>>]) -> HashMap<usize, (Strin
     ends
 }
 
+/// Flatten a retained row snapshot only once, including across render passes.
+#[derive(Default)]
+pub(crate) struct TurnEndsCache {
+    rows: std::rc::Weak<Vec<Rc<RefCell<RowState>>>>,
+    ends: Rc<HashMap<usize, (String, String)>>,
+}
+impl TurnEndsCache {
+    pub(crate) fn get(
+        &mut self,
+        rows: &Rc<Vec<Rc<RefCell<RowState>>>>,
+    ) -> Rc<HashMap<usize, (String, String)>> {
+        if !self
+            .rows
+            .upgrade()
+            .is_some_and(|old| Rc::ptr_eq(&old, rows))
+        {
+            self.ends = Rc::new(turn_ends(rows));
+            self.rows = Rc::downgrade(rows);
+        }
+        self.ends.clone()
+    }
+}
+
 /// A message's text: prose and lists line by line, code kept for Copy and left
 /// out when it is read aloud.
 pub(crate) fn plain(nodes: &[Node], speech: bool) -> String {
@@ -422,5 +445,37 @@ mod tests {
         let spoken = plain(&nodes, true);
         assert!(!spoken.contains("let x"), "{spoken}");
         assert!(spoken.contains("Last."));
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    fn rows(text: &str) -> Rc<Vec<Rc<RefCell<RowState>>>> {
+        let history=serde_json::from_value(serde_json::json!({"sessionKey":"saved:cache","transcript":[{"id":"p","role":"user","text":"Question"},{"id":"a","role":"assistant","text":text}]})).unwrap();
+        Rc::new(
+            crate::stream::Transcript::new(history)
+                .rows
+                .into_iter()
+                .map(|r| Rc::new(RefCell::new(RowState::new(r))))
+                .collect(),
+        )
+    }
+    #[test]
+    fn repeated_paints_reuse_answer_text_and_a_new_snapshot_refreshes_it() {
+        let mut cache = TurnEndsCache::default();
+        let first = rows("Original answer");
+        let text = cache.get(&first);
+        assert!(text.values().any(|(copy, _)| copy == "Original answer"));
+        for _ in 0..20 {
+            assert!(
+                Rc::ptr_eq(&text, &cache.get(&first)),
+                "unchanged panes do not flatten their full history per paint"
+            );
+        }
+        let next = rows("Updated answer");
+        let updated = cache.get(&next);
+        assert!(!Rc::ptr_eq(&text, &updated));
+        assert!(updated.values().any(|(copy, _)| copy == "Updated answer"));
     }
 }
