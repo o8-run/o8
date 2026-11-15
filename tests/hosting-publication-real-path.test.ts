@@ -7,7 +7,7 @@ import { POST as publish } from '@/app/api/panel/prs/[number]/route';
 import { POST as legacy } from '@/app/api/panel/pr/review/route';
 
 const host = vi.hoisted(() => ({ installation: 9000, head: 'a'.repeat(40), merged: false, queue: false, queued: false,
-  lost: false, lostBeforeApply: false, raceHead: false, auto: false, failCheck: false, missingCheck: false, mutations: [] as Array<Record<string, unknown>>, reads: 0 }));
+  lost: false, lostBeforeApply: false, raceHead: false, internalError: false, auto: false, failCheck: false, missingCheck: false, mutations: [] as Array<Record<string, unknown>>, reads: 0 }));
 vi.mock('@/lib/github-broker/env', () => ({ getGitHubAppConfig: () => null }));
 vi.mock('@/lib/github-broker/managed', () => ({ readManagedGithubToken: () => ({ installationId: host.installation, token: 'fixture', accountLogin: 'example' }), readActiveIdentity: () => 'fixture', readSignInEpoch: () => 1 }));
 const approved = 'a'.repeat(40);
@@ -19,14 +19,15 @@ const post = (old = false, extra: Record<string, unknown> = {}) => {
   return old ? legacy(request) : publish(request, { params: Promise.resolve({ number: String(number) }) });
 };
 beforeEach(() => {
-  number++; host.installation++; Object.assign(host, { head: approved, merged: false, queue: false, queued: false, lost: false, lostBeforeApply: false, raceHead: false, auto: false, failCheck: false, missingCheck: false, mutations: [], reads: 0 });
+  number++; host.installation++; Object.assign(host, { head: approved, merged: false, queue: false, queued: false, lost: false, lostBeforeApply: false, raceHead: false, internalError: false, auto: false, failCheck: false, missingCheck: false, mutations: [], reads: 0 });
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     if (url.endsWith('/merge') || (url.endsWith('/graphql') && body.query?.startsWith('mutation'))) {
       host.mutations.push(body);
       if (host.raceHead) host.head = 'd'.repeat(40);
       if (host.lostBeforeApply) throw new Error('Connection lost after sending');
-      if ((body.sha ?? body.variables?.input?.expectedHeadOid) !== host.head) return Response.json({ message: 'Head changed' }, { status: 409 });
+      if ((body.sha ?? body.variables?.input?.expectedHeadOid) !== host.head) return url.endsWith('/graphql') ? Response.json({ errors: [{ type: 'UNPROCESSABLE', message: 'Head changed' }], data: null }) : Response.json({ message: 'Head changed' }, { status: 409 });
+      if (host.internalError && url.endsWith('/graphql')) return Response.json({ errors: [{ type: 'INTERNAL', message: 'Unconfirmed' }], data: null });
       if (host.queue) host.queued = true; else if (body.query?.includes('enablePullRequestAutoMerge')) host.auto = true; else host.merged = true;
       if (host.lost) throw new Error('Response lost');
       if (url.endsWith('/merge')) return Response.json({ merged: true, sha: mergedSha });
@@ -157,5 +158,21 @@ it('reconciles a lost queue acknowledgement without enqueuing twice', async () =
   const response = await post(false, { action: 'enable-auto-merge' });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ publication: { status: 'queued', approvedSha: approved, mergedSha: null } });
+  expect(host.mutations).toHaveLength(1);
+});
+
+it.each([false, true])('refuses a definite GraphQL head mismatch, queue=%s', async queue => {
+  host.queue = queue; host.raceHead = true;
+  const response = await post(false, { action: 'enable-auto-merge' });
+  expect(response.status).toBe(409);
+  expect(host.merged).toBe(false);
+  expect(host.mutations).toHaveLength(1);
+  expect(host.mutations[0].variables).toMatchObject({ input: { expectedHeadOid: approved } });
+});
+
+it('keeps an indeterminate GraphQL execution error unknown without retrying the mutation', async () => {
+  host.internalError = true;
+  expect((await post(false, { action: 'enable-auto-merge' })).status).toBe(202);
+  expect((await post(false, { action: 'enable-auto-merge' })).status).toBe(202);
   expect(host.mutations).toHaveLength(1);
 });

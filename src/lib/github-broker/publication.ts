@@ -116,10 +116,11 @@ export async function publishGitHubPullRequest(repo: string, number: number, act
         body: JSON.stringify({ query: `mutation Publication($input: ${inputType}!) { ${mutation}(input: $input) { ${selection} } }`,
           variables: { input: { pullRequestId: pr.node_id, expectedHeadOid: approvedSha, ...(!queue ? { mergeMethod: method.toUpperCase() } : {}) } } }),
       }, { authorization }));
-      const payload = await response.json() as { errors?: unknown[]; data?: Record<string, { mergeQueueEntry?: { id?: string }; pullRequest?: { id?: string } }> };
+      const payload = await response.json() as { errors?: Array<{ type?: string }>; data?: Record<string, { mergeQueueEntry?: { id?: string }; pullRequest?: { id?: string } }> };
       if (response.ok && !payload.errors?.length && (queue ? payload.data?.[mutation]?.mergeQueueEntry?.id : payload.data?.[mutation]?.pullRequest?.id === pr.node_id)) {
         receipt.status = queue ? 'queued' : 'auto_merge_enabled';
-      } else if (response.status >= 400 && response.status < 500) receipt.status = 'refused';
+      } else if (response.status >= 400 && response.status < 500
+        || !payload.data?.[mutation] && payload.errors?.length && payload.errors.every(error => error.type === 'UNPROCESSABLE')) receipt.status = 'refused';
     } else {
       ({ response } = await githubInstallationFetch(repo, `/repos/${repo}/pulls/${number}/merge`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(18_000),
