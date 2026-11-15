@@ -6,9 +6,9 @@ import type { ChildProcess } from '@/lib/providers/child-process';
 import { bindNextBrowserPipe } from '@/lib/next/browser-pipe';
 import { POST } from './route';
 
-const settings = vi.hoisted(() => ({ enabled: false, hud: false, reads: 0 }));
-vi.mock('@/lib/operator/defaults', () => ({ getOperatorDefaults: async () => { settings.reads++; return { values: { nativeDictationPill: settings.enabled, nativeDictationHud: settings.hud } }; } }));
-afterEach(() => { settings.enabled = false; settings.hud = false; settings.reads = 0; vi.useRealTimers(); });
+const settings = vi.hoisted(() => ({ enabled: false, hud: false, ink: false, reads: 0 }));
+vi.mock('@/lib/operator/defaults', () => ({ getOperatorDefaults: async () => { settings.reads++; return { values: { nativeDictationPill: settings.enabled, nativeDictationHud: settings.hud, nativeSpatialInk: settings.ink } }; } }));
+afterEach(() => { settings.enabled = false; settings.hud = false; settings.ink = false; settings.reads = 0; vi.useRealTimers(); });
 
 it('drives the caret/HUD panel only under its own flag, over its own frame type', async () => {
   const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
@@ -162,5 +162,44 @@ it('rejects an out-of-range HUD placement before it reaches the native process',
   expect(frames).toHaveLength(0);
   expect(await (await post({ x: -1200, y: -300, width: 460, height: 138 })).json()).toMatchObject({ native: true });
   expect(frames).toHaveLength(1);
+  child.emit('exit');
+});
+
+it('drives the ink panel only under its own flag and passes back well-formed points', async () => {
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), exitCode: null, signalCode: null });
+  bindNextBrowserPipe(child as unknown as ChildProcess);
+  const frames: Record<string, unknown>[] = [];
+  let result: Record<string, unknown> = { ok: true, capturing: true, points: [[0, 0.25, 0.5, 0], [0, 0.3, 0.5, 16]], next: 2 };
+  child.stdin.on('data', data => {
+    const frame = JSON.parse(String(data));
+    frames.push(frame);
+    child.stdout.write('o8-next-browser-result:' + JSON.stringify({ id: frame.id, result }) + '\n');
+  });
+  const post = (body: object) => POST(new NextRequest('http://localhost/api/next/dictation-pill', { method: 'POST', body: JSON.stringify({ surface: 'ink', ...body }) }));
+  const monitor = { x: -1920, y: 102, width: 1920, height: 1080 };
+  // The dock and HUD flags never turn the ink native; flag off sends no frame.
+  settings.enabled = true; settings.hud = true;
+  expect(await (await post({ action: 'arm', session: 1, monitor })).json()).toEqual({ native: false, enabled: false });
+  expect(frames).toHaveLength(0);
+  settings.ink = true;
+  expect(await (await post({ action: 'arm', session: 1, monitor, reducedMotion: false })).json())
+    .toEqual({ enabled: true, absent: false, native: true, capturing: true, points: [[0, 0.25, 0.5, 0], [0, 0.3, 0.5, 16]], next: 2 });
+  expect(frames[0]).toMatchObject({ type: 'spatial-ink', verb: 'present', args: { action: 'arm', session: 1, monitor, surface: 'ink' } });
+  // The flag is read at arm, not per keep-alive.
+  const reads = settings.reads;
+  result = { ok: false, capturing: false, disarmed: 'lease', next: 2 };
+  expect(await (await post({ action: 'frame', session: 1, from: 2 })).json()).toEqual({ enabled: true, absent: false, native: false, capturing: false, disarmed: 'lease', next: 2 });
+  expect(settings.reads).toBe(reads);
+  // A malformed point list is a failed reply.
+  result = { ok: true, points: [[0, 2, 0.5, 0]] };
+  expect(await (await post({ action: 'frame', session: 1 })).json()).toMatchObject({ native: false });
+  // Malformed requests never reach the pipe.
+  const sent = frames.length;
+  for (const body of [{ action: 'arm', session: 1 }, { action: 'arm', session: 1, monitor: { ...monitor, width: 0 } }, { action: 'frame' }, { action: 'frame', session: 1, from: -1 }, { action: 'capture', session: 1 }]) {
+    expect((await post(body)).status).toBe(400);
+  }
+  expect(frames).toHaveLength(sent);
+  // The other surfaces still refuse the ink's arm action.
+  expect((await POST(new NextRequest('http://localhost/api/next/dictation-pill', { method: 'POST', body: '{"action":"arm"}' }))).status).toBe(400);
   child.emit('exit');
 });

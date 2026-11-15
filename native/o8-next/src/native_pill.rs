@@ -1,7 +1,8 @@
 //! Passive dock drawing: dictation, the speech, live voice, agent working and
 //! fleet capsules, and the edit chip and glints below them. Capture, voice,
 //! agent and edit commands keep their web owners. The caret/HUD dictation
-//! feedback panel (native_hud.rs) shares this queue and loop.
+//! feedback panel (native_hud.rs) and the draw-on-screen ink panel
+//! (native_ink.rs) share this queue and loop.
 #[cfg(test)]
 use gpui::TestAppContext;
 use gpui::{
@@ -447,7 +448,9 @@ fn deliver(handle: WindowHandle<Pill>, frame: Value, cx: &mut gpui::AsyncApp) ->
 
 pub(crate) fn has_real_windows(cx: &App) -> bool {
     cx.windows().iter().any(|window| {
-        window.downcast::<Pill>().is_none() && window.downcast::<hud::Hud>().is_none()
+        window.downcast::<Pill>().is_none()
+            && window.downcast::<hud::Hud>().is_none()
+            && window.downcast::<ink::Ink>().is_none()
     })
 }
 
@@ -470,6 +473,7 @@ pub(crate) fn install(cx: &mut App) {
     cx.spawn(async move |cx| {
         let mut handle: Option<WindowHandle<Pill>> = None;
         let mut hud_handle: Option<WindowHandle<hud::Hud>> = None;
+        let mut ink_handle: Option<WindowHandle<ink::Ink>> = None;
         let mut visible = false;
         loop {
             wait_for_work(visible, &WAKE.1, cx.background_executor()).await;
@@ -482,6 +486,10 @@ pub(crate) fn install(cx: &mut App) {
                 }
                 if frame["type"] == "dictation-hud" {
                     hud::deliver(&mut hud_handle, frame, cx);
+                    continue;
+                }
+                if frame["type"] == "spatial-ink" {
+                    ink::deliver(&mut ink_handle, frame, cx);
                     continue;
                 }
                 if handle.is_none() && frame["args"]["action"] == "release" {
@@ -553,6 +561,7 @@ pub(crate) fn install(cx: &mut App) {
                 }
             }
             visible |= hud::tick(&mut hud_handle, cx);
+            visible |= ink::tick(&mut ink_handle, cx);
         }
     })
     .detach();
@@ -720,6 +729,8 @@ mod capsules;
 mod extras;
 #[path = "native_hud.rs"]
 mod hud;
+#[path = "native_ink.rs"]
+mod ink;
 
 #[cfg(test)]
 #[path = "native_pill_extras_tests.rs"]

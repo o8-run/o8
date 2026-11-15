@@ -59,7 +59,12 @@ export function requestNextHud(args: Record<string, unknown>): Promise<unknown> 
   return requestNextControl('dictation-hud', 'present', args);
 }
 
-const PRESENTATION = new Set(['dictation-pill', 'dictation-hud']);
+/** The draw-on-screen ink panel: the same receipts and deadline, its own window and pointer. */
+export function requestNextInk(args: Record<string, unknown>): Promise<unknown> | null {
+  return requestNextControl('spatial-ink', 'present', args);
+}
+
+const PRESENTATION = new Set(['dictation-pill', 'dictation-hud', 'spatial-ink']);
 
 function requestNextControl(type: string, verb: string, args: Record<string, unknown>): Promise<unknown> | null {
   const bridge = runtime.__o8NextBrowserPipe;

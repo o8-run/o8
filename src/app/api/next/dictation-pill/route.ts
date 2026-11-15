@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
-import { requestNextHud, requestNextPill } from '@/lib/next/browser-pipe';
+import { requestNextHud, requestNextInk, requestNextPill } from '@/lib/next/browser-pipe';
+import { inkReply, inkRequestValid } from '@/lib/next/spatial-ink';
 import { validPlacement } from '@/lib/next/hud-placement';
 
 export const runtime = 'nodejs';
@@ -8,6 +9,7 @@ export const dynamic = 'force-dynamic';
 
 let enabled = false;
 let hudEnabled = false;
+let inkEnabled = false;
 
 /** Existing API authorization applies; this route grants no voice/control authority. */
 export async function POST(request: NextRequest) {
@@ -27,8 +29,19 @@ export async function POST(request: NextRequest) {
   const raw = Buffer.concat(chunks).toString('utf8');
   let body: Record<string, unknown>;
   try { body = JSON.parse(raw); } catch { return NextResponse.json({ native: false }, { status: 400 }); }
-  if (!body || typeof body !== 'object' || !['prepare', 'frame', 'release'].includes(String(body.action))) {
+  const ink = !!body && typeof body === 'object' && body.surface === 'ink';
+  if (!body || typeof body !== 'object' || !(ink ? ['prepare', 'arm', 'frame', 'release'] : ['prepare', 'frame', 'release']).includes(String(body.action))) {
     return NextResponse.json({ native: false }, { status: 400 });
+  }
+  // The draw-on-screen ink panel: its own flag, window and pointer capture.
+  if (ink) {
+    if (!inkRequestValid(body)) return NextResponse.json({ native: false }, { status: 400 });
+    if (body.action === 'prepare' || body.action === 'arm') inkEnabled = (await getOperatorDefaults()).values.nativeSpatialInk === true;
+    if (!inkEnabled) return NextResponse.json({ native: false, enabled: false });
+    const pending = requestNextInk(body);
+    const reply = await pending as Record<string, unknown> | null;
+    return NextResponse.json({ enabled: true, absent: pending === null || reply?.absent === true, ...inkReply(reply) },
+      { headers: { 'Cache-Control': 'no-store' } });
   }
   // The caret/HUD feedback panel has its own flag and window; it reports no clicks.
   const hud = body.surface === 'hud';
