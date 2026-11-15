@@ -57,7 +57,7 @@ export async function readEffectivePolicy(id: string) {
     const defaults = getOperatorDefaultsSync();
     input.approvalPosture = { value: defaults.values.requireApproval, source: defaults.sources.requireApproval };
     reading = 'merge-mode';
-    input.mergePolicy = currentLaneMergePolicy();
+    input.mergePolicy = currentLaneMergePolicy(lane.projectId);
     reading = 'work-revision';
     const head = await readHeadSha(lane.worktreePath || lane.repoPath, lane.repoPath);
     input.headSha = head;
