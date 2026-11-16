@@ -4407,6 +4407,8 @@
       "path": "tests/managed-worktree-safety-hook-runtime.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
+        "native-build",
         "worktree"
       ]
     },

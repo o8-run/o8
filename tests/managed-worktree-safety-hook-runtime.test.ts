@@ -107,12 +107,13 @@ describe('time ledger hook', () => {
     return settings.hooks.PreToolUse!.at(-1)!.hooks[0]!.command;
   }
 
-  function run(command: string, payload: Record<string, unknown>, managed: boolean) {
+  function run(command: string, payload: Record<string, unknown>, managed: boolean | 'worker') {
     const env = { ...process.env };
-    delete env.O8_TIME_GATE_MS;
-    delete env.O8_TIME_LEDGER;
-    if (managed) env.O8_MANAGED_SESSION = '1';
-    else delete env.O8_MANAGED_SESSION;
+    for (const key of ['O8_TIME_GATE_MS', 'O8_TIME_LEDGER', 'O8_MANAGED_SESSION', 'O8_OWNED_RUN_MARKER']) {
+      delete env[key];
+    }
+    if (managed === 'worker') env.O8_OWNED_RUN_MARKER = 'run-proof';
+    else if (managed) env.O8_MANAGED_SESSION = '1';
     const executed = spawnSync('/bin/sh', ['-c', command], {
       cwd: repo,
       encoding: 'utf8',
@@ -163,7 +164,7 @@ describe('time ledger hook', () => {
 
     expect(run(command, { hook_event_name: 'PreToolUse', tool_use_id: 'third', tool_input }, true))
       .toBeNull();
-    expect(run(command, { hook_event_name: 'PreToolUse', tool_use_id: 'fourth', tool_input }, true))
+    expect(run(command, { hook_event_name: 'PreToolUse', tool_use_id: 'fourth', tool_input }, 'worker'))
       .toMatchObject({ permissionDecision: 'deny' });
 
     const advised = run(command, { hook_event_name: 'PreToolUse', tool_use_id: 'fifth', tool_input }, false);

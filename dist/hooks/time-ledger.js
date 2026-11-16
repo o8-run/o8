@@ -40,6 +40,11 @@ function gateMs() {
   return Number.isFinite(override) && override > 0 ? override : DEFAULT_GATE_MS;
 }
 
+/** An o8 session or an o8 packet worker; anything else is the operator's own session. */
+function isManagedAgent() {
+  return process.env.O8_MANAGED_SESSION === '1' || Boolean(process.env.O8_OWNED_RUN_MARKER);
+}
+
 function readStdin() {
   return new Promise((resolve, reject) => {
     let raw = '';
@@ -228,7 +233,7 @@ function handlePreToolUse(input, file, now) {
     return;
   }
   const change = changedSince(cwd, entry.tree);
-  if (process.env.O8_MANAGED_SESSION !== '1') {
+  if (!isManagedAgent()) {
     stamp();
     emit('PreToolUse', { additionalContext: slowCommandText(key, stats, change, false) });
     return;
