@@ -19,9 +19,7 @@ function isShellHost(host, port) {
     : /^tauri\.localhost:[1-9][0-9]{0,4}$/.test(canonical) && Number(canonical.split(':')[1]) <= 65535);
 }
 
-function lanAccessEnabled(env = process.env) {
-  return ['1', 'true', 'yes', 'on'].includes(String(env.O8_LAN_ACCESS ?? '').trim().toLowerCase());
-}
+const { lanAccessEnabled } = require('./lan-access.cjs');
 
 /**
  * A phone on the same network addresses this machine by its IPv4 address. A

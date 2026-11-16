@@ -8883,7 +8883,7 @@ const httpServer = createServer(async (req, res) => {
   res.end();
 });
 
-// Loopback by default; O8_LAN_ACCESS=1 opts in to 0.0.0.0 for phone access.
+// Loopback by default; the phone access setting or launch environment opts in.
 const WS_LISTEN_HOST = resolveListenHost();
 const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
 

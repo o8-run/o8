@@ -11,8 +11,10 @@ import { NextRequest } from 'next/server';
 
 const h = vi.hoisted(() => ({
   resolveRequestPrincipal: vi.fn(),
+  runningPhoneNetwork: vi.fn().mockResolvedValue(false),
 }));
 
+vi.mock('@/lib/panel/mobile-network', () => ({ runningPhoneNetwork: h.runningPhoneNetwork }));
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: h.resolveRequestPrincipal }));
 vi.mock('@/lib/panel/api-port', () => ({ resolvePortInfo: () => ({ apiPort: 3001, wsPort: 3002 }) }));
 vi.mock('@/lib/panel/lan-ip', () => ({
@@ -69,13 +71,15 @@ describe('GET /api/panel/mobile-pairing — LAN reachability flag', () => {
 
   it('reports lanAccess:false when the servers are loopback-only (default)', async () => {
     delete process.env.O8_LAN_ACCESS;
+    h.runningPhoneNetwork.mockResolvedValue(false);
     h.resolveRequestPrincipal.mockReturnValue('operator');
     const body = await (await GET(req())).json();
     expect(body.lanAccess).toBe(false);
   });
 
-  it('reports lanAccess:true when the operator opted in with O8_LAN_ACCESS=1', async () => {
+  it('reports lanAccess:true when both running listeners are reachable', async () => {
     process.env.O8_LAN_ACCESS = '1';
+    h.runningPhoneNetwork.mockResolvedValue(true);
     h.resolveRequestPrincipal.mockReturnValue('operator');
     const body = await (await GET(req())).json();
     expect(body.lanAccess).toBe(true);

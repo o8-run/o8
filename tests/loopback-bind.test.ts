@@ -26,7 +26,7 @@ describe('local server bind address', () => {
     // and the launcher both use; neither may set the host anywhere else.
     const source = read('crates/o8-launch-core/src/server_env.rs');
     expect(source).not.toMatch(/\.env\("HOSTNAME",\s*"0\.0\.0\.0"\)/);
-    expect(source).toContain('.env("HOSTNAME", ports::sidecar_listen_host())');
+    expect(source).toContain('ports::listen_host_in(');
     for (const file of ['src-tauri/src/lib.rs', 'crates/o8-launcher/src/main.rs']) {
       expect(read(file), file).not.toMatch(/\.env\("HOSTNAME"/);
     }

@@ -21,9 +21,24 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const RENEW: Duration = Duration::from_secs(240);
 const QR_SIZE: f32 = 240.;
 const QR_MARGIN: usize = 2;
-pub(crate) const LAN_OFF: &str = "Phone pairing needs local network access, which is off by \
-     default: o8 only listens on 127.0.0.1. Quit o8, relaunch it with O8_LAN_ACCESS=1 in its \
-     environment, then retry.";
+pub(crate) const LAN_OFF: &str = "Phone access is off. Turn it on in Pairing.";
+const NETWORK: &str = "/api/panel/mobile-network";
+#[derive(Clone, Debug, PartialEq)]
+struct Network {
+    saved: bool,
+    running: bool,
+    overridden: bool,
+}
+impl Network {
+    fn line(&self) -> &'static str {
+        match (self.saved, self.running) {
+            (true, true) => "Listening on this network",
+            (true, false) => "Not listening · saved on",
+            (false, true) => "Listening on this network · saved off",
+            (false, false) => "Not listening on this network",
+        }
+    }
+}
 const NO_ADDRESS: &str = "No local network address found. Connect this Mac to Wi-Fi, then retry.";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -147,6 +162,9 @@ fn devices(reply: &Value) -> Vec<Device> {
 }
 
 pub(crate) struct Mobile {
+    network: Option<Network>,
+    network_saving: bool,
+    network_error: Option<String>,
     client: Client,
     started: bool,
     connect: Option<bool>,
@@ -166,6 +184,9 @@ impl Mobile {
         let _ = cx;
         // Nothing is read until the page is first shown.
         Self {
+            network: None,
+            network_saving: false,
+            network_error: None,
             client,
             started: false,
             connect: None,
@@ -184,6 +205,7 @@ impl Mobile {
     fn start(&mut self, cx: &mut Context<Self>) {
         self.started = true;
         self.load_devices(cx);
+        self.network_request(None, cx);
         let client = self.client.clone();
         let task = cx
             .background_executor()
@@ -196,6 +218,76 @@ impl Mobile {
             });
         })
         .detach();
+    }
+
+    fn network_request(&mut self, enabled: Option<bool>, cx: &mut Context<Self>) {
+        if self.network_saving {
+            return;
+        }
+        self.network_saving = true;
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            call::<Value>(
+                &client,
+                if enabled.is_some() { "POST" } else { "GET" },
+                NETWORK,
+                enabled.map_or(json!({}), |value| json!({"enabled": value})),
+                TIMEOUT,
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let reply = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.network_saving = false;
+                match reply {
+                    Ok(reply)
+                        if reply["ok"] == true
+                            && reply["enabled"].is_boolean()
+                            && reply["running"].is_boolean() =>
+                    {
+                        this.network = Some(Network {
+                            saved: reply["enabled"] == true,
+                            running: reply["running"] == true,
+                            overridden: reply["overridden"] == true,
+                        });
+                        this.network_error = None;
+                    }
+                    _ => this.network_error = Some("Could not read or save phone access.".into()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn network_switch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let on = self.network.as_ref().is_some_and(|n| n.saved);
+        let enabled = self.network.is_some() && !self.network_saving;
+        div()
+            .id("settings-mobile-network")
+            .debug_selector(|| "settings-mobile-network".into())
+            .w(px(34.))
+            .h(px(20.))
+            .flex_shrink_0()
+            .rounded_full()
+            .bg(if on { theme().accent } else { theme().border })
+            .opacity(if enabled { 1. } else { 0.45 })
+            .when(enabled, |v| {
+                v.cursor_pointer().hover(|v| v.opacity(0.8)).on_click(
+                    cx.listener(move |this, _, _, cx| this.network_request(Some(!on), cx)),
+                )
+            })
+            .child(
+                div()
+                    .size_full()
+                    .p(px(2.))
+                    .flex()
+                    .items_center()
+                    .when(on, |v| v.justify_end())
+                    .child(div().size(px(16.)).rounded_full().bg(gpui::white())),
+            )
+            .into_any_element()
     }
 
     fn read_attach(&mut self, reply: Result<Value, String>) {
@@ -548,6 +640,26 @@ impl Render for Mobile {
             .child(muted("Pairing".into()))
             .child(
                 row(
+                    "Phone access on this network".into(),
+                    self.network
+                        .as_ref()
+                        .map_or("Checking network access", Network::line)
+                        .into(),
+                )
+                .child(self.network_switch(cx)),
+            )
+            .when(
+                self.network
+                    .as_ref()
+                    .is_some_and(|n| n.saved != n.running && !n.overridden),
+                |v| v.child(muted("Quit and reopen o8 to apply".into())),
+            )
+            .when(self.network.as_ref().is_some_and(|n| n.overridden), |v| {
+                v.child(muted("Launch environment overrides this setting".into()))
+            })
+            .when_some(self.network_error.clone(), |v, error| v.child(muted(error)))
+            .child(
+                row(
                     "Pairing code".into(),
                     "o8 mobile connects directly to this Mac. Your phone needs the same Wi-Fi, \
                      or Tailscale when you're away."
@@ -603,6 +715,21 @@ mod tests {
             "lanAccess":true,"token":"secret"})
     }
 
+    #[test]
+    fn phone_network_page_distinguishes_saved_and_running_states() {
+        let state = |saved, running| Network {
+            saved,
+            running,
+            overridden: false,
+        };
+        assert_eq!(state(false, false).line(), "Not listening on this network");
+        assert_eq!(state(true, false).line(), "Not listening · saved on");
+        assert_eq!(state(true, true).line(), "Listening on this network");
+        assert_eq!(
+            state(false, true).line(),
+            "Listening on this network · saved off"
+        );
+    }
     #[test]
     fn the_code_carries_every_address_and_the_handshake_when_there_is_one() {
         let plain = payload(&reply(), &["a".into()]);
