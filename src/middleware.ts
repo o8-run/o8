@@ -134,6 +134,9 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // create or edit a task, so it cannot introduce a new prompt this way.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/automations\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/mobile\/automations\/[^/]+\/(?:enabled|run)\/?$/ },
+  // Which coding agents are installed and signed in: booleans and a default model,
+  // never an account, organisation or path.
+  { methods: new Set(['GET']), path: /^\/api\/mobile\/agents\/?$/ },
   // The agents and models this computer offers, for the phone's picker.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/orchestrator\/models\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
