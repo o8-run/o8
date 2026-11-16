@@ -91,6 +91,8 @@ beforeAll(async () => {
       CORTEX_IDE_DATA_DIR: dataDir,
       O8_API_PORT: String(await freePort()),
       O8_WS_PORT: String(wsPort),
+      // The remote-device gate is exercised over a network address.
+      O8_LAN_ACCESS: '1',
       NEXT_ORIGIN: `http://127.0.0.1:${await freePort()}`,
     },
   });
