@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
+vi.mock('@/lib/mobile/pull-request-projection', () => ({ mobileThreadPullRequests: async () => [] }));
+
 const listMobileOrchestratorThreads = vi.fn(() => []);
 
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({

@@ -16,6 +16,8 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { mobileThreadPullRequests } from '@/lib/mobile/pull-request-projection';
+import { DEFAULT_SYMON_MACHINE } from '@/lib/symon/machine-registry';
 import { legacyInboxPin } from '@/lib/inbox/preferences';
 import { inboxProjection, inboxRunStartedAt, inboxSubject } from '@/lib/inbox/store';
 import { threadGitContext } from '@/lib/repos/thread-git-context';
@@ -64,18 +66,21 @@ export async function GET(request: NextRequest) {
   try {
     const threads = listMobileOrchestratorThreads({ backend, limit, ...(offset === undefined ? {} : { offset }) });
     const parked = createParkedWorkspaceContext();
+    const pulls = await mobileThreadPullRequests(threads.map(thread => thread.id)).catch(() => []);
     return NextResponse.json({ threads: threads.map(thread => {
+      const pr = pulls.find(pr => pr.threadId === thread.id);
       const subject = inboxSubject('conversation', thread.id, thread.repoPath, thread.projectId);
       const projection = inboxProjection(subject, null, undefined, legacyInboxPin(thread));
       // Additive checkout context: owner/repo (or folder), live branch and worktree identity.
       const git = threadGitContext(thread.repoPath);
       const remoteSlug = thread.githubOwner && thread.githubRepo ? `${thread.githubOwner}/${thread.githubRepo}` : null;
-      return { ...thread, ...projection, ...parkedWorkspaceProjection(subject, parked), pinned: projection.pinnedAt != null,
+      return { ...thread, ...projection, machineDisplayName: DEFAULT_SYMON_MACHINE.displayName,
+        ...(pr ? { pullRequestNumber: pr.number, pullRequestState: pr.state, changeCount: pr.changedFiles } : {}), ...parkedWorkspaceProjection(subject, parked), pinned: projection.pinnedAt != null,
         isWorktree: git.isWorktree, worktreePath: git.worktreePath,
-        repoSlug: remoteSlug ?? git.repoSlug ?? thread.repoName, branch: git.branch ?? thread.repoBranch, runStartedAt: inboxRunStartedAt(subject) };
-    }) }, { headers: NO_STORE });
-  } catch (error) {
-    console.log('[mobile-orchestrator] thread list failed', error);
+        repoSlug: remoteSlug ?? git.repoSlug ?? thread.repoName, branch: git.branch ?? thread.repoBranch, ...(thread.status === 'busy' ? { runStartedAt: inboxRunStartedAt(subject) ?? undefined } : {}) };
+    }), updatedAt: [...threads.map(thread => thread.lastMessageAt), ...pulls.map(pr => pr.updatedAt ?? '')].sort().at(-1) ?? null }, { headers: { 'Cache-Control': 'private, max-age=5' } });
+  } catch {
+    console.log('[mobile-orchestrator] thread list failed');
     return NextResponse.json({ threads: [] }, { headers: NO_STORE });
   }
 }
