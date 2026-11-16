@@ -155,11 +155,21 @@ describe('time ledger hook', () => {
     expect(note?.additionalContext).toContain('`cargo build --release` took 28 min');
     expect(git('status', '--porcelain')).toBe('');
 
+    for (const [id, duration_ms] of [['check-1', 40_000], ['check-2', 50_000], ['once', 20_000]] as const) {
+      run(command, {
+        hook_event_name: 'PostToolUse',
+        tool_use_id: id,
+        tool_input: { command: id === 'once' ? 'cargo fmt --check' : 'cargo check' },
+        duration_ms,
+      }, true);
+    }
+
     appendFileSync(path.join(repo, 'main.rs'), '// one\n// two\n');
     const stopped = run(command, { hook_event_name: 'PreToolUse', tool_use_id: 'second', tool_input }, true);
     expect(stopped).toMatchObject({ permissionDecision: 'deny' });
     expect(stopped?.permissionDecisionReason).toContain('takes about 28 min here (median of 1 run)');
     expect(stopped?.permissionDecisionReason).toContain('2 lines in 1 file changed since its last run');
+    expect(stopped?.permissionDecisionReason).toContain('Shorter commands run here: `cargo check` (45 s).');
     expect(git('status', '--porcelain').trim()).toBe('M main.rs');
 
     expect(run(command, { hook_event_name: 'PreToolUse', tool_use_id: 'third', tool_input }, true))

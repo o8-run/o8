@@ -204,12 +204,29 @@ function describeChange(change) {
   return ` ${plural(change.lines, 'line')} in ${plural(change.files, 'file')} changed since its last run.`;
 }
 
-function slowCommandText(key, stats, change, stopped) {
+/**
+ * Commands this repository has timed at least twice at half the cost or less.
+ * They are what an agent has already used here, so no ladder has to be declared.
+ */
+function shorterCommands(ledger, key, medianMs) {
+  return Object.entries(ledger.commands)
+    .filter(([other]) => other !== key)
+    .map(([other, entry]) => ({ key: other, stats: commandStats(entry) }))
+    .filter((row) => row.stats.count >= 2 && row.stats.medianMs * 2 <= medianMs)
+    .sort((a, b) => b.stats.count - a.stats.count || a.stats.medianMs - b.stats.medianMs)
+    .slice(0, 3);
+}
+
+function slowCommandText(key, stats, change, stopped, shorter) {
   const cost = `o8 clock: \`${key}\` takes about ${formatDuration(stats.medianMs)} here `
     + `(median of ${plural(stats.count, 'run')}).${describeChange(change)}`;
+  const options = shorter.length > 0
+    ? ` Shorter commands run here: ${shorter
+      .map((row) => `\`${row.key}\` (${formatDuration(row.stats.medianMs)})`).join(', ')}.`
+    : '';
   return stopped
-    ? `${cost} Finish every pending edit first, or run a narrower check. Send the same command again to start it.`
-    : `${cost} Batch pending edits before the next run.`;
+    ? `${cost}${options} Finish every pending edit first, or run a narrower check. Send the same command again to start it.`
+    : `${cost}${options} Batch pending edits before the next run.`;
 }
 
 function emit(eventName, fields) {
@@ -233,9 +250,10 @@ function handlePreToolUse(input, file, now) {
     return;
   }
   const change = changedSince(cwd, entry.tree);
+  const shorter = shorterCommands(ledger, key, stats.medianMs);
   if (!isManagedAgent()) {
     stamp();
-    emit('PreToolUse', { additionalContext: slowCommandText(key, stats, change, false) });
+    emit('PreToolUse', { additionalContext: slowCommandText(key, stats, change, false, shorter) });
     return;
   }
   const ackId = `${input.session_id || 'session'}:${key}`;
@@ -248,7 +266,7 @@ function handlePreToolUse(input, file, now) {
   writeLedger(file, ledger, now);
   emit('PreToolUse', {
     permissionDecision: 'deny',
-    permissionDecisionReason: slowCommandText(key, stats, change, true),
+    permissionDecisionReason: slowCommandText(key, stats, change, true, shorter),
   });
 }
 
