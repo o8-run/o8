@@ -164,8 +164,25 @@ export function findMissionRegistryEntryByPacketId(
 ): MissionRegistryEntry | null {
   const normalizedPacketId = packetId.trim();
   if (!normalizedPacketId) return null;
-  return listMissionRegistryEntries(options)
-    .find((entry) => entry.mission.packets.some((packet) => packet.id === normalizedPacketId)) ?? null;
+  // Parsing every stored mission costs ~5 MB of JSON per lookup on a long-lived
+  // install, and idle sweeps look packets up per session. SQLite first keeps
+  // only rows whose text contains the id as JSON writes it; parsing then
+  // confirms the id belongs to a packet, so a mention in a prompt never matches.
+  const needle = JSON.stringify(normalizedPacketId).slice(1, -1);
+  const rows = getSqlite().prepare(`
+    SELECT id, mission_state_json, created_at, updated_at, archived_at
+      FROM missions
+     WHERE ${options.includeArchived ? '1 = 1' : 'archived_at IS NULL'}
+       AND instr(mission_state_json, ?) > 0
+     ORDER BY created_at ASC
+  `).all(needle) as MissionStateRow[];
+  const excludeMissionId = options.excludeMissionId?.trim() ?? '';
+  for (const row of rows) {
+    if (excludeMissionId && row.id === excludeMissionId) continue;
+    const entry = missionRegistryEntryFromRow(row);
+    if (entry?.mission.packets.some((packet) => packet.id === normalizedPacketId)) return entry;
+  }
+  return null;
 }
 
 export function hasRegistryPendingHeadlessWork(currentMissionId?: string | null) {
