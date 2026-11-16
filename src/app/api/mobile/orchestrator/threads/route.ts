@@ -22,6 +22,7 @@ import { localMachineName } from '@/lib/mobile/machine-name';
 import { legacyInboxPin } from '@/lib/inbox/preferences';
 import { inboxProjection, inboxRunStartedAt, inboxSubject } from '@/lib/inbox/store';
 import { threadGitContext } from '@/lib/repos/thread-git-context';
+import { lookupLinkedWork } from '@/lib/mobile/linked-work';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileOrchestratorBackend } from '@/lib/mobile/types';
 import { OrchestratorThreadProjectError } from '@/lib/mobile/orchestrator-thread-project';
@@ -68,6 +69,8 @@ export async function GET(request: NextRequest) {
     const threads = listMobileOrchestratorThreads({ backend, limit, ...(offset === undefined ? {} : { offset }) });
     const parked = createParkedWorkspaceContext();
     const pulls = await mobileThreadPullRequests(threads.map(thread => thread.id)).catch(() => []);
+    // Counts only, from what is stored locally. The lookup never throws.
+    const linkedWork = lookupLinkedWork(threads);
     return NextResponse.json({ threads: threads.map(thread => {
       const pr = pulls.find(pr => pr.threadId === thread.id);
       const subject = inboxSubject('conversation', thread.id, thread.repoPath, thread.projectId);
@@ -75,7 +78,7 @@ export async function GET(request: NextRequest) {
       // Additive checkout context: owner/repo (or folder), live branch and worktree identity.
       const git = threadGitContext(thread.repoPath);
       const remoteSlug = thread.githubOwner && thread.githubRepo ? `${thread.githubOwner}/${thread.githubRepo}` : null;
-      return { ...thread, ...projection, machineDisplayName: localMachineName(),
+      return { ...thread, ...projection, linkedWork: linkedWork.get(thread.id) ?? null, machineDisplayName: localMachineName(),
         ...(pr ? { pullRequestNumber: pr.number, pullRequestState: pr.state, changeCount: pr.changedFiles } : {}), ...parkedWorkspaceProjection(subject, parked), pinned: projection.pinnedAt != null,
         isWorktree: git.isWorktree, worktreePath: git.worktreePath,
         repoSlug: remoteSlug ?? git.repoSlug ?? thread.repoName, branch: git.branch ?? thread.repoBranch, ...(thread.status === 'busy' ? { runStartedAt: inboxRunStartedAt(subject) ?? undefined } : {}) };

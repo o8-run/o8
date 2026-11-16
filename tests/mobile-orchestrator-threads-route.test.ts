@@ -12,6 +12,9 @@ vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
   listMobileOrchestratorThreads,
 }));
 
+const lookupLinkedWork = vi.hoisted(() => vi.fn(() => new Map()));
+vi.mock('@/lib/mobile/linked-work', () => ({ lookupLinkedWork }));
+
 const { GET, POST } = await import('@/app/api/mobile/orchestrator/threads/route');
 
 function request(search = ''): NextRequest {
@@ -20,28 +23,31 @@ function request(search = ''): NextRequest {
 
 describe('mobile orchestrator threads route backend filter', () => {
   beforeEach(() => {
-    listMobileOrchestratorThreads.mockClear();
+    listMobileOrchestratorThreads.mockReset();
+    listMobileOrchestratorThreads.mockReturnValue([]);
+    lookupLinkedWork.mockReset();
+    lookupLinkedWork.mockReturnValue(new Map());
   });
 
   it('passes Hermes backend filters through to the thread history helper', async () => {
     const res = await GET(request('?backend=hermes'));
 
     expect(res.status).toBe(200);
-    expect(listMobileOrchestratorThreads).toHaveBeenCalledWith({ backend: 'hermes' });
+    expect(listMobileOrchestratorThreads).toHaveBeenCalledWith({ backend: 'hermes', limit: undefined });
   });
 
   it('passes Collide backend filters through to the thread history helper', async () => {
     const res = await GET(request('?backend=collide'));
 
     expect(res.status).toBe(200);
-    expect(listMobileOrchestratorThreads).toHaveBeenCalledWith({ backend: 'collide' });
+    expect(listMobileOrchestratorThreads).toHaveBeenCalledWith({ backend: 'collide', limit: undefined });
   });
 
   it('keeps the default non-openclaw bucket when no backend is requested', async () => {
     const res = await GET(request());
 
     expect(res.status).toBe(200);
-    expect(listMobileOrchestratorThreads).toHaveBeenCalledWith({ backend: null });
+    expect(listMobileOrchestratorThreads).toHaveBeenCalledWith({ backend: null, limit: undefined });
   });
 
   it('does not fall back to the default bucket for unknown backend values', async () => {
@@ -52,6 +58,17 @@ describe('mobile orchestrator threads route backend filter', () => {
     expect(json).toEqual({ threads: [] });
     expect(listMobileOrchestratorThreads).not.toHaveBeenCalled();
   });
+  it('adds optional counts in one batch while preserving existing fields', async () => {
+    const threads = [{ id: 'thoughts-a', title: 'One' }, { id: 'thoughts-b', title: 'Two' }];
+    const counts = { pullRequests: { total: 1, open: 1, merged: 0, closed: 0 }, branches: 1 };
+    listMobileOrchestratorThreads.mockReturnValue(threads as never);
+    lookupLinkedWork.mockReturnValue(new Map([['thoughts-a', counts]]));
+    const json = await (await GET(request())).json();
+    expect(json.threads).toMatchObject([{ ...threads[0], linkedWork: counts }, { ...threads[1], linkedWork: null }]);
+    expect(lookupLinkedWork).toHaveBeenCalledExactlyOnceWith(threads);
+    expect(json.threads.map(({ id, title }: { id: string; title: string }) => ({ id, title }))).toEqual(threads);
+  });
+
 });
 
 describe('phone thread creation model admission', () => {
