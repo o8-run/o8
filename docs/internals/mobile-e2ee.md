@@ -37,7 +37,7 @@ New SQLite table `mobile_devices` (`~/.o8`, Drizzle, new migration):
 | `token_hash` | `sha256(deviceToken)` — store the **hash**; the token is shown once at enrollment |
 | `device_label` | human label, e.g. "Marquise's iPhone" |
 | `identity_public_key` | base64 Ed25519 device identity pub (handshake auth) |
-| `created_at`, `last_seen_at` | ISO 8601 |
+| `created_at`, `last_seen_at`, `last_paired_at` | ISO 8601 |
 | `revoked_at` | null = active; set = revoked |
 
 **Token validation (middleware `src/middleware.ts` + WS `verifyClient`):** given a presented token —
@@ -139,3 +139,44 @@ Mirrors the #4/#6 playbook. Non-breaking by construction:
 ---
 
 *Source map — o8 side: `src/ws-server.ts` (WS `verifyClient` ~4411, `send`/`sendRaw`/`broadcast` ~1535/1566/1592, `handleClientMessage` ~2472, welcome ~4429), `src/middleware.ts` (token gate ~256/310), `src/lib/ws-auth.ts` (shared token), `src/app/api/panel/mobile-pairing/route.ts` (pairing payload), `src/lib/db/schema.ts` (+ migration). Mobile side: `src/o8/ws.ts` (`handleRawMessage` ~387, send ~194, reconnect ~476), `src/o8/client.ts` (WS URL ~16), `src/o8/config.ts` (SecureStore `o8.backend.token` ~20), `src/app/pair*.tsx` (pairing), `package.json` (Expo 55, add tweetnacl).*
+
+## Authentication outcomes and recovery
+
+The private mobile close-code registry is `src/lib/ws-server/device-e2ee-policy.ts`.
+Existing shared-token phones keep their transport and credentials. New codes and
+HTTP fields are additive. A client must retain its pairing on retryable failures.
+
+| Code | Meaning | Client action |
+|---|---|---|
+| 1001 | Server shutting down | Reconnect after restart |
+| 4401 | Positively rejected credential (reserved) | Check credential |
+| 4403 | Registered device key proof rejected | Check authentication |
+| 4410 | `device_revoked`, matched retained revoked row | Remove pairing |
+| 4411 | `handshake_timeout` | Retry with pairing retained |
+| 4412 | `handshake_init_failed` | Retry with pairing retained |
+| 4413 | `internal_error`, missing server authentication context | Retry with pairing retained |
+| 4414 | `auth_unavailable`, canonical registry lookup failed | Retry with pairing retained |
+| 4415 | Required handshake/encrypted framing missing | Retry with pairing retained |
+
+Unknown credentials receive generic HTTP 401 (or WS upgrade rejection), without a
+revocation marker. Only a credential matching a retained revoked row receives
+HTTP 401 with `code: device_revoked` or WS 4410. Comparisons of the shared bearer
+remain constant-time. No application state is sent on these rejection paths.
+
+Unavailable HTTP auth storage returns 503, `Retry-After: 2`, and
+`code: auth_unavailable`. The server rebuilds the token projection at startup.
+Middleware repairs missing, unreadable or invalid projections through an
+operator-authenticated internal server operation before retrying the gate.
+Publication uses an owner-only temporary file and atomic rename. Active hashes
+remain newline-separated; `revoked:` lines carry revoked hashes and cannot
+match active credentials in older readers. The database remains canonical.
+
+An invalid or unreadable existing server identity is preserved. Pairing and
+enrollment return 503 with `code: server_identity_unavailable` and an actionable
+error for Mobile settings. Restore the original identity to preserve phone pins;
+only an absent identity permits key generation. Re-enrollment updates the active
+identity's credential and `last_paired_at`; a revoked row is never reused.
+
+Historical duplicate rows remain available for revocation checks. The device list
+groups by phone identity, preferring an active row. Revoking a displayed phone
+revokes every active row for that identity.

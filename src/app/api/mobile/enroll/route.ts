@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse, type NextRequest } from 'next/server';
 import { mobileE2eeEnabled } from '@/lib/mobile/e2ee-flag';
 import { consumeEnrollCode, enrollDevice } from '@/lib/mobile/device-registry';
-import { getServerIdentityPublicKey } from '@/lib/mobile/e2ee-identity';
+import { ServerIdentityUnavailableError, getServerIdentityPublicKey } from '@/lib/mobile/e2ee-identity';
 
 interface EnrollBody {
   enroll?: unknown;
@@ -47,12 +47,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const serverIdentityPublicKey = getServerIdentityPublicKey();
     const { deviceToken } = enrollDevice({ identityPublicKey, deviceLabel });
     return NextResponse.json({
       deviceToken,
-      serverIdentityPublicKey: getServerIdentityPublicKey(),
+      serverIdentityPublicKey,
     });
   } catch (error) {
+    if (error instanceof ServerIdentityUnavailableError) return NextResponse.json({ error: error.message, code: 'server_identity_unavailable', retryable: true }, { status: 503, headers: { 'Retry-After': '2' } });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Enrollment failed' },
       { status: 500 },

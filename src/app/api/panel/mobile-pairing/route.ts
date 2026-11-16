@@ -26,7 +26,7 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { mobileE2eeEnabled } from '@/lib/mobile/e2ee-flag';
 import { createEnrollCode } from '@/lib/mobile/device-registry';
-import { getServerIdentityPublicKey } from '@/lib/mobile/e2ee-identity';
+import { ServerIdentityUnavailableError, getServerIdentityPublicKey } from '@/lib/mobile/e2ee-identity';
 import { runningPhoneNetwork } from '@/lib/panel/mobile-network';
 
 interface MobilePairingResponse {
@@ -99,6 +99,7 @@ export async function GET(request: NextRequest) {
     }
     return NextResponse.json(payload);
   } catch (error) {
+    if (error instanceof ServerIdentityUnavailableError) return NextResponse.json({ error: error.message, code: 'server_identity_unavailable', retryable: true }, { status: 503, headers: { 'Retry-After': '2' } });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to build pairing payload' },
       { status: 500 },

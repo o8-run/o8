@@ -91,6 +91,8 @@ beforeAll(async () => {
       CORTEX_IDE_DATA_DIR: dataDir,
       O8_API_PORT: String(await freePort()),
       O8_WS_PORT: String(wsPort),
+      // The remote-device gate is exercised over a network address.
+      O8_LAN_ACCESS: '1',
       NEXT_ORIGIN: `http://127.0.0.1:${await freePort()}`,
     },
   });
@@ -159,7 +161,7 @@ describe('remote enrolled-device WebSocket authentication', () => {
       .toMatchObject({ channel: 'system', event: 'e2ee-ready' });
 
     socket.send(JSON.stringify({ type: 'agent-kill', agentId: 'must-not-run' }));
-    expect(await closed).toEqual({ code: 4403, reason: 'encrypted frames required' });
+    expect(await closed).toEqual({ code: 4415, reason: 'encrypted frames required' });
     sockets.delete(socket);
     expect((await fetch(`http://127.0.0.1:${wsPort}/health`)).ok).toBe(true);
   });
@@ -177,7 +179,7 @@ describe('remote enrolled-device WebSocket authentication', () => {
     await once(socket, 'open');
     socket.send(JSON.stringify({ type: 'agent-kill', agentId: 'must-not-run' }));
 
-    expect(await closed).toEqual({ code: 4403, reason: 'e2ee handshake required' });
+    expect(await closed).toEqual({ code: 4415, reason: 'e2ee handshake required' });
     sockets.delete(socket);
     expect(frames.every((frame) => (
       frame.channel === 'system'
@@ -200,7 +202,7 @@ describe('remote enrolled-device WebSocket authentication', () => {
     const result = await closed;
     sockets.delete(socket);
 
-    expect(result).toEqual({ code: 4403, reason: 'e2ee handshake required' });
+    expect(result).toEqual({ code: 4411, reason: 'handshake_timeout' });
     expect(frames.some((frame) => frame.channel === 'system' && frame.event === 'e2ee-hello')).toBe(true);
     expect(frames.every((frame) => (
       frame.channel === 'system'

@@ -1,3 +1,5 @@
+import { initiateE2eeHandshake } from './lib/ws-server/device-e2ee-handshake';
+import { handleTokenProjectionRequest } from './lib/mobile/token-projection-http';
 import { symonOwnerPaths } from './lib/symon/http/owner-paths';
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
 import { VoiceHostBroker, handleVoiceHostHttp } from '@/lib/ws-server/voice-host';
@@ -282,14 +284,13 @@ import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions, signalOwnedDashTmuxSession } from './lib/ws-server/dash-terminal-gc';
-import { resolveDeviceByToken, isDeviceActive, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
+import { syncTokenFile, resolveDeviceByToken, isDeviceActive, isDeviceRevoked, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
 import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/relay-connector';
 import {
   startMachineAttachSupervisor,
   stopMachineAttachSupervisor,
 } from './lib/connect/machine-attach-supervisor';
-import { getServerIdentity } from './lib/mobile/e2ee-identity';
-import { startServerHandshake, completeServerHandshake, type ServerHandshake } from './lib/mobile/e2ee-channel';
+import { completeServerHandshake, type ServerHandshake } from './lib/mobile/e2ee-channel';
 import { encryptFrame, decryptFrame, isEncryptedFrame } from './lib/mobile/e2ee-crypto';
 import {
   buildMobileInboxDelta,
@@ -331,7 +332,7 @@ import {
   negotiateRealtimeHello,
   optionalRealtimeAudienceMatches,
 } from './lib/realtime/negotiation';
-import { deviceE2eeFailureAction } from './lib/ws-server/device-e2ee-policy';
+import { MOBILE_CLOSE } from './lib/ws-server/device-e2ee-policy';
 import { isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
 import { withWsHealthHandler } from './lib/ws-server/handler-activity';
 import { WsWatchdog } from './lib/ws-server/health-watchdog';
@@ -2204,7 +2205,7 @@ function stopFlushTimer(client: ClientState) {
 // legacy clients have no `e2ee` state, so wireForClient is a pass-through and
 // the path is byte-identical to before.
 
-const E2EE_HANDSHAKE_TIMEOUT_MS = 2500;
+
 
 /** Encrypt a plaintext frame for an ENCRYPTED client; pass-through otherwise. */
 function wireForClient(client: ClientState, plaintext: string): string {
@@ -2226,27 +2227,6 @@ function sendInitialClientState(client: ClientState): void {
 
 /** Require E2EE for a remote per-device-token client. Initial state stays
  * withheld until the registered device key completes the handshake. */
-function initiateE2eeHandshake(client: ClientState, device: MobileDevice): void {
-  try {
-    const { handshake, hello } = startServerHandshake(getServerIdentity(), device.identityPublicKey);
-    // Send hello while the connection is still "plaintext" (e2ee unset) so the
-    // awaiting-init suppression in send/sendRaw doesn't block it; THEN enter the
-    // handshake window. hello is plaintext (it establishes the key) but signed.
-    send(client, { channel: 'system', event: 'e2ee-hello', data: hello });
-    client.e2ee = { state: 'awaiting-init', handshake };
-    client.e2ee.helloTimer = setTimeout(() => {
-      if (client.e2ee?.state === 'awaiting-init') {
-        const action = deviceE2eeFailureAction('handshake_timeout');
-        console.warn(`[mobile-e2ee] ${client.id} did not complete the required device-key handshake`);
-        try { client.ws.close(action.closeCode, action.closeReason); } catch { /* already gone */ }
-      }
-    }, E2EE_HANDSHAKE_TIMEOUT_MS);
-  } catch (error) {
-    console.warn(`[mobile-e2ee] handshake init failed for ${client.id}: ${error instanceof Error ? error.message : String(error)}`);
-    const action = deviceE2eeFailureAction('handshake_init_failed');
-    try { client.ws.close(action.closeCode, action.closeReason); } catch { /* already gone */ }
-  }
-}
 
 /** Handle the client's e2ee-init: verify + derive the session key, then deliver
  *  an encrypted e2ee-ready + the (now encrypted) initial state. */
@@ -2261,7 +2241,7 @@ function handleE2eeInit(client: ClientState, msg: Record<string, unknown>): void
   });
   if ('error' in result) {
     console.warn(`[mobile-e2ee] ${client.id} handshake rejected: ${result.error}`);
-    try { client.ws.close(4403, 'e2ee handshake failed'); } catch { /* already gone */ }
+    try { client.ws.close(MOBILE_CLOSE.proofRejected, 'e2ee handshake failed'); } catch { /* already gone */ }
     return;
   }
   e2ee.sessionKey = result.sessionKey;
@@ -3680,11 +3660,11 @@ async function handleClientMessage(client: ClientState, raw: string) {
 
   const encryptedFrame = isEncryptedFrame(msg) ? msg : null;
   if (client.e2ee?.state === 'awaiting-init' && !encryptedFrame && msg.type !== 'e2ee-init') {
-    try { client.ws.close(4403, 'e2ee handshake required'); } catch { /* already gone */ }
+    try { client.ws.close(MOBILE_CLOSE.protocolRejected, 'e2ee handshake required'); } catch { /* already gone */ }
     return;
   }
   if (client.e2ee?.state === 'encrypted' && !encryptedFrame) {
-    try { client.ws.close(4403, 'encrypted frames required'); } catch { /* already gone */ }
+    try { client.ws.close(MOBILE_CLOSE.protocolRejected, 'encrypted frames required'); } catch { /* already gone */ }
     return;
   }
 
@@ -7720,6 +7700,7 @@ function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
 // ── Server startup ──
 
 const httpServer = createServer(async (req, res) => {
+  if (handleTokenProjectionRequest(req, res, isAuthorizedInternalRequest)) return;
   // Rust classifies and stamps only the first request on a connection. End each
   // relayed response so the next request is classified and stamped on a fresh socket.
   const symonOwnerRequest = symonOwnerPaths.has(req.url?.split('?')[0] ?? '');
@@ -8887,6 +8868,7 @@ const httpServer = createServer(async (req, res) => {
 const WS_LISTEN_HOST = resolveListenHost();
 const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
 
+try { syncTokenFile(); } catch { console.error('[mobile-e2ee] Auth projection unavailable; device HTTP requests will retry.'); }
 const WS_TOKEN = getOrCreateWsToken();
 console.log(`[ws-auth] WS token loaded (source: ${wsTokenSource()})`);
 
@@ -8909,6 +8891,7 @@ const wss = new WebSocketServer({
       __o8AuthKind?: 'operator' | 'device';
       __o8Remote?: boolean;
       __o8RevokedClose?: boolean;
+      __o8AuthUnavailable?: boolean;
     };
     // Remote vs loopback (drives whether E2EE is offered) — socket peer truth.
     req.__o8Remote = !isLoopbackAddress(o8dBridge?.peer(req) ?? req.socket?.remoteAddress ?? '127.0.0.1');
@@ -8930,7 +8913,7 @@ const wss = new WebSocketServer({
         done(true);
         return;
       }
-      // Known-but-REVOKED token → accept the upgrade, then close 4401 immediately
+      // Known-but-REVOKED token → accept the upgrade, then close 4410 immediately
       // (handled in the connection handler) so the phone gets a deterministic
       // "revoked" signal on reconnect, not an ambiguous upgrade failure.
       if (token && isTokenRevoked(token)) {
@@ -8939,7 +8922,10 @@ const wss = new WebSocketServer({
         return;
       }
     } catch {
-      // DB not ready / lookup error → fall through to reject.
+      // Accept only to deliver a retryable close; never register this socket.
+      req.__o8AuthUnavailable = true;
+      done(true);
+      return;
     }
     done(false, 401, 'Unauthorized');
   },
@@ -8958,17 +8944,22 @@ wss.on('connection', (ws, req) => {
     __o8AuthKind?: 'operator' | 'device';
     __o8Remote?: boolean;
     __o8RevokedClose?: boolean;
+    __o8AuthUnavailable?: boolean;
   };
-  // #5 — a revoked token was accepted only to deliver a clean 4401 close. Send it
+  // #5 — a revoked token was accepted only to deliver a clean 4410 close. Send it
   // and drop the socket without registering a client (no data is ever exchanged).
+  if (upgrade.__o8AuthUnavailable) {
+    try { ws.close(MOBILE_CLOSE.authUnavailable, 'auth_unavailable'); } catch { /* already gone */ }
+    return;
+  }
   if (upgrade.__o8RevokedClose) {
-    try { ws.close(4401, 'device revoked'); } catch { /* already gone */ }
+    try { ws.close(MOBILE_CLOSE.deviceRevoked, 'device_revoked'); } catch { /* already gone */ }
     return;
   }
   const device = upgrade.__o8Device ?? null;
   const authKind = upgrade.__o8AuthKind;
   if (!authKind) {
-    try { ws.close(4401, 'missing authenticated subject'); } catch { /* already gone */ }
+    try { ws.close(MOBILE_CLOSE.internalError, 'internal_error'); } catch { /* already gone */ }
     return;
   }
   const remote = upgrade.__o8Remote === true;
@@ -9013,7 +9004,7 @@ wss.on('connection', (ws, req) => {
   // initial state is withheld until the channel is encrypted. Loopback +
   // legacy shared-token clients are a separate explicit plaintext auth path.
   if (remote && device) {
-    initiateE2eeHandshake(client, device);
+    initiateE2eeHandshake(client, device, send);
   } else {
     sendInitialClientState(client);
   }
@@ -9075,9 +9066,11 @@ setInterval(() => {
   for (const client of clients.values()) {
     if (!client.deviceId) continue;
     try {
-      if (!isDeviceActive(client.deviceId)) {
+      if (isDeviceRevoked(client.deviceId)) {
         console.log(`[mobile-e2ee] closing revoked device connection ${client.id} (device ${client.deviceId})`);
-        try { client.ws.close(4401, 'device revoked'); } catch { /* already gone */ }
+        try { client.ws.close(MOBILE_CLOSE.deviceRevoked, 'device_revoked'); } catch { /* already gone */ }
+      } else if (!isDeviceActive(client.deviceId)) {
+        try { client.ws.close(MOBILE_CLOSE.internalError, 'internal_error'); } catch { /* already gone */ }
       }
     } catch { /* DB hiccup — try again next sweep */ }
   }
@@ -10199,7 +10192,7 @@ async function shutdown(signal: string, exitCode = 0) {
 
   // Send close frame to every client so they reconnect cleanly
   for (const client of clients.values()) {
-    try { client.ws.close(1001, 'server shutting down'); } catch { /* already gone */ }
+    try { client.ws.close(MOBILE_CLOSE.serverShutdown, 'server shutting down'); } catch { /* already gone */ }
   }
   clients.clear();
 
