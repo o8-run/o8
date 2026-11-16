@@ -20,6 +20,20 @@ describe('Codex orchestrator error events', () => {
     });
   });
 
+  it('puts a paragraph break between separate messages in one turn', () => {
+    const state: CodexLineHandlerState = { threadId: null, cost: null };
+    const onEvent = vi.fn();
+    const message = (text: string) => JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', id: text, text } });
+
+    handleCodexJsonLine(message('I will compare the two.'), state, onEvent, { isLocalModel: false });
+    handleCodexJsonLine(message('The roadmap is clear.'), state, onEvent, { isLocalModel: false });
+
+    expect(onEvent.mock.calls.map(([event]) => event)).toEqual([
+      { type: 'text', text: 'I will compare the two.' },
+      { type: 'text', text: '\n\nThe roadmap is clear.' },
+    ]);
+  });
+
   it('retains fresh, cached, and output token truth from a completed turn', () => {
     const state: CodexLineHandlerState = { threadId: null, cost: null };
 
