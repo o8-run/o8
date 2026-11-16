@@ -420,7 +420,7 @@ function localRequestRefusal(req: NextRequest): NextResponse | null {
 }
 
 /** Exported for the vitest gate suite (tests/middleware-gate.test.ts). */
-export function panelGateMiddleware(req: NextRequest): NextResponse {
+export function panelGateMiddleware(req: NextRequest, options: { rebuildMissing?: boolean } = {}): NextResponse {
   const { pathname } = req.nextUrl;
   const method = req.method.toUpperCase();
   const boundary = localRequestRefusal(req);
@@ -501,6 +501,9 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
   // A per-device credential is a capability token, not an operator credential.
   // It can reach only the explicit mobile surface above; new routes fail closed.
   try {
+    // No credential file yet: the default export asks the registry to rebuild it
+    // before an unrecognized bearer is refused. Without that owner it reads as empty.
+    if (bearer && options.rebuildMissing && readTokenProjection().missing) throw new Error('missing projection');
     if (isActiveDeviceToken(bearer)) {
       if (deviceMayAccess(pathname, method)) return NextResponse.next();
       return NextResponse.json({ error: 'Device token is not authorized for this endpoint.' }, { status: 403 });
@@ -540,17 +543,18 @@ export default async function middleware(req: NextRequest, event?: NextFetchEven
   const boundary = localRequestRefusal(req);
   if (boundary) return boundary;
   const gateWithRecovery = async (request: NextRequest) => {
-    const response = panelGateMiddleware(request);
+    const response = panelGateMiddleware(request, { rebuildMissing: true });
     if (response.status !== 503) return response;
+    // When no rebuild is possible, an absent file is an empty registry again.
+    const settled = () => panelGateMiddleware(request);
     try {
       const token = loadPanelToken();
-      if (!token) return response;
-      const repair = await fetch(`http://127.0.0.1:${resolvePortInfo().wsPort}/internal/mobile-token-projection`, {
+      if (!token) return settled();
+      await fetch(`http://127.0.0.1:${resolvePortInfo().wsPort}/internal/mobile-token-projection`, {
         method: 'POST', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2000), redirect: 'error',
       });
-      if (repair.ok) return panelGateMiddleware(request);
-    } catch { /* Keep the retryable response. */ }
-    return response;
+    } catch { /* The registry owner is not reachable. */ }
+    return settled();
   };
   if (!clerkPublishableKey || !clerkSecretKey) return gateWithRecovery(req);
   hostedMiddleware ??= import('@clerk/nextjs/server').then(({ clerkMiddleware }) =>

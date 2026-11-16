@@ -148,6 +148,15 @@ describe('durable device pairing through persisted registry and HTTP middleware'
     } finally { fetchMock.mockRestore(); }
   });
 
+  it('answers an unknown bearer with 401 when no projection exists and nothing can rebuild it', async () => {
+    rmSync(MOBILE_DEVICE_TOKENS_PATH, { force: true });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('no registry owner'));
+    try {
+      expect((await middleware(req('unknown-credential')))!.status).toBe(401);
+      expect(panelGateMiddleware(req('unknown-credential')).status).toBe(401);
+    } finally { fetchMock.mockRestore(); writeFileSync(MOBILE_DEVICE_TOKENS_PATH, '', { mode: 0o600 }); }
+  });
+
   it('returns 503 with a retry hint when canonical storage cannot rebuild', async () => {
     getSqlite();
     rmSync(MOBILE_DEVICE_TOKENS_PATH);

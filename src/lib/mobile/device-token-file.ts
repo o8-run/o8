@@ -17,22 +17,33 @@ export function writeActiveTokenHashes(hashes: string[], revoked: string[] = [])
     renameSync(temp, MOBILE_DEVICE_TOKENS_PATH);
   } catch (error) {
     // Never leave an old active credential readable after a failed revocation publication.
-    try { unlinkSync(MOBILE_DEVICE_TOKENS_PATH); } catch { /* unavailable */ }
+    invalidateTokenProjection();
     throw error;
   } finally {
     try { unlinkSync(temp); } catch { /* renamed or never created */ }
   }
 }
 
-export function readTokenProjection(): { active: Set<string>; revoked: Set<string> } {
+/**
+ * An absent file means no device was ever enrolled here: an empty set, marked
+ * `missing` so the gate can ask for a rebuild. Unreadable or invalid content throws.
+ */
+export function readTokenProjection(): { active: Set<string>; revoked: Set<string>; missing: boolean } {
   const active = new Set<string>();
   const revoked = new Set<string>();
-  for (const line of readFileSync(MOBILE_DEVICE_TOKENS_PATH, 'utf8').split('\n').filter(Boolean)) {
+  let raw: string;
+  try {
+    raw = readFileSync(MOBILE_DEVICE_TOKENS_PATH, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { active, revoked, missing: true };
+    throw error;
+  }
+  for (const line of raw.split('\n').filter(Boolean)) {
     if (/^[a-f0-9]{64}$/.test(line)) active.add(line);
     else if (/^revoked:[a-f0-9]{64}$/.test(line)) revoked.add(line.slice(8));
     else throw new Error('Invalid mobile auth projection');
   }
-  return { active, revoked };
+  return { active, revoked, missing: false };
 }
 
 /** Compatibility reader for non-gate consumers. */
@@ -44,5 +55,12 @@ export function readActiveTokenHashes(): Set<string> {
 
 /** Prevent a failed canonical read from leaving a previously published active set. */
 export function invalidateTokenProjection(): void {
-  try { unlinkSync(MOBILE_DEVICE_TOKENS_PATH); } catch { /* already unavailable */ }
+  // A marker line no reader accepts, so the gate answers "try again" and not
+  // "unauthorized". Absence alone would read as "no devices".
+  try {
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(MOBILE_DEVICE_TOKENS_PATH, 'unavailable\n', { mode: 0o600 });
+  } catch {
+    try { unlinkSync(MOBILE_DEVICE_TOKENS_PATH); } catch { /* already absent */ }
+  }
 }
