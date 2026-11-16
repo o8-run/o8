@@ -315,8 +315,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/app/api/orchestrator/delegate/route.ts](../../src/app/api/orchestrator/delegate/route.ts) | governedLaunchPrompt | Worker scope, launch and completion | 25 | 25 | 2 |
 | [src/app/api/orchestrator/visual-inspection/route.ts](../../src/app/api/orchestrator/visual-inspection/route.ts) | questions:message | Orchestration and tool authority | 129 | 129 | 0 |
 | [src/app/api/panel/issues/enhance/route.ts](../../src/app/api/panel/issues/enhance/route.ts) | systemPrompt | Model input and output contract | 258 | 258 | 2 |
-| [src/app/api/panel/o8-github-summary/route.ts](../../src/app/api/panel/o8-github-summary/route.ts) | messages:message | Model input and output contract | 69 | 69 | 0 |
-| [src/app/api/panel/o8-github-summary/route.ts](../../src/app/api/panel/o8-github-summary/route.ts) | prompt | Model input and output contract | 26 | 26 | 2 |
 | [src/app/api/panel/o8-mission-summary/route.ts](../../src/app/api/panel/o8-mission-summary/route.ts) | messages:message | Model input and output contract | 118 | 118 | 0 |
 | [src/app/api/panel/o8-scratch-chat/route.ts](../../src/app/api/panel/o8-scratch-chat/route.ts) | stream:message | Model input and output contract | 41 | 41 | 1 |
 | [src/app/api/v2/chat/suggestions/route.ts](../../src/app/api/v2/chat/suggestions/route.ts) | SYSTEM_PROMPT | Model input and output contract | 214 | 214 | 0 |
