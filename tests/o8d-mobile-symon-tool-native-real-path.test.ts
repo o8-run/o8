@@ -65,3 +65,16 @@ it('forwards Next calls to the WS owner without a local bridge client', async ()
     if (saved.port === undefined) delete process.env.O8_WS_PORT; else process.env.O8_WS_PORT = saved.port;
   }
 });
+
+
+it('runs deferred and unknown tools in the server owner with Next stopped', async () => {
+  writeFileSync(join(server.directory, 'symon-scope-grant.json'), JSON.stringify({
+    sessionId: 'native-phone', subject: 'operator', deviceId: null, workspaceMode: 'o8', toolPack: 'o8',
+    repoId: null, repoPath: null, allowedTools: ['symon_machine_switch', 'unknown'], issuedAt: Date.now(), scopeVersion: 1,
+  }));
+  for (const [tool, error] of [['symon_machine_switch', 'desktop_unavailable'], ['unknown', 'unknown_tool']] as const) {
+    const response = await call('POST', server.token, false, { sessionId: 'native-phone', callId: tool, tool, args: {} });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: false, result: { error } });
+  }
+});

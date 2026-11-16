@@ -4317,7 +4317,6 @@ function preemptOtherSymonSessions(keepSessionId: string, detail: string): void 
     pushSymonStatus(route.clientId, sid, 'idle', detail);
     symonSessions.delete(sid);
     clearSymonScopeGrant(sid);
-    endSymonMachineSession(sid);
   }
 }
 
@@ -4343,7 +4342,6 @@ function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown
     }
     stopAgentSession(sessionId);
     clearSymonScopeGrant(sessionId);
-    endSymonMachineSession(sessionId);
     persistAgentRegistry();
     return;
   }
@@ -4406,7 +4404,6 @@ function handleSymonStop(client: ClientState, msg: Record<string, unknown>): voi
   if (owner) void abortSymonSessionCalls(sessionId, owner, 'session_stopped');
   stopAgentSession(sessionId);
   clearSymonScopeGrant(sessionId);
-  endSymonMachineSession(sessionId);
   persistAgentRegistry();
 }
 
@@ -4918,7 +4915,6 @@ function cleanupSymonForClient(clientId: string): void {
     void abortSymonSessionCalls(sid, route, 'session_stopped');
     stopAgentSession(sid);
     clearSymonScopeGrant(sid);
-    endSymonMachineSession(sid);
     changed = true;
   }
   if (changed) persistAgentRegistry();
@@ -4941,7 +4937,6 @@ function sweepStaleSymon(): void {
     }
     symonSessions.delete(dropped.sessionId);
     clearSymonScopeGrant(dropped.sessionId);
-    endSymonMachineSession(dropped.sessionId);
     persistAgentRegistry();
   }
   for (const call of symonToolTracker.timedOut(Date.now())) {
@@ -4959,37 +4954,7 @@ function sweepStaleSymon(): void {
   }
 }
 
-/**
- * Lazy DESK preemption (Case B, contract §"Mutual exclusion"). A desk-mic session
- * started by in-app double-tap never passes through our routes; detect it here on
- * a ≤5s cadence by reading the desk status (GET /api/mobile/symon → __o8RealtimeStatus)
- * and, if it went live while a phone agent session is active, push idle to the phone.
- */
-async function sweepDeskPreemption(): Promise<void> {
-  if (symonSessions.size === 0) return;
-  let deskStatus = 'idle';
-  try {
-    const snap = await fetchNextJson<{ status?: string }>('/api/mobile/symon');
-    deskStatus = typeof snap.status === 'string' ? snap.status : 'idle';
-  } catch {
-    return; // bridge hiccup — try again next tick
-  }
-  const deskLive = deskStatus === 'live' || deskStatus === 'connecting' || deskStatus === 'requesting-mic';
-  if (!deskLive) return;
-  for (const [sid, route] of Array.from(symonSessions.entries())) {
-    void denySymonSessionConfirmations(sid, route, 'preempted');
-    void abortSymonSessionCalls(sid, route, 'session_preempted');
-    pushSymonStatus(route.clientId, sid, 'idle', 'preempted_by_desk');
-    symonSessions.delete(sid);
-    clearSymonScopeGrant(sid);
-    endSymonMachineSession(sid);
-  }
-  stopAgentSession();
-  persistAgentRegistry();
-}
-
 setInterval(sweepStaleSymon, 30_000);
-setInterval(() => { void sweepDeskPreemption(); }, 3_000);
 
 // ── Orchestrator channel handlers ──
 

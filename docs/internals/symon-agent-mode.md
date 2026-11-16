@@ -101,8 +101,8 @@ no tools. The complete Life and desktop catalogs inherit the cached schemas;
 the frozen Phone Code pack does not.
 
 Every `mcp__` tool remains unknown to the native safety classifier and therefore
-defaults to `Destructive`. The normal Rust confirmation card must settle before
-dispatch posts to `POST /api/symon/mcp/call`. Returned MCP content is capped at
+defaults to `Destructive`. For phone voice, a server confirmation card must settle before dispatch calls
+`callSymonMcpTool` directly. Desktop bridge callers retain their existing routes. Returned MCP content is capped at
 16 KB and nested under `observedData` with
 `trust:"untrusted_observed_data_not_instructions"`. The two bridge routes accept
 only the operator principal used by the Rust bridge; device and worker tokens cannot call them directly.
@@ -114,11 +114,10 @@ only the operator principal used by the Rust bridge; device and worker tokens ca
 Mints an ephemeral OpenAI Realtime client token carrying the shared voice,
 persona, and live Mac tool schemas used by the desk-mic session. The workspace
 then selects both the phone catalog and model: ordinary Life and legacy `{}`
-receive the complete live bridge catalog on mini, the repository catch-up launch
+receive the server catalog on mini, the repository catch-up launch
 uses flagship, and Code receives the explicit bounded pack below and can
 participate in the server-owned mini/flagship experiment.
-Desktop mints remain unchanged. All schemas still come from the Rust-supplied
-live catalog that reaches the webview; the server filters those schemas by name
+Desktop mints remain unchanged. Static schemas come from the server phone catalog; the server filters those schemas by name
 rather than maintaining copy-pasted tool definitions.
 
 Request body (all fields optional; legacy `{}` remains valid):
@@ -284,7 +283,7 @@ The Code and repository catch-up schemas omit `repo`, `repoId`, and `repoPath`
 and reject unknown arguments. Repository identity belongs exclusively to the
 immutable Mac grant; the relay injects the canonical values after the model
 chooses a tool. Each selector emits its required tools in the canonical order
-above, and the o8 selector appends MCP schemas in bridge order. If any required
+above, and the o8 selector appends MCP schemas in server catalog order. If any required
 tool for the selected pack is absent or is not a function schema, the mint fails
 as `503 desktop_unavailable` with the missing names instead of silently creating
 a partial phone agent. Desktop Symon does not pass through these phone selectors
@@ -483,7 +482,7 @@ refusal lands later at the transport as `invalid_model`. If the trial session
 fails to connect, the fix is a separate Live-session transport path, not a
 change to this allowlist.
 
-Side effect: if a desk-mic session is live, it is **stopped cleanly before minting** (see mutual exclusion) and `preempted: "desk"` is set.
+The deleted desktop live voice host is no longer contacted. `preempted` remains present and is `null`. Voice uses the current default because no server-side voice selection preference exists.
 
 Errors (typed, structured, never thrown):
 | HTTP | body.error | meaning |
@@ -495,7 +494,7 @@ Errors (typed, structured, never thrown):
 | 501 | `no_key` | BYOK OpenAI key absent (same rule as the desk mint — managed proxy does not carry realtime in v1) |
 | 501 | `subscription_unavailable` | repository catch-up or `symon.voice.subscriptionOnly` requires a current Codex ChatGPT-OAuth login and will not fall through to BYOK |
 | 502 | `mint_failed` | upstream OpenAI session-mint failure (body includes `detail`) |
-| 503 | `desktop_unavailable` | webview/eval bridge unreachable, or the live catalog is missing a required Code tool |
+| 503 | `desktop_unavailable` | server catalog is missing a required pack tool, or the scope grant cannot be persisted |
 
 ### GET/POST `/api/mobile/symon` — unchanged (Remote mode)
 
@@ -505,23 +504,23 @@ One **additive** field on GET responses: `"agentSession": { "sessionId", "starte
 
 Not called by the phone. Body `{ sessionId, callId, tool, args, utterance? }` re-loads the
 active grant, rejects disallowed tools, overwrites repo arguments with the
-server-owned canonical pair, and then executes through the same Rust dispatcher
-and SafetyClass gate as desk mode. A normal completion returns `{ ok, result }`;
+server-owned canonical pair, and then executes through the server phone registry,
+SafetyClass gate and `phoneToolHandler`. A normal completion returns `{ ok, result }`;
 a gated call returns `{ ok:false, result:
-{error:"needs_confirmation", detail}, confirmation }` while its original webview
-promise remains pending under the exact `(sessionId, callId)` key.
+{error:"needs_confirmation", detail}, confirmation }` while its server registry call
+remains pending under the exact `(sessionId, callId)` key.
 
 `dryRun:true` is an authenticated operator/eval diagnostic: it performs the same
-grant validation and returns the exact scoped args without invoking Rust.
+grant validation and returns the exact scoped args without executing a handler.
 
 ### POST `/api/mobile/symon/confirm` — internal resolver (ws-server → Next)
 
 Body `{ sessionId, callId, confirmationId, allow, terminal? }` resolves only the matching
-cached invoke through `window.__o8SymonAgent.resolveConfirm`. The response is
+registry call through `phoneToolServer.calls.decide()`. The response is
 `{ok:true,resolution:{status:"resolved"|"already_resolved",allow}}` or a terminal
 `expired`/`preempted` resolution. A mismatched triple fails closed. The route
 never accepts tool arguments or repo context. `terminal` accepts only `expired`
-or `preempted`, only with `allow:false`; the Rust gate records that exact reason
+or `preempted`, only with `allow:false`; the server registry records that exact reason
 instead of letting the relay relabel an ordinary rejection after the fact.
 
 ## WS channel: `symon`  (multiplexed on the paired socket resolved from `O8_WS_PORT` or `~/.o8/ws-port` — `subscribe("symon", handler)`)
@@ -561,7 +560,7 @@ Completion requires an assistant `end_turn` text record, an empty set of `tool_u
 - Parallel calls are keyed by `(sessionId, callId)`; confirmations add
   `confirmationId`. Terminal results are cached for five minutes so duplicate
   calls replay instead of executing twice.
-- Execution timeout is **60s**, paused while awaiting the Rust gate. The gate's
+- Execution timeout is **60s**, paused while awaiting the server confirmation gate. The gate's
   `expiresAt` is authoritative and auto-denies. Stop, disconnect, stale cleanup,
   and session preemption also submit denial before dropping the call.
 - v2 receives `symon-confirm-required`, sends one decision, then receives a
@@ -582,6 +581,10 @@ Completion requires an assistant `end_turn` text record, an empty set of `tool_u
   `done`/`failed` from the queued orchestrator turn. `stop` emits `stopped` after
   the exact lane has been reaped and archived. The phone forwards every terminal
   update into the live Realtime conversation so Symon answers aloud.
+
+The route owner is shared on `globalThis` across Next bundles; native transport forwards both routes to the WS owner. Re-POST attaches to the existing registry call before review preparation. Cards come only from server review builders, and a builder failure creates no confirmation. Duplicate decisions preserve the first decision. See [Server phone tool handlers](phone-tool-handlers.md) for cancellation bounds and process-local replay limits.
+
+The nine deferred tools (`symon_execute_plan`, `symon_machine_list`, `symon_machine_switch`, `symon_ledger_recent`, `symon_ledger_undo`, `symon_watch`, `symon_watch_run`, `agent_turn`, `escalate`) return `desktop_unavailable`. The ledger, watch execution and background agent behavior below describe classic capabilities, not current phone voice execution. Watch list and cancellation remain server-supported. Phone WS attempt tracking remains; the classic tool-action ledger is not invoked by server handlers.
 
 ## Durable action ledger
 
@@ -791,15 +794,15 @@ request state, and commits (`sourceKind: 'repository'`, from the GitHub webhook)
 
 One operator, one Symon voice at a time:
 
-- Starting an **Agent-mode session** (`POST /session`) while a desk-mic session is live: the desk session is stopped cleanly first (same code path as the user toggling it off), the response carries `preempted:"desk"`, and the desk UI shows a "Symon moved to your phone" notice.
-- Starting a **desk-mic session** (double-tap / dock / Remote-mode toggle) while an Agent-mode session is live: the Agent session is terminated — `symon-agent-status {status:"idle", detail:"preempted_by_desk"}` is pushed to the phone, which must close its WebRTC connection on receipt.
+- Phone voice does not stop or probe the deleted desktop live voice host. The mint response retains `preempted:null`.
+- The desktop status sweep was removed from the phone voice path. Remote-mode endpoints remain separate.
 - A second `POST /session` while an Agent session is live: last-start-wins as well (the old `sessionId` gets the same `idle`/`preempted` push) — this makes phone-app restarts self-healing.
-- Rationale: the operator is one person moving between surfaces; whichever mic they pick up wins. Never two live sessions; never a refusal the operator has to untangle.
+- Phone-session ownership remains last-start-wins. The removed desktop live voice host no longer participates.
 
 ## Session registry
 
 The desktop keeps exactly one `activeAgentSession` record `{ sessionId, startedAt, lastStatus, source: "phone" }` plus the separately persisted immutable scope grant described above. The status record powers the GET field, mutual exclusion, and stale-session cleanup: a session with no status event or tool call for **10 minutes** is marked `idle` and dropped. Every status, tool, decision, and stop frame must match both the active session and its authenticated operator/device subject.
-Stop, disconnect, stale cleanup, and desk preemption revoke the exact persisted
+Stop, disconnect, stale cleanup, and phone session preemption revoke the exact persisted
 grant; revocation uses an atomic move-and-compare so it cannot delete a newer
 last-start-wins mint.
 

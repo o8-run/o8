@@ -30,6 +30,7 @@ export interface PhoneToolDecision {
   callId: string;
   confirmationId: string;
   allow: boolean;
+  terminal?: 'expired' | 'preempted';
 }
 
 function immutableCopy<T>(value: T): T {
@@ -58,7 +59,7 @@ interface CallState {
 }
 
 /**
- * Process-local owner, deliberately unwired. Restart reconciliation attaches here
+ * Process-local call owner. Restart reconciliation attaches here
  * when durable call receipts are introduced; a restart currently loses all state.
  * Completed calls and early interrupts each retain at most 1,000 entries for five
  * minutes, lazily pruned on access. Replay protection ends at eviction or restart.
@@ -135,6 +136,12 @@ export function createPhoneToolCallRegistry(
   }
 
   return {
+    attach(sessionId: string, callId: string, tool: string): Promise<SymonToolRelayResult> | undefined {
+      prune();
+      const call = active.get(keyFor(sessionId, callId)) ?? completed.get(keyFor(sessionId, callId))?.call;
+      return call ? this.start({ sessionId, callId, tool, args: {} }) : undefined;
+    },
+
     /** Pending gates return immediately; executing starts/attaches await the terminal result. */
     async start(input: PhoneToolCall): Promise<SymonToolRelayResult> {
       try {
@@ -196,9 +203,9 @@ export function createPhoneToolCallRegistry(
         return toolErrorResult('confirmation_declined');
       }
       call.decided = true;
-      if (input.allow) execute(key, call);
+      if (input.allow && !input.terminal) execute(key, call);
       else finish(key, call, toolErrorResult('confirmation_declined'));
-      return { ok: true, result: { status: 'resolved', allow: input.allow } };
+      return { ok: true, result: { status: input.terminal ?? 'resolved', ...(!input.terminal ? { allow: input.allow } : {}) } };
     },
 
     /** Await one terminal result, including while a gate is pending. */
@@ -232,5 +239,3 @@ export function createPhoneToolCallRegistry(
     },
   };
 }
-
-export const phoneToolCalls = createPhoneToolCallRegistry();
