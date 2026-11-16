@@ -225,6 +225,14 @@ function writeMissionRegistryStateUnlocked(state: OrchestratorMissionState, mirr
     const normalized = normalizeOrchestratorMissionStateForPersistence(mirror ? preserveReleasedPackets(state) : state);
     const waves = buildDependencyGraph(normalized.packets).map((node) => node.wave);
     const archivedAt = missionIsTerminal(normalized) ? Date.now() : null;
+    const json = JSON.stringify(normalized);
+    // The headless loop rewrites every live mission each tick. An update that
+    // changes nothing keeps the stored row and its version as they are.
+    const stored = getSqlite().prepare('SELECT mission_state_json, archived_at FROM missions WHERE id = ?')
+      .get(missionId) as Pick<MissionStateRow, 'mission_state_json' | 'archived_at'> | undefined;
+    if (stored && stored.mission_state_json === json && (stored.archived_at !== null) === (archivedAt !== null)) {
+      return normalized;
+    }
     const version = nextRegistryVersion(missionId);
     getSqlite().prepare(`
       UPDATE missions
@@ -240,7 +248,7 @@ function writeMissionRegistryStateUnlocked(state: OrchestratorMissionState, mirr
         title: packet.title,
         referenceLabel: packet.referenceLabel,
       }))),
-      JSON.stringify(normalized),
+      json,
       Math.max(1, ...waves),
       version,
       archivedAt,
