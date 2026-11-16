@@ -9,7 +9,7 @@ import { nativeSessionReadsEnabled } from './native-session-reads';
 import { markNativeCortexReader } from '@/lib/cortex/owner-process';
 import { isLoopbackAddress } from '@/lib/auth/loopback-request';
 import { O8_RELAY_FORWARD_HEADER, O8_RELAY_FORWARD_MARKER, O8_RELAY_SURFACE_HEADER, O8_WEB_MACHINE_SURFACE } from '@/lib/connect/web-machine-surface';
-import { browserWriteAllowed, isAllowedLocalHost, requestTargetAllowed } from '../../../scripts/lib/http-request-boundary.cjs';
+import { browserWriteAllowed, isShellHost, requestTargetAllowed } from '../../../scripts/lib/http-request-boundary.cjs';
 export { nativeSurfaceRoutes } from './native-http-registry';
 
 type Handler = (request: NextRequest, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
@@ -31,7 +31,7 @@ export function nativeClientAddr(clientAddress: string | null, get: (name: strin
       relaySurface: get(O8_RELAY_SURFACE_HEADER) === O8_WEB_MACHINE_SURFACE ? O8_WEB_MACHINE_SURFACE : null };
   }
   const host = get('host');
-  if (!host || publicPort === undefined || !isAllowedLocalHost(host, publicPort) || !requestTargetAllowed(target, publicPort)
+  if (!host || publicPort === undefined || !isShellHost(host, publicPort) || !requestTargetAllowed(target, publicPort)
     || !browserWriteAllowed(method, get, 'http:')) return { address: 'unverified-proxy', relaySurface: null };
   return { address: clientAddress, relaySurface: null };
 }

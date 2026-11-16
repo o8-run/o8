@@ -9,13 +9,35 @@ function isLoopbackHost(host, port) {
   return port === undefined || match[2] === String(port) || (!match[2] && (port === 80 || port === 443));
 }
 
-function isAllowedLocalHost(host, port) {
+/** Loopback names and the shell's own origin: the only hosts that can carry loopback trust. */
+function isShellHost(host, port) {
   if (isLoopbackHost(host, port)) return true;
   if (typeof host !== 'string') return false;
   const canonical = host.toLowerCase();
   return canonical === 'tauri.localhost' || (port !== undefined
     ? canonical === `tauri.localhost:${port}`
     : /^tauri\.localhost:[1-9][0-9]{0,4}$/.test(canonical) && Number(canonical.split(':')[1]) <= 65535);
+}
+
+function lanAccessEnabled(env = process.env) {
+  return ['1', 'true', 'yes', 'on'].includes(String(env.O8_LAN_ACCESS ?? '').trim().toLowerCase());
+}
+
+/**
+ * A phone on the same network addresses this machine by its IPv4 address. A
+ * numeric address cannot be re-pointed by DNS, so it is not the rebinding case
+ * the name check exists for. It never carries loopback trust.
+ */
+function isIpv4LiteralHost(host, port) {
+  if (typeof host !== 'string') return false;
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?::([1-9][0-9]{0,4}))?$/.exec(host);
+  if (!match || match.slice(1, 5).some(part => Number(part) > 255 || (part.length > 1 && part[0] === '0'))) return false;
+  if (match[5] && Number(match[5]) > 65535) return false;
+  return port === undefined || match[5] === String(port) || (!match[5] && (port === 80 || port === 443));
+}
+
+function isAllowedLocalHost(host, port, env = process.env) {
+  return isShellHost(host, port) || (lanAccessEnabled(env) && isIpv4LiteralHost(host, port));
 }
 
 function requestTargetAllowed(target, port) {
@@ -44,6 +66,7 @@ function browserWriteAllowed(method, get, protocol = 'http:') {
 }
 
 exports.isLoopbackHost = isLoopbackHost;
+exports.isShellHost = isShellHost;
 exports.isAllowedLocalHost = isAllowedLocalHost;
 exports.requestTargetAllowed = requestTargetAllowed;
 exports.browserWriteAllowed = browserWriteAllowed;
