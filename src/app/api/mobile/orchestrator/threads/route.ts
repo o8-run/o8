@@ -1,4 +1,5 @@
 import { createParkedWorkspaceContext, parkedWorkspaceProjection } from '@/lib/inbox/parked-workspaces';
+import { mobileModelError } from '@/lib/mobile/model-catalog';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -96,6 +97,7 @@ export async function POST(request: NextRequest) {
         backend?: string | null;
         agent?: string | null;
         reveal?: boolean;
+        model?: string;
       }
     | null;
 
@@ -110,6 +112,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid backend' }, { status: 400, headers: NO_STORE });
   }
 
+  const modelError = mobileModelError(backend ?? 'claude', body.model);
+  if (modelError) return NextResponse.json({ error: modelError }, { status: 400, headers: NO_STORE });
+
   try {
     const thread = createMobileOrchestratorThread({
       repoPath: body.repoPath,
@@ -120,6 +125,7 @@ export async function POST(request: NextRequest) {
       backend,
       agent: body.agent,
       reveal: body.reveal,
+      model: body.model,
     });
     return NextResponse.json({ thread }, { headers: NO_STORE });
   } catch (error) {

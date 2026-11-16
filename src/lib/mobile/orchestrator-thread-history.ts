@@ -367,6 +367,7 @@ export function createMobileOrchestratorThread(input: {
   backend?: MobileOrchestratorBackend | null;
   agent?: string | null;
   reveal?: boolean;
+  model?: string;
 }): MobileOrchestratorThread {
   const repoPath = input.repoPath.trim();
   if (!repoPath) {
@@ -379,7 +380,7 @@ export function createMobileOrchestratorThread(input: {
   const projectId = resolveOrchestratorThreadProjectId(null, input.projectId);
   const record: OrchestratorHistoryRecord = {
     messages: [],
-    model: modelForBackend(backend) ?? DEFAULT_MODEL,
+    model: input.model ?? modelForBackend(backend) ?? DEFAULT_MODEL,
     savedAt: now,
     starred: false,
     pinned: false,

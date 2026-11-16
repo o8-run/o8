@@ -10,6 +10,7 @@ export interface CreateMobileOrchestratorThreadInput {
   repoBranch?: string | null;
   backend?: MobileOrchestratorBackend | null;
   agent?: string | null;
+  model?: string;
 }
 
 type MobileThreadFetch = (
@@ -47,6 +48,7 @@ export async function createMobileOrchestratorThreadFromRepo(
       repoBranch: input.repoBranch ?? undefined,
       backend: input.backend ?? undefined,
       agent: input.agent ?? undefined,
+      model: input.model,
     }),
   });
   const payload = await response.json().catch(() => null) as {

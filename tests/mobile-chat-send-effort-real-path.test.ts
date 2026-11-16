@@ -88,6 +88,17 @@ describe('mobile send effort validation through the route and persisted chat his
     expect(searchRow()).toMatchObject({ model });
   });
 
+  it('rejects an unknown Codex model before dispatch or persistence', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/mobile/chat/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionKey: `llm-chat:${tabId}`, message: 'Hello', model: 'cli:codex:unknown' }),
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'invalid_model' });
+    expect(proxy).not.toHaveBeenCalled();
+    expect(readPersistedLlmChat(tabId)).toBeNull();
+  });
+
   it('accepts a corrected request without duplicating the rejected user message', async () => {
     expect((await POST(request(''))).status).toBe(400);
     closeDb();
