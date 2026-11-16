@@ -250,7 +250,6 @@ describe('route module shape', () => {
 
 const SELF_AUTH = [/^\/api\/worker(\/|$)/, /^\/api\/cloud(\/|$)/, /^\/api\/github\/webhook(\/|$)/];
 const PUBLIC_ANY = [
-  /^\/api\/v2\/auth\/logout\/?$/,
   /^\/api\/mobile\/enroll(\/|$)/,
 ];
 const PUBLIC_READ = [
