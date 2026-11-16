@@ -19,7 +19,12 @@ function isShellHost(host, port) {
     : /^tauri\.localhost:[1-9][0-9]{0,4}$/.test(canonical) && Number(canonical.split(':')[1]) <= 65535);
 }
 
-const { lanAccessEnabled } = require('./lan-access.cjs');
+// This file is also bundled for the browser, so it must not load Node modules.
+// Server entry points hand in the rule that also reads the saved setting; without
+// one, only the launch environment can open the network host rule.
+let lanAccessEnabled = (env = process.env) =>
+  ['1', 'true', 'yes', 'on'].includes(String(env.O8_LAN_ACCESS ?? '').trim().toLowerCase());
+function useLanAccess(rule) { lanAccessEnabled = rule; }
 
 /**
  * A phone on the same network addresses this machine by its IPv4 address. A
@@ -64,6 +69,7 @@ function browserWriteAllowed(method, get, protocol = 'http:') {
 }
 
 exports.isLoopbackHost = isLoopbackHost;
+exports.useLanAccess = useLanAccess;
 exports.isShellHost = isShellHost;
 exports.isAllowedLocalHost = isAllowedLocalHost;
 exports.requestTargetAllowed = requestTargetAllowed;

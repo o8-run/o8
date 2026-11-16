@@ -93,6 +93,7 @@ async function prepareFixture() {
     copyFileSync(join(prebuild, `darwin-${process.arch}`, 'better_sqlite3.node'), join(host, 'better_sqlite3.node'));
   }
   copyFileSync('scripts/lib/http-request-boundary.cjs', join(root, 'http-request-boundary.cjs'));
+  copyFileSync('scripts/lib/lan-access.cjs', join(root, 'lan-access.cjs'));
   await build({
     entryPoints: ['src/lib/browser-engine/egress-proxy.ts'],
     outfile: join(root, 'egress-proxy.cjs'), bundle: true, platform: 'node', format: 'cjs',
