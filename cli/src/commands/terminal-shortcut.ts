@@ -19,6 +19,8 @@ import { CliError, EXIT } from '../api.js';
 import { WATCHER_LABEL } from './terminal-panes.js';
 
 export const SHORTCUT_ACTION = 'o8_terminals';
+/** Focuses the next o8 pane that needs you. */
+export const NEEDS_YOU_ACTION = 'o8_needs_you';
 const MODULE_FILE = 'o8.lua';
 /** The first line of a file this command wrote. A file without it belongs to the operator. */
 const OWNED_HEADER = '-- Written by `o8 terminal shortcut`.';
@@ -87,6 +89,13 @@ export function shortcutModule(self: string[], key: string | null, rexDir: strin
     rexCommand, 'run', '-s', '\0session', '--label', WATCHER_LABEL, '--',
     ...self, '--human', 'terminal', 'panes', '--watch', '--here',
   ].map((word) => (word === '\0session' ? 'ctx.session_id' : luaString(word))).join(', ');
+  const needsYouArgv = [
+    ...self.map(luaString), '"--human"', '"terminal"', '"needs-you"', '"--session"', 'ctx.session_id', '"--from"', 'ctx.block_id or ""',
+  ].join(', ');
+  // The command calls `rex` itself, so it needs `rex` on the PATH the server gives it.
+  const needsYouEnv = rexDir
+    ? `      env = { PATH = ${luaString(rexDir)} .. ${luaString(process.platform === 'win32' ? ';' : ':')} .. (os.getenv("PATH") or "") },`
+    : null;
   return [
     `${OWNED_HEADER} Run it again to update this file,`,
     '-- or `o8 terminal shortcut --remove` to delete it. Edits here are overwritten.',
@@ -105,6 +114,24 @@ export function shortcutModule(self: string[], key: string | null, rexDir: strin
     '    local output = result.stdout ~= "" and result.stdout or result.stderr',
     '    if not result.ok then error(output ~= "" and output or "o8 could not open the terminals tab.", 0) end',
     '    return { output = "o8 is watching for workers in the o8 terminals tab." }',
+    '  end,',
+    '}',
+    'rex.action{',
+    `  name = "${NEEDS_YOU_ACTION}",`,
+    '  title = "Go to o8 Pane That Needs You",',
+    '  description = "Focus the next o8 pane that is blocked or failed. Run it again to move to the next one.",',
+    '  category = "o8",',
+    '  keywords = "o8 needs you blocked stuck failed attention next worker pane",',
+    '  run = function(ctx)',
+    '    if ctx.session_id == nil then error("Run this from a Rex session.", 0) end',
+    `    local result, err = rex.exec({ ${needsYouArgv} }, {`,
+    '      timeout = 15,',
+    ...(needsYouEnv ? [needsYouEnv] : []),
+    '    })',
+    '    if result == nil then error(err, 0) end',
+    '    local output = (result.stdout ~= "" and result.stdout or result.stderr):gsub("%s+$", "")',
+    '    if not result.ok then error(output ~= "" and output or "o8 could not find the pane.", 0) end',
+    '    return { output = output }',
     '  end,',
     '}',
     ...(key ? [`rex.bind(${luaString(key)}, "${SHORTCUT_ACTION}")`] : []),

@@ -263,7 +263,8 @@ commands:
   terminal control <id>  exclusive input/output to an existing terminal; --human for interactive mode
   terminal wait <id> --match <text> [--timeout ms]  wait read-only for output already present or arriving later
   terminal panes [--watch] [--here] [--limit N] [--machine <label-or-id>]  open one read-only pane per running packet, worker terminal and live shell in the Rex session you are in; --here opens them beside this pane
-  terminal shortcut [--key <key>] | --remove  add "Show o8 Terminals" to the Rex command palette: a tab that keeps filling as work starts; optional key; --remove takes it out
+  terminal shortcut [--key <key>] | --remove  add "Show o8 Terminals" and "Go to o8 Pane That Needs You" to the Rex command palette; optional key for the first; --remove takes them out
+  terminal needs-you [--session <id>] [--from <block>]  focus the next o8 pane in this Rex session that is blocked or failed; run again for the next one
   terminal ... --machine <label-or-id>  run terminal commands on a saved SSH machine
   machine add <target> --label <name>  save a verified SSH terminal machine; optional --port, --ssh-config
   machine list|check|rename|disable|enable|remove  manage saved SSH machines

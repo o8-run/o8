@@ -55,11 +55,18 @@ describe('the action file', () => {
     expect(lua).toContain('rex.exec({ "rex", "run", "-s", ctx.session_id, "--label", "o8 watcher", "--", '
       + '"/usr/bin/node", "/opt/o8 app/o8.mjs", "--human", "terminal", "panes", "--watch", "--here" }, {');
     expect(lua).not.toContain('rex.bind');
+    // The second action focuses the next o8 pane that needs you, from the pane it was run in.
+    expect(lua).toContain('name = "o8_needs_you"');
+    expect(lua).toContain('"terminal", "needs-you", "--session", ctx.session_id, "--from", ctx.block_id or "" }');
   });
 
   it('calls rex by its full path when it is known, since the action runs with the server\'s PATH', () => {
     expect(shortcutModule(self, null, '/Apps/Rex Server/MacOS'))
       .toContain('rex.exec({ "/Apps/Rex Server/MacOS/rex", "run", "-s", ctx.session_id,');
+    // It calls rex itself, so rex goes on the PATH it runs with.
+    expect(shortcutModule(self, null, '/Apps/Rex Server/MacOS'))
+      .toContain('env = { PATH = "/Apps/Rex Server/MacOS" .. ":" .. (os.getenv("PATH") or "") },');
+    expect(shortcutModule(self, null)).not.toContain('os.getenv');
     const has = (path: string) => path === join('/b', 'rex');
     expect(rexCommandDir({ PATH: '/a:/b:/c' }, has, 'darwin')).toBe('/b');
     expect(rexCommandDir({ PATH: '/a:/c' }, has, 'darwin')).toBeNull();
