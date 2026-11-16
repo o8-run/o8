@@ -5,4 +5,4 @@ export function isAllowedLocalHost(host: string | null | undefined, port?: numbe
 export function requestTargetAllowed(target: string | null | undefined, port?: number): boolean;
 export function browserWriteAllowed(method: string, get: (name: string) => string | null, protocol?: string): boolean;
 /** Server entry points register the rule that also reads the saved phone-access setting. */
-export function useLanAccess(rule: (env?: Readonly<Record<string, string | undefined>>) => boolean): void;
+export function setLanAccessRule(rule: (env?: Readonly<Record<string, string | undefined>>) => boolean): void;

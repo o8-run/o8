@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect, it } from 'vitest';
-import { isAllowedLocalHost, isShellHost, useLanAccess } from '../scripts/lib/http-request-boundary.cjs';
+import { isAllowedLocalHost, isShellHost, setLanAccessRule } from '../scripts/lib/http-request-boundary.cjs';
 import { lanAccessEnabled } from '../scripts/lib/lan-access.cjs';
 
 const on = { O8_LAN_ACCESS: '1' };
@@ -47,7 +47,7 @@ it('ignores the saved choice until a server entry point registers the rule that 
 });
 
 it('uses the saved choice without granting loopback host trust', () => {
-  useLanAccess(lanAccessEnabled);
+  setLanAccessRule(lanAccessEnabled);
   const dir = mkdtempSync(join(tmpdir(), 'o8-lan-boundary-'));
   try {
     writeFileSync(join(dir, 'phone-network'), 'on\n');

@@ -24,7 +24,7 @@ function isShellHost(host, port) {
 // one, only the launch environment can open the network host rule.
 let lanAccessEnabled = (env = process.env) =>
   ['1', 'true', 'yes', 'on'].includes(String(env.O8_LAN_ACCESS ?? '').trim().toLowerCase());
-function useLanAccess(rule) { lanAccessEnabled = rule; }
+function setLanAccessRule(rule) { lanAccessEnabled = rule; }
 
 /**
  * A phone on the same network addresses this machine by its IPv4 address. A
@@ -69,7 +69,7 @@ function browserWriteAllowed(method, get, protocol = 'http:') {
 }
 
 exports.isLoopbackHost = isLoopbackHost;
-exports.useLanAccess = useLanAccess;
+exports.setLanAccessRule = setLanAccessRule;
 exports.isShellHost = isShellHost;
 exports.isAllowedLocalHost = isAllowedLocalHost;
 exports.requestTargetAllowed = requestTargetAllowed;
