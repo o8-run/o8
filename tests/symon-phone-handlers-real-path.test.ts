@@ -121,6 +121,7 @@ const call = async (tool: string, args: Json = {}, signal = new AbortController(
 const scoped = { repoId: repo.id, repoPath: repo.localPath };
 let laneId: string;
 const argsFor = (tool: string): Json => {
+  if (tool === 'gh_issue_create' || tool === 'gh_comment') return { repo: repo.name, title: 'Fixture title', kind: 'issue', number: 7, body: 'Fixture opening' };
   if (tool === 'o8_panel_read') return { kind: 'repos' };
   if (tool === 'o8_ask') return { question: 'What changed?' };
   if (tool === 'terminal_send') return { session_name: 'owned-terminal', text: 'fixture input' };
@@ -142,7 +143,7 @@ afterAll(async () => { terminal.kill(); terminalHost.dispose(); server.closeAllC
 beforeEach(() => { fail = false; head = 'head-1'; fingerprint = 'diff-1'; governance = 'governance-1'; working = false; polls = 0; pendingReceipts = 0; mutations.length = 0; });
 
 describe('phone server dispatcher over authenticated HTTP and persisted state', () => {
-  it.each(PHONE_SERVER_TOOLS.filter(t => !['symon_watch_list', 'symon_watch_cancel'].includes(t)))('%s succeeds and refuses unavailable or invalid targets', async tool => {
+  it.each(PHONE_SERVER_TOOLS.filter(t => !['symon_watch_list', 'symon_watch_cancel'].includes(t) && !t.startsWith('git_') && !t.startsWith('gh_') && t !== 'repo_commit_diff'))('%s succeeds and refuses unavailable or invalid targets', async tool => {
     let args = argsFor(tool);
     if (tool === 'o8_approve_item' || tool === 'o8_reject_item') {
       const reviewed = await call('o8_review_diff', args) as Json;
@@ -239,7 +240,7 @@ describe('phone server dispatcher over authenticated HTTP and persisted state', 
       if (tool === 'o8_approve_item' || tool === 'o8_reject_item') args = { ...args, reviewReceipt: (await call('o8_review_diff', args) as Json).reviewReceipt };
       expect(Object.hasOwn(PHONE_TOOL_REVIEW_BUILDERS, tool)).toBe(true);
       const review = await PHONE_TOOL_REVIEW_BUILDERS[tool](args, { signal: new AbortController().signal });
-      expect(review.summary).toContain(tool.startsWith('terminal') ? 'owned-terminal' : tool === 'o8_dispatch' || tool === 'o8_delegate' ? repo.name : tool.includes('approve') || tool.includes('reject') ? approval.title : tool === 'o8_stop_agent' || tool === 'o8_agent_task' ? laneId : 'packet-one');
+      expect(review.summary).toContain(tool.startsWith('terminal') ? 'owned-terminal' : tool === 'o8_dispatch' || tool === 'o8_delegate' || tool.startsWith('gh_') ? repo.name : tool.includes('approve') || tool.includes('reject') ? approval.title : tool === 'o8_stop_agent' || tool === 'o8_agent_task' ? laneId : 'packet-one');
     }
   });
   it('lists and cancels real persisted watch records without running their plans', async () => {
@@ -256,7 +257,7 @@ describe('phone server dispatcher over authenticated HTTP and persisted state', 
     await expect(call('symon_watch_list', args, controller.signal)).rejects.toThrow();
     expect(mutations).toHaveLength(0);
   });
-  it.each(['symon_execute_plan', 'symon_machine_list', 'symon_machine_switch', 'symon_ledger_recent', 'symon_ledger_undo', 'symon_watch', 'symon_watch_run', 'agent_turn', 'escalate', 'git_status', 'gh_comment'])('%s stays unavailable', async tool => {
+  it.each(['symon_execute_plan', 'symon_machine_list', 'symon_machine_switch', 'symon_ledger_recent', 'symon_ledger_undo', 'symon_watch', 'symon_watch_run', 'agent_turn', 'escalate'])('%s stays unavailable', async tool => {
     expect(await call(tool)).toEqual({ error: 'desktop_unavailable' }); expect(mutations).toHaveLength(0);
   });
   it.each(['unknown', '__proto__', 'constructor', 'toString'])('unknown %s executes nothing', async tool => {

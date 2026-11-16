@@ -2,6 +2,7 @@ import { redactThreadText } from '@/lib/threads/redaction';
 import type { PhoneToolHandler } from './calls';
 import type { PhoneToolReview } from './confirm';
 import { approvalReview, decideApproval, reviewDiff } from './handlers/approvals';
+import { github, githubReview } from './handlers/github';
 import { control } from './handlers/control';
 import { reads } from './handlers/reads';
 import { lane, laneResult, scope } from './handlers/scope';
@@ -14,12 +15,12 @@ export const PHONE_SERVER_TOOLS = [
   'o8_packet_wait', 'o8_recap', 'o8_usage', 'o8_panel_read', 'o8_dispatch', 'o8_delegate',
   'o8_packet_steer', 'o8_agent_task', 'o8_packet_rerun', 'o8_packet_reset', 'o8_stop_agent',
   'o8_approve_item', 'o8_reject_item', 'terminal_list', 'terminal_send', 'symon_watch_list', 'symon_watch_cancel',
+  'git_status', 'git_log', 'repo_commit_diff', 'gh_pr_list', 'gh_issue_list', 'gh_issue_view',
+  'gh_pr_view', 'gh_triage', 'gh_issue_create', 'gh_comment',
 ] as const;
 const deferred = new Set([
   'symon_execute_plan', 'symon_machine_list', 'symon_machine_switch', 'symon_ledger_recent',
   'symon_ledger_undo', 'symon_watch', 'symon_watch_run', 'agent_turn', 'escalate',
-  'git_status', 'git_log', 'repo_commit_diff', 'gh_pr_list', 'gh_issue_list', 'gh_issue_view',
-  'gh_pr_view', 'gh_triage', 'gh_issue_create', 'gh_comment',
 ]);
 const controls = new Set(['o8_packet_wait', 'o8_dispatch', 'o8_delegate', 'o8_packet_steer', 'o8_agent_task', 'o8_packet_rerun', 'o8_packet_reset', 'o8_stop_agent']);
 const dispatch: PhoneToolHandler = async (tool, args, { signal }) => {
@@ -27,6 +28,7 @@ const dispatch: PhoneToolHandler = async (tool, args, { signal }) => {
   if (!(PHONE_SERVER_TOOLS as readonly string[]).includes(tool)) return { error: 'unknown_tool' };
   signal.throwIfAborted();
   checkProtectedPath(args);
+  if (tool.startsWith('git_') || tool.startsWith('gh_') || tool === 'repo_commit_diff') return github(tool, args, signal);
   if (tool === 'o8_review_diff') return reviewDiff(args, signal);
   if (tool === 'o8_approve_item' || tool === 'o8_reject_item') return decideApproval(tool, args, signal);
   if (controls.has(tool)) return control(tool, args, signal);
@@ -70,6 +72,8 @@ const dispatchReview = (tool: string): ReviewBuilder => async (args, { signal })
 };
 /** Call before start(); failures must prevent creating the confirmation card. Never trust model-supplied review fields. */
 const builders: Record<string, ReviewBuilder> = {
+  gh_issue_create: (args, { signal }) => githubReview('gh_issue_create', args, signal),
+  gh_comment: (args, { signal }) => githubReview('gh_comment', args, signal),
   o8_dispatch: dispatchReview('o8_dispatch'), o8_delegate: dispatchReview('o8_delegate'),
   o8_packet_steer: packetReview('o8_packet_steer'), o8_agent_task: packetReview('o8_agent_task'),
   o8_packet_rerun: packetReview('o8_packet_rerun'), o8_packet_reset: packetReview('o8_packet_reset'), o8_stop_agent: packetReview('o8_stop_agent'),

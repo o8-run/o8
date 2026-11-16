@@ -8253,6 +8253,16 @@
       ]
     },
     {
+      "path": "tests/symon-phone-git-handlers-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-phone-handlers-real-path.test.ts",
       "reasons": [
         "network-listener",
