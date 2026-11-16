@@ -14,8 +14,9 @@ const EDITORS: [(&str, &str, &str); 2] = [
     ("Cursor", "com.todesktop.230313mzl4w4u92", "cursor"),
 ];
 
-/// The program and arguments. No shell is involved, and only an absolute path
-/// is accepted, so a stored path cannot read as an option.
+/// The program and arguments. Only an absolute path is accepted, so a stored
+/// path cannot read as an option; on Windows the spawn itself goes through
+/// the shim-aware child route.
 pub(super) fn command(
     editor: (&str, &str, &str),
     path: &str,
@@ -63,24 +64,39 @@ impl ThreadList {
             return;
         };
         let task = cx.background_executor().spawn(async move {
-            crate::child_command::command(program)
+            if cfg!(target_os = "windows")
+                && args
+                    .iter()
+                    .any(|arg| arg.chars().any(crate::editor_command::shell_char))
+            {
+                return Err(
+                    "The project folder holds a character the Windows shell would \
+                     re-parse; rename the folder or open it manually."
+                        .to_owned(),
+                );
+            }
+            let opened = crate::child_command::shim_command(program)
                 .args(args)
                 .status()
-                .is_ok_and(|status| status.success())
+                .is_ok_and(|status| status.success());
+            if opened {
+                Ok(())
+            } else {
+                Err(format!("{} is not installed.", editor.0))
+            }
         });
         cx.spawn(async move |this, cx| {
-            let opened = task.await;
-            let _ = this.update(cx, |_, cx| {
-                if !opened {
+            if let Err(error) = task.await {
+                let _ = this.update(cx, |_, cx| {
                     toasts::show(
                         toasts::Kind::Info,
-                        format!("{} is not installed.", editor.0),
+                        error,
                         vec![],
                         Some(toasts::NOTICE_TIMEOUT),
                         cx,
                     );
-                }
-            });
+                });
+            }
         })
         .detach();
     }
@@ -131,11 +147,16 @@ mod tests {
 
     #[test]
     fn the_editor_command_takes_only_an_absolute_path() {
-        let (program, args) = command(EDITORS[0], "/repo", true).unwrap();
+        // "/repo" is absolute only on POSIX; Windows needs a drive letter.
+        let absolute = if cfg!(windows) { r"C:\repo" } else { "/repo" };
+        let (program, args) = command(EDITORS[0], absolute, true).unwrap();
         assert_eq!(program, "open");
-        assert_eq!(args, ["-b", "com.microsoft.VSCode", "/repo"]);
-        let (program, args) = command(EDITORS[1], "/repo", false).unwrap();
-        assert_eq!((program.as_str(), args.as_slice()), ("cursor", &["/repo".to_owned()][..]));
+        assert_eq!(args, ["-b", "com.microsoft.VSCode", absolute]);
+        let (program, args) = command(EDITORS[1], absolute, false).unwrap();
+        assert_eq!(
+            (program.as_str(), args.as_slice()),
+            ("cursor", &[absolute.to_owned()][..])
+        );
         assert!(command(EDITORS[0], "--new-window", true).is_none());
     }
 }

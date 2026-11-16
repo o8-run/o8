@@ -19,14 +19,39 @@ pub(crate) enum Place<'a> {
     Remote(Option<&'a str>),
 }
 
+/// Characters cmd.exe re-parses even inside quotes (`%VAR%` expands); a
+/// `.cmd` shim routes every argument through it.
+const WINDOWS_SHELL_CHARS: &str = "&|^<>%";
+
+pub(crate) fn shell_char(char: char) -> bool {
+    WINDOWS_SHELL_CHARS.contains(char)
+}
+
+/// Drive letters (`C:\repo`, `C:/repo`) and UNC shares (`\\box\repo`) are
+/// absolute on Windows.
+fn windows_absolute(path: &str) -> bool {
+    path.starts_with('\\')
+        || path
+            .as_bytes()
+            .first_chunk::<3>()
+            .is_some_and(|[drive, colon, slash]| {
+                drive.is_ascii_alphabetic() && *colon == b':' && (*slash == b'\\' || *slash == b'/')
+            })
+}
+
 /// The programs to try, in order, each as a full argv. No shell is involved,
 /// and only an absolute path is accepted, so a stored path cannot read as an
 /// option. On macOS a local `code` that is not on PATH falls back to the app.
+/// On Windows a drive letter is an absolute path, and the folder (and SSH
+/// host) may not hold characters the shell would re-parse: Windows CLIs are
+/// `.cmd` shims that run through cmd.exe, which expands `%VAR%` even inside
+/// quotes — the same surface the desktop's `/api/panel/open-in` refuses.
 pub(crate) fn argv(
     editor: &str,
     place: Place,
     path: &str,
     macos: bool,
+    windows: bool,
 ) -> Result<Vec<Vec<String>>, String> {
     let editor = match editor.trim() {
         "" => DEFAULT_EDITOR,
@@ -35,8 +60,15 @@ pub(crate) fn argv(
     if editor.starts_with('-') || editor.contains(char::is_whitespace) {
         return Err("The editor command must be a single program name.".into());
     }
-    if !path.starts_with('/') {
+    if !(path.starts_with('/') || (windows && windows_absolute(path))) {
         return Err("Only an absolute project folder can be opened.".into());
+    }
+    if windows && path.chars().any(shell_char) {
+        return Err(
+            "The project folder holds a character the Windows shell would re-parse; \
+             rename the folder or open it manually."
+                .into(),
+        );
     }
     match place {
         Place::Here => {
@@ -55,6 +87,13 @@ pub(crate) fn argv(
                 .map(str::trim)
                 .filter(|host| !host.is_empty() && !host.starts_with('-'))
                 .ok_or("This project's machine has no saved SSH host.")?;
+            if windows && host.chars().any(shell_char) {
+                return Err(
+                    "The saved SSH host holds a character the Windows shell would re-parse; \
+                     fix the machine's entry."
+                        .into(),
+                );
+            }
             Ok(vec![vec![
                 editor.to_owned(),
                 "--remote".to_owned(),
@@ -65,13 +104,15 @@ pub(crate) fn argv(
     }
 }
 
-/// Runs each argv until one starts and exits cleanly.
+/// Runs each argv until one starts and exits cleanly. The spawn goes through
+/// the shim-aware route (`shim_command`): on Windows the editor is reached by
+/// its `.cmd` shim, and only the child's status is waited on, never killed.
 pub(crate) fn launch(tries: &[Vec<String>]) -> Result<(), String> {
     let opened = tries.iter().any(|argv| {
         let Some((program, args)) = argv.split_first() else {
             return false;
         };
-        crate::child_command::command(program)
+        crate::child_command::shim_command(program)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -117,7 +158,13 @@ pub(crate) fn open(client: &Client, machine: Option<&str>, path: &str) -> Result
         None => Place::Here,
         Some(_) => Place::Remote(host.as_deref()),
     };
-    launch(&argv(&editor, place, path, cfg!(target_os = "macos"))?)
+    launch(&argv(
+        &editor,
+        place,
+        path,
+        cfg!(target_os = "macos"),
+        cfg!(target_os = "windows"),
+    )?)
 }
 
 /// A fake `code` first on PATH that records each argv, one argument per line.
@@ -135,16 +182,45 @@ pub(crate) mod fake_code {
         let bin = BIN.get_or_init(|| {
             let bin = crate::shell::test_support::scratch_path("o8-fake-code");
             std::fs::create_dir_all(&bin).unwrap();
-            let script = bin.join("code");
-            std::fs::write(
-                &script,
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$(dirname \"$0\")/argv.log\"\n",
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let script = if cfg!(windows) {
+                bin.join("code.cmd")
+            } else {
+                bin.join("code")
+            };
+            if cfg!(windows) {
+                // CreateProcess cannot start an extensionless file and cmd.exe
+                // cannot run a shebang script, so on Windows the fake is a
+                // batch file. The nine unrolled `%~n` lines replace the
+                // obvious `goto` loop: a std-spawned cmd.exe with piped
+                // handles stops a redirecting loop silently after its first
+                // iteration (cmd 10.0.26300; the same loop runs fine when the
+                // parent is a console), while consecutive top-level
+                // redirections keep working. Nine slots cover every argv the
+                // tests spawn. The parens keep a trailing digit from reading
+                // as a redirection handle (`echo repo2>>log` would append
+                // stderr instead).
+                let mut batch = String::from("@echo off\r\n");
+                for n in 1..=9 {
+                    batch.push_str(&format!(
+                        "if not \"%~{n}\"==\"\" (echo %~{n})>>\"%~dp0argv.log\"\r\n"
+                    ));
+                }
+                std::fs::write(&script, batch).unwrap();
+            } else {
+                std::fs::write(
+                    &script,
+                    "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$(dirname \"$0\")/argv.log\"\n",
+                )
+                .unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(
+                        &script,
+                        std::fs::Permissions::from_mode(0o755),
+                    )
+                    .unwrap();
+                }
             }
             let path = std::env::var_os("PATH").unwrap_or_default();
             let mut dirs = vec![bin.clone()];
@@ -181,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_local_project_opens_with_code_and_falls_back_to_the_app_on_macos() {
-        let tries = argv("code", Place::Here, "/work/repo", true).unwrap();
+        let tries = argv("code", Place::Here, "/work/repo", true, false).unwrap();
         assert_eq!(
             tries,
             [
@@ -189,13 +265,13 @@ mod tests {
                 strings(&["open", "-a", "Visual Studio Code", "/work/repo"]),
             ]
         );
-        let tries = argv("", Place::Here, "/work/repo", false).unwrap();
+        let tries = argv("", Place::Here, "/work/repo", false, false).unwrap();
         assert_eq!(
             tries,
             [strings(&["code", "/work/repo"])],
             "empty means code"
         );
-        let tries = argv("cursor", Place::Here, "/work/repo", true).unwrap();
+        let tries = argv("cursor", Place::Here, "/work/repo", true, false).unwrap();
         assert_eq!(
             tries,
             [strings(&["cursor", "/work/repo"])],
@@ -205,7 +281,14 @@ mod tests {
 
     #[test]
     fn a_remote_project_opens_over_ssh_with_the_saved_host() {
-        let tries = argv("code", Place::Remote(Some("me@box")), "/home/me/repo", true).unwrap();
+        let tries = argv(
+            "code",
+            Place::Remote(Some("me@box")),
+            "/home/me/repo",
+            true,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             tries,
             [strings(&[
@@ -220,7 +303,8 @@ mod tests {
     #[test]
     fn a_remote_project_without_a_saved_host_is_refused() {
         for host in [None, Some(""), Some("  "), Some("-oProxyCommand=x")] {
-            let error = argv("code", Place::Remote(host), "/home/me/repo", true).unwrap_err();
+            let error =
+                argv("code", Place::Remote(host), "/home/me/repo", true, false).unwrap_err();
             assert_eq!(
                 error, "This project's machine has no saved SSH host.",
                 "{host:?}"
@@ -232,21 +316,62 @@ mod tests {
     fn a_path_with_spaces_stays_one_argument() {
         let path = "/work/my project/repo two";
         assert_eq!(
-            argv("code", Place::Here, path, false).unwrap(),
+            argv("code", Place::Here, path, false, false).unwrap(),
             [strings(&["code", path])]
         );
         assert_eq!(
-            argv("code", Place::Remote(Some("box")), path, false).unwrap(),
+            argv("code", Place::Remote(Some("box")), path, false, false).unwrap(),
             [strings(&["code", "--remote", "ssh-remote+box", path])]
         );
     }
 
     #[test]
     fn only_an_absolute_path_and_a_single_program_are_accepted() {
-        assert!(argv("code", Place::Here, "--new-window", false).is_err());
-        assert!(argv("code", Place::Here, "repo", false).is_err());
-        assert!(argv("--help", Place::Here, "/repo", false).is_err());
-        assert!(argv("code --wait", Place::Here, "/repo", false).is_err());
+        assert!(argv("code", Place::Here, "--new-window", false, false).is_err());
+        assert!(argv("code", Place::Here, "repo", false, false).is_err());
+        assert!(argv("--help", Place::Here, "/repo", false, false).is_err());
+        assert!(argv("code --wait", Place::Here, "/repo", false, false).is_err());
+    }
+
+    #[test]
+    fn windows_drive_paths_open_and_shell_metacharacters_are_refused() {
+        assert_eq!(
+            argv("code", Place::Here, r"C:\work\repo", false, true).unwrap(),
+            [strings(&["code", r"C:\work\repo"])]
+        );
+        assert_eq!(
+            argv("code", Place::Here, "C:/work/my repo", false, true).unwrap(),
+            [strings(&["code", "C:/work/my repo"])]
+        );
+        assert!(argv("code", Place::Here, r"\\box\repo", false, true).is_ok());
+        assert!(
+            argv("code", Place::Here, "C:\\work\\repo", false, false).is_err(),
+            "drive letters are only absolute on Windows"
+        );
+        assert!(
+            argv("code", Place::Here, "repo", false, true).is_err(),
+            "a bare name is not absolute anywhere"
+        );
+        for bad in [
+            "C:\\wo&rk",
+            "C:\\wo|rk",
+            "C:\\wo^rk",
+            "C:\\wo<rk",
+            "C:\\wo>rk",
+            "C:\\wo%rk",
+        ] {
+            let error = argv("code", Place::Here, bad, false, true).unwrap_err();
+            assert!(error.contains("the Windows shell"), "{bad}: {error}");
+        }
+        let error = argv(
+            "code",
+            Place::Remote(Some("me@&box")),
+            "C:\\work\\repo",
+            false,
+            true,
+        )
+        .unwrap_err();
+        assert!(error.contains("SSH host"), "{error}");
     }
 
     /// Answers the two reads `open` makes, with the given editor and machines.
