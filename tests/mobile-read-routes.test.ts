@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server';
 vi.mock('@/lib/inbox/parked-workspaces', () => ({ createParkedWorkspaceContext: () => ({}), parkedWorkspaceProjection: () => ({}) }));
 vi.mock('@/lib/inbox/preferences', () => ({ legacyInboxPin: () => null }));
 vi.mock('@/lib/inbox/store', () => ({ inboxSubject: () => ({}), inboxProjection: () => ({}), inboxRunStartedAt: () => '2026-01-01T00:00:00Z' }));
+vi.mock('@/lib/mobile/machine-name', () => ({ localMachineName: () => 'Studio iMac' }));
 vi.mock('@/lib/repos/thread-git-context', () => ({ threadGitContext: () => ({}) }));
 vi.mock('@/lib/mobile/orchestrator-thread-project', () => ({ OrchestratorThreadProjectError: class extends Error {} }));
 vi.mock('@/lib/lane/registry', () => ({ findLaneByPacket: () => null, getLaneEvents: () => [] }));
@@ -70,7 +71,7 @@ describe('paired mobile read routes through the real gate', () => {
     const req = request('/api/mobile/orchestrator/threads');
     expect(panelGateMiddleware(req).status).toBe(200);
     const body = await (await threads.GET(req)).json();
-    expect(body.threads[0]).toMatchObject({ machineDisplayName: 'This computer', runStartedAt: '2026-01-01T00:00:00Z', pullRequestNumber: 7, pullRequestState: 'open', changeCount: 4 });
+    expect(body.threads[0]).toMatchObject({ machineDisplayName: 'Studio iMac', runStartedAt: '2026-01-01T00:00:00Z', pullRequestNumber: 7, pullRequestState: 'open', changeCount: 4 });
     h.links = [];
     h.threads[0].status = 'idle';
     const missing = await (await threads.GET(req)).json();
