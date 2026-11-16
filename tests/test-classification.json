@@ -3070,6 +3070,13 @@
       ]
     },
     {
+      "path": "tests/device-link-route-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/device-merge-publication-real-path.test.ts",
       "reasons": [
         "child-process",
