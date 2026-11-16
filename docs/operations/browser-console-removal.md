@@ -136,7 +136,7 @@ removal pull request.
   longer builds. It stays because changing `scripts/next` needs the native
   surface label; its test is removed.
 - The native parity captures (`scripts/parity`) now skip the web side unless
-  `--webHost` is given. The diagnostics demo (`/api/panel/diagnostics/run-demo`)
-  reports every step skipped until it targets the native window.
+  `--webHost` is given. The diagnostics demo route, which reported every step
+  skipped, has since been removed.
 - The relay browser-session path above (security review).
 - The test-only helpers listed above can move next to their tests or go.

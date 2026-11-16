@@ -396,21 +396,16 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/commits?repo=...\|workspace=...&limit=...` | Recent commits (GitHub-side or local workspace). |
 | GET | `/api/panel/commits/[hash]?workspace=...` | Detail for a single commit. |
 | GET | `/api/panel/commits/[hash]/file?workspace=...&path=...` | File contents at a specific commit. |
-| GET | `/api/panel/deployments?project=...&limit=...` | List Vercel deployments (requires `VERCEL_TOKEN`). |
-| GET | `/api/panel/deploys` | Latest deployment statuses via GitHub API. |
 | GET | `/api/panel/dev-server` | List active dev server processes. |
 | POST | `/api/panel/dev-server` | Start a dev server process. |
 | DELETE | `/api/panel/dev-server` | Stop a dev server process. |
-| POST | `/api/panel/diagnostics/run-demo` | Run the in-app demo sequence (#800), capturing screenshots. |
 | POST | `/api/panel/factory-reset` | Wipe contents of `~/.o8/` data directory (preserves the dir). |
 | GET | `/api/panel/file-asset?workspace=...&path=...` | Serve registered repo file as asset (image/PDF), 50MB cap. |
 | GET | `/api/panel/file-content?path=...` | Read raw file content with path-traversal protection. |
 | GET | `/api/panel/file-diff?path=...&hideWhitespace=1` | Per-file diff (`git diff -w` when `hideWhitespace`). |
 | GET | `/api/panel/file-preview?path=...&workspace=...` | File preview (image MIME or text). |
 | GET | `/api/panel/files?workspace=...` | List files in a workspace. |
-| POST | `/api/panel/fleet/invalidate` | Flush the owned-session fleet cache across every runtime. |
 | GET | `/api/panel/git-log?workspace=...` | Parsed git log with structured ref data. |
-| GET | `/api/panel/git-status?workspace=...` | Working tree + branch-vs-main status. |
 | GET | `/api/panel/git/log?workspace=...&limit=...` | Compact git log for Loop Status widget (#796). |
 | POST | `/api/panel/github-device` | GitHub device-flow handshake (operator bearer required). |
 | GET | `/api/panel/github-status` | Parsed `gh auth status` output. |
@@ -421,10 +416,8 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/panel/issues/create` | Create a GitHub issue. |
 | POST | `/api/panel/issues/enhance` | Enhance issue body via LLM, parallel-fetching repo context. |
 | GET | `/api/panel/lan-host` | Discover first private LAN IPv4 + reachable dev ports for mobile DevHostFrame. |
-| GET | `/api/panel/loop-status` | Read `~/.o8/loop-cron-state.json` for the autonomous-loop widget. |
 | POST | `/api/panel/mcp-test` | "Test connection" probe for a registered MCP server (stdio or HTTP). |
 | GET | `/api/panel/mobile-pairing` | Mobile pairing payload (Tailscale URL, ws-token, fingerprints) for QR. |
-| POST | `/api/panel/o8-github-summary` | Summarize a repo's recent GitHub activity via OpenRouter free models. |
 | GET | `/api/panel/o8-update-summary` | Summarize an o8 GitHub release (release notes + recent commits) via OpenRouter free models for the UpdateCard. |
 | POST | `/api/panel/o8-mission-summary` | Summarize a completed mission's merged packets (hydrated from the session_outcomes ledger) into plain-language prose via OpenRouter free models, for the Mission-complete detail modal. |
 | POST | `/api/panel/o8-scratch-chat` | One-shot scratch chat with tool calls (file context, OpenRouter free models). |
@@ -435,9 +428,6 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/ports?fresh=1` | Discover ports in use on the local machine (cached). |
 | GET | `/api/panel/pr?repo=...&number=...` | PR detail + computed checks rollup status. |
 | POST | `/api/panel/pr/review` | Submit a PR review (approve / comment / request_changes / merge / close). |
-| POST | `/api/panel/pr/review/reply` | Reply to a PR review thread. |
-| POST | `/api/panel/pr/review/resolve` | Resolve / unresolve a PR review thread. |
-| GET | `/api/panel/pr/review/threads?repo=...&number=...` | GraphQL review threads (in-memory cached). |
 | GET | `/api/panel/projects` | List projects ledger (reconciled with repo registry). |
 | POST | `/api/panel/projects` | Create a project. |
 | PATCH | `/api/panel/projects/[id]` | Update project name / repos / color. |
@@ -449,7 +439,6 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/panel/prs/[number]` | PR mutation (close / merge / review / comment). |
 | GET | `/api/panel/prs/[number]/comments?repo=...` | List PR comments + reviews. |
 | GET | `/api/panel/readme?workspace=...` | First matching README file in a workspace. |
-| GET | `/api/panel/repo-status?path=...` | "What changed since I last checked" signal set (commit, diff, etc.). |
 | GET | `/api/panel/repos` | List registered repos. |
 | POST | `/api/panel/repos` | Add / touch / update a registered repo. |
 | DELETE | `/api/panel/repos` | Remove a registered repo (with runtime cleanup). |
@@ -457,7 +446,6 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/panel/repos/scaffold` | Scaffold a repo from a kind (next, tauri, etc.). |
 | GET | `/api/panel/search?q=...` | Cmd+K command palette server-side fan-out (#661). |
 | GET | `/api/panel/serve-image?path=...` | Serve image file from allowed roots (`$HOME` or `/tmp`). |
-| GET | `/api/panel/session-costs?agent=...` | Persisted runtime-session cost rows from `usage_logs`. |
 | GET | `/api/panel/skeleton?workspace=...&search=...` | Workspace skeleton map + rendered text, or symbol search. |
 | GET | `/api/panel/status` | Stable status read for CLI / agents (allowlisted — read-only). |
 | GET | `/api/panel/supervisor-inbox?includeDismissed=1&scope=all&projectId=...` | Supervisor inbox items + summary. |
@@ -466,7 +454,6 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/terminal-sessions` | List alive dashboard terminal sessions. |
 | GET | `/api/panel/terminal-state?scope=...` | Read persisted terminal state for a scope (per-tile JSON file). |
 | POST | `/api/panel/terminal-state` | Persist terminal state for a scope. |
-| GET | `/api/panel/timeline` | Aggregate today's agent activity into timeline segments. |
 | GET | `/api/panel/universal-search?q=...` | Cross-surface search (files, navigation targets, sessions). |
 | GET | `/api/panel/workers` | Worker tokens + fleet status + remote-runtime registration. |
 | POST | `/api/panel/workers` | Mutate worker tokens. |
