@@ -250,6 +250,18 @@ async function revParse(repoPath: string, ref: string): Promise<string | null> {
   }
 }
 
+// Each sweep runs every 30 s. Fetching every repository's base on each one was
+// ~8 network fetches a minute at rest; merges made outside o8 are still found
+// within this window. O8_ANCESTRY_FETCH_INTERVAL_MS overrides it (tests use 0).
+const DEFAULT_BASE_FETCH_INTERVAL_MS = 5 * 60_000;
+const lastBaseFetchAt = new Map<string, number>();
+
+function baseFetchIntervalMs(): number {
+  const raw = process.env.O8_ANCESTRY_FETCH_INTERVAL_MS;
+  const value = raw === undefined || raw.trim() === '' ? Number.NaN : Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_BASE_FETCH_INTERVAL_MS;
+}
+
 async function refreshOriginBase(repoPath: string, baseBranch: string, refreshed: Set<string>): Promise<void> {
   // Worktrees share their repository's refs, so one fetch per repository and
   // base serves every candidate in the same sweep.
@@ -262,6 +274,11 @@ async function refreshOriginBase(repoPath: string, baseBranch: string, refreshed
   const key = `${repository}\0${baseBranch}`;
   if (refreshed.has(key)) return;
   refreshed.add(key);
+  const now = Date.now();
+  const last = lastBaseFetchAt.get(key);
+  if (last !== undefined && now - last < baseFetchIntervalMs()) return;
+  lastBaseFetchAt.set(key, now);
+  if (lastBaseFetchAt.size > 500) lastBaseFetchAt.delete(lastBaseFetchAt.keys().next().value!);
   try {
     await git(repoPath, ['fetch', '--quiet', 'origin', `${baseBranch}:refs/remotes/origin/${baseBranch}`], {
       timeout: 20_000,

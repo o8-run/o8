@@ -39,6 +39,10 @@ if (!fs || !os || !path) {
   throw new Error('Vitest setup requires Node built-in modules.');
 }
 
+// The merged-by-ancestry sweep fetches each base at most every few minutes in
+// the app. Tests push and sweep again at once, so they fetch on every sweep.
+process.env.O8_ANCESTRY_FETCH_INTERVAL_MS ??= '0';
+
 // The worker sandbox is on by default on macOS. Tests turn it on explicitly,
 // so an unset switch means off here on every platform.
 if (process.env.O8_WORKER_SANDBOX === undefined) process.env.O8_WORKER_SANDBOX = 'off';
