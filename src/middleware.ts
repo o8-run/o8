@@ -126,6 +126,8 @@ const ALLOWLIST_ANY_METHOD: RegExp[] = [
 
 const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
   { methods: new Set(['GET']), path: /^\/api\/mobile\/(?:pull-requests|usage)\/?$/ },
+  // Cost and tokens per day by agent: totals only, no session or account detail.
+  { methods: new Set(['GET']), path: /^\/api\/mobile\/usage\/history\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/mobile\/conversation-pr-context\/?$/ },
   // The agents and models this computer offers, for the phone's picker.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/orchestrator\/models\/?$/ },
