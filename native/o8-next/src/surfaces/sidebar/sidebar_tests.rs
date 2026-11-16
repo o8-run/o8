@@ -103,6 +103,14 @@ fn sidebar_selection_leaves_projects_and_settings(cx: &mut TestAppContext) {
     click(cx, "settings-close");
     settle(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()));
+    // Tools has a Mobile row that opens Settings on the phone pairing page.
+    click(cx, "rail-more");
+    click(cx, "rail-more-mobile");
+    settle(&shell, cx);
+    assert!(cx.debug_bounds("settings-mobile").is_some());
+    click(cx, "settings-close");
+    settle(&shell, cx);
+    assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()));
     for (buttons, panel) in [(&["rail-more", "rail-more-projects"][..], "project-new")] {
         for button in buttons.iter().copied() {
             click(cx, button);

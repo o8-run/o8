@@ -426,7 +426,15 @@ impl Settings {
     }
     /// Opens Mobile with a fresh pairing code, as the app's command asks.
     pub(crate) fn show_pairing(&mut self, cx: &mut Context<Self>) {
-        self.select("mobile", cx);
+        if self.busy {
+            // Settings just opened and its first read is in flight. That read
+            // serves every page, so only the page changes.
+            self.navigation.remember("mobile");
+            self.section = "mobile";
+            self.changed(cx);
+        } else {
+            self.select("mobile", cx);
+        }
         if let Some(mobile) = &self.mobile {
             mobile.update(cx, |mobile, cx| mobile.show_pairing(cx));
         }
