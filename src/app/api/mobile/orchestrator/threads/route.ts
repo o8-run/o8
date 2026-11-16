@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { mobileThreadPullRequests } from '@/lib/mobile/pull-request-projection';
-import { DEFAULT_SYMON_MACHINE } from '@/lib/symon/machine-registry';
+import { localMachineName } from '@/lib/mobile/machine-name';
 import { legacyInboxPin } from '@/lib/inbox/preferences';
 import { inboxProjection, inboxRunStartedAt, inboxSubject } from '@/lib/inbox/store';
 import { threadGitContext } from '@/lib/repos/thread-git-context';
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
       // Additive checkout context: owner/repo (or folder), live branch and worktree identity.
       const git = threadGitContext(thread.repoPath);
       const remoteSlug = thread.githubOwner && thread.githubRepo ? `${thread.githubOwner}/${thread.githubRepo}` : null;
-      return { ...thread, ...projection, machineDisplayName: DEFAULT_SYMON_MACHINE.displayName,
+      return { ...thread, ...projection, machineDisplayName: localMachineName(),
         ...(pr ? { pullRequestNumber: pr.number, pullRequestState: pr.state, changeCount: pr.changedFiles } : {}), ...parkedWorkspaceProjection(subject, parked), pinned: projection.pinnedAt != null,
         isWorktree: git.isWorktree, worktreePath: git.worktreePath,
         repoSlug: remoteSlug ?? git.repoSlug ?? thread.repoName, branch: git.branch ?? thread.repoBranch, ...(thread.status === 'busy' ? { runStartedAt: inboxRunStartedAt(subject) ?? undefined } : {}) };
