@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import {
+  DEFAULT_VOICE,
   PHONE_CODE_TOOL_NAMES,
   PHONE_O8_TOOL_NAMES,
 } from '@/lib/voice/realtime-session-config';
@@ -71,6 +72,8 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.CODEX_HOME = dataDir;
 
 const h = vi.hoisted(() => ({
+  catalog: [] as Array<Record<string, unknown>>,
+  mcp: [] as Array<Record<string, unknown>>,
   evalJs: vi.fn<(code: string) => Promise<{ result: string }>>(),
   resolveRequestPrincipal: vi.fn(),
   resolveDeviceByToken: vi.fn(),
@@ -95,11 +98,9 @@ vi.mock('@/lib/mobile/inbox', () => ({
     return typeof source === 'function' ? (source as () => unknown)() : source;
   },
 }));
-vi.mock('@/lib/mcp/o8-webview-client', () => ({
-  O8WebviewClient: class {
-    evalJs = h.evalJs;
-  },
-}));
+vi.mock('@/lib/mcp/o8-webview-client', () => ({ O8WebviewClient: class { evalJs = h.evalJs; } }));
+vi.mock('@/lib/symon/execution/catalog', () => ({ get PHONE_TOOL_CATALOG() { return h.catalog; } }));
+vi.mock('@/lib/mcp/symon-tools', () => ({ getSymonMcpCatalog: async () => ({ tools: h.mcp, servers: [] }) }));
 vi.mock('@/lib/cortex/qa/llm/byok-keys', () => ({ resolveOpenAIKey: h.resolveOpenAIKey }));
 vi.mock('@/lib/voice/realtime-access', () => ({ resolveRealtimeAccess: h.resolveRealtimeAccess }));
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: h.resolveRequestPrincipal }));
@@ -166,15 +167,14 @@ function fullDesktopBridgeTools() {
   return toolSchemas(names);
 }
 
-/** Default bridge: desk NOT live, 105-tool desktop catalog, voice=marin. */
+/** Server catalog fixture, including connected MCP schemas. */
 function bridgeReady(
   deskWasLive = false,
   tools: Array<Record<string, unknown>> = fullDesktopBridgeTools(),
 ) {
-  h.evalJs.mockImplementation(async (code: string) => {
-    if (code.includes('deskWasLive')) return { result: JSON.stringify({ deskWasLive }) };
-    return { result: JSON.stringify({ ready: true, tools, voice: 'marin' }) };
-  });
+  void deskWasLive;
+  h.catalog = tools.filter(tool => !String(tool.name).startsWith('mcp__'));
+  h.mcp = tools.filter(tool => String(tool.name).startsWith('mcp__'));
 }
 
 function codeBridgeReady(extras: readonly string[] = []) {
@@ -327,7 +327,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(json.session.clientSecret).toBe('ek_test_secret');
     expect(json.session.model).toBe('gpt-realtime-2.1-mini');
     expect(json.session.billingSource).toBe('openai-api-key');
-    expect(json.session.voice).toBe('marin');
+    expect(json.session.voice).toBe(DEFAULT_VOICE);
     expect(json.session.baseUrl).toBe('https://api.openai.com/v1/realtime');
     expect(json.session.expiresAt).toBe(1_783_490_000 * 1000); // seconds → ms
     expect(json.session.scopeVersion).toBe(1);
@@ -366,7 +366,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     ).toContain('render_surface');
     expect(sentBody.session.tool_choice).toBe('auto');
     expect(sentBody.session.audio.input.transcription.model).toBe('whisper-1');
-    expect(sentBody.session.audio.output.voice).toBe('marin');
+    expect(sentBody.session.audio.output.voice).toBe(DEFAULT_VOICE);
     expect(JSON.parse(readFileSync(billingStatePath, 'utf8')).billingSource).toBe('openai-api-key');
   });
 
@@ -558,12 +558,13 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('200 + preempted:"desk" when a desk-mic session was live (stopped first)', async () => {
+  it('200 keeps the preempted field null without a desktop voice host', async () => {
     bridgeReady(true);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ value: 'ek', expires_at: 1 }) }));
     const res = await POST(req());
     expect(res.status).toBe(200);
-    expect((await res.json()).preempted).toBe('desk');
+    expect((await res.json()).preempted).toBeNull();
+    expect(h.evalJs).not.toHaveBeenCalled();
   });
 
   it('200: binds an enrolled phone mint to its exact device id', async () => {
@@ -761,7 +762,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(sentBody.session.instructions).toBeUndefined();
     expect(sentBody.session.tools).toBeUndefined();
     // Audio still belongs to the voice layer.
-    expect(sentBody.session.audio.output.voice).toBe('marin');
+    expect(sentBody.session.audio.output.voice).toBe(DEFAULT_VOICE);
     expect(sentBody.session.audio.input.transcription.model).toBe('whisper-1');
 
     // The trial has to say which brain answered it, so the mint line names it.
@@ -904,7 +905,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(contextBlock).not.toContain('"controlTab":"terminal"');
   });
 
-  it('503: fails loud when the live Mac catalog cannot supply the complete Code pack', async () => {
+  it('503: fails loud when the server catalog cannot supply the complete Code pack', async () => {
     bridgeReady(false, toolSchemas(['o8_status', 'o8_dispatch', 'send_email']));
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -924,7 +925,7 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('503: fails loud when the live Mac catalog cannot supply the complete o8 pack', async () => {
+  it('503: fails loud when the server catalog cannot supply the complete o8 pack', async () => {
     const tools = fullDesktopBridgeTools().filter((tool) => tool.name !== 'o8_needs_me');
     bridgeReady(false, tools);
     const fetchMock = vi.fn();
@@ -1037,11 +1038,13 @@ describe('POST /api/mobile/symon/session — mint assembly + error table', () =>
     expect((await res.json()).error).toBe('no_key');
   });
 
-  it('503 desktop_unavailable when the webview eval bridge is unreachable', async () => {
+  it('mints with no webview host available', async () => {
     h.evalJs.mockRejectedValue(new Error('ENOENT socket'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ value: 'ek-fixture', expires_at: 1 }) }));
     const res = await POST(req());
-    expect(res.status).toBe(503);
-    expect((await res.json()).error).toBe('desktop_unavailable');
+    expect(res.status).toBe(200);
+    expect((await res.json()).preempted).toBeNull();
+    expect(h.evalJs).not.toHaveBeenCalled();
   });
 
   it('502 mint_failed on an upstream OpenAI error (structured, not thrown)', async () => {

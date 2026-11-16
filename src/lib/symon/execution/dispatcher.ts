@@ -1,3 +1,5 @@
+import { boundedObservedResult } from '@/lib/mcp/symon-mcp-call-route';
+import { callSymonMcpTool } from '@/lib/mcp/symon-tools';
 import { redactThreadText } from '@/lib/threads/redaction';
 import type { PhoneToolHandler } from './calls';
 import type { PhoneToolReview } from './confirm';
@@ -18,13 +20,18 @@ export const PHONE_SERVER_TOOLS = [
   'git_status', 'git_log', 'repo_commit_diff', 'gh_pr_list', 'gh_issue_list', 'gh_issue_view',
   'gh_pr_view', 'gh_triage', 'gh_issue_create', 'gh_comment',
 ] as const;
-const deferred = new Set([
+export const PHONE_DEFERRED_TOOLS = new Set([
   'symon_execute_plan', 'symon_machine_list', 'symon_machine_switch', 'symon_ledger_recent',
   'symon_ledger_undo', 'symon_watch', 'symon_watch_run', 'agent_turn', 'escalate',
 ]);
 const controls = new Set(['o8_packet_wait', 'o8_dispatch', 'o8_delegate', 'o8_packet_steer', 'o8_agent_task', 'o8_packet_rerun', 'o8_packet_reset', 'o8_stop_agent']);
 const dispatch: PhoneToolHandler = async (tool, args, { signal }) => {
-  if (deferred.has(tool)) return { error: 'desktop_unavailable' };
+  if (tool.startsWith('mcp__')) {
+    signal.throwIfAborted();
+    const externalArgs = Object.fromEntries(Object.entries(args).filter(([key]) => !key.startsWith('__symon')));
+    return boundedObservedResult(tool, await callSymonMcpTool(tool, externalArgs));
+  }
+  if (PHONE_DEFERRED_TOOLS.has(tool)) return { error: 'desktop_unavailable' };
   if (!(PHONE_SERVER_TOOLS as readonly string[]).includes(tool)) return { error: 'unknown_tool' };
   signal.throwIfAborted();
   checkProtectedPath(args);

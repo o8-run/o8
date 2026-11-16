@@ -10,7 +10,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function boundedObservedResult(source: string, value: unknown): {
+export function boundedObservedResult(source: string, value: unknown): {
   observedData: { source: string; trust: typeof OBSERVED_DATA_TRUST; data: unknown };
   truncated: boolean;
   note: typeof OBSERVED_DATA_NOTE;

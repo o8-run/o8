@@ -24,7 +24,8 @@ import {
   recordSymonPhoneBillingSource,
   type SymonPhoneBillingSource,
 } from '@/lib/voice/symon-phone-billing';
-import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { PHONE_TOOL_CATALOG } from '@/lib/symon/execution/catalog';
+import { getSymonMcpCatalog } from '@/lib/mcp/symon-tools';
 import { getMobileInboxSnapshot } from '@/lib/mobile/inbox';
 import { buildPhoneBriefingBlock } from '@/lib/mobile/symon-briefing';
 import { rankPhoneBriefing } from '@/lib/mobile/catch-up-ranking';
@@ -60,8 +61,8 @@ import {
  *
  * Config parity is assembled from the shared source
  * (src/lib/voice/realtime-session-config.ts) — model / voice / instructions come
- * from there directly; the Rust-supplied tool schemas reach us through the same
- * webview eval bridge the desk session loads them from (`realtime_tools()`).
+ * from there directly; static schemas come from the server catalog and connected
+ * MCP schemas come from the server-side MCP catalog.
  *
  * Gated in middleware (loopback OR Bearer ws-token, the whole /api/mobile/*
  * family) AND requirePanelAuth here. Never throws — structured errors per the
@@ -381,93 +382,6 @@ async function phoneBriefingBlock(scope: ResolvedPhoneScope): Promise<PhoneBrief
   }
 }
 
-// Reuse the ONE per-server webview socket (shared with /api/mobile/symon,
-// /api/browser/agent, /api/canvas/intent).
-function webviewClient(): O8WebviewClient {
-  const g = globalThis as { __o8BrowserAgentClient?: O8WebviewClient };
-  if (!g.__o8BrowserAgentClient) g.__o8BrowserAgentClient = new O8WebviewClient();
-  return g.__o8BrowserAgentClient;
-}
-
-// Stop a LIVE desk-mic session before minting (mutual exclusion — same code path
-// as the operator toggling it off: the RealtimeVoiceHost listener runs the exact
-// toggle() the hotkey runs). Gated on the live status so an IDLE desk is never
-// accidentally STARTED by the toggle. Returns whether a desk session was live.
-const STOP_DESK_EVAL = `(() => {
-  const w = window;
-  const st = typeof w.__o8RealtimeStatus === 'string' ? w.__o8RealtimeStatus : 'idle';
-  const live = st === 'live' || st === 'connecting' || st === 'requesting-mic';
-  if (live && w.__o8SymonRemoteReady === true) {
-    w.dispatchEvent(new CustomEvent('o8:symon-remote-toggle'));
-  }
-  return JSON.stringify({ deskWasLive: live });
-})()`;
-
-// Read the tool schemas + voice pref that the RealtimeVoiceHost agent bridge
-// publishes on window (it loaded them from `realtime_tools()` via the compiled
-// Tauri invoke). We do NOT invoke Tauri from raw eval (bare-specifier dynamic
-// imports don't resolve in an eval string) — the webview publishes for us.
-const TOOLS_EVAL = `(() => {
-  const w = window;
-  const A = w.__o8SymonAgent;
-  if (!A) return JSON.stringify({ ready: false, reason: 'no_bridge' });
-  if (!A.config || !Array.isArray(A.config.tools)) return JSON.stringify({ ready: false, reason: 'loading' });
-  return JSON.stringify({ ready: true, tools: A.config.tools, voice: typeof A.config.voice === 'string' ? A.config.voice : null });
-})()`;
-
-interface BridgeResult {
-  deskWasLive: boolean;
-  tools: Array<Record<string, unknown>>;
-  voice: string;
-}
-
-class BridgeUnavailable extends Error {}
-
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Reach the webview: stop a live desk session, then poll for the published tool
- * schemas (the host publishes them shortly after mount). Throws BridgeUnavailable
- * if the eval socket is unreachable (app not running) or the host never publishes
- * — the caller maps that to 503 desktop_unavailable.
- */
-async function reachWebview(): Promise<BridgeResult> {
-  const client = webviewClient();
-
-  let deskWasLive = false;
-  try {
-    const { result } = await client.evalJs(STOP_DESK_EVAL);
-    deskWasLive = Boolean((JSON.parse(result) as { deskWasLive?: boolean }).deskWasLive);
-  } catch (error) {
-    throw new BridgeUnavailable(error instanceof Error ? error.message : 'webview eval bridge unreachable');
-  }
-
-  // Poll ~3s for the host's tool-schema publish (fresh-mount race).
-  const deadline = Date.now() + 3_000;
-  let lastReason = 'loading';
-  while (Date.now() < deadline) {
-    let parsed: { ready?: boolean; tools?: unknown; voice?: unknown; reason?: string };
-    try {
-      const { result } = await client.evalJs(TOOLS_EVAL);
-      parsed = JSON.parse(result);
-    } catch (error) {
-      throw new BridgeUnavailable(error instanceof Error ? error.message : 'webview eval bridge unreachable');
-    }
-    if (parsed.ready && Array.isArray(parsed.tools)) {
-      return {
-        deskWasLive,
-        tools: parsed.tools as Array<Record<string, unknown>>,
-        voice: typeof parsed.voice === 'string' && parsed.voice ? parsed.voice : DEFAULT_VOICE,
-      };
-    }
-    lastReason = parsed.reason || 'loading';
-    await sleep(200);
-  }
-  throw new BridgeUnavailable(`voice host has not published tool schemas (${lastReason})`);
-}
-
 export async function POST(request: NextRequest) {
   // Accept the operator credential OR an enrolled device — the phone reaches this
   // over the relay with its per-device bearer + a non-loopback client-addr, which
@@ -553,8 +467,8 @@ export async function POST(request: NextRequest) {
   // tool calls. Every realtime variant leaves it undefined.
   const backendModel = modelSelection.backendModel;
 
-  // Resolved BEFORE the webview bridge and the mint: a model the realtime
-  // endpoint will not accept must not preempt a live desk session or burn a
+  // Resolved before catalog preparation and the mint: a model the realtime
+  // endpoint will not accept must not burn a
   // mint. OpenAI returns a token for such ids and only refuses them at the
   // WebRTC/WebSocket exchange, where nothing names the model.
   const modelCheck = assertRealtimeCapableModel(model);
@@ -635,30 +549,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Reach the webview: preempt a live desk session + pull the tool schemas.
-  let bridge: BridgeResult;
-  try {
-    bridge = await reachWebview();
-  } catch (error) {
-    if (error instanceof BridgeUnavailable) {
-      console.warn(`${LOG} desktop_unavailable: ${error.message}`);
-      return NextResponse.json(
-        { ok: false, error: 'desktop_unavailable', detail: error.message },
-        { status: 503 },
-      );
+  const catalog: Array<Record<string, unknown>> = PHONE_TOOL_CATALOG.map(schema => ({ type: 'function', ...schema }));
+  if (resolvedScope.toolPack !== 'code') {
+    try {
+      const mcp = await getSymonMcpCatalog();
+      catalog.push(...mcp.tools.map(schema => ({ type: 'function', ...schema })));
+    } catch {
+      console.warn(`${LOG} Connected tool catalog unavailable; minting the static pack.`);
     }
-    return NextResponse.json(
-      { ok: false, error: 'desktop_unavailable', detail: error instanceof Error ? error.message : 'webview bridge failed' },
-      { status: 503 },
-    );
   }
 
   const sessionId = `sym-${randomUUID()}`;
-  const voice = bridge.voice;
+  const voice = DEFAULT_VOICE;
   const usesCodePack = resolvedScope.toolPack === 'code';
   const phonePack = usesCodePack
-    ? { label: 'Code', logKey: 'code_tools_incomplete', ...selectPhoneCodeTools(bridge.tools) }
-    : { label: 'o8', logKey: 'o8_tools_incomplete', ...selectPhoneO8Tools(bridge.tools) };
+    ? { label: 'Code', logKey: 'code_tools_incomplete', ...selectPhoneCodeTools(catalog) }
+    : { label: 'o8', logKey: 'o8_tools_incomplete', ...selectPhoneO8Tools(catalog) };
   if (phonePack.missing.length > 0) {
     const detail = `${phonePack.label} tool catalog incomplete; missing: ${phonePack.missing.join(', ')}`;
     console.error(`${LOG} ${phonePack.logKey}: ${detail}`);
@@ -667,8 +573,8 @@ export async function POST(request: NextRequest) {
       { status: 503 },
     );
   }
-  const phoneBridgeTools = phonePack.tools;
-  const mintedPhoneTools = [...phoneBridgeTools, RENDER_SURFACE_TOOL];
+  const phoneTools = phonePack.tools;
+  const mintedPhoneTools = [...phoneTools, RENDER_SURFACE_TOOL];
 
   // Ahead of the workspace-context JSON, inside the cached prefix.
   const { block: briefing, advisory: briefingAdvisory } = await phoneBriefingBlock(resolvedScope);
@@ -732,7 +638,7 @@ export async function POST(request: NextRequest) {
       : Date.now() + REALTIME_TOKEN_TTL_SECONDS * 1000;
 
     const issuedAt = Date.now();
-    const allowedTools = Array.from(new Set(phoneBridgeTools.flatMap((tool) => {
+    const allowedTools = Array.from(new Set(phoneTools.flatMap((tool) => {
       const name = tool.name;
       return typeof name === 'string' && /^[A-Za-z0-9_:-]{1,96}$/.test(name) ? [name] : [];
     })));
@@ -760,7 +666,7 @@ export async function POST(request: NextRequest) {
     console.log(
       `${LOG} minted ${sessionId} (model=${model}${backendModel ? ` backend=${backendModel}` : ''}` +
         ` brain=${brain} billing=${billingSource} voice=${voice} tools=${mintedPhoneTools.length}` +
-        ` briefing=${briefing.length}${bridge.deskWasLive ? ' preempted=desk' : ''})`,
+        ` briefing=${briefing.length})`,
     );
 
     return NextResponse.json({
@@ -788,7 +694,7 @@ export async function POST(request: NextRequest) {
         repoPath: resolvedScope.repoPath,
         workspaceMode: resolvedScope.workspaceMode,
       },
-      preempted: bridge.deskWasLive ? 'desk' : null,
+      preempted: null,
       // Advisory catch-up order (#2444); the phone may ignore it. Absent when off.
       ...(briefingAdvisory ? { briefing: { advisory: briefingAdvisory } } : {}),
     });
