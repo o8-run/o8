@@ -538,6 +538,7 @@ export interface MobileOrchestratorThread {
   outcome?: 'asked';
   networkQuestion?: import('@/lib/bots/network-types').NetworkQuestionSummary;
   networkProjectionError?: string;
+  linkedWork?: import('./linked-work').LinkedWork | null;
   id: string;
   title: string;
   lastMessageAt: string;
