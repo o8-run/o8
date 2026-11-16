@@ -113,7 +113,8 @@ mod mac {
         NSApplicationDelegate, NSApplicationTerminateReply, NSEventMask, NSRunningApplication,
     };
     use objc2_foundation::{
-        MainThreadMarker, NSDate, NSDefaultRunLoopMode, NSObject, NSObjectProtocol,
+        MainThreadMarker, NSArray, NSDate, NSDefaultRunLoopMode, NSObject, NSObjectProtocol,
+        NSString,
     };
     use std::{
         ffi::{CStr, OsStr},
@@ -162,6 +163,14 @@ mod mac {
             fn reopen(&self, _: &NSApplication, _: bool) -> bool {
                 self.ivars().show.store(true, Ordering::SeqCst);
                 false
+            }
+            #[unsafe(method(application:openFiles:))]
+            fn open_files(&self, app: &NSApplication, paths: &NSArray<NSString>) {
+                for i in 0..paths.count() {
+                    crate::documents::enqueue(PathBuf::from(paths.objectAtIndex(i).to_string()));
+                }
+                self.ivars().show.store(true, Ordering::SeqCst);
+                app.replyToOpenOrPrint(objc2_app_kit::NSApplicationDelegateReply::Success);
             }
             #[unsafe(method(applicationShouldTerminate:))]
             fn quit(&self, _: &NSApplication) -> NSApplicationTerminateReply {

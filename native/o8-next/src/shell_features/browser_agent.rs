@@ -6,7 +6,11 @@ impl ShellFeature for BrowserAgent {
     fn ticks(&self) -> &'static [TickHook] {
         &[TickHook {
             order: 55,
-            run: |s, _, _, cx| {
+            run: |s, _, window, cx| {
+                #[cfg(unix)]
+                while let Some(path) = crate::app_parent::take_document() {
+                    super::right_panel::open_document(s, path, window, cx);
+                }
                 // Bounded parent queue, each mutation is removed before dispatch.
                 while let Some(frame) = crate::app_parent::take_browser_request() {
                     let id = frame["id"].as_str().unwrap_or_default().to_string();

@@ -343,6 +343,8 @@ struct Panel {
     menu: Option<std::time::Instant>,
     /// Files and o8.md views, keyed like panel content.
     files: std::collections::HashMap<String, gpui::Entity<crate::files_panel::FilesPanel>>,
+    /// Finder preview has a separate slot so workspace drafts survive external opens.
+    document_scope: Option<String>,
     browsers: std::collections::HashMap<String, gpui::Entity<crate::browser_panel::BrowserPanel>>,
     /// The left edge is being dragged; the width saves when it is let go.
     resizing: bool,
@@ -381,6 +383,7 @@ impl Default for Panel {
             scroll: Default::default(),
             menu: None,
             files: Default::default(),
+            document_scope: None,
             browsers: Default::default(),
             resizing: false,
             drag_from: None,
@@ -397,6 +400,13 @@ impl Panel {
 }
 
 fn key(s: &Shell, tool: Tool) -> String {
+    if tool == Tool::Files
+        && s.features.read::<Panel>().is_some_and(|p| {
+            p.document_scope.as_deref() == Some(s.state.selected.as_deref().unwrap_or(""))
+        })
+    {
+        return format!("panel|{}|Finder", s.state.selected.as_deref().unwrap_or(""));
+    }
     if tool == Tool::Spec {
         return "panel|notes|Spec".into();
     }
@@ -736,6 +746,9 @@ fn ensure_side_chat(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>)
 }
 
 fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>) {
+    if tool == Tool::Files {
+        s.features.get::<Panel>().document_scope = None;
+    }
     show_mode(s, tool, true, window, cx);
 }
 fn show_mode(
@@ -1008,6 +1021,7 @@ pub(super) fn open_files(
     window: &mut Window,
     cx: &mut Context<Shell>,
 ) {
+    s.features.get::<Panel>().document_scope = None;
     if let Some(root) = root {
         let key = key(s, Tool::Files);
         let client = s.panel_client(&root);
@@ -1330,3 +1344,28 @@ const SIDE_CHAT: &str = "M11 5a8 8 0 1 0 0 16 8 8 0 1 0 0-16Z M19 2v6 M16 5h6";
 const RESOURCES: &str = "M4 15a8 8 0 0 1 16 0 M12 15l4-4 M12 14a1 1 0 1 0 0 2 1 1 0 1 0 0-2Z";
 const TARGETS: &str = "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16Z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M12 2v3 M12 19v3 M2 12h3 M19 12h3";
 const CLOSE: &str = "M18 6 6 18 M6 6l12 12";
+
+/// Finder documents use a local read-only viewer, independent of registered repos.
+#[cfg(unix)]
+pub(super) fn open_document(
+    s: &mut Shell,
+    path: std::path::PathBuf,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    s.features.get::<Panel>().document_scope = Some(s.state.selected.clone().unwrap_or_default());
+    let key = key(s, Tool::Files);
+    let client = s.panel_client("");
+    let view = cx.new(|cx| {
+        crate::files_panel::FilesPanel::new(
+            client,
+            String::new(),
+            crate::files_panel::Mode::Files,
+            cx,
+        )
+    });
+    view.update(cx, |view, cx| view.open_document(path, cx));
+    s.features.get::<Panel>().files.insert(key, view);
+    show_mode(s, Tool::Files, true, window, cx);
+    window.activate_window();
+}

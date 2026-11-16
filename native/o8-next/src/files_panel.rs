@@ -96,6 +96,7 @@ pub struct FilesPanel {
     file_generation: u64,
     view_modes: HashMap<String, viewer::ViewMode>,
     contents_hidden: bool,
+    document_read_only: bool,
     wrap_lines: bool,
     editor_subscription: Option<Subscription>,
     editing_path: Option<String>,
@@ -218,6 +219,7 @@ impl FilesPanel {
             file_generation: 0,
             view_modes: HashMap::new(),
             contents_hidden: false,
+            document_read_only: false,
             wrap_lines: true,
             editor_subscription: None,
             editing_path: None,
@@ -273,8 +275,45 @@ impl FilesPanel {
     }
 
     fn open_file(&mut self, path: String, cx: &mut Context<Self>) {
+        self.document_read_only = false;
         self.pending_line = None;
         self.open_file_inner(path, false, cx);
+    }
+    #[cfg(unix)]
+    pub(crate) fn open_document(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        let Some(data) = crate::app_parent::document_directory() else {
+            return;
+        };
+        self.open_document_in(path, data, cx);
+    }
+    #[cfg(unix)]
+    fn open_document_in(
+        &mut self,
+        path: std::path::PathBuf,
+        data: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        self.document_read_only = true;
+        self.tree_visible = false;
+        self.selected = Some(path.to_string_lossy().into_owned());
+        self.editing_path = None;
+        self.editor_subscription = None;
+        self.file = File::Loading;
+        let task = cx.background_executor().spawn(async move {
+            use std::io::Read;
+            let (path, file) = crate::document_validation::open(&path, &data)
+                .map_err(|_| "Document cannot be opened")?;
+            let mut bytes = Vec::new();
+            file.take(8 * 1024 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|_| "Document cannot be read")?;
+            let truncated = bytes.len() > 8 * 1024 * 1024;
+            bytes.truncate(8 * 1024 * 1024);
+            let content = String::from_utf8_lossy(&bytes);
+            Ok(serde_json::json!({"content": content, "truncated": truncated, "path": path}))
+        });
+        self.finish_file(task, cx);
+        cx.notify();
     }
     /// Opens a file by the path a reply gave it, at that line if it gave one.
     /// Reply text never chooses a file outside this workspace.
@@ -509,7 +548,7 @@ impl FilesPanel {
                     .child(crate::icon::stroke(file_icon(&title), file_color(&title), 14., 1.6))
                     .child(viewer::file_heading(&title, cx))
                     .when(previewable, |bar| bar.child(self.preview_toggle(cx)))
-                    .when(self.mode==Mode::Files && matches!(self.file, File::Loaded {truncated:false,large,..} if large != source::Large::ReadOnly),|bar|bar.child(self.edit_toggle(cx)))
+                    .when(!self.document_read_only && self.mode==Mode::Files && matches!(self.file, File::Loaded {truncated:false,large,..} if large != source::Large::ReadOnly),|bar|bar.child(self.edit_toggle(cx)))
                     .when(!preview && matches!(&self.file, File::Loaded {truncated:false,buffer,..} if !buffer.editing), |bar| bar.child(self.wrap_toggle(cx)))
                     .child(self.privacy_toggle(cx))
                     .when(self.mode == Mode::Files, |bar| {

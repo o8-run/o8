@@ -2,6 +2,10 @@ mod render_region;
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
 mod app_parent;
+#[cfg(unix)]
+mod document_transport;
+#[cfg(unix)]
+mod document_validation;
 mod child_command;
 mod external_open;
 mod brain;

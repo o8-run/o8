@@ -21,6 +21,8 @@ use std::{
 #[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Request {
     Show,
+    OpenFiles { paths: Vec<PathBuf> },
+    TakeOpenFiles,
     PrepareRestart,
     CancelRestart { reservation: String },
     Restart { reservation: String },
@@ -73,6 +75,9 @@ fn read_request(peer: &mut UnixStream) -> io::Result<Request> {
 }
 impl Instance {
     pub fn claim(directory: &Path) -> io::Result<Option<Self>> {
+        Self::claim_with(directory, &[])
+    }
+    pub fn claim_with(directory: &Path, paths: &[PathBuf]) -> io::Result<Option<Self>> {
         let lock = OpenOptions::new()
             .read(true)
             .write(true)
@@ -104,7 +109,14 @@ impl Instance {
                 }
                 if let Ok(mut peer) = UnixStream::connect(&socket) {
                     peer.set_read_timeout(Some(Duration::from_secs(5)))?;
-                    peer.write_all(b"{\"op\":\"show\"}\n")?;
+                    let request = if paths.is_empty() {
+                        Request::Show
+                    } else {
+                        Request::OpenFiles {
+                            paths: paths.to_vec(),
+                        }
+                    };
+                    peer.write_all(&serde_json::to_vec(&request)?)?;
                     peer.shutdown(std::net::Shutdown::Write)?;
                     let mut response = Vec::new();
                     peer.take(4096).read_to_end(&mut response)?;
