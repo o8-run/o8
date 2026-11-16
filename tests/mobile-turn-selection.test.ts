@@ -32,6 +32,12 @@ describe('mobile thread selection', () => {
     expect(resolve(original, '/repo', 'thoughts-one', 'codex')).toMatchObject({ thinkingEffort: 'high' });
   });
 
+  it('does not inherit a reasoning pin when selecting a Codex model without reasoning', () => {
+    history.messages[0].backend = 'codex';
+    const message = { ...original, model: 'gpt-4o' };
+    expect(resolveMobileTurnSelection(message, '/repo', 'thoughts-one', 'codex')).not.toHaveProperty('thinkingEffort');
+  });
+
   it.each(['acp', 'hermes', 'opencode', 'pi', 'o8'])('does not inherit an unmapped legacy effort for %s', backend => {
     history.messages[0].backend = backend as typeof history.messages[0]['backend'];
     expect(resolve(original, '/repo', 'thoughts-one', backend)).not.toHaveProperty('thinkingEffort');

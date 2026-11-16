@@ -3,6 +3,7 @@ import { handleTokenProjectionRequest } from './lib/mobile/token-projection-http
 import { symonOwnerPaths } from './lib/symon/http/owner-paths';
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
 import { VoiceHostBroker, handleVoiceHostHttp } from '@/lib/ws-server/voice-host';
+import { mobileModelError } from './lib/mobile/model-catalog';
 import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
@@ -5393,6 +5394,13 @@ async function handleOrchestratorSendMsgOnce(
     ? msg.thinkingEffort
     : undefined;
   const serviceTier = isOrchestratorServiceTier(msg.serviceTier) ? msg.serviceTier : undefined;
+  if (msg.surface === 'mobile') {
+    const error = mobileModelError(resolveMsgBackendId(msg), msg.model);
+    if (error) {
+      send(client, { channel: 'orchestrator', event: 'error', data: { error, code: 'invalid_model', status: 400, ...orchestratorCommandAckCorrelation(correlationId) } });
+      throw new OrchestratorSendRejectedBeforeAcceptance(error);
+    }
+  }
   const model = normalizeOrchestratorTurnModel(msg.model);
   const crossHouseRole = msg.surface === 'canvas-agent' ? 'canvas-agent' : 'orchestrator';
   const requestedBackendId = resolveMsgBackendId(msg);

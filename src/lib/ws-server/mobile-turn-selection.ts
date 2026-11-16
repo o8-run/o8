@@ -1,3 +1,4 @@
+import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { isUnmappedEffortLead } from '@/lib/lane/orchestrator-backends/unmapped-effort';
 import { resolve } from 'node:path';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
@@ -25,6 +26,10 @@ export function resolveMobileTurnSelection(
     ?? normalizeObservedOrchestratorTurnModel(backend, previous.model);
   if (typeof leadModel === 'string') inherited.model = leadModel;
   if (!isUnmappedEffortLead(backend) && (!receipt?.effortSource || receipt.effortSource === 'transport') && isManualThinkingEffort(receipt?.effort)) inherited.thinkingEffort = receipt.effort;
+  // A newly selected Codex model without reasoning must not inherit an old pin.
+  if (backend === 'codex' && typeof message.model === 'string' && !codexSupportsReasoningEffort(message.model, 'high')) {
+    delete inherited.thinkingEffort;
+  }
   if (receipt?.permissionMode === 'plan' || receipt?.permissionMode === 'full') {
     inherited.permissionMode = receipt.permissionMode;
   }

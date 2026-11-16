@@ -1,3 +1,4 @@
+import { isCodexModelId } from '@/lib/models';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   writePersistedLlmChat,
@@ -118,6 +119,10 @@ export async function POST(request: NextRequest) {
 
   if (!message) {
     return NextResponse.json({ error: 'message is required' }, { status: 400 });
+  }
+
+  if (requestedModel?.startsWith('cli:codex:') && !isCodexModelId(requestedModel.slice('cli:codex:'.length))) {
+    return NextResponse.json({ error: 'Unknown Codex model', code: 'invalid_model' }, { status: 400 });
   }
 
   const effort = body?.effort;

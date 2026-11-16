@@ -4,14 +4,15 @@ import { NextRequest } from 'next/server';
 vi.mock('@/lib/mobile/pull-request-projection', () => ({ mobileThreadPullRequests: async () => [] }));
 
 const listMobileOrchestratorThreads = vi.fn(() => []);
+const createThread = vi.fn(() => ({ id: 'thoughts-fixture' }));
 
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
-  createMobileOrchestratorThread: vi.fn(),
+  createMobileOrchestratorThread: createThread,
   listArchivedOrchestratorThreadIds: vi.fn(() => []),
   listMobileOrchestratorThreads,
 }));
 
-const { GET } = await import('@/app/api/mobile/orchestrator/threads/route');
+const { GET, POST } = await import('@/app/api/mobile/orchestrator/threads/route');
 
 function request(search = ''): NextRequest {
   return new NextRequest(`http://localhost:3001/api/mobile/orchestrator/threads${search}`);
@@ -50,5 +51,21 @@ describe('mobile orchestrator threads route backend filter', () => {
     expect(res.status).toBe(200);
     expect(json).toEqual({ threads: [] });
     expect(listMobileOrchestratorThreads).not.toHaveBeenCalled();
+  });
+});
+
+describe('phone thread creation model admission', () => {
+  it('forwards a listed Codex model and refuses unknown models', async () => {
+    const request = (model: string) => new NextRequest('http://localhost/api/mobile/orchestrator/threads', {
+      method: 'POST', body: JSON.stringify({ repoPath: '/tmp/fixture', backend: 'codex', model }),
+    });
+    createThread.mockClear();
+    expect((await POST(request('gpt-6.1-sol'))).status).toBe(200);
+    expect(createThread).toHaveBeenCalledWith(expect.objectContaining({ backend: 'codex', model: 'gpt-6.1-sol' }));
+    createThread.mockClear();
+    const refused = await POST(request('unknown-model'));
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ error: expect.stringContaining('Unknown model') });
+    expect(createThread).not.toHaveBeenCalled();
   });
 });
