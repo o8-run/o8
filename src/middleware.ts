@@ -130,6 +130,10 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // Browse one thread's checkout: a folder listing and a size-capped text preview.
   // Read-only; ignored and secret-named files are never returned.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/files\/(?:list|content)\/?$/ },
+  // Scheduled tasks: see them, switch one on or off, run one now. The phone cannot
+  // create or edit a task, so it cannot introduce a new prompt this way.
+  { methods: new Set(['GET']), path: /^\/api\/mobile\/automations\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/mobile\/automations\/[^/]+\/(?:enabled|run)\/?$/ },
   // The agents and models this computer offers, for the phone's picker.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/orchestrator\/models\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
