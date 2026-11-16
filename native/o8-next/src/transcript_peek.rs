@@ -89,6 +89,8 @@ enum Read {
     Text(Arc<str>),
     Missing,
     Unavailable(String),
+    /// A GitHub link's card: its header and lines.
+    Card(String, Vec<String>),
 }
 impl Read {
     fn from(result: Result<Value, String>) -> (Self, Option<f64>) {
@@ -113,6 +115,7 @@ impl Read {
             Self::Text(content) => window(content, line),
             Self::Missing => Snippet::Missing,
             Self::Unavailable(error) => Snippet::Unavailable(error.clone()),
+            Self::Card(_, lines) => Snippet::Preview(lines.clone()),
         }
     }
 }
@@ -171,10 +174,104 @@ pub(crate) struct Target {
     pub line: Option<usize>,
     /// A sent mention's title and lines, shown instead of a file.
     pub preview: Option<(String, Vec<String>)>,
+    /// A GitHub link, read for its card instead of a file.
+    pub link: Option<String>,
 }
 impl Target {
     fn file(&self) -> String {
-        format!("{}/{}", self.root.trim_end_matches('/'), self.path)
+        match &self.link {
+            Some(link) => link.clone(),
+            None => format!("{}/{}", self.root.trim_end_matches('/'), self.path),
+        }
+    }
+}
+
+/// A github.com repository, issue or pull request link, the ones the server
+/// can describe; any other link keeps its plain tooltip.
+pub(crate) fn github_link(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://github.com/") else {
+        return false;
+    };
+    let path = rest.split(['?', '#']).next().unwrap_or_default();
+    let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    let name = |part: &str| {
+        part.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+            && part.len() <= 100
+            && part.chars().all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c))
+    };
+    let number = |part: &str| {
+        part.len() <= 7 && !part.starts_with('0') && part.chars().all(|c| c.is_ascii_digit())
+    };
+    match parts.as_slice() {
+        [owner, repo] => name(owner) && name(repo),
+        [owner, repo, "issues", n] | [owner, repo, "pull", n] => {
+            name(owner) && name(repo) && number(n)
+        }
+        [owner, repo, "pull", n, tab] => {
+            name(owner) && name(repo) && number(n) && ["files", "commits", "checks"].contains(tab)
+        }
+        _ => false,
+    }
+}
+
+/// Words laid into at most `rows` lines of `width` characters, the last cut
+/// with an ellipsis when more is left.
+fn wrap(text: &str, width: usize, rows: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        if !current.is_empty() && current.chars().count() + 1 + word.chars().count() > width {
+            lines.push(std::mem::take(&mut current));
+            if lines.len() == rows {
+                let last = lines.last_mut().expect("a line");
+                let kept: String = last.chars().take(width.saturating_sub(1)).collect();
+                *last = format!("{}…", kept.trim_end());
+                return lines;
+            }
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+fn plural(count: u64, one: &str) -> String {
+    if count == 1 { format!("1 {one}") } else { format!("{count} {one}s") }
+}
+
+/// The card for the server's answer about a GitHub link.
+pub(crate) fn link_card(body: &Value) -> Option<(String, Vec<String>)> {
+    let preview = &body["preview"];
+    let repo = preview["repo"].as_str()?;
+    let count = |key: &str| preview[key].as_u64().unwrap_or(0);
+    match preview["kind"].as_str()? {
+        "repo" => {
+            let mut lines = wrap(preview["description"].as_str().unwrap_or("No description"), 64, 2);
+            let mut facts = vec![plural(count("stars"), "star"), plural(count("forks"), "fork")];
+            facts.extend(preview["language"].as_str().map(str::to_owned));
+            lines.push(facts.join(" · "));
+            Some((format!("github.com/{repo}"), lines))
+        }
+        kind @ ("issue" | "pull") => {
+            let what = if kind == "pull" { "pull request" } else { "issue" };
+            let state = match preview["state"].as_str().unwrap_or("open") {
+                "merged" => "Merged",
+                "closed" => "Closed",
+                _ => "Open",
+            };
+            let mut lines = wrap(preview["title"].as_str().unwrap_or_default(), 64, 2);
+            let mut facts = vec![format!("{state} {what}")];
+            facts.extend(preview["author"].as_str().map(|author| format!("by {author}")));
+            facts.push(plural(count("comments"), "comment"));
+            lines.push(facts.join(" · "));
+            Some((format!("{repo} #{}", count("number")), lines))
+        }
+        _ => None,
     }
 }
 struct Hover {
@@ -296,14 +393,24 @@ impl Peeks {
             state.cache.store(file, read, None, Instant::now());
             return;
         };
-        let (root, path) = (target.root, target.path);
-        let task = cx
-            .background_executor()
-            .spawn(async move { crate::files_panel::read_file(&client, &root, &path) });
+        let (root, path, link) = (target.root, target.path, target.link);
+        let task = cx.background_executor().spawn(async move {
+            match link {
+                Some(link) => {
+                    let answer = client.get::<Value>("/api/panel/link-preview", &[("url", &link)]);
+                    let read = match answer.ok().as_ref().and_then(link_card) {
+                        Some((title, lines)) => Read::Card(title, lines),
+                        None => Read::Unavailable("No preview for this link.".into()),
+                    };
+                    (read, None)
+                }
+                None => Read::from(crate::files_panel::read_file(&client, &root, &path)),
+            }
+        });
         let peeks = self.clone();
         window
             .spawn(cx, async move |cx| {
-                let (read, mtime) = Read::from(task.await);
+                let (read, mtime) = task.await;
                 let mut state = peeks.0.borrow_mut();
                 state.reading.remove(&file);
                 state.cache.store(file, read, mtime, Instant::now());
@@ -341,9 +448,13 @@ impl Peeks {
             }
             _ => None,
         };
+        let title = match state.cache.0.get(&target.file()) {
+            Some(Entry { read: Read::Card(title, _), .. }) => Some(title.clone()),
+            _ => None,
+        };
         let at = place(pill, size(px(WIDTH), height(&snippet)), viewport);
         let peeks = self.clone();
-        let card = card(target, snippet, note)
+        let card = card(target, title, snippet, note)
             .on_hover(move |hovering, window, cx| peeks.card_hover(*hovering, window, cx));
         Some(
             deferred(
@@ -395,7 +506,12 @@ pub(crate) fn place(
     )
 }
 
-fn card(target: &Target, snippet: Option<Snippet>, note_text: Option<String>) -> gpui::Stateful<gpui::Div> {
+fn card(
+    target: &Target,
+    title: Option<String>,
+    snippet: Option<Snippet>,
+    note_text: Option<String>,
+) -> gpui::Stateful<gpui::Div> {
     let at = target
         .line
         .map_or_else(String::new, |line| format!(":{line}"));
@@ -498,9 +614,11 @@ fn card(target: &Target, snippet: Option<Snippet>, note_text: Option<String>) ->
                         .overflow_hidden()
                         .text_ellipsis()
                         .text_color(theme().text_secondary)
-                        .child(match &target.preview {
-                            Some((title, _)) => title.clone(),
-                            None => format!("{}{at}", target.file()),
+                        .child(match (&target.preview, title, &target.link) {
+                            (Some((title, _)), _, _) => title.clone(),
+                            (None, Some(title), _) => title,
+                            (None, None, Some(link)) => link.clone(),
+                            (None, None, None) => format!("{}{at}", target.file()),
                         }),
                 )
                 .when_some(note_text, |header, note| {
@@ -598,6 +716,72 @@ mod tests {
             px(50.),
             "above, from its top"
         );
+    }
+
+    #[test]
+    fn only_github_repository_issue_and_pull_request_links_get_a_card() {
+        for url in [
+            "https://github.com/o8-run/o8",
+            "https://github.com/o8-run/o8/",
+            "https://github.com/o8-run/o8/issues/12",
+            "https://github.com/o8-run/o8/pull/6261",
+            "https://github.com/o8-run/o8/pull/6261/files",
+            "https://github.com/o8-run/o8/issues/12#issuecomment-1",
+        ] {
+            assert!(github_link(url), "{url}");
+        }
+        for url in [
+            "http://github.com/o8-run/o8",
+            "https://github.com.evil.test/o8-run/o8",
+            "https://gist.github.com/a/b",
+            "https://github.com/o8-run",
+            "https://github.com/o8-run/o8/blob/main/README.md",
+            "https://github.com/o8-run/o8/issues/0",
+            "https://github.com/o8-run/o8/issues/12/x",
+            "https://github.com/../o8",
+            "https://example.com/o8-run/o8",
+        ] {
+            assert!(!github_link(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_github_card_names_the_repository_and_its_facts() {
+        let repo = serde_json::json!({"ok": true, "preview": {
+            "kind": "repo", "repo": "o8-run/o8", "description": "Review and merge layer",
+            "stars": 60, "forks": 1, "language": "TypeScript"}});
+        assert_eq!(
+            link_card(&repo),
+            Some((
+                "github.com/o8-run/o8".into(),
+                vec!["Review and merge layer".into(), "60 stars · 1 fork · TypeScript".into()]
+            ))
+        );
+        let pull = serde_json::json!({"ok": true, "preview": {
+            "kind": "pull", "repo": "o8-run/o8", "number": 6261, "title": "Install with Homebrew",
+            "state": "merged", "author": "q", "comments": 1}});
+        assert_eq!(
+            link_card(&pull),
+            Some((
+                "o8-run/o8 #6261".into(),
+                vec!["Install with Homebrew".into(), "Merged pull request · by q · 1 comment".into()]
+            ))
+        );
+        let issue = serde_json::json!({"preview": {"kind": "issue", "repo": "a/b", "number": 2,
+            "title": "x", "state": "closed", "author": null, "comments": 0}});
+        assert_eq!(link_card(&issue).unwrap().1[1], "Closed issue · 0 comments");
+        assert_eq!(link_card(&serde_json::json!({"ok": false})), None);
+    }
+
+    #[test]
+    fn long_descriptions_wrap_to_two_lines_and_end_cut() {
+        let text = "word ".repeat(40);
+        let lines = wrap(&text, 20, 2);
+        assert_eq!(lines.len(), 2);
+        assert!(lines.iter().all(|line| line.chars().count() <= 20), "{lines:?}");
+        assert!(lines[1].ends_with('…'));
+        assert_eq!(wrap("short one", 20, 2), vec!["short one"]);
+        assert!(wrap("", 20, 2).is_empty());
     }
 
     #[test]
