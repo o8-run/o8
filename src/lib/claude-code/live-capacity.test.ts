@@ -26,7 +26,13 @@ describe('Claude account usage', () => {
     expect(rows[0].args).toContain('{"disableAllHooks":true}');
     expect(rows[0].args).toContain('--strict-mcp-config');
     expect(rows[0].cwd).toBe(realpathSync(root));
-    expect(rows.slice(1).map(row => row.request.subtype)).toEqual(['initialize', 'get_usage']);
+    expect(result.account).toEqual({
+      organization: 'Example Org',
+      resetsLeft: 2,
+      credits: { amount: 12.5, currency: 'USD' },
+      extraUsage: { used: { amount: 4.2, currency: 'USD' }, limit: { amount: 50, currency: 'USD' } },
+    });
+    expect(rows.slice(1).map(row => row.request.subtype)).toEqual(['initialize', 'get_usage', 'get_status']);
     expect(rows[2].request.skip_behaviors).toBe(true);
     expect(rows.every(row => row.type !== 'user')).toBe(true);
   });
@@ -49,6 +55,32 @@ describe('Claude account usage', () => {
     await expect(readLiveClaudeRuntimeCapacity({ binaryPath: fixture, cwd: root, timeoutMs: 100 })).rejects.toThrow('unavailable');
     vi.stubEnv('O8_CLAUDE_CAPACITY_TEST_MODE', 'malformed');
     await expect(readLiveClaudeRuntimeCapacity({ binaryPath: fixture, cwd: root, timeoutMs: 2_000 })).rejects.toThrow('unavailable');
+  });
+
+  it('still reports usage when the CLI cannot answer get_status', async () => {
+    vi.stubEnv('O8_CLAUDE_CAPACITY_TEST_MODE', 'no-status');
+    const result = await readLiveClaudeRuntimeCapacity({ binaryPath: fixture, cwd: root, timeoutMs: 2_000 });
+    expect(result.status).toBe('available');
+    expect(result.account?.organization).toBeUndefined();
+    expect(result.account?.resetsLeft).toBe(2);
+  });
+
+  it('reports only the account facts the CLI actually returned', () => {
+    const now = Date.parse('2026-11-15T00:00:00Z');
+    const windows = { seven_day: { utilization: 10, resets_at: '2026-11-20T00:00:00Z' } };
+    // Nothing beyond the windows: no account at all, never zeros.
+    expect(parseClaudeUsageCapacity({ rate_limits_available: true, rate_limits: { ...windows, cedar_ember: null, spend: { enabled: false, used: { amount_minor: 0, currency: 'USD', exponent: 2 }, balance: null } } }, now).account).toBeUndefined();
+    const parsed = parseClaudeUsageCapacity({ rate_limits_available: true, rate_limits: { ...windows,
+      cedar_ember: { eligible: true, grants: [
+        { id: 'a', resets_left: 1, usable_now: true, ends_at: '2026-12-01T00:00:00Z' },
+        { id: 'b', resets_left: 4, usable_now: true, ends_at: '2026-11-01T00:00:00Z' },
+        { id: 'c', resets_left: 2, usable_now: true, paused: true },
+        { id: 'd', resets_left: 3, usable_now: false },
+      ] },
+      spend: { enabled: true, used: { amount_minor: 300, currency: 'usd', exponent: 2 }, limit: null, balance: { amount_minor: 'x' } },
+    } }, now);
+    expect(parsed.account).toEqual({ resetsLeft: 1, extraUsage: { used: { amount: 3, currency: 'USD' } } });
+    expect(parseClaudeUsageCapacity({ rate_limits_available: true, rate_limits: { ...windows, cedar_ember: { eligible: false, grants: [] } } }, now).account).toBeUndefined();
   });
 
   it('keeps missing quota unknown and distinguishes unsupported subscription logins', () => {

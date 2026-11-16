@@ -43,8 +43,24 @@ describe('Codex live capacity', () => {
       source: 'app-server',
       confidence: 'exact',
       buckets: [{ id: 'primary', label: 'Weekly', usedRatio: 0.33 }],
+      account: { organization: 'Example Workspace', resetsLeft: 3, credits: { amount: 120.5, currency: null } },
     });
+    expect(JSON.stringify(snapshot)).not.toMatch(/private@example/);
     expect(readFileSync(auditPath, 'utf8').trim()).toBe(tempRoot);
+  });
+
+  it('leaves out account facts the app-server did not report', () => {
+    const window = { usedPercent: 10, windowDurationMins: 10_080, resetsAt: 1_787_197_379 };
+    expect(parseCodexAppServerCapacity({ rateLimits: { primary: window } }).account).toBeUndefined();
+    expect(parseCodexAppServerCapacity({
+      rateLimits: { primary: window, credits: { hasCredits: false, unlimited: false, balance: '0' } },
+      rateLimitResetCredits: { availableCount: -1 },
+    }, { accountRead: { account: { workspaceName: null } } }).account).toBeUndefined();
+    expect(parseCodexAppServerCapacity({
+      rateLimits: { primary: window, credits: { hasCredits: true, unlimited: false, balance: '1' } },
+      rateLimitsByLimitId: { codex: { credits: { hasCredits: true, unlimited: false, balance: '7.25' } } },
+      rateLimitResetCredits: { availableCount: 0 },
+    }).account).toEqual({ resetsLeft: 0, credits: { amount: 7.25, currency: null } });
   });
 
   it('rejects malformed live limits so the runtime can fall back to durable local truth', () => {

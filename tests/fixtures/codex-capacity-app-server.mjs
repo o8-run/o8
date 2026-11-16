@@ -28,9 +28,16 @@ input.on('line', (line) => {
         rateLimits: {
           primary: { usedPercent: 33, windowDurationMins: 10_080, resetsAt: 1_787_197_379 },
           secondary: null,
+          credits: { hasCredits: true, unlimited: false, balance: '120.5' },
         },
+        rateLimitResetCredits: { availableCount: 3, credits: [] },
         planType: 'pro',
       },
+    })}\n`);
+  } else if (message.method === 'account/read') {
+    process.stdout.write(`${JSON.stringify({
+      id: message.id,
+      result: { account: { type: 'chatgpt', email: 'private@example.invalid', planType: 'pro', workspaceName: 'Example Workspace' } },
     })}\n`);
   }
 });
