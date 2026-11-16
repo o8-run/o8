@@ -94,6 +94,21 @@ describe('mobile file content', () => {
   });
 });
 
+describe('ignored files', () => {
+  it('hides the contents of a git-ignored file asked for by path, directly or through an alias', async () => {
+    await file('.gitignore', 'local-settings.json\nprivate/\n');
+    await file('local-settings.json', '{"key":"value"}');
+    await mkdir(join(root, 'private'));
+    await file('private/notes.txt', 'private');
+    await symlink(join(root, 'private'), join(root, 'shortcut'));
+    await file('visible.txt', 'shown');
+    expect(await readMobileFile(root, 'local-settings.json')).toMatchObject({ status: 'hidden', content: null });
+    expect(await readMobileFile(root, 'private/notes.txt')).toMatchObject({ status: 'hidden', content: null });
+    expect(await readMobileFile(root, 'shortcut/notes.txt')).toMatchObject({ status: 'hidden', content: null });
+    expect(await readMobileFile(root, 'visible.txt')).toMatchObject({ status: 'text', content: 'shown' });
+  });
+});
+
 describe('secret names', () => {
   it.each(['.env', '.env.local', 'src/.env.production', 'cert.pem', 'cert.KEY', 'id_rsa', 'id_rsa.pub', 'keys/id_ed25519_backup'])('hides %s', path => expect(isSecretFilePath(path)).toBe(true));
   it.each(['environment.ts', '.environment', 'key.ts', 'public.txt', 'id_rsx'])('allows %s', path => expect(isSecretFilePath(path)).toBe(false));

@@ -123,7 +123,10 @@ export async function readMobileFile(root: string, path: string, range: { startL
     checkedPath(relative(await realpath(root), opened.realPath).split('\\').join('/'));
     const extension = extname(path).slice(1).toLowerCase();
     const metadata = { path, size: opened.stat.size, extension, language: LANGUAGES[extension] ?? 'plaintext', maxBytes: MOBILE_FILE_MAX_BYTES };
-    if (isSecretFilePath(path) || isSecretFilePath(relative(await realpath(root), opened.realPath))) {
+    const canonical = relative(await realpath(root), opened.realPath).split('\\').join('/');
+    // An ignored file is left out of every listing; asking for it by path must not read it
+    // either. The check uses the real location: git refuses a path that crosses a symlink.
+    if (isSecretFilePath(path) || isSecretFilePath(canonical) || (await ignoredPaths(root, [canonical])).size > 0) {
       return { ...metadata, status: 'hidden' as const, content: null };
     }
     if (opened.stat.size > MOBILE_FILE_MAX_BYTES) return { ...metadata, status: 'too_large' as const, content: null };
