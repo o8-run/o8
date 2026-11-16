@@ -31,21 +31,33 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
-    <!-- Register o8 in Finder's "Open With" for any file. Role Viewer + rank
-         Alternate = o8 is LISTED in the Open With submenu but never claims the
-         default handler for any type (the two together are what keep o8 from
-         stealing another app's default). The UTI set is a deliberate catch-all:
-         public.data conforms every file (incl. extensionless); public.text +
-         public.source-code + public.plain-text name the dev-file surface o8
-         actually opens. NOTE: this is authored HERE rather than as
-         `bundle.fileAssociations` in tauri.conf.json on purpose — Tauri's
-         fileAssociations can only enumerate extensions (no UTI catch-all, no
-         LSHandlerRank), and Tauri merges this custom Info.plist OVER its
-         generated CFBundleDocumentTypes, so a tauri.conf entry would be dead
-         config. Opens are delivered via RunEvent::Opened in lib.rs → the
-         dashboard workspace (default) or the canvas as file cards. -->
+    <!-- Text uses Default rank so users can choose it in Get Info. o8 does
+         not own these types. The existing catch-all remains Alternate. -->
     <key>CFBundleDocumentTypes</key>
     <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>Text and source documents</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Default</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>net.daringfireball.markdown</string>
+                <string>public.text</string>
+                <string>public.plain-text</string>
+                <string>public.source-code</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>md</string><string>markdown</string><string>mdx</string>
+                <string>txt</string><string>rs</string><string>ts</string>
+                <string>tsx</string><string>js</string><string>jsx</string>
+                <string>py</string><string>c</string><string>h</string>
+                <string>cpp</string><string>go</string><string>swift</string>
+                <string>sh</string><string>json</string><string>yaml</string>
+                <string>yml</string><string>toml</string><string>xml</string>
+                <string>html</string><string>css</string>
+            </array>
+        </dict>
         <dict>
             <key>CFBundleTypeName</key>
             <string>Any document</string>

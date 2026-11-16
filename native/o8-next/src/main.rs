@@ -2,6 +2,12 @@ mod render_region;
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
 mod app_parent;
+#[cfg(unix)]
+#[path = "../../../crates/o8-launcher/src/documents/validation.rs"]
+mod document_validation;
+#[cfg(unix)]
+#[path = "../../../crates/o8-launcher/src/documents/transport.rs"]
+mod document_transport;
 mod child_command;
 mod external_open;
 mod brain;

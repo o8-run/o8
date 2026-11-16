@@ -127,6 +127,9 @@ impl FilesPanel {
         .detach();
     }
     pub(super) fn toggle_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.document_read_only {
+            return;
+        }
         if let File::Loaded {
             buffer,
             truncated: false,
@@ -151,6 +154,9 @@ impl FilesPanel {
         }
     }
     pub(super) fn save_file(&mut self, cx: &mut Context<Self>) {
+        if self.document_read_only {
+            return;
+        }
         let File::Loaded {
             buffer,
             truncated: false,

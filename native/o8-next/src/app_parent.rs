@@ -26,6 +26,7 @@ pub fn watch() {
     if std::env::var("O8_NEXT_PARENT_PIPE").as_deref() != Ok("1") {
         return;
     }
+    watch_documents();
     std::thread::spawn(|| {
         let input = std::io::stdin();
         let mut input = input.lock();
@@ -123,4 +124,43 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+}
+
+#[cfg(unix)]
+static DOCUMENTS: Mutex<VecDeque<std::path::PathBuf>> = Mutex::new(VecDeque::new());
+#[cfg(unix)]
+pub(crate) fn take_document() -> Option<std::path::PathBuf> {
+    DOCUMENTS.lock().unwrap().pop_front()
+}
+#[cfg(not(unix))]
+fn watch_documents() {}
+#[cfg(unix)]
+fn watch_documents() {
+    let Some(data) = document_directory() else {
+        return;
+    };
+    std::thread::spawn(move || {
+        loop {
+            if DOCUMENTS.lock().unwrap().is_empty() {
+                if let Ok(paths) = crate::document_transport::receive(&data) {
+                    DOCUMENTS.lock().unwrap().extend(paths);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+    });
+}
+
+/// The server passes an explicit state file even when ambient environment is
+/// stripped. Its parent is the server-selected app data directory.
+#[cfg(unix)]
+pub(crate) fn document_directory() -> Option<std::path::PathBuf> {
+    let args: Vec<_> = std::env::args_os().collect();
+    args.windows(2)
+        .find(|pair| pair[0] == "--shell-state")
+        .and_then(|pair| {
+            std::path::Path::new(&pair[1])
+                .parent()
+                .map(std::path::Path::to_path_buf)
+        })
 }

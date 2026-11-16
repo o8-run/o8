@@ -764,3 +764,9 @@ fn large_file_one_million_lines_stays_within_bounds(cx: &mut TestAppContext) {
         assert!(ms < 32., "{name} {ms:.1}ms");
     }
 }
+
+#[cfg(unix)]
+#[gpui::test]
+fn finder_document_selects_read_only_markdown(cx: &mut TestAppContext) {
+    viewer_tests::finder_document_selects_read_only_markdown(cx);
+}

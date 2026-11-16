@@ -301,3 +301,39 @@ pub(super) fn viewer_failed_svg_keeps_source_available_and_retry_recovers(cx: &m
     click(cx, "files-retry");
     wait(cx, "files-media-2");
 }
+
+#[cfg(unix)]
+pub(super) fn finder_document_selects_read_only_markdown(cx: &mut TestAppContext) {
+    let root = std::env::temp_dir().join(format!("finder-markdown-{}", std::process::id()));
+    fs::create_dir_all(root.join("data")).unwrap();
+    let file = root.join("guide.md");
+    fs::write(&file, "# Finder document\n").unwrap();
+    let client = Client::new("http://127.0.0.1:1").unwrap();
+    let (panel, cx) =
+        cx.add_window_view(|_, cx| FilesPanel::new(client, String::new(), Mode::Files, cx));
+    panel.update(cx, |panel, cx| {
+        panel.open_document_in(file.clone(), root.join("data"), cx)
+    });
+    cx.run_until_parked();
+    // Drive background IO without a server or installed application.
+    for _ in 0..100 {
+        draw(cx);
+        if panel.read_with(cx, |p, _| matches!(p.file, File::Loaded { .. })) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    wait(cx, "files-markdown-1");
+    assert!(cx.debug_bounds("files-edit-toggle").is_none());
+    panel.read_with(cx, |p, _| {
+        assert_eq!(p.selected.as_deref(), file.to_str());
+        assert!(p.document_read_only);
+        assert!(p.view_mode() == viewer::ViewMode::Preview);
+        let File::Loaded { buffer, .. } = &p.file else {
+            panic!("document did not load");
+        };
+        assert_eq!(buffer.text, "# Finder document\n");
+        assert!(!buffer.editing);
+    });
+    fs::remove_dir_all(root).unwrap();
+}

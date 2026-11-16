@@ -4,6 +4,7 @@ use o8_launcher::ownership::{self, identity, private_write, Pending, Receipt};
 use o8_launcher::update;
 use serde::{Deserialize, Serialize};
 mod control;
+mod documents;
 mod native;
 mod prepare;
 mod shutdown;
@@ -480,11 +481,14 @@ fn run(config: &mut Config, relaunch: &update::Relaunch) -> Result<(), Option<St
     }
     fs::create_dir_all(config.data_dir.join("logs"))
         .map_err(|_| Some("Data directory unavailable".into()))?;
-    let Some(instance_lock) = Instance::claim(&config.data_dir)
+    let Some(instance_lock) = Instance::claim_with(&config.data_dir, &documents::initial())
         .map_err(|error| Some(format!("Instance unavailable: {error}")))?
     else {
         return Ok(());
     };
+    for path in documents::initial() {
+        documents::enqueue(path);
+    }
     // Settles an interrupted install while this instance holds the lock.
     let mut updates = update::Controller::new(update::Updater::new(
         &config.version,
@@ -705,7 +709,7 @@ fn serve(
         .build()
         .map_err(|_| "Health client unavailable")?;
     let mut deadline = Instant::now() + Duration::from_secs(90);
-    let voice_only =
+    let mut voice_only =
         o8_launch_core::server_env::voice_only(std::env::var("O8_VOICE_ONLY").ok().as_deref());
     let mut opened = false;
     let mut pending_show = false;
@@ -717,6 +721,9 @@ fn serve(
             // Never call this while holding the server lock: a native quit waits in here.
             native.pump();
             pending_show |= reopen.swap(false, Ordering::SeqCst);
+            if documents::pending() {
+                voice_only = false;
+            }
             let received = match lock(control).as_ref() {
                 Some(instance) => instance.receive().map_err(|_| "Instance control stopped")?,
                 None => break,
@@ -735,6 +742,16 @@ fn serve(
                     },
                     Request::UpdateApply => Ok(updates.apply()),
                     Request::UpdateStatus => Ok(updates.status()),
+                    Request::OpenFiles { paths } => {
+                        pending_show = true;
+                        for path in paths {
+                            documents::enqueue(path);
+                        }
+                        Ok(serde_json::json!({"ok": true}))
+                    }
+                    Request::TakeOpenFiles => {
+                        Ok(serde_json::json!({"paths": documents::take(&config.data_dir)}))
+                    }
                     Request::Show => {
                         pending_show = true;
                         Ok(serde_json::json!({"ok": true}))
@@ -921,7 +938,12 @@ fn main() {
     };
     // With no arguments the launcher is the app bundle's main program and
     // reads its paths from the bundle it runs in.
-    let loaded: Option<Config> = if args.len() == 1 {
+    let loaded: Option<Config> = if args.len() == 1
+        || args
+            .iter()
+            .skip(1)
+            .all(|arg| !arg.to_string_lossy().starts_with('-'))
+    {
         std::env::current_exe().ok().and_then(|exe| {
             o8_launcher::bundle::configuration(
                 &exe,
