@@ -23,6 +23,17 @@ const h = vi.hoisted(() => ({
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({ listMobileOrchestratorThreads: () => h.threads, listArchivedOrchestratorThreadIds: () => [], createMobileOrchestratorThread: vi.fn() }));
 vi.mock('@/lib/orchestrator/pull-request-context', () => ({ listPullRequestContext: () => ({ links: h.links, nextCursor: null }) }));
 vi.mock('@/lib/github-broker', () => ({ fetchGitHubPullRequestDetail: vi.fn(async () => ({ number: 7, title: 'Change', state: h.closed ? 'closed' : 'open', draft: true, inMergeQueue: false, updatedAt: '2026-01-01', changedFiles: 4, body: 'private', statusCheckRollup: [{ name: 'Lint', status: 'completed', conclusion: 'failure' }, { name: 'Test', status: 'completed', conclusion: 'success' }, { name: 'Build', status: 'queued', conclusion: null }] })) }));
+vi.mock('@/lib/repos/registry', () => ({ listRepos: async () => [{ localPath: '/work/app', remoteUrl: 'git@github.com:org/app.git' }, { localPath: '/work/plain', remoteUrl: null }] }));
+const panel = vi.hoisted(() => ({ calls: [] as string[] }));
+const panelHandler = (name: string) => ({ GET: async (request: Request, context?: { params: Promise<{ number: string }> }) => {
+  panel.calls.push(`${name} ${new URL(request.url).pathname}${new URL(request.url).search} ${context ? (await context.params).number : ''}`.trim());
+  return Response.json({ handler: name });
+} });
+vi.mock('@/app/api/panel/prs/route', () => panelHandler('list'));
+vi.mock('@/app/api/panel/prs/[number]/route', () => panelHandler('detail'));
+vi.mock('@/app/api/panel/prs/[number]/checks/route', () => panelHandler('checks'));
+vi.mock('@/app/api/panel/prs/[number]/timeline/route', () => panelHandler('timeline'));
+vi.mock('@/app/api/panel/prs/[number]/comments/route', () => panelHandler('comments'));
 vi.mock('@/lib/runtime/capacity-service', () => ({ getRuntimeCapacityControlSnapshot: async () => h.capacity }));
 const dir = mkdtempSync(join(tmpdir(), 'o8-mobile-read-'));
 process.env.CORTEX_IDE_DATA_DIR = dir;
@@ -66,6 +77,29 @@ describe('paired mobile read routes through the real gate', () => {
     const body = await (await prs.GET(request('/api/mobile/pull-requests?repo=other/private'))).json();
     expect(body.pullRequests).toEqual([]);
     h.closed = false;
+  });
+  it('reads pull requests only for a registered project, with the repository taken from its remote', async () => {
+    const get = async (query: string) => {
+      const req = request(`/api/mobile/pull-requests?${query}`);
+      expect(panelGateMiddleware(req).status).toBe(200);
+      return prs.GET(req);
+    };
+    panel.calls.length = 0;
+    expect((await get('view=list&repoPath=/work/other&repo=org/app')).status).toBe(404);
+    expect((await get('view=list&repoPath=/work/plain')).status).toBe(404);
+    expect((await get('number=7&repoPath=/work/other&repo=org/app')).status).toBe(404);
+    expect((await get('view=list&repoPath=/work/app&state=merged')).status).toBe(400);
+    expect((await get('number=7&repoPath=/work/app&part=checkout')).status).toBe(400);
+    expect((await get('number=0&repoPath=/work/app')).status).toBe(400);
+    expect(panel.calls).toEqual([]);
+    expect(await (await get('view=list&repoPath=/work/app&state=closed&page=2&repo=other/private')).json()).toEqual({ handler: 'list' });
+    expect(await (await get('number=7&repoPath=/work/app&repo=other/private')).json()).toEqual({ handler: 'detail' });
+    expect(await (await get('number=7&repoPath=/work/app&part=checks')).json()).toEqual({ handler: 'checks' });
+    expect(panel.calls).toEqual([
+      'list /api/panel/prs?view=list&state=closed&page=2&repo=org%2Fapp',
+      'detail /api/panel/prs/7?repo=org%2Fapp&page=1 7',
+      'checks /api/panel/prs/7/checks?repo=org%2Fapp&page=1 7',
+    ]);
   });
   it('adds thread display facts and omits absent facts', async () => {
     const req = request('/api/mobile/orchestrator/threads');
