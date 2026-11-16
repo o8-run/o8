@@ -1,3 +1,4 @@
+import { resolveClockHookCommand } from '@/lib/worktree/safety-hooks';
 import { prepareOwnedWorkerMcpConfig, type PreparedOwnedWorkerMcpConfig } from './worker-mcp-config';
 import { prepareWorkerO8Cli, type PreparedWorkerO8Cli } from './worker-o8-cli';
 import type {
@@ -45,6 +46,7 @@ export async function prepareOwnedLaunchArgs({
       sandboxEnabled,
     });
     workerMcp.sandboxReadPaths.push(...(workerO8?.readPaths ?? []));
+    const clockHookCommand = await resolveClockHookCommand();
 
     if (mode === 'launch') {
       return {
@@ -57,6 +59,7 @@ export async function prepareOwnedLaunchArgs({
           workerMcpConfigPath: workerMcp.configPath,
           workerMcpServers: workerMcp.servers,
           runtimeConfig: session.runtimeConfig,
+          clockHookCommand,
         }),
         stdinPayload: adapter.launchStdin?.({
           cwd: session.repoPath,
@@ -82,6 +85,7 @@ export async function prepareOwnedLaunchArgs({
       // A resumed read-only packet must stay read-only: the pin lives on the
       // session, so the mode survives even when the resume caller knows nothing.
       runtimeConfig: session.runtimeConfig,
+      clockHookCommand,
     });
     if (!args) {
       throw new Error(`Resume is not supported by the ${humanLabel} runtime adapter.`);

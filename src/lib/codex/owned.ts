@@ -118,6 +118,24 @@ export function codexWorkerMcpOverrideArgs(servers: ResolvedWorkerMcpServer[]): 
     });
 }
 
+/**
+ * o8's time ledger hook for a Codex worker. The worker ignores the user's
+ * config, where Codex keeps hook trust, so a hook passed at launch runs only
+ * with the trust bypass. The bypass does not widen what runs: an untrusted
+ * project's own hooks are not loaded at all. Codex has no failure event, so
+ * PostToolUse covers failed commands too.
+ */
+export function codexClockHookArgs(command?: string): string[] {
+  if (!command) return [];
+  const hook = `hooks=[{type="command",command=${JSON.stringify(command)},timeout=20}]`;
+  return [
+    '--dangerously-bypass-hook-trust',
+    '-c', `hooks.PreToolUse=[{matcher="Bash",${hook}}]`,
+    '-c', `hooks.PostToolUse=[{matcher="Bash",${hook}}]`,
+    '-c', `hooks.SessionStart=[{${hook}}]`,
+  ];
+}
+
 export function codexLaunchArgs(ctx: {
   cwd: string;
   prompt: string;
@@ -125,6 +143,7 @@ export function codexLaunchArgs(ctx: {
   effort?: ThinkingEffort;
   workerMcpServers?: ResolvedWorkerMcpServer[];
   runtimeConfig?: Record<string, string>;
+  clockHookCommand?: string;
 }): string[] {
   return [
     'exec',
@@ -136,6 +155,7 @@ export function codexLaunchArgs(ctx: {
     ...DISABLE_IMAGE_TOOL,
     ...IGNORE_USER_CONFIG,
     ...codexWorkerMcpOverrideArgs(ctx.workerMcpServers ?? []),
+    ...codexClockHookArgs(ctx.clockHookCommand),
     '-C',
     ctx.cwd,
     // `ollama:<model>` / `lmstudio:<model>` → run this worker on a LOCAL model
@@ -154,6 +174,7 @@ export function codexResumeArgs(ctx: {
   effort?: ThinkingEffort;
   workerMcpServers?: ResolvedWorkerMcpServer[];
   runtimeConfig?: Record<string, string>;
+  clockHookCommand?: string;
 }): string[] {
   const local = parseLocalModel(ctx.model);
   return [
@@ -168,6 +189,7 @@ export function codexResumeArgs(ctx: {
     ...DISABLE_IMAGE_TOOL,
     ...IGNORE_USER_CONFIG,
     ...codexWorkerMcpOverrideArgs(ctx.workerMcpServers ?? []),
+    ...codexClockHookArgs(ctx.clockHookCommand),
     ...(local ? ['--model', local.model] : codexModelArgs(ctx.model)),
     ...codexReasoningEffortArgs(ctx.effort, ctx.model),
     ctx.prompt,
@@ -256,6 +278,8 @@ const CODEX_STDERR_NOISE_PATTERNS: RegExp[] = [
   /rmcp::transport::worker.*worker quit/i,
   /mcp.*connection refused/i,
   /mcp.*transport channel closed/i,
+  // The time ledger stopping a slow command once is the hook working, not a failure.
+  /Command blocked by PreToolUse hook: o8 clock/,
 ];
 
 export const codexOwnedAdapter: OwnedRuntimeAdapter = {
