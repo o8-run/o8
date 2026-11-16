@@ -12,6 +12,7 @@ import {
 } from './terminal-panes.js';
 import { forgetRemoved, rememberRemoved } from '../rex-auto-shortcut.js';
 import { installShortcut, parseShortcutArgs, removeShortcut } from './terminal-shortcut.js';
+import { focusNeedsYou, parseNeedsYouArgs } from './terminal-needs-you.js';
 import { waitForTerminalOutput } from './terminal-wait.js';
 import { createTerminalStatusReporter } from '../terminal-status.js';
 
@@ -527,12 +528,27 @@ function runTerminalShortcut(mode: OutputMode, rest: string[]): number {
   return EXIT.OK;
 }
 
+/** Focus the next o8 pane in this Rex session that needs you. */
+function runTerminalNeedsYou(mode: OutputMode, rest: string[]): number {
+  const result = focusNeedsYou({ args: parseNeedsYouArgs(rest), env: process.env });
+  if (mode.human) {
+    const more = result.waiting > 1 ? ` ${result.waiting - 1} more need${result.waiting === 2 ? 's' : ''} you.` : '';
+    process.stdout.write(result.block
+      ? `${result.msg ?? 'Needs you'}: ${result.label ?? result.block}.${more}\n`
+      : 'No o8 pane needs you.\n');
+  } else {
+    printJson({ schema: 'o8/cli/terminal.needs-you/v1', ...result });
+  }
+  return EXIT.OK;
+}
+
 export async function runTerminal(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
-  if (!['list', 'show', 'observe', 'control', 'wait', 'panes', 'shortcut'].includes(sub ?? '')) {
-    throw new CliError('invalid_args', 'Use `o8 terminal list|show|observe|control|wait|panes|shortcut`.', EXIT.INVALID_ARGS);
+  if (!['list', 'show', 'observe', 'control', 'wait', 'panes', 'shortcut', 'needs-you'].includes(sub ?? '')) {
+    throw new CliError('invalid_args', 'Use `o8 terminal list|show|observe|control|wait|panes|shortcut|needs-you`.', EXIT.INVALID_ARGS);
   }
   if (sub === 'panes') return runTerminalPanes(mode, rest);
   if (sub === 'shortcut') return runTerminalShortcut(mode, rest);
+  if (sub === 'needs-you') return runTerminalNeedsYou(mode, rest);
   const machineAt = rest.indexOf('--machine');
   if (machineAt >= 0) {
     const key = rest[machineAt + 1];

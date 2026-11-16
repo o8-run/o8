@@ -6,10 +6,11 @@ o8 keeps ownership of every worker. Rex only shows them. Closing a pane, a tab o
 
 ## Setup
 
-There is nothing to run. The first time you run an `o8` command in a Rex pane, o8 adds "Show o8 Terminals" to the Rex command palette and says so in one line. It writes one file, `o8.lua`, beside your Rex `init.lua` and adds one `require("o8")` line to it; nothing else in your Rex config changes. The action starts the `o8` command on your PATH, so updating o8 keeps it working.
+There is nothing to run. The first time you run an `o8` command in a Rex pane, o8 adds "Show o8 Terminals" and "Go to o8 Pane That Needs You" to the Rex command palette and says so in one line. It writes one file, `o8.lua`, beside your Rex `init.lua` and adds one `require("o8")` line to it; nothing else in your Rex config changes. The actions start the `o8` command on your PATH, so updating o8 keeps them working.
 
 - To bind a key as well, run `o8 terminal shortcut --key cmd+shift+o`.
-- `o8 terminal shortcut --remove` takes it out, and o8 remembers that and does not add it back. Run `o8 terminal shortcut` to add it again.
+- If you set it up before "Go to o8 Pane That Needs You" existed, run `o8 terminal shortcut` again to add it. o8 does not rewrite a file it already wrote on its own.
+- `o8 terminal shortcut --remove` takes both out, and o8 remembers that and does not add it back. Run `o8 terminal shortcut` to add it again.
 - Set `O8_REX_SHORTCUT=0` to stop o8 from adding it on its own.
 - o8 never replaces an `o8.lua` you wrote yourself, never binds a key on its own, and does nothing when it runs as a worker or without a person at the terminal.
 
@@ -55,6 +56,17 @@ A worker can be stuck without asking for anything. A packet's pane watches for t
 Only progress clears a sign: any new output clears the first, the command passing or failing differently clears the second, and a different test result clears the third. A steer starts all three over. A sign only marks the pane. The worker keeps running until you stop or steer it.
 
 So a tab of worker panes tells you at a glance which workers finished and which need you. Marks are written to stdout only with human output in an interactive Rex pane, so JSON output on stdout stays clean. Set `O8_TERMINAL_STATUS=0` to turn them off, or `O8_TERMINAL_STATUS=1` to send them in another terminal that reads the Program Status Protocol; with JSON output, forced marks go to stderr.
+
+## Go to the pane that needs you
+
+Pick "Go to o8 Pane That Needs You" from the palette, or run `o8 terminal needs-you` in any pane of the session. Rex focuses an o8 pane that is blocked or failed, and the palette says what it reported, such as `Blocked: needs a decision: o8: Fix login [p2]. 1 more needs you.`
+
+- From a pane that needs nothing, it goes to the most urgent one: blocked before failed.
+- From a pane that needs you, it goes to the next one in the session, so running it again visits each in turn.
+- The `o8 watcher` pane is skipped, since it only counts the others. Panes of other programs are never chosen.
+- When nothing needs you, focus stays where it is.
+
+To give it a key, bind the action in your `init.lua`: `rex.bind("cmd+shift+n", "o8_needs_you")`.
 
 ## Start work from the terminal
 
