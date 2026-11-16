@@ -406,6 +406,8 @@ export interface OwnedRuntimeAdapter {
     workerMcpServers?: ResolvedWorkerMcpServer[];
     /** Config pinned when the session was created (carrier, spend cap, work mode). */
     runtimeConfig?: Record<string, string>;
+    /** Shell command for o8's time ledger hook, when the running install has one. */
+    clockHookCommand?: string;
   }): string[];
 
   /** Optional stdin payload for runtimes launched as interactive stream processors. */
@@ -429,6 +431,8 @@ export interface OwnedRuntimeAdapter {
     workerMcpServers?: ResolvedWorkerMcpServer[];
     /** Config pinned when the session was created (carrier, spend cap, work mode). */
     runtimeConfig?: Record<string, string>;
+    /** Shell command for o8's time ledger hook, when the running install has one. */
+    clockHookCommand?: string;
   }): string[] | null;
 
   /** Parse a run's stdout into normalized entries + outcome + discovered thread id. */

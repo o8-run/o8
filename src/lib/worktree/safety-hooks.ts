@@ -94,6 +94,20 @@ export async function resolveManagedWorkspaceSafetyHookRuntime(options: {
   throw new Error(`The running o8 installation has no complete safety-hook runtime under ${runtimeRoot}.`);
 }
 
+/**
+ * The shell command that runs o8's time ledger hook, for a runtime that takes
+ * hooks at launch. Undefined when this install has no hook runtime: a worker
+ * must still start without a clock.
+ */
+export async function resolveClockHookCommand(): Promise<string | undefined> {
+  try {
+    const runtime = await resolveManagedWorkspaceSafetyHookRuntime();
+    return `${quoteShellArg(runtime.nodePath)} ${quoteShellArg(runtime.hookPaths['time-ledger.js'])}`;
+  } catch {
+    return undefined;
+  }
+}
+
 async function resolveGitPath(
   cwd: string,
   flag: '--absolute-git-dir' | '--git-common-dir',
