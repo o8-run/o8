@@ -82,7 +82,7 @@ migrateDataDirOnce();
 
 import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
-import { resolvePortInfo } from '@/lib/panel/api-port';
+import { ownsDataDirRelayIdentity, resolvePortInfo } from '@/lib/panel/api-port';
 import { getInstanceIdentity } from '@/lib/panel/instance-identity';
 import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
@@ -9945,8 +9945,12 @@ async function bootstrapWsServer() {
     // isolated + gated (entitlement + operator toggle + license token); dials OUT
     // to the relay and bridges relayed phones into THIS ws-server. A failure here
     // NEVER affects the LAN path — the call is self-guarded and returns null.
-    startRelayConnectorIfEnabled();
-    startMachineAttachSupervisor();
+    if (ownsDataDirRelayIdentity(WS_PORT)) {
+      startRelayConnectorIfEnabled();
+      startMachineAttachSupervisor();
+    } else {
+      console.log(`[relay] not started: port ${WS_PORT} is not the server this data folder names`);
+    }
 
     // ── Start Agent Supervisor ──
     const supervisorCallbacks: SupervisorCallbacks = {
