@@ -577,6 +577,29 @@ describe('merged-by-ancestry reconciliation', () => {
     }
   }, 30_000);
 
+  it('fetches a repository base at most once per interval across sweeps', async () => {
+    const { clone } = makeRepo('o8-ancestry-fetch-interval');
+    writeFileSync(join(clone, 'lane.txt'), 'lane\n');
+    commitAll(clone, 'lane work');
+    seedLaneOnly(clone);
+    const previous = process.env.O8_ANCESTRY_FETCH_INTERVAL_MS;
+    process.env.O8_ANCESTRY_FETCH_INTERVAL_MS = '300000';
+    const gitCalls = logGitCalls();
+    try {
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 0 });
+      expect(gitCalls.take('fetch')).toBe(1);
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 0 });
+      expect(gitCalls.take('fetch')).toBe(0);
+      process.env.O8_ANCESTRY_FETCH_INTERVAL_MS = '0';
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 0 });
+      expect(gitCalls.take('fetch')).toBe(1);
+    } finally {
+      gitCalls.restore();
+      if (previous === undefined) delete process.env.O8_ANCESTRY_FETCH_INTERVAL_MS;
+      else process.env.O8_ANCESTRY_FETCH_INTERVAL_MS = previous;
+    }
+  }, 30_000);
+
   it('never reports no changes for an idle lane with no launched session', async () => {
     const { clone } = makeRepo('o8-lane-never-launched');
     const packetId = 'pkt-never-launched';
