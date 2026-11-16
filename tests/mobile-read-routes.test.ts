@@ -49,12 +49,17 @@ function request(path: string, bearer = token, method = 'GET') {
   return new NextRequest(`http://localhost:3001${path}`, { method, headers: { authorization: `Bearer ${bearer}`, 'x-o8-client-addr': '198.51.100.2' } });
 }
 describe('paired mobile read routes through the real gate', () => {
+<<<<<<< HEAD
   it.each(['/api/mobile/pull-requests', '/api/mobile/usage', '/api/mobile/usage/history', '/api/mobile/files/list', '/api/mobile/files/content', '/api/mobile/automations', '/api/mobile/agents', '/api/mobile/orchestrator/models'])('limits %s to authenticated GET', path => {
+=======
+  it.each(['/api/mobile/pull-requests', '/api/mobile/usage', '/api/mobile/source-control/status', '/api/mobile/orchestrator/models'])('limits %s to authenticated GET', path => {
+>>>>>>> 8fd030ee2 (feat(mobile): let a paired phone commit and push a thread's work)
     expect(panelGateMiddleware(request(path)).status).toBe(200);
     expect(panelGateMiddleware(request(path, '')).status).toBe(401);
     expect(panelGateMiddleware(request(path, 'revoked-device')).status).toBe(401);
     for (const method of ['POST', 'PUT', 'DELETE', 'PATCH', 'HEAD']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
   });
+<<<<<<< HEAD
   it.each(['/api/mobile/automations/auto_1/enabled', '/api/mobile/automations/auto_1/run'])('limits %s to authenticated POST', path => {
     expect(panelGateMiddleware(request(path, token, 'POST')).status).toBe(200);
     expect(panelGateMiddleware(request(path, '', 'POST')).status).toBe(401);
@@ -62,6 +67,17 @@ describe('paired mobile read routes through the real gate', () => {
   });
   it.each(['/api/mobile/automations/auto_1', '/api/mobile/automations/auto_1/run/extra', '/api/automations', '/api/automations/auto_1/run'])('keeps %s closed to a paired device', path => {
     for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
+=======
+  it.each(['stage', 'unstage', 'commit', 'pull', 'push'])('limits source control %s to authenticated POST', action => {
+    const path = `/api/mobile/source-control/${action}`;
+    expect(panelGateMiddleware(request(path, token, 'POST')).status).toBe(200);
+    expect(panelGateMiddleware(request(path, '', 'POST')).status).toBe(401);
+    expect(panelGateMiddleware(request(path, 'revoked-device', 'POST')).status).toBe(401);
+    for (const method of ['GET', 'PUT', 'DELETE', 'PATCH']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
+  });
+  it.each(['/api/mobile/source-control/force-push', '/api/mobile/source-control/push/extra', '/api/mobile/source-control'])('keeps %s closed to a paired device', path => {
+    for (const method of ['GET', 'POST']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
+>>>>>>> 8fd030ee2 (feat(mobile): let a paired phone commit and push a thread's work)
   });
   it.each(['/api/panel/prs', '/api/runtime/capacity', '/api/orchestrator/state'])('preserves operator-only %s', path => {
     expect(panelGateMiddleware(request(path)).status).toBe(403);

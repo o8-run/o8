@@ -137,6 +137,10 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // Which coding agents are installed and signed in: booleans and a default model,
   // never an account, organisation or path.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/agents\/?$/ },
+  // Commit and push one thread's work. The checkout comes from the session, never
+  // from a path in the request; push refuses the default branch and never forces.
+  { methods: new Set(['GET']), path: /^\/api\/mobile\/source-control\/status\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/mobile\/source-control\/(?:stage|unstage|commit|pull|push)\/?$/ },
   // The agents and models this computer offers, for the phone's picker.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/orchestrator\/models\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
