@@ -2,7 +2,7 @@ import 'server-only';
 
 import { CodexAppServerClient } from '@/lib/codex/app-server-client';
 import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
-import type { RuntimeCapacityBucket, RuntimeCapacitySnapshot } from '@/lib/runtimes/types';
+import type { RuntimeCapacityAccount, RuntimeCapacityBucket, RuntimeCapacitySnapshot } from '@/lib/runtimes/types';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -48,9 +48,29 @@ function parseWindow(id: string, value: unknown): RuntimeCapacityBucket | null {
   };
 }
 
+/**
+ * Credits from `credits.balance` (a decimal string), resets from
+ * `rateLimitResetCredits.availableCount`, and the workspace from `account/read`.
+ */
+function codexAccount(response: JsonRecord | null, rateLimits: JsonRecord, accountRead: unknown): RuntimeCapacityAccount | undefined {
+  const account: RuntimeCapacityAccount = {};
+  const workspace = record(record(accountRead)?.account)?.workspaceName;
+  if (typeof workspace === 'string' && workspace.trim()) {
+    account.organization = workspace.replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+  const resets = record(response?.rateLimitResetCredits)?.availableCount;
+  if (Number.isSafeInteger(resets) && (resets as number) >= 0) account.resetsLeft = resets as number;
+  const credits = record(record(record(response?.rateLimitsByLimitId)?.codex)?.credits ?? rateLimits.credits);
+  const balance = typeof credits?.balance === 'string' && credits.balance.trim() ? Number(credits.balance) : NaN;
+  if (credits?.hasCredits === true && credits.unlimited !== true && Number.isFinite(balance) && balance >= 0) {
+    account.credits = { amount: balance, currency: null };
+  }
+  return Object.keys(account).length ? account : undefined;
+}
+
 export function parseCodexAppServerCapacity(
   value: unknown,
-  options: { identityId?: string | null; observedAtMs?: number } = {},
+  options: { identityId?: string | null; observedAtMs?: number; accountRead?: unknown } = {},
 ): RuntimeCapacitySnapshot {
   const response = record(value);
   const rateLimits = record(response?.rateLimits ?? response?.rate_limits);
@@ -60,6 +80,7 @@ export function parseCodexAppServerCapacity(
     parseWindow('secondary', rateLimits.secondary),
   ].filter((bucket): bucket is RuntimeCapacityBucket => bucket !== null);
   if (buckets.length === 0) throw new Error('Codex app-server returned no rate-limit windows.');
+  const account = codexAccount(response, rateLimits, options.accountRead);
   return {
     runtime: 'codex',
     identityId: options.identityId ?? null,
@@ -69,6 +90,7 @@ export function parseCodexAppServerCapacity(
     source: 'app-server',
     confidence: 'exact',
     buckets,
+    ...(account ? { account } : {}),
   };
 }
 
@@ -92,8 +114,12 @@ export async function readLiveCodexRuntimeCapacity(options: {
   });
   try {
     await client.initialize('o8-capacity', '1');
-    const response = await client.request('account/rateLimits/read', {}, requestTimeoutMs);
-    return parseCodexAppServerCapacity(response, { identityId: options.identityId });
+    const [response, accountRead] = await Promise.all([
+      client.request('account/rateLimits/read', {}, requestTimeoutMs),
+      // The workspace name is optional; an app-server without account/read still reports limits.
+      client.request('account/read', {}, requestTimeoutMs).catch(() => null),
+    ]);
+    return parseCodexAppServerCapacity(response, { identityId: options.identityId, accountRead });
   } finally {
     await client.close();
   }

@@ -71,6 +71,23 @@ export interface RuntimeCapacityBucket {
   expiresAt: string | null;
 }
 
+/** An amount in major units; a null currency means the provider's own credits. */
+export interface RuntimeCapacityAmount {
+  amount: number;
+  currency: string | null;
+}
+
+/** Account facts the provider reports beside its windows. Absent fields were not reported. */
+export interface RuntimeCapacityAccount {
+  organization?: string;
+  /** Limit resets the account can still redeem. */
+  resetsLeft?: number;
+  /** Prepaid credit balance. */
+  credits?: RuntimeCapacityAmount;
+  /** Extra usage spent this period, and its cap when one is set. */
+  extraUsage?: { used: RuntimeCapacityAmount; limit?: RuntimeCapacityAmount };
+}
+
 export interface RuntimeCapacitySnapshot {
   runtime: string;
   identityId: string | null;
@@ -80,6 +97,7 @@ export interface RuntimeCapacitySnapshot {
   source: RuntimeCapacitySource | null;
   confidence: RuntimeCapacityConfidence | null;
   buckets: RuntimeCapacityBucket[];
+  account?: RuntimeCapacityAccount;
 }
 
 export interface RuntimeIdentityConfigValidation {

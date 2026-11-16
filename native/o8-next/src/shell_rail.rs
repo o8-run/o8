@@ -664,6 +664,64 @@ pub(crate) fn usage_runtime(capacity: &Value, now: u64) -> Div {
     section
 }
 
+/// "$12.50", "12.50 EUR", "120.5 credits": an amount the server reported.
+fn amount_label(amount: &Value) -> Option<String> {
+    let value = amount["amount"].as_f64().filter(|value| value.is_finite())?;
+    Some(match amount["currency"].as_str() {
+        Some("USD") => format!("${value:.2}"),
+        Some(currency) => format!("{value:.2} {currency}"),
+        None => {
+            let text = format!("{value:.2}");
+            let text = text.trim_end_matches('0').trim_end_matches('.');
+            format!("{text} credits")
+        }
+    })
+}
+
+/// The account facts the provider reported beside its windows, as label and
+/// value. A fact the server left out has no row.
+fn account_rows(capacity: &Value) -> Vec<(&'static str, String)> {
+    let account = &capacity["account"];
+    let mut rows = vec![];
+    if let Some(organization) = account["organization"].as_str().filter(|o| !o.is_empty()) {
+        rows.push(("Organization", organization.to_string()));
+    }
+    if let Some(left) = account["resetsLeft"].as_u64() {
+        rows.push(("Resets left", left.to_string()));
+    }
+    if let Some(credits) = amount_label(&account["credits"]) {
+        rows.push(("Credits", credits));
+    }
+    if let Some(used) = amount_label(&account["extraUsage"]["used"]) {
+        rows.push((
+            "Extra usage",
+            match amount_label(&account["extraUsage"]["limit"]) {
+                Some(limit) => format!("{used} of {limit}"),
+                None => used,
+            },
+        ));
+    }
+    rows
+}
+
+/// One account fact under a runtime's windows.
+fn account_row(label: &'static str, value: String) -> Div {
+    div()
+        .h(px(18.))
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(8.))
+        .text_size(px(11.))
+        .child(
+            div()
+                .flex_shrink_0()
+                .text_color(theme().text_secondary)
+                .child(label),
+        )
+        .child(div().min_w_0().truncate().child(value))
+}
+
 /// The hover card: every connected runtime's windows on one line each, with
 /// the share used, an even-pace mark and the time to reset. It never scrolls.
 fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
@@ -706,7 +764,13 @@ fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
                 )),
         );
     for capacity in &capacities {
-        body = body.child(usage_runtime(capacity, now));
+        body = body.child(
+            usage_runtime(capacity, now).children(
+                account_rows(capacity)
+                    .into_iter()
+                    .map(|(label, value)| account_row(label, value)),
+            ),
+        );
     }
     let body = body
         .when(snapshot.is_some() && capacities.is_empty(), |body| {
@@ -770,7 +834,7 @@ fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
 
 #[cfg(test)]
 mod usage_card_tests {
-    use super::{countdown, elapsed_share, ring_path, standing, window_seconds};
+    use super::{account_rows, countdown, elapsed_share, ring_path, standing, window_seconds};
     use serde_json::json;
 
     #[test]
@@ -779,6 +843,37 @@ mod usage_card_tests {
         assert_eq!(countdown(39 * 60), "39m");
         assert_eq!(countdown(9 * 3600 + 34 * 60), "9h 34m");
         assert_eq!(countdown(6 * 86_400 + 11 * 3600 + 59), "6d 11h");
+    }
+
+    #[test]
+    fn account_rows_show_only_what_the_provider_reported() {
+        let claude = json!({"account": {
+            "organization": "Example Org",
+            "resetsLeft": 2,
+            "credits": {"amount": 12.5, "currency": "USD"},
+            "extraUsage": {"used": {"amount": 4.2, "currency": "USD"}, "limit": {"amount": 50, "currency": "USD"}},
+        }});
+        assert_eq!(
+            account_rows(&claude),
+            vec![
+                ("Organization", "Example Org".to_string()),
+                ("Resets left", "2".to_string()),
+                ("Credits", "$12.50".to_string()),
+                ("Extra usage", "$4.20 of $50.00".to_string()),
+            ]
+        );
+        let codex = json!({"account": {"resetsLeft": 0, "credits": {"amount": 120.5, "currency": null}}});
+        assert_eq!(
+            account_rows(&codex),
+            vec![
+                ("Resets left", "0".to_string()),
+                ("Credits", "120.5 credits".to_string()),
+            ]
+        );
+        let uncapped = json!({"account": {"extraUsage": {"used": {"amount": 3, "currency": "EUR"}}}});
+        assert_eq!(account_rows(&uncapped), vec![("Extra usage", "3.00 EUR".to_string())]);
+        // A runtime without account facts gets no rows, never zeros.
+        assert!(account_rows(&json!({"buckets": []})).is_empty());
     }
 
     #[test]

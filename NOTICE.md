@@ -259,6 +259,20 @@ SOFTWARE.
   `native/o8-next/src/composer/project_bar.rs`
 - License text: [T3 Code](src/lib/usage/history-readers/LICENSE.txt)
 
+## Agent account usage facts
+
+- Copyright: Copyright (c) 2026 T3 Tools Inc.
+- License: MIT
+- Upstream: <https://github.com/pingdotgg/t3code> at commit
+  `05ccd6bfb5c49fe73cd979c03ec8eb3e6f45fa6a`, files
+  `apps/server/src/provider/claudeResetCredits.ts`,
+  `apps/server/src/provider/claudeUsageLimits.ts` and
+  `apps/server/src/provider/codexUsageLimits.ts`
+- Use in o8: the reset-grant filter in `src/lib/claude-code/live-capacity.ts`,
+  and the usage, spend, reset and credit field names read there and in
+  `src/lib/codex/live-capacity.ts`
+- License text: [T3 Code](licenses/t3code-MIT.txt)
+
 ## o8 next inbox sidebar
 
 - Copyright: Copyright (c) 2026 T3 Tools Inc.
