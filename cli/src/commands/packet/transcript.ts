@@ -12,6 +12,7 @@ import { printHumanHeading, printJson, type OutputMode } from '../../output.js';
 import {
   createTerminalStatusReporter, packetStatusReport, type TerminalStatusReport,
 } from '../../terminal-status.js';
+import { STUCK_MARK, StuckWatch, stuckLine, type StuckSignal } from './stuck-signals.js';
 import { parsePacketArguments, requirePacketId, resolvePacketTarget } from './target.js';
 
 export type TranscriptEvent =
@@ -371,6 +372,11 @@ export interface FollowSteps {
   ended?(cursor: number, session: string | null, state: string | null): void;
   /** Told each time the follow moves on, so a follow that fails can be taken up from there. */
   moved?(cursor: number, session: string | null): void;
+  /**
+   * Watches the worker for signs it is stuck. `flagged` is told when a sign
+   * starts, changes, or clears (`null`), after each pause.
+   */
+  stuck?: { watch: StuckWatch; flagged(signal: StuckSignal | null): void };
 }
 
 /**
@@ -389,6 +395,15 @@ export async function followTranscript(steps: FollowSteps, first: TranscriptPage
   let checkDue = false;
   let paused = false;
   let page: Pick<TranscriptPage, 'events'> = first;
+  let flagged: StuckSignal | null = null;
+  const checkStuck = () => {
+    if (!steps.stuck) return;
+    const signal = steps.stuck.watch.check();
+    if (signal?.reason === flagged?.reason && signal?.detail === flagged?.detail) return;
+    flagged = signal;
+    steps.stuck.flagged(signal);
+  };
+  steps.stuck?.watch.observe(first.events);
   while (true) {
     let over = false;
     try {
@@ -400,7 +415,10 @@ export async function followTranscript(steps: FollowSteps, first: TranscriptPage
       }
       over = followIsOver(state);
       // A full page means more is waiting, so read on without a pause.
-      if (!over && !paused && page.events.length < TRANSCRIPT_LIMIT_MAX) await steps.wait();
+      if (!over && !paused && page.events.length < TRANSCRIPT_LIMIT_MAX) {
+        await steps.wait();
+        checkStuck();
+      }
       paused = false;
       const read = await steps.read(cursor);
       failures = 0;
@@ -411,11 +429,13 @@ export async function followTranscript(steps: FollowSteps, first: TranscriptPage
         // The page was read with the old session's cursor, so it is not shown. Start the new one
         // over, even if the old worker had stopped: the new one decides when this ends.
         steps.say('The packet was dispatched again. Following the new worker.');
+        steps.stuck?.watch.restart();
         page = { events: [] };
         quietPages = 0;
         continue;
       }
       steps.show(read.events);
+      steps.stuck?.watch.observe(read.events);
       page = read;
       quietPages = read.events.length === 0 ? quietPages + 1 : 0;
       if (over && read.events.length < TRANSCRIPT_LIMIT_MAX) {
@@ -563,6 +583,8 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
   const holding = args.hold && mode.human;
   const terminal = { input: process.stdin, output: process.stdout };
   const tabStatus = createTerminalStatusReporter(mode);
+  // Counts carry across a held pane's follows; a steer or a new session starts them over.
+  const stuck = new StuckWatch();
   let from: TranscriptPage = recent;
   const read = (cursor: number) => fetchPage(cfg, packetId, { cursor, limit: TRANSCRIPT_LIMIT_MAX });
   const state = () => laneState(cfg, packetId);
@@ -575,6 +597,7 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
   while (true) {
     let exit: number;
     tabStatus.report(transcriptStatusReport('following'));
+    stuck.touch();
     try {
       exit = await followTranscript({
         read,
@@ -586,6 +609,14 @@ export async function runPacketTranscript(mode: OutputMode, rest: string[]): Pro
         ended: (cursor, session, ended) => {
           takeUp(cursor, session);
           tabStatus.report(transcriptStatusReport('ended', ended));
+        },
+        // A stuck worker marks the pane for attention until it makes progress. It keeps running.
+        stuck: {
+          watch: stuck,
+          flagged: (signal) => {
+            say(signal ? stuckLine(signal) : 'o8: the worker is moving again.');
+            tabStatus.report(signal ? { state: 'error', msg: STUCK_MARK[signal.reason] } : transcriptStatusReport('following'));
+          },
         },
       }, from);
     } catch (error) {

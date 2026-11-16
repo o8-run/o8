@@ -40,11 +40,19 @@ Rex marks a tab while a program in it reports its state. o8 reports from:
 
 | Where | Working | Then |
 |---|---|---|
-| A packet's pane | while its worker runs | error when the packet failed, is blocked on a decision, or was archived; done for any other stop, such as awaiting review |
+| A packet's pane | while its worker runs | error when the packet failed, is blocked on a decision, or was archived; done for any other stop, such as awaiting review. While it runs, error with "Needs you" when the worker looks stuck (see below) |
 | The `o8 watcher` pane (`o8 terminal panes --watch`) | while a packet it has seen runs | a count of the packets it has seen run since it started, by where each stands now, such as `2 running · 1 needs you`; error when one waits on you or failed; done when none runs and at least one finished (a merged or dismissed packet counts as done); idle before the first ("No workers yet"), when only paused ones are left, and while o8 does not answer ("Cannot reach o8") |
 | `o8 mission dispatch --watch`, `o8 mission wait` | while it waits | done when the packet reaches review or release; error when it fails, blocks or is archived; cleared on a timeout or any other wake |
 | `o8 mission tail` | while packets run | one mark per packet (up to 60), and one for the mission |
 | `o8 chat` | while a turn runs | done when a reply to a message you sent from that chat is ready; error when the connection drops or the chat shows an error |
+
+A worker can be stuck without asking for anything. A packet's pane watches for three signs and marks the tab for attention when one shows, with a line in the pane that says what it saw:
+
+- **No output:** nothing from the worker for 10 minutes, or 30 minutes while a command it started is still running. The mark reads `Needs you: no output`.
+- **Same error 3x:** the same command failed with the same output three times. Numbers such as timings are ignored when comparing output. The mark reads `Needs you: same error 3x`.
+- **Edits, tests flat:** one file was edited four or more times while the test command failed the same way three runs in a row. The mark reads `Needs you: edits, tests flat`.
+
+Only progress clears a sign: any new output clears the first, the command passing or failing differently clears the second, and a different test result clears the third. A steer starts all three over. A sign only marks the pane. The worker keeps running until you stop or steer it.
 
 So a tab of worker panes tells you at a glance which workers finished and which need you. Marks are written to stdout only with human output in an interactive Rex pane, so JSON output on stdout stays clean. Set `O8_TERMINAL_STATUS=0` to turn them off, or `O8_TERMINAL_STATUS=1` to send them in another terminal that reads the Program Status Protocol; with JSON output, forced marks go to stderr.
 
