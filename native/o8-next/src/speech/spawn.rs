@@ -122,13 +122,20 @@ fn environment(launch: &Launch) -> Result<Vec<std::ffi::CString>, String> {
         .collect()
 }
 
+// tree-sitter-rust 0.24 (theme_tests) cannot parse `unsafe extern "C"` blocks,
+// so the declaration reaches the parser only as macro token trees.
+#[cfg(target_os = "macos")]
+macro_rules! spawn_abi {
+    ($($declaration:tt)*) => { unsafe extern "C" { $($declaration)* } };
+}
+
 #[cfg(target_os = "macos")]
 fn disclaimed(launch: &Launch) -> Result<Spawned, String> {
     use std::ffi::CString;
     use std::os::fd::FromRawFd;
     use std::os::unix::ffi::OsStrExt;
 
-    unsafe extern "C" {
+    spawn_abi! {
         // Private but stable libSystem call (multi-process browsers use it for
         // the same purpose): the child becomes its own TCC responsible process.
         fn responsibility_spawnattrs_setdisclaim(
