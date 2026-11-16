@@ -3,7 +3,7 @@
 // classic shell (#6130). It writes the bundle where the classic build does, so
 // signing, notarization and the release checks run on it unchanged.
 //
-//   node scripts/native-app-build.mjs [--skip-prebuild | --candidate]
+//   node scripts/native-app-build.mjs [--skip-prebuild | --candidate [--sign]]
 //
 // --candidate builds for this machine only and keeps work between runs: one
 // chip, incremental compiles, and the packaged server is reused while its
@@ -11,11 +11,15 @@
 // no `.env` file and has never run the release prebuild; otherwise the packaged
 // server falls back to the release prebuild, which is several times slower.
 //
+// --sign signs a candidate with the identity in APPLE_SIGNING_IDENTITY so it
+// keeps the installed app's permissions and stored items. It is not notarized,
+// so it is for the machine that built it, never for distribution.
+//
 // Nothing in the release pipeline selects this script yet.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
+  chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -180,6 +184,28 @@ async function candidatePrebuild(root, triple, compile) {
   if (webKey(root) === key) writeFileSync(keyFile, `${key}\n`);
 }
 
+function machOFiles(dir, found = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) machOFiles(full, found);
+    else if (entry.isFile() && (/\.(node|dylib)$/.test(entry.name) || entry.name === 'spawn-helper')
+      && execFileSync('file', [full], { encoding: 'utf8' }).includes('Mach-O')) found.push(full);
+  }
+  return found;
+}
+
+/** The release signing order and options, without a timestamp server or notarization. */
+function signCandidate(root, app) {
+  const identity = process.env.APPLE_SIGNING_IDENTITY?.trim();
+  if (!identity) throw new Error('--sign needs APPLE_SIGNING_IDENTITY.');
+  const sign = (target, extra = []) => execFileSync('codesign',
+    ['--force', '--options', 'runtime', '--timestamp=none', '--sign', identity, ...extra, target], { stdio: 'inherit' });
+  for (const file of machOFiles(join(app, 'Contents/Resources/server/node_modules'))) sign(file);
+  sign(join(app, 'Contents/MacOS/speech_recognizer'), ['--entitlements', join(root, 'src-tauri/entitlements.speech.plist')]);
+  sign(app, ['--deep', '--entitlements', join(root, 'src-tauri/entitlements.plist')]);
+  execFileSync('codesign', ['--verify', '--deep', '--strict', app], { stdio: 'inherit' });
+}
+
 /** The same two slices and embedded plist the classic build script produced. */
 function buildSpeechRecognizer(root, work, arches) {
   const source = join(root, 'src-tauri/helpers/speech_recognizer.swift');
@@ -246,6 +272,10 @@ async function main() {
     cpSync(server, join(resources, 'server'), { recursive: true, verbatimSymlinks: true });
     writeInfoPlist(root, join(app, 'Contents/Info.plist'), version);
   });
+  if (process.argv.includes('--sign')) {
+    if (!candidate) throw new Error('--sign is for --candidate builds; releases use the release signing step.');
+    timed('sign', () => signCandidate(root, join(root, APP_BUNDLE)));
+  }
   console.log(`[native-app] ${APP_BUNDLE} assembled for v${version}${candidate ? ` (candidate, ${arches[0]})` : ''} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }
 
