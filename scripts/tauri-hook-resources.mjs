@@ -11,6 +11,7 @@ export const REQUIRED_SAFETY_HOOKS = [
   'claude-code-pretool-hook.js',
   'post-edit-typecheck.js',
   'completion-gate.js',
+  'time-ledger.js',
 ];
 
 export function exportTauriSafetyHookResources(projectRoot, serverRoot) {

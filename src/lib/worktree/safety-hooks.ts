@@ -23,6 +23,7 @@ const MANAGED_HOOK_NAMES = [
   'claude-code-pretool-hook.js',
   'post-edit-typecheck.js',
   'completion-gate.js',
+  'time-ledger.js',
 ] as const;
 
 export const MANAGED_WORKSPACE_SAFETY_SETTINGS = '.claude/settings.local.json';
@@ -227,42 +228,50 @@ async function ensureSafetyHookGitExclusion(
   return { adminPath: gitAdmin.adminPath, adminIdentity: gitAdmin.adminIdentity };
 }
 
+function safetyHooksContent(
+  runtime: ManagedWorkspaceSafetyHookRuntime,
+  timeLedger: boolean,
+): string {
+  const hook = (hookName: (typeof MANAGED_HOOK_NAMES)[number], timeout: number) => ({
+    type: 'command',
+    command: `${quoteShellArg(runtime.nodePath)} ${quoteShellArg(runtime.hookPaths[hookName])}`,
+    timeout,
+  });
+  const clock = { hooks: [hook('time-ledger.js', 20)] };
+  return JSON.stringify({
+    hooks: {
+      PreToolUse: [
+        { matcher: '*', hooks: [hook('claude-code-pretool-hook.js', 10)] },
+        ...(timeLedger ? [{ matcher: 'Bash', ...clock }] : []),
+      ],
+      PostToolUse: [
+        { matcher: 'Write|Edit|MultiEdit', hooks: [hook('post-edit-typecheck.js', 35)] },
+        { matcher: 'Stop|TaskComplete', hooks: [hook('completion-gate.js', 50)] },
+        ...(timeLedger ? [{ matcher: 'Bash', ...clock }] : []),
+      ],
+      ...(timeLedger ? {
+        PostToolUseFailure: [{ matcher: 'Bash', ...clock }],
+        SessionStart: [clock],
+      } : {}),
+    },
+  }, null, 2);
+}
+
 export function managedWorkspaceSafetyHooksContent(
   runtime: ManagedWorkspaceSafetyHookRuntime,
 ): string {
-  const hookCommand = (hookName: (typeof MANAGED_HOOK_NAMES)[number]) => (
-    `${quoteShellArg(runtime.nodePath)} ${quoteShellArg(runtime.hookPaths[hookName])}`
-  );
-  return JSON.stringify({
-    hooks: {
-      PreToolUse: [{
-        matcher: '*',
-        hooks: [{
-          type: 'command',
-          command: hookCommand('claude-code-pretool-hook.js'),
-          timeout: 10,
-        }],
-      }],
-      PostToolUse: [
-        {
-          matcher: 'Write|Edit|MultiEdit',
-          hooks: [{
-            type: 'command',
-            command: hookCommand('post-edit-typecheck.js'),
-            timeout: 35,
-          }],
-        },
-        {
-          matcher: 'Stop|TaskComplete',
-          hooks: [{
-            type: 'command',
-            command: hookCommand('completion-gate.js'),
-            timeout: 50,
-          }],
-        },
-      ],
-    },
-  }, null, 2);
+  return safetyHooksContent(runtime, true);
+}
+
+/**
+ * The settings o8 generated before the time ledger. A workspace created by an
+ * older build still holds these bytes, and cleanup must keep recognizing them
+ * as generated.
+ */
+export function previousManagedWorkspaceSafetyHooksContent(
+  runtime: ManagedWorkspaceSafetyHookRuntime,
+): string {
+  return safetyHooksContent(runtime, false);
 }
 
 export async function writeManagedWorkspaceSafetyHooks(

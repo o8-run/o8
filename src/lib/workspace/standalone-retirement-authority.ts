@@ -8,7 +8,7 @@ import { materializationAwareExecFile, withWorktreeMaterializationExecution } fr
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
-import { MANAGED_WORKSPACE_SAFETY_SETTINGS, managedWorkspaceSafetyHooksContent, resolveManagedWorkspaceSafetyHookRuntime } from '@/lib/worktree/safety-hooks';
+import { MANAGED_WORKSPACE_SAFETY_SETTINGS, managedWorkspaceSafetyHooksContent, previousManagedWorkspaceSafetyHooksContent, resolveManagedWorkspaceSafetyHookRuntime } from '@/lib/worktree/safety-hooks';
 import { captureIgnoredArtifacts } from './ignored-artifact-io';
 
 const REBUILDABLE_PATHS = ['node_modules', '.o8-install-runtime', '.next/cache', '.turbo'];
@@ -54,11 +54,17 @@ export async function admitStandaloneRetirement(input: {
     git(input.directoryPath, ['rev-parse', '--verify', 'HEAD^{commit}']),
     git(input.directoryPath, ['rev-parse', '--verify', 'HEAD^{tree}']),
   ]));
-  const generatedSettingsSha256 = createHash('sha256').update(managedWorkspaceSafetyHooksContent(
-    await resolveManagedWorkspaceSafetyHookRuntime(),
-  )).digest('hex');
+  const runtime = await resolveManagedWorkspaceSafetyHookRuntime();
+  const sha256 = (content: string) => createHash('sha256').update(content).digest('hex');
+  let generatedSettingsSha256 = sha256(managedWorkspaceSafetyHooksContent(runtime));
   const environmentReferences = (await readWorktreeMetaSnapshot(input.repositoryPath))[input.worktreeId]?.environmentReferences ?? {};
-  await verifyCleanContents(input.directoryPath, input.identity, headCommit, treeSha, generatedSettingsSha256, environmentReferences);
+  try {
+    await verifyCleanContents(input.directoryPath, input.identity, headCommit, treeSha, generatedSettingsSha256, environmentReferences);
+  } catch {
+    // A workspace created before the time ledger holds the previous generated settings.
+    generatedSettingsSha256 = sha256(previousManagedWorkspaceSafetyHooksContent(runtime));
+    await verifyCleanContents(input.directoryPath, input.identity, headCommit, treeSha, generatedSettingsSha256, environmentReferences);
+  }
   const repositoryPath = canonicalRepoRoot(input.repositoryPath);
   const objects = await git(repositoryPath, ['rev-list', '--objects', '--missing=print', headCommit]);
   if (objects.split('\n').some((line) => line.startsWith('?'))) throw new Error('Standalone source recovery objects are incomplete.');
