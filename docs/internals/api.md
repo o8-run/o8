@@ -524,7 +524,6 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/runtime/archive` | Archive an owned Codex / Gemini / opencode session. |
 | GET | `/api/runtime/inventory?fresh=1` | Runtime inventory snapshot (all adapters in parallel). |
 | POST | `/api/runtime/launch` | Launch a runtime surface (`launchRuntimeSurface`) and publish realtime mutation. |
-| GET | `/api/runtime/review?surfaceId=...` | Owned Codex review packet for a surface. |
 | GET | `/api/runtime/telemetry?sessionKey=...` | Per-session telemetry from the adapter (when supported). |
 | GET | `/api/runtime/transcript?sessionKey=...&limit=...&sinceId=...` | Read normalized transcript entries (with compaction metadata). |
 

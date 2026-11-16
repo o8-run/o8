@@ -180,16 +180,13 @@ telemetry does not establish a monetary charge or remaining account quota.
 - `src/lib/runtimes/types.ts` — universal `AgentRuntime` interface.
 - `src/lib/fleet/types.ts` — product-facing runtime surface.
 - `src/lib/orchestrator/runtime-capabilities.ts` — canonical runtime catalog and inferred runtime type.
-- `src/lib/runtime/runtime-evidence.ts` — timestamped carrier, transport, model, billing, pricing, and provenance evidence derived around that catalog.
 - `src/lib/runtimes/declarative-workers.ts` — generated declarative registrations.
 - `src/lib/runtimes/shared/owned-session` — shared owned-process lifecycle.
 - `src/lib/runtimes/index.ts` — specialized runtime registration.
 
 ## Evidence ownership
 
-`GET /api/runtime/evidence` is the normalized caller surface for runtime evidence. It combines the canonical runtime entry, supported operating-system and architecture carriers, the current local carrier observation, registered `AgentRuntime` capability flags, owned-session archive registration, local readiness and version probes, and timestamped upstream sources. `fresh=1` also drives the production OpenCode ACP target probe and the native Grok model probe. The OpenCode response returns only the named target checks and catalog count rather than credentials or the full private provider inventory.
-
-Runtime, provider, model, and billing mode are separate fields. A runtime can expose several providers, one model can be reached through several runtimes, and subscription capacity is never converted into an API-token price. Unknown and stale evidence remain visible. Every catalog entry must retain at least one source, observation date, and freshness bound; `runtime-evidence.test.ts` rejects omissions before they can become silent guesses.
+Runtime, provider, model, and billing mode are separate fields. A runtime can expose several providers, one model can be reached through several runtimes, and subscription capacity is never converted into an API-token price.
 
 ### Codex reasoning-effort evidence
 
