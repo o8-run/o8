@@ -70,6 +70,13 @@ o8 finds the coding-agent CLIs you already have installed and runs them behind o
 
 Download the signed universal DMG from [o8.run/download](https://o8.run/download) or [Releases](https://github.com/o8-run/o8/releases/latest). It runs natively on Apple Silicon and Intel, needs macOS 14 or later, and updates itself.
 
+Or install it with Homebrew:
+
+```sh
+brew trust o8-run/tap
+brew install --cask o8-run/tap/o8
+```
+
 ### Linux
 
 The 0.1.810 [preview packages](https://github.com/o8-run/o8/releases/tag/v0.1.810) (AppImage, DEB, RPM, with checksums) are six releases behind macOS and use the older WebKit shell. The native app's packages are built on Ubuntu 24.04 in CI ([details](./docs/internals/linux-download-packages.md)) and are not published yet.
