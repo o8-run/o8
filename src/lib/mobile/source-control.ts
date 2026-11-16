@@ -66,19 +66,34 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-export async function resolveSourceControlCheckout(sessionKey: unknown): Promise<string> {
-  if (typeof sessionKey !== 'string' || !sessionKey.trim()) {
-    throw new SourceControlError('invalid_session', 'sessionKey is required.');
+/**
+ * A phone names its thread by id, and a worker session by its session key: exactly
+ * one of the two. The checkout always comes from what the desktop has stored for it.
+ */
+export async function resolveSourceControlCheckout(identity: { sessionKey?: unknown; threadId?: unknown }): Promise<string> {
+  const sessionKey = typeof identity.sessionKey === 'string' ? identity.sessionKey.trim() : '';
+  const threadId = typeof identity.threadId === 'string' ? identity.threadId.trim() : '';
+  if (Boolean(sessionKey) === Boolean(threadId)) {
+    throw new SourceControlError('invalid_session', 'Provide exactly one of threadId or sessionKey.');
+  }
+  if (threadId && !/^[a-zA-Z0-9_-]+$/.test(threadId)) {
+    throw new SourceControlError('invalid_session', 'threadId is not valid.');
   }
   try {
-    const { findLaneBySession } = await import('@/lib/lane/registry');
-    const lane = findLaneBySession(sessionKey);
-    const cwd = lane?.worktreePath ?? lane?.repoPath;
+    let cwd: string | null | undefined;
+    if (threadId) {
+      const { readProjectedThread } = await import('@/lib/mobile/orchestrator-thread-history');
+      cwd = readProjectedThread(threadId)?.repoPath;
+    } else {
+      const { findLaneBySession } = await import('@/lib/lane/registry');
+      const lane = findLaneBySession(sessionKey);
+      cwd = lane?.worktreePath ?? lane?.repoPath;
+    }
     if (cwd && (await stat(cwd)).isDirectory()) {
       await git(cwd, ['rev-parse', '--show-toplevel']);
       return cwd;
     }
-  } catch { /* Missing lane or checkout is never replaced with another repository. */ }
+  } catch { /* Missing thread, lane or checkout is never replaced with another repository. */ }
   throw new SourceControlError('checkout_not_found', 'The thread checkout could not be resolved.', 404);
 }
 
@@ -142,8 +157,11 @@ export async function sourceControlResponse(request: Request, action: SourceCont
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new SourceControlError('invalid_request', 'A JSON object is required.');
       body = parsed as Record<string, unknown>;
     }
-    const sessionKey = action === 'status' ? new URL(request.url).searchParams.get('sessionKey') : body.sessionKey;
-    const cwd = await resolveSourceControlCheckout(sessionKey);
+    const query = new URL(request.url).searchParams;
+    const identity = action === 'status'
+      ? { sessionKey: query.get('sessionKey'), threadId: query.get('threadId') }
+      : { sessionKey: body.sessionKey, threadId: body.threadId };
+    const cwd = await resolveSourceControlCheckout(identity);
     const result = action === 'status' ? { ok: true, status: await readSourceControlStatus(cwd) } : await mutateSourceControl(cwd, action, body);
     return Response.json(result, { headers });
   } catch (error) {

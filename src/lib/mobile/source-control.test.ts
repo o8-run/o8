@@ -7,6 +7,8 @@ import { assertPushBranch, mutateSourceControl, parsePorcelainStatus, readSource
 
 const registry = vi.hoisted(() => ({ findLaneBySession: vi.fn() }));
 vi.mock('@/lib/lane/registry', () => registry);
+const history = vi.hoisted(() => ({ readProjectedThread: vi.fn() }));
+vi.mock('@/lib/mobile/orchestrator-thread-history', () => history);
 const roots: string[] = [];
 async function repo() {
   const cwd = await mkdtemp(path.join(tmpdir(), 'mobile-source-control-'));
@@ -162,4 +164,20 @@ it('refuses an unknown default branch and invalid named remote', async () => {
   git(cwd, ['config', 'branch.feature.remote', '.']);
   git(cwd, ['config', 'branch.feature.merge', 'refs/heads/feature']);
   await expect(mutateSourceControl(cwd, 'push', {})).rejects.toMatchObject({ code: 'invalid_remote' });
+});
+
+it('resolves a thread id to its stored checkout and refuses an ambiguous or malformed identity', async () => {
+  const cwd = await repo();
+  history.readProjectedThread.mockReturnValue({ repoPath: cwd });
+  const byThread = await sourceControlResponse(new Request('http://localhost/?threadId=thoughts-one'), 'status');
+  expect(byThread.status).toBe(200);
+  expect(history.readProjectedThread).toHaveBeenCalledWith('thoughts-one');
+  expect((await byThread.json()).status.branch).toBe('feature');
+  // Both identifiers, or a thread id that could be a path, never reach a lookup.
+  history.readProjectedThread.mockClear();
+  expect((await sourceControlResponse(new Request('http://localhost/?threadId=thoughts-one&sessionKey=x'), 'status')).status).toBe(400);
+  expect((await sourceControlResponse(new Request('http://localhost/?threadId=..%2F..%2Fetc'), 'status')).status).toBe(400);
+  expect(history.readProjectedThread).not.toHaveBeenCalled();
+  history.readProjectedThread.mockReturnValue(null);
+  expect((await sourceControlResponse(new Request('http://localhost/?threadId=unknown'), 'status')).status).toBe(404);
 });
