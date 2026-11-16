@@ -97,6 +97,14 @@
       ]
     },
     {
+      "path": "src/app/api/mobile/symon/tool/route.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener"
+      ]
+    },
+    {
       "path": "src/app/api/mobile/sync/route.test.ts",
       "reasons": [
         "child-process"
