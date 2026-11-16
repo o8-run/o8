@@ -6,6 +6,8 @@ import { spawn } from 'node:child_process';
 import { resolveSpawn, withServerOnlyStubNodeOptions } from './run-lib.mjs';
 import { generatedOutputLaunch } from './lib/generated-output-launch.mjs';
 
+import { lanAccessEnabled } from './lib/lan-access.cjs';
+
 const root = process.cwd();
 const stateDir = join(
   process.env.O8_DATA_DIR
@@ -181,14 +183,12 @@ async function all() {
 }
 
 function devListenHost(source) {
-  return ['1', 'true', 'yes', 'on'].includes(String(source.O8_LAN_ACCESS ?? '').trim().toLowerCase())
-    ? '0.0.0.0'
-    : '127.0.0.1';
+  return lanAccessEnabled(source) ? '0.0.0.0' : '127.0.0.1';
 }
 
 const mode = process.argv[2] || 'all';
 if (mode === 'cleanup') await cleanup();
-// Loopback unless O8_LAN_ACCESS opts in (mirrors src/lib/panel/listen-host.ts);
+// Resolve the same phone access setting as the packaged servers;
 // `next dev` would otherwise listen on every interface.
 else if (mode === 'next') run('dev:next', 'next', ['dev', '-p', env.PORT, '-H', devListenHost(env)]);
 else if (mode === 'ws') {

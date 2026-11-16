@@ -56,7 +56,13 @@ impl ServerEnvironment {
         self.common(command);
         command
             .env("PORT", self.api_port.to_string())
-            .env("HOSTNAME", ports::sidecar_listen_host())
+            .env(
+                "HOSTNAME",
+                ports::listen_host_in(
+                    std::env::var("O8_LAN_ACCESS").ok().as_deref(),
+                    std::path::Path::new(&self.data_dir),
+                ),
+            )
             .env("NODE_ENV", "production")
             .env("O8_API_PORT", self.api_port.to_string())
             .env("O8_WS_PORT", self.ws_port.to_string())

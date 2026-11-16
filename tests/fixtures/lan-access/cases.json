@@ -1,0 +1,11 @@
+[
+  {"name":"missing", "env":null, "file":null, "enabled":false},
+  {"name":"file on", "env":null, "file":"on\n", "enabled":true},
+  {"name":"file off", "env":null, "file":"off\n", "enabled":false},
+  {"name":"malformed", "env":null, "file":"true", "enabled":false},
+  {"name":"malformed extra", "env":null, "file":"on\non\n", "enabled":false},
+  {"name":"env on wins", "env":" YES ", "file":"off\n", "enabled":true},
+  {"name":"env off wins", "env":"0", "file":"on\n", "enabled":false},
+  {"name":"env empty wins", "env":"", "file":"on\n", "enabled":false},
+  {"name":"env malformed wins", "env":"maybe", "file":"on\n", "enabled":false}
+]

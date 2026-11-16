@@ -506,6 +506,7 @@ require('./server-impl.js');
 `);
 console.log('📦 Wrote server.js wrapper (socket-addr stamping) + server-impl.js');
 cpSync(join(root, 'scripts', 'lib', 'http-request-boundary.cjs'), join(server, 'http-request-boundary.cjs'));
+cpSync(join(root, 'scripts', 'lib', 'lan-access.cjs'), join(server, 'lan-access.cjs'));
 cpSync(nativeAddonRuntimePath, join(server, 'native-addon-runtime.cjs'));
 console.log('📦 Copied native addon runtime selector');
 
