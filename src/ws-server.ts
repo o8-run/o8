@@ -5394,8 +5394,12 @@ async function handleOrchestratorSendMsgOnce(
     ? msg.thinkingEffort
     : undefined;
   const serviceTier = isOrchestratorServiceTier(msg.serviceTier) ? msg.serviceTier : undefined;
-  if (msg.surface === 'mobile') {
-    const error = mobileModelError(resolveMsgBackendId(msg), msg.model);
+  // Check only a model the phone itself chose for a Claude or Codex turn. A
+  // model inherited from the thread's last turn, or one on a backend with no
+  // phone catalog, was not picked from the list and must not block the turn.
+  const phoneBackend = resolveMsgBackendId(msg);
+  if (msg.surface === 'mobile' && typeof incoming.model === 'string' && (phoneBackend === 'claude' || phoneBackend === 'codex')) {
+    const error = mobileModelError(phoneBackend, incoming.model);
     if (error) {
       send(client, { channel: 'orchestrator', event: 'error', data: { error, code: 'invalid_model', status: 400, ...orchestratorCommandAckCorrelation(correlationId) } });
       throw new OrchestratorSendRejectedBeforeAcceptance(error);
