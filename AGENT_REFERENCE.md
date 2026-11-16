@@ -139,7 +139,7 @@ o8 lead stop <lead-id> [--reason "..."]         # durable stop; restart cannot a
 o8 version                                 # CLI + connected server version
 o8 doctor [--reap] [--repair]              # diagnose server/config; reap zombies; repair CLI symlink
 o8 app restart [--if-update-pending]        # request a running-app restart
-o8 connect [--status]                       # register this machine or list connected machines
+o8 connect [--status|--sign-in]             # register this machine, list connected machines, or sign in with a code
 o8 disconnect                               # remove this machine from the connected-device registry
 o8 mcp install --claude-code|--cursor|--print
 

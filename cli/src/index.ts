@@ -250,7 +250,7 @@ commands:
   lead status          read a compact persisted receipt without calling the model
   lead wait            bounded wait for receipt updates or a terminal state
   lead stop            durably stop the lead; recovery cannot auto-resume it
-  connect [--status]   register this signed-in machine, or list connected machines
+  connect [--status|--sign-in]  register this signed-in machine, list connected machines, or sign in with a code
   disconnect           remove this machine from the operator's connected devices
   run-heavy -- <cmd>   queue a native build or full suite on this machine
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch

@@ -21,6 +21,18 @@ The local ws-token authenticates the CLI to the local o8 app and is never forwar
 
 If neither account credential exists, the command tells the operator to sign in through the existing desktop flow and retry. Phase 1a does not create a second CLI-only device flow.
 
+### Sign-in without a browser
+
+A computer with no browser (a server, a cloud box) signs in with `o8 connect --sign-in`.
+
+1. The local route `POST /api/panel/auth/device/link` with `{ "action": "start" }` asks the account service for a one-time secret and a short code. The command prints the verification page and the code. The secret stays in the server process.
+2. A signed-in person opens the page on any device, enters the code, checks the computer's name and platform, and approves.
+3. The command polls the same route with `{ "action": "poll" }`. After approval the route stores the device session, renews it for a sign-in ticket, trades the ticket for an account session, syncs the account, registers the machine and turns the account link on.
+
+The computer derives its device credential from the one-time secret, so the credential is never sent to it. The device session then renews, rotates and revokes like one enrolled by the desktop app.
+
+After sign-in, the account link authenticates with the signed license token cached by entitlement sync. An account with no license has no cached credential, so its link stays idle until a later change gives the supervisor a renewable account session.
+
 The machine identity sent to the registry is:
 
 ```ts
@@ -435,4 +447,4 @@ These product or security choices are outside the approved phase 1a brief. Statu
 2. Heartbeat cadence and offline timeout — proposed default pending phase-1b review: 60s cadence, offline after 3 missed beats (180s).
 3. Disconnect semantics — proposed default pending phase-1b review: retain an audit tombstone; list and cap queries exclude tombstoned rows.
 4. Relay-ticket signing key ownership and ticket lifetime — proposed default pending phase-1b review: license server owns the signing key; 10-minute ticket lifetime.
-5. Auto-launching the desktop sign-in UI from the CLI — deferred; phase 1b keeps the phase 1a behavior (operator uses the existing sign-in surface).
+5. Auto-launching the desktop sign-in UI from the CLI — deferred; phase 1b keeps the phase 1a behavior (operator uses the existing sign-in surface). A computer with no browser uses `o8 connect --sign-in` (see Sign-in without a browser).
