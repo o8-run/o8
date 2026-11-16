@@ -186,7 +186,7 @@ telemetry does not establish a monetary charge or remaining account quota.
 
 ## Evidence ownership
 
-Runtime, provider, model, and billing mode are separate fields. A runtime can expose several providers, one model can be reached through several runtimes, and subscription capacity is never converted into an API-token price. Unknown and stale evidence remain visible. Every catalog entry must retain at least one source, observation date, and freshness bound; `runtime-evidence.test.ts` rejects omissions before they can become silent guesses.
+Runtime, provider, model, and billing mode are separate fields. A runtime can expose several providers, one model can be reached through several runtimes, and subscription capacity is never converted into an API-token price.
 
 ### Codex reasoning-effort evidence
 
