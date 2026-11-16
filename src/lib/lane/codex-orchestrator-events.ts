@@ -22,6 +22,16 @@ export interface CodexLineHandlerState {
    * todo_list on started AND completed; suppress the duplicate. Per-turn:
    * every sendTurn/rebound creates a fresh state literal. */
   lastPlanJson?: string;
+  /** A whole message was already emitted this turn. Codex sends each message
+   * complete, and the transcript appends text events, so later messages need
+   * their own paragraph break. */
+  emittedMessage?: boolean;
+}
+
+function messageText(text: string, state: CodexLineHandlerState): string {
+  const separated = state.emittedMessage ? `\n\n${text}` : text;
+  state.emittedMessage = true;
+  return separated;
 }
 
 function safeObject(value: unknown): Record<string, unknown> | undefined {
@@ -126,7 +136,7 @@ export function handleCodexJsonLine(
 
     if (type === 'event_msg' && payload?.type === 'agent_message') {
       const text = typeof payload.message === 'string' ? payload.message : '';
-      if (text) onEvent({ type: 'text', text });
+      if (text) onEvent({ type: 'text', text: messageText(text, state) });
       return true;
     }
 
@@ -154,7 +164,7 @@ export function handleCodexJsonLine(
 
     if (type === 'item.completed' && item?.type === 'agent_message') {
       const text = typeof item.text === 'string' ? item.text : '';
-      if (text) onEvent({ type: 'text', text });
+      if (text) onEvent({ type: 'text', text: messageText(text, state) });
       return true;
     }
 
