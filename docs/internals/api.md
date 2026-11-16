@@ -304,6 +304,7 @@ narrow read-only exception.
 | POST | `/api/mobile/chat` | Create a new mobile LLM chat session, returning `sessionKey`/`tabId`. |
 | POST | `/api/mobile/chat/send` | Send a mobile chat turn (streams via WS, persists locally). |
 | POST | `/api/mobile/enhance` | Enhance raw mobile prompt via Gemini 2.0 Flash. |
+| GET | `/api/mobile/usage/history?range=30d` | Hourly (24h) or local-calendar daily (7d/30d/90d) coding-agent usage at stored list API rates; counts only, cached in memory for 60 seconds. Requires operator bearer until device allowlisted. |
 | GET | `/api/mobile/history?sessionKey=...&limit=...` | Read paginated transcript for a session (LLM chat or runtime tail). |
 | GET | `/api/mobile/inbox?fresh=1&limit=...` | Mobile inbox snapshot (pending approvals, activity items). |
 | GET | `/api/mobile/media?path=...&download=1` | Serve allowed media files (image/PDF) from sanctioned roots. |
