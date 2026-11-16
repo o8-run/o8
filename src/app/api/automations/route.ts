@@ -15,6 +15,7 @@ import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
 import { computeNextRunAt, validateCron } from '@/lib/automations/cron';
 import { automationApiRecord } from '@/lib/automations/api-shape';
+import { listAutomationRows } from '@/lib/automations/store';
 import {
   ingestLaneAutomationSourceEvents,
   latestAutomationSourceSequence,
@@ -62,7 +63,7 @@ export async function GET(request: Request) {
   if (!db) return NextResponse.json({ automations: [] });
   const rows = owner
     ? db.select().from(automations).where(eq(automations.owner, owner)).orderBy(desc(automations.createdAt)).all()
-    : db.select().from(automations).orderBy(desc(automations.createdAt)).all();
+    : listAutomationRows();
   return NextResponse.json({ automations: rows.map(automationApiRecord) });
 }
 

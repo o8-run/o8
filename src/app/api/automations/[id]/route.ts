@@ -13,7 +13,7 @@ import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
 import { computeNextRunAt, validateCron } from '@/lib/automations/cron';
 import { automationApiRecord } from '@/lib/automations/api-shape';
-import { cancelAutomationFires } from '@/lib/automations/fire-store';
+import { updateAutomationRow } from '@/lib/automations/store';
 import {
   ingestLaneAutomationSourceEvents,
   latestAutomationSourceSequence,
@@ -210,9 +210,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
     }
   }
 
-  db.update(automations).set(next).where(eq(automations.id, id)).run();
-  if (body.enabled === false) cancelAutomationFires(id);
-  const updated = db.select().from(automations).where(eq(automations.id, id)).get();
+  const updated = updateAutomationRow(id, next);
   if (!updated) return NextResponse.json({ error: 'update failed' }, { status: 500 });
   return NextResponse.json({ automation: automationApiRecord(updated) });
 }
