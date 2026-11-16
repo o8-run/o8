@@ -45,6 +45,7 @@ import { stableReleaseEffects } from './lib/stable-release-effects.mjs';
 import { artifactChannel } from './lib/build-channel.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
 import { withReleaseFollowLine } from './lib/release-follow-line.mjs';
+import { HOMEBREW_TAP, requestHomebrewBump } from './lib/homebrew-tap.mjs';
 
 const REPO = 'o8-run/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
@@ -497,6 +498,10 @@ try {
     console.warn('[release] update publication verification unavailable; no fresh-offer receipt was recorded.');
   }
   await stable.complete(pubDate);
+  const brew = requestHomebrewBump(version);
+  console.log(brew.requested
+    ? `[release] asked ${HOMEBREW_TAP} to move its cask to ${version}`
+    : `[release] Homebrew cask not bumped (${brew.reason}); the tap's daily check will pick up ${version}.`);
 } catch (err) {
   console.error(`[release-mirror] failed to mirror ${tag} to ${PUBLIC_MIRROR}:`, err?.message ?? err);
   console.error(`[release-mirror] private publish above is unaffected — auto-update will not pick up this version until the mirror succeeds`);
