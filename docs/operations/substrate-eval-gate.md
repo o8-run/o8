@@ -89,7 +89,6 @@ on the dispatch / recall path is wrapped with `withTiming(label, fn)` or
 | `recall.recent-outcomes` | `/api/cortex/recent-outcomes` (Recall card outcomes row) |
 | `recall.directives` | `/api/cortex/directives` (Recall card directives + dispatch trailers) |
 | `recall.symbol-graph` | `build-context.ts` (dispatch context injection symbol trace) |
-| `recall.runtime-recommendation` | `/api/cortex/runtime-recommendation` (routing chip) |
 | `recall.proposer-outcomes` | `proposer.ts` (auto-directive proposer SQLite read) |
 
 The buffer at `<dataDir>/recall-metrics.json` keeps the most recent **1000
