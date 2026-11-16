@@ -32,14 +32,14 @@ type AnalyticsSessionAccumulator = {
 
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 
-function parseDbTimestamp(value: string | null | undefined): number {
+export function parseDbTimestamp(value: string | null | undefined): number {
   if (!value) return 0;
   const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
   const parsed = new Date(normalized).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function runtimeSurfaceFromRow(row: typeof usageLogs.$inferSelect): AnalyticsSurfaceKey | null {
+export function runtimeSurfaceFromRow(row: typeof usageLogs.$inferSelect): AnalyticsSurfaceKey | null {
   if (row.agentName === 'codex' || row.agentName === 'Codex CLI' || row.sessionKey?.startsWith('codex')) {
     return 'Codex CLI';
   }
