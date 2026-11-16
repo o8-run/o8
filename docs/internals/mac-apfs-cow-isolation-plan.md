@@ -164,7 +164,6 @@ Acceptance:
 Files:
 
 - `src/lib/worktree/apfs.ts`
-- `src/app/api/worktrees/capabilities/route.ts`
 
 Work:
 

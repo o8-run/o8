@@ -308,7 +308,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src-tauri/src/mac_perms.rs](../../src-tauri/src/mac_perms.rs) | fire_mic_prompt | Model input and output contract | 25 | 25 | 0 |
 | [src-tauri/src/screen_localization.rs](../../src-tauri/src/screen_localization.rs) | catalog_prompt | Model input and output contract | 97 | 97 | 0 |
 | [src-tauri/src/stt/polish/prompt.rs](../../src-tauri/src/stt/polish/prompt.rs) | build_prompt | Model input and output contract | 2024 | 2024 | 0 |
-| [src/app/api/board/tasks/[taskId]/start/route.ts](../../src/app/api/board/tasks/[taskId]/start/route.ts) | buildLaunchPrompt | Worker scope, launch and completion | 30 | 30 | 0 |
 | [src/app/api/canvas/intent/route.ts](../../src/app/api/canvas/intent/route.ts) | { POST: spawnPrompt } | Model input and output contract | 11 | 11 | 0 |
 | [src/app/api/mobile/enhance/route.ts](../../src/app/api/mobile/enhance/route.ts) | SYSTEM_PROMPT | Model input and output contract | 171 | 171 | 0 |
 | [src/app/api/mobile/ripple/resolve/route.ts](../../src/app/api/mobile/ripple/resolve/route.ts) | prompt:message | Model input and output contract | 209 | 209 | 0 |
@@ -317,8 +316,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/app/api/panel/issues/enhance/route.ts](../../src/app/api/panel/issues/enhance/route.ts) | systemPrompt | Model input and output contract | 258 | 258 | 2 |
 | [src/app/api/panel/o8-mission-summary/route.ts](../../src/app/api/panel/o8-mission-summary/route.ts) | messages:message | Model input and output contract | 118 | 118 | 0 |
 | [src/app/api/panel/o8-scratch-chat/route.ts](../../src/app/api/panel/o8-scratch-chat/route.ts) | stream:message | Model input and output contract | 41 | 41 | 1 |
-| [src/app/api/v2/chat/suggestions/route.ts](../../src/app/api/v2/chat/suggestions/route.ts) | SYSTEM_PROMPT | Model input and output contract | 214 | 214 | 0 |
-| [src/app/api/v2/chat/suggestions/route.ts](../../src/app/api/v2/chat/suggestions/route.ts) | userPrompt | Model input and output contract | 13 | 13 | 2 |
 | [src/app/api/v2/proxy/cli/route.ts](../../src/app/api/v2/proxy/cli/route.ts) | buildPrompt | Model input and output contract | 13 | 13 | 3 |
 | [src/app/api/v2/proxy/llm/route.ts](../../src/app/api/v2/proxy/llm/route.ts) | systemPrompt | Model input and output contract | 35 | 35 | 0 |
 | [src/app/dashboard/page.tsx](../../src/app/dashboard/page.tsx) | mobilePromptBody | Model input and output contract | 44 | 44 | 1 |

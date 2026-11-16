@@ -157,7 +157,6 @@ Routes are grouped by their first path segment.
 |---|---|---|
 | GET | `/api/board?repo=<path>` | Read board snapshot for a repo. |
 | POST | `/api/board` | Apply a board mutation with optimistic concurrency (`expectedRevision`). |
-| POST | `/api/board/tasks/[taskId]/start` | Launch a backlog task in plan mode, building the launch prompt. |
 
 ### `/api/browser/*` — In-app browser provider surface (gated)
 
@@ -235,12 +234,9 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 | GET | `/api/cortex/diagnostics` | Substrate eval summary (#749) — answers "is SQLite still fine?". |
 | GET | `/api/cortex/directives` | List directive markdown files from `~/.o8/directives/`. |
 | POST | `/api/cortex/directives` | Create / update a directive. |
-| GET | `/api/cortex/project-pulse?repoPath=...` | Aggregate peer-repo activity (commits, PRs, issues) across projects. |
 | GET | `/api/cortex/proposals` | List directive proposal candidates. |
 | POST | `/api/cortex/proposals` | Dismiss a directive proposal. |
 | GET | `/api/cortex/recent-outcomes?repoPath=...&limit=...` | Read recent rows from the `session_outcomes` ledger. |
-| GET | `/api/cortex/runtime-recommendation?repoPath=...` | Dispatch routing recommendation backed by `recommendRuntime()`. |
-| POST | `/api/cortex/symbol-graph` | Resolve symbol references for a repo from explicit list or free-form text. |
 
 ### `/api/dictation/*` — Push-to-talk voice input (gated)
 
@@ -399,7 +395,6 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/dev-server` | List active dev server processes. |
 | POST | `/api/panel/dev-server` | Start a dev server process. |
 | DELETE | `/api/panel/dev-server` | Stop a dev server process. |
-| POST | `/api/panel/factory-reset` | Wipe contents of `~/.o8/` data directory (preserves the dir). |
 | GET | `/api/panel/file-asset?workspace=...&path=...` | Serve registered repo file as asset (image/PDF), 50MB cap. |
 | GET | `/api/panel/file-content?path=...` | Read raw file content with path-traversal protection. |
 | GET | `/api/panel/file-diff?path=...&hideWhitespace=1` | Per-file diff (`git diff -w` when `hideWhitespace`). |
@@ -518,7 +513,6 @@ device flow and every stateful panel route require the operator bearer.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/setup/active-branch?repoPath=...` | Resolve the active repo + its default branch (handles worktree paths). |
 | GET | `/api/setup/claude-desktop` | Read current Claude config + report install status. |
 | POST | `/api/setup/claude-desktop` | Merge o8 + codebase-memory MCP entries into Claude config. |
 | GET | `/api/setup/config` | Read `~/.o8/setup.json`. |
@@ -584,11 +578,8 @@ principal for stateful routes. Only session inspection (read) and logout
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/v2/auth/logout` | Revoke session row + clear auth cookie. |
 | GET | `/api/v2/auth/session` | Read current authenticated user profile. |
-| GET | `/api/v2/chat/ftux` | Personalized first-touch payload for the chat surface. |
 | POST | `/api/v2/chat` | Streaming chat endpoint (free / paid tier routing via gateway). |
-| POST | `/api/v2/chat/suggestions` | Suggested-reply chips (0-3 short replies, #771). |
 | GET | `/api/v2/chat-history?tabId=...` | Read persisted LLM chat messages per tab. |
 | POST | `/api/v2/chat-history` | Append a message to a tab's history. |
 | PATCH | `/api/v2/chat-history` | Update a tab's history. |
@@ -603,7 +594,6 @@ principal for stateful routes. Only session inspection (read) and logout
 | DELETE | `/api/v2/keys` | Remove a provider key. |
 | POST | `/api/v2/proxy/cli` | Route chat through an installed CLI runtime (Claude Code, Codex, Gemini CLI). |
 | POST | `/api/v2/proxy/llm` | BYOK provider proxy (Anthropic / OpenAI / OpenRouter / Gemini) with cost computation + cache multipliers. |
-| GET | `/api/v2/repos` | List registered repos from `~/.o8/repos.json`. |
 
 ### `/api/worker/*` — Cloud worker event polling (self-authenticating)
 
@@ -621,7 +611,6 @@ Workers authenticate with `Authorization: Bearer cwk_*` per-request.
 | POST | `/api/worktrees` | Create a new worktree. |
 | DELETE | `/api/worktrees` | Cleanup / prune worktrees. |
 | POST | `/api/worktrees/batch` | List worktrees for many repos in parallel. |
-| GET | `/api/worktrees/capabilities?repo=...` | Probe APFS CoW capability for a repo's filesystem. |
 | GET | `/api/worktrees/conflicts?repo=...&deep=true` | Conflict report (fast file-level or deep line-level). |
 | GET | `/api/worktrees/diff?sessionKey=...&worktreePath=...&baseBranch=...` | Full unified diff for an agent's worktree vs base. |
 | GET | `/api/worktrees/diff-summary?sessionKey=...&worktreePath=...&baseBranch=...` | `{ additions, deletions, fileCount }` for a worktree. |
