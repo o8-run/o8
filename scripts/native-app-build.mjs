@@ -7,14 +7,17 @@
 //
 // --candidate builds for this machine only and keeps work between runs: one
 // chip, incremental compiles, and the packaged server is reused while its
-// sources are unchanged. Run it in a checkout that is kept between builds.
+// sources are unchanged. Run it in a checkout that is kept between builds, has
+// no `.env` file and has never run the release prebuild; otherwise the packaged
+// server falls back to the release prebuild, which is several times slower.
 //
 // Nothing in the release pipeline selects this script yet.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync,
+  chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 
@@ -112,23 +115,68 @@ function webKey(root) {
 }
 
 /**
- * One chip, incremental. The whole prebuild runs only when the packaged server's
- * sources changed; otherwise only the two Rust programs are brought up to date.
+ * Why this checkout cannot use the plain server build, or null when it can. The
+ * release prebuild binds a checkout to its own build profile; from then on the
+ * build tools accept only the prebuild there. The profile path mirrors
+ * `releaseBuildProfile` in scripts/lib/release-build-profile.mjs.
  */
-function candidatePrebuild(root, triple, compile) {
+function releasePrebuildReason(root) {
+  if (existsSync(join(root, '.env'))) return 'this checkout has a .env file';
+  const profile = join(realpathSync(homedir()), '.o8-release-build-profiles',
+    createHash('sha256').update(realpathSync(root)).digest('hex'));
+  if (existsSync(join(root, '.o8-generated-output-store')) || existsSync(join(profile, 'cortex-ide.db'))) {
+    return 'this checkout has run the release prebuild';
+  }
+  return null;
+}
+
+/**
+ * One chip, incremental. The two Rust programs are always brought up to date; the
+ * packaged server is rebuilt only when its sources changed.
+ *
+ * The server is built with the plain build and export, which take a few minutes.
+ * The release prebuild adds checksums and a cache capture that a local build does
+ * not need. The plain build refuses to strip a checkout's `.env` out of the
+ * packaged server, so a checkout that has one uses the release prebuild instead.
+ */
+async function candidatePrebuild(root, triple, compile) {
   const env = { ...compile, O8_TAURI_BUILD_TARGET: triple };
+  const node = process.execPath;
   const keyFile = join(root, 'out/.candidate-web-key');
   const key = webKey(root);
   const current = existsSync(join(root, 'out/server/server.js')) && existsSync(keyFile)
     && readFileSync(keyFile, 'utf8').trim() === key;
-  if (current) {
-    console.log('[native-app] packaged server reused: its sources are unchanged');
-    timed('write helper', () => run(process.execPath, ['scripts/build-pi-write.mjs'], { env }));
-    timed('native window', () => run(process.execPath, ['scripts/next/build-sidecar.mjs'], { env }));
+  const slow = current ? null : releasePrebuildReason(root);
+  if (slow) {
+    console.log(`[native-app] ${slow}, so the packaged server uses the release prebuild`);
+    rmSync(keyFile, { force: true });
+    timed('prebuild', () => run('npm', ['run', 'tauri:prebuild'], { env }));
+    if (webKey(root) === key) writeFileSync(keyFile, `${key}\n`);
     return;
   }
+  if (!existsSync(join(root, 'src-tauri/helpers', `speech-local-${triple}`))) {
+    timed('speech sidecar', () => run(node, ['scripts/build-speech-local.mjs'], { env }));
+  }
+  timed('write helper', () => run(node, ['scripts/build-pi-write.mjs'], { env }));
+  timed('native window', () => run(node, ['scripts/next/build-sidecar.mjs'], { env }));
+  if (current) {
+    console.log('[native-app] packaged server reused: its sources are unchanged');
+    return;
+  }
+  // Each build gets an empty data folder and an empty output folder, so the build
+  // tools keep no record of an earlier output to reconcile with.
+  const data = mkdtempSync(join(tmpdir(), 'o8-candidate-build-'));
+  const web = { ...env, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data };
   rmSync(keyFile, { force: true });
-  timed('prebuild', () => run('npm', ['run', 'tauri:prebuild'], { env }));
+  rmSync(join(root, '.next'), { recursive: true, force: true });
+  try {
+    timed('web build', () => run('npm', ['run', 'build'], { env: web }));
+    timed('server export', () => run(node, ['scripts/tauri-export.mjs'], { env: web }));
+    if (existsSync(join(root, 'out/server/.env'))) throw new Error('The packaged server contains a .env file.');
+    timed('packaged server smoke', () => run(node, ['scripts/packaged-server-smoke.mjs'], { env: web }));
+  } finally {
+    rmSync(data, { recursive: true, force: true });
+  }
   if (webKey(root) === key) writeFileSync(keyFile, `${key}\n`);
 }
 
@@ -151,7 +199,7 @@ function buildSpeechRecognizer(root, work, arches) {
   return output;
 }
 
-function main() {
+async function main() {
   if (process.platform !== 'darwin') throw new Error('The native app bundle is assembled on macOS.');
   const root = process.cwd();
   const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
@@ -164,7 +212,7 @@ function main() {
     ? { ...process.env, CARGO_PROFILE_RELEASE_INCREMENTAL: 'true', CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '256' }
     : process.env;
   if (candidate) {
-    candidatePrebuild(root, staged, compile);
+    await candidatePrebuild(root, staged, compile);
   } else if (!process.argv.includes('--skip-prebuild')) {
     // The helper builds read this to produce both chips, as the classic build asked them to.
     const env = { ...process.env, O8_TAURI_BUILD_TARGET: 'universal-apple-darwin' };
@@ -202,10 +250,8 @@ function main() {
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     console.error(`[native-app] ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
-  }
+  });
 }
