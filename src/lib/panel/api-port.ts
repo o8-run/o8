@@ -142,6 +142,19 @@ export function resolvePortInfo(): PortInfo {
   return { apiPort: DEFAULT_API_PORT, wsPort: DEFAULT_WS_PORT, source: 'default' };
 }
 
+/**
+ * Whether this realtime server is the one its data folder names. The desktop
+ * shell records the port of the server it started in `ws-port`. A second server
+ * started on another port against the same folder (a development server beside
+ * the installed app) shares the install and pairing identity, so it must not
+ * sign in to the relay: the relay keeps one link per identity, and two servers
+ * would replace each other's link on every reconnect.
+ */
+export function ownsDataDirRelayIdentity(wsPort: number): boolean {
+  const recorded = readPortFile('ws-port');
+  return recorded === null || recorded === wsPort;
+}
+
 export function getApiBase(): string {
   const { apiPort } = resolvePortInfo();
   return `http://127.0.0.1:${apiPort}`;
