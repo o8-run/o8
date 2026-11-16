@@ -172,3 +172,50 @@ And the desktop remains:
 - execution-heavy
 - context-heavy
 - review-heavy
+
+## Paired phone read projections
+
+These additions use the existing active device bearer gate, including relay
+requests. Only GET is granted for the two new routes; operator APIs retain their
+existing restrictions. Revocation removes the bearer from the active-token file.
+There are currently no per-device repository grants in the device registry or
+principal. The PR selector enumerates the paired desktop's visible thread history
+(including the separately listed backend bucket) and follows durable PR associations only.
+Query parameters cannot select another repository. Symon conversation scope grants
+are specific to that conversation's tools and are not device repository grants.
+
+- `GET /api/mobile/pull-requests` returns `{ pullRequests, updatedAt }`. Each open
+  linked PR has `repository`, `number`, `title`, `state`, `draft`, optional
+  `mergeQueueState` (boolean queue membership when known), `threadId`, `updatedAt`,
+  and `checks: { passing, failing, pending, failingNames }`. Multiple associations
+  for the same thread and PR collapse to one row. Rows sort by repository, PR
+  number, then thread id. The provider detail reader supplies checks and draft
+  facts; raw payloads, files and credentials are never returned. Failed reads
+  return a generic 503, rather than presenting an empty successful snapshot.
+- `GET /api/mobile/usage` returns `{ accounts, updatedAt }`. Each account has an
+  opaque `id`, `runtime`, and `windows: [{ label, percentUsed, resetsAt }]`.
+  Optional `account` fields are `organization`, `resetsLeft`,
+  `credits: { amount, currency }`, and
+  `extraUsage: { used: { amount, currency }, limit?: { amount, currency } }`.
+  Unknown usage remains null. The shared capacity service supplies the snapshot;
+  optional provider facts are omitted until available. Row ids remain stable for
+  the server process lifetime and change on restart; underlying identity ids,
+  configuration references, emails and credential-derived hashes are withheld.
+- `GET /api/mobile/orchestrator/threads` adds `machineDisplayName` (the registered
+  local display label), optional active `runStartedAt`, `pullRequestNumber`,
+  `pullRequestState`, and `changeCount` (the linked PR's changed-file count).
+  When multiple PRs are associated, the first in repository/number order supplies
+  the compact row. Missing PR data omits those fields and cannot hide the thread.
+  The response also carries `updatedAt` from thread and linked PR observations.
+  Packet state stays on `/api/mobile/orchestrator/packets`: each agent now adds
+  optional `orchestratorThreadId`, `packetStatus`, `rejected`, optional
+  `outcome: 'merged'`, `workerLabel`, and `updatedAt`; the envelope adds
+  `updatedAt`. This preserves multiple workers per thread and lets the phone use
+  the desktop sidebar's attention rank, working-state and event-time selection
+  instead of overwriting the existing thread status. Existing packet repo-path
+  filtering and worktree diff counts still apply. Archived packets are excluded
+  from the sidebar join, as on desktop.
+
+The two new responses use private 15-second HTTP caches; thread and packet reads
+use private 5-second caches. All retain stable ordering from their source or
+explicit sort. These fields are additive; existing phones may ignore them.

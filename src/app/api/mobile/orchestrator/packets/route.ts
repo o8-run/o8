@@ -222,8 +222,8 @@ export async function GET(req: NextRequest) {
       || repoOwnsCandidate(repoPath, packet.workspaceTargetPath)
     ));
 
-    const agents: MobileOrchestratorAgent[] = await Promise.all(
-      matched.map(async ({ packet, lane }) => {
+    const agents = await Promise.all(
+      matched.sort((a, b) => a.packet.id.localeCompare(b.packet.id)).map(async ({ packet, lane }) => {
         // Live worktree if the lane has one; queued packets resolve to null
         // → zero diff stats.
         const worktreePath = lane?.worktreePath ?? lane?.repoPath ?? null;
@@ -232,6 +232,12 @@ export async function GET(req: NextRequest) {
 
         return {
           id: packet.id,
+          ...(packet.orchestratorThreadId ? { orchestratorThreadId: packet.orchestratorThreadId } : {}),
+          packetStatus: packet.status,
+          rejected: packet.review?.approved === false,
+          ...(packet.releaseState === 'released' ? { outcome: 'merged' } : {}),
+          workerLabel: packetTitle(packet),
+          updatedAt: packet.releaseStatePayload?.releasedAt ?? packet.archivedAt ?? packet.lastEventAt ?? packet.lane?.lastEventAt ?? null,
           title: packetTitle(packet),
           runtime: packetRuntime(packet, lane),
           status: mapPacketStatus(packet, lane),
@@ -250,11 +256,11 @@ export async function GET(req: NextRequest) {
     );
 
     return NextResponse.json(
-      { agents },
-      { headers: { 'Cache-Control': 'no-store, max-age=0' } },
+      { agents, updatedAt: mission.updatedAt },
+      { headers: { 'Cache-Control': 'private, max-age=5' } },
     );
-  } catch (error) {
-    console.log('[mobile-orchestrator] packet list failed', error);
+  } catch {
+    console.log('[mobile-orchestrator] packet list failed');
     return emptyResponse;
   }
 }
