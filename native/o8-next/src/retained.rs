@@ -1307,9 +1307,11 @@ impl Element for RetainedRow {
                 // and a sent mention at what it names.
                 let peek = state.peeks.clone().and_then(|peeks| {
                     let mention = crate::composer::mention::groups::sent_preview(&url);
-                    let (root, path, line) = match &mention {
-                        Some(_) => (String::new(), String::new(), None),
-                        None => {
+                    let link = (mention.is_none() && crate::transcript_peek::github_link(&url))
+                        .then(|| url.to_string());
+                    let (root, path, line) = match (&mention, &link) {
+                        (Some(_), _) | (None, Some(_)) => (String::new(), String::new(), None),
+                        (None, None) => {
                             let (path, line) = crate::text::file_ref(url.strip_prefix("file:")?)?;
                             (root?.to_owned(), path.to_owned(), line)
                         }
@@ -1320,6 +1322,7 @@ impl Element for RetainedRow {
                         path,
                         line,
                         preview: mention,
+                        link,
                     };
                     Some((peeks, target))
                 });
