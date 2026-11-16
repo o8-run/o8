@@ -1,6 +1,11 @@
 //! Bounded queue survives server and window startup; no document content enters IPC.
+// One copy of the path rules and the wire format, shared with the native window.
+// It lives in the native window's sources so that crate still builds when its
+// source folder is copied on its own.
 #[cfg(test)]
+#[path = "../../../native/o8-next/src/document_transport.rs"]
 mod transport;
+#[path = "../../../native/o8-next/src/document_validation.rs"]
 pub mod validation;
 use std::{
     collections::VecDeque,

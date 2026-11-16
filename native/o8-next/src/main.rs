@@ -3,11 +3,9 @@ mod render_region;
 mod activity;
 mod app_parent;
 #[cfg(unix)]
-#[path = "../../../crates/o8-launcher/src/documents/validation.rs"]
-mod document_validation;
-#[cfg(unix)]
-#[path = "../../../crates/o8-launcher/src/documents/transport.rs"]
 mod document_transport;
+#[cfg(unix)]
+mod document_validation;
 mod child_command;
 mod external_open;
 mod brain;
