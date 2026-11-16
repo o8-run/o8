@@ -292,7 +292,7 @@ describe('launch provisioning through mission HTTP entry points', () => {
       writeFileSync(join(repoPath, 'package-lock.json'), JSON.stringify({ name: 'empty-preparation-fixture', version: '1.0.0', lockfileVersion: 3, packages: { '': { name: 'empty-preparation-fixture', version: '1.0.0' } } }));
       writeFileSync(join(repoPath, '.gitignore'), 'node_modules/\n');
       mkdirSync(join(repoPath, 'hooks'), { recursive: true });
-      for (const name of ['claude-code-pretool-hook.js', 'post-edit-typecheck.js', 'completion-gate.js']) copyFileSync(join(cwd, 'dist/hooks', name), join(repoPath, 'hooks', name));
+      for (const name of ['claude-code-pretool-hook.js', 'post-edit-typecheck.js', 'completion-gate.js', 'time-ledger.js']) copyFileSync(join(cwd, 'dist/hooks', name), join(repoPath, 'hooks', name));
       execFileSync(realGit, ['add', '-A'], { cwd: repoPath });
       execFileSync(realGit, ['-c', 'user.email=test@o8.invalid', '-c', 'user.name=o8-test', 'commit', '-m', 'empty dependency fixture'], { cwd: repoPath });
       execFileSync(realGit, ['push', 'origin', 'main'], { cwd: repoPath });
