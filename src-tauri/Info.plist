@@ -31,14 +31,17 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
-    <!-- Text uses Default rank so users can choose it in Get Info. o8 does
-         not own these types. The existing catch-all remains Alternate. -->
+    <!-- Every entry is rank Alternate: o8 is offered under Open With and can be
+         chosen as the default in Get Info, but installing it never takes a
+         file type away from the app that already opens it. Markdown and the
+         common text and source types are named explicitly because Finder does
+         not reliably offer an app through the catch-all alone. -->
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
             <key>CFBundleTypeName</key><string>Text and source documents</string>
             <key>CFBundleTypeRole</key><string>Viewer</string>
-            <key>LSHandlerRank</key><string>Default</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
             <key>LSItemContentTypes</key>
             <array>
                 <string>net.daringfireball.markdown</string>
