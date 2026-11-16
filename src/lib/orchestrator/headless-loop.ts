@@ -163,10 +163,12 @@ async function runRegistryMissionTicks(
     const { result: activity } = await withMissionRegistryState(entry.id, async (fresh) => {
       const reconciled = reconcileOrchestratorControlPlaneState(fresh);
       const fanned = fanOutComparisonPackets(reconciled);
+      // Most registry missions are idle. Check for work first: the budget reads
+      // settings and every active lane, which an idle mission never needs.
+      const idle = { state: fanned, result: { launched: 0, maintenanceNeeded: hasWorktreeMaintenanceDemand(fanned) } };
+      if (!missionHasPendingHeadlessWork(fanned)) return idle;
       const budget = buildRemainingLaunchBudget();
-      if (!missionHasPendingHeadlessWork(fanned) || budget.maxLaunches <= 0) {
-        return { state: fanned, result: { launched: 0, maintenanceNeeded: hasWorktreeMaintenanceDemand(fanned) } };
-      }
+      if (budget.maxLaunches <= 0) return idle;
       const dispatched = await runDispatchTick(fanned, {
         launchBudget: budget,
         enforceBootRecoveryGuard: true,
