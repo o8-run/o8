@@ -35,10 +35,11 @@ import {
   isTauriShellOrigin,
 } from '@/lib/auth/loopback-request';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 import { validWsToken, wsTokenFor } from '@/lib/ws-auth';
 // DB-free reader of the registry's derived active-token-hash file (#5). Importing
 // this does NOT pull better-sqlite3 into the middleware bundle — it is pure fs.
-import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
+import { readTokenProjection } from '@/lib/mobile/device-token-file';
 import { isLocalWorkerToken } from '@/lib/auth/worker-token';
 import { isBrainReadWorkerBearer, resolveBrainReadWorkerToken } from '@/lib/auth/brain-read-worker-token';
 import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
@@ -351,7 +352,7 @@ function tokenMatches(presented: string, expected: string): boolean {
 function isActiveDeviceToken(presented: string): boolean {
   if (!presented) return false;
   const hash = createHash('sha256').update(presented, 'utf-8').digest('hex');
-  return readActiveTokenHashes().has(hash);
+  return readTokenProjection().active.has(hash);
 }
 
 function isActiveSpectatorToken(presented: string): boolean {
@@ -499,9 +500,16 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
 
   // A per-device credential is a capability token, not an operator credential.
   // It can reach only the explicit mobile surface above; new routes fail closed.
-  if (isActiveDeviceToken(bearer)) {
-    if (deviceMayAccess(pathname, method)) return NextResponse.next();
-    return NextResponse.json({ error: 'Device token is not authorized for this endpoint.' }, { status: 403 });
+  try {
+    if (isActiveDeviceToken(bearer)) {
+      if (deviceMayAccess(pathname, method)) return NextResponse.next();
+      return NextResponse.json({ error: 'Device token is not authorized for this endpoint.' }, { status: 403 });
+    }
+    if (bearer && readTokenProjection().revoked.has(createHash('sha256').update(bearer).digest('hex'))) {
+      return NextResponse.json({ error: 'Unauthorized', code: 'device_revoked' }, { status: 401 });
+    }
+  } catch {
+    return NextResponse.json({ error: 'Authentication storage unavailable', code: 'auth_unavailable', retryable: true }, { status: 503, headers: { 'Retry-After': '2' } });
   }
 
   return NextResponse.json(
@@ -531,9 +539,22 @@ let hostedMiddleware: Promise<NextMiddleware> | undefined;
 export default async function middleware(req: NextRequest, event?: NextFetchEvent) {
   const boundary = localRequestRefusal(req);
   if (boundary) return boundary;
-  if (!clerkPublishableKey || !clerkSecretKey) return panelGateMiddleware(req);
+  const gateWithRecovery = async (request: NextRequest) => {
+    const response = panelGateMiddleware(request);
+    if (response.status !== 503) return response;
+    try {
+      const token = loadPanelToken();
+      if (!token) return response;
+      const repair = await fetch(`http://127.0.0.1:${resolvePortInfo().wsPort}/internal/mobile-token-projection`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2000), redirect: 'error',
+      });
+      if (repair.ok) return panelGateMiddleware(request);
+    } catch { /* Keep the retryable response. */ }
+    return response;
+  };
+  if (!clerkPublishableKey || !clerkSecretKey) return gateWithRecovery(req);
   hostedMiddleware ??= import('@clerk/nextjs/server').then(({ clerkMiddleware }) =>
-    clerkMiddleware((_auth, request) => panelGateMiddleware(request), {
+    clerkMiddleware((_auth, request) => gateWithRecovery(request), {
       publishableKey: clerkPublishableKey,
       secretKey: clerkSecretKey,
     }));

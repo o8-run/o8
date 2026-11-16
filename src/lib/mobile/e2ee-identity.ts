@@ -8,7 +8,7 @@
  * MITM server. Mirrors the `ws-auth.ts` concurrency-safe create pattern.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import nacl from 'tweetnacl';
@@ -28,15 +28,30 @@ export interface ServerIdentity {
 
 let cached: ServerIdentity | null = null;
 
+export class ServerIdentityUnavailableError extends Error {
+  constructor() {
+    super('Server identity is unavailable. Restore the existing identity file before pairing.');
+    this.name = 'ServerIdentityUnavailableError';
+  }
+}
+
 function readStoredSecret(): Uint8Array | null {
+  let raw: string;
   try {
-    if (!existsSync(E2EE_IDENTITY_PATH)) return null;
-    const raw = readFileSync(E2EE_IDENTITY_PATH, 'utf8').trim();
-    if (!raw) return null;
+    raw = readFileSync(E2EE_IDENTITY_PATH, 'utf8').trim();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    console.error('[mobile-e2ee] Existing server identity cannot be read; pairing disabled.');
+    throw new ServerIdentityUnavailableError();
+  }
+  try {
     const secret = b64decode(raw);
-    return secret.length === nacl.sign.secretKeyLength ? secret : null;
+    const derived = nacl.sign.keyPair.fromSeed(secret.subarray(0, 32)).secretKey;
+    if (secret.length !== nacl.sign.secretKeyLength || b64encode(secret) !== raw || !nacl.verify(secret, derived)) throw new Error();
+    return secret;
   } catch {
-    return null;
+    console.error('[mobile-e2ee] Existing server identity is invalid; pairing disabled.');
+    throw new ServerIdentityUnavailableError();
   }
 }
 
@@ -62,7 +77,7 @@ export function getServerIdentity(): ServerIdentity {
 
   try {
     writeFileSync(E2EE_IDENTITY_PATH, encoded, { flag: 'wx', mode: 0o600 });
-    console.log(`[mobile-e2ee] Generated server E2EE identity at ${E2EE_IDENTITY_PATH}`);
+    console.log('[mobile-e2ee] Generated server E2EE identity.');
     cached = identityFromSecret(keyPair.secretKey);
     return cached;
   } catch (error) {
@@ -73,9 +88,8 @@ export function getServerIdentity(): ServerIdentity {
         return cached;
       }
     }
-    writeFileSync(E2EE_IDENTITY_PATH, encoded, { mode: 0o600 });
-    cached = identityFromSecret(keyPair.secretKey);
-    return cached;
+    console.error('[mobile-e2ee] Server identity could not be created; pairing disabled.');
+    throw new ServerIdentityUnavailableError();
   }
 }
 

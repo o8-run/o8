@@ -14,7 +14,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
-import { writeActiveTokenHashes } from '@/lib/mobile/device-token-file';
+import { invalidateTokenProjection, writeActiveTokenHashes } from '@/lib/mobile/device-token-file';
 
 export interface MobileDevice {
   id: string;
@@ -22,6 +22,7 @@ export interface MobileDevice {
   identityPublicKey: string;
   createdAt: string;
   lastSeenAt: string | null;
+  lastPairedAt: string | null;
   revokedAt: string | null;
 }
 
@@ -32,6 +33,7 @@ interface DeviceRow {
   identity_public_key: string;
   created_at: string;
   last_seen_at: string | null;
+  last_paired_at: string | null;
   revoked_at: string | null;
 }
 
@@ -47,12 +49,23 @@ export function hashToken(token: string): string {
  * Rebuild the middleware's derived active-token-hash file from the DB. Called
  * after every enroll/revoke so the (DB-free) middleware sees the change.
  */
-function syncTokenFile(): void {
-  const sqlite = getSqlite();
-  const rows = sqlite
-    .prepare(`SELECT token_hash FROM mobile_devices WHERE revoked_at IS NULL`)
-    .all() as Array<{ token_hash: string }>;
-  writeActiveTokenHashes(rows.map((r) => r.token_hash));
+export function syncTokenFile(): void {
+  try {
+    const sqlite = getSqlite();
+    // Serialize read + publication with registry writers in other processes.
+    sqlite.transaction(() => {
+      const rows = sqlite
+        .prepare(`SELECT token_hash, revoked_at FROM mobile_devices`)
+        .all() as Array<{ token_hash: string; revoked_at: string | null }>;
+      writeActiveTokenHashes(
+        rows.filter(r => !r.revoked_at).map(r => r.token_hash),
+        rows.filter(r => r.revoked_at).map(r => r.token_hash),
+      );
+    }).immediate();
+  } catch (error) {
+    invalidateTokenProjection();
+    throw error;
+  }
 }
 
 function toDevice(row: DeviceRow): MobileDevice {
@@ -62,6 +75,7 @@ function toDevice(row: DeviceRow): MobileDevice {
     identityPublicKey: row.identity_public_key,
     createdAt: row.created_at,
     lastSeenAt: row.last_seen_at,
+    lastPairedAt: row.last_paired_at,
     revokedAt: row.revoked_at,
   };
 }
@@ -111,15 +125,28 @@ export interface EnrollResult {
 /** Register a device's identity + mint its token. Caller must validate the enroll code first. */
 export function enrollDevice(input: { identityPublicKey: string; deviceLabel?: string | null }): EnrollResult {
   const sqlite = getSqlite();
-  const deviceId = randomUUID();
   const deviceToken = randomBytes(TOKEN_BYTES).toString('hex');
-  sqlite
-    .prepare(
-      `INSERT INTO mobile_devices (id, token_hash, device_label, identity_public_key)
-       VALUES (?, ?, ?, ?)`,
-    )
-    .run(deviceId, hashToken(deviceToken), input.deviceLabel?.trim() || null, input.identityPublicKey);
-  syncTokenFile();
+  let deviceId: string;
+  try {
+    deviceId = sqlite.transaction(() => {
+      const existing = sqlite.prepare(`SELECT id FROM mobile_devices WHERE identity_public_key = ? AND revoked_at IS NULL ORDER BY created_at, id LIMIT 1`)
+        .get(input.identityPublicKey) as { id: string } | undefined;
+      if (existing) {
+        sqlite.prepare(`UPDATE mobile_devices SET token_hash = ?, device_label = ?, last_paired_at = datetime('now') WHERE id = ?`)
+          .run(hashToken(deviceToken), input.deviceLabel?.trim() || null, existing.id);
+        syncTokenFile();
+        return existing.id;
+      }
+      const id = randomUUID();
+      sqlite.prepare(`INSERT INTO mobile_devices (id, token_hash, device_label, identity_public_key, last_paired_at) VALUES (?, ?, ?, ?, datetime('now'))`)
+        .run(id, hashToken(deviceToken), input.deviceLabel?.trim() || null, input.identityPublicKey);
+      syncTokenFile();
+      return id;
+    }).immediate();
+  } catch (error) {
+    invalidateTokenProjection();
+    throw error;
+  }
   return { deviceId, deviceToken };
 }
 
@@ -147,7 +174,7 @@ export function resolveDeviceByToken(token: string): MobileDevice | null {
 /**
  * Does this token belong to a KNOWN-but-REVOKED device? Lets the WS gate tell a
  * revoked reconnect apart from a totally-unknown token, so it can return a clean
- * 4401 close (deterministic "you were revoked" signal) instead of a generic
+ * 4410 close (deterministic "you were revoked" signal) instead of a generic
  * upgrade rejection the phone can't distinguish from a network blip.
  */
 export function isTokenRevoked(token: string): boolean {
@@ -174,17 +201,29 @@ export function isDeviceActive(deviceId: string): boolean {
 export function listDevices(): MobileDevice[] {
   const sqlite = getSqlite();
   const rows = sqlite
-    .prepare(`SELECT * FROM mobile_devices ORDER BY created_at DESC`)
+    .prepare(`SELECT * FROM mobile_devices ORDER BY revoked_at IS NOT NULL, COALESCE(last_paired_at, created_at) DESC, id`)
     .all() as DeviceRow[];
-  return rows.map(toDevice);
+  // Historical duplicate enrollments stay in the registry for credential
+  // revocation evidence, but the operator sees one entry per phone identity.
+  const identities = new Set<string>();
+  return rows.filter(row => {
+    if (identities.has(row.identity_public_key)) return false;
+    identities.add(row.identity_public_key);
+    return true;
+  }).map(toDevice);
 }
 
 /** Revoke a device. Returns true if a row transitioned to revoked. */
 export function revokeDevice(deviceId: string): boolean {
   const sqlite = getSqlite();
   const result = sqlite
-    .prepare(`UPDATE mobile_devices SET revoked_at = datetime('now') WHERE id = ? AND revoked_at IS NULL`)
+    .prepare(`UPDATE mobile_devices SET revoked_at = datetime('now') WHERE identity_public_key = (SELECT identity_public_key FROM mobile_devices WHERE id = ?) AND revoked_at IS NULL`)
     .run(deviceId);
   if (result.changes > 0) syncTokenFile();
   return result.changes > 0;
+}
+
+/** Only a retained revoked row is evidence of revocation. */
+export function isDeviceRevoked(deviceId: string): boolean {
+  return Boolean(getSqlite().prepare('SELECT 1 FROM mobile_devices WHERE id = ? AND revoked_at IS NOT NULL').get(deviceId));
 }
