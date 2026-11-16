@@ -364,7 +364,30 @@ function finiteToken(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-function extractClaudeTurns(file: string, sinceMs: number): ClaudeTurnRead {
+// A Claude transcript only changes by being written, which moves its ctime. Keep each file's parsed
+// tail until that happens: the capacity read runs about once a minute over up to 128 transcripts,
+// and re-reading and re-parsing them all (up to 64 MiB) every time was the bulk of its cost.
+const claudeTurnCache = new Map<string, { version: string; read: ClaudeTurnRead }>();
+
+function fileVersion(file: string): string | null {
+  try {
+    const stats = statSync(file);
+    return `${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`;
+  } catch {
+    return null;
+  }
+}
+
+function cachedClaudeTurns(file: string): ClaudeTurnRead {
+  const version = fileVersion(file);
+  const cached = claudeTurnCache.get(file);
+  if (version !== null && cached?.version === version) return cached.read;
+  const read = extractClaudeTurns(file);
+  if (version !== null) claudeTurnCache.set(file, { version, read });
+  return read;
+}
+
+function extractClaudeTurns(file: string): ClaudeTurnRead {
   const turns: ClaudeTurn[] = [];
   let malformedObservations = 0;
   try {
@@ -392,7 +415,6 @@ function extractClaudeTurns(file: string, sinceMs: number): ClaudeTurnRead {
         malformedObservations += 1;
         continue;
       }
-      if (ts < sinceMs) continue;
       const inputTokens = input + cacheCreation;
       if (inputTokens === 0 && output === 0) continue;
       turns.push({ ts, inputTokens, outputTokens: output });
@@ -434,10 +456,14 @@ function readClaudeCapacity(nowMs = Date.now()): CapacityRead {
   let latestTs: number | null = null;
   let malformedObservations = 0;
 
+  for (const cachedFile of [...claudeTurnCache.keys()]) {
+    if (!files.includes(cachedFile)) claudeTurnCache.delete(cachedFile);
+  }
   for (const file of files) {
-    const read = extractClaudeTurns(file, sevenDaysAgo);
+    const read = cachedClaudeTurns(file);
     malformedObservations += read.malformedObservations;
     for (const turn of read.turns) {
+      if (turn.ts < sevenDaysAgo) continue;
       weeklyUsage.input += turn.inputTokens;
       weeklyUsage.output += turn.outputTokens;
       if (turn.ts >= fiveHoursAgo) {
