@@ -438,7 +438,8 @@ if (process.platform === 'darwin' || process.platform === 'linux') {
 
 const http = require('node:http');
 const https = require('node:https');
-const { isAllowedLocalHost, requestTargetAllowed, browserWriteAllowed } = require('./http-request-boundary.cjs');
+const { isAllowedLocalHost, requestTargetAllowed, browserWriteAllowed, setLanAccessRule } = require('./http-request-boundary.cjs');
+setLanAccessRule(require('./lan-access.cjs').lanAccessEnabled);
 
 function stampClientAddr(server) {
   // Ensure upgrade requests reach the boundary even without an app listener.

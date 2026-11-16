@@ -1,8 +1,9 @@
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect, it } from 'vitest';
-import { isAllowedLocalHost, isShellHost } from '../scripts/lib/http-request-boundary.cjs';
+import { isAllowedLocalHost, isShellHost, setLanAccessRule } from '../scripts/lib/http-request-boundary.cjs';
+import { lanAccessEnabled } from '../scripts/lib/lan-access.cjs';
 
 const on = { O8_LAN_ACCESS: '1' };
 const off = { O8_DATA_DIR: '/nonexistent/o8-lan-fixture' };
@@ -32,7 +33,21 @@ it('never treats a network address as a host that can carry loopback trust', () 
   expect(isShellHost('localhost:47100', 47100)).toBe(true);
 });
 
+it('loads no Node module, because the browser bundle includes this file', () => {
+  const source = readFileSync(join(__dirname, '../scripts/lib/http-request-boundary.cjs'), 'utf8');
+  expect(source).not.toMatch(/require\(/);
+});
+
+it('ignores the saved choice until a server entry point registers the rule that reads it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'o8-lan-boundary-'));
+  try {
+    writeFileSync(join(dir, 'phone-network'), 'on\n');
+    expect(isAllowedLocalHost('192.168.1.20:47100', 47100, { O8_DATA_DIR: dir })).toBe(false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 it('uses the saved choice without granting loopback host trust', () => {
+  setLanAccessRule(lanAccessEnabled);
   const dir = mkdtempSync(join(tmpdir(), 'o8-lan-boundary-'));
   try {
     writeFileSync(join(dir, 'phone-network'), 'on\n');

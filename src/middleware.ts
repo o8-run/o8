@@ -45,7 +45,11 @@ import { isBrainReadWorkerBearer, resolveBrainReadWorkerToken } from '@/lib/auth
 import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
 import { O8_BROADCAST_SURFACE_HEADER } from '@/lib/broadcast/surface';
 import { resolvePluginToken } from '@/lib/auth/plugin-token';
-import { browserWriteAllowed, isAllowedLocalHost } from '../scripts/lib/http-request-boundary.cjs';
+import { browserWriteAllowed, isAllowedLocalHost, setLanAccessRule } from '../scripts/lib/http-request-boundary.cjs';
+import { lanAccessEnabled } from '../scripts/lib/lan-access.cjs';
+
+// The shared host rule stays free of Node modules; hand it the rule that reads the saved setting.
+setLanAccessRule(lanAccessEnabled);
 
 migrateDataDirOnce();
 
