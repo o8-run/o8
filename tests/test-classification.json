@@ -8253,6 +8253,14 @@
       ]
     },
     {
+      "path": "tests/symon-phone-handlers-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path",
+        "terminal-host"
+      ]
+    },
+    {
       "path": "tests/symon-phone-pi-brain-real-path.test.ts",
       "reasons": [
         "real-path"
