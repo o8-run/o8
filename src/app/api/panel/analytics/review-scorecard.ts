@@ -79,11 +79,13 @@ function median(values: number[]): number | null {
 }
 const approvalAsked = (approval: ApprovalRow) => approval.audit.some(event => ['desktop', 'mobile'].includes(event.actor)
   && ['approved', 'rejected'].includes(event.type));
-const human = (change: Change) => change.correctionAsked || change.events.some(event => event.actor === 'user' && !['create', 'attach_session'].includes(event.verb))
+const human = (change: Change) => change.correctionAsked
+  || change.events.some(event => event.verb === 'pull_request_merged' && event.payload.humanIntervention === 'human') || change.events.some(event => event.actor === 'user' && !['create', 'attach_session'].includes(event.verb))
   || change.events.some(event => event.verb === 'steered_packet' && event.payload.source === 'operator')
   || change.approvals.some(approvalAsked);
 function merge(change: Change): EventRow | undefined {
-  return change.events.find(event => event.verb === 'merge_dispatch_succeeded'
+  return change.events.find(event => event.verb === 'pull_request_merged' && !!event.payload.mergeSha)
+    ?? change.events.find(event => event.verb === 'merge_dispatch_succeeded'
     && !!event.payload.mergeSha)
     ?? change.events.find(event => event.verb === 'merge' && !!event.payload.laneHeadSha);
 }
@@ -97,12 +99,15 @@ function metrics(changes: Change[], corrections: Map<string, number>): Metric[] 
     const receipt = merge(change)!;
     const head = receipt.payload.reviewedHeadSha;
     const verdict = change.reviews.filter(review => review.timestamp <= Date.parse(receipt.timestamp)).at(-1);
-    return receipt.actor !== 'user' && !human(change) && !corrections.get(change.id) && typeof head === 'string'
+    const pullRequestAutomated = receipt.verb !== 'pull_request_merged'
+      || (receipt.actor === 'system' && receipt.payload.humanIntervention === 'none'
+        && typeof head === 'string' && receipt.payload.mergedHeadSha === head);
+    return pullRequestAutomated && receipt.actor !== 'user' && !human(change) && !corrections.get(change.id) && typeof head === 'string'
       && verdict?.approved === true && verdict.reviewedHeadSha === head
       && (verdict.findings ?? []).every(finding => finding.resolution !== 'deferred');
   });
   add('without-person', 'Throughput', 'Went through without a person', autonomous,
-    'Reviewed HEAD matched a durable automated merge receipt, with no recorded human step. Share is of changes with merge receipts; legacy merges without receipts are excluded.',
+    'Counts o8 merge dispatch, direct lane merges, and observed pull-request or merge-queue merges with durable receipts. Autonomous pull-request merges require complete nonhuman actor evidence and an unchanged reviewed HEAD. Legacy merges without receipts are excluded.',
     merged.length ? autonomous.length : null,
     merged.length ? `${autonomous.length} / ${merged.length} (${Math.round(100 * autonomous.length / merged.length)}%)` : '—');
   const reasons: Array<[string, string, (change: Change) => boolean]> = [

@@ -250,6 +250,8 @@ async function archiveMergedPullRequestLane(
   pull: GitHubPullRequestSnapshot,
   match: 'prNumber' | 'headRefName',
 ): Promise<boolean> {
+  const { recordPullRequestMergeReceipt } = await import('./pull-request-merge-receipt');
+  await recordPullRequestMergeReceipt(lane, pull);
   const mergedClean = await stampPrMergedClean(lane, pull);
   const { releaseMergedPullRequestPacket } = await import('@/lib/orchestrator/automatic-release');
   const release = await releaseMergedPullRequestPacket(lane, pull, () => {

@@ -296,3 +296,14 @@ it.each([{ targets: {} }, { targets: [null] }])('drops malformed nested correcti
   expect(body.basis).toContain('1 malformed rows skipped');
   expect(body.metrics.find((row: { id: string }) => row.id === 'corrections').value).toBe(0);
 });
+
+it('counts an automatic pull-request merge of the reviewed head', async () => {
+  lane('pr-auto'); review('pr-auto', true, -2000);
+  event('pr-auto', 'pull_request_merged', -1000, 'system', {
+    reviewedHeadSha: 'a'.repeat(40), mergedHeadSha: 'a'.repeat(40),
+    mergeSha: 'b'.repeat(40), humanIntervention: 'none',
+  });
+  const body = await score();
+  expect(body.metrics.find((row: { id: string }) => row.id === 'without-person').value).toBe(1);
+  expect(body.metrics.find((row: { id: string }) => row.id === 'verdict-merge').value).toBe(1000);
+});

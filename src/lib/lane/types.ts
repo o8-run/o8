@@ -303,6 +303,7 @@ export type LaneEventVerb =
   | 'worker_capacity_wait'
   | 'capacity_snapshot'
   | 'pr_merged_reconciled'
+  | 'pull_request_merged'
   | 'merged_by_ancestry_reconciled'
   // The ancestry sweep proved a merge, then found the branch had advanced past
   // the commit it proved before the release could land — a steer inside the

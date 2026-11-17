@@ -6995,6 +6995,14 @@
       ]
     },
     {
+      "path": "tests/pull-request-merge-scorecard-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/push-gate-real-path.test.ts",
       "reasons": [
         "executable-fixture",
