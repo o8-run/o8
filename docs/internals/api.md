@@ -317,6 +317,8 @@ narrow read-only exception.
 | GET | `/api/mobile/push/subscribe` | List subscriptions. |
 | DELETE | `/api/mobile/push/subscribe` | Remove a web-push subscription by endpoint. |
 | POST | `/api/mobile/push/test` | Send a test push to every subscription. |
+| GET | `/api/mobile/files/list?threadId=...&path=...` | List one checkout directory (or use sessionKey); folders first, ignored entries excluded, capped at 500 with truncated flag. |
+| GET | `/api/mobile/files/content?threadId=...&path=...&startLine=...&endLine=...` | Read checkout text (or use sessionKey); optional inclusive 1-based lines, 256 KiB cap, hidden secrets and binary metadata. |
 | GET | `/api/mobile/review-file?path=...` | Server-side cached review file content. |
 | GET | `/api/mobile/search?q=...` | Universal mobile search across chats, packets, history. |
 | GET | `/api/mobile/session-media?sessionKey=...` | List media attachments per session (currently returns empty scaffold). |

@@ -49,7 +49,7 @@ function request(path: string, bearer = token, method = 'GET') {
   return new NextRequest(`http://localhost:3001${path}`, { method, headers: { authorization: `Bearer ${bearer}`, 'x-o8-client-addr': '198.51.100.2' } });
 }
 describe('paired mobile read routes through the real gate', () => {
-  it.each(['/api/mobile/pull-requests', '/api/mobile/usage', '/api/mobile/usage/history', '/api/mobile/orchestrator/models'])('limits %s to authenticated GET', path => {
+  it.each(['/api/mobile/pull-requests', '/api/mobile/usage', '/api/mobile/usage/history', '/api/mobile/files/list', '/api/mobile/files/content', '/api/mobile/orchestrator/models'])('limits %s to authenticated GET', path => {
     expect(panelGateMiddleware(request(path)).status).toBe(200);
     expect(panelGateMiddleware(request(path, '')).status).toBe(401);
     expect(panelGateMiddleware(request(path, 'revoked-device')).status).toBe(401);

@@ -127,6 +127,9 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // Cost and tokens per day by agent: totals only, no session or account detail.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/usage\/history\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/mobile\/conversation-pr-context\/?$/ },
+  // Browse one thread's checkout: a folder listing and a size-capped text preview.
+  // Read-only; ignored and secret-named files are never returned.
+  { methods: new Set(['GET']), path: /^\/api\/mobile\/files\/(?:list|content)\/?$/ },
   // The agents and models this computer offers, for the phone's picker.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/orchestrator\/models\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
