@@ -5038,6 +5038,12 @@
       ]
     },
     {
+      "path": "tests/next-merge-differential-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-monaco-build-failure-real-path.test.ts",
       "reasons": [
         "child-process",
