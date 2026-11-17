@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -22,6 +22,7 @@ const worker = 'fixture-nonphone-worker-0123456789abcdef';
 const phone = 'fixture-nonphone-paired-device-0123456789abcdef';
 let reset: () => void;
 let snapshot: () => unknown;
+let checkOwnership: () => void;
 
 async function listen(handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>) {
   const server = createServer((req, res) => { void handler(req, res).catch(() => res.writeHead(500).end()); });
@@ -54,6 +55,25 @@ beforeAll(async () => {
   const { countInboxItems } = await import('@/lib/supervisor/inbox');
   countInboxItems('human_required');
   const sqlite = getSqlite();
+  // WS startup already owns getDb(), lane registry, supervisor inbox and repo registry.
+  // Observe that route requests reuse this existing owner rather than add handles/watchers.
+  await import('@/lib/repos/registry');
+  const databaseDescriptors = () => existsSync('/proc/self/fd')
+    ? readdirSync('/proc/self/fd').flatMap(fd => {
+      try {
+        const target = readlinkSync(`/proc/self/fd/${fd}`);
+        return target === sqlite.name || target === `${sqlite.name}-wal` || target === `${sqlite.name}-shm` ? [target] : [];
+      } catch { return []; }
+    }).sort() : null;
+  const watchers = () => process.getActiveResourcesInfo().filter(name => /FSEvent|StatWatcher/.test(name)).sort();
+  const initialDescriptors = databaseDescriptors();
+  if (process.platform === 'linux') expect(initialDescriptors?.length).toBeGreaterThan(0);
+  const initialWatchers = watchers();
+  checkOwnership = () => {
+    expect(getSqlite()).toBe(sqlite);
+    expect(databaseDescriptors()).toEqual(initialDescriptors);
+    expect(watchers()).toEqual(initialWatchers);
+  };
   const seedTime = '2026-11-17T00:00:00.000Z';
   reset = () => {
     sqlite.prepare('DELETE FROM supervisor_inbox').run();
@@ -72,7 +92,7 @@ beforeAll(async () => {
   const { handleNativeHttp } = await import('@/lib/ws-server/native-http-routes');
   const handlers: Record<string, Handler> = {
     'GET /api/lanes/touches': (await import('@/app/api/lanes/touches/route')).GET,
-    'GET /api/mcp': (await import('@/app/api/mcp/route')).GET,
+    'GET /api/mcp': (await import('@/lib/mcp/operator-mcp-get')).GET,
     'POST /api/panel/supervisor-inbox': (await import('@/app/api/panel/supervisor-inbox/route')).POST,
     'POST /api/v2/files': (await import('@/app/api/v2/files/route')).POST,
   };
@@ -145,4 +165,5 @@ it.each(cases)('serves $method $path without Next with original auth and stored 
       if (route.path.includes('v2/files')) expect(actual.state).toMatchObject({ file: 'saved through original handler\n' });
     }
   }
+  checkOwnership();
 }, 90_000);

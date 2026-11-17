@@ -60,7 +60,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/branches', 'POST', () => import('@/app/api/panel/branches/route')),
     route('/api/panel/files', 'GET', () => import('@/app/api/panel/files/route')),
     route('/api/panel/file-asset', 'GET', () => import('@/app/api/panel/file-asset/route')),
-    route('/api/v2/files', 'GET', () => import('@/app/api/v2/files/route')),
+    route('/api/v2/files', 'GET POST', () => import('@/app/api/v2/files/route')),
     route('/api/v2/files/quick-docs', 'GET', () => import('@/app/api/v2/files/quick-docs/route')),
     route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
@@ -216,6 +216,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // elevation (x-o8-device-worker/conversation/pid) is honored ONLY when the principal is already
     // operator (route.ts: resolveRequestPrincipalContext(request).role === 'operator'), so a device
     // or worker bearer cannot forge it. Responses are operator-visible MCP tool results. (#5243)
+    route('/api/mcp', 'GET', () => import('@/lib/mcp/operator-mcp-get')),
     route('/api/mcp', 'POST DELETE', () => import('@/app/api/mcp/route')),
   ],
   grid: [],
@@ -265,6 +266,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // review, then moves the lane to reviewing or recovery. The WS process already runs the same
     // reaper on its own interval. (#5243)
     route('/api/lanes/reap', 'POST', () => import('@/app/api/lanes/reap/route')),
+    route('/api/lanes/touches', 'GET', () => import('@/app/api/lanes/touches/route')),
     route('/api/lanes/[id]', 'GET', () => import('@/app/api/lanes/[id]/route')),
     // A packet worker's o8 CLI heartbeats, reports progress, tails its events and reads or widens
     // its scope here. The gate grants workers these paths; each handler then binds the bearer to
@@ -506,7 +508,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/issues/[number]', 'GET', () => import('@/app/api/panel/issues/[number]/route')),
   ],
   inbox: [
-    route('/api/panel/supervisor-inbox', 'GET', () => import('@/app/api/panel/supervisor-inbox/route')),
+    route('/api/panel/supervisor-inbox', 'GET POST', () => import('@/app/api/panel/supervisor-inbox/route')),
     route('/api/panel/approvals', 'GET POST', () => import('@/lib/approvals/route')),
   ],
   diff: [
