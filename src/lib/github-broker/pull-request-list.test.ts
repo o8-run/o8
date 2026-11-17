@@ -28,6 +28,21 @@ describe('paged pull request reads', () => {
     expect(body.variables.ids).toEqual(pulls.map((pr) => pr.node_id));
   });
 
+  it('reports which pull requests wait in the merge queue', async () => {
+    const pulls = [pull(1), pull(2)];
+    githubInstallationFetch.mockImplementation(async (_repo: string, path: string) => ({ response: path === '/graphql'
+      ? Response.json({ data: { nodes: [
+        { number: 1, additions: 1, deletions: 0, reviewRequests: { nodes: [] }, commits: { nodes: [] }, mergeQueueEntry: { position: 2 } },
+        { number: 2, additions: 1, deletions: 0, reviewRequests: { nodes: [] }, commits: { nodes: [] }, mergeQueueEntry: null },
+      ] } })
+      : Response.json(pulls),
+    }));
+    const result = await fetchPullRequestListPage('example/repo', 'open', 1);
+    expect(result.prs[0].mergeQueue).toEqual({ position: 2 });
+    expect(result.prs[1].mergeQueue).toBeNull();
+    expect(JSON.parse(githubInstallationFetch.mock.calls[1][2].body as string).query).toContain('mergeQueueEntry { position }');
+  });
+
   it('keeps public reads available without a connection and marks unavailable stats honestly', async () => {
     hasGitHubBrokerAccess.mockReturnValue(false);
     githubInstallationFetch.mockResolvedValue({ response: Response.json([pull(1)]), anonymous: true });

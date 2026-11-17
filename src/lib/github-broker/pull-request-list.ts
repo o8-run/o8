@@ -29,12 +29,14 @@ interface PullStats {
   commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string; contexts?: { checkRunCountsByState: Array<{ state: string; count: number }>; statusContextCountsByState: Array<{ state: string; count: number }> } } | null } }> };
   reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
   mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
+  mergeQueueEntry?: { position?: number | null } | null;
 }
 
 const STATS_QUERY = `query PullRequestListStats($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on PullRequest {
       number additions deletions reviewDecision mergeable
+      mergeQueueEntry { position }
       reviewRequests(first: 100) { nodes { requestedReviewer { ... on User { login } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 1) { checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
     }
@@ -93,6 +95,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
       url: pull.html_url, labels: pull.labels.map((label) => label.name),
       createdAt: pull.created_at,
       reviewDecision: summary?.reviewDecision ?? null, mergeable: summary?.mergeable ?? null,
+      mergeQueue: summary?.mergeQueueEntry ? { position: typeof summary.mergeQueueEntry.position === 'number' ? summary.mergeQueueEntry.position : null } : null,
     }; }),
   };
 }
