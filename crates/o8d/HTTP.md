@@ -418,3 +418,16 @@ not an installed usage ranking or a live shadow comparison.
 Parity compares parsed JSON semantics. Object-key wire order is out of scope
 because clients parse JSON; key presence, null versus missing, scalar values
 and array order remain strict.
+Saved thread metadata includes `linkedWork` (null without associations or a
+branch-only summary) and `machineDisplayName`. The app bridge supplies its
+process-cached machine name so native and TypeScript responses use the same
+choice. Standalone readers use the saved `computer-name`, or `This computer`.
+A thread with durable PR associations retains TypeScript fallback: that handler
+also reads the live PR broker and adds PR state, change counts and updatedAt;
+the local linked-work mirror alone cannot reproduce that response.
+
+The standalone saved-thread reader's `This computer`/chosen-file name is a
+display fallback, not full parity with TypeScript's hostname/scutil, ECMAScript
+trim and UTF-16 truncation rules. App parity requires the bridge's cached
+`O8D_MACHINE_DISPLAY_NAME`; its socket test changes the saved file after launch
+to distinguish that environment value from the standalone fallback.

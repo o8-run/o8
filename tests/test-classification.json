@@ -5947,6 +5947,14 @@
       ]
     },
     {
+      "path": "tests/o8d-thread-projection-parity-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-tts-owner-real-path.test.ts",
       "reasons": [
         "child-process",

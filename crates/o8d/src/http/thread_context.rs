@@ -166,6 +166,7 @@ pub(super) fn append_all(store: &ReadContext<'_>, threads: &mut [Value]) -> Resu
     if parked {
         return Err(());
     }
+    super::thread_metadata::append(store, threads)?;
     let mut statement = db
         .prepare("SELECT value FROM app_state WHERE key = ?")
         .map_err(|_| ())?;
@@ -176,11 +177,9 @@ pub(super) fn append_all(store: &ReadContext<'_>, threads: &mut [Value]) -> Resu
             let workspace = if repo.is_empty() {
                 Value::Null
             } else {
-                json!(
-                    std::fs::canonicalize(repo)
-                        .unwrap_or_else(|_| PathBuf::from(repo))
-                        .to_string_lossy()
-                )
+                json!(std::fs::canonicalize(repo)
+                    .unwrap_or_else(|_| PathBuf::from(repo))
+                    .to_string_lossy())
             };
             (workspace, git_context(repo))
         });
@@ -223,15 +222,17 @@ pub(super) fn append_all(store: &ReadContext<'_>, threads: &mut [Value]) -> Resu
         } else {
             Value::Null
         };
-        thread["runStartedAt"] = if state["runStatus"] == "running" {
-            state
+        // The mobile handler omits this key for idle threads and for busy
+        // threads without a persisted running timestamp (undefined in TS).
+        if thread["status"] == "busy" && state["runStatus"] == "running" {
+            if let Some(started) = state
                 .get("runStartedAt")
-                .or_else(|| state.get("runAt"))
-                .cloned()
-                .unwrap_or(Value::Null)
-        } else {
-            Value::Null
-        };
+                .filter(|v| !v.is_null())
+                .or_else(|| state.get("runAt").filter(|v| !v.is_null()))
+            {
+                thread["runStartedAt"] = started.clone();
+            }
+        }
         thread["isWorktree"] = json!(git.is_worktree);
         thread["worktreePath"] = git.worktree_path.clone();
         thread["branch"] = if git.branch.is_null() {
