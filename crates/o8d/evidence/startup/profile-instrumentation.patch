@@ -1,0 +1,64 @@
+diff --git a/crates/o8d/src/app/session_reads.rs b/crates/o8d/src/app/session_reads.rs
+index 147920db0..ede016d8b 100644
+--- a/crates/o8d/src/app/session_reads.rs
++++ b/crates/o8d/src/app/session_reads.rs
+@@ -85,6 +85,7 @@ pub(super) async fn serve(
+         }
+         request = request.header(name, value.trim());
+     }
++    let timing_start = std::time::Instant::now();
+     let Ok(admission) = request
+         .header("x-o8d-bridge", key)
+         .header("x-o8d-peer", "unverified-proxy")
+@@ -102,6 +103,8 @@ pub(super) async fn serve(
+         // unavailable gate never grants native access.
+         return Ok(false);
+     }
++    let admission_ms = timing_start.elapsed().as_secs_f64() * 1000.0;
++    let reader_start = std::time::Instant::now();
+     let directory = PathBuf::from(std::env::var("O8D_SESSION_DATA_DIR").map_err(|_| ())?)
+         .canonicalize()
+         .map_err(|_| ())?;
+@@ -114,6 +117,7 @@ pub(super) async fn serve(
+         tokio::task::spawn_blocking(move || http::session_read(directory, database, &path, &query))
+             .await
+             .map_err(|_| ())?;
++    let reader_ms = reader_start.elapsed().as_secs_f64() * 1000.0;
+     // Runtime transcripts, lane overlays, network projections and dynamic steer
+     // capabilities remain TS-owned until their readers are ported.
+     if response.status() == StatusCode::SERVICE_UNAVAILABLE {
+@@ -130,6 +134,7 @@ pub(super) async fn serve(
+         status.as_u16(),
+         status.canonical_reason().unwrap_or("Response")
+     );
++    output.push_str(&format!("Server-Timing: admission;dur={admission_ms:.6}, reader;dur={reader_ms:.6}\r\n"));
+     for (name, value) in response.headers() {
+         output.push_str(&format!("{name}: {}\r\n", value.to_str().map_err(|_| ())?));
+     }
+diff --git a/crates/o8d/src/http/mod.rs b/crates/o8d/src/http/mod.rs
+index ae5bd4d07..b90cc1b3f 100644
+--- a/crates/o8d/src/http/mod.rs
++++ b/crates/o8d/src/http/mod.rs
+@@ -306,6 +306,7 @@ pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &s
+         "/api/orchestrator/composer-queue" => value(&params, "threadId"),
+         _ => "",
+     };
++    let profile_preflight_start = std::time::Instant::now();
+     if store.database().ok().is_some_and(|db| {
+         db.query_row(
+             "SELECT EXISTS(SELECT 1 FROM bot_network_threads WHERE ? = '/api/mobile/orchestrator/threads' OR thread_id = ?)",
+@@ -314,7 +315,13 @@ pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &s
+     }) {
+         return unavailable();
+     }
+-    dispatch(&store, path, &params)
++    let profile_preflight_ms = profile_preflight_start.elapsed().as_secs_f64() * 1000.0;
++    let profile_reader_start = std::time::Instant::now();
++    let mut response = dispatch(&store, path, &params);
++    let profile_reader_ms = profile_reader_start.elapsed().as_secs_f64() * 1000.0;
++    response.headers_mut().insert("x-o8d-profile",
++        axum::http::HeaderValue::from_str(&format!("preflight;dur={profile_preflight_ms:.6}, exact_reader;dur={profile_reader_ms:.6}")).unwrap());
++    response
+ }
+ 
+ pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {

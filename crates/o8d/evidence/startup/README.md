@@ -14,9 +14,11 @@ Current `gates.json` uses an optimized release binary, ten warmups and 100 measu
 
 | Route | TS p50/p95 ms | Rust p50/p95 ms |
 | --- | ---: | ---: |
-| /api/panel/ws-info | 5.89/7.60 | 8.11/9.79 |
-| /api/setup/identity | 5.52/7.43 | 10.11/11.32 |
+| /api/panel/ws-info | 5.59/6.72 | 8.11/9.58 |
+| /api/setup/identity | 6.11/6.97 | 9.07/14.24 |
 
 Rebased onto main88657435a after chat-list merged. The shared table proves all seven inherited/startup entries, with chat-list and startup fixture seeds retained. Fresh focused/Rust/typecheck/lint/rules checks pass; current release timings replace the previous table.
 
 The shared session integration module now records per-route TypeScript auth outcomes instead of assuming every table GET requires a bearer. Public identity/loopback discovery stays covered; refusal bodies remain exact. The existing module fails200-versus401 before this test correction and passes all7 tests after it.
+
+[PERFORMANCE.md](PERFORMANCE.md) breaks down TS admission, the exact startup reader, generic database preflight, dispatch/close and transport residual. Raw ordered samples, the optimized binary hash, source restoration hashes and the unapplied instrumentation patch are committed. The diagnostic release binary also passes both500-case route comparisons and stateful boundaries. The unchanged production release binary reruns the full shared integration module7/7. No production instrumentation or auth bypass is included.
