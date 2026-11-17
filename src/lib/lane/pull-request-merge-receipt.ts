@@ -5,7 +5,7 @@ import type { GitHubPullRequestSnapshot } from '@/lib/github-broker/store';
 import type { ApprovalAuditEvent } from '@/lib/approvals/types';
 import type { Lane } from './types';
 
-/** Called only by merged-pull reconciliation, before release/archival decisions. */
+/** Called only by merged-pull reconciliation, after release/archival decisions; the caller swallows failures. */
 export async function recordPullRequestMergeReceipt(lane: Lane, pull: GitHubPullRequestSnapshot): Promise<void> {
   if (!pull.mergedAt || !Number.isFinite(Date.parse(pull.mergedAt))) return;
   const db = getSqlite();
