@@ -1,0 +1,902 @@
+{
+  "kind": "synthetic-public-socket-release",
+  "build": {
+    "profile": "release",
+    "command": "cargo build --locked --offline --release --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d",
+    "binarySha256": "8dfb7ff6f095b3cf2af788f6fcfa7cf1d9f52bf8097ff8adb8da0a3e91786766"
+  },
+  "summary": [
+    {
+      "route": "/api/panel/repos",
+      "attempted": 100,
+      "native": 38,
+      "fallback": 62,
+      "differences": 0
+    },
+    {
+      "route": "/api/panel/projects",
+      "attempted": 100,
+      "native": 80,
+      "fallback": 20,
+      "differences": 0
+    },
+    {
+      "route": "/api/projects",
+      "attempted": 100,
+      "native": 60,
+      "fallback": 40,
+      "differences": 0
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "attempted": 100,
+      "native": 80,
+      "fallback": 20,
+      "differences": 0
+    },
+    {
+      "route": "/api/projects/[id]",
+      "attempted": 100,
+      "native": 48,
+      "fallback": 52,
+      "differences": 0
+    }
+  ],
+  "auth": [
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "repos": [],
+          "validatedRestorePaths": []
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "repos": [],
+          "validatedRestorePaths": []
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "repos": [],
+          "validatedRestorePaths": []
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "repos": [],
+          "validatedRestorePaths": []
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "activeProjectId": "legacy-alpha",
+          "projects": [
+            {
+              "createdAt": "2026-01-02T00:00:00.000Z",
+              "id": "proj-12345678-90a",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "\u96ea project",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-12345678-90a"
+            },
+            {
+              "color": "#7fa68f",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "id": "legacy-alpha",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "Alpha",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-01234567-89a"
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "activeProjectId": "legacy-alpha",
+          "projects": [
+            {
+              "createdAt": "2026-01-02T00:00:00.000Z",
+              "id": "proj-12345678-90a",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "\u96ea project",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-12345678-90a"
+            },
+            {
+              "color": "#7fa68f",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "id": "legacy-alpha",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "Alpha",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-01234567-89a"
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "activeProjectId": "legacy-alpha",
+          "projects": [
+            {
+              "createdAt": "2026-01-02T00:00:00.000Z",
+              "id": "proj-12345678-90a",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "\u96ea project",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-12345678-90a"
+            },
+            {
+              "color": "#7fa68f",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "id": "legacy-alpha",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "Alpha",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-01234567-89a"
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "activeProjectId": "legacy-alpha",
+          "projects": [
+            {
+              "createdAt": "2026-01-02T00:00:00.000Z",
+              "id": "proj-12345678-90a",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "\u96ea project",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-12345678-90a"
+            },
+            {
+              "color": "#7fa68f",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "id": "legacy-alpha",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "Alpha",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-01234567-89a"
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "projects": [
+            {
+              "createdAt": 30,
+              "description": " Fixture description ",
+              "id": "proj-12345678-90a",
+              "mainRepoId": null,
+              "name": "\u96ea project",
+              "repos": [],
+              "slug": "snow",
+              "updatedAt": 40
+            },
+            {
+              "createdAt": 10,
+              "description": null,
+              "id": "proj-01234567-89a",
+              "mainRepoId": "repo-a",
+              "name": "Alpha",
+              "repos": [],
+              "slug": "alpha",
+              "updatedAt": 20
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "projects": [
+            {
+              "createdAt": 30,
+              "description": " Fixture description ",
+              "id": "proj-12345678-90a",
+              "mainRepoId": null,
+              "name": "\u96ea project",
+              "repos": [],
+              "slug": "snow",
+              "updatedAt": 40
+            },
+            {
+              "createdAt": 10,
+              "description": null,
+              "id": "proj-01234567-89a",
+              "mainRepoId": "repo-a",
+              "name": "Alpha",
+              "repos": [],
+              "slug": "alpha",
+              "updatedAt": 20
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "projects": [
+            {
+              "createdAt": 30,
+              "description": " Fixture description ",
+              "id": "proj-12345678-90a",
+              "mainRepoId": null,
+              "name": "\u96ea project",
+              "repos": [],
+              "slug": "snow",
+              "updatedAt": 40
+            },
+            {
+              "createdAt": 10,
+              "description": null,
+              "id": "proj-01234567-89a",
+              "mainRepoId": "repo-a",
+              "name": "Alpha",
+              "repos": [],
+              "slug": "alpha",
+              "updatedAt": 20
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "projects": [
+            {
+              "createdAt": 30,
+              "description": " Fixture description ",
+              "id": "proj-12345678-90a",
+              "mainRepoId": null,
+              "name": "\u96ea project",
+              "repos": [],
+              "slug": "snow",
+              "updatedAt": 40
+            },
+            {
+              "createdAt": 10,
+              "description": null,
+              "id": "proj-01234567-89a",
+              "mainRepoId": "repo-a",
+              "name": "Alpha",
+              "repos": [],
+              "slug": "alpha",
+              "updatedAt": 20
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Registered repository not found."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 404
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Registered repository not found."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 404
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Registered repository not found."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 404
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Registered repository not found."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 404
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "mergePolicy": {
+            "mode": "pr_only",
+            "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+          },
+          "project": {
+            "createdAt": 10,
+            "description": null,
+            "id": "proj-01234567-89a",
+            "mainRepoId": "repo-a",
+            "name": "Alpha",
+            "repos": [],
+            "slug": "alpha",
+            "updatedAt": 20
+          },
+          "savedMergeMode": null
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "mergePolicy": {
+            "mode": "pr_only",
+            "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+          },
+          "project": {
+            "createdAt": 10,
+            "description": null,
+            "id": "proj-01234567-89a",
+            "mainRepoId": "repo-a",
+            "name": "Alpha",
+            "repos": [],
+            "slug": "alpha",
+            "updatedAt": 20
+          },
+          "savedMergeMode": null
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "mergePolicy": {
+            "mode": "pr_only",
+            "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+          },
+          "project": {
+            "createdAt": 10,
+            "description": null,
+            "id": "proj-01234567-89a",
+            "mainRepoId": "repo-a",
+            "name": "Alpha",
+            "repos": [],
+            "slug": "alpha",
+            "updatedAt": 20
+          },
+          "savedMergeMode": null
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "mergePolicy": {
+            "mode": "pr_only",
+            "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+          },
+          "project": {
+            "createdAt": 10,
+            "description": null,
+            "id": "proj-01234567-89a",
+            "mainRepoId": "repo-a",
+            "name": "Alpha",
+            "repos": [],
+            "slug": "alpha",
+            "updatedAt": 20
+          },
+          "savedMergeMode": null
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    }
+  ],
+  "reservedPathRefusals": [
+    {
+      "path": "/api/projects/context",
+      "admissionStatus": 409,
+      "native": false
+    },
+    {
+      "path": "/api/projects/locks",
+      "admissionStatus": 409,
+      "native": false
+    },
+    {
+      "path": "/api/projects/dismissed-suggestions",
+      "admissionStatus": 409,
+      "native": false
+    }
+  ],
+  "creationFallback": {
+    "native": false,
+    "addedProjects": 2,
+    "responseIdsPersisted": true
+  },
+  "referenceAdmissionProbes": 0,
+  "separateChildLaunchFlags": [
+    false,
+    true
+  ],
+  "mutationPointer": "$/body/repos: expected [], received null",
+  "clientParser": {
+    "method": "Exact serde project/icon/ledger/machine declarations; workspace uses its Value consumer; repo-icon has no active o8-next consumer and is byte-checked by the socket harness; not GPUI suite",
+    "parsed": {
+      "panel-projects": 100,
+      "project-detail": 39,
+      "projects": 90,
+      "repo-icon": 0,
+      "repos": 81,
+      "ssh-machines": 0,
+      "workspaces": 0
+    }
+  },
+  "clientParserSources": [
+    {
+      "path": "native/o8-next/src/projects_model.rs",
+      "sha256": "3ec300d8d8a0c25707b41341efaf41c7643ae73c095a71d686fb96928b85126f"
+    },
+    {
+      "path": "native/o8-next/src/project_icon.rs",
+      "sha256": "ec0b90bf40bdb0b21e787abb5128bc209fcc2f2f5672430558ac27ec865c0d80"
+    },
+    {
+      "path": "native/o8-next/src/surfaces/setup/new_project.rs",
+      "sha256": "0d46ac40357f95f06139fb3f4683d5177d4d6b42f13bdef145add3a2465099a7"
+    },
+    {
+      "path": "native/o8-next/src/surfaces/settings/machines.rs",
+      "sha256": "c15797d7be956bedf883212e29d72cc9af26cc862078fd90ea1fa2372264fa8e"
+    }
+  ],
+  "latency": "Final replay on the rebased candidate pending.",
+  "failThenPass": {
+    "testFirstCommit": "c35188c66",
+    "exit": 1,
+    "failure": "Native route was not reached: /api/panel/repos"
+  },
+  "scope": [
+    "/api/panel/repos",
+    "/api/panel/projects",
+    "/api/projects",
+    "/api/panel/repo-icon",
+    "/api/projects/[id]"
+  ],
+  "limitations": [
+    "Synthetic Linux fixture, not installed performance or a GPUI launch.",
+    "SSH peer/local-only admission remains excluded and master-security-owned.",
+    "Workspace GET stays TypeScript-owned because it always writes lifecycle state."
+  ]
+}

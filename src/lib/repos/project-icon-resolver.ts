@@ -130,6 +130,8 @@ async function discover(cwd: string, faviconPath: string | null) {
 type Entry = { value: Promise<string | null>; expires: number };
 export class ProjectIconResolver {
   private readonly cache = new Map<string, Entry>();
+  /** Private admission floor; cached icon decisions stay with this process. */
+  hasFreshEntries(): boolean { return [...this.cache.values()].some(entry => entry.expires > Date.now()); }
   invalidate(cwd: string) {
     for (const key of this.cache.keys()) if (key.slice(key.indexOf('\0') + 1) === cwd) this.cache.delete(key);
   }

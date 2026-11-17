@@ -1,0 +1,9 @@
+# Repository/project TypeScript oracle
+
+Five GETs remain at rust-with-fallback. corpus.json has100 generated requests per route, seed6327, captured from original handlers through the production public socket with Next absent. Repositories cover source,readiness,restorePath,restoreValidationOnly accepted/invalid/missing/empty/repeated/Unicode/boundary inputs; the detail route varies its URI id. The fixture covers registry/sidecar/SQL/membership/description/merge-policy/icon states.
+
+Reference and native phases launch separate daemon children with their actual flags; the reference phase asserts zero admission probes. Live pairs compare the original values exactly. Only requestId,epoch,generatedAt use the shared normalizer; known owned fixture roots in response values and request parameters bind to $FIXTURE_ROOT (source checkout paths bind to $SOURCE_ROOT). File mtimes and the fixture clock are controlled inputs, not excluded output fields. The committed frozen oracle is checked against a fresh run.
+
+The matrix has500 comparisons and zero differences.35 auth outcomes match. Three reserved literal routes defer with409 at admission and retain TS handling. A separate missing-project edge falls back and proves TS-created response IDs are persisted. A mutation of an actual native response is detected at $/body/repos. Successful replies pass exact extracted o8-next project/repository/ledger serde declarations; this is not GPUI or installed-app proof. Repo-icon bytes/security headers compare through the socket; it has no active o8-next GET consumer.
+
+[store-map.md](store-map.md) describes the read/write ownership and exclusions. No SSH peer pass-through or workspace lifecycle route is admitted. No route is deleted, no Rust-only state is selected, and all store writes retain TypeScript ownership. Final release timing/completion receipts are recorded in gates.json before publication.
