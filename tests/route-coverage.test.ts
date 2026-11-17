@@ -254,7 +254,6 @@ const PUBLIC_ANY = [
 ];
 const PUBLIC_READ = [
   /^\/api\/panel\/status(\/|$)/,
-  /^\/api\/v2\/auth\/session\/?$/,
   /^\/api\/mobile\/orchestrator\/backend-availability(\/|$)/,
   /^\/api\/mobile\/push\/public-key(\/|$)/,
   // #1529 — a paired phone whose saved API port moved probes this to find the
