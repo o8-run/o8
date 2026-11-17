@@ -127,3 +127,48 @@ it.each(['REQUESTED', 'WAITING', 'FUTURE_PENDING', 'SUCCESS', 'FAILURE', 'CANCEL
   const page = await fetchPullRequestListPage('example/repo', 'open', 1);
   expect(page.prs[0].checksPending).toBe(['REQUESTED', 'WAITING', 'FUTURE_PENDING'].includes(state));
 });
+
+describe('failed checks that the base branch does not require', () => {
+  const failingStats = (numbers: number[], pending = false) => ({ data: { nodes: numbers.map((number) => ({ number, additions: 1, deletions: 0, commits: { nodes: [{ commit: { statusCheckRollup: {
+    state: 'FAILURE', contexts: { checkRunCountsByState: pending ? [{ state: 'IN_PROGRESS', count: 1 }] : [], statusContextCountsByState: [] },
+  } } }] } })) } });
+  const answer = (contexts: Array<Record<string, unknown>>, hasNextPage = false) => ({ commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage }, nodes: contexts } } } }] } });
+  const respond = (stats: unknown, required: unknown) => githubInstallationFetch.mockImplementation(async (_repo: string, path: string, init?: { body?: string }) => ({
+    response: path !== '/graphql' ? Response.json([pull(1), pull(2)]) : Response.json(String(init?.body).includes('PullRequestListRequiredChecks') ? required : stats),
+  }));
+
+  it('passes a pull request whose only failures are optional, and keeps a required failure red', async () => {
+    respond(failingStats([1, 2]), { data: {
+      p0: answer([{ __typename: 'CheckRun', conclusion: 'FAILURE', isRequired: false }, { __typename: 'CheckRun', conclusion: 'SUCCESS', isRequired: true }]),
+      p1: answer([{ __typename: 'CheckRun', conclusion: 'FAILURE', isRequired: true }]),
+    } });
+    const page = await fetchPullRequestListPage('example/repo', 'open', 1);
+    expect(page.prs.map((pr) => pr.checks)).toEqual(['success', 'failure']);
+    const body = JSON.parse(githubInstallationFetch.mock.calls[2][2].body as string);
+    expect(body.query).toContain('isRequired(pullRequestNumber: 1)');
+    expect(body.query).toContain('isRequired(pullRequestNumber: 2)');
+  });
+
+  it('reads as pending when optional failures sit beside unfinished checks', async () => {
+    respond(failingStats([1], true), { data: { p0: answer([{ __typename: 'StatusContext', state: 'ERROR', isRequired: false }, { __typename: 'CheckRun', conclusion: null, isRequired: true }]) } });
+    const page = await fetchPullRequestListPage('example/repo', 'open', 1);
+    expect(page.prs[0]).toMatchObject({ checks: 'pending', checksPending: true });
+  });
+
+  it.each([
+    ['more checks than one page', answer([{ __typename: 'CheckRun', conclusion: 'FAILURE', isRequired: false }], true)],
+    ['an unanswered required flag', answer([{ __typename: 'CheckRun', conclusion: 'FAILURE', isRequired: null }])],
+    ['a missing answer', null],
+  ])('keeps the failure on %s', async (_label, p0) => {
+    respond(failingStats([1]), { data: { p0 } });
+    expect((await fetchPullRequestListPage('example/repo', 'open', 1)).prs[0].checks).toBe('failure');
+  });
+
+  it('keeps the failure when the required-check read fails', async () => {
+    githubInstallationFetch.mockImplementation(async (_repo: string, path: string, init?: { body?: string }) => {
+      if (path === '/graphql' && String(init?.body).includes('PullRequestListRequiredChecks')) throw new Error('unavailable');
+      return { response: path === '/graphql' ? Response.json(failingStats([1])) : Response.json([pull(1)]) };
+    });
+    expect((await fetchPullRequestListPage('example/repo', 'open', 1)).prs[0].checks).toBe('failure');
+  });
+});
