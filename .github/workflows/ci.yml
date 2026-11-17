@@ -262,7 +262,7 @@ jobs:
         if: needs.reuse.outputs.reuse != 'true'
         run: npm run test:classification:check
       - if: needs.reuse.outputs.reuse != 'true'
-        run: node --test scripts/ci/test-classification-listing.test.mjs scripts/ci/integration-weights.test.mjs scripts/ci/native-test-shard.test.mjs scripts/ci/pr-review-comment.test.mjs scripts/ci/native-test-cache.test.mjs
+        run: node --test scripts/ci/test-classification-listing.test.mjs scripts/ci/integration-weights.test.mjs scripts/ci/native-test-shard.test.mjs scripts/ci/pr-review-comment.test.mjs scripts/ci/native-test-cache.test.mjs scripts/ci/time-audit.test.mjs
 
   test-shards:
     name: Hermetic Unit Tests (shard ${{ matrix.shard }}/4)
