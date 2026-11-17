@@ -278,7 +278,7 @@ pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &s
 }
 
 pub fn native_body_too_large() -> Response {
-    reply(StatusCode::PAYLOAD_TOO_LARGE, json!({"error":"Native request exceeds 16 MiB"}))
+    reply(StatusCode::PAYLOAD_TOO_LARGE, json!({"error":"Request exceeds 16 MiB"}))
 }
 
 pub fn native_request(directory: PathBuf, database: PathBuf, path: &str, query: &str, method: &str, body: &[u8]) -> Response {
