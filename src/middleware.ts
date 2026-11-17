@@ -101,8 +101,6 @@ function loadStoredPanelToken(): string | null {
 const ALLOWLIST_READ_ONLY: RegExp[] = [
   // Health check for the Tauri shell to know the bundled server is up.
   /^\/api\/panel\/status(\/|$)/,
-  // Session inspection authenticates with the o8-token cookie in its handler.
-  /^\/api\/v2\/auth\/session\/?$/,
   // A paired phone's bounded stale-port probe. The response is public port
   // metadata signed with the already pinned E2EE server identity; it exposes
   // no bearer, enrollment code, or other operator capability.
@@ -142,7 +140,7 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // Phone-facing routes only. Keep internal desktop/ws-server routes out of
   // this list: devices*, push-url, symon/tool, and ws-token all require the
   // operator credential. New mobile routes fail closed until named here.
-  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat\/send|diff-comments?|enhance|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|review-file|search|symon(?:\/session|\/text-session)?|sync|terminal-input|terminal-sessions)\/?$/ },
+  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat\/send|diff-comments?|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|review-file|search|symon(?:\/session|\/text-session)?|sync|terminal-input|terminal-sessions)\/?$/ },
   // A paired phone reads its own standing intents and clears one. Read + cancel
   // ONLY: registering a watch stays inside a Symon turn, where it raises a card,
   // and the tools' own surface (/api/symon/watches) keeps the operator bearer.

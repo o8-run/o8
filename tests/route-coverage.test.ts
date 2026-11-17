@@ -254,7 +254,6 @@ const PUBLIC_ANY = [
 ];
 const PUBLIC_READ = [
   /^\/api\/panel\/status(\/|$)/,
-  /^\/api\/v2\/auth\/session\/?$/,
   // #1529 — a paired phone whose saved API port moved probes this to find the
   // new one. Credential-free by design: it returns port metadata plus a
   // signature over a domain-separated transcript

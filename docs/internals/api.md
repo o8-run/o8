@@ -151,19 +151,11 @@ Routes are grouped by their first path segment.
 | DELETE | `/api/automations/[id]` | Delete an automation. |
 | POST | `/api/automations/[id]/run` | Fire an automation now; updates `lastRunAt` + recomputes `nextRunAt` for cron rows. |
 
-### `/api/board/*` — Cortex task board state (gated)
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/board?repo=<path>` | Read board snapshot for a repo. |
-| POST | `/api/board` | Apply a board mutation with optimistic concurrency (`expectedRevision`). |
-
 ### `/api/browser/*` — In-app browser provider surface (gated)
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/browser/inventory` | Snapshot of attachable browser surfaces. |
-| POST | `/api/browser/attach` | Attach a browser surface via the named provider. |
 
 ### `/api/broadcast/*` — Read-only spectator projection
 
@@ -213,12 +205,6 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/command-center/snapshot?fresh=1` | Full fleet snapshot (cached unless `fresh=1`). |
-
-### `/api/connectors/*` — Third-party data importers (gated)
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/connectors/chatgpt` | Import ChatGPT conversation history (zip multipart or JSON). |
 
 ### `/api/cortex/*` — Cortex v2 memory + Q&A surface (gated)
 
@@ -303,7 +289,6 @@ narrow read-only exception.
 | GET | `/api/mobile/activity` | Chronological fleet activity feed (newest-first, capped ~40). |
 | GET | `/api/mobile/bootstrap?fresh=1` | First-load bootstrap snapshot (repos, sessions, layout). |
 | POST | `/api/mobile/chat/send` | Send a mobile chat turn (streams via WS, persists locally). |
-| POST | `/api/mobile/enhance` | Enhance raw mobile prompt via Gemini 2.0 Flash. |
 | GET | `/api/mobile/usage/history?range=30d` | Hourly (24h) or local-calendar daily (7d/30d/90d) coding-agent usage at stored list API rates; counts only, cached in memory for 60 seconds. Requires operator bearer until device allowlisted. |
 | GET | `/api/mobile/history?sessionKey=...&limit=...` | Read paginated transcript for a session (LLM chat or runtime tail). |
 | GET | `/api/mobile/inbox?fresh=1&limit=...` | Mobile inbox snapshot (pending approvals, activity items). |
@@ -313,8 +298,6 @@ narrow read-only exception.
 | GET | `/api/mobile/orchestrator/packets?repoPath=...` | List orchestrator packets per repo (mobile-shaped payload). |
 | GET | `/api/mobile/orchestrator/threads` | List recent orchestrator threads. |
 | POST | `/api/mobile/orchestrator/threads` | Create a desktop-owned o8/Claude thread mobile can attach to. |
-| GET | `/api/mobile/orchestrator/threads/reveal?since=...` | List pending reveal-on-desktop requests. |
-| POST | `/api/mobile/orchestrator/threads/[threadId]/reveal` | Request the desktop reveal a thread. |
 | POST | `/api/mobile/push-url` | Fan out a URL push to every connected mobile client over WS. |
 | GET | `/api/mobile/files/list?threadId=...&path=...` | List one checkout directory (or use sessionKey); folders first, ignored entries excluded, capped at 500 with truncated flag. |
 | GET | `/api/mobile/files/content?threadId=...&path=...&startLine=...&endLine=...` | Read checkout text (or use sessionKey); optional inclusive 1-based lines, 256 KiB cap, hidden secrets and binary metadata. |
@@ -352,8 +335,6 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | POST | `/api/orchestrator/lead` | Start, send, structurally report an outcome, or durably stop a persistent lead with replay-safe admission. Operator only. |
 | GET | `/api/orchestrator/lane-events?since=...` | Long-poll for orchestrator-relevant lane events. |
 | POST | `/api/orchestrator/merge` | Approve + merge a packet (`approveAndMergePacket`). |
-| GET | `/api/orchestrator/packet-spec?packetId=...` | Read the packet's structured spec. |
-| PUT | `/api/orchestrator/packet-spec` | Replace a packet's spec. |
 | GET | `/api/orchestrator/packet-transcript?packetId=...&limit=...&cursor=...` | Paginated transcript for a packet. |
 | POST | `/api/orchestrator/propose-spec` | `cortex_propose_spec` MCP backend — agents suggest a spec (#773/#857). |
 | POST | `/api/orchestrator/reload` | Graceful orchestrator reload after conversational MCP install. |
@@ -468,10 +449,7 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/projects/[id]/repos` | Add a repo to a project (with role + suggestionOrigin). |
 | PATCH | `/api/projects/[id]/repos/[repoId]` | Update repo's role within the project. |
 | DELETE | `/api/projects/[id]/repos/[repoId]` | Remove a repo from a project. |
-| GET | `/api/projects/dismissed-suggestions` | List dismissed suggestion fingerprints. |
-| POST | `/api/projects/dismissed-suggestions` | Dismiss a suggestion by fingerprint. |
 | GET | `/api/projects/locks?projectId=...` | List project locks (lane-scoped concurrency control). |
-| POST | `/api/projects/locks/[laneId]` | Lock action — currently only `archive_stale` is supported. |
 
 ### `/api/repo-spec/*` — Per-repo `o8.md` spec file (gated)
 
@@ -557,7 +535,6 @@ Every `[taskId]/<action>` route is a thin wrapper around `runTaskMutationRoute` 
 | POST | `/api/tasks/[taskId]/claim` | Claim a task (sets actor / note). |
 | POST | `/api/tasks/[taskId]/dispatch` | Dispatch a task to a runtime (model, worker intent, requested provider). |
 | POST | `/api/tasks/[taskId]/prune` | Prune a task with a reason. |
-| POST | `/api/tasks/[taskId]/remove` | Remove a task with a reason. |
 | POST | `/api/tasks/[taskId]/report` | Report progress / status / metadata for a task. |
 
 ### `/api/tts/*` — Text-to-speech (operator or paired-device capability)
@@ -575,7 +552,6 @@ principal for stateful routes. Only session inspection (read) and logout
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v2/auth/session` | Read current authenticated user profile. |
 | POST | `/api/v2/chat` | Streaming chat endpoint (free / paid tier routing via gateway). |
 | GET | `/api/v2/chat-history?tabId=...` | Read persisted LLM chat messages per tab. |
 | POST | `/api/v2/chat-history` | Append a message to a tab's history. |
