@@ -5,7 +5,9 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Network threads and parked workspace receipt projections remain TypeScript-owned."
+    "reason": "Network threads and parked workspace receipt projections remain TypeScript-owned.",
+    "state": "red",
+    "test": "tests/o8d-native-route-table-real-path.test.ts"
   },
   {
     "path": "/api/mobile/history",
@@ -13,7 +15,9 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Runtime-owned transcripts, network projections and durable lane overlays remain TypeScript-owned."
+    "reason": "Runtime-owned transcripts, network projections and durable lane overlays remain TypeScript-owned.",
+    "state": "red",
+    "test": "tests/o8d-native-route-table-real-path.test.ts"
   },
   {
     "path": "/api/v2/chat-history",
@@ -21,7 +25,9 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Network projections remain TypeScript-owned."
+    "reason": "Network projections remain TypeScript-owned.",
+    "state": "red",
+    "test": "tests/o8d-native-route-table-real-path.test.ts"
   },
   {
     "path": "/api/orchestrator/composer-queue",
@@ -29,6 +35,8 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Network projections, visual receipts and live steering capabilities remain TypeScript-owned."
+    "reason": "Network projections, visual receipts and live steering capabilities remain TypeScript-owned.",
+    "state": "red",
+    "test": "tests/o8d-native-route-table-real-path.test.ts"
   }
 ]

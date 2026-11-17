@@ -37,6 +37,7 @@ pub(super) async fn serve(
     header: &str,
     upstream: &str,
     key: &str,
+    count: &super::request_counts::Count,
 ) -> Result<bool, ()> {
     if !enabled() {
         return Ok(false);
@@ -139,5 +140,6 @@ pub(super) async fn serve(
     socket.write_all(output.as_bytes()).await.map_err(|_| ())?;
     socket.write_all(&body).await.map_err(|_| ())?;
     socket.shutdown().await.map_err(|_| ())?;
+    count.finish(Some(status.as_u16())).await;
     Ok(true)
 }

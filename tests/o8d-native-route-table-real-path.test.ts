@@ -62,7 +62,7 @@ it('uses one four-route GET table through the public socket with Next stopped', 
       expect(records).toContainEqual(expect.objectContaining({ route: path, method: 'GET', status: 200 }));
       expect(records).toContainEqual(expect.objectContaining({ route: path, method: 'GET', status: 401 }));
     }
-    expect(records).toContainEqual(expect.objectContaining({ route: '__other__', method: 'GET', status: 200 }));
+    expect(records).toContainEqual(expect.objectContaining({ route: '/api/panel/ws-info', method: 'GET', status: 200 }));
     for (const record of records) {
       expect(Object.keys(record).sort()).toEqual(['durationBucket', 'method', 'route', 'status']);
       expect(['lt10ms', 'lt100ms', 'lt1s', 'gte1s']).toContain(record.durationBucket);

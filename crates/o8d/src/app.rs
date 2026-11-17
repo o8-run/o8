@@ -18,6 +18,7 @@ use tokio_tungstenite::{
 };
 
 mod input;
+mod request_counts;
 #[cfg(feature = "experimental-session-reads")]
 mod session_reads;
 
@@ -122,11 +123,18 @@ async fn connection(
         })
     });
     if !upgrade {
+        let count = request_counts::Count::new(header);
         #[cfg(feature = "experimental-session-reads")]
-        if session_reads::serve(&mut socket, header, &upstream, &key).await? {
+        if session_reads::serve(&mut socket, header, &upstream, &key, &count).await? {
             return Ok(());
         }
-        let mut backend = TcpStream::connect(&upstream).await.map_err(|_| ())?;
+        let mut backend = match TcpStream::connect(&upstream).await {
+            Ok(stream) => request_counts::Backend::new(stream),
+            Err(_) => {
+                count.finish(None).await;
+                return Err(());
+            }
+        };
         // Attest the socket peer on the first request. TS closes each relayed
         // response, so every request arrives on a freshly stamped connection.
         if let Some(stamped) = stamp_http_header(header, &key, &peer) {
@@ -136,9 +144,9 @@ async fn connection(
                 .await
                 .map_err(|_| ())?;
         }
-        tokio::io::copy_bidirectional(&mut socket, &mut backend)
-            .await
-            .map_err(|_| ())?;
+        let result = tokio::io::copy_bidirectional(&mut socket, &mut backend).await;
+        count.finish(backend.status).await;
+        result.map_err(|_| ())?;
         return Ok(());
     }
     let mut request = format!("ws://{upstream}{path}")

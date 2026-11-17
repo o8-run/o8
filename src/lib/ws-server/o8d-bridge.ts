@@ -134,6 +134,7 @@ export class O8dBridge {
         env: childEnvironment({ inherit: false, env: {
           O8D_BRIDGE_KEY: this.key, O8D_EPOCH: this.epoch,
           O8D_NATIVE_SESSION_READS: process.env.O8_NEXT_O8D === '1' && nativeSessionReadsEnabled() ? '1' : undefined,
+          O8D_REQUEST_COUNTS_PATH: join(getDataDir(), 'o8d-request-counts.jsonl'),
           O8D_SESSION_DATA_DIR: getDataDir(), O8D_SESSION_DB_PATH: process.env.CORTEX_IDE_DB_PATH, TZ: process.env.TZ,
         } }), stdio: ['pipe', 'pipe', 'pipe'],
       });

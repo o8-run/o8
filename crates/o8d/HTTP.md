@@ -394,3 +394,16 @@ under their approvals. The response also includes `total`, the event count after
 existing project scope and visibility checks. Show more increases the requested
 prefix by 50; refreshing replaces that prefix. Reads without `auditLimit` retain
 the existing response. Authorization and project scope are unchanged.
+
+### Local request counts
+
+The app bridge writes `o8d-request-counts.jsonl` in its data directory. Each
+HTTP record contains only a committed API route template (or `__other__`), a
+bounded method label, status and duration bucket. It includes native answers
+and proxied refusals. Dynamic path values, queries, headers and bodies are never
+written. Templates are checked against API source by Test Classification, along
+with the route-count ceiling and every native table entry's test mapping.
+Two segments of approximately 8 MiB bound disk use; writes have a 100 ms deadline
+and failures do not affect the response. Standalone daemons record only when
+`O8D_REQUEST_COUNTS_PATH` is set. This is synthetic/local counting evidence,
+not an installed usage ranking or a live shadow comparison.
