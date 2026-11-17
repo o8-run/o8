@@ -2,7 +2,7 @@
   "kind": "synthetic-public-socket",
   "issue": 6370,
   "checks": {
-    "canonicalPublicSocketAndAdmission": "4 requested modules: 11 passed, 0 failed (settings rebase)",
+    "canonicalPublicSocketAndAdmission": "Final base: four modules 10 passed/1 admission timeout; unchanged admission-only retry 2 passed/0 failed. All 11 requested tests have passing results.",
     "boundaryRecipes": "0,1024,16777216 native200;16777217 native413",
     "unauthorizedOversized": "401 via TypeScript",
     "fallback": "exact synthetic messages persisted by TypeScript",
@@ -11,13 +11,13 @@
     "lint": 0,
     "rules": 0,
     "oversizedError": "Request exceeds 16 MiB (matches the TypeScript boundary)",
-    "settingsMerge": "defaults context, auth paths and owner-hop refusal retained; method/body dispatch carries private context"
+    "settingsMerge": "settings and mobileInbox contexts, auth paths, owner-hop and mobileInbox-null refusal retained; native.rs context decode retains 4096-byte bound"
   },
   "sourceSha256": {
     "crates/o8d/src/app.rs": "75bf7589a84f4a90ab8d7bc8defb313ce889a1b6565a09decc87ead091fea151",
-    "crates/o8d/src/app/native.rs": "34a5a41e30fa5f53fd83a6693edde30b0d964168de3984a66fdf68fa5c38678d",
-    "crates/o8d/src/http/mod.rs": "df3304c0bf386eb35aabd0dac927bdf0c92aaba469694fe104913fbc135911fa",
-    "src/lib/ws-server/native-http-routes.ts": "a79617ddef52521592386f6f1d4c4e8503e8336573bd1c7b659707252d13b483",
+    "crates/o8d/src/app/native.rs": "e903a15da85d4271c2df2806950e60205e27c72edfbd2880c32810930f70cfb7",
+    "crates/o8d/src/http/mod.rs": "a4c865ed94055adb1ce289e889941c540ad0999243865392bbd4eba159474fca",
+    "src/lib/ws-server/native-http-routes.ts": "8aea8985e7380c9451511145d693493aa9473eafc1fc47078260e2744228fcc7",
     "scripts/o8d/build-write-fixture.mjs": "8a0149a754c72a51bd62e09246d04248a120f1441118bedee34867aa211f2241",
     "scripts/o8d/verification-fixture.patch": "1fbfdcc9e31046746c57207b4946dcc71b8dd63b7b91942f3a7c83515789f35a",
     "tests/o8d-rust-write-path-real-path.test.ts": "2b1c2fd0b8cb22532084d533ff114d7cb329b3617ddb20eec77a0beaa177166a",
@@ -26,5 +26,6 @@
   },
   "fullCompletionAndHosted": "Authorized focused local checks passed; hosted CI pending",
   "securityReview": "required before arming",
-  "base": "e25c88d2c3cd5c6d51aaa96390aa11fa67a80dff"
+  "base": "dc855e3a88c9e5571ddf85ad9f4712b46848ab1d",
+  "timingFollowup": 6408
 }
