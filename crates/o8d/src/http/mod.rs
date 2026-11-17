@@ -1,5 +1,6 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
 mod chat;
+mod chat_list;
 mod git_remote;
 mod queue;
 mod read_context;
@@ -210,6 +211,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params) -> Response {
         },
         "/api/mobile/history" => chat::transcript(store, params),
         "/api/v2/chat-history" => chat::context(store, params),
+        "/api/v2/chat-history/list" => chat_list::read(store, params),
         "/api/orchestrator/composer-queue" => queue::read(store, params),
         "/api/orchestrator/state" => {
             // Reconciliation and live runtime evidence still belong to TypeScript.
