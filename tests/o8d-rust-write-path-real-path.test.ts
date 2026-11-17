@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { request } from 'node:http';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -18,6 +19,33 @@ beforeAll(async () => {
   ], { timeout: 300_000, maxBuffer: 4 * 1024 * 1024 });
 }, 310_000);
 afterAll(() => rmSync(buildDirectory, { recursive: true, force: true }));
+
+// Withhold the body: an unauthorized request must be refused from its head,
+// even when its declared length exceeds the native limit. Pumping 17 MiB via
+// fetch races the canonical listener's early close and can surface ECONNRESET
+// instead of its response. Do not retry that race or send Expect (which would
+// deliberately bypass native admission).
+function refusedOversizedHead(origin: string, path: string) {
+  return new Promise<{ status: number | undefined; native: string | string[] | undefined; body: string }>((resolve, reject) => {
+    const pending = request(new URL(path, origin), { method: 'POST', headers: {
+      authorization: 'Bearer wrong', 'x-o8d-session-read': 'authorize',
+      'x-o8d-bridge': 'spoofed', 'content-length': String(16 * 1024 * 1024 + 1),
+    } }, response => {
+      const chunks: Buffer[] = [];
+      response.on('data', chunk => chunks.push(Buffer.from(chunk)));
+      response.once('error', reject);
+      response.once('end', () => {
+        resolve({ status: response.statusCode, native: response.headers['x-o8d-native'],
+          body: Buffer.concat(chunks).toString('utf8') });
+        pending.destroy();
+      });
+    });
+    pending.once('error', reject);
+    pending.setTimeout(10_000, () => pending.destroy(new Error('Admission waited for an unauthorized body')));
+    pending.flushHeaders();
+  });
+}
+
 it('threads POST bytes into native dispatch, bounds bodies, and replays a buffered fallback exactly', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-native-write-')));
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
@@ -54,10 +82,15 @@ it('threads POST bytes into native dispatch, bounds bodies, and replays a buffer
     expect(read.status).toBe(200);
     expect(read.headers.get('x-o8d-native')).toBe('1');
     await read.arrayBuffer();
-    const denied = await fetch(origin + path, { method: 'POST', headers: { authorization: 'Bearer wrong', 'x-o8d-session-read': 'authorize', 'x-o8d-bridge': 'spoofed' }, body: Buffer.alloc(16 * 1024 * 1024 + 1, 'a') });
+    const denied = await refusedOversizedHead(origin, path);
     expect(denied.status).toBe(401);
-    expect(denied.headers.get('x-o8d-native')).toBeNull();
-    await denied.arrayBuffer();
+    expect(denied.native).toBeUndefined();
+    await server.stop(); server = undefined;
+    server = await startParityReference({ directory, nativeHttp: true, o8d: true,
+      nativeSessionReads: false, binary, preload: resolve('tests/fixtures/write-fixture-preload.cjs') });
+    await server.stopNext();
+    const referenceOrigin = server.url.replace('ws:', 'http:').replace('/ws', '');
+    expect(await refusedOversizedHead(referenceOrigin, path)).toEqual(denied);
   } finally {
     await server?.stop();
     rmSync(directory, { recursive: true, force: true });
