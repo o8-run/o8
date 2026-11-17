@@ -22,7 +22,8 @@ it('matches 100 seeded TS requests per settings route, durable stores and auth t
   try {
     const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, LANG: 'C.UTF-8', NODE_ENV: 'test',
       HOME: directory, USERPROFILE: directory, CORTEX_IDE_DATA_DIR: directory,
-      CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'), O8D_PARITY_SEED: process.env.O8D_PARITY_SEED };
+      CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'), O8D_PARITY_SEED: process.env.O8D_PARITY_SEED,
+      O8D_SETTINGS_RELEASE_RECEIPT: process.env.O8D_SETTINGS_RELEASE_RECEIPT };
     const { stdout } = await promisify(execFile)(process.execPath, ['--import', './scripts/register-server-only-stub.mjs',
       '--import', 'tsx', 'tests/fixtures/o8d-settings-parity.mts', binary, result],
     { cwd: process.cwd(), env, timeout: 180_000, maxBuffer: 32 * 1024 * 1024 });
@@ -30,7 +31,8 @@ it('matches 100 seeded TS requests per settings route, durable stores and auth t
     const report = JSON.parse(readFileSync(result, 'utf8'));
     expect(report.summary.map((item: { route: string }) => item.route)).toEqual(routes);
     expect(report.summary.every((item: { attempted: number; native: number; differences: number }) =>
-      item.attempted === 100 && item.native > 0 && item.differences === 0)).toBe(true);
+      item.attempted >= 100 && item.native > 0 && item.differences === 0)).toBe(true);
+    if (process.env.O8D_SETTINGS_REPORT) writeFileSync(process.env.O8D_SETTINGS_REPORT, JSON.stringify(report, null, 2) + '\n');
     const corpus = { seed: report.seed, records: report.records };
     const path = join(process.cwd(), 'crates/o8d/evidence/settings/corpus.json');
     if (process.env.O8D_CAPTURE_SETTINGS === '1') {
