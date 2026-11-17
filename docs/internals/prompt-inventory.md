@@ -347,7 +347,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/cortex/qa/llm/sonnet-adapter.ts](../../src/lib/cortex/qa/llm/sonnet-adapter.ts) | buildCliPrompt | Retrieval, classification and grounding | 8 | 8 | 2 |
 | [src/lib/cortex/qa/llm/sonnet-adapter.ts](../../src/lib/cortex/qa/llm/sonnet-adapter.ts) | combinedPrompt | Retrieval, classification and grounding | 1 | 1 | 2 |
 | [src/lib/cortex/spec-image-captions.ts](../../src/lib/cortex/spec-image-captions.ts) | CAPTION_PROMPT | Retrieval, classification and grounding | 30 | 30 | 0 |
-| [src/lib/dictation/polish-prompt.ts](../../src/lib/dictation/polish-prompt.ts) | buildPolishSystemPrompt | Model input and output contract | 455 | 455 | 1 |
 | [src/lib/dispatch/decomposition-pipeline.ts](../../src/lib/dispatch/decomposition-pipeline.ts) | buildDecompositionPrompt | Task decomposition | 231 | 231 | 6 |
 | [src/lib/dispatch/decomposition-pipeline.ts](../../src/lib/dispatch/decomposition-pipeline.ts) | inline-model-context | Task decomposition | 118 | 118 | 21 |
 | [src/lib/dispatch/edge-case-surfacer.ts](../../src/lib/dispatch/edge-case-surfacer.ts) | renderEdgeCaseSections | Worker scope, launch and completion | 71 | 71 | 4 |
@@ -556,7 +555,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/mcp/plugin-tools.ts](../../src/lib/mcp/plugin-tools.ts) | tool:o8_follow_up | Tool selection, arguments and authority | 51 | 51 | 0 |
 | [src/lib/mcp/plugin-tools.ts](../../src/lib/mcp/plugin-tools.ts) | tool:o8_machines | Tool selection, arguments and authority | 26 | 26 | 0 |
 | [src/lib/mcp/plugin-tools.ts](../../src/lib/mcp/plugin-tools.ts) | tool:o8_result | Tool selection, arguments and authority | 49 | 49 | 0 |
-| [src/lib/mcp/symon-tools.ts](../../src/lib/mcp/symon-tools.ts) | tool-schema-descriptions | Tool selection, arguments and authority | 9 | 9 | 2 |
 | [src/lib/mcp/task-control-tools.ts](../../src/lib/mcp/task-control-tools.ts) | tool:o8_launch_task | Tool selection, arguments and authority | 117 | 117 | 0 |
 | [src/lib/mcp/task-control-tools.ts](../../src/lib/mcp/task-control-tools.ts) | tool:o8_stop_task | Tool selection, arguments and authority | 74 | 74 | 0 |
 | [src/lib/mcp/task-draft-tools.ts](../../src/lib/mcp/task-draft-tools.ts) | tool:o8_prepare_task | Tool selection, arguments and authority | 165 | 165 | 0 |
@@ -565,7 +563,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/mcp/transcript-read-tool.ts](../../src/lib/mcp/transcript-read-tool.ts) | tool-schema-descriptions | Tool selection, arguments and authority | 211 | 211 | 0 |
 | [src/lib/mobile/diff-comments.ts](../../src/lib/mobile/diff-comments.ts) | formatOpenDiffCommentsForPrompt | Model input and output contract | 11 | 11 | 5 |
 | [src/lib/mobile/orchestrator-handoff-history.ts](../../src/lib/mobile/orchestrator-handoff-history.ts) | createHandoffHistoryMarker:message | Continuation and retained context | 4 | 4 | 2 |
-| [src/lib/mobile/symon-text-session-store.ts](../../src/lib/mobile/symon-text-session-store.ts) | formatSymonTextPlannerPrompt | Model input and output contract | 78 | 78 | 8 |
 | [src/lib/o8md/spec-review.ts](../../src/lib/o8md/spec-review.ts) | buildPrompt | Specification review | 356 | 356 | 2 |
 | [src/lib/o8md/spec-review.ts](../../src/lib/o8md/spec-review.ts) | buildSingleNotePrompt | Specification review | 70 | 70 | 3 |
 | [src/lib/o8md/spec-review.ts](../../src/lib/o8md/spec-review.ts) | inline-model-context | Specification review | 92 | 92 | 0 |
@@ -631,20 +628,8 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/supervisor/heal-bot.ts](../../src/lib/supervisor/heal-bot.ts) | buildHealPrompt | Model input and output contract | 77 | 77 | 11 |
 | [src/lib/supervisor/heal-bot.ts](../../src/lib/supervisor/heal-bot.ts) | fullPrompt | Model input and output contract | 1 | 1 | 2 |
 | [src/lib/supervisor/heal-bot.ts](../../src/lib/supervisor/heal-bot.ts) | HEAL_BOT_SYSTEM_PROMPT | Model input and output contract | 76 | 76 | 0 |
-| [src/lib/symon/durable/brain.ts](../../src/lib/symon/durable/brain.ts) | SOURCE_INSTRUCTIONS | Model input and output contract | 60 | 60 | 0 |
-| [src/lib/symon/durable/brain.ts](../../src/lib/symon/durable/brain.ts) | SYMON_PROMPT | Model input and output contract | 149 | 149 | 0 |
-| [src/lib/symon/durable/o8-tools.ts](../../src/lib/symon/durable/o8-tools.ts) | PROMPT | Model input and output contract | 96 | 96 | 0 |
-| [src/lib/symon/durable/o8-tools.ts](../../src/lib/symon/durable/o8-tools.ts) | tool:o8_command_help | Model input and output contract | 28 | 28 | 0 |
-| [src/lib/symon/durable/o8-tools.ts](../../src/lib/symon/durable/o8-tools.ts) | tool:o8_commands | Model input and output contract | 27 | 27 | 0 |
-| [src/lib/symon/durable/o8-tools.ts](../../src/lib/symon/durable/o8-tools.ts) | tool:o8_run | Model input and output contract | 30 | 30 | 0 |
-| [src/lib/symon/managed-messages-inbound.ts](../../src/lib/symon/managed-messages-inbound.ts) | prompt | Model input and output contract | 28 | 28 | 3 |
 | [src/lib/targeting/rationale.ts](../../src/lib/targeting/rationale.ts) | buildBatchPrompt | Model input and output contract | 142 | 142 | 8 |
 | [src/lib/tasks/actions.ts](../../src/lib/tasks/actions.ts) | buildDispatchPrompt | Worker scope, launch and completion | 62 | 62 | 6 |
 | [src/lib/visualizations/orchestrator-prompt.ts](../../src/lib/visualizations/orchestrator-prompt.ts) | withVisualizationInstructions | Orchestration and tool authority | 332 | 332 | 1 |
 | [src/lib/voice/managed-live/byok-request.ts](../../src/lib/voice/managed-live/byok-request.ts) | instructions | Model input and output contract | 264 | 264 | 0 |
 | [src/lib/voice/managed-live/byok-request.ts](../../src/lib/voice/managed-live/byok-request.ts) | response:message | Model input and output contract | 7 | 7 | 2 |
-| [src/lib/voice/realtime-session-config.ts](../../src/lib/voice/realtime-session-config.ts) | DEFAULT_INSTRUCTIONS | Model input and output contract | 506 | 506 | 0 |
-| [src/lib/voice/realtime-session-config.ts](../../src/lib/voice/realtime-session-config.ts) | PHONE_CODE_SURFACE_INSTRUCTIONS | Model input and output contract | 669 | 669 | 0 |
-| [src/lib/voice/realtime-session-config.ts](../../src/lib/voice/realtime-session-config.ts) | PHONE_CODE_TOOL_INSTRUCTIONS | Model input and output contract | 421 | 421 | 0 |
-| [src/lib/voice/realtime-session-config.ts](../../src/lib/voice/realtime-session-config.ts) | PHONE_SURFACE_INSTRUCTIONS | Model input and output contract | 508 | 508 | 0 |
-| [src/lib/voice/realtime-session-config.ts](../../src/lib/voice/realtime-session-config.ts) | tool-schema-descriptions | Model input and output contract | 182 | 182 | 0 |

@@ -4376,12 +4376,6 @@
       ]
     },
     {
-      "path": "tests/mcp-launch-payer-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/mcp-lead-outcomes-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -8128,48 +8122,6 @@
       "reasons": [
         "child-process",
         "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-brain-o8-commands-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-brain-store-owner-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-durable-brain-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-machine-session-in-process-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "network-listener",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-messages-receiver-owner-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-messages-receiver-real-path.test.ts",
-      "reasons": [
         "real-path"
       ]
     },

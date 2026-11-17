@@ -8,7 +8,7 @@ The confirmation route calls `decide()` and projects its result into the existin
 
 Session minting wraps static catalog schemas as `{ type: 'function', ...schema }` and applies the existing Code or o8 selectors in their existing order. The o8 pack appends connected tools from `getSymonMcpCatalog`; the Code pack stays frozen. Connected calls use `callSymonMcpTool` after an explicit destructive-class card names the server tool and its arguments. Internal correlation fields are excluded from MCP arguments. The MCP transport currently cannot cancel an in-flight request; interruption can report an unknown outcome rather than claim cancellation succeeded. No persisted server voice selection exists, so minting uses `DEFAULT_VOICE`.
 
-Phone voice no longer reads or stops deleted desktop live voice, polls its status, or ends its webview machine session. Existing WS confirmation mirroring already uses the card returned by the tool route and its own correlated tracker, so it needs no new route or protocol message. Desktop Remote mode and the separate text planner retain their existing bridge helpers. `symon-tool-eval.ts` and the webview client remain because machine cleanup, text planning, and other desktop paths still use them.
+Phone voice no longer reads or stops deleted desktop live voice, polls its status, or ends its webview machine session. Existing WS confirmation mirroring already uses the card returned by the tool route and its own correlated tracker, so it needs no new route or protocol message. Desktop Remote mode and the separate text planner retain their existing bridge helpers. The WS relay, text planner, and machine cleanup helpers have since been removed with Symon.
 
 ## Transport choices
 

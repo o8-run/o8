@@ -10,7 +10,6 @@ const sourceFile = path.resolve('src/instrumentation.ts');
 const bootstrapRequests = [
   '@/lib/telemetry/crash-capture',
   '@/lib/startup/schedule',
-  '@/lib/tts/ensure-edge-tts',
 ];
 
 interface CompilationStats {

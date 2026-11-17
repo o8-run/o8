@@ -35,6 +35,21 @@ afterAll(async () => {
 });
 
 describe('recorded WS sessions through the real server and parity CLI', () => {
+  it('keeps the shared mobile terminal and update inventory endpoints available', async () => {
+    const origin = reference.url.replace(/^ws:/, 'http:').replace(/\/ws$/, '');
+    const headers = { authorization: `Bearer ${reference.token}`, 'content-type': 'application/json' };
+    const inventory = await fetch(`${origin}/terminal-voice-sessions`, { headers });
+    expect(inventory.status).toBe(200);
+    expect(await inventory.json()).toEqual({ sessions: [] });
+    const input = await fetch(`${origin}/terminal-voice-input`, {
+      method: 'POST', headers, body: JSON.stringify({}),
+    });
+    expect(input.status).toBe(400);
+    expect(await input.text()).toBe('sessionName and text required');
+    const denied = await fetch(`${origin}/terminal-voice-sessions`);
+    expect(denied.status).toBe(401);
+  });
+
   it('matches every control envelope, upgrade rejection, and close', async () => {
     const result = await runHarness();
     expect(result.output).toContain('parity passed');
