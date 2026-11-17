@@ -1,0 +1,1146 @@
+{
+  "kind": "synthetic-public-socket-release",
+  "build": {
+    "profile": "release",
+    "diagnosticOnly": true,
+    "baseSourceHead": "4e333f4a97c360c29438e32de39116bfc40dde69",
+    "binarySha256": "80f51a0ec7620531d402017ff91e8041bcd0dfb3bec05441f325cc136643855c",
+    "diagnosticPatchSha256": "0c0fb12c8ba2d1dc61fc7ad3ac69faf68606494ea0f6607be1377260fe6cafa5",
+    "productionSourceSha256": {
+      "crates/o8d/src/app/session_reads.rs": "e5f6cbd3af656e3c79d208ac36722b19727842ae8f286eb6f06e4641d220455d",
+      "crates/o8d/src/http/mod.rs": "876af4de5aae165fbae5e08514c9abae62c4dbca65372f7eac548d6c0a6da880",
+      "crates/o8d/src/http/chat_list.rs": "1d07dc3fd2c8061e2c777690def2e90c114ab381b0015872093618de6f580aaa"
+    },
+    "cargoArguments": [
+      "build",
+      "--locked",
+      "--offline",
+      "--release",
+      "--manifest-path",
+      "crates/o8d/Cargo.toml",
+      "--features",
+      "experimental-session-reads",
+      "--bin",
+      "o8d"
+    ]
+  },
+  "warmupsPerShape": 10,
+  "samplesPerShape": 100,
+  "authOutcomesPerTransport": 6,
+  "auth": {
+    "reference": [
+      {
+        "label": "missing-bearer",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "wrong-bearer",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "readonly-bearer",
+        "status": 403,
+        "body": {
+          "error": "Read-only worker has no API capability."
+        }
+      },
+      {
+        "label": "spoofed-bridge",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "wrong-host",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "cross-origin-write",
+        "status": 403,
+        "body": {
+          "error": "Origin is not allowed"
+        }
+      }
+    ],
+    "native": [
+      {
+        "label": "missing-bearer",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "wrong-bearer",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "readonly-bearer",
+        "status": 403,
+        "body": {
+          "error": "Read-only worker has no API capability."
+        }
+      },
+      {
+        "label": "spoofed-bridge",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "wrong-host",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "cross-origin-write",
+        "status": 403,
+        "body": {
+          "error": "Origin is not allowed"
+        }
+      }
+    ]
+  },
+  "stageDefinitions": {
+    "admissionRoundTrip": "Pooled o8d-to-TypeScript HTTP authorization request through the received 204; no authorization caching.",
+    "chatListRead": "Exact chat_list::read, including JSON response creation, excluding generic session_read preflight and connection teardown.",
+    "databasePreflight": "Connection opening plus the first network-thread SQL preflight query in session_read, before chat_list::read.",
+    "databaseCloseAndDispatch": "Connection teardown plus remaining path setup/parameter parsing/blocking dispatch and diagnostic overhead.",
+    "transportAndClientResidual": "Client elapsed minus admission round trip and the complete dispatch envelope; includes public connection/classification, transfer and client JSON decoding. This is a measured residual, not isolated network latency.",
+    "percentiles": "Nearest-rank p50/p95 per component; component percentiles must not be summed. Means and paired sums do add."
+  },
+  "timings": [
+    {
+      "path": "/api/v2/chat-history/list",
+      "typescript": {
+        "endToEnd": {
+          "p50Ms": 8.875338999998348,
+          "p95Ms": 12.711581999999908,
+          "meanMs": 9.440852949999899
+        },
+        "handler": {
+          "p50Ms": 1.5,
+          "p95Ms": 2.2,
+          "meanMs": 1.574
+        }
+      },
+      "native": {
+        "endToEnd": {
+          "p50Ms": 9.307660999998916,
+          "p95Ms": 13.560944000000745,
+          "meanMs": 9.826105819999958
+        },
+        "admissionRoundTrip": {
+          "p50Ms": 2.405611,
+          "p95Ms": 3.482504,
+          "meanMs": 2.5452727
+        },
+        "chatListRead": {
+          "p50Ms": 0.825587,
+          "p95Ms": 1.287993,
+          "meanMs": 0.88477982
+        },
+        "databasePreflight": {
+          "p50Ms": 3.40673,
+          "p95Ms": 4.784181,
+          "meanMs": 3.54167199
+        },
+        "databaseCloseAndDispatch": {
+          "p50Ms": 0.6936259999999996,
+          "p95Ms": 1.0679130000000012,
+          "meanMs": 0.80734043
+        },
+        "transportAndClientResidual": {
+          "p50Ms": 1.9019069999984755,
+          "p95Ms": 3.2598930000002166,
+          "meanMs": 2.047040879999957
+        },
+        "dispatchEnvelope": {
+          "p50Ms": 4.919275,
+          "p95Ms": 7.087956,
+          "meanMs": 5.23379224
+        },
+        "admissionShareOfMeasuredClientTimePct": 25.9031680161573,
+        "profile": {
+          "databaseOpen": {
+            "p50Ms": 0.089557,
+            "p95Ms": 0.184962,
+            "meanMs": 0.10274014
+          },
+          "firstSqlQuery": {
+            "p50Ms": 3.326055,
+            "p95Ms": 4.677194,
+            "meanMs": 3.43893185
+          },
+          "databaseClose": {
+            "p50Ms": 0.437754,
+            "p95Ms": 0.680071,
+            "meanMs": 0.47461725
+          },
+          "parkedSnapshotQuery": {
+            "p50Ms": 0.019663,
+            "p95Ms": 0.063207,
+            "meanMs": 0.02633209
+          },
+          "inboxQueryAndParse": {
+            "p50Ms": 0.033018,
+            "p95Ms": 0.056483,
+            "meanMs": 0.03615364
+          },
+          "directoryEnumerationAndOrdering": {
+            "p50Ms": 0.037737,
+            "p95Ms": 0.061159,
+            "meanMs": 0.0408803
+          },
+          "historyFileRead": {
+            "p50Ms": 0.19198,
+            "p95Ms": 0.343629,
+            "meanMs": 0.20908888
+          },
+          "historyJsonParse": {
+            "p50Ms": 0.184411,
+            "p95Ms": 0.352423,
+            "meanMs": 0.20812822
+          },
+          "remainingProjectionAndSort": {
+            "p50Ms": 0.237636,
+            "p95Ms": 0.3665,
+            "meanMs": 0.25496362
+          },
+          "jsonResponseCreation": {
+            "p50Ms": 0.097514,
+            "p95Ms": 0.181678,
+            "meanMs": 0.10911851
+          },
+          "historyFilesPerRequest": {
+            "min": 15,
+            "max": 15
+          },
+          "historyBytesPerRequest": {
+            "min": 23118,
+            "max": 23118
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?surface=mobile-assistant",
+      "typescript": {
+        "endToEnd": {
+          "p50Ms": 7.905443999999989,
+          "p95Ms": 9.835967999999411,
+          "meanMs": 8.11197965999996
+        },
+        "handler": {
+          "p50Ms": 1.4,
+          "p95Ms": 1.7,
+          "meanMs": 1.41
+        }
+      },
+      "native": {
+        "endToEnd": {
+          "p50Ms": 8.041255000000092,
+          "p95Ms": 11.681260000001203,
+          "meanMs": 8.955144699999856
+        },
+        "admissionRoundTrip": {
+          "p50Ms": 2.079483,
+          "p95Ms": 3.274348,
+          "meanMs": 2.32098456
+        },
+        "chatListRead": {
+          "p50Ms": 0.740881,
+          "p95Ms": 1.10217,
+          "meanMs": 0.80246967
+        },
+        "databasePreflight": {
+          "p50Ms": 3.006055,
+          "p95Ms": 4.402612,
+          "meanMs": 3.29183612
+        },
+        "databaseCloseAndDispatch": {
+          "p50Ms": 0.6354879999999996,
+          "p95Ms": 0.9839229999999999,
+          "meanMs": 0.71905757
+        },
+        "transportAndClientResidual": {
+          "p50Ms": 1.669722999999843,
+          "p95Ms": 2.4875840000007017,
+          "meanMs": 1.8207967799998552
+        },
+        "dispatchEnvelope": {
+          "p50Ms": 4.338464,
+          "p95Ms": 6.147786,
+          "meanMs": 4.81336336
+        },
+        "admissionShareOfMeasuredClientTimePct": 25.917890081664872,
+        "profile": {
+          "databaseOpen": {
+            "p50Ms": 0.081883,
+            "p95Ms": 0.180483,
+            "meanMs": 0.09800836
+          },
+          "firstSqlQuery": {
+            "p50Ms": 2.92322,
+            "p95Ms": 4.233965,
+            "meanMs": 3.19382776
+          },
+          "databaseClose": {
+            "p50Ms": 0.410692,
+            "p95Ms": 0.617657,
+            "meanMs": 0.44740992
+          },
+          "parkedSnapshotQuery": {
+            "p50Ms": 0.018113,
+            "p95Ms": 0.038348,
+            "meanMs": 0.02272397
+          },
+          "inboxQueryAndParse": {
+            "p50Ms": 0.030072,
+            "p95Ms": 0.063972,
+            "meanMs": 0.03518977
+          },
+          "directoryEnumerationAndOrdering": {
+            "p50Ms": 0.034405,
+            "p95Ms": 0.060471,
+            "meanMs": 0.04245247
+          },
+          "historyFileRead": {
+            "p50Ms": 0.185907,
+            "p95Ms": 0.296953,
+            "meanMs": 0.20380294
+          },
+          "historyJsonParse": {
+            "p50Ms": 0.165343,
+            "p95Ms": 0.269293,
+            "meanMs": 0.18210818
+          },
+          "remainingProjectionAndSort": {
+            "p50Ms": 0.200098,
+            "p95Ms": 0.307972,
+            "meanMs": 0.22154659
+          },
+          "jsonResponseCreation": {
+            "p50Ms": 0.080231,
+            "p95Ms": 0.160277,
+            "meanMs": 0.09454105
+          },
+          "historyFilesPerRequest": {
+            "min": 15,
+            "max": 15
+          },
+          "historyBytesPerRequest": {
+            "min": 23118,
+            "max": 23118
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?include=orchestrator",
+      "typescript": {
+        "endToEnd": {
+          "p50Ms": 7.113256000000547,
+          "p95Ms": 10.327978000001167,
+          "meanMs": 7.47934696000002
+        },
+        "handler": {
+          "p50Ms": 1.4,
+          "p95Ms": 1.8,
+          "meanMs": 1.359
+        }
+      },
+      "native": {
+        "endToEnd": {
+          "p50Ms": 8.337390000000596,
+          "p95Ms": 11.999017999998614,
+          "meanMs": 9.049687569999914
+        },
+        "admissionRoundTrip": {
+          "p50Ms": 2.112801,
+          "p95Ms": 3.080511,
+          "meanMs": 2.30049688
+        },
+        "chatListRead": {
+          "p50Ms": 0.913982,
+          "p95Ms": 1.274856,
+          "meanMs": 0.97475612
+        },
+        "databasePreflight": {
+          "p50Ms": 3.046851,
+          "p95Ms": 4.414944,
+          "meanMs": 3.30521885
+        },
+        "databaseCloseAndDispatch": {
+          "p50Ms": 0.6319909999999997,
+          "p95Ms": 0.9010820000000006,
+          "meanMs": 0.69080461
+        },
+        "transportAndClientResidual": {
+          "p50Ms": 1.5981879999998743,
+          "p95Ms": 2.5917789999984215,
+          "meanMs": 1.7784111099999145
+        },
+        "dispatchEnvelope": {
+          "p50Ms": 4.576156,
+          "p95Ms": 6.506448,
+          "meanMs": 4.97077958
+        },
+        "admissionShareOfMeasuredClientTimePct": 25.420732618728643,
+        "profile": {
+          "databaseOpen": {
+            "p50Ms": 0.085965,
+            "p95Ms": 0.177253,
+            "meanMs": 0.10231969
+          },
+          "firstSqlQuery": {
+            "p50Ms": 2.956178,
+            "p95Ms": 4.305469,
+            "meanMs": 3.20289916
+          },
+          "databaseClose": {
+            "p50Ms": 0.390144,
+            "p95Ms": 0.594603,
+            "meanMs": 0.42624259
+          },
+          "parkedSnapshotQuery": {
+            "p50Ms": 0.018296,
+            "p95Ms": 0.028431,
+            "meanMs": 0.02280609
+          },
+          "inboxQueryAndParse": {
+            "p50Ms": 0.030277,
+            "p95Ms": 0.071745,
+            "meanMs": 0.0377686
+          },
+          "directoryEnumerationAndOrdering": {
+            "p50Ms": 0.035539,
+            "p95Ms": 0.04969,
+            "meanMs": 0.03870414
+          },
+          "historyFileRead": {
+            "p50Ms": 0.180428,
+            "p95Ms": 0.316267,
+            "meanMs": 0.20349155
+          },
+          "historyJsonParse": {
+            "p50Ms": 0.168006,
+            "p95Ms": 0.260745,
+            "meanMs": 0.18513205
+          },
+          "remainingProjectionAndSort": {
+            "p50Ms": 0.316476,
+            "p95Ms": 0.448412,
+            "meanMs": 0.33712427
+          },
+          "jsonResponseCreation": {
+            "p50Ms": 0.13264,
+            "p95Ms": 0.238593,
+            "meanMs": 0.14962488
+          },
+          "historyFilesPerRequest": {
+            "min": 15,
+            "max": 15
+          },
+          "historyBytesPerRequest": {
+            "min": 23118,
+            "max": 23118
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?q=雪",
+      "typescript": {
+        "endToEnd": {
+          "p50Ms": 6.726227999999537,
+          "p95Ms": 38.540123000000676,
+          "meanMs": 12.71495130000003
+        },
+        "handler": {
+          "p50Ms": 1.2,
+          "p95Ms": 2.5,
+          "meanMs": 1.442
+        }
+      },
+      "native": {
+        "endToEnd": {
+          "p50Ms": 9.041484000001219,
+          "p95Ms": 13.604680000000371,
+          "meanMs": 9.802294630000105
+        },
+        "admissionRoundTrip": {
+          "p50Ms": 2.363714,
+          "p95Ms": 3.388093,
+          "meanMs": 2.51037634
+        },
+        "chatListRead": {
+          "p50Ms": 0.824142,
+          "p95Ms": 1.332887,
+          "meanMs": 0.88242332
+        },
+        "databasePreflight": {
+          "p50Ms": 3.387415,
+          "p95Ms": 5.594389,
+          "meanMs": 3.68075085
+        },
+        "databaseCloseAndDispatch": {
+          "p50Ms": 0.7265519999999999,
+          "p95Ms": 1.17333,
+          "meanMs": 0.79912096
+        },
+        "transportAndClientResidual": {
+          "p50Ms": 1.7089909999986697,
+          "p95Ms": 2.8761990000010655,
+          "meanMs": 1.929623160000106
+        },
+        "dispatchEnvelope": {
+          "p50Ms": 4.938193,
+          "p95Ms": 7.932778,
+          "meanMs": 5.36229513
+        },
+        "admissionShareOfMeasuredClientTimePct": 25.61008860432481,
+        "profile": {
+          "databaseOpen": {
+            "p50Ms": 0.090263,
+            "p95Ms": 0.222502,
+            "meanMs": 0.10761923
+          },
+          "firstSqlQuery": {
+            "p50Ms": 3.281569,
+            "p95Ms": 5.463009,
+            "meanMs": 3.57313162
+          },
+          "databaseClose": {
+            "p50Ms": 0.454265,
+            "p95Ms": 0.76378,
+            "meanMs": 0.48581617
+          },
+          "parkedSnapshotQuery": {
+            "p50Ms": 0.019958,
+            "p95Ms": 0.035167,
+            "meanMs": 0.02464523
+          },
+          "inboxQueryAndParse": {
+            "p50Ms": 0.033196,
+            "p95Ms": 0.089392,
+            "meanMs": 0.03933138
+          },
+          "directoryEnumerationAndOrdering": {
+            "p50Ms": 0.038889,
+            "p95Ms": 0.0652,
+            "meanMs": 0.04293754
+          },
+          "historyFileRead": {
+            "p50Ms": 0.191487,
+            "p95Ms": 0.39624,
+            "meanMs": 0.22286912
+          },
+          "historyJsonParse": {
+            "p50Ms": 0.181097,
+            "p95Ms": 0.321009,
+            "meanMs": 0.20466164
+          },
+          "remainingProjectionAndSort": {
+            "p50Ms": 0.229477,
+            "p95Ms": 0.368652,
+            "meanMs": 0.2571564
+          },
+          "jsonResponseCreation": {
+            "p50Ms": 0.079253,
+            "p95Ms": 0.143835,
+            "meanMs": 0.0907023
+          },
+          "historyFilesPerRequest": {
+            "min": 15,
+            "max": 15
+          },
+          "historyBytesPerRequest": {
+            "min": 23118,
+            "max": 23118
+          }
+        }
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?archived=only",
+      "typescript": {
+        "endToEnd": {
+          "p50Ms": 6.085628999999244,
+          "p95Ms": 9.635650000000169,
+          "meanMs": 6.831644299999989
+        },
+        "handler": {
+          "p50Ms": 1,
+          "p95Ms": 1.8,
+          "meanMs": 1.116
+        }
+      },
+      "native": {
+        "endToEnd": {
+          "p50Ms": 9.246276999998372,
+          "p95Ms": 13.594688999997743,
+          "meanMs": 9.956892869999901
+        },
+        "admissionRoundTrip": {
+          "p50Ms": 2.463554,
+          "p95Ms": 4.151531,
+          "meanMs": 2.64834297
+        },
+        "chatListRead": {
+          "p50Ms": 0.669316,
+          "p95Ms": 1.08095,
+          "meanMs": 0.71975156
+        },
+        "databasePreflight": {
+          "p50Ms": 3.6073049999999998,
+          "p95Ms": 5.708513,
+          "meanMs": 3.85236966
+        },
+        "databaseCloseAndDispatch": {
+          "p50Ms": 0.7396560000000001,
+          "p95Ms": 1.122566,
+          "meanMs": 0.85529521
+        },
+        "transportAndClientResidual": {
+          "p50Ms": 1.7167139999996488,
+          "p95Ms": 2.7821170000009303,
+          "meanMs": 1.8811334699999014
+        },
+        "dispatchEnvelope": {
+          "p50Ms": 5.002093,
+          "p95Ms": 7.819584,
+          "meanMs": 5.42741643
+        },
+        "admissionShareOfMeasuredClientTimePct": 26.598086416892684,
+        "profile": {
+          "databaseOpen": {
+            "p50Ms": 0.099869,
+            "p95Ms": 0.237796,
+            "meanMs": 0.12361982
+          },
+          "firstSqlQuery": {
+            "p50Ms": 3.503231,
+            "p95Ms": 5.449637,
+            "meanMs": 3.72874984
+          },
+          "databaseClose": {
+            "p50Ms": 0.47598,
+            "p95Ms": 0.83026,
+            "meanMs": 0.52772127
+          },
+          "parkedSnapshotQuery": {
+            "p50Ms": 0.021369,
+            "p95Ms": 0.039684,
+            "meanMs": 0.02536983
+          },
+          "inboxQueryAndParse": {
+            "p50Ms": 0.034433,
+            "p95Ms": 0.081496,
+            "meanMs": 0.04147525
+          },
+          "directoryEnumerationAndOrdering": {
+            "p50Ms": 0.045049,
+            "p95Ms": 0.071331,
+            "meanMs": 0.04954021
+          },
+          "historyFileRead": {
+            "p50Ms": 0.198071,
+            "p95Ms": 0.365858,
+            "meanMs": 0.22590733
+          },
+          "historyJsonParse": {
+            "p50Ms": 0.189629,
+            "p95Ms": 0.315695,
+            "meanMs": 0.20813765
+          },
+          "remainingProjectionAndSort": {
+            "p50Ms": 0.134875,
+            "p95Ms": 0.228203,
+            "meanMs": 0.14888427
+          },
+          "jsonResponseCreation": {
+            "p50Ms": 0.016659,
+            "p95Ms": 0.044268,
+            "meanMs": 0.02032307
+          },
+          "historyFilesPerRequest": {
+            "min": 15,
+            "max": 15
+          },
+          "historyBytesPerRequest": {
+            "min": 23118,
+            "max": 23118
+          }
+        }
+      }
+    }
+  ],
+  "aggregate": {
+    "requestsPerTransport": 500,
+    "admissionShareOfMeasuredClientTimePct": 25.899224465568526,
+    "exactReaderShareOfMeasuredClientTimePct": 8.960221132293137,
+    "databasePreflightShareOfMeasuredClientTimePct": 37.133433145873944,
+    "databaseCloseShareOfMeasuredClientTimePct": 4.96280934483664
+  },
+  "repeatedQueryProbe": {
+    "kind": "Separate release diagnostic with one extra read-only query; excluded from end-to-end table.",
+    "samples": 100,
+    "warmups": 10,
+    "binarySha256": "f2841f7a375227740cac59ee6d30090e7724c99a130442f1317d6e065c7e0fad",
+    "diagnosticPatchSha256": "150cc66b11938d678a61dcc6d6b35614a5287a053673cf5980f80fc7e974b1c1",
+    "firstQuery": {
+      "p50Ms": 9.982898,
+      "p95Ms": 24.844581,
+      "meanMs": 13.30881416
+    },
+    "sameConnectionRepeatedQuery": {
+      "p50Ms": 0.036926,
+      "p95Ms": 0.161002,
+      "meanMs": 0.05406306
+    },
+    "samplesMs": [
+      {
+        "first": 10.11225,
+        "repeated": 0.047732
+      },
+      {
+        "first": 27.46369,
+        "repeated": 0.037242
+      },
+      {
+        "first": 19.713561,
+        "repeated": 0.031862
+      },
+      {
+        "first": 9.54566,
+        "repeated": 0.040949
+      },
+      {
+        "first": 10.000126,
+        "repeated": 0.052436
+      },
+      {
+        "first": 9.544145,
+        "repeated": 0.040939
+      },
+      {
+        "first": 9.096176,
+        "repeated": 0.035568
+      },
+      {
+        "first": 9.002494,
+        "repeated": 0.161002
+      },
+      {
+        "first": 11.200243,
+        "repeated": 0.034892
+      },
+      {
+        "first": 8.240186,
+        "repeated": 0.036112
+      },
+      {
+        "first": 9.964985,
+        "repeated": 0.028309
+      },
+      {
+        "first": 8.627427,
+        "repeated": 0.035824
+      },
+      {
+        "first": 12.168745,
+        "repeated": 0.070208
+      },
+      {
+        "first": 9.495932,
+        "repeated": 0.034576
+      },
+      {
+        "first": 9.401176,
+        "repeated": 0.023753
+      },
+      {
+        "first": 8.940639,
+        "repeated": 0.023395
+      },
+      {
+        "first": 9.977251,
+        "repeated": 0.03727
+      },
+      {
+        "first": 9.982898,
+        "repeated": 0.042899
+      },
+      {
+        "first": 6.929588,
+        "repeated": 0.024003
+      },
+      {
+        "first": 13.32026,
+        "repeated": 0.024573
+      },
+      {
+        "first": 8.134973,
+        "repeated": 0.035467
+      },
+      {
+        "first": 8.160417,
+        "repeated": 0.023569
+      },
+      {
+        "first": 8.129046,
+        "repeated": 0.036212
+      },
+      {
+        "first": 9.267797,
+        "repeated": 0.032042
+      },
+      {
+        "first": 21.200032,
+        "repeated": 0.035977
+      },
+      {
+        "first": 10.636436,
+        "repeated": 0.037101
+      },
+      {
+        "first": 9.504294,
+        "repeated": 0.068048
+      },
+      {
+        "first": 7.17445,
+        "repeated": 0.023039
+      },
+      {
+        "first": 9.737876,
+        "repeated": 0.038881
+      },
+      {
+        "first": 10.01774,
+        "repeated": 0.026898
+      },
+      {
+        "first": 9.045439,
+        "repeated": 0.058613
+      },
+      {
+        "first": 9.533649,
+        "repeated": 0.039668
+      },
+      {
+        "first": 9.287304,
+        "repeated": 0.023663
+      },
+      {
+        "first": 7.892475,
+        "repeated": 0.033937
+      },
+      {
+        "first": 8.483811,
+        "repeated": 0.038618
+      },
+      {
+        "first": 9.93799,
+        "repeated": 0.037744
+      },
+      {
+        "first": 10.968609,
+        "repeated": 0.067676
+      },
+      {
+        "first": 6.758524,
+        "repeated": 0.044781
+      },
+      {
+        "first": 13.141434,
+        "repeated": 0.354938
+      },
+      {
+        "first": 11.285731,
+        "repeated": 0.100195
+      },
+      {
+        "first": 9.53115,
+        "repeated": 0.564526
+      },
+      {
+        "first": 11.471059,
+        "repeated": 0.045158
+      },
+      {
+        "first": 9.163615,
+        "repeated": 0.038287
+      },
+      {
+        "first": 9.066657,
+        "repeated": 0.025925
+      },
+      {
+        "first": 7.061997,
+        "repeated": 0.023852
+      },
+      {
+        "first": 6.590819,
+        "repeated": 0.036031
+      },
+      {
+        "first": 8.915235,
+        "repeated": 0.036358
+      },
+      {
+        "first": 7.763774,
+        "repeated": 0.034201
+      },
+      {
+        "first": 8.060937,
+        "repeated": 0.053176
+      },
+      {
+        "first": 7.994749,
+        "repeated": 0.03271
+      },
+      {
+        "first": 10.926636,
+        "repeated": 0.040333
+      },
+      {
+        "first": 11.622014,
+        "repeated": 0.034589
+      },
+      {
+        "first": 10.054832,
+        "repeated": 0.03838
+      },
+      {
+        "first": 9.560117,
+        "repeated": 0.033537
+      },
+      {
+        "first": 10.100094,
+        "repeated": 0.036995
+      },
+      {
+        "first": 8.881972,
+        "repeated": 0.04013
+      },
+      {
+        "first": 9.169284,
+        "repeated": 0.062123
+      },
+      {
+        "first": 9.128314,
+        "repeated": 0.146326
+      },
+      {
+        "first": 8.237198,
+        "repeated": 0.035998
+      },
+      {
+        "first": 10.17165,
+        "repeated": 0.042946
+      },
+      {
+        "first": 10.91949,
+        "repeated": 0.044434
+      },
+      {
+        "first": 9.779557,
+        "repeated": 0.038273
+      },
+      {
+        "first": 16.568165,
+        "repeated": 0.024274
+      },
+      {
+        "first": 8.471419,
+        "repeated": 0.037724
+      },
+      {
+        "first": 17.653438,
+        "repeated": 0.024117
+      },
+      {
+        "first": 11.13883,
+        "repeated": 0.02484
+      },
+      {
+        "first": 129.739072,
+        "repeated": 0.036366
+      },
+      {
+        "first": 39.959844,
+        "repeated": 0.037998
+      },
+      {
+        "first": 33.502068,
+        "repeated": 0.07309
+      },
+      {
+        "first": 18.02321,
+        "repeated": 0.039848
+      },
+      {
+        "first": 24.844581,
+        "repeated": 0.056679
+      },
+      {
+        "first": 12.372916,
+        "repeated": 0.039411
+      },
+      {
+        "first": 13.186278,
+        "repeated": 0.053945
+      },
+      {
+        "first": 9.939818,
+        "repeated": 0.027204
+      },
+      {
+        "first": 11.247539,
+        "repeated": 0.259763
+      },
+      {
+        "first": 24.233813,
+        "repeated": 0.045404
+      },
+      {
+        "first": 10.486832,
+        "repeated": 0.046496
+      },
+      {
+        "first": 11.612744,
+        "repeated": 0.034954
+      },
+      {
+        "first": 16.550983,
+        "repeated": 0.187491
+      },
+      {
+        "first": 12.11476,
+        "repeated": 0.174504
+      },
+      {
+        "first": 10.528785,
+        "repeated": 0.024722
+      },
+      {
+        "first": 10.265892,
+        "repeated": 0.03431
+      },
+      {
+        "first": 15.797031,
+        "repeated": 0.035687
+      },
+      {
+        "first": 9.269742,
+        "repeated": 0.030192
+      },
+      {
+        "first": 16.578767,
+        "repeated": 0.032104
+      },
+      {
+        "first": 9.572239,
+        "repeated": 0.03597
+      },
+      {
+        "first": 10.62104,
+        "repeated": 0.038694
+      },
+      {
+        "first": 9.862839,
+        "repeated": 0.036554
+      },
+      {
+        "first": 10.872924,
+        "repeated": 0.030596
+      },
+      {
+        "first": 8.985343,
+        "repeated": 0.023579
+      },
+      {
+        "first": 10.791781,
+        "repeated": 0.033301
+      },
+      {
+        "first": 8.946539,
+        "repeated": 0.040714
+      },
+      {
+        "first": 52.474966,
+        "repeated": 0.032833
+      },
+      {
+        "first": 16.278892,
+        "repeated": 0.024172
+      },
+      {
+        "first": 15.139184,
+        "repeated": 0.037754
+      },
+      {
+        "first": 16.097602,
+        "repeated": 0.038054
+      },
+      {
+        "first": 15.730319,
+        "repeated": 0.036926
+      },
+      {
+        "first": 15.384379,
+        "repeated": 0.036678
+      },
+      {
+        "first": 11.10945,
+        "repeated": 0.038443
+      },
+      {
+        "first": 9.730783,
+        "repeated": 0.036016
+      }
+    ]
+  },
+  "readerOptimizationFollowup": "https://github.com/o8-run/o8/issues/6373",
+  "verification": {
+    "diagnosticReleaseBuild": 0,
+    "typescriptBenchmark": 0,
+    "nativeBenchmark": 0,
+    "profileBinaryGeneratedAndGcTests": 0,
+    "generatedRequests": 500,
+    "generatedDifferences": 0,
+    "gcExpiredFallbacks": 3,
+    "gcFreshOrKeptNative": 5
+  },
+  "limitations": [
+    "Synthetic Linux fixture with 15 history files and 23118 JSON bytes per request; not installed-app performance.",
+    "TS and native runs are sequential and host scheduling noise remains; no samples or tail spikes removed.",
+    "Timestamp instrumentation adds overhead; production Rust sources are restored byte-for-byte.",
+    "The repeated-query experiment proves a warm-connection difference, not the end-to-end gain of an unimplemented pool."
+  ]
+}

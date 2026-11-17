@@ -1,0 +1,175 @@
+diff --git a/crates/o8d/src/app/session_reads.rs b/crates/o8d/src/app/session_reads.rs
+index 147920db0..8f950e6d1 100644
+--- a/crates/o8d/src/app/session_reads.rs
++++ b/crates/o8d/src/app/session_reads.rs
+@@ -85,6 +85,7 @@ pub(super) async fn serve(
+         }
+         request = request.header(name, value.trim());
+     }
++    let timing_start = std::time::Instant::now();
+     let Ok(admission) = request
+         .header("x-o8d-bridge", key)
+         .header("x-o8d-peer", "unverified-proxy")
+@@ -102,6 +103,8 @@ pub(super) async fn serve(
+         // unavailable gate never grants native access.
+         return Ok(false);
+     }
++    let admission_ms = timing_start.elapsed().as_secs_f64() * 1000.0;
++    let reader_start = std::time::Instant::now();
+     let directory = PathBuf::from(std::env::var("O8D_SESSION_DATA_DIR").map_err(|_| ())?)
+         .canonicalize()
+         .map_err(|_| ())?;
+@@ -114,6 +117,7 @@ pub(super) async fn serve(
+         tokio::task::spawn_blocking(move || http::session_read(directory, database, &path, &query))
+             .await
+             .map_err(|_| ())?;
++    let reader_ms = reader_start.elapsed().as_secs_f64() * 1000.0;
+     // Runtime transcripts, lane overlays, network projections and dynamic steer
+     // capabilities remain TS-owned until their readers are ported.
+     if response.status() == StatusCode::SERVICE_UNAVAILABLE {
+@@ -130,6 +134,7 @@ pub(super) async fn serve(
+         status.as_u16(),
+         status.canonical_reason().unwrap_or("Response")
+     );
++    output.push_str(&format!("Server-Timing: admission;dur={admission_ms:.6}, envelope;dur={reader_ms:.6}\r\n"));
+     for (name, value) in response.headers() {
+         output.push_str(&format!("{name}: {}\r\n", value.to_str().map_err(|_| ())?));
+     }
+diff --git a/crates/o8d/src/http/chat_list.rs b/crates/o8d/src/http/chat_list.rs
+index d83394179..05f266b01 100644
+--- a/crates/o8d/src/http/chat_list.rs
++++ b/crates/o8d/src/http/chat_list.rs
+@@ -93,18 +93,39 @@ fn probe(s: &str) -> bool {
+         == "reply with exactly: terminal chat is connected"
+ }
+ 
++#[derive(Default)]
++struct Profile { parked: u128, prefs: u128, enumerate: u128, fileio: u128, jsonparse: u128, files: u64, bytes: usize }
++fn profile_ms(ns: u128) -> f64 { ns as f64 / 1_000_000.0 }
+ pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
+-    match listing(store, params) {
++    let start = std::time::Instant::now();
++    let mut profile = Profile::default();
++    let result = listing(store, params, &mut profile);
++    let listing_ns = start.elapsed().as_nanos();
++    let reply_start = std::time::Instant::now();
++    let mut response = match result {
+         Ok(rows) => reply(StatusCode::OK, json!({"conversations":rows})),
+         Err(()) => unavailable(),
+-    }
++    };
++    let reply_ms = reply_start.elapsed().as_secs_f64() * 1000.0;
++    let read_ms = start.elapsed().as_secs_f64() * 1000.0;
++    let other_ns = listing_ns.saturating_sub(profile.parked + profile.prefs + profile.enumerate + profile.fileio + profile.jsonparse);
++    response.headers_mut().append("server-timing", axum::http::HeaderValue::from_str(&format!(
++        "read;dur={read_ms:.6}, parked;dur={:.6}, prefs;dur={:.6}, enumerate;dur={:.6}, fileio;dur={:.6}, jsonparse;dur={:.6}, listingother;dur={:.6}, jsonreply;dur={reply_ms:.6}",
++        profile_ms(profile.parked), profile_ms(profile.prefs), profile_ms(profile.enumerate), profile_ms(profile.fileio), profile_ms(profile.jsonparse), profile_ms(other_ns)
++    )).unwrap());
++    response.headers_mut().insert("x-o8d-profile-files", profile.files.to_string().parse().unwrap());
++    response.headers_mut().insert("x-o8d-profile-bytes", profile.bytes.to_string().parse().unwrap());
++    response
+ }
+-fn listing(store: &ReadContext<'_>, params: &Params) -> Result<Vec<Value>, ()> {
++fn listing(store: &ReadContext<'_>, params: &Params, profile: &mut Profile) -> Result<Vec<Value>, ()> {
++    let enumerate_start = std::time::Instant::now();
+     let root = store.directory.join("chat-history");
+     let Ok(entries) = std::fs::read_dir(&root) else {
+         return Ok(vec![]);
+     };
++    profile.enumerate += enumerate_start.elapsed().as_nanos();
+     let db = store.database()?;
++    let parked_start = std::time::Instant::now();
+     if db
+         .query_row(
+             "SELECT EXISTS(SELECT 1 FROM workspace_snapshots WHERE state = 'parked')",
+@@ -115,6 +136,8 @@ fn listing(store: &ReadContext<'_>, params: &Params) -> Result<Vec<Value>, ()> {
+     {
+         return Err(());
+     }
++    profile.parked += parked_start.elapsed().as_nanos();
++    let prefs_start = std::time::Instant::now();
+     let mut statement = db
+         .prepare("SELECT key,value FROM app_state WHERE key >= ? AND key < ?")
+         .map_err(|_| ())?;
+@@ -133,9 +156,11 @@ fn listing(store: &ReadContext<'_>, params: &Params) -> Result<Vec<Value>, ()> {
+         };
+         states.insert(key, state);
+     }
++    profile.prefs += prefs_start.elapsed().as_nanos();
+     let include = value(params, "include") == "orchestrator";
+     let archived = value(params, "archived");
+     let search = value(params, "q").to_lowercase();
++    let enumerate_start = std::time::Instant::now();
+     let mut files: Vec<_> = entries
+         .flatten()
+         .map(|e| e.path())
+@@ -148,14 +173,22 @@ fn listing(store: &ReadContext<'_>, params: &Params) -> Result<Vec<Value>, ()> {
+             .encode_utf16()
+             .collect::<Vec<_>>()
+     });
++    profile.enumerate += enumerate_start.elapsed().as_nanos();
+     let mut output = Vec::new();
+     for path in files {
+         let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
+             continue;
+         };
+-        let Ok(data) = store.json(&path) else {
+-            continue;
+-        };
++        profile.files += 1;
++        let io_start = std::time::Instant::now();
++        let bytes = store.file(&path, RECORD_LIMIT);
++        profile.fileio += io_start.elapsed().as_nanos();
++        let Ok(bytes) = bytes else { continue; };
++        profile.bytes += bytes.len();
++        let parse_start = std::time::Instant::now();
++        let data = serde_json::from_slice::<Value>(&bytes);
++        profile.jsonparse += parse_start.elapsed().as_nanos();
++        let Ok(data) = data else { continue; };
+         let Some(messages) = data["messages"].as_array() else {
+             continue;
+         };
+diff --git a/crates/o8d/src/http/mod.rs b/crates/o8d/src/http/mod.rs
+index a5b9e5eaa..7cccc5746 100644
+--- a/crates/o8d/src/http/mod.rs
++++ b/crates/o8d/src/http/mod.rs
+@@ -299,15 +299,30 @@ pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &s
+         "/api/orchestrator/composer-queue" => value(&params, "threadId"),
+         _ => "",
+     };
+-    if store.database().ok().is_some_and(|db| {
+-        db.query_row(
+-            "SELECT EXISTS(SELECT 1 FROM bot_network_threads WHERE ? = '/api/mobile/orchestrator/threads' OR thread_id = ?)",
+-            [path, id], |r| r.get::<_, bool>(0),
+-        ).unwrap_or(false)
+-    }) {
+-        return unavailable();
+-    }
+-    dispatch(&store, path, &params)
++    let profile_open_start = std::time::Instant::now();
++    let profile_db = store.database().ok();
++    let profile_open_ms = profile_open_start.elapsed().as_secs_f64() * 1000.0;
++    let profile_network_start = std::time::Instant::now();
++    let profile_network = profile_db.is_some_and(|db| db.query_row(
++        "SELECT EXISTS(SELECT 1 FROM bot_network_threads WHERE ? = '/api/mobile/orchestrator/threads' OR thread_id = ?)",
++        [path, id], |r| r.get::<_, bool>(0),
++    ).unwrap_or(false));
++    let profile_network_ms = profile_network_start.elapsed().as_secs_f64() * 1000.0;
++    let warm_query_start = std::time::Instant::now();
++    let _ = profile_db.map(|db| db.query_row(
++        "SELECT EXISTS(SELECT 1 FROM bot_network_threads WHERE ? = '/api/mobile/orchestrator/threads' OR thread_id = ?)",
++        [path, id], |r| r.get::<_, bool>(0),
++    ));
++    let warm_query_ms = warm_query_start.elapsed().as_secs_f64() * 1000.0;
++    if profile_network { return unavailable(); }
++    let mut response = dispatch(&store, path, &params);
++    let profile_close_start = std::time::Instant::now();
++    drop(store);
++    let profile_close_ms = profile_close_start.elapsed().as_secs_f64() * 1000.0;
++    response.headers_mut().append("server-timing", axum::http::HeaderValue::from_str(&format!(
++        "dbopen;dur={profile_open_ms:.6}, network;dur={profile_network_ms:.6}, dbclose;dur={profile_close_ms:.6}, warmquery;dur={warm_query_ms:.6}"
++    )).unwrap());
++    response
+ }
+ 
+ pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {

@@ -38,5 +38,15 @@
     "reason": "Network projections, visual receipts and live steering capabilities remain TypeScript-owned.",
     "state": "red",
     "test": "tests/o8d-native-route-table-real-path.test.ts"
+  },
+  {
+    "path": "/api/v2/chat-history/list",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Parked workspace projections, local-time placeholder titles and unsupported saved encodings remain TypeScript-owned; empty-record cleanup stays with the TypeScript writer.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-chat-list-real-path.test.ts"
   }
 ]
