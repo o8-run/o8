@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { getWsBase } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -5,7 +6,7 @@ import type { KnowledgeSource } from '@/lib/operator/knowledge-source-defaults';
 /** Every settings writer uses the same removal/cancellation and answer-cache boundary. */
 export async function reconcileKnowledgeSources(before: KnowledgeSource[], after: KnowledgeSource[]) {
   if (JSON.stringify(before) === JSON.stringify(after)) return;
-  if (process.env.O8_NEXT_O8D === '1' && !isNativeCortexReader()) {
+  if (nativeHttpTransportEnabled() && !isNativeCortexReader()) {
     // Window-bearing settings transactions stay in Next. Only WS reconciles their index.
     // Best effort: the settings are already saved, so an unreachable index owner must not
     // fail the save or roll back its window change. WS reindexes on its next reconcile.

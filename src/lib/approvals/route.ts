@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { checkApprovalMergeHead } from './merge-head';
 import { isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { pageApprovalAudit } from '@/lib/approvals/audit-page';
@@ -277,7 +278,7 @@ export async function POST(request: NextRequest) {
   }
   // Scope the operation using the exact record resolved below, after caller admission.
   // A changed continuation cannot fall through into LLM grant issuance.
-  if (process.env.O8_NEXT_O8D === '1' && body[RUNTIME_APPROVAL_OPERATION] === true
+  if (nativeHttpTransportEnabled() && body[RUNTIME_APPROVAL_OPERATION] === true
     && (body.terminalAdapter !== undefined ? current.continuation?.kind !== 'lane' : !isNativeApprovalContinuation(current.continuation?.kind))) {
     return NextResponse.json({ ok: false, error: 'Approval continuation changed.' }, { status: 409 });
   }
@@ -400,7 +401,7 @@ export async function POST(request: NextRequest) {
     if (!approval) {
       return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
     }
-    if (process.env.O8_NEXT_O8D === '1' && body[RUNTIME_APPROVAL_OPERATION] === true
+    if (nativeHttpTransportEnabled() && body[RUNTIME_APPROVAL_OPERATION] === true
       && resolutionClaim.claimed
       && approval.continuation?.kind !== current.continuation?.kind) {
       if (resolutionClaim.claimId) finalizeApprovalContinuation(id, resolutionClaim.claimId, 'failed', 'Approval continuation changed.');

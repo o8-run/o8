@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 /**
  * Native session reads (threads, history, chat-history, composer-queue served
  * by o8d). On by default wherever the native transport is on (O8_NEXT_O8D=1).
@@ -6,6 +7,6 @@
  */
 export function nativeSessionReadsEnabled(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
   const flag = env.O8D_NATIVE_SESSION_READS;
-  if (flag === undefined) return env.O8_NEXT_O8D === '1';
+  if (flag === undefined) return nativeHttpTransportEnabled(env);
   return flag === '1';
 }

@@ -74,10 +74,20 @@ export function forwardNextUpgrade(req: IncomingMessage, socket: Duplex, head: B
     for (let i = 0; i < response.rawHeaders.length; i += 2) headers += `${response.rawHeaders[i]}: ${response.rawHeaders[i + 1]}\r\n`;
     socket.write(headers + '\r\n'); if (first.length) socket.write(first); if (head.length) remote.write(head);
     socket.on('error', () => remote.destroy()); remote.on('error', () => socket.destroy());
+    socket.on('end', () => remote.destroy());
     socket.on('close', () => remote.destroy()); remote.on('close', () => socket.destroy());
     remote.pipe(socket); socket.pipe(remote);
   });
-  proxy.on('response', response => { response.resume(); refuse(response.statusCode ?? 502); });
+  proxy.on('response', response => {
+    const nominated = String(response.headers.connection ?? '').split(',').map(name => name.trim().toLowerCase());
+    let raw = `HTTP/1.1 ${response.statusCode ?? 502} ${response.statusMessage ?? 'Upstream response'}\r\n`;
+    for (let i = 0; i < response.rawHeaders.length; i += 2) {
+      if (![...hops, ...nominated].includes(response.rawHeaders[i].toLowerCase())) raw += `${response.rawHeaders[i]}: ${response.rawHeaders[i + 1]}\r\n`;
+    }
+    socket.write(raw + 'Connection: close\r\n\r\n');
+    response.on('error', () => socket.destroy());
+    response.on('end', () => socket.end()); response.pipe(socket, { end: false });
+  });
   proxy.on('error', () => { if (!socket.destroyed) refuse(502); });
   socket.on('close', () => proxy.destroy()); socket.on('error', () => proxy.destroy()); proxy.end();
 }

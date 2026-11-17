@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { getDeviceManager } from '@/lib/devices/service';
 import { DeviceControllers } from '@/lib/devices/controllers';
 import type { DeviceControllerContext } from '@/lib/devices/controller-store';
@@ -48,7 +49,7 @@ async function callDeviceOwner(args: Record<string, unknown>, context?: DeviceCo
 }
 
 export async function handleDevice(args: Record<string, unknown>, context?: DeviceControllerContext): Promise<McpToolResult> {
-  if (process.env.O8_NEXT_O8D === '1' && !isNativeCortexReader()) return callDeviceOwner(args, context);
+  if (nativeHttpTransportEnabled() && !isNativeCortexReader()) return callDeviceOwner(args, context);
   const action = String(args.action);
   const fields: Record<string, string[]> = { status: [], acquire: ['deviceId'], release: ['deviceId'], handoff: ['deviceId', 'targetSession'],
     press: ['deviceId', 'x', 'y'], swipe: ['deviceId', 'x', 'y', 'toX', 'toY'], scroll: ['deviceId', 'direction'], type: ['deviceId', 'text'], snapshot: ['deviceId'] };

@@ -7606,7 +7606,7 @@ const httpServer = createServer(async (req, res) => {
 const WS_LISTEN_HOST = resolveListenHost();
 const o8dBridge = process.env.O8_WS_O8D !== '0'
   && (process.env.O8_WS_O8D === '1' || o8dStartsByDefault())
-  ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
+  ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST, API_FRONT_DOOR) : null;
 
 try { syncTokenFile(); } catch { console.error('[mobile-e2ee] Auth projection unavailable; device HTTP requests will retry.'); }
 const WS_TOKEN = getOrCreateWsToken();
@@ -8339,6 +8339,10 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
   // A second WS uses the same receiver lock path; on this port it dies with
   // EADDRINUSE before receiver startup. A different port still cannot steal the claim.
   if (err.code === 'EADDRINUSE') {
+    if (API_FRONT_DOOR) {
+      console.error('[ws-server] Advertised API port is occupied; refusing takeover without launcher handoff.');
+      process.exit(1);
+    }
     void recoverFromPortInUse();
   } else {
     throw err;

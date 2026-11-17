@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { isNativeCortexReader } from '@/lib/cortex/owner-process';
@@ -9,7 +10,7 @@ import { deliverQueuedPacketSteer, steerPacket, SteerPacketUnavailableError, typ
 import type { LaneEvent } from '@/lib/lane/types';
 
 export async function POST(request: Request): Promise<Response> {
-  if (!isNativeCortexReader() || process.env.O8_NEXT_O8D !== '1') return Response.json({ error: 'Steer requires the native owner.' }, { status: 503 });
+  if (!isNativeCortexReader() || !nativeHttpTransportEnabled()) return Response.json({ error: 'Steer requires the native owner.' }, { status: 503 });
   if (!headersIndicateLoopback(name => request.headers.get(name)) || resolveRequestPrincipalContext(request).role !== 'operator') {
     return Response.json({ error: 'Steer ownership requires the local operator.' }, { status: 403 });
   }

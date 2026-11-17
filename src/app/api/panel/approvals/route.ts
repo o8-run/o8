@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { NextRequest } from 'next/server';
 import { GET, POST as resolveApproval } from '@/lib/approvals/route';
@@ -8,7 +9,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
-  if (process.env.O8_NEXT_O8D === '1') {
+  if (nativeHttpTransportEnabled()) {
     const principal = resolveRequestPrincipal(request);
     if (principal !== 'operator' && principal !== 'device') return resolveApproval(request);
     const body = await request.clone().json().catch(() => null);

@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { RuntimeSelectionError, runtimeSelectionRefusal } from '@/lib/agents/routing';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
@@ -7,7 +8,7 @@ import { dispatchTask, readTaskEffortSelection, TaskMutationError, type TaskDisp
 
 /** Internal data-only operation. The caller has already admitted the HTTP/MCP principal. */
 export async function POST(request: Request): Promise<Response> {
-  if (!isNativeCortexReader() || process.env.O8_NEXT_O8D !== '1') {
+  if (!isNativeCortexReader() || !nativeHttpTransportEnabled()) {
     return Response.json({ error: 'Task dispatch requires the native owner.' }, { status: 503 });
   }
   if (!headersIndicateLoopback(name => request.headers.get(name)) || resolveRequestPrincipalContext(request).role !== 'operator') {

@@ -1,11 +1,15 @@
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, execFile, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { connect } from 'node:net';
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, request } from 'node:http';
+import { connect, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, it } from 'vitest';
+import { promisify } from 'node:util';
+import { afterAll, beforeAll, expect, it } from 'vitest';
+import { bundleServers } from '../scripts/lib/server-bundles.mjs';
+import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
+import WebSocket, { WebSocketServer } from 'ws';
 
 async function freePort() {
   const server = createServer();
@@ -15,15 +19,39 @@ async function freePort() {
   return port;
 }
 
-it('owns the advertised API socket without the legacy flag and forwards unknown requests to Next', async () => {
+const target = join(process.cwd(), 'crates/o8d/target/session-reads');
+const binary = process.env.O8D_TEST_BINARY ?? join(target, 'debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
+const bundleRoot = mkdtempSync(join(tmpdir(), 'o8-front-door-bundle-'));
+afterAll(() => rmSync(bundleRoot, { recursive: true, force: true }));
+beforeAll(async () => {
+  const { stdout } = await promisify(execFile)('df', ['-Pk', '/']);
+  if (Number(stdout.trim().split('\n').at(-1)!.trim().split(/\s+/)[3]) < 15 * 1024 * 1024) throw new Error('15 GiB free required for fixture build');
+  if (!process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml',
+    '--features', 'experimental-session-reads', '--target-dir', target], { env: { ...process.env, RUSTC_WRAPPER: '' }, maxBuffer: 32 * 1024 * 1024 });
+  // Use the actual packaged entry once for both launches. This also avoids
+  // retranspiling the complete source graph in each isolated child process.
+  bundleServers({ root: process.cwd(), outDir: bundleRoot });
+  stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: bundleRoot });
+  copyFileSync('src/lib/lane/orchestrator.md', join(bundleRoot, 'orchestrator.md'));
+}, 900_000);
+
+it.each([false, true])('owns the advertised API socket and forwards with legacy flag off (o8d=%s)', async rust => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-api-front-door-')));
   const token = 'front-door-fixture-operator';
   const requests: Array<{ method: string; path: string; host: string; body: string }> = [];
+  const upstreamSockets = new Set<Socket>();
+  let abortedUpstream: (() => void) | undefined;
+  const upstreamAborted = new Promise<void>(resolve => { abortedUpstream = resolve; });
+  const upstreamWebSockets = new WebSocketServer({ noServer: true });
   const upstream = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const record = { method: req.method!, path: req.url!, host: req.headers.host!, body: Buffer.concat(chunks).toString('base64') };
     if (req.url?.startsWith('/api/fixture/') || req.url === '/api/setup/identity') requests.push(record);
+    if (req.url === '/fixture/abort') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: open\n\n');
+      res.on('close', () => abortedUpstream?.()); return;
+    }
     if (req.url === '/fixture/redirect') { res.writeHead(302, { Location: '/fixture/destination' }).end(); return; }
     if (req.url === '/fixture/stream') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: first\n\n');
@@ -38,10 +66,18 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
     res.writeHead(207, { 'Content-Type': 'application/json', 'Set-Cookie': ['fixture-a=1; HttpOnly', 'fixture-b=2; SameSite=Strict'] });
     res.end(JSON.stringify(record));
   });
-  upstream.on('upgrade', (_req, socket, head) => {
+  upstream.on('connection', socket => { upstreamSockets.add(socket); socket.on('close', () => upstreamSockets.delete(socket)); });
+  upstream.on('upgrade', (req, socket, head) => {
+    if (req.url === '/fixture/websocket') {
+      upstreamWebSockets.handleUpgrade(req, socket, head, ws => ws.on('message', bytes => ws.send(bytes))); return;
+    }
+    if (req.url === '/fixture/upgrade-refused') {
+      socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 6\r\nX-Fixture: denied\r\n\r\ndenied'); return;
+    }
     socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\nfixture-upgrade');
     if (head.length) socket.write(head);
     socket.on('error', () => {}); socket.on('data', bytes => socket.write(bytes));
+    socket.on('end', () => socket.end());
   });
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
   const nextPort = (upstream.address() as { port: number }).port;
@@ -53,16 +89,17 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
   }
   execFileSync('git', ['init', '-q', directory]);
   const child = spawn(process.execPath, ['--require=./scripts/next/brain-runtime.cjs',
-    '--import=./scripts/register-server-only-stub.mjs', '--import=tsx', 'src/ws-server.ts'], {
-    cwd: process.cwd(), detached: process.platform !== 'win32', stdio: ['ignore', 'ignore', 'pipe'],
+    join(bundleRoot, 'ws-server.mjs')], {
+    cwd: process.cwd(), detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
     env: { PATH: join(directory, 'fixture-bin') + ':/usr/bin:/bin', HOME: directory, USERPROFILE: directory,
       NODE_ENV: 'test', LANG: 'C.UTF-8', CORTEX_IDE_DATA_DIR: directory, CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, O8_API_PORT: String(apiPort), PORT: String(apiPort),
       O8_WS_PORT: String(oldWsPort), WS_PORT: String(oldWsPort), NEXT_ORIGIN: `http://127.0.0.1:${nextPort}`,
-      O8_API_FRONT_DOOR: '1', O8_NEXT_O8D: '0', O8_WS_O8D: '0', O8D_NATIVE_SESSION_READS: '0',
+      O8_API_FRONT_DOOR: '1', O8_NEXT_O8D: '0', O8_WS_O8D: rust ? '1' : '0', O8D_BINARY: binary, O8D_NATIVE_SESSION_READS: '0',
       O8_TTS_PYTHON: join(directory, 'no-python'), CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${apiPort}` },
   });
   let stderr = '';
+  child.stdout?.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-8192); });
   child.stderr?.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-8192); });
   const origin = `http://127.0.0.1:${apiPort}`;
   try {
@@ -76,6 +113,10 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     expect(ready, 'WS startup failed: ' + stderr).toBe(true);
+    if (rust) {
+      const health = await (await fetch(origin + '/health')).json();
+      expect(health.delivery.transport).toBe('o8d');
+    }
     requests.length = 0;
     let registered: Response;
     try { registered = await fetch(origin + '/api/setup/identity', { signal: AbortSignal.timeout(30_000) }); }
@@ -83,6 +124,13 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
     expect(registered.status).toBe(200);
     expect(requests).toEqual([]);
     expect(await registered.json()).toMatchObject({ apiPort, wsPort: apiPort });
+    const wsInfo = await fetch(origin + '/api/panel/ws-info', { headers: { authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(10_000) });
+    expect(wsInfo.status).toBe(200); expect(await wsInfo.json()).toMatchObject({ wsPort: apiPort });
+    const websocket = new WebSocket(`ws://127.0.0.1:${apiPort}/ws?token=${token}`);
+    const wsDeadline = setTimeout(() => websocket.terminate(), 30_000);
+    try { await once(websocket, 'open'); }
+    catch (error) { throw new Error('WS upgrade failed: ' + String(error) + '\n' + stderr); }
+    finally { clearTimeout(wsDeadline); websocket.terminate(); }
 
     const bytes = Buffer.from([0, 255, 10, 128, 1]);
     const forwarded = await fetch(origin + '/api/fixture/unregistered?repeat=a&repeat=b&text=%E9%9B%AA', {
@@ -92,6 +140,11 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
     expect(forwarded.headers.getSetCookie()).toEqual(['fixture-a=1; HttpOnly', 'fixture-b=2; SameSite=Strict']);
     expect(await forwarded.json()).toEqual({ method: 'POST', path: '/api/fixture/unregistered?repeat=a&repeat=b&text=%E9%9B%AA',
       host: `127.0.0.1:${apiPort}`, body: bytes.toString('base64') });
+    for (const [path, method] of [['/api/setup/identity', 'POST'], ['/api/lanes/touches', 'GET'],
+      ['/api/prompt-library/import', 'GET'], ['/api/automations/connected', 'PATCH']]) {
+      const response = await fetch(origin + path, { method, headers: { authorization: 'Bearer ' + token } });
+      expect(response.status).toBe(207); expect((await response.json()).path).toBe(path);
+    }
     const redirect = await fetch(origin + '/fixture/redirect', { redirect: 'manual' });
     expect([redirect.status, redirect.headers.get('location')]).toEqual([302, '/fixture/destination']);
     const head = await fetch(origin + '/fixture/head', { method: 'HEAD' });
@@ -101,12 +154,18 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
     const stream = await fetch(origin + '/fixture/stream');
     expect(stream.headers.get('content-type')).toBe('text/event-stream');
     expect(await stream.text()).toBe('data: first\n\ndata: second\n\n');
+    const controller = new AbortController();
+    const aborting = await fetch(origin + '/fixture/abort', { signal: controller.signal });
+    const reader = aborting.body!.getReader(); await reader.read(); controller.abort();
+    await Promise.race([upstreamAborted, new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => reject(new Error('Aborted proxy left upstream open')), 5000); timer.unref();
+    })]);
     for (const path of ['/', '/mobile', '/dashboard']) {
       const response = await fetch(origin + path);
       expect(response.status).toBe(200); expect(await response.text()).toContain('Use the desktop app');
     }
     for (const headers of [{ 'x-o8-client-addr': '127.0.0.9', 'x-o8d-bridge': 'forged' },
-      { 'x-o8-client-addr': '127.0.0.9', 'x-o8-relay-forward': '1', 'x-o8d-bridge': 'forged' }]) {
+      { 'x-o8-client-addr': '127.0.0.9', 'x-o8-relay-forward': '1', 'x-o8d-bridge': 'forged' }] as Record<string, string>[]) {
       const response = await fetch(origin + '/api/fixture/peer', { headers });
       expect(await response.json()).toEqual({ address: headers['x-o8-relay-forward'] ? 'o8-relay-forward' : '127.0.0.1',
         relay: headers['x-o8-relay-forward'] ? '1' : null, bridge: null });
@@ -114,20 +173,43 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
     expect((await fetch(origin + '/api/setup/status')).status).toBe(401);
     expect((await fetch(origin + '/api/setup/status', { headers: { authorization: 'Bearer wrong' } })).status).toBe(401);
     expect((await fetch(origin + '/api/setup/status', { headers: { authorization: 'Bearer ' + token } })).status).toBe(200);
-    expect((await fetch(origin + '/api/fixture/unknown', { headers: { host: 'untrusted.invalid' } })).status).toBe(421);
+    const badHost = await new Promise<number | undefined>((resolve, reject) => {
+      const call = request(origin + '/api/fixture/unknown', { headers: { Host: 'untrusted.invalid' } }, response => {
+        response.resume(); response.on('end', () => resolve(response.statusCode));
+      }); call.on('error', reject); call.end();
+    });
+    expect(badHost).toBe(421);
     expect((await fetch(origin + '/api/fixture/unknown', { method: 'POST', headers: { origin: 'https://untrusted.invalid' } })).status).toBe(403);
     const socket = connect(apiPort, '127.0.0.1');
+    const upgradeDeadline = setTimeout(() => socket.destroy(new Error('Forwarded upgrade timed out')), 10_000);
     try {
       await once(socket, 'connect');
       socket.write(`GET /fixture/upgrade HTTP/1.1\r\nHost: 127.0.0.1:${apiPort}\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\n`);
       let data = '';
       for await (const chunk of socket) { data += chunk.toString(); if (data.includes('fixture-upgrade')) break; }
       expect(data).toContain('HTTP/1.1 101'); expect(data).toContain('fixture-upgrade');
-    } finally { socket.destroy(); }
+    } finally { clearTimeout(upgradeDeadline); socket.destroy(); }
+    const refusedUpgrade = connect(apiPort, '127.0.0.1');
+    const refusedDeadline = setTimeout(() => refusedUpgrade.destroy(new Error('Upgrade refusal timed out')), 10_000);
+    try {
+      await once(refusedUpgrade, 'connect');
+      refusedUpgrade.write(`GET /fixture/upgrade-refused HTTP/1.1\r\nHost: 127.0.0.1:${apiPort}\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\n`);
+      let raw = ''; for await (const chunk of refusedUpgrade) raw += chunk.toString();
+      expect(raw).toContain('HTTP/1.1 401 Unauthorized'); expect(raw).toContain('X-Fixture: denied'); expect(raw).toMatch(/\r\n\r\ndenied$/);
+    } finally { clearTimeout(refusedDeadline); refusedUpgrade.destroy(); }
+    const forwardedWs = new WebSocket(origin.replace('http:', 'ws:') + '/fixture/websocket');
+    const forwardedWsDeadline = setTimeout(() => forwardedWs.terminate(), 30_000);
+    try {
+      await once(forwardedWs, 'open'); const echoed = once(forwardedWs, 'message');
+      forwardedWs.send('next-websocket-frame'); expect((await echoed)[0].toString()).toBe('next-websocket-frame');
+    } finally { clearTimeout(forwardedWsDeadline); forwardedWs.terminate(); }
+    console.info('[api-front-door] forwarding, notices, refusal and upgrade checks complete');
+    for (const connection of upstreamSockets) connection.destroy();
     upstream.closeAllConnections();
     await new Promise<void>(resolve => upstream.close(() => resolve()));
     const nativeOnly = await fetch(origin + '/api/setup/identity', { signal: AbortSignal.timeout(5000) });
     expect(nativeOnly.status).toBe(200);
+    console.info('[api-front-door] registered route remains available with Next stopped');
   } finally {
     const closed = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : once(child, 'close');
     try {
@@ -138,7 +220,10 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
       try { if (child.pid && process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch { /* exited */ }
     }, 5000);
     await closed; clearTimeout(timer);
+    for (const ws of upstreamWebSockets.clients) ws.terminate();
+    upstreamWebSockets.close();
     upstream.closeAllConnections();
+    for (const connection of upstreamSockets) connection.destroy();
     if (upstream.listening) await new Promise<void>(resolve => upstream.close(() => resolve()));
     rmSync(directory, { recursive: true, force: true });
   }
