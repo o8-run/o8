@@ -297,6 +297,7 @@ narrow read-only exception.
 | GET | `/api/mobile/automations` | List projected automation schedules and run state. |
 | POST | `/api/mobile/automations/[id]/enabled` | Set enabled with `{ enabled: boolean }`. |
 | POST | `/api/mobile/automations/[id]/run` | Run with `{ clientMutationId: string }` using desktop prechecks. |
+| GET | `/api/mobile/agents` | List coding runtime installation, known sign-in state, and default model; excludes account identifiers. |
 | POST | `/api/mobile/action` | Execute a mobile-issued runtime action (LLM chat turn, dispatch, approval). |
 | GET | `/api/mobile/activity` | Chronological fleet activity feed (newest-first, capped ~40). |
 | GET | `/api/mobile/bootstrap?fresh=1` | First-load bootstrap snapshot (repos, sessions, layout). |
