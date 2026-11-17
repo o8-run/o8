@@ -170,6 +170,9 @@ fn update_on_main<R: tauri::Runtime>(
 
 fn create<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<tauri::WebviewWindow<R>, String> {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
+    if crate::dock_window::VOICE_PAGES_REMOVED {
+        return Err("The chat voice window was removed.".into());
+    }
     let port = API_PORT.load(Ordering::Relaxed);
     if port == 0 {
         return Err("Voice surface is not initialized.".into());

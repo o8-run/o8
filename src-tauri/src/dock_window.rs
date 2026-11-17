@@ -31,6 +31,12 @@
 #[cfg(target_os = "macos")]
 pub const DOCK_LABEL: &str = "dock";
 
+/// The pages the shell's voice windows loaded were removed (#6232). A window
+/// created now would show the removed-console notice on the desktop, so the
+/// windows that loaded a server page are not created. Their show, hide and
+/// event calls already do nothing when the window does not exist.
+pub(crate) const VOICE_PAGES_REMOVED: bool = true;
+
 /// Window-local logical rect of the PAINTED pill content, reported by the
 /// React layer (`dock_set_hit_rect`) on every morph. None until the page
 /// hydrates — and None means CLICK-THROUGH, so a dead webview never blocks
@@ -78,6 +84,9 @@ const DOCK_TOP_INSET: f64 = 0.0;
 /// Next port written to ~/.o8/api-port.
 #[cfg(target_os = "macos")]
 pub fn create(app: &tauri::AppHandle, api_port: u16) {
+    if VOICE_PAGES_REMOVED {
+        return;
+    }
     use tauri::Manager;
 
     if app.get_webview_window(DOCK_LABEL).is_some() {
