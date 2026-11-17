@@ -2,7 +2,7 @@
   "kind": "synthetic-public-socket",
   "issue": 6370,
   "checks": {
-    "canonicalPublicSocketAndAdmission": "3 passed, 0 failed (rebased candidate)",
+    "canonicalPublicSocketAndAdmission": "4 requested modules: 11 passed, 0 failed (settings rebase)",
     "boundaryRecipes": "0,1024,16777216 native200;16777217 native413",
     "unauthorizedOversized": "401 via TypeScript",
     "fallback": "exact synthetic messages persisted by TypeScript",
@@ -10,13 +10,14 @@
     "typecheckFast": 0,
     "lint": 0,
     "rules": 0,
-    "oversizedError": "Request exceeds 16 MiB (matches the TypeScript boundary)"
+    "oversizedError": "Request exceeds 16 MiB (matches the TypeScript boundary)",
+    "settingsMerge": "defaults context, auth paths and owner-hop refusal retained; method/body dispatch carries private context"
   },
   "sourceSha256": {
     "crates/o8d/src/app.rs": "75bf7589a84f4a90ab8d7bc8defb313ce889a1b6565a09decc87ead091fea151",
-    "crates/o8d/src/app/native.rs": "5f3a080fcb6aaf867eca4711b4b7f2154be0492dc84846e9a1b1ea3fe9f0b719",
-    "crates/o8d/src/http/mod.rs": "621e1163e19ef4ece6ead2d96b7476f54aa317488f3435ce9a66bc2e9edb7f49",
-    "src/lib/ws-server/native-http-routes.ts": "94a3fb6deab7d121881edf5e72220dc4192eb032afa68fddd853fd81f9a193c7",
+    "crates/o8d/src/app/native.rs": "34a5a41e30fa5f53fd83a6693edde30b0d964168de3984a66fdf68fa5c38678d",
+    "crates/o8d/src/http/mod.rs": "df3304c0bf386eb35aabd0dac927bdf0c92aaba469694fe104913fbc135911fa",
+    "src/lib/ws-server/native-http-routes.ts": "a79617ddef52521592386f6f1d4c4e8503e8336573bd1c7b659707252d13b483",
     "scripts/o8d/build-write-fixture.mjs": "8a0149a754c72a51bd62e09246d04248a120f1441118bedee34867aa211f2241",
     "scripts/o8d/verification-fixture.patch": "1fbfdcc9e31046746c57207b4946dcc71b8dd63b7b91942f3a7c83515789f35a",
     "tests/o8d-rust-write-path-real-path.test.ts": "2b1c2fd0b8cb22532084d533ff114d7cb329b3617ddb20eec77a0beaa177166a",
@@ -24,5 +25,6 @@
     "crates/o8d/evidence/write-path/corpus.json": "0c1442ba61145eec5a817c5edb3dd1e000fdf14f3cdda79f6c781db1a2fc18c9"
   },
   "fullCompletionAndHosted": "Authorized focused local checks passed; hosted CI pending",
-  "securityReview": "required before arming"
+  "securityReview": "required before arming",
+  "base": "e25c88d2c3cd5c6d51aaa96390aa11fa67a80dff"
 }
