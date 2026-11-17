@@ -138,14 +138,9 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET']), path: /^\/api\/mobile\/orchestrator\/models\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
   // Phone-facing routes only. Keep internal desktop/ws-server routes out of
-  // this list: devices*, push-url, symon/tool, and ws-token all require the
+  // this list: devices*, push-url, and ws-token all require the
   // operator credential. New mobile routes fail closed until named here.
-  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat\/send|diff-comments?|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|review-file|search|symon(?:\/session|\/text-session)?|sync|terminal-input|terminal-sessions)\/?$/ },
-  // A paired phone reads its own standing intents and clears one. Read + cancel
-  // ONLY: registering a watch stays inside a Symon turn, where it raises a card,
-  // and the tools' own surface (/api/symon/watches) keeps the operator bearer.
-  { methods: new Set(['GET']), path: /^\/api\/mobile\/symon\/watches\/?$/ },
-  { methods: new Set(['DELETE']), path: /^\/api\/mobile\/symon\/watches\/[^/]+\/?$/ },
+  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat\/send|diff-comments?|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|review-file|search|sync|terminal-input|terminal-sessions)\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/panel\/approvals\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|github-status|repos|operator-defaults|projects|search)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/panel\/(?:operator-defaults|pr\/review)\/?$/ },
@@ -163,15 +158,13 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET']), path: /^\/api\/orchestrator\/merge-preview\/?$/ },
   // Phone-facing surfaces reached OUTSIDE /api/mobile/* (the app grew into these
   // and each failed closed until named). All device-safe: repo o8.md notes (read
-  // + autosave write), fleet runtime inventory, review diffs, dictation + TTS.
+  // + autosave write), fleet runtime inventory, review diffs.
   // The repo-spec/asset srcPath (local-file) branch is separately blocked to
   // devices in its handler.
   { methods: new Set(['GET', 'PUT', 'POST']), path: /^\/api\/repo-spec\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/repo-spec\/asset\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/runtime\/inventory\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/worktrees\/(?:diff|diff-summary)\/?$/ },
-  { methods: new Set(['POST']), path: /^\/api\/dictation\/(?:polish|transcribe)\/?$/ },
-  { methods: new Set(['POST']), path: /^\/api\/tts\/?$/ },
   // Display-only documents an agent attached to a thread. Read only: the
   // handlers refuse a device that asks for a packet transcript, and a device
   // cannot publish or preview.

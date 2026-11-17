@@ -7,7 +7,6 @@ import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import type { OrchestratorBackend, OrchestratorTurnOptions } from '@/lib/lane/orchestrator-backends/types';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
-import { voiceFollowupReceipt, voiceFollowupRemovalReceipt } from '@/components/desktop/thoughts/chat-panel/managed-voice-followup';
 
 const mocks = vi.hoisted(() => ({ beforeProject: null as (() => Promise<void>) | null,
   send: vi.fn(async (_repo: string, _message: string, emit: (event: OrchestratorEvent) => void, options: OrchestratorTurnOptions) => {
@@ -279,7 +278,7 @@ it.each(['canonical', 'optimistic', 'replaced'])('binds a persisted lead follow-
   }
 });
 
-it.each(['held', 'applied'] as const)('keeps voice status truthful when an uncertain save retries after backend admission: %s', async status => {
+it.each(['held', 'applied'] as const)('keeps the queue receipt truthful when an uncertain save retries after backend admission: %s', async status => {
   const id = 'voice-receipt-retry'; const payload: ComposerQueuePayload = { ...base, afterTaskId: 'original-task', routing: { ...base.routing, pinBackend: true } };
   await enqueue(id, payload);
   expect(queue.claimNextComposerSend(target)?.id).toBe(id);
@@ -290,18 +289,13 @@ it.each(['held', 'applied'] as const)('keeps voice status truthful when an uncer
   }));
   const receipt = (await response.json()).item;
   expect(receipt).toMatchObject({ id, status, admittedAt: expect.any(Number) });
-  const spoken = voiceFollowupReceipt(receipt);
-  expect(spoken).toContain('did not submit');
-  expect(spoken).not.toMatch(/has not been submitted|canceled before submission/);
   if (status === 'held') {
-    expect(spoken).toContain('may already have reached');
     const removed = await DELETE(new NextRequest('http://localhost/api/orchestrator/composer-queue', {
       method: 'DELETE', headers: { host: 'localhost' }, body: JSON.stringify({ ...target, id }),
     }));
     expect(removed.status).toBe(200);
     expect(queue.readComposerSend(id)).toMatchObject({ status: 'cancelled', admittedAt: expect.any(Number) });
-    expect(voiceFollowupRemovalReceipt()).toContain('does not stop or undo work already submitted');
-  } else expect(spoken).toContain('already accepted');
+  }
   expect(mocks.send).not.toHaveBeenCalled();
 });
 

@@ -97,14 +97,6 @@
       ]
     },
     {
-      "path": "src/app/api/mobile/symon/tool/route.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
-        "network-listener"
-      ]
-    },
-    {
       "path": "src/app/api/mobile/sync/route.test.ts",
       "reasons": [
         "child-process"
@@ -180,12 +172,6 @@
       ]
     },
     {
-      "path": "src/app/api/panel/symon/imessage-access/route.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
       "path": "src/app/api/runtime/usage/machine-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -232,39 +218,6 @@
     },
     {
       "path": "src/app/api/v2/proxy/cli/route.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
-      "path": "src/app/api/voice/live/availability-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "src/app/api/voice/live/byok-real-path.test.ts",
-      "reasons": [
-        "executable-fixture",
-        "real-path"
-      ]
-    },
-    {
-      "path": "src/app/api/voice/live/gpt-live-lifecycle-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "src/app/api/voice/live/personal-pilot-real-path.test.ts",
-      "reasons": [
-        "executable-fixture",
-        "network-listener",
-        "real-path"
-      ]
-    },
-    {
-      "path": "src/app/api/voice/live/route.test.ts",
       "reasons": [
         "child-process"
       ]
@@ -2088,12 +2041,6 @@
       ]
     },
     {
-      "path": "tests/catch-up-ranking-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/changelog-scrub.test.ts",
       "reasons": [
         "child-process",
@@ -3439,14 +3386,6 @@
       ]
     },
     {
-      "path": "tests/fuzzy-watch-real-path.test.ts",
-      "reasons": [
-        "executable-fixture",
-        "network-listener",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/gate-failure-warning-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4737,13 +4676,6 @@
       ]
     },
     {
-      "path": "tests/mobile-ask-effort-real-path.test.ts",
-      "reasons": [
-        "executable-fixture",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/mobile-chat-send-effort-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -4941,12 +4873,6 @@
       ]
     },
     {
-      "path": "tests/next-dictation-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/next-diff-review-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5107,12 +5033,6 @@
         "child-process",
         "network-listener",
         "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/next-stream-differential-real-path.test.ts",
-      "reasons": [
         "real-path"
       ]
     },
@@ -5560,25 +5480,6 @@
       ]
     },
     {
-      "path": "tests/o8d-messages-receiver-native-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/o8d-mobile-symon-native-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/o8d-mobile-symon-tool-native-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/o8d-more-reads-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5881,34 +5782,6 @@
       ]
     },
     {
-      "path": "tests/o8d-symon-brain-owner-native-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/o8d-symon-mcp-owner-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/o8d-symon-transport-tool-native-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/o8d-symon-watches-native-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/o8d-task-dispatch-owner-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5962,15 +5835,6 @@
       "path": "tests/o8d-thread-projection-parity-real-path.test.ts",
       "reasons": [
         "child-process",
-        "native-build",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/o8d-tts-owner-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "executable-fixture",
         "native-build",
         "real-path"
       ]
@@ -8280,18 +8144,6 @@
       ]
     },
     {
-      "path": "tests/symon-brain-without-node-sqlite-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-conversations-api-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/symon-durable-brain-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -8306,20 +8158,6 @@
       ]
     },
     {
-      "path": "tests/symon-managed-messages-pi-brain-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-mcp-real-path.test.ts",
-      "reasons": [
-        "network-listener",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/symon-messages-receiver-owner-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -8330,54 +8168,6 @@
     {
       "path": "tests/symon-messages-receiver-real-path.test.ts",
       "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-phone-git-handlers-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
-        "network-listener",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-phone-handlers-real-path.test.ts",
-      "reasons": [
-        "network-listener",
-        "real-path",
-        "terminal-host"
-      ]
-    },
-    {
-      "path": "tests/symon-phone-pi-brain-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-text-say-loop.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
-        "network-listener",
-        "process-signal"
-      ]
-    },
-    {
-      "path": "tests/symon-voice-record-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/symon-watch-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "network-listener",
-        "process-signal",
         "real-path"
       ]
     },
@@ -8616,12 +8406,6 @@
       ]
     },
     {
-      "path": "tests/tts-edge-installed.integration.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
       "path": "tests/typecheck-parity.test.ts",
       "reasons": [
         "child-process"
@@ -8827,12 +8611,6 @@
     },
     {
       "path": "tests/visual-inspection-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/visual-instruction-delivery-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
