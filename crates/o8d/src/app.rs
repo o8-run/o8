@@ -20,7 +20,7 @@ use tokio_tungstenite::{
 mod input;
 mod request_counts;
 #[cfg(feature = "experimental-session-reads")]
-mod session_reads;
+mod native;
 
 pub async fn serve(
     listener: TcpListener,
@@ -125,9 +125,13 @@ async fn connection(
     if !upgrade {
         let count = request_counts::Count::new(header);
         #[cfg(feature = "experimental-session-reads")]
-        if session_reads::serve(&mut socket, header, &upstream, &key, &count).await? {
-            return Ok(());
-        }
+        let replay = match native::serve(&mut socket, header, &upstream, &key, &count).await? {
+            native::Outcome::Served => return Ok(()),
+            native::Outcome::Replay(body) => Some(body),
+            native::Outcome::Proxy => None,
+        };
+        #[cfg(not(feature = "experimental-session-reads"))]
+        let replay: Option<Vec<u8>> = None;
         let mut backend = match TcpStream::connect(&upstream).await {
             Ok(stream) => request_counts::Backend::new(stream),
             Err(_) => {
@@ -138,11 +142,20 @@ async fn connection(
         // Attest the socket peer on the first request. TS closes each relayed
         // response, so every request arrives on a freshly stamped connection.
         if let Some(stamped) = stamp_http_header(header, &key, &peer) {
-            socket.read_exact(&mut vec![0; end]).await.map_err(|_| ())?;
+            if replay.is_none() {
+                socket.read_exact(&mut vec![0; end]).await.map_err(|_| ())?;
+            }
             backend
                 .write_all(stamped.as_bytes())
                 .await
                 .map_err(|_| ())?;
+        }
+        if let Some(body) = replay {
+            // If stamping did not apply, the original header was already consumed.
+            if stamp_http_header(header, &key, &peer).is_none() {
+                backend.write_all(header.as_bytes()).await.map_err(|_| ())?;
+            }
+            backend.write_all(&body).await.map_err(|_| ())?;
         }
         let result = tokio::io::copy_bidirectional(&mut socket, &mut backend).await;
         count.finish(backend.status).await;
