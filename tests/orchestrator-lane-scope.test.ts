@@ -75,7 +75,7 @@ describe('mission-scoped persisted lane reconciliation', () => {
     const expected = reconcileOrchestratorMissionState(current, {
       laneSnapshots: [], runtimeTruth: [], domainLanes: all,
     });
-    const events = vi.spyOn(registry, 'getLaneEvents');
+    const events = vi.spyOn(registry, 'getRecentLaneEvents');
     const lanes = vi.spyOn(registry, 'listLanes');
 
     // Read the mission back through the same default entry point used by
@@ -84,7 +84,7 @@ describe('mission-scoped persisted lane reconciliation', () => {
 
     expect(actual).toEqual(expected);
     expect(lanes).toHaveBeenCalledExactlyOnceWith(new Set([first.packet.id, second.packet.id]));
-    expect(events.mock.calls.map(([id]) => id)).toEqual([first.lane.id, second.lane.id]);
+    expect(events).toHaveBeenCalledExactlyOnceWith([first.lane.id, second.lane.id], 100);
     expect(buildDomainLaneSummaries(new Set([first.packet.id]))[0]?.status).toBe('failed');
   });
 
@@ -92,11 +92,11 @@ describe('mission-scoped persisted lane reconciliation', () => {
     const current = fixture();
     fixture('reviewing');
     persist([current.packet]);
-    const events = vi.spyOn(registry, 'getLaneEvents');
+    const events = vi.spyOn(registry, 'getRecentLaneEvents');
 
     const result = await syncOrchestratorControlPlaneState();
 
-    expect(events.mock.calls.map(([id]) => id)).toEqual([current.lane.id]);
+    expect(events).toHaveBeenCalledExactlyOnceWith([current.lane.id], 100);
     expect(inventory).not.toHaveBeenCalled();
     expect(readOrchestratorControlPlaneState()).toEqual(result);
   });
@@ -114,13 +114,13 @@ describe('mission-scoped persisted lane reconciliation', () => {
     const before = fixture('reviewing');
     const after = fixture();
     persist([before.packet]);
-    const events = vi.spyOn(registry, 'getLaneEvents');
+    const events = vi.spyOn(registry, 'getRecentLaneEvents');
 
     const result = await withLockedState((current) => {
       current.packets = [after.packet];
     });
 
-    expect(events.mock.calls.map(([id]) => id)).toEqual([after.lane.id]);
+    expect(events).toHaveBeenCalledExactlyOnceWith([after.lane.id], 100);
     expect(inventory).not.toHaveBeenCalled();
     expect(result.state.packets.map((packet) => packet.id)).toEqual([after.packet.id]);
     expect(readOrchestratorControlPlaneState()).toEqual(result.state);
@@ -130,7 +130,7 @@ describe('mission-scoped persisted lane reconciliation', () => {
     fixture('reviewing');
     persist([]);
     const lanes = vi.spyOn(registry, 'listLanes');
-    const events = vi.spyOn(registry, 'getLaneEvents');
+    const events = vi.spyOn(registry, 'getRecentLaneEvents');
 
     expect(reconcileOrchestratorControlPlaneState().packets).toEqual([]);
     await syncOrchestratorControlPlaneState();
@@ -156,7 +156,7 @@ describe('mission-scoped persisted lane reconciliation', () => {
     const current = fixture();
     const state = persist([current.packet]);
     const summary = buildDomainLaneSummaries(new Set([current.packet.id]));
-    const events = vi.spyOn(registry, 'getLaneEvents');
+    const events = vi.spyOn(registry, 'getRecentLaneEvents');
 
     const actual = reconcileOrchestratorControlPlaneState(state, [], summary);
     const expected = reconcileOrchestratorMissionState(state, {

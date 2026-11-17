@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, 
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
-import { getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { getRecentLaneEvents, listLanes } from '@/lib/lane/registry';
 import { CODEX_AUTH_RECOVERY_LANE_LABEL, findCurrentAuthExit } from '@/lib/lane/current-auth-exit';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import { readLaneTerminalReason } from '@/lib/lane/terminal-reason';
@@ -348,11 +348,12 @@ function hasUnreconciledRuntimeExit(lane: Lane, events: LaneEvent[]): boolean {
 
 export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): DomainLaneSummary[] {
   if (packetIds?.size === 0) return [];
-  return listLanes(packetIds)
-    .filter((lane) => lane.packetId)
+  const packetLanes = listLanes(packetIds).filter((lane) => lane.packetId);
+  const recentEvents = getRecentLaneEvents(packetLanes.map((lane) => lane.id), 100);
+  return packetLanes
     .map((lane) => {
       const mergePolicy = currentLaneMergePolicy(lane.projectId);
-      const events = getLaneEvents(lane.id, 100);
+      const events = recentEvents.get(lane.id) ?? [];
       const recovery = recoveryInfoFromLaneEvents(events);
       const currentAuthExit = findCurrentAuthExit(lane, events);
       const runtimeExited = currentAuthExit ? false : hasUnreconciledRuntimeExit(lane, events);

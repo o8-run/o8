@@ -607,6 +607,42 @@ export function getLaneEvents(laneId: string, limit = 50): LaneEvent[] {
     .reverse();
 }
 
+// The headless tick rebuilds every live mission's lane summaries every 10 s,
+// and most of those lanes are archived and silent. Keep each lane's recent
+// events until its event set changes. COUNT and MAX(rowid) over the lane's
+// index range move on every insert or delete, by any writer in any process.
+const recentLaneEventCache = new Map<string, { version: string; limit: number; events: LaneEvent[] }>();
+const RECENT_LANE_EVENT_CACHE_MAX = 2_000;
+
+/** Recent events per lane, oldest first, as `getLaneEvents`. Shared arrays: do not mutate. */
+export function getRecentLaneEvents(laneIds: readonly string[], limit = 50): Map<string, LaneEvent[]> {
+  const result = new Map<string, LaneEvent[]>();
+  if (laneIds.length === 0) return result;
+  const rows = getSqlite().prepare(`
+    SELECT lane_id AS laneId, COUNT(*) AS count, MAX(rowid) AS last
+      FROM lane_events
+     WHERE lane_id IN (SELECT value FROM json_each(?))
+     GROUP BY lane_id
+  `).all(JSON.stringify(laneIds)) as Array<{ laneId: string; count: number; last: number }>;
+  const versions = new Map(rows.map((row) => [row.laneId, `${row.count}:${row.last}`]));
+  for (const laneId of laneIds) {
+    const version = versions.get(laneId) ?? '0:0';
+    const cached = recentLaneEventCache.get(laneId);
+    if (cached && cached.version === version && cached.limit === limit) {
+      result.set(laneId, cached.events);
+      continue;
+    }
+    const events = getLaneEvents(laneId, limit);
+    recentLaneEventCache.delete(laneId);
+    recentLaneEventCache.set(laneId, { version, limit, events });
+    if (recentLaneEventCache.size > RECENT_LANE_EVENT_CACHE_MAX) {
+      recentLaneEventCache.delete(recentLaneEventCache.keys().next().value!);
+    }
+    result.set(laneId, events);
+  }
+  return result;
+}
+
 /**
  * Count lane events of a given verb that occurred AFTER the most recent
  * `launching_session` status_change for this lane. Used by the post-rebase
