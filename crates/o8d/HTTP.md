@@ -472,3 +472,21 @@ Fresh requests, a missing/expired/invalidated cache, nonempty sessions/approvals
 ### Unselected review workspace
 
 GET /api/review/workspace returns its original empty snapshot only when the canonical selection predicate confirms both the workspace query and CORTEX_IDE_REVIEW_REPO_ROOT are empty. The route and private admission use the same live predicate. Selected or configured workspaces stay with their original TS Git,GitHub and review-cache owner. No new listener registration,caller grant or Rust writer is introduced; the private context is one boolean and the idle reader does not open SQLite.
+
+## Flagged native startup reads
+
+The app bridge supplies a read-only snapshot of the TypeScript port resolver,
+its file-cache fingerprints and the server version. Saved startup GETs preserve
+ws-info's file-first liveness probes and identity's cached-port behavior. A
+changed resolver cache key or missing credential/ID defers to TypeScript, which
+retains creation and failed-write fallback ownership. Identity preserves its
+CORS and no-store headers. These readers do not create credentials or IDs.
+
+The standalone ws-info file reader retains its prior behavior outside native
+app session mode. Full startup parity requires the bridge resolver snapshot;
+unsupported snapshot or saved state defers rather than guessing. The public
+socket test records TypeScript responses with Next stopped and checks native
+responses, cache/liveness boundaries, missing-file fallback and refusals.
+Object-key wire order is outside semantic JSON parity; missing/null, scalar
+values and array order remain strict. Queryless startup routes repeat shared
+seeded requests; file/env/liveness fixtures supply the input variation.

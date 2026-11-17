@@ -2741,5 +2741,79 @@
     "typecheck": 0,
     "lint": 0,
     "rules": 0
+  },
+  "latestRebase": {
+    "base": "44f65df81bd01cd3b5712e124fab621ba10cc2c5",
+    "checks": {
+      "cargoAllFeatures": 0,
+      "cargoTests": 30,
+      "typecheckFast": 0,
+      "touchedLint": 0,
+      "wholeTouchedModules": 0
+    },
+    "modules": {
+      "tests/o8d-rust-startup-real-path.test.ts": 3,
+      "tests/o8d-native-route-table-real-path.test.ts": 1,
+      "tests/o8d-parity-real-path.test.ts": 7
+    },
+    "generatedPerRoute": 500,
+    "differencesPerRoute": 0,
+    "functionalBinarySha256": "d2787a7ef5abf052d169d4711c958dab6b1920fc1908c68574bd2a6b8becea14",
+    "note": "Settings and mobile contexts, auth paths and window-owner fallback retained. Functional replay only; optimized latency above remains the historical release receipt."
+  },
+  "packagingRebase": {
+    "base": "dc855e3a8",
+    "focusedStartup": {
+      "exit": 0,
+      "tests": 3,
+      "generatedPerRoute": 500,
+      "differencesPerRoute": 0
+    },
+    "defaultOnModule": {
+      "exit": 0,
+      "tests": 6
+    },
+    "typecheckFast": 0,
+    "touchedLint": 0,
+    "cargoReceiptReused": {
+      "exit": 0,
+      "tests": 30,
+      "rustSourcesAndManifestsUnchanged": true
+    },
+    "fixtureBootRegression": {
+      "red": "reference WS health timed out before any child output at the 30-second fixture deadline",
+      "green": "Match the existing shared-session fixture 60-second WS bootstrap budget. The production daemon readiness timeout stays five seconds."
+    },
+    "notes": "Retains bundled binary discovery and the startup resolver/version snapshot. Prior full table/auth module replay is recorded under latestRebase; no new latency claim."
+  },
+  "queueRebase": {
+    "base": "049f562a0",
+    "checks": {
+      "cargoAllFeatures": 0,
+      "build": 0,
+      "focusedStartup": 0,
+      "typecheckFast": 0,
+      "touchedLint": 0
+    },
+    "generatedPerRoute": 500,
+    "differencesPerRoute": 0,
+    "mainCallers": [
+      {
+        "file": "native/o8-next/src/client.rs:309",
+        "request": "GET /api/panel/ws-info",
+        "populatedCase": "Saved WS token and nonzero live ports; real Client::websocket consumes wsPort and wsToken."
+      },
+      {
+        "file": "native/o8-next/src/settings_about.rs:41",
+        "request": "GET /api/setup/identity",
+        "populatedCase": "Saved identity and nonempty server version; settings_request decodes Identity."
+      },
+      {
+        "file": "native/o8-next/src/shell_features/update.rs:739",
+        "request": "GET /api/setup/identity",
+        "populatedCase": "Updater reads persisted identity on the main GET."
+      }
+    ],
+    "preserved": "Merged settings, mobile inbox and workspace context/auth paths and packaged binary discovery. Functional checks only; release latency above remains its dated optimized receipt."
   }
 }

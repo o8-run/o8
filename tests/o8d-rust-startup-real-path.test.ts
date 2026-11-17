@@ -59,7 +59,7 @@ async function freePort() { const listener = await listen(); await close(listene
 async function start(directory: string, enabled: boolean, fixedPorts: { api: number; ws: number }, filePorts = false,
   identityEnv?: { O8_INSTANCE_ID?: string; O8_BOOT_ID?: string }) {
   const server = await startParityReference({ directory, binary, nativeHttp: true, o8d: true,
-    nativeSessionReads: enabled, fixedPorts, startupFilePorts: filePorts, identityEnv });
+    nativeSessionReads: enabled, fixedPorts, startupFilePorts: filePorts, identityEnv, startupTimeoutMs: 60_000 });
   await server.stopNext();
   return server;
 }
