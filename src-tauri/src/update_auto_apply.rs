@@ -97,7 +97,15 @@ pub(crate) async fn stage<R: Runtime>(app: &AppHandle<R>, retry: bool) {
         Ok(bytes)
     });
     let mut held = state.0.lock().unwrap();
-    let h = held.as_mut().unwrap();
+    // A check may have cleared or replaced the held update while this one
+    // downloaded; its bytes then belong to nothing and are dropped.
+    let Some(h) = held.as_mut().filter(|h| {
+        h.phase == "downloading"
+            && h.update.version == update.version
+            && h.update.raw_json["_o8Epoch"] == update.raw_json["_o8Epoch"]
+    }) else {
+        return;
+    };
     match result {
         Ok(bytes) => {
             h.bytes = Some(bytes);

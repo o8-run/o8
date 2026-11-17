@@ -243,7 +243,13 @@ fn apply(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                         cx,
                     );
                 }
-                Ok(body) => received(s, serde_json::json!({"state":"failed","error":body["error"]["message"].as_str().unwrap_or("Update could not be applied")}), cx),
+                Ok(body) => {
+                    let error = body["error"]["message"]
+                        .as_str()
+                        .or_else(|| body["error"].as_str())
+                        .unwrap_or("Update could not be applied");
+                    received(s, serde_json::json!({"state":"failed","error":error}), cx)
+                }
                 Err(error) => received(s, serde_json::json!({"state":"failed","error":error}), cx),
             }
             cx.notify();
