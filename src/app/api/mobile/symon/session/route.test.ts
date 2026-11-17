@@ -271,6 +271,8 @@ function writePreviousBillingSource(billingSource: 'chatgpt-subscription' | 'ope
 }
 
 beforeEach(() => {
+  // The delegated request shape stays covered; production leaves this unset.
+  vi.stubEnv('O8_SYMON_LIVE_BRAIN_READY', '1');
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(Date.UTC(2026, 5, 1));
   // Reset ONLY these fns — not vi.clearAllMocks(), which would also wipe the
@@ -1517,6 +1519,28 @@ describe('POST /api/mobile/symon/session — the per-session brain choice (#2423
     expect(h.persistSymonScopeGrant).not.toHaveBeenCalled();
     expect(warnSpy.mock.calls.map((call) => String(call[0])).join('\n')).toContain('brain_locked: plan=free');
     warnSpy.mockRestore();
+  });
+
+  it('with the live brain not ready, a paid plan asking for it is sent to Standard without a mint', async () => {
+    vi.stubEnv('O8_SYMON_LIVE_BRAIN_READY', '');
+    vi.stubEnv('O8_PLAN', 'founder');
+    const fetchMock = mintOk();
+
+    const refused = await POST(req(JSON.stringify({ brain: 'live' })));
+    expect(refused.status).toBe(403);
+    const body = await refused.json();
+    expect(body.error).toBe('brain_locked');
+    expect(body.detail).toContain('standard brain');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // The retry the phone makes after that refusal starts, and offers no switch.
+    const standard = await POST(req(JSON.stringify({ brain: 'realtime' })));
+    expect(standard.status).toBe(200);
+    const session = (await standard.json()).session;
+    expect(session.brain).toBe('realtime');
+    expect(session.brains).toEqual(['realtime']);
+    const sent = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(sent.session.delegation).toBeUndefined();
   });
 
   it('paid plan asking for the live brain mints the delegated session and records it', async () => {

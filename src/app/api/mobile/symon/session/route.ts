@@ -72,6 +72,11 @@ import {
  */
 
 const LOG = '[symon-agent]';
+/**
+ * False until the live brain mints through the Live session endpoint. Tests
+ * may switch it on to keep the delegated request shape covered.
+ */
+const liveBrainReady = () => process.env.O8_SYMON_LIVE_BRAIN_READY === '1';
 
 const CONTEXT_BODY_MAX_CHARS = 4_096;
 const CURRENT_ROUTE_MAX_CHARS = 160;
@@ -426,14 +431,22 @@ export async function POST(request: NextRequest) {
   // an upstream mint is attempted: a plan that may not run the live brain must
   // never spend a token finding that out. One flag names the gate.
   const entitlement = await getEntitlement();
-  const liveBrainAllowed = entitlement.flags['voice.liveBrain'];
+  // The live brain is off for every plan until it mints on the Live endpoint:
+  // OpenAI refuses its `session.delegation` block on the realtime mint, so a
+  // phone set to Live could not start Symon at all. The phone treats this
+  // refusal as "use Standard": it saves Standard, shows the detail once and
+  // mints again, and it hides the switch because `brains` no longer offers Live.
+  const ready = liveBrainReady();
+  const liveBrainAllowed = ready && entitlement.flags['voice.liveBrain'];
   if (sessionRequest.brain === 'live' && !liveBrainAllowed) {
-    console.warn(`${LOG} brain_locked: plan=${entitlement.plan}`);
+    console.warn(`${LOG} brain_locked: plan=${entitlement.plan} ready=${ready}`);
     return NextResponse.json(
       {
         ok: false,
         error: 'brain_locked',
-        detail: 'The live brain is a paid-plan option. This plan runs Symon on the standard brain.',
+        detail: ready
+          ? 'The live brain is a paid-plan option. This plan runs Symon on the standard brain.'
+          : 'The live brain is being rebuilt. Symon is running on the standard brain.',
       },
       { status: 403 },
     );
