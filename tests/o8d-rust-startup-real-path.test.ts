@@ -54,7 +54,7 @@ function equal(expected: unknown, actual: unknown, path: string) {
   if (difference) throw new Error(`Startup parity ${path}: ${difference}`);
 }
 
-it('records TS startup reads, replays 500 ignored-query requests per route natively, and preserves headers/auth', async () => {
+it('records TS startup reads, replays 500 shared-generator requests per route natively, and preserves headers/auth', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-startup-parity-')));
   const fixedPorts = { api: await freePort(), ws: await freePort() };
   const live = await listen();
