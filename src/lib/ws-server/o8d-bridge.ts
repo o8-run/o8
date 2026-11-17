@@ -4,6 +4,9 @@ import { isIP } from 'node:net';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { access, constants } from 'node:fs/promises';
+import { statSync } from 'node:fs';
+import packageJson from '../../../package.json';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
@@ -13,6 +16,25 @@ import { nativeSessionReadsEnabled } from './native-session-reads';
 import { o8dBinaryPath } from './o8d-binary';
 
 const PIPE_LIMIT = 1024 * 1024;
+
+/** Read-only authority snapshot; changed resolver cache keys defer to TS. */
+function startupPortInfo(): string | undefined {
+  try {
+    const stamp = (name: string): string | null => {
+      try { return statSync(join(getDataDir(), name), { bigint: true }).mtimeNs.toString(); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+    };
+    const apiMtimeNs = stamp('api-port');
+    const wsMtimeNs = stamp('ws-port');
+    // Reuse the actual TS cache, including its intentional ws-port asymmetry.
+    const info = resolvePortInfo();
+    if (stamp('api-port') !== apiMtimeNs || stamp('ws-port') !== wsMtimeNs) return undefined;
+    return JSON.stringify({ ...info, apiMtimeNs, wsMtimeNs });
+  } catch { return undefined; }
+}
 
 /** TS owns authentication, checkpoints and commands; Rust owns the public socket. */
 export class O8dBridge {
@@ -130,6 +152,8 @@ export class O8dBridge {
         '--app-upstream', this.upstream], {
         env: childEnvironment({ inherit: false, env: {
           O8D_BRIDGE_KEY: this.key, O8D_EPOCH: this.epoch,
+          O8D_SERVER_VERSION: packageJson.version, O8D_STARTUP_PORT_INFO: startupPortInfo(),
+          O8_INSTANCE_ID: process.env.O8_INSTANCE_ID, O8_BOOT_ID: process.env.O8_BOOT_ID,
           O8D_NATIVE_SESSION_READS: process.env.O8_NEXT_O8D === '1' && nativeSessionReadsEnabled() ? '1' : undefined,
           O8D_REQUEST_COUNTS_PATH: join(getDataDir(), 'o8d-request-counts.jsonl'),
           O8D_MACHINE_DISPLAY_NAME: nativeSessionReadsEnabled() ? localMachineName() : undefined,

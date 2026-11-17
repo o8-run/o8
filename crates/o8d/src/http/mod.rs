@@ -12,21 +12,23 @@ mod settings_presentation;
 mod settings_native;
 mod settings_roster;
 mod settings_providers;
+mod settings;
+
 mod thread_context;
 mod thread_metadata;
 mod thread_summary;
 
 use axum::{
-    Json, Router,
     body::Body,
     extract::State,
     http::{Request, StatusCode},
     response::{IntoResponse, Response},
     routing::any,
+    Json, Router,
 };
 use read_context::ReadContext;
 use rusqlite::{Connection, OpenFlags};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     io::Read,
@@ -229,9 +231,9 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params) -> Response {
                 let lanes: i64 = db
                     .query_row("SELECT COUNT(*) FROM lanes", [], |r| r.get(0))
                     .map_err(|_| ())?;
-                let mission =
-                    store.json(&store.directory.join("orchestrator-state.json"))?["mission"]
-                        .clone();
+                let mission = store.json(&store.directory.join("orchestrator-state.json"))?
+                    ["mission"]
+                    .clone();
                 if lanes != 0 || !mission["packets"].as_array().is_some_and(Vec::is_empty) {
                     return Err(());
                 }
@@ -244,6 +246,11 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params) -> Response {
                 Err(()) => unavailable(),
             }
         }
+        "/api/panel/ws-info" if std::env::var("O8D_NATIVE_SESSION_READS").as_deref() == Ok("1") => {
+            settings::ws_info(store)
+        }
+        // Preserve the existing standalone saved-file reader. Only the app
+        // transport has the live TypeScript resolver snapshot/admission path.
         "/api/panel/ws-info" => {
             let port = store
                 .file(&store.directory.join("ws-port"), 32)
@@ -260,6 +267,8 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params) -> Response {
         "/api/panel/operator-defaults" | "/api/runtime/provider-instances" | "/api/setup/config"
         | "/api/v2/keys" | "/api/runtime/capabilities" | "/api/runtime/service-tiers"
             => settings_defaults::read(store, path, params),
+        "/api/setup/identity" => settings::identity(store),
+
         _ => reply(StatusCode::NOT_FOUND, json!({"error":"Not found"})),
     }
 }
