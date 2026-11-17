@@ -10,6 +10,7 @@ test('nearest-rank percentiles and observed critical path do not sum parallel jo
     { name: 'parallel', created_at: at(2), started_at: at(5), completed_at: at(70), steps: [
       { name: 'Run npm run lint -- --cache', started_at: at(5), completed_at: at(12) },
       { name: 'Run node --test native-cache.test.mjs', started_at: at(12), completed_at: at(20) },
+      { name: 'Post Restore root node_modules', started_at: at(20), completed_at: at(25) },
     ] },
     { name: 'terminal', created_at: at(3), started_at: at(6), completed_at: at(100), steps: [
       { name: 'Run npm ci --prefer-offline', started_at: at(6), completed_at: at(26), conclusion: 'success' },
@@ -19,7 +20,7 @@ test('nearest-rank percentiles and observed critical path do not sum parallel jo
   assert.equal(run.wallSeconds, 120);
   assert.equal(run.criticalPath.observedSeconds, 100);
   assert.equal(run.criticalPath.terminalJob, 'terminal');
-  assert.equal(run.jobs[0].setupSeconds, 0);
+  assert.equal(run.jobs[0].setupSeconds, 5);
   assert.equal(run.jobs[0].runningSeconds, 15);
   assert.equal(run.jobs[1].queueSeconds, 3);
   assert.equal(run.jobs[1].installSeconds, 20);

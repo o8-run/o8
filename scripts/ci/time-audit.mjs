@@ -12,7 +12,7 @@ export function percentile(values, percent) {
 }
 const seconds = (start, end) => start && end ? Math.max(0, (Date.parse(end) - Date.parse(start)) / 1000) : 0;
 const install = name => /npm (?:ci|install)|Install (?:root )?dependencies/i.test(name);
-const setup = name => install(name) || /^(?:Set up |(?:Post )?Run (?:actions\/(?:checkout|setup-node|cache)|dtolnay\/rust-toolchain|Swatinem\/rust-cache|\.\/\.github\/actions\/(?:next-linux-setup|node-modules-cache|linux-package-prerequisites))|Restore |Save |Install |Verify native modules|Identify installed Node|Resolve current audit tool identity|Measure native cache size)/i.test(name);
+const setup = name => install(name) || /^(?:Set up |(?:Post )?Run (?:actions\/(?:checkout|setup-node|cache)|dtolnay\/rust-toolchain|Swatinem\/rust-cache|\.\/\.github\/actions\/(?:next-linux-setup|node-modules-cache|linux-package-prerequisites))|Restore |Save |Install |Verify native modules|Identify installed Node|Resolve current audit tool identity|Measure native cache size)/i.test(name.replace(/^(?:Post |Pre )/, ''));
 export function summarizeRun(run, jobs) {
   const active = jobs.filter(job => job.started_at && job.completed_at && job.conclusion !== 'skipped');
   const terminal = active.reduce((last, job) => !last || Date.parse(job.completed_at) > Date.parse(last.completed_at) ? job : last, null);
