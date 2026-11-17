@@ -70,6 +70,8 @@ pub struct UpdateConfig {
     pub pubkey: Option<String>,
     /// Debug builds only.
     pub max_download_bytes: Option<u64>,
+    /// Debug fixtures only: delay the first background check.
+    pub background_delay_ms: Option<u64>,
 }
 
 /// How the replacement is started once installed: the launcher's own
@@ -88,6 +90,7 @@ pub struct Updater {
     pubkey: String,
     max_download: u64,
     data_dir: PathBuf,
+    background_delay: Duration,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -178,6 +181,9 @@ impl Updater {
             max_download: debug_only(config.max_download_bytes, "max_download_bytes")?
                 .unwrap_or(MAX_DOWNLOAD),
             data_dir: data_dir.to_path_buf(),
+            background_delay: Duration::from_millis(
+                debug_only(config.background_delay_ms, "background_delay_ms")?.unwrap_or(1000),
+            ),
         })
     }
 
@@ -584,6 +590,9 @@ pub struct Controller {
     available: Option<Release>,
     error: Option<String>,
     ready: Option<Staged>,
+    install_requested: bool,
+    background_check: bool,
+    next_check: std::time::Instant,
 }
 
 impl Controller {
@@ -592,6 +601,9 @@ impl Controller {
         if let Ok(updater) = &updater {
             updater.recover();
         }
+        let delay = updater
+            .as_ref()
+            .map_or(Duration::from_secs(3600), |u| u.background_delay);
         Self {
             state: if updater.is_ok() {
                 "idle"
@@ -604,6 +616,9 @@ impl Controller {
             available: None,
             error: None,
             ready: None,
+            install_requested: false,
+            background_check: false,
+            next_check: std::time::Instant::now() + delay,
         }
     }
 
@@ -661,6 +676,10 @@ impl Controller {
             Err(_) => return self.status(),
             Ok(updater) => updater.clone(),
         };
+        if self.ready.is_some() {
+            self.install_requested = true;
+            return serde_json::json!({"ok": true, "state": "staged"});
+        }
         if let Some(refusal) = self.busy() {
             return refusal;
         }
@@ -670,6 +689,7 @@ impl Controller {
             self.error = Some(reason.clone());
             return serde_json::json!({"ok": false, "state": "failed", "error": reason});
         }
+        self.install_requested = true;
         self.state = "staging";
         self.error = None;
         self.spawn(move || Outcome::Staged(Box::new(updater.stage())));
@@ -693,6 +713,19 @@ impl Controller {
 
     /// Collects a finished job; returns a staged update ready for admission.
     pub fn poll(&mut self) -> Option<&Release> {
+        if self.install_requested && self.ready.is_some() {
+            return self.ready.as_ref().map(|staged| &staged.release);
+        }
+        if self.job.is_none()
+            && self.ready.is_none()
+            && std::time::Instant::now() >= self.next_check
+        {
+            self.next_check = std::time::Instant::now() + Duration::from_secs(3600);
+            if self.updater.is_ok() {
+                self.background_check = true;
+                self.check();
+            }
+        }
         let outcome = match self.job.as_ref().map(|job| job.try_recv()) {
             Some(Ok(outcome)) => outcome,
             Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
@@ -721,6 +754,13 @@ impl Controller {
                         answer
                     }
                 };
+                if self.background_check {
+                    self.background_check = false;
+                    if self.state == "available" {
+                        self.apply();
+                        self.install_requested = false;
+                    }
+                }
                 for mut peer in self.waiting.drain(..) {
                     let _ = writeln!(peer, "{answer}");
                 }
@@ -730,7 +770,9 @@ impl Controller {
                     self.state = "staged";
                     self.available = Some(staged.release.clone());
                     self.ready = Some(staged);
-                    return self.ready.as_ref().map(|staged| &staged.release);
+                    if self.install_requested {
+                        return self.ready.as_ref().map(|staged| &staged.release);
+                    }
                 }
                 Err(error) => {
                     crate::note!("Update not staged: {error}");

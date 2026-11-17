@@ -205,6 +205,7 @@ impl Case {
         config["version"] = "1.0.0".into();
         config["update"] = serde_json::json!({
             "bundle": bundle,
+            "background_delay_ms": 3_600_000,
             "settings": f.root.join("update-ping.json"),
             "endpoints": [
                 feed.url("/v1/update/{{target}}/{{arch}}/{{current_version}}"),
@@ -519,4 +520,57 @@ fn non_release_version_reports_unsupported_cleanly() {
         assert_eq!(answer["ok"], false);
     }
     assert!(f.launcher.as_mut().unwrap().try_wait().unwrap().is_none());
+}
+
+#[test]
+fn background_update_stages_without_request_and_waits_for_apply() {
+    let mut case = Case::new();
+    let path = case.f.root.join("config.json");
+    let mut config: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    config["update"]["background_delay_ms"] = 0.into();
+    fs::write(path, config.to_string()).unwrap();
+    let (bytes, signature) = case.signed("2.0.0", &[]);
+    case.publish("2.0.0", bytes, signature, false);
+    case.f.start();
+    case.f.ready();
+    until(|| case.status()["state"] == "staged");
+    assert!(case.feed.requested("/o8.app.tar.gz"));
+    assert!(case.installed().contains("1.0.0"));
+    assert!(!case.f.root.join("relaunched").exists());
+    assert!(case
+        .f
+        .launcher
+        .as_mut()
+        .unwrap()
+        .try_wait()
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        control(&case.f, serde_json::json!({"op":"update-apply"}))["ok"],
+        true
+    );
+    until(|| case.f.root.join("relaunched").exists());
+    assert!(case.installed().contains("2.0.0"));
+}
+
+#[test]
+fn background_bad_signature_is_discarded_while_servers_keep_running() {
+    let mut case = Case::new();
+    let path = case.f.root.join("config.json");
+    let mut config: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    config["update"]["background_delay_ms"] = 0.into();
+    fs::write(path, config.to_string()).unwrap();
+    let (mut bytes, signature) = case.signed("2.0.0", &[]);
+    bytes[10] ^= 1;
+    case.publish("2.0.0", bytes, signature, false);
+    case.f.start();
+    case.f.ready();
+    let servers = case.f.starts("api-starts");
+    until(|| case.status()["state"] == "failed");
+    assert!(case.status()["error"]
+        .as_str()
+        .unwrap()
+        .contains("signature"));
+    case.untouched(&servers);
+    assert!(TcpStream::connect(("127.0.0.1", case.f.port("ws-port"))).is_ok());
 }
