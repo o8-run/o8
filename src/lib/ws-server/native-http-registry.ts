@@ -484,6 +484,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/setup/detect', 'GET', () => import('@/app/api/setup/detect/route')),
   ],
   projects: [
+    // Reserve literal project paths before [id]; their original authenticated
+    // handlers remain TS-owned and cannot be shadowed by the new detail GET.
+    route('/api/projects/context', 'GET', () => import('@/app/api/projects/context/route')),
+    route('/api/projects/locks', 'GET', () => import('@/app/api/projects/locks/route')),
+    route('/api/projects/dismissed-suggestions', 'GET', () => import('@/app/api/projects/dismissed-suggestions/route')),
+    // Original operator/worker principal guard, middleware and rooted image reader stay authoritative.
+    route('/api/panel/repo-icon', 'GET', () => import('@/app/api/panel/repo-icon/route')),
     // POST is the MCP server's project create (o8_create_project). No device or worker grant in
     // panelGateMiddleware, so over native only the operator bearer passes; the handler has no auth of its
     // own and never reads x-o8-client-addr or loopback. It writes the SQLite project and the projects ledger,
@@ -495,7 +502,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/repos/init', 'POST', () => import('@/app/api/panel/repos/init/route')),
     route('/api/panel/repos/scaffold', 'POST', () => import('@/app/api/panel/repos/scaffold/route')),
     route('/api/projects', 'GET POST', () => import('@/app/api/projects/route')),
-    route('/api/projects/[id]', 'PATCH DELETE', () => import('@/app/api/projects/[id]/route')),
+    // GET retains requirePanelAuth, with no device/worker grant added.
+    route('/api/projects/[id]', 'GET PATCH DELETE', () => import('@/app/api/projects/[id]/route')),
     route('/api/projects/[id]/repos', 'POST', () => import('@/app/api/projects/[id]/repos/route')),
     route('/api/projects/[id]/repos/[repoId]', 'PATCH DELETE', () => import('@/app/api/projects/[id]/repos/[repoId]/route')),
   ],

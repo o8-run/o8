@@ -138,6 +138,16 @@
       ]
     },
     {
+      "path": "src/app/api/panel/prs/[number]/checkout/route-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "src/app/api/panel/prs/github-panel-snapshot.test.ts",
       "reasons": [
         "child-process",
@@ -3450,6 +3460,12 @@
       ]
     },
     {
+      "path": "tests/github-device-consolidation.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/github-issue-packet-scope-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5706,6 +5722,14 @@
       ]
     },
     {
+      "path": "tests/o8d-rust-projects-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-rust-review-workspace-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5935,6 +5959,12 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/openrouter-work-usage-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
@@ -8653,6 +8683,12 @@
         "real-path"
       ],
       "browser": true
+    },
+    {
+      "path": "tests/voice-codex-realtime-route.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
     },
     {
       "path": "tests/wake-triage-real-path.test.ts",

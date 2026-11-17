@@ -4,6 +4,7 @@ mod chat_list;
 mod mobile_inbox;
 mod review_workspace;
 mod git_remote;
+mod projects;
 mod queue;
 mod read_context;
 mod repository;
@@ -209,6 +210,9 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
 }
 fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, _body: &[u8]) -> Response {
     if method != "GET" { return unavailable() }
+    if projects::matches(path) {
+        return projects::read(store, path, params);
+    }
     match path {
         "/api/panel/branches"
             if std::env::var("O8D_NATIVE_REPOSITORY_READS").as_deref() == Ok("1") =>
@@ -284,9 +288,20 @@ pub fn native_route(path: &str, method: &str) -> Option<&'static Value> {
         })
         .iter()
         .find(|route| {
-            route["path"] == path
-                && route["methods"].as_array()
-                    .is_some_and(|methods| methods.iter().any(|entry| entry == method))
+            route["path"].as_str().is_some_and(|pattern| {
+                let expected = pattern.split('/').collect::<Vec<_>>();
+                let actual = path.split('/').collect::<Vec<_>>();
+                expected.len() == actual.len()
+                    && expected.iter().zip(actual).all(|(e, a)| {
+                        if e.starts_with('[') && e.ends_with(']') {
+                            !a.is_empty()
+                        } else {
+                            *e == a
+                        }
+                    })
+            }) && route["methods"]
+                .as_array()
+                .is_some_and(|methods| methods.iter().any(|entry| entry == method))
         })
 }
 

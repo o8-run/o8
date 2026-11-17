@@ -502,3 +502,25 @@ length framing retain streaming fallback. Production route methods remain
 GET-only in this change; no Rust store writer is added. The write-path corpus
 and exported byte-handler fixture verify the seam through the real public
 socket with Next stopped. Generic write admission requires security review.
+
+## Saved repository and project reads
+
+The shared table admits five GETs at rust-with-fallback: panel/repos,
+panel/projects, projects, projects/[id] and panel/repo-icon. TypeScript retains
+registry/readiness/icon process-cache authority, GitHub discovery, selected
+readiness/restore probes, sidecar/SQL repair and all store writes. Native
+repo-icon replies cover missing repositories and proven missing icons; rooted
+image discovery/verification stays with the original handler.
+
+Dynamic project admission matches the registry's selected route pattern.
+Reserved literal context/locks/dismissed-suggestions probes receive409 without
+executing their GET; normal fallback performs the canonical dispatch. Every
+existing bearer/principal floor remains authoritative. No SSH peer/local-only
+admission or workspace lifecycle route is included in this group.
+
+The public-socket fixture launches separate flag-off/on children, captures100
+seeded requests per route, checks the frozen oracle and durable native-store
+content, and preserves all JSON fields. Clock and owned image mtime are seeded
+inputs. A separate creation case verifies the TS fallback creates missing
+projects and persists returned IDs. See evidence/projects for exact counts,
+consumer-parser proof and release-only timing.
