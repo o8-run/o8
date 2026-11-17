@@ -5662,6 +5662,9 @@ fn browser_view_show(window: tauri::Window, app: tauri::AppHandle) -> Result<(),
 #[tauri::command]
 fn open_voice_settings(app: tauri::AppHandle) {
     use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+    if dock_window::VOICE_PAGES_REMOVED {
+        return;
+    }
     if let Some(win) = app.get_webview_window("voice-settings") {
         let _ = win.center();
         let _ = win.show();

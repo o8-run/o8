@@ -665,6 +665,10 @@ mod overlay {
     fn build_window(app: &tauri::AppHandle) -> bool {
         use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+        if crate::dock_window::VOICE_PAGES_REMOVED {
+            return false;
+        }
+
         let base = match crate::dev_frontend::from_env() {
             Ok(Some(dev)) => dev.origin().to_string(),
             _ => format!("http://127.0.0.1:{}", API_PORT.get().copied().unwrap_or(3001)),

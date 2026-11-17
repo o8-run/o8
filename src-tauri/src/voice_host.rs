@@ -85,6 +85,9 @@ pub(crate) fn start(app: AppHandle, port: u16, boot_id: String) {
         return;
     }
     app.manage(VoiceHost);
+    if crate::dock_window::VOICE_PAGES_REMOVED {
+        return;
+    }
     // Never load the packaged dashboard loader. Wait for this boot's server,
     // then create directly at the only permitted voice-host URL.
     std::thread::spawn(move || {

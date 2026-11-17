@@ -148,6 +148,10 @@ mod imp {
     pub fn create(app: &tauri::AppHandle, api_port: u16) {
         use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
+        if crate::dock_window::VOICE_PAGES_REMOVED {
+            return;
+        }
+
         if app.get_webview_window(SPATIAL_INK_LABEL).is_some() {
             return;
         }

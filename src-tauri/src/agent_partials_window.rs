@@ -69,6 +69,10 @@ const WINDOW_BOTTOM_GAP: f64 = 190.0;
 pub fn create(app: &tauri::AppHandle, api_port: u16) {
     use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
+    if crate::dock_window::VOICE_PAGES_REMOVED {
+        return;
+    }
+
     if app.get_webview_window(PARTIALS_LABEL).is_some() {
         return;
     }
