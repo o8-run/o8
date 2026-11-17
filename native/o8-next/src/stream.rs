@@ -223,26 +223,12 @@ impl Transcript {
         this
     }
     fn merge(&mut self, incoming: Vec<Entry>, replace: bool) -> bool {
-        let prefix = if self.backfilled && !replace {
-            incoming
-                .first()
-                .and_then(|first| self.entries.iter().position(|entry| entry.id == first.id))
-                .map(|index| self.entries[..index].to_vec())
-                .unwrap_or_else(|| self.entries.clone())
-        } else {
-            vec![]
-        };
         let mut next = if replace {
             incoming
         } else {
-            crate::merge::entries(&self.entries, incoming)
+            crate::merge::sources(&self.entries, incoming)
         };
-        if self.backfilled && !replace {
-            let mut retained = prefix;
-            retained.retain(|entry| !next.iter().any(|current| current.id == entry.id));
-            retained.extend(next);
-            next = retained;
-        } else if !self.backfilled
+        if !self.backfilled
             && next.len() > 200
             && !next
                 .last()
@@ -838,8 +824,8 @@ impl Transcript {
             self.context_busy = active;
         }
         // Normalized worker frames contain only changed entries. The mobile
-        // merger intentionally trims windows and deduplicates equal commands;
-        // neither rule applies to distinct, cursor-addressed worker events.
+        // source merger does not interpret worker coverage markers; those rules
+        // belong to the distinct, cursor-addressed worker path.
         if entries
             .last()
             .is_some_and(|e| e.extra.contains_key("nativeWorkerReadback"))
@@ -852,7 +838,7 @@ impl Transcript {
             .any(|entry| self.entries.iter().any(|current| current.id == entry.id));
         // A send's echo can arrive as a one-turn window: one that is shorter and
         // shares nothing with this chat extends it rather than wiping it.
-        if !overlaps && !entries.is_empty() && entries.len() < self.entries.len() {
+        if replace && !overlaps && !entries.is_empty() && entries.len() < self.entries.len() {
             let mut next = self.entries.clone();
             next.extend(entries);
             return self.merge(next, true);
@@ -915,6 +901,85 @@ impl Transcript {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn merge_history(entries: Value) -> History {
+        serde_json::from_value(
+            serde_json::json!({"sessionKey":"llm-chat:merge","transcript":entries}),
+        )
+        .unwrap()
+    }
+    fn merge_frame(entries: Value, replace: bool) -> Value {
+        serde_json::json!({"channel":"history","event":"update","data":{
+            "sessionKey":"llm-chat:merge","entries":entries,"replace":replace}})
+    }
+    #[test]
+    fn merge_port_partial_middle_window_retains_long_thread() {
+        let entries: Vec<Value> = (0..300).map(|i| serde_json::json!({
+            "id":format!("e{i}"),"role":"assistant","text":format!("reply {i}"),"timestamp":i
+        })).collect();
+        let mut t = Transcript::new(merge_history(serde_json::json!(entries[100..])));
+        t.apply(&merge_frame(serde_json::json!(entries[140..160]), false));
+        assert_eq!(t.entries.len(), 200, "partial windows retain the live tail");
+        assert_eq!(t.entries[0].id, "e100");
+        t.prepend(merge_history(serde_json::json!(entries[..100])));
+        t.apply(&merge_frame(serde_json::json!(entries[140..160]), false));
+        assert_eq!(t.entries.len(), 300);
+        assert!(
+            t.entries
+                .iter()
+                .enumerate()
+                .all(|(i, e)| e.id == format!("e{i}"))
+        );
+    }
+    #[test]
+    fn merge_port_live_revision_has_no_duplicate_or_stale_text() {
+        let mut t = Transcript::new(merge_history(serde_json::json!([
+            {"id":"a","role":"user","text":"question","timestamp":1},
+            {"id":"b","role":"assistant","text":"Draft","timestamp":2}
+        ])));
+        t.apply(&merge_frame(
+            serde_json::json!([
+                {"id":"b","role":"assistant","text":"Final","timestamp":2,"persistedVersion":2}
+            ]),
+            false,
+        ));
+        assert_eq!(t.entries.len(), 2);
+        assert_eq!(t.entries[1].text, "Final");
+    }
+    #[test]
+    fn merge_port_overlapping_backfilled_checkpoints_keep_newest_revision() {
+        let mut t = Transcript::new(merge_history(serde_json::json!([
+            {"id":"b","role":"user","text":"question","timestamp":2},
+            {"id":"c","role":"assistant","text":"Draft","timestamp":3}
+        ])));
+        t.prepend(merge_history(serde_json::json!([
+            {"id":"a","role":"user","text":"older","timestamp":1}
+        ])));
+        for (text, version, time) in [("Final", 2, 3), ("Draft", 1, 4)] {
+            t.apply(&merge_frame(serde_json::json!([
+                {"id":"b","role":"user","text":"question","timestamp":2},
+                {"id":"c","role":"assistant","text":text,"timestamp":time,"persistedVersion":version}
+            ]), true));
+            assert_eq!(
+                t.entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+                ["a", "b", "c"]
+            );
+            assert_eq!(t.entries[2].text, "Final");
+        }
+    }
+    #[test]
+    fn merge_port_optimistic_user_confirmation_survives_stale_echo() {
+        let mut t = Transcript::new(merge_history(serde_json::json!([
+            {"id":"orch-user-send","role":"user","text":"question","timestamp":1}
+        ])));
+        for confirmed in [true, false] {
+            t.apply(&merge_frame(serde_json::json!([
+                {"id":"orch-user-send","role":"user","text":"question","timestamp":1,"deliveryConfirmed":confirmed}
+            ]), false));
+            assert_eq!(t.entries.len(), 1);
+            assert_eq!(t.entries[0].extra["deliveryConfirmed"], true);
+        }
+    }
+
     fn native_terminal_fixture(output: bool) -> Transcript {
         let mut transcript = Transcript::new(
             serde_json::from_value(serde_json::json!({
