@@ -1,3 +1,5 @@
+import { apiFrontDoorEnabled } from './api-front-door-config';
+import { registeredFrontDoorRoute } from './api-front-door-routes';
 /**
  * Next.js HTTP fetch helpers for the ws-server → Next API hop.
  *
@@ -40,7 +42,7 @@ function wsToken(): string {
 }
 
 function getNextOrigin(pathname: string, method: string): string {
-  if (process.env.O8_NEXT_O8D === '1' && matchNativeHttpRoute(pathname, method)) return getWsBase().replace(/^ws:/, 'http:');
+  if (apiFrontDoorEnabled() ? registeredFrontDoorRoute(pathname, method) : process.env.O8_NEXT_O8D === '1' && matchNativeHttpRoute(pathname, method)) return getWsBase().replace(/^ws:/, 'http:');
   return process.env.NEXT_ORIGIN ?? getApiBase();
 }
 

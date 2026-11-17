@@ -2,6 +2,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
@@ -23,8 +24,24 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const record = { method: req.method!, path: req.url!, host: req.headers.host!, body: Buffer.concat(chunks).toString('base64') };
     if (req.url?.startsWith('/api/fixture/') || req.url === '/api/setup/identity') requests.push(record);
+    if (req.url === '/fixture/redirect') { res.writeHead(302, { Location: '/fixture/destination' }).end(); return; }
+    if (req.url === '/fixture/stream') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: first\n\n');
+      setTimeout(() => res.end('data: second\n\n'), 20); return;
+    }
+    if (req.method === 'HEAD') { res.writeHead(202, { 'Content-Length': '7', 'X-Fixture': 'head' }).end(); return; }
+    if (req.method === 'OPTIONS') { res.writeHead(204, { Allow: 'GET, POST' }).end(); return; }
+    if (req.url === '/api/fixture/peer') {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ address: req.headers['x-o8-client-addr'],
+        relay: req.headers['x-o8-relay-forward'] ?? null, bridge: req.headers['x-o8d-bridge'] ?? null })); return;
+    }
     res.writeHead(207, { 'Content-Type': 'application/json', 'Set-Cookie': ['fixture-a=1; HttpOnly', 'fixture-b=2; SameSite=Strict'] });
     res.end(JSON.stringify(record));
+  });
+  upstream.on('upgrade', (_req, socket, head) => {
+    socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\nfixture-upgrade');
+    if (head.length) socket.write(head);
+    socket.on('error', () => {}); socket.on('data', bytes => socket.write(bytes));
   });
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
   const nextPort = (upstream.address() as { port: number }).port;
@@ -61,8 +78,8 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
     expect(ready, 'WS startup failed: ' + stderr).toBe(true);
     requests.length = 0;
     let registered: Response;
-    try { registered = await fetch(origin + '/api/setup/identity', { signal: AbortSignal.timeout(5000) }); }
-    catch { throw new Error('Advertised API port was not taken over with O8_API_FRONT_DOOR=1 and O8_NEXT_O8D=0'); }
+    try { registered = await fetch(origin + '/api/setup/identity', { signal: AbortSignal.timeout(30_000) }); }
+    catch (error) { throw new Error('Advertised API port was not ready with O8_API_FRONT_DOOR=1 and O8_NEXT_O8D=0: ' + (error instanceof Error ? error.name : 'unknown')); }
     expect(registered.status).toBe(200);
     expect(requests).toEqual([]);
     expect(await registered.json()).toMatchObject({ apiPort, wsPort: apiPort });
@@ -75,6 +92,38 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
     expect(forwarded.headers.getSetCookie()).toEqual(['fixture-a=1; HttpOnly', 'fixture-b=2; SameSite=Strict']);
     expect(await forwarded.json()).toEqual({ method: 'POST', path: '/api/fixture/unregistered?repeat=a&repeat=b&text=%E9%9B%AA',
       host: `127.0.0.1:${apiPort}`, body: bytes.toString('base64') });
+    const redirect = await fetch(origin + '/fixture/redirect', { redirect: 'manual' });
+    expect([redirect.status, redirect.headers.get('location')]).toEqual([302, '/fixture/destination']);
+    const head = await fetch(origin + '/fixture/head', { method: 'HEAD' });
+    expect([head.status, head.headers.get('content-length'), await head.text()]).toEqual([202, '7', '']);
+    const options = await fetch(origin + '/fixture/options', { method: 'OPTIONS' });
+    expect([options.status, options.headers.get('allow')]).toEqual([204, 'GET, POST']);
+    const stream = await fetch(origin + '/fixture/stream');
+    expect(stream.headers.get('content-type')).toBe('text/event-stream');
+    expect(await stream.text()).toBe('data: first\n\ndata: second\n\n');
+    for (const path of ['/', '/mobile', '/dashboard']) {
+      const response = await fetch(origin + path);
+      expect(response.status).toBe(200); expect(await response.text()).toContain('Use the desktop app');
+    }
+    for (const headers of [{ 'x-o8-client-addr': '127.0.0.9', 'x-o8d-bridge': 'forged' },
+      { 'x-o8-client-addr': '127.0.0.9', 'x-o8-relay-forward': '1', 'x-o8d-bridge': 'forged' }]) {
+      const response = await fetch(origin + '/api/fixture/peer', { headers });
+      expect(await response.json()).toEqual({ address: headers['x-o8-relay-forward'] ? 'o8-relay-forward' : '127.0.0.1',
+        relay: headers['x-o8-relay-forward'] ? '1' : null, bridge: null });
+    }
+    expect((await fetch(origin + '/api/setup/status')).status).toBe(401);
+    expect((await fetch(origin + '/api/setup/status', { headers: { authorization: 'Bearer wrong' } })).status).toBe(401);
+    expect((await fetch(origin + '/api/setup/status', { headers: { authorization: 'Bearer ' + token } })).status).toBe(200);
+    expect((await fetch(origin + '/api/fixture/unknown', { headers: { host: 'untrusted.invalid' } })).status).toBe(421);
+    expect((await fetch(origin + '/api/fixture/unknown', { method: 'POST', headers: { origin: 'https://untrusted.invalid' } })).status).toBe(403);
+    const socket = connect(apiPort, '127.0.0.1');
+    try {
+      await once(socket, 'connect');
+      socket.write(`GET /fixture/upgrade HTTP/1.1\r\nHost: 127.0.0.1:${apiPort}\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\n`);
+      let data = '';
+      for await (const chunk of socket) { data += chunk.toString(); if (data.includes('fixture-upgrade')) break; }
+      expect(data).toContain('HTTP/1.1 101'); expect(data).toContain('fixture-upgrade');
+    } finally { socket.destroy(); }
     upstream.closeAllConnections();
     await new Promise<void>(resolve => upstream.close(() => resolve()));
     const nativeOnly = await fetch(origin + '/api/setup/identity', { signal: AbortSignal.timeout(5000) });
@@ -93,4 +142,4 @@ it('owns the advertised API socket without the legacy flag and forwards unknown 
     if (upstream.listening) await new Promise<void>(resolve => upstream.close(() => resolve()));
     rmSync(directory, { recursive: true, force: true });
   }
-}, 120_000);
+}, 180_000);

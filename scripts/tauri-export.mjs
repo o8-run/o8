@@ -463,8 +463,10 @@ function stampClientAddr(server) {
       const appPort = Number(process.env.PORT);
       if (!Number.isInteger(appPort) || appPort < 1 || appPort > 65535
         || req.socket?.localPort === appPort) {
-        if (!isAllowedLocalHost(req.headers.host, req.socket.localPort)
-          || !requestTargetAllowed(req.url, req.socket.localPort)) return refuse(421);
+        const publicPort = process.env.O8_API_FRONT_DOOR === '1' ? Number(process.env.O8_API_PORT) : req.socket.localPort;
+        if (!Number.isInteger(publicPort) || publicPort < 1 || publicPort > 65535
+          || !isAllowedLocalHost(req.headers.host, publicPort)
+          || !requestTargetAllowed(req.url, publicPort)) return refuse(421);
         const get = (name) => typeof req.headers[name] === 'string' ? req.headers[name] : null;
         if (!browserWriteAllowed(req.method, get, req.socket?.encrypted ? 'https:' : 'http:')) return refuse(403);
       }
