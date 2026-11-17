@@ -1,0 +1,103 @@
+{
+  "/api/setup/config": [],
+  "/api/runtime/provider-instances": [
+    {
+      "name": "thread",
+      "valid": [
+        "fixture-thread",
+        "missing-thread"
+      ],
+      "invalid": [
+        "__proto__"
+      ],
+      "boundary": [
+        " ",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ]
+    }
+  ],
+  "/api/runtime/capabilities": [
+    {
+      "name": "id",
+      "valid": [
+        "codex",
+        "claude-code",
+        "gemini",
+        "opencode",
+        "hermes",
+        "muse"
+      ],
+      "invalid": [
+        "missing",
+        "CODEX"
+      ],
+      "boundary": [
+        " ",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ]
+    }
+  ],
+  "/api/v2/keys": [],
+  "/api/runtime/service-tiers": [
+    {
+      "name": "backend",
+      "valid": [
+        "codex",
+        "claude"
+      ],
+      "invalid": [
+        "unknown",
+        "CLAUDE"
+      ]
+    },
+    {
+      "name": "model",
+      "valid": [
+        "gpt-5.4",
+        "claude-opus-4-6",
+        "fixture-model"
+      ],
+      "boundary": [
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        " "
+      ]
+    }
+  ],
+  "/api/panel/operator-defaults": [
+    {
+      "name": "include",
+      "valid": [
+        "presentation",
+        "native",
+        "setup-built-in",
+        "values",
+        "setup",
+        "window-error"
+      ],
+      "invalid": [
+        "invalid",
+        "NATIVE"
+      ]
+    },
+    {
+      "name": "refresh",
+      "valid": [
+        "runtime"
+      ],
+      "invalid": [
+        "true",
+        "RUNTIME"
+      ]
+    },
+    {
+      "name": "project",
+      "valid": [
+        "fixture-project"
+      ],
+      "invalid": [
+        "missing-project"
+      ]
+    }
+  ]
+}

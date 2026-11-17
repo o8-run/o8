@@ -366,6 +366,7 @@ mod tests {
         Fixture(Store {
             directory: directory.canonicalize().unwrap(),
             database,
+            defaults_context: None,
         })
     }
     fn write(f: &Fixture, id: &str, extra: Value) {
