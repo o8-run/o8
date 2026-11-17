@@ -108,5 +108,15 @@
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
     "test": "tests/o8d-rust-settings-real-path.test.ts"
+  },
+  {
+    "path": "/api/mobile/inbox",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Only a warm empty canonical inbox cache is admitted; fresh, expired, invalidated, live and nonempty projections remain TypeScript-owned.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-mobile-inbox-real-path.test.ts"
   }
 ]

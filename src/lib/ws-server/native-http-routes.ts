@@ -84,7 +84,12 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
       // to the original handler even when the public bearer gate passed.
       const deferSettingsHop = url.pathname === '/api/panel/operator-defaults'
         && headers.has('x-o8-settings-window-owner-hop');
+      const mobileInbox = url.pathname === '/api/mobile/inbox'
+        ? (await import('@/lib/mobile/inbox')).nativeEmptyInboxContext({
+          fresh: url.searchParams.get('fresh') === '1', includeWorkspaceReview: url.searchParams.get('workspaceReview') !== '0',
+        }) : undefined;
       const defaultsContext = {
+        mobileInbox,
         operatorEnvClean: [
           'O8_ACTION_EFFORT',
           'O8_ACTION_MODEL',
@@ -147,10 +152,10 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
         ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
       };
-      response = denied ?? (deferSettingsHop ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+      response = denied ?? ((deferSettingsHop || mobileInbox === null) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
         'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
       } }));
-      admission = !denied && !deferSettingsHop;
+      admission = !denied && !deferSettingsHop && !(mobileInbox === null);
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });
     } else if (match.route.path === '/api/runtime/archive' && typeof mutationWorkspace({ url: url.href }) !== 'string') {

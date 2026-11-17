@@ -1,6 +1,7 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
 mod chat;
 mod chat_list;
+mod mobile_inbox;
 mod git_remote;
 mod queue;
 mod read_context;
@@ -298,6 +299,7 @@ pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &s
     if !is_session_read(path) {
         return unavailable();
     }
+    if path == "/api/mobile/inbox" { return mobile_inbox::read(&store); }
     // A missing JSON file can still be a network thread. Its agent-bus
     // projection and projection health remain owned by TypeScript.
     let id = match path {

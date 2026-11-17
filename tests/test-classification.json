@@ -5824,6 +5824,14 @@
       ]
     },
     {
+      "path": "tests/o8d-rust-mobile-inbox-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-rust-settings-real-path.test.ts",
       "reasons": [
         "child-process",
