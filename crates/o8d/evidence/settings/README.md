@@ -21,13 +21,15 @@ Release-only latency uses an optimized build,10 warmups and100 measured requests
 
 | Shape | TS p50/p95 ms | Rust p50/p95 ms |
 | --- | ---: | ---: |
-| /api/setup/config | 2.90/3.27 | 5.21/5.59 |
-| /api/runtime/provider-instances | 2.92/3.41 | 6.45/8.02 |
-| /api/runtime/capabilities | 2.85/3.86 | 7.98/9.08 |
-| /api/v2/keys | 3.38/4.02 | 5.98/6.93 |
-| /api/runtime/service-tiers | 4.61/6.04 | 6.87/8.58 |
-| /api/panel/operator-defaults?include=native | 10.92/15.77 | 7.32/9.69 |
+| /api/setup/config | 3.62/4.50 | 5.35/6.99 |
+| /api/runtime/provider-instances | 3.54/4.04 | 5.94/8.13 |
+| /api/runtime/capabilities | 3.36/4.73 | 5.87/6.18 |
+| /api/v2/keys | 4.74/5.50 | 6.16/7.95 |
+| /api/runtime/service-tiers | 4.04/5.77 | 6.91/7.95 |
+| /api/panel/operator-defaults?include=native | 10.07/13.16 | 7.16/9.12 |
 
 Final hermetic run:920 files/7515 tests pass,4 tests fail in the same2 baseline files (mobile-model-catalog and providers/instances),3 files/5 tests skipped. Initial cache startup failed before tests; the completed run uses an isolated filesystem cache with the same selection. Focused public/frozen/Rust/typecheck/lint/rules/inventory checks pass. Hosted Ubuntu acceptance remains pending.
 
 The reference and native phases launch separate real daemon children with their actual flag values. The reference phase asserts zero native-admission probes, so each TypeScript GET executes once. This replaces the earlier measurements that toggled only the Node flag beneath a running daemon. Fresh frozen/typecheck/lint/rules/classification checks pass after this fixture correction; production application sources are unchanged.
+
+Rebased onto main88657435a after chat-list merged. Fresh public/table/frozen, typecheck, lint, rules and all-feature Rust checks pass. Exact extracted o8-next serde accepts102 native-settings replies and100 key-inventory replies, and rejects omitted additionalSettingsSet/provider id. This fixture has no nonempty bot sample; no fresh bot-row omission coverage or GPUI launch is claimed.
