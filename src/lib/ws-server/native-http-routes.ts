@@ -1,4 +1,5 @@
 /** Shell transport work: reuse surface handlers on the opt-in WS listener without Next. */
+import nativeRoutes from '../../../crates/o8d/native-routes.json';
 import { once } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { NextRequest } from 'next/server';
@@ -72,7 +73,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     if (gate.headers.get('x-middleware-next') !== '1') response = gate;
     else if (authenticatedBridge && nativeSessionReadsEnabled()
       && req.method === 'GET' && req.headers['x-o8d-session-read'] === 'authorize'
-      && ['/api/mobile/orchestrator/threads', '/api/mobile/history', '/api/v2/chat-history', '/api/orchestrator/composer-queue'].includes(url.pathname)) {
+      && nativeRoutes.some(route => route.path === url.pathname && route.methods.includes(req.method ?? 'GET'))) {
       // Admission only. Keep the middleware and queue's existing defense-in-depth
       // gate authoritative; the bridge credential cannot authorize a principal.
       const denied = url.pathname === '/api/orchestrator/composer-queue'

@@ -37,6 +37,7 @@ pub(super) async fn serve(
     header: &str,
     upstream: &str,
     key: &str,
+    count: &super::request_counts::Count,
 ) -> Result<bool, ()> {
     if !enabled() {
         return Ok(false);
@@ -58,7 +59,7 @@ pub(super) async fn serve(
     {
         return Ok(false);
     }
-    if !http::is_session_read(path) {
+    if http::native_route(path, "GET").is_none() {
         return Ok(false);
     }
     // Admit the original path/method/headers through production middleware and
@@ -125,7 +126,7 @@ pub(super) async fn serve(
         .map_err(|_| ())?;
     let status = response.status();
     let mut output = format!(
-        "HTTP/1.1 {} {}\r\nConnection: close\r\nx-o8d-native-session-read: 1\r\n",
+        "HTTP/1.1 {} {}\r\nConnection: close\r\nx-o8d-native: 1\r\nx-o8d-native-session-read: 1\r\n",
         status.as_u16(),
         status.canonical_reason().unwrap_or("Response")
     );
@@ -139,5 +140,6 @@ pub(super) async fn serve(
     socket.write_all(output.as_bytes()).await.map_err(|_| ())?;
     socket.write_all(&body).await.map_err(|_| ())?;
     socket.shutdown().await.map_err(|_| ())?;
+    count.finish(Some(status.as_u16())).await;
     Ok(true)
 }

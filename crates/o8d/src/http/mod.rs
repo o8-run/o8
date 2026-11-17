@@ -250,15 +250,25 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params) -> Response {
     }
 }
 
-/// Shared inventory for native admission; non-GET dispatch remains with TS.
+/// Shared inventory for native admission, embedded once from the route table.
+pub fn native_route(path: &str, method: &str) -> Option<&'static Value> {
+    static ROUTES: std::sync::OnceLock<Vec<Value>> = std::sync::OnceLock::new();
+    ROUTES
+        .get_or_init(|| {
+            serde_json::from_str(include_str!("../../native-routes.json"))
+                .expect("valid native route table")
+        })
+        .iter()
+        .find(|route| {
+            route["path"] == path
+                && route["methods"].as_array()
+                    .is_some_and(|methods| methods.iter().any(|entry| entry == method))
+        })
+}
+
+/// Compatibility wrapper for saved-session dispatch.
 pub fn is_session_read(path: &str) -> bool {
-    matches!(
-        path,
-        "/api/mobile/orchestrator/threads"
-            | "/api/mobile/history"
-            | "/api/v2/chat-history"
-            | "/api/orchestrator/composer-queue"
-    )
+    native_route(path, "GET").is_some()
 }
 
 /// Called only after the app transport's per-request TypeScript auth admission.
