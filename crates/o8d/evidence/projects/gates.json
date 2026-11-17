@@ -4,7 +4,7 @@
     "profile": "release",
     "binarySha256": "f54e7bc8062ef7280083a325eb4580ea5efc2a77a11eaaaaff811ae8a81787e2",
     "command": "cargo build --locked --offline --release --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d",
-    "rebaseNote": "The final base update changes only mission-registry cache/tests and archived release notes; Rust sources and bridge are identical to the optimized build. The 500-case frozen/public replay and typecheck were rerun on the rebased tree."
+    "rebaseNote": "Release samples above are the historical optimized receipt. Current functional replay is recorded separately under latestRebase; no new latency claim is made."
   },
   "summary": [
     {
@@ -2049,5 +2049,130 @@
       "passedTests": 2,
       "base": "6713fba4878c4d4549d9a6479fa24490633b201b"
     }
+  },
+  "reservedProof": [
+    {
+      "path": "/api/projects/locks",
+      "admissionStatus": 409,
+      "native": false
+    }
+  ],
+  "retiredProof": [
+    {
+      "path": "/api/projects/context",
+      "admissionStatus": 409,
+      "status": 404,
+      "native": false
+    },
+    {
+      "path": "/api/projects/dismissed-suggestions",
+      "admissionStatus": 409,
+      "status": 404,
+      "native": false
+    }
+  ],
+  "latestRebase": {
+    "base": "44f65df81bd01cd3b5712e124fab621ba10cc2c5",
+    "checks": {
+      "cargoAllFeatures": 0,
+      "cargoTests": 30,
+      "typecheckFast": 0,
+      "touchedLint": 0,
+      "wholeTouchedModules": 0
+    },
+    "modules": {
+      "tests/o8d-rust-projects-real-path.test.ts": 1,
+      "tests/o8d-native-route-table-real-path.test.ts": 1,
+      "tests/o8d-parity-real-path.test.ts": 7
+    },
+    "summary": [
+      {
+        "route": "/api/panel/repos",
+        "attempted": 100,
+        "native": 38,
+        "fallback": 62,
+        "differences": 0
+      },
+      {
+        "route": "/api/panel/projects",
+        "attempted": 100,
+        "native": 80,
+        "fallback": 20,
+        "differences": 0
+      },
+      {
+        "route": "/api/projects",
+        "attempted": 100,
+        "native": 60,
+        "fallback": 40,
+        "differences": 0
+      },
+      {
+        "route": "/api/panel/repo-icon",
+        "attempted": 100,
+        "native": 80,
+        "fallback": 20,
+        "differences": 0
+      },
+      {
+        "route": "/api/projects/[id]",
+        "attempted": 100,
+        "native": 48,
+        "fallback": 52,
+        "differences": 0
+      }
+    ],
+    "authCases": 35,
+    "functionalBinarySha256": "5dd53c161de5b72cbd4ac4f2bc816a53b26abb89e41d7ae597ee048fd0a26187",
+    "preserved": "Settings and mobile contexts, settings auth paths, window-owner fallback and project principal checks."
+  },
+  "retiredRegistryRegression": {
+    "redExit": 1,
+    "redBase": "592cdd8d3112bb679578ae14d4d8a1176b0c99c8",
+    "redSetup": "Remove context/dismissed registry imports and add retired-name socket assertions before the explicit admission refusal.",
+    "failure": "Expected native false; received true for the retired path via the dynamic detail route.",
+    "greenExit": 0,
+    "outcomes": [
+      {
+        "path": "/api/projects/context",
+        "admissionStatus": 409,
+        "status": 404,
+        "native": false
+      },
+      {
+        "path": "/api/projects/dismissed-suggestions",
+        "admissionStatus": 409,
+        "status": 404,
+        "native": false
+      }
+    ]
+  },
+  "packagingRebase": {
+    "base": "dc855e3a8",
+    "routeModule": 0,
+    "typecheckFast": 0,
+    "touchedLint": 0,
+    "cargoReceiptReused": {
+      "exit": 0,
+      "tests": 30,
+      "rustSourcesAndManifestsUnchanged": true
+    },
+    "preserved": "Packaged helper discovery, settings/mobile admission contexts, existing auth paths and settings window-owner fallback.",
+    "note": "Functional frozen replay on the packaged-daemon base; release samples above are historical and were not remeasured.",
+    "fixtureBudget": "Five-minute child budget for the500-request batch; production readiness and latency are unchanged. Prior180-second timeout receipt retained."
+  },
+  "startupMergeRebase": {
+    "base": "88763944bbf93286e2bb90f5da720e0723f18c07",
+    "checks": {
+      "cargo": 0,
+      "build": 0,
+      "ownRealPath": 0,
+      "typecheckFast": 0,
+      "touchedLint": 0
+    },
+    "comparisons": 500,
+    "differences": 0,
+    "authOutcomes": 35,
+    "preserved": "All startup/settings/mobile/workspace/project contexts and table entries; approved WS registrations unchanged; retired imports remain absent."
   }
 }

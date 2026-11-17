@@ -10,7 +10,7 @@ All Rust SQLite connections are READ_ONLY, profile-bounded and WAL-visible. No i
 | projects/[id] | projects/project_repos + merge-policy app_state and dogfood marker | Original authenticated handler remains fallback for unsupported cases; PATCH/DELETE remain TS |
 | panel/repo-icon | attested registered repo; bounded saved identity/icon probes | Rooted image discovery/verification and response bytes/security headers stay with the original handler; native missing-repo/no-icon replies only |
 
-The literal projects/context, projects/locks and projects/dismissed-suggestions paths precede [id]. Their private admission probes receive409 without running the GET; the canonical TS fallback handles them once. Corpus tests compare responses and observe that refusal.
+The live literal projects/locks path precedes [id]. Its private admission probe receives409 without running the GET. Retired projects/context and projects/dismissed-suggestions have no registry imports; explicit409 probes keep them off the Rust detail path, and the canonical TS detail fallback returns404. Public-socket tests compare both reference responses and admission refusals.
 
 panel/ssh-machines is excluded. The prepared real socket-peer pass-through is a caller-trust change requiring master security review, alongside the operator gate. panel/workspaces stays on TS because syncWorkspaceLifecycleRecords writes even for an empty fleet and inventory can reconcile lanes.
 

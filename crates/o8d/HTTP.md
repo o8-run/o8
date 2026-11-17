@@ -513,8 +513,9 @@ repo-icon replies cover missing repositories and proven missing icons; rooted
 image discovery/verification stays with the original handler.
 
 Dynamic project admission matches the registry's selected route pattern.
-Reserved literal context/locks/dismissed-suggestions probes receive409 without
-executing their GET; normal fallback performs the canonical dispatch. Every
+The live locks literal and retired context/dismissed-suggestions names receive409
+at admission without executing a GET; normal fallback performs the canonical dispatch.
+Retired names have no registry imports and retain the detail handler404. Every
 existing bearer/principal floor remains authoritative. No SSH peer/local-only
 admission or workspace lifecycle route is included in this group.
 

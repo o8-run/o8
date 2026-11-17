@@ -484,11 +484,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/setup/detect', 'GET', () => import('@/app/api/setup/detect/route')),
   ],
   projects: [
-    // Reserve literal project paths before [id]; their original authenticated
-    // handlers remain TS-owned and cannot be shadowed by the new detail GET.
-    route('/api/projects/context', 'GET', () => import('@/app/api/projects/context/route')),
+    // Reserve the remaining live literal route before [id]. Context and
+    // dismissed-suggestions imports are retired by #6402 and #6376.
     route('/api/projects/locks', 'GET', () => import('@/app/api/projects/locks/route')),
-    route('/api/projects/dismissed-suggestions', 'GET', () => import('@/app/api/projects/dismissed-suggestions/route')),
     // Original operator/worker principal guard, middleware and rooted image reader stay authoritative.
     route('/api/panel/repo-icon', 'GET', () => import('@/app/api/panel/repo-icon/route')),
     // POST is the MCP server's project create (o8_create_project). No device or worker grant in

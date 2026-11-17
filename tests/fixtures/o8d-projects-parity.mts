@@ -141,7 +141,10 @@ const routes = [
 const records: unknown[] = [], summary: unknown[] = [], auth: unknown[] = [], timings: unknown[] = [];
 const references = new Map<string, Awaited<ReturnType<typeof read>>>();
 const authReferences = new Map<string, Awaited<ReturnType<typeof read>>>();
-const reserved = ['/api/projects/context', '/api/projects/locks', '/api/projects/dismissed-suggestions'];
+const reserved = ['/api/projects/locks'];
+const retired = ['/api/projects/context', '/api/projects/dismissed-suggestions'];
+const retiredReferences = new Map<string, Awaited<ReturnType<typeof read>>>();
+const retiredProof: unknown[] = [];
 const reservedReferences = new Map<string, Awaited<ReturnType<typeof read>>>();
 const reservedProof: unknown[] = [];
 let creationFallback: unknown;
@@ -207,6 +210,18 @@ try {
         reservedProof.push({ path, admissionStatus: 409, native: false });
       }
     }
+    // Retired literal names must not become project data through [id].
+    for (const path of retired) {
+      const count = server.probes.length; const actual = await read(path);
+      assert.equal(actual.native, false);
+      assert.equal((actual.wire as { status: number }).status, 404);
+      if (!enabled) retiredReferences.set(path, actual);
+      else {
+        assert.equal(firstDifference(retiredReferences.get(path)!.wire, actual.wire), null);
+        assert.deepEqual(server.probes.slice(count), [{ path, status: 409 }], 'Retired name admitted as project data');
+        retiredProof.push({ path, admissionStatus: 409, status: 404, native: false });
+      }
+    }
     if (releaseReceipt) for (const route of routes) {
       await seed(0);
       const path = route.path === '/api/projects/[id]' ? '/api/projects/proj-01234567-89a'
@@ -239,7 +254,7 @@ try {
     }
     await server.stop(); server = undefined;
   }
-  writeFileSync(output, JSON.stringify({ records, summary, auth, timings, reservedProof, creationFallback, separateChildLaunchFlags: [false, true],
+  writeFileSync(output, JSON.stringify({ records, summary, auth, timings, reservedProof, retiredProof, creationFallback, separateChildLaunchFlags: [false, true],
     referenceAdmissionProbes: 0, mutationPointer }, null, 2) + '\n');
 } finally { db.close(); await server?.stop(); }
 process.exit(0);

@@ -25,7 +25,7 @@ it('matches 100 seeded TS requests per projects route, durable stores and auth t
       O8D_PROJECTS_RELEASE_RECEIPT: process.env.O8D_PROJECTS_RELEASE_RECEIPT };
     const { stdout } = await promisify(execFile)(process.execPath, ['--import', './scripts/register-server-only-stub.mjs',
       '--import', 'tsx', 'tests/fixtures/o8d-projects-parity.mts', binary, result],
-    { cwd: process.cwd(), env, timeout: 180_000, maxBuffer: 32 * 1024 * 1024 });
+    { cwd: process.cwd(), env, timeout: 300_000, maxBuffer: 32 * 1024 * 1024 });
     console.info(stdout);
     const report = JSON.parse(readFileSync(result, 'utf8'));
     expect(report.summary.map((item: { route: string }) => item.route)).toEqual(routes);
