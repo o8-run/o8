@@ -5837,6 +5837,13 @@
       ]
     },
     {
+      "path": "tests/o8d-rust-write-path-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-session-read-admission-real-path.test.ts",
       "reasons": [
         "network-listener",

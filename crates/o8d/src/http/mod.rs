@@ -200,14 +200,15 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
         params.entry(key).or_insert(value);
     }
     let work = store.clone();
-    match tokio::task::spawn_blocking(move || dispatch(&ReadContext::new(&work), &path, &params))
+    match tokio::task::spawn_blocking(move || dispatch(&ReadContext::new(&work), &path, &params, "GET", &[]))
         .await
     {
         Ok(response) => response,
         Err(_) => unavailable(),
     }
 }
-fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params) -> Response {
+fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, _body: &[u8]) -> Response {
+    if method != "GET" { return unavailable() }
     match path {
         "/api/panel/branches"
             if std::env::var("O8D_NATIVE_REPOSITORY_READS").as_deref() == Ok("1") =>
@@ -296,6 +297,15 @@ pub fn is_session_read(path: &str) -> bool {
 
 /// Called only after the app transport's per-request TypeScript auth admission.
 pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &str, defaults_context: Option<Value>) -> Response {
+    native_request(directory, database, path, query, "GET", &[], defaults_context)
+}
+
+pub fn native_body_too_large() -> Response {
+    reply(StatusCode::PAYLOAD_TOO_LARGE, json!({"error":"Native request exceeds 16 MiB"}))
+}
+
+pub fn native_request(directory: PathBuf, database: PathBuf, path: &str, query: &str, method: &str, body: &[u8], defaults_context: Option<Value>) -> Response {
+    if body.len() > 16 * 1024 * 1024 { return native_body_too_large() }
     let store = Store {
         directory,
         database,
@@ -306,7 +316,7 @@ pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &s
     for (key, value) in form_urlencoded::parse(query.as_bytes()).into_owned() {
         params.entry(key).or_insert(value);
     }
-    if !is_session_read(path) {
+    if native_route(path, method).is_none() {
         return unavailable();
     }
     if path == "/api/mobile/inbox" { return mobile_inbox::read(&store); }
@@ -330,7 +340,7 @@ pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &s
     }) {
         return unavailable();
     }
-    dispatch(&store, path, &params)
+    dispatch(&store, path, &params, method, body)
 }
 
 pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
