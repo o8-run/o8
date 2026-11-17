@@ -73,9 +73,7 @@ export async function POST(request: Request): Promise<Response> {
 
 // Streamable HTTP permits servers that don't offer a resumable SSE stream to
 // reject GET. Tool calls still use POST; the compatibility shim only needs POST.
-export function GET(): Response {
-  return new Response(null, { status: 405, headers: { Allow: 'POST, DELETE' } });
-}
+export { GET } from '@/lib/mcp/operator-mcp-get';
 
 export function DELETE(): Response {
   return new Response(null, { status: 204 });

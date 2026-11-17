@@ -5020,6 +5020,13 @@
       ]
     },
     {
+      "path": "tests/next-shutdown-nonphone-group1-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-sidebar-real-path.test.ts",
       "reasons": [
         "child-process",
