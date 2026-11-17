@@ -1,0 +1,38 @@
+{
+  "seed": 6411,
+  "cases": 100,
+  "statuses": {
+    "200": 37,
+    "400": 63
+  },
+  "snoozeOpens": 179,
+  "dedicatedWriter": "src/lib/cortex/proposer.ts:snoozeProposal",
+  "productionCaller": "native/o8-next/src/surfaces/activity/proposals.rs:dismiss automatic proposal",
+  "request": {
+    "method": "POST",
+    "path": "/api/cortex/proposals",
+    "body": {
+      "action": "dismiss",
+      "id": "proposal-1",
+      "filePattern": "src/main.rs",
+      "fixPattern": "preserve saved state"
+    }
+  },
+  "red": "native marker absent on case0 with real nonempty dismiss",
+  "clock": "verification child only; fixed Date.now, candidate Rust fixture pending",
+  "activation": "not registered; public Rust/state ownership proof pending dispatch prerequisite",
+  "engineProof": {
+    "realMutations": 37,
+    "generatedRequests": 100,
+    "persistedStateComparisons": 100,
+    "differences": 0,
+    "finalSnapshotsEqual": true,
+    "integrationTests": {
+      "pass": 1,
+      "fail": 0
+    },
+    "typecheckFast": 0,
+    "touchedJsTsEslint": 0,
+    "limitation": "63 validation refusals are modeled in test adapter; production HTTP adapter is not registered. No public native green or completed route claim."
+  }
+}

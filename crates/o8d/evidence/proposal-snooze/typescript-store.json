@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "proposal-1",
+      "filePattern": "src/main.rs",
+      "fixPattern": "preserve saved state",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-1",
+      "filePattern": "duplicate",
+      "fixPattern": "duplicate",
+      "snoozedUntil": "old"
+    },
+    {
+      "id": "proposal-11",
+      "filePattern": "日本語/修正.ts",
+      "fixPattern": "repair",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-3",
+      "filePattern": "**/*.rs",
+      "fixPattern": "保持順序",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-8",
+      "filePattern": "**/*.rs",
+      "fixPattern": "保持順序",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-7",
+      "filePattern": "日本語/修正.ts",
+      "fixPattern": "repair",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-0",
+      "filePattern": "**/*.rs",
+      "fixPattern": "保持順序",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-9",
+      "filePattern": "**/*.rs",
+      "fixPattern": "保持順序",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-4",
+      "filePattern": "日本語/修正.ts",
+      "fixPattern": "repair",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-2",
+      "filePattern": "日本語/修正.ts",
+      "fixPattern": "repair",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-6",
+      "filePattern": "**/*.rs",
+      "fixPattern": "保持順序",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-10",
+      "filePattern": "日本語/修正.ts",
+      "fixPattern": "repair",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-12",
+      "filePattern": "日本語/修正.ts",
+      "fixPattern": "repair",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    },
+    {
+      "id": "proposal-5",
+      "filePattern": "**/*.rs",
+      "fixPattern": "保持順序",
+      "snoozedUntil": "2027-01-23T16:00:00.000Z"
+    }
+  ]
+}
