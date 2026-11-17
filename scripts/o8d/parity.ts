@@ -1,4 +1,5 @@
 /** Domain-read oracle: real WS entry, persisted fixture, Next listener closed. */
+import nativeRoutes from '../../crates/o8d/native-routes.json';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,9 +33,7 @@ export function firstDifference(expected: unknown, actual: unknown, path = '$'):
   }
   return null;
 }
-export const SESSION_READ_PATHS = [
-  '/api/mobile/orchestrator/threads', '/api/mobile/history', '/api/v2/chat-history', '/api/orchestrator/composer-queue',
-] as const;
+export const SESSION_READ_PATHS = nativeRoutes.filter(route => route.methods.includes('GET')).map(route => route.path);
 export function sessionCorpus(directory: string) {
   const queue = `${SESSION_READ_PATHS[3]}?${new URLSearchParams({ repoPath: join(directory, 'fixture-repo'), threadId: 'thoughts-review', backend: 'claude' })}`;
   return [
@@ -70,7 +69,7 @@ export const IDLE_SETTLE_MS = 20_000;
 export async function send(server: Server, path: string, headers: Record<string, string> = {}) {
   const response = await fetch(server.origin + path, { headers: { authorization: `Bearer ${server.token}`, ...headers } });
   return { status: response.status, body: await response.json() as unknown,
-    native: response.headers.get('x-o8d-native-session-read') === '1' };
+    native: response.headers.get('x-o8d-native') === '1' || response.headers.get('x-o8d-native-session-read') === '1' };
 }
 export async function backendRss(pid: number) {
   const { stdout } = await promisify(execFile)('ps', ['-eo', 'pid=,ppid=,rss=']);
