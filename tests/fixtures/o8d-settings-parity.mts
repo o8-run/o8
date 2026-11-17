@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -9,8 +8,7 @@ const require = createRequire(import.meta.url);
 // Real timers and performance.now remain available for transport measurements.
 Date.now = () => 1794873600000;
 const { firstDifference, generateRequests, normalize } = require('../../scripts/o8d/parity.ts') as typeof import('../../scripts/o8d/parity');
-const { handleNativeHttp } = require('../../src/lib/ws-server/native-http-routes.ts') as typeof import('../../src/lib/ws-server/native-http-routes');
-const { O8dBridge } = require('../../src/lib/ws-server/o8d-bridge.ts') as typeof import('../../src/lib/ws-server/o8d-bridge');
+const { freeReadParityPort, startReadParityBridge } = require('./o8d-read-parity-bridge.ts') as typeof import('./o8d-read-parity-bridge');
 const profiles = require('./o8d-settings-parameters.json') as typeof import('./o8d-settings-parameters.json');
 
 const [binary, output] = process.argv.slice(2);
@@ -32,26 +30,16 @@ writeFileSync(join(directory, 'provider-instances.json'), JSON.stringify({ versi
   instances: [{ id: 'fixture-codex', runtime: 'codex', name: 'Fixture', enabled: true }], threads: { 'fixture-thread': 'fixture-codex' } }));
 writeFileSync(join(directory, '.claude/settings.json'), JSON.stringify({ fastMode: true }));
 
-const reserve = createServer();
-await new Promise<void>(resolve => reserve.listen(0, '127.0.0.1', resolve));
-const port = (reserve.address() as { port: number }).port;
-await new Promise<void>(resolve => reserve.close(() => resolve()));
-Object.assign(process.env, { O8_NEXT_O8D: '1', O8_WS_O8D: '1', O8D_NATIVE_SESSION_READS: '1',
-  O8D_BINARY: binary, O8_API_PORT: String(port), O8_WS_PORT: String(port), PORT: String(port) });
+const port = await freeReadParityPort();
+let server: Awaited<ReturnType<typeof startReadParityBridge>> | undefined;
 const originalFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => {
   const url = String(input instanceof Request ? input.url : input);
   assert.ok(url.startsWith('http://127.0.0.1:'), 'External fixture network disabled');
   return originalFetch(input, init);
 };
-const privateServer = createServer(async (req, res) => {
-  try {
-    if (!await handleNativeHttp(req, res, port, bridge.bridged(req), bridge.clientAddress(req))) res.writeHead(404).end();
-  } catch { res.writeHead(500).end(); }
-});
-const bridge = new O8dBridge(privateServer, port, 'settings-parity-epoch', '127.0.0.1');
 async function read(path: string, headers: Record<string, string> = {}, method = 'GET') {
-  const response = await fetch(`http://127.0.0.1:${port}${path}`, { method,
+  const response = await fetch(server!.origin + path, { method,
     signal: AbortSignal.timeout(20_000), headers: { authorization: `Bearer ${token}`, ...headers },
     ...(method === 'POST' ? { body: '{}' } : {}) });
   return { native: response.headers.get('x-o8d-native-session-read') === '1', wire: normalize({
@@ -77,121 +65,117 @@ function snapshot() {
   walk(directory);
   return files;
 }
-const records: unknown[] = [];
-const summary: Array<{ route: string; attempted: number; native: number; fallback: number; differences: number }> = [];
-const auth: unknown[] = [];
-const timings: unknown[] = [];
+const records: unknown[] = [], summary: unknown[] = [], auth: unknown[] = [], timings: unknown[] = [];
+const references = new Map<string, Awaited<ReturnType<typeof read>>>();
+const authReferences = new Map<string, Awaited<ReturnType<typeof read>>>();
+const groups = Object.entries(profiles).map(([route, parameters]) => {
+  const generated = generateRequests({ path: route, parameters, count: 100 });
+  if (route === '/api/panel/operator-defaults') {
+    const project = parameters.find(parameter => parameter.name === 'project')!;
+    generated.push(...generateRequests({ path: route, parameters: [project], count: 100 }).map(request => {
+      const url = new URL(request.path, 'http://fixture.invalid'); url.searchParams.set('include', 'native');
+      return { ...request, caseIndex: request.caseIndex + 100, kind: 'legacy-' + request.kind, path: url.pathname + url.search };
+    }));
+  }
+  return { route, generated };
+});
+function prepare(route: string, index: number) {
+  if (route !== '/api/panel/operator-defaults') return;
+  const mode = index % 5;
+  if (index >= 100) {
+    rmSync(join(directory, 'settings.toml'), { force: true });
+    writeFileSync(join(directory, 'operator-defaults.json'), JSON.stringify({ presentationQuietMode: mode % 2 === 0,
+      ...(mode === 4 ? { parallelCap: 2 } : {}) }));
+  } else {
+    writeFileSync(join(directory, 'settings.toml'), '[presentation]\nquiet_mode = true\n');
+    writeFileSync(join(directory, 'operator-defaults.json'), '{}');
+  }
+}
+const releaseReceipt = process.env.O8D_SETTINGS_RELEASE_RECEIPT;
+if (releaseReceipt) {
+  const receipt = JSON.parse(readFileSync(releaseReceipt, 'utf8'));
+  assert.equal(receipt.profile, 'release');
+  assert.equal(createHash('sha256').update(readFileSync(binary)).digest('hex'), receipt.binarySha256);
+}
+let mutationPointer: string | null = null;
 try {
-  await bridge.start();
-  assert.equal(bridge.status.transport, 'o8d');
-  // Initialize the actual TS-owned schema and migration stores before read-only comparisons.
-  process.env.O8D_NATIVE_SESSION_READS = '0';
-  await read('/api/panel/operator-defaults?include=native');
-  for (const [route, parameters] of Object.entries(profiles)) {
-    const generated = generateRequests({ path: route, parameters, count: 100 });
-    if (route === '/api/panel/operator-defaults') {
-      const project = parameters.find(parameter => parameter.name === 'project')!;
-      generated.push(...generateRequests({ path: route, parameters: [project], count: 100 }).map(request => {
-        const url = new URL(request.path, 'http://fixture.invalid');
-        url.searchParams.set('include', 'native');
-        return { ...request, caseIndex: request.caseIndex + 100, kind: 'legacy-' + request.kind, path: url.pathname + url.search };
-      }));
+  for (const enabled of [false, true]) {
+    server = await startReadParityBridge(binary, port, enabled);
+    if (!enabled) {
+      // TS initializes its owned stores before the saved-read comparison.
+      await read('/api/panel/operator-defaults?include=native');
+      await read('/api/panel/operator-defaults');
     }
-    let native = 0;
-    for (const request of generated) {
-      // The operator group deliberately includes unsupported legacy ownership.
-      // Other parameter domains come directly from each handler's accepted inputs.
-      const operator = route === '/api/panel/operator-defaults';
-      const mode = request.caseIndex % 5;
-      const path = request.path;
-      if (operator && request.caseIndex >= 100) {
-        rmSync(join(directory, 'settings.toml'), { force: true });
-        writeFileSync(join(directory, 'operator-defaults.json'), JSON.stringify({
-          presentationQuietMode: mode % 2 === 0, ...(mode === 4 ? { parallelCap: 2 } : {}),
-        }));
+    for (const { route, generated } of groups) {
+      let native = 0;
+      for (const request of generated) {
+        prepare(route, request.caseIndex);
+        const before = snapshot();
+        const actual = await read(request.path);
+        const key = route + ':' + request.caseIndex;
+        if (!enabled) { assert.equal(actual.native, false); references.set(key, actual); continue; }
+        assert.deepEqual(snapshot(), before, `Native read changed durable files: ${request.path}`);
+        const expected = references.get(key)!;
+        const pointer = firstDifference(expected.wire, actual.wire);
+        assert.equal(pointer, null, JSON.stringify({ seed: request.seed, caseIndex: request.caseIndex, path: request.path, pointer }));
+        if (route === '/api/v2/keys') {
+          const wire = actual.wire as { body: { providers: Array<{ configured: boolean; maskedKey: unknown }> } };
+          for (const provider of wire.body.providers) { assert.equal(provider.configured, false); assert.equal(provider.maskedKey, null); }
+        }
+        if (actual.native) native++;
+        if (route === '/api/panel/operator-defaults' && request.caseIndex >= 100) {
+          assert.equal(actual.native, request.caseIndex % 5 !== 4, `Native route was not reached: ${request.path}`);
+        }
+        records.push({ request, expected: portable(expected.wire), native: actual.native });
       }
-      if (operator && request.caseIndex < 100) {
-        writeFileSync(join(directory, 'settings.toml'), '[presentation]\nquiet_mode = true\n');
-        writeFileSync(join(directory, 'operator-defaults.json'), '{}');
+      if (enabled) {
+        assert.ok(native > 0, `Native route was not reached: ${route}`);
+        const result = { route, attempted: generated.length, native, fallback: generated.length - native, differences: 0 };
+        summary.push(result); console.log(JSON.stringify(result));
       }
-      process.env.O8D_NATIVE_SESSION_READS = '0';
-      const expected = await read(path);
-      const before = snapshot();
-      process.env.O8D_NATIVE_SESSION_READS = '1';
-      const actual = await read(path);
-      assert.deepEqual(snapshot(), before, `Native read changed durable files: ${path}`);
-      const pointer = firstDifference(expected.wire, actual.wire);
-      assert.equal(pointer, null, JSON.stringify({ seed: request.seed, caseIndex: request.caseIndex, path, pointer }));
-      if (route === '/api/v2/keys') {
-        const wire = actual.wire as { body: { providers: Array<{ configured: boolean; maskedKey: unknown }> } };
-        for (const provider of wire.body.providers) {
-          assert.equal(provider.configured, false);
-          assert.equal(provider.maskedKey, null);
+      const cases = [
+        { headers: { authorization: '' } }, { headers: { authorization: 'Bearer wrong' } },
+        { headers: { authorization: 'Bearer o8ro_fixture' } },
+        { headers: { authorization: '', 'x-o8d-session-read': 'authorize', 'x-o8d-bridge': 'spoofed', 'x-o8d-peer': '127.0.0.1' } },
+        { headers: { authorization: '', host: 'untrusted.invalid' } },
+        { headers: { origin: 'https://untrusted.invalid' }, method: 'POST' },
+      ];
+      for (const [index, refusal] of cases.entries()) {
+        const actual = await read(route, refusal.headers, refusal.method);
+        const key = route + ':' + index;
+        assert.equal(actual.native, false);
+        if (!enabled) authReferences.set(key, actual);
+        else {
+          const expected = authReferences.get(key)!;
+          assert.equal(firstDifference(expected.wire, actual.wire), null, `Refusal differs: ${route}`);
+          auth.push({ route, method: refusal.method ?? 'GET', expected: expected.wire });
         }
       }
-      if (actual.native) native++;
-      if (operator && request.caseIndex >= 100) assert.equal(actual.native, mode !== 4, `Native route was not reached: ${path}`);
-      records.push({ request: { ...request, path }, expected: portable(expected.wire), native: actual.native });
     }
-    assert.ok(native > 0, `Native route was not reached: ${route}`);
-    const result = { route, attempted: generated.length, native, fallback: generated.length - native, differences: 0 };
-    summary.push(result);
-    console.log(JSON.stringify(result));
-    for (const headers of [{ authorization: '' }, { authorization: 'Bearer wrong' },
-      { authorization: 'Bearer o8ro_fixture' },
-      { authorization: '', 'x-o8d-session-read': 'authorize', 'x-o8d-bridge': 'spoofed', 'x-o8d-peer': '127.0.0.1' },
-      { authorization: '', host: 'untrusted.invalid' }]) {
-      process.env.O8D_NATIVE_SESSION_READS = '0'; const expected = await read(route, headers);
-      process.env.O8D_NATIVE_SESSION_READS = '1'; const actual = await read(route, headers);
-      assert.equal(firstDifference(expected.wire, actual.wire), null, `Refusal differs: ${route}`);
-      assert.equal(actual.native, false);
-      auth.push({ route, expected: expected.wire });
-    }
-    process.env.O8D_NATIVE_SESSION_READS = '0';
-    const refused = await read(route, { origin: 'https://untrusted.invalid' }, 'POST');
-    process.env.O8D_NATIVE_SESSION_READS = '1';
-    const refusedNative = await read(route, { origin: 'https://untrusted.invalid' }, 'POST');
-    assert.equal(firstDifference(refused.wire, refusedNative.wire), null);
-    assert.equal(refusedNative.native, false);
-    auth.push({ route, method: 'POST', expected: refused.wire });
-  }
-  const releaseReceipt = process.env.O8D_SETTINGS_RELEASE_RECEIPT;
-  if (releaseReceipt) {
-    const receipt = JSON.parse(readFileSync(releaseReceipt, 'utf8'));
-    assert.equal(receipt.profile, 'release');
-    assert.equal(createHash('sha256').update(readFileSync(binary)).digest('hex'), receipt.binarySha256);
-    for (const route of Object.keys(profiles)) {
+    if (releaseReceipt) for (const route of Object.keys(profiles)) {
       rmSync(join(directory, 'settings.toml'), { force: true });
       writeFileSync(join(directory, 'operator-defaults.json'), '{}');
       const path = route === '/api/panel/operator-defaults' ? route + '?include=native' : route;
-      for (const enabled of [false, true]) {
-        process.env.O8D_NATIVE_SESSION_READS = enabled ? '1' : '0';
-        for (let index = 0; index < 10; index++) await read(path);
-        const samples = [];
-        for (let index = 0; index < 100; index++) {
-          const start = performance.now();
-          const result = await read(path);
-          samples.push(performance.now() - start);
-          assert.equal(result.native, enabled, `Latency reader not reached: ${path}`);
-        }
-        const sorted = [...samples].sort((a, b) => a - b);
-        timings.push({ path, native: enabled, p50Ms: sorted[49], p95Ms: sorted[94], samplesMs: samples });
+      for (let index = 0; index < 10; index++) await read(path);
+      const samples = [];
+      for (let index = 0; index < 100; index++) {
+        const start = performance.now(); const result = await read(path); samples.push(performance.now() - start);
+        assert.equal(result.native, enabled, `Latency reader not reached: ${path}`);
       }
+      const sorted = [...samples].sort((a, b) => a - b);
+      timings.push({ path, native: enabled, p50Ms: sorted[49], p95Ms: sorted[94], samplesMs: samples });
     }
+    if (!enabled) assert.deepEqual(server.probes, [], 'Reference child attempted native admission');
+    else {
+      const response = await read('/api/setup/config'); assert.equal(response.native, true);
+      const mutated = structuredClone(response.wire) as { body: { setupComplete: boolean } };
+      mutated.body.setupComplete = !mutated.body.setupComplete;
+      mutationPointer = firstDifference(response.wire, mutated);
+      assert.ok(mutationPointer?.startsWith('$/body/setupComplete'));
+    }
+    await server.stop(); server = undefined;
   }
-  // Mutate an actual native response, then require a useful mismatch pointer.
-  process.env.O8D_NATIVE_SESSION_READS = '1';
-  const response = await read('/api/setup/config');
-  assert.equal(response.native, true);
-  const mutated = structuredClone(response.wire) as { body: { setupComplete: boolean } };
-  mutated.body.setupComplete = !mutated.body.setupComplete;
-  const mutationPointer = firstDifference(response.wire, mutated);
-  assert.ok(mutationPointer?.startsWith('$/body/setupComplete'));
-  writeFileSync(output, JSON.stringify({ seed: generatedSeed(), records, summary, auth, timings, mutationPointer }, null, 2) + '\n');
-} finally {
-  bridge.stop();
-  privateServer.closeAllConnections();
-  await new Promise<void>(resolve => privateServer.close(() => resolve()));
-}
-function generatedSeed() { return generateRequests({ path: '/', parameters: [], count: 1 })[0].seed; }
+  writeFileSync(output, JSON.stringify({ seed: groups[0].generated[0].seed, records, summary, auth, timings,
+    separateChildLaunchFlags: [false, true], referenceAdmissionProbes: 0, mutationPointer }, null, 2) + '\n');
+} finally { await server?.stop(); }
 process.exit(0);
