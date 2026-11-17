@@ -298,6 +298,12 @@ narrow read-only exception.
 | POST | `/api/mobile/automations/[id]/enabled` | Set enabled with `{ enabled: boolean }`. |
 | POST | `/api/mobile/automations/[id]/run` | Run with `{ clientMutationId: string }` using desktop prechecks. |
 | GET | `/api/mobile/agents` | List coding runtime installation, known sign-in state, and default model; excludes account identifiers. |
+| GET | `/api/mobile/source-control/status` | Read branch, upstream, ahead/behind and file states for sessionKey. |
+| POST | `/api/mobile/source-control/stage` | Stage paths or all in the sessionKey checkout. |
+| POST | `/api/mobile/source-control/unstage` | Unstage paths or all in the sessionKey checkout. |
+| POST | `/api/mobile/source-control/commit` | Commit staged changes with a required message. |
+| POST | `/api/mobile/source-control/pull` | Pull the sessionKey checkout with fast-forward only. |
+| POST | `/api/mobile/source-control/push` | Push or publish the current branch; refuse protected/default branches. |
 | POST | `/api/mobile/action` | Execute a mobile-issued runtime action (LLM chat turn, dispatch, approval). |
 | GET | `/api/mobile/activity` | Chronological fleet activity feed (newest-first, capped ~40). |
 | GET | `/api/mobile/bootstrap?fresh=1` | First-load bootstrap snapshot (repos, sessions, layout). |
