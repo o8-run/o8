@@ -10,7 +10,8 @@ builds retain the existing listener arrangement until explicitly approved.
 
 Start WS before Next. Supply the same explicit front-door flag, public
 `O8_API_PORT`, profile/data directory and credentials to both processes.
-WS advertises that port for HTTP and WebSocket connections. Set `NEXT_ORIGIN`
+WS advertises that port for HTTP and WebSocket connections, including when a
+stale WS port file still names another listening process. Set `NEXT_ORIGIN`
 to a distinct private HTTP loopback origin and bind Next there using its own
 `PORT`. The upstream must have no credentials, path, query or fragment.
 A missing, nonlocal or self-referential upstream refuses startup. An occupied
@@ -49,8 +50,10 @@ hop-by-hop headers and caller-supplied private bridge/peer stamps, then derives
 the peer from the socket or the authenticated o8d hop. Remote and restrictive
 relay callers carry a restrictive marker across the private loopback hop.
 The generated packaged Next wrapper validates the public Host against
-`O8_API_PORT` while its socket remains bound to private `PORT`. Bearer grants
-are unchanged.
+`O8_API_PORT` while its socket remains bound to private `PORT`. Existing
+internal calls may also address private `PORT` from an actual loopback socket;
+peer headers cannot enable that exception, and restrictive relay stamps and
+bearer checks still apply. Bearer grants are unchanged.
 
 ## Pages and review
 

@@ -55,7 +55,13 @@ server.listen(0, '127.0.0.1', () => { process.env.PORT = String(server.address()
       expect(remote.status).toBe(200); expect(JSON.parse(remote.body)).toEqual({ peer: 'o8-relay-forward' });
       expect((await call(privatePort, 'untrusted.invalid')).status).toBe(421);
       expect((await call(privatePort, host, { origin: 'https://untrusted.invalid' }, 'POST')).status).toBe(403);
-      if (flag === '1') expect((await call(privatePort, `127.0.0.1:${privatePort}`)).status).toBe(421);
+      if (flag === '1') {
+        // Internal owner calls still target private Next. Peer stamps cannot
+        // promote their restrictive relay marker, on either accepted authority.
+        expect((await call(privatePort, `127.0.0.1:${privatePort}`)).status).toBe(200);
+        const directRelay = await call(privatePort, `127.0.0.1:${privatePort}`, { 'x-o8-relay-forward': '1' });
+        expect(JSON.parse(directRelay.body)).toEqual({ peer: 'o8-relay-forward' });
+      }
       const stopped = once(child, 'exit'); child.kill(); await stopped; child = undefined;
     }
   } finally {

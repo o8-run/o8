@@ -83,6 +83,8 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
   const nextPort = (upstream.address() as { port: number }).port;
   const apiPort = await freePort(), oldWsPort = await freePort();
   writeFileSync(join(directory, 'ws-token'), token, { mode: 0o600 });
+  // The old file can still name a listening process during launcher handoff.
+  writeFileSync(join(directory, 'ws-port'), String(nextPort));
   mkdirSync(join(directory, 'fixture-bin'));
   for (const command of ['gh', 'claude', 'codex', 'tmux', 'lsof', 'ps', 'pi', 'opencode']) {
     writeFileSync(join(directory, 'fixture-bin', command), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
