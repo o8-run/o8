@@ -11,3 +11,15 @@
 - `o8 mission create --dispatch` returns once the dispatch is admitted and fails clearly when it does not start.
 - Codex sessions that use the default identity are found again, and replies in the newer format are read.
 - A sandboxed command-line agent can change the mode of its own state files.
+- A paired phone can browse a thread's files, read scheduled tasks and switch or run them, see which coding agents are signed in, and commit and push a thread's work.
+- The phone reads each registered project's pull requests, with their place and progress in the merge queue.
+- The phone is offered only the Codex models this computer's account can run, and reads usage history.
+- A thread's followers are told when it starts and finishes compacting.
+- A computer registers under its own name, and one with no browser can sign in with a short code.
+- Phone pairing opens from the Tools drawer, and a saved switch controls network access.
+- The usage card shows resets, credits and organization.
+- GitHub link pills show the repository, issue or pull request on hover, and files open from Finder in the native window.
+- Composer dictation records in process and keeps its history.
+- o8 installs with Homebrew.
+- Agent commands are timed, and a slow rerun is stopped once.
+- Several orchestrator reads do less repeated work.
