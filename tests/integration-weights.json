@@ -614,7 +614,6 @@
   "tests/next-surface-boundary-real-path.test.ts": 5,
   "tests/next-surface-registration-real-path.test.ts": 6,
   "tests/next-terminal-real-path.test.ts": 8,
-  "tests/next-voice-host-real-path.test.ts": 27,
   "tests/next-workers-real-path.test.ts": 6,
   "tests/nightly-typecheck-heap-real-path.test.ts": 2,
   "tests/npm-release-age-real-path.test.ts": 13,

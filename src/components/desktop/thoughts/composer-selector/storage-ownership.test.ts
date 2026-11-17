@@ -7,8 +7,6 @@ const thoughtsRoot = fileURLToPath(new URL('../', import.meta.url));
 const directPersistencePattern = /\blocalStorage\.(?:getItem|setItem|removeItem)\s*\(|window\.localStorage\b|fetch\(\s*['"]\/api\/panel\/operator-defaults/;
 
 const directPersistenceSeams: Record<string, string> = {
-  'chat-panel/composer-queue-recovery.ts': 'Owns versioned uncertain Send next identities and exact payloads per conversation and attempt; recovery never automatically sends work.',
-  'chat-panel/composer-draft-store.ts': 'Owns versioned unsent text, completed images and file context per repository and conversation; saving never sends a turn.',
   'chat-panel/transcript-reading-position.ts': 'Owns o8:transcript-reading:v1: reading intent, bounded identities, offsets and order per workspace and thread/session conversation; history deletion removes all matching workspace buckets and invalidates mounted writers before teardown.',
   'composer-mode-storage.ts': 'Owns tab-scoped composer mode persistence and legacy migration.',
   'composer-selector/state.ts': 'Owns selector feature flags plus global and per-thread effort maps.',

@@ -67,7 +67,7 @@ const PROVIDERS: ProviderKeyConfig[] = [
   {
     // BYOK for Symon Realtime mode (gpt-realtime). Free path — the user's key
     // bills OpenAI directly, o8 never spends (the managed/proxied path is the
-    // paid lever). See src/lib/voice/realtime-access.ts.
+    // paid lever).
     id: 'openai',
     label: 'OpenAI',
     envVar: 'OPENAI_API_KEY',
