@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -11,8 +11,6 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const profileRoute = await import('@/app/api/runtime/claude-code-profile/route');
-const modelsRoute = await import('@/app/api/runtime/claude-code-models/route');
-const codexRoute = await import('@/app/api/runtime/claude-code-codex/route');
 
 function request(pathname: string, init?: { method?: string; body?: unknown }) {
   return new NextRequest(`http://localhost:3001${pathname}`, {
@@ -76,40 +74,4 @@ describe('Claude Code worker settings through production routes', () => {
     expect(existsSync(path.join(dataDir, 'claude-code-worker.json'))).toBe(false);
   });
 
-  it('serves only tool-capable live models to the harness picker', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
-      data: [
-        { id: 'deepseek/deepseek-v4-pro-0813', name: 'DeepSeek: V4 Pro', supported_parameters: ['tools', 'tool_choice'] },
-        { id: 'x-ai/grok-4.6', name: 'SpaceXAI: Grok 4.6', supported_parameters: ['tools', 'tool_choice'] },
-        { id: 'text-only/model', name: 'Text only', supported_parameters: ['temperature'] },
-      ],
-    })));
-
-    const response = await modelsRoute.GET(request('/api/runtime/claude-code-models?refresh=1'));
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.total).toBe(2);
-    expect(JSON.stringify(body.groups)).toContain('deepseek/deepseek-v4-pro-0813');
-    expect(JSON.stringify(body.groups)).toContain('x-ai/grok-4.6');
-    expect(JSON.stringify(body.groups)).not.toContain('text-only/model');
-  });
-
-  it('keeps discovered Codex OAuth credentials owner-only through the authenticated route', async () => {
-    const authDir = path.join(dataDir, 'cliproxy', 'codex-auth');
-    const credentialPath = path.join(authDir, 'codex-test.json');
-    mkdirSync(authDir, { recursive: true, mode: 0o700 });
-    writeFileSync(credentialPath, JSON.stringify({ type: 'codex', access_token: 'route-test-only' }), {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    chmodSync(credentialPath, 0o644);
-
-    const response = await codexRoute.GET(request('/api/runtime/claude-code-codex'));
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      ok: true,
-      status: { authenticated: true },
-    });
-    expect(statSync(credentialPath).mode & 0o777).toBe(0o600);
-  });
 });

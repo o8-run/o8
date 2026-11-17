@@ -2190,12 +2190,6 @@
       ]
     },
     {
-      "path": "tests/claude-code-worker-profile-route.test.ts",
-      "reasons": [
-        "executable-fixture"
-      ]
-    },
-    {
       "path": "tests/claude-code-worker-skill-isolation-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2591,12 +2585,6 @@
         "child-process",
         "executable-fixture",
         "git-cli",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/codex-transcript-retention-real-path.test.ts",
-      "reasons": [
         "real-path"
       ]
     },

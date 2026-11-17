@@ -340,7 +340,6 @@
   "tests/codex-review-retry-format-real-path.test.ts": 11,
   "tests/codex-review-retry-head-real-path.test.ts": 6,
   "tests/codex-sol-compatibility-real-path.test.ts": 8,
-  "tests/codex-transcript-retention-real-path.test.ts": 2,
   "tests/cold-start-runtime-spawn-routes.test.ts": 1,
   "tests/collide-effort-admission-real-path.test.ts": 5,
   "tests/committed-storage-reconciliation-real-path.test.ts": 3,

@@ -369,7 +369,6 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/cli-usage` | Snapshot of CLI usage across all runtimes. |
 | GET | `/api/panel/cloud-workers` | Panel-side surface for cloud workers (#514). |
 | POST | `/api/panel/cloud-workers` | Mutate cloud worker registrations. |
-| POST | `/api/panel/codex-sessions/prune` | Archive or delete Codex sessions older than `maxAgeDays`. |
 | GET | `/api/panel/commit-diff?sha=...&workspace=...` | Files changed in a single commit. |
 | GET | `/api/panel/commits?repo=...\|workspace=...&limit=...` | Recent commits (GitHub-side or local workspace). |
 | GET | `/api/panel/commits/[hash]?workspace=...` | Detail for a single commit. |
@@ -391,12 +390,10 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/issues/[number]?repo=...` | Detail for a single issue. |
 | POST | `/api/panel/issues/create` | Create a GitHub issue. |
 | POST | `/api/panel/issues/enhance` | Enhance issue body via LLM, parallel-fetching repo context. |
-| GET | `/api/panel/lan-host` | Discover first private LAN IPv4 + reachable dev ports for mobile DevHostFrame. |
 | POST | `/api/panel/mcp-test` | "Test connection" probe for a registered MCP server (stdio or HTTP). |
 | GET | `/api/panel/mobile-pairing` | Mobile pairing payload (Tailscale URL, ws-token, fingerprints) for QR. |
 | GET | `/api/panel/o8-update-summary` | Summarize an o8 GitHub release (release notes + recent commits) via OpenRouter free models for the UpdateCard. |
 | POST | `/api/panel/o8-mission-summary` | Summarize a completed mission's merged packets (hydrated from the session_outcomes ledger) into plain-language prose via OpenRouter free models, for the Mission-complete detail modal. |
-| POST | `/api/panel/o8-scratch-chat` | One-shot scratch chat with tool calls (file context, OpenRouter free models). |
 | GET | `/api/panel/open-in` | List available editors (CLIs that exist on PATH). |
 | POST | `/api/panel/open-in` | Open a file in the requested editor. |
 | GET | `/api/panel/operator-defaults` | Read operator defaults (parallel cap, overlap gate mode, etc.). |
