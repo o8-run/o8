@@ -687,15 +687,6 @@ describe('panelGateMiddleware — allowlists and bypasses', () => {
     expect(res.status).toBe(401);
   });
 
-  it('allows the mobile push public key (needed before any pairing)', () => {
-    const res = panelGateMiddleware(
-      gatedRequest('http://192.168.1.50:3001/api/mobile/push/public-key', {
-        headers: { host: '192.168.1.50:3001' },
-      }),
-    );
-    expect(res.status).toBe(200);
-  });
-
   it('allows the nonce-signed mobile pairing discovery probe without a bearer', () => {
     // The phone probes bounded candidate ports before it knows which listener
     // is its paired desktop, so this request cannot carry its device bearer.

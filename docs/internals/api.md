@@ -189,7 +189,6 @@ is refused by the global middleware even when it originates on loopback.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/claude-code/transcript?sessionKey=...&limit=...` | Read Claude Code JSONL and return transcript entries compatible with the mobile shape. |
 | GET | `/api/claude-code/diffs?sessionKey=...&limit=...` | Extract file edit/write operations from Claude Code JSONL for live rendering. |
 | POST | `/api/claude-code/send` | Send a message to a Claude Code session (delegates to `handleClaudeCodeSend`). |
 
@@ -206,7 +205,6 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/codex/transcript` | Read Codex session JSONL and project to mobile-shaped transcript entries. |
 | GET | `/api/codex/diffs` | Parse Codex `apply_patch` format into structured file edits. |
 | POST | `/api/codex/send` | Stream a message through `codex exec --json`; resumes if `threadId` provided. |
 
@@ -300,14 +298,10 @@ narrow read-only exception.
 | GET | `/api/mobile/agents` | List coding runtime installation, known sign-in state, and default model; excludes account identifiers. |
 | GET | `/api/mobile/source-control/status` | Read branch, upstream, ahead/behind and file states for sessionKey. |
 | POST | `/api/mobile/source-control/stage` | Stage paths or all in the sessionKey checkout. |
-| POST | `/api/mobile/source-control/unstage` | Unstage paths or all in the sessionKey checkout. |
 | POST | `/api/mobile/source-control/commit` | Commit staged changes with a required message. |
-| POST | `/api/mobile/source-control/pull` | Pull the sessionKey checkout with fast-forward only. |
-| POST | `/api/mobile/source-control/push` | Push or publish the current branch; refuse protected/default branches. |
 | POST | `/api/mobile/action` | Execute a mobile-issued runtime action (LLM chat turn, dispatch, approval). |
 | GET | `/api/mobile/activity` | Chronological fleet activity feed (newest-first, capped ~40). |
 | GET | `/api/mobile/bootstrap?fresh=1` | First-load bootstrap snapshot (repos, sessions, layout). |
-| POST | `/api/mobile/chat` | Create a new mobile LLM chat session, returning `sessionKey`/`tabId`. |
 | POST | `/api/mobile/chat/send` | Send a mobile chat turn (streams via WS, persists locally). |
 | POST | `/api/mobile/enhance` | Enhance raw mobile prompt via Gemini 2.0 Flash. |
 | GET | `/api/mobile/usage/history?range=30d` | Hourly (24h) or local-calendar daily (7d/30d/90d) coding-agent usage at stored list API rates; counts only, cached in memory for 60 seconds. Requires operator bearer until device allowlisted. |
@@ -322,16 +316,10 @@ narrow read-only exception.
 | GET | `/api/mobile/orchestrator/threads/reveal?since=...` | List pending reveal-on-desktop requests. |
 | POST | `/api/mobile/orchestrator/threads/[threadId]/reveal` | Request the desktop reveal a thread. |
 | POST | `/api/mobile/push-url` | Fan out a URL push to every connected mobile client over WS. |
-| GET | `/api/mobile/push/public-key` | Return the VAPID public key for `pushManager.subscribe`. |
-| POST | `/api/mobile/push/subscribe` | Store a web-push subscription. |
-| GET | `/api/mobile/push/subscribe` | List subscriptions. |
-| DELETE | `/api/mobile/push/subscribe` | Remove a web-push subscription by endpoint. |
-| POST | `/api/mobile/push/test` | Send a test push to every subscription. |
 | GET | `/api/mobile/files/list?threadId=...&path=...` | List one checkout directory (or use sessionKey); folders first, ignored entries excluded, capped at 500 with truncated flag. |
 | GET | `/api/mobile/files/content?threadId=...&path=...&startLine=...&endLine=...` | Read checkout text (or use sessionKey); optional inclusive 1-based lines, 256 KiB cap, hidden secrets and binary metadata. |
 | GET | `/api/mobile/review-file?path=...` | Server-side cached review file content. |
 | GET | `/api/mobile/search?q=...` | Universal mobile search across chats, packets, history. |
-| GET | `/api/mobile/session-media?sessionKey=...` | List media attachments per session (currently returns empty scaffold). |
 | POST | `/api/mobile/sync` | Reconcile mobile-side cache with server (multi-type sync envelope). |
 | GET | `/api/mobile/ws-token` | Return `~/.o8/ws-token` for mobile WS handshake. |
 
@@ -415,7 +403,6 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/files?workspace=...` | List files in a workspace. |
 | GET | `/api/panel/git-log?workspace=...` | Parsed git log with structured ref data. |
 | GET | `/api/panel/git/log?workspace=...&limit=...` | Compact git log for Loop Status widget (#796). |
-| POST | `/api/panel/github-device` | GitHub device-flow handshake (operator bearer required). |
 | GET | `/api/panel/github-status` | Parsed `gh auth status` output. |
 | GET | `/api/panel/ide-surface` | Read persisted IDE surface state (terminal repos, active repo). |
 | POST | `/api/panel/ide-surface` | Persist IDE surface state. |
@@ -462,7 +449,6 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/terminal-sessions` | List alive dashboard terminal sessions. |
 | GET | `/api/panel/terminal-state?scope=...` | Read persisted terminal state for a scope (per-tile JSON file). |
 | POST | `/api/panel/terminal-state` | Persist terminal state for a scope. |
-| GET | `/api/panel/universal-search?q=...` | Cross-surface search (files, navigation targets, sessions). |
 | GET | `/api/panel/workers` | Worker tokens + fleet status + remote-runtime registration. |
 | POST | `/api/panel/workers` | Mutate worker tokens. |
 | GET | `/api/panel/workspaces` | List workspaces with cached PR / branch / diff data per repo. |
@@ -482,8 +468,6 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/projects/[id]/repos` | Add a repo to a project (with role + suggestionOrigin). |
 | PATCH | `/api/projects/[id]/repos/[repoId]` | Update repo's role within the project. |
 | DELETE | `/api/projects/[id]/repos/[repoId]` | Remove a repo from a project. |
-| GET | `/api/projects/context?repoPath=...&projectId=...&taskTitle=...&taskBody=...` | Build a project task brief (or raw context). |
-| POST | `/api/projects/context` | Build a project task brief from body params. |
 | GET | `/api/projects/dismissed-suggestions` | List dismissed suggestion fingerprints. |
 | POST | `/api/projects/dismissed-suggestions` | Dismiss a suggestion by fingerprint. |
 | GET | `/api/projects/locks?projectId=...` | List project locks (lane-scoped concurrency control). |
@@ -623,7 +607,6 @@ Workers authenticate with `Authorization: Bearer cwk_*` per-request.
 | GET | `/api/worktrees?repo=...` | List all worktrees + conflict status for a repo. |
 | POST | `/api/worktrees` | Create a new worktree. |
 | DELETE | `/api/worktrees` | Cleanup / prune worktrees. |
-| POST | `/api/worktrees/batch` | List worktrees for many repos in parallel. |
 | GET | `/api/worktrees/conflicts?repo=...&deep=true` | Conflict report (fast file-level or deep line-level). |
 | GET | `/api/worktrees/diff?sessionKey=...&worktreePath=...&baseBranch=...` | Full unified diff for an agent's worktree vs base. |
 | GET | `/api/worktrees/diff-summary?sessionKey=...&worktreePath=...&baseBranch=...` | `{ additions, deletions, fileCount }` for a worktree. |

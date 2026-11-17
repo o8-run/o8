@@ -146,16 +146,6 @@
       ]
     },
     {
-      "path": "src/app/api/panel/prs/[number]/checkout/route-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "executable-fixture",
-        "git-cli",
-        "real-path",
-        "worktree-api"
-      ]
-    },
-    {
       "path": "src/app/api/panel/prs/github-panel-snapshot.test.ts",
       "reasons": [
         "child-process",
@@ -193,13 +183,6 @@
       "path": "src/app/api/panel/symon/imessage-access/route.test.ts",
       "reasons": [
         "child-process"
-      ]
-    },
-    {
-      "path": "src/app/api/panel/universal-search/route.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli"
       ]
     },
     {
@@ -284,12 +267,6 @@
       "path": "src/app/api/voice/live/route.test.ts",
       "reasons": [
         "child-process"
-      ]
-    },
-    {
-      "path": "src/app/api/worktrees/batch/route.test.ts",
-      "reasons": [
-        "worktree-api"
       ]
     },
     {
@@ -3534,12 +3511,6 @@
       ]
     },
     {
-      "path": "tests/github-device-consolidation.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
       "path": "tests/github-issue-packet-scope-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6058,12 +6029,6 @@
       "reasons": [
         "child-process",
         "git-cli"
-      ]
-    },
-    {
-      "path": "tests/openrouter-work-usage-real-path.test.ts",
-      "reasons": [
-        "real-path"
       ]
     },
     {
@@ -8854,12 +8819,6 @@
         "real-path"
       ],
       "browser": true
-    },
-    {
-      "path": "tests/voice-codex-realtime-route.test.ts",
-      "reasons": [
-        "executable-fixture"
-      ]
     },
     {
       "path": "tests/wake-triage-real-path.test.ts",
