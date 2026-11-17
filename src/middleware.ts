@@ -101,8 +101,6 @@ function loadStoredPanelToken(): string | null {
 const ALLOWLIST_READ_ONLY: RegExp[] = [
   // Health check for the Tauri shell to know the bundled server is up.
   /^\/api\/panel\/status(\/|$)/,
-  // Session inspection authenticates with the o8-token cookie in its handler.
-  /^\/api\/v2\/auth\/session\/?$/,
   // VAPID public key — public by definition; the mobile client needs it
   // to call pushManager.subscribe before any token handshake.
   /^\/api\/mobile\/push\/public-key(\/|$)/,
@@ -147,7 +145,7 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // Phone-facing routes only. Keep internal desktop/ws-server routes out of
   // this list: devices*, push-url, symon/tool, and ws-token all require the
   // operator credential. New mobile routes fail closed until named here.
-  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat(?:\/send)?|diff-comment(?:s|\/resolve)?|enhance|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:backend-availability|openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|push\/(?:public-key|subscribe|test)|review-file|search|session-media|symon(?:\/session|\/text-session)?|sync|terminal-input|terminal-sessions)\/?$/ },
+  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat(?:\/send)?|diff-comment(?:s|\/resolve)?|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:backend-availability|openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|push\/(?:public-key|subscribe|test)|review-file|search|session-media|symon(?:\/session|\/text-session)?|sync|terminal-input|terminal-sessions)\/?$/ },
   // A paired phone reads its own standing intents and clears one. Read + cancel
   // ONLY: registering a watch stays inside a Symon turn, where it raises a card,
   // and the tools' own surface (/api/symon/watches) keeps the operator bearer.
