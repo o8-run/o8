@@ -1671,6 +1671,26 @@
       ]
     },
     {
+      "path": "tests/api-front-door-packaged-boundary-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/api-front-door-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/approval-referee-real-path.test.ts",
       "reasons": [
         "child-process",
