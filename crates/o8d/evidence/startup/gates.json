@@ -1,0 +1,188 @@
+{
+  "kind": "synthetic-public-socket",
+  "binarySha256": "76c52db5e1fc0ff037a2bd880f3e57a9f40bc21b7ca1991c0f38a2c69a7ad906",
+  "reference": {
+    "native": false,
+    "warmups": 10,
+    "samples": 100,
+    "decisions": [
+      {
+        "path": "/api/panel/ws-info",
+        "label": "missing-bearer",
+        "status": 401,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "wrong-bearer",
+        "status": 401,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "readonly-bearer",
+        "status": 403,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "spoofed-bridge",
+        "status": 401,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "wrong-host",
+        "status": 401,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "cross-origin-write",
+        "status": 403,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "missing-bearer",
+        "status": 200,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "wrong-bearer",
+        "status": 200,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "readonly-bearer",
+        "status": 403,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "spoofed-bridge",
+        "status": 200,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "wrong-host",
+        "status": 200,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "cross-origin-write",
+        "status": 403,
+        "native": false
+      }
+    ],
+    "timings": [
+      {
+        "path": "/api/panel/ws-info",
+        "p50Ms": 17.434101999999257,
+        "p95Ms": 27.31490499999927
+      },
+      {
+        "path": "/api/setup/identity",
+        "p50Ms": 15.69639300000199,
+        "p95Ms": 22.510980000002746
+      }
+    ],
+    "exactDecisionComparisons": 0
+  },
+  "native": {
+    "native": true,
+    "warmups": 10,
+    "samples": 100,
+    "decisions": [
+      {
+        "path": "/api/panel/ws-info",
+        "label": "missing-bearer",
+        "status": 401,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "wrong-bearer",
+        "status": 401,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "readonly-bearer",
+        "status": 403,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "spoofed-bridge",
+        "status": 401,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "wrong-host",
+        "status": 401,
+        "native": false
+      },
+      {
+        "path": "/api/panel/ws-info",
+        "label": "cross-origin-write",
+        "status": 403,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "missing-bearer",
+        "status": 200,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "wrong-bearer",
+        "status": 200,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "readonly-bearer",
+        "status": 403,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "spoofed-bridge",
+        "status": 200,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "wrong-host",
+        "status": 200,
+        "native": false
+      },
+      {
+        "path": "/api/setup/identity",
+        "label": "cross-origin-write",
+        "status": 403,
+        "native": false
+      }
+    ],
+    "timings": [
+      {
+        "path": "/api/panel/ws-info",
+        "p50Ms": 40.92517300000327,
+        "p95Ms": 59.498585000001185
+      },
+      {
+        "path": "/api/setup/identity",
+        "p50Ms": 35.10284600000159,
+        "p95Ms": 45.244878999998036
+      }
+    ],
+    "exactDecisionComparisons": 12
+  }
+}

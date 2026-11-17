@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:net';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -13,7 +13,20 @@ const binary = process.env.O8D_TEST_BINARY ?? process.env.O8D_BINARY
   ?? join(targetDir, 'debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
 const paths = ['/api/panel/ws-info', '/api/setup/identity'] as const;
 const headersToCompare = ['content-type', 'cache-control', 'access-control-allow-origin', 'allow'];
+const frozenCorpusPath = join(process.cwd(), 'crates/o8d/evidence/startup/corpus.json');
 type Running = Awaited<ReturnType<typeof startParityReference>>;
+
+// Bind ephemeral fixture ports and credentials without storing their values.
+// Live TS/Rust comparisons below still compare the original values exactly.
+function portable(value: unknown, ports: { api: number; ws: number }, token: string): unknown {
+  if (value === token) return '$FIXTURE_WS_TOKEN';
+  if (value === ports.api) return '$FIXTURE_API_PORT';
+  if (value === ports.ws) return '$FIXTURE_WS_PORT';
+  if (Array.isArray(value)) return value.map(item => portable(item, ports, token));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
+    .map(([key, item]) => [key, portable(item, ports, token)]));
+  return value;
+}
 
 beforeAll(async () => {
   if (process.env.O8D_TEST_BINARY || process.env.O8D_BINARY) return;
@@ -24,12 +37,20 @@ beforeAll(async () => {
     '--features', 'experimental-session-reads', '--target-dir', targetDir], { maxBuffer: 64 * 1024 * 1024 });
 }, 900_000);
 
+const probeSockets = new WeakMap<Server, Set<Socket>>();
 async function listen() {
-  const server = createServer(socket => socket.end());
+  const sockets = new Set<Socket>();
+  const server = createServer(socket => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+    socket.end();
+  });
+  probeSockets.set(server, sockets);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   return { server, port: (server.address() as { port: number }).port };
 }
 async function close(server: Server) {
+  for (const socket of probeSockets.get(server) ?? []) socket.destroy();
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 }
 async function freePort() { const listener = await listen(); await close(listener.server); return listener.port; }
@@ -42,7 +63,7 @@ async function start(directory: string, enabled: boolean, fixedPorts: { api: num
 }
 async function read(server: Running, path: string, headers: Record<string, string> = {}, method = 'GET') {
   const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
-  const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, ...headers },
+  const response = await fetch(origin + path, { signal: AbortSignal.timeout(20_000), method, headers: { authorization: `Bearer ${server.token}`, ...headers },
     ...(method === 'POST' ? { body: '{}' } : {}) });
   const body = await response.json() as unknown;
   return { native: response.headers.get('x-o8d-native-session-read') === '1',
@@ -66,12 +87,14 @@ it('records TS startup reads, replays 500 shared-generator requests per route na
     writeFileSync(join(directory, 'boot-id'), 'fixture-startup-boot\n', { mode: 0o600 });
     const savedIds = ['instance-id', 'boot-id'].map(name => readFileSync(join(directory, name), 'utf8'));
     const corpus: Array<{ path: string; expected: unknown }> = [];
+    const frozen: Array<{ request: ReturnType<typeof generateRequests>[number]; expected: unknown }> = [];
     const refusals: Array<{ path: string; headers: Record<string, string>; method?: string; expected?: unknown }> = [];
     for (const path of paths) {
       for (const credential of ['', 'wrong', 'o8ro_fixture']) refusals.push({ path, headers: {
-        authorization: credential ? `Bearer ${credential}` : '', 'x-o8d-session-read': 'authorize',
-        'x-o8d-bridge': 'spoofed', 'x-o8d-peer': '127.0.0.1',
+        authorization: credential ? `Bearer ${credential}` : '',
       } });
+      refusals.push({ path, headers: { authorization: '', 'x-o8d-session-read': 'authorize',
+        'x-o8d-bridge': 'spoofed', 'x-o8d-peer': '127.0.0.1' } });
       refusals.push({ path, headers: { host: 'fixture.invalid', authorization: '' } });
       refusals.push({ path, method: 'POST', headers: { origin: 'https://fixture.invalid' } });
     }
@@ -88,9 +111,26 @@ it('records TS startup reads, replays 500 shared-generator requests per route na
           if (!enabled) {
             expect(result.native).toBe(false);
             corpus.push({ path: request, expected: result.wire });
+            frozen.push({ request: generated, expected: portable(result.wire, fixedPorts, server.token) });
           } else {
             if (!result.native) throw new Error(`Native route was not reached: ${path}`);
             const difference = mismatchReceipt(generated, corpus.find(record => record.path === request)!.expected, result.wire);
+            expect(difference, difference ? JSON.stringify(difference) : undefined).toBeNull();
+          }
+        }
+      }
+      console.info(`[startup-parity] generated replay complete native=${enabled}`);
+      if (!enabled) {
+        if (process.env.O8D_UPDATE_STARTUP_CORPUS === '1') {
+          if (process.env.O8D_PARITY_SEED && process.env.O8D_PARITY_SEED !== '6327') throw new Error('Frozen oracle requires default seed');
+          mkdirSync(join(process.cwd(), 'crates/o8d/evidence/startup'), { recursive: true });
+          writeFileSync(frozenCorpusPath, JSON.stringify(frozen, null, 2) + '\n');
+        }
+        if (!process.env.O8D_PARITY_SEED || process.env.O8D_PARITY_SEED === '6327') {
+          const recorded = JSON.parse(readFileSync(frozenCorpusPath, 'utf8')) as typeof frozen;
+          expect(recorded).toHaveLength(1_000);
+          for (const [index, record] of frozen.entries()) {
+            const difference = mismatchReceipt(record.request, recorded[index], record);
             expect(difference, difference ? JSON.stringify(difference) : undefined).toBeNull();
           }
         }
@@ -104,15 +144,24 @@ it('records TS startup reads, replays 500 shared-generator requests per route na
           .toBe(index < 2 ? live.port : fixedPorts.ws);
       }
       for (const refusal of refusals) {
+        console.info(`[startup-parity] auth case ${refusal.method ?? 'GET'} ${refusal.path} native=${enabled}`);
         const result = await read(server, refusal.path, refusal.headers, refusal.method);
         expect(result.native).toBe(false);
+        // Identity discovery is public in the TS policy. Compare its existing
+        // outcomes too; the port must not add a new auth floor.
+        if (refusal.path !== '/api/setup/identity') expect([401, 403]).toContain((result.wire as { status: number }).status);
         if (!enabled) refusal.expected = result.wire;
         else equal(refusal.expected, result.wire, refusal.path);
       }
+      console.info(`[startup-parity] boundaries/auth cases complete native=${enabled}`);
       expect(['instance-id', 'boot-id'].map(name => readFileSync(join(directory, name), 'utf8'))).toEqual(savedIds);
       await server.stop(); server = undefined;
     }
-  } finally { await server?.stop(); await close(live.server); rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    await server?.stop();
+    await close(live.server);
+    rmSync(directory, { recursive: true, force: true });
+  }
 }, 300_000);
 
 it('matches file-cache asymmetry and defers changed api-port or missing IDs/credentials to TS', async () => {
@@ -172,7 +221,11 @@ it('matches file-cache asymmetry and defers changed api-port or missing IDs/cred
     const missingToken = await read(server, paths[0]);
     expect(missingToken.native).toBe(false);
     equal(before.wire, missingToken.wire, paths[0]);
-  } finally { await server?.stop(); await close(live.server); rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    await server?.stop();
+    await close(live.server);
+    rmSync(directory, { recursive: true, force: true });
+  }
 }, 240_000);
 
 it('uses trimmed ID environment overrides without creating identity files', async () => {
