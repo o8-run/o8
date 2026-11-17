@@ -206,6 +206,10 @@ if (architecture) {
     ], { stdio: 'inherit' });
   }
 }
+if (!architecture) {
+  execFileSync('codesign', ['--force', '--options', 'runtime', '--timestamp',
+    '--sign', process.env.APPLE_SIGNING_IDENTITY, join(APP, 'Contents/MacOS/o8d')], { stdio: 'inherit' });
+}
 console.log('[sign-and-notarize] re-sealing .app shell');
 execFileSync('codesign', [
   '--force',

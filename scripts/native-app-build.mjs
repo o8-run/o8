@@ -28,7 +28,7 @@ import process from 'node:process';
 export const APP_BUNDLE = 'src-tauri/target/universal-apple-darwin/release/bundle/macos/o8.app';
 const ARCHES = ['x86_64', 'aarch64'];
 const WEB_INPUTS = ['src', 'public', 'package-lock.json', 'next.config.ts', 'tsconfig.json', 'scripts/tauri-export.mjs'];
-const HELPERS = ['o8-next', 'o8-pi-write', 'speech-local'];
+const HELPERS = ['o8-next', 'o8-pi-write', 'o8d', 'speech-local'];
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: 'inherit', ...options });
@@ -161,6 +161,7 @@ async function candidatePrebuild(root, triple, compile) {
   if (!existsSync(join(root, 'src-tauri/helpers', `speech-local-${triple}`))) {
     timed('speech sidecar', () => run(node, ['scripts/build-speech-local.mjs'], { env }));
   }
+  timed('daemon', () => run(node, ['scripts/build-o8d.mjs'], { env }));
   timed('write helper', () => run(node, ['scripts/build-pi-write.mjs'], { env }));
   timed('native window', () => run(node, ['scripts/next/build-sidecar.mjs'], { env }));
   if (current) {
