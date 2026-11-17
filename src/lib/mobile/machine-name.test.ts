@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readMachineName } from './machine-name';
+import { readChosenMachineName, readMachineName } from './machine-name';
 
 describe('readMachineName', () => {
   it('uses the name set in macOS Sharing settings', () => {
@@ -13,5 +13,16 @@ describe('readMachineName', () => {
 
   it('never returns an empty name', () => {
     expect(readMachineName('linux', () => '', () => '')).toBe('This computer');
+  });
+});
+
+describe('readChosenMachineName', () => {
+  it('uses the first line of the owner\'s file', () => {
+    expect(readChosenMachineName(() => '  Linux box \nnotes\n')).toBe('Linux box');
+  });
+
+  it('is absent when the file is missing or blank', () => {
+    expect(readChosenMachineName(() => { throw new Error('ENOENT'); })).toBeNull();
+    expect(readChosenMachineName(() => '\n')).toBeNull();
   });
 });
