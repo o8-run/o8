@@ -222,13 +222,6 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 | POST | `/api/cortex/proposals` | Dismiss a directive proposal. |
 | GET | `/api/cortex/recent-outcomes?repoPath=...&limit=...` | Read recent rows from the `session_outcomes` ledger. |
 
-### `/api/dictation/*` — Push-to-talk voice input (gated)
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/dictation/transcribe` | Multipart audio upload → OpenRouter transcription endpoint. |
-| POST | `/api/dictation/polish` | Polish a raw dictation transcript with Claude Haiku and the Anthropic key (adaptive punctuation); unpolished without a key. |
-
 ### `/api/github/*` — GitHub App webhook receiver (self-authenticating)
 
 | Method | Path | Purpose |
@@ -533,12 +526,6 @@ Every `[taskId]/<action>` route is a thin wrapper around `runTaskMutationRoute` 
 | POST | `/api/tasks/[taskId]/dispatch` | Dispatch a task to a runtime (model, worker intent, requested provider). |
 | POST | `/api/tasks/[taskId]/prune` | Prune a task with a reason. |
 | POST | `/api/tasks/[taskId]/report` | Report progress / status / metadata for a task. |
-
-### `/api/tts/*` — Text-to-speech (operator or paired-device capability)
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/tts` | Server-side TTS via `edge-tts` Python (browser can't set DRM headers Microsoft now requires). |
 
 ### `/api/v2/*` — v2 API layer: auth, chat, files, BYOK, proxies (partial)
 

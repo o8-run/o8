@@ -150,6 +150,10 @@ fn header(path: &str, kind: tar::EntryType, size: usize, mode: u32) -> tar::Head
 }
 /// The classic `.app.tar.gz`: one top directory holding the bundle.
 fn archive(root: &Path, version: &str, extra: &[(&str, &[u8])]) -> Vec<u8> {
+    archive_program(version, program(root, version).as_bytes(), extra)
+}
+
+fn archive_program(version: &str, executable: &[u8], extra: &[(&str, &[u8])]) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
     let mut add = |path: &str, data: &[u8], mode: u32| {
         builder
@@ -164,11 +168,7 @@ fn archive(root: &Path, version: &str, extra: &[(&str, &[u8])]) -> Vec<u8> {
         plist(version).as_bytes(),
         0o644,
     );
-    add(
-        "o8.app/Contents/MacOS/o8",
-        program(root, version).as_bytes(),
-        0o755,
-    );
+    add("o8.app/Contents/MacOS/o8", executable, 0o755);
     for (path, data) in extra {
         add(path, data, 0o644);
     }
@@ -573,4 +573,225 @@ fn background_bad_signature_is_discarded_while_servers_keep_running() {
         .contains("signature"));
     case.untouched(&servers);
     assert!(TcpStream::connect(("127.0.0.1", case.f.port("ws-port"))).is_ok());
+}
+
+/// Full archive compatibility, with the installed main program being this
+/// branch's launcher. The helper is built in the classic updater fixture so
+/// dependency resolution and installer implementation are the fixture's own.
+#[test]
+#[ignore = "build update-chain-classic and set O8_CLASSIC_UPDATER_FIXTURE first"]
+fn classic_to_launcher_release_chain() {
+    let helper = std::env::var_os("O8_CLASSIC_UPDATER_FIXTURE")
+        .expect("set O8_CLASSIC_UPDATER_FIXTURE to the fixture binary");
+    let launcher = fs::read(env!("CARGO_BIN_EXE_o8-launcher")).unwrap();
+    for mode in [
+        "good",
+        "bad-signature",
+        "cannot-start",
+        "before-swap",
+        "after-swap",
+    ] {
+        eprintln!("release-chain scenario: {mode}");
+        let mut case = Case::new();
+        fs::write(
+            case.bundle.join("Contents/MacOS/o8"),
+            program(&case.f.root, "0.9.0"),
+        )
+        .unwrap();
+        fs::write(case.bundle.join("Contents/Info.plist"), plist("0.9.0")).unwrap();
+        let bytes = archive_program("1.0.0", &launcher, &[]);
+        let signature = sign(&case.keys, &bytes);
+        case.publish("1.0.0", bytes, signature, false);
+        let main = case.bundle.join("Contents/MacOS/o8");
+        let _detached = DetachedLauncher(main.clone());
+        let installed = std::process::Command::new(&helper)
+            .arg(case.feed.url("/feed/latest.json"))
+            .arg(&case.keys.public)
+            .arg(&main)
+            .output()
+            .unwrap();
+        assert!(
+            installed.status.success(),
+            "classic install: {}",
+            String::from_utf8_lossy(&installed.stderr)
+        );
+        assert!(case.installed().contains("1.0.0"));
+        assert!(
+            fs::read(&main).unwrap() == launcher,
+            "installed executable differs"
+        );
+        assert!(case.feed.requested("/o8.app.tar.gz"));
+        let fault = format!("{mode}:update");
+        let faults = [("O8_LAUNCHER_FAULT", fault.as_str())];
+        case.f.launcher = Some(case.f.launch_with(
+            &main,
+            &case.f.root.join("config.json"),
+            if mode.ends_with("swap") { &faults } else { &[] },
+            "launcher-stderr",
+        ));
+        case.f.ready();
+        assert_eq!(case.status()["current"], "1.0.0");
+        let executable = if mode == "cannot-start" {
+            b"#!/nonexistent-update-chain-interpreter\n".to_vec()
+        } else {
+            program(&case.f.root, "2.0.0").into_bytes()
+        };
+        let bytes = archive_program("2.0.0", &executable, &[]);
+        let other = keys();
+        let signature = sign(
+            if mode == "bad-signature" {
+                &other
+            } else {
+                &case.keys
+            },
+            &bytes,
+        );
+        case.publish("2.0.0", bytes, signature, false);
+        if mode == "bad-signature" {
+            let servers = case.f.starts("api-starts");
+            assert!(case.refused().contains("signature"));
+            case.untouched(&servers);
+            assert!(
+                fs::read(&main).unwrap() == launcher,
+                "installed executable differs"
+            );
+            continue;
+        }
+        assert_eq!(
+            control(&case.f, serde_json::json!({"op":"update-check"}))["available"]["version"],
+            "2.0.0"
+        );
+        assert_eq!(
+            control(&case.f, serde_json::json!({"op":"update-apply"}))["ok"],
+            true
+        );
+        let child = case.f.launcher.as_mut().unwrap();
+        until(|| child.try_wait().unwrap().is_some());
+        let exit = child.wait().unwrap();
+        case.f.launcher = None;
+        if mode.ends_with("swap") {
+            assert_eq!(exit.code(), Some(86));
+            assert!(case.f.root.join("update-journal.json").exists());
+            if mode == "after-swap" {
+                launchable(&case, "2.0.0");
+            }
+            fs::remove_file(case.f.root.join("window-ready")).unwrap();
+            // NEXT is an allowed stub. Recovery still runs through the real
+            // launcher entry point, using the same installed-bundle override.
+            if mode == "before-swap" {
+                assert!(fs::read(&main).unwrap() == launcher);
+                case.f.launcher = Some(case.f.launch_with(
+                    &main,
+                    &case.f.root.join("config.json"),
+                    &[],
+                    "launcher-stderr",
+                ));
+            } else {
+                case.f.start();
+            }
+            case.f.ready();
+            let last = &case.status()["last"];
+            assert_eq!(
+                last["outcome"],
+                if mode == "after-swap" {
+                    "installed"
+                } else {
+                    "failed"
+                }
+            );
+            assert_eq!(last["from"], "1.0.0");
+            assert_eq!(last["to"], "2.0.0");
+            assert!(!case.f.root.join("update-journal.json").exists());
+            assert!(!case.staging().join("staged").exists());
+        } else if mode == "cannot-start" {
+            until(|| {
+                case.f.starts("api-starts").len() == 2 && case.f.root.join("launcher.sock").exists()
+            });
+            until(|| case.status()["last"]["outcome"] == "failed");
+            assert!(case.installed().contains("1.0.0"));
+            assert!(
+                fs::read(&main).unwrap() == launcher,
+                "installed executable differs"
+            );
+            assert!(case.status()["last"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("previous version was restored"));
+            let server = *case.f.starts("api-starts").last().unwrap();
+            let parent = std::process::Command::new("ps")
+                .args(["-p", &server.to_string(), "-o", "ppid="])
+                .output()
+                .unwrap();
+            let pid: i32 = String::from_utf8(parent.stdout)
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            let command = std::process::Command::new("ps")
+                .args(["-ww", "-p", &pid.to_string(), "-o", "command="])
+                .output()
+                .unwrap();
+            assert!(String::from_utf8_lossy(&command.stdout)
+                .contains(&main.to_string_lossy().to_string()));
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
+            until(|| !case.f.root.join("launcher.sock").exists());
+        } else {
+            assert!(exit.success());
+            assert!(case.installed().contains("2.0.0"));
+            until(|| case.f.root.join("relaunched").exists());
+            let ran: serde_json::Value =
+                serde_json::from_slice(&fs::read(case.f.root.join("relaunched")).unwrap()).unwrap();
+            assert_eq!(ran["version"], "2.0.0");
+            assert_eq!(
+                ran["args"],
+                serde_json::json!(["--config", case.f.root.join("config.json")])
+            );
+            let last: serde_json::Value =
+                serde_json::from_slice(&fs::read(case.f.root.join("update-last.json")).unwrap())
+                    .unwrap();
+            assert_eq!(last["outcome"], "installed");
+            assert_eq!(last["from"], "1.0.0");
+            assert_eq!(last["to"], "2.0.0");
+        }
+        if mode == "good" || mode == "after-swap" {
+            let previous = case.staging().join("previous/o8.app/Contents/MacOS/o8");
+            assert!(
+                fs::read(previous).unwrap() == launcher,
+                "previous executable differs"
+            );
+        }
+    }
+}
+
+/// Also covers a panic after rollback starts a detached launcher. Only a
+/// command inside this fixture bundle may be terminated.
+struct DetachedLauncher(PathBuf);
+impl Drop for DetachedLauncher {
+    fn drop(&mut self) {
+        let Ok(output) = std::process::Command::new("ps")
+            .args(["-axww", "-o", "pid=,command="])
+            .output()
+        else {
+            return;
+        };
+        let executable = self.0.to_string_lossy();
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let line = line.trim();
+            let Some((pid, command)) = line.split_once(char::is_whitespace) else {
+                continue;
+            };
+            if command
+                .trim()
+                .starts_with(&format!("{executable} --config "))
+            {
+                if let Ok(pid) = pid.parse::<i32>() {
+                    unsafe {
+                        libc::kill(pid, libc::SIGTERM);
+                    }
+                }
+            }
+        }
+    }
 }

@@ -38,17 +38,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
     route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
     route('/api/harness', 'POST', () => import('@/lib/harness/route')),
-    route('/api/mobile/symon/text-turn', 'POST DELETE', () => import('@/lib/symon/http/text-turn')),
-    route('/api/panel/symon/conversations', 'GET', () => import('@/lib/symon/http/conversations')),
-    route('/api/panel/symon/conversations/continue', 'POST', () => import('@/lib/symon/http/continue')),
-    route('/api/panel/symon/conversations/transcript', 'GET', () => import('@/lib/symon/http/transcript')),
-    route('/api/panel/symon/conversations/record', 'POST', () => import('@/lib/symon/http/record')),
-    route('/api/symon/managed-messages/inbound', 'POST', () => import('@/lib/symon/http/managed-inbound')),
 
-    route('/api/mobile/symon', 'GET POST', () => import('@/lib/mobile/symon-relay-route')),
-    route('/api/mobile/symon/confirm', 'POST', () => import('@/lib/mobile/symon-confirm-route')),
-    route('/api/mobile/symon/tool', 'POST DELETE', () => import('@/lib/mobile/symon-tool-route')),
-    route('/api/panel/symon/messages-receiver', 'GET POST', () => import('@/lib/symon/messages-receiver/control-route')),
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
@@ -131,7 +121,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/compact', 'POST', () => import('@/app/api/orchestrator/compact/route')),
     route('/api/orchestrator/session-rules', 'GET POST DELETE', () => import('@/app/api/orchestrator/session-rules/route')),
     route('/api/orchestrator/delegate', 'POST', () => import('@/app/api/orchestrator/delegate/route')),
-    route('/api/next/voice-host', 'GET POST', () => import('@/app/api/next/voice-host/route')),
     route('/api/orchestrator/stop-packet', 'POST', () => import('@/app/api/orchestrator/stop-packet/route')),
     // Operator-only (requirePanelAuth, then the bearer principal); like stop-packet
     // they run the dispatch tick here. The agent supervisor's watch map is still
@@ -146,14 +135,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/devices/owner', 'POST', () => import('@/lib/devices/owner-route')),
     // Native mode keeps preview servers in the WS process.
     route('/api/tasks/[taskId]/preview', 'POST DELETE', () => import('@/lib/cloud/task-preview-route')),
-    // Loads the handler, not the Next route: Next forwards here while this
-    // transport is on, so the edge-tts installer has one owner (#5422).
-    route('/api/tts', 'POST', () => import('@/lib/tts/route')),
-    // Symon's connected MCP tools: the handlers, not the Next routes, so the MCP
-    // sessions and their child processes have one owner while this transport is
-    // on (#5422). Operator only (the handler refuses a worker with 403).
-    route('/api/symon/mcp/tools', 'GET', () => import('@/lib/mcp/symon-mcp-tools-route')),
-    route('/api/symon/mcp/call', 'POST', () => import('@/lib/mcp/symon-mcp-call-route')),
     // Symon Agent-Mode tool relay (an already-confirmed SSH-transported tool invoked on the
     // remote webview). POST only, operator-ws-token-only TWICE over: the handler's
     // transportAuthorized does a constant-time timingSafeEqual(bearer, getOrCreateWsToken())
@@ -163,7 +144,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // from the body reach the webview eval (buildTransportedToolEval) ONLY through JSON.stringify
     // -> they are JS data literals, never interpolated as code, so a ws-token holder cannot inject
     // JS. The response is the tool result, no credential. (#5243)
-    route('/api/symon/transport/tool', 'POST', () => import('@/app/api/symon/transport/tool/route')),
   ],
   brain: [
     route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route')),
@@ -414,12 +394,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/broadcast/post', 'POST', () => import('@/lib/broadcast/post-route')),
     route('/api/broadcast/tokens', 'POST', () => import('@/lib/broadcast/tokens-route')),
     route('/api/broadcast/say', 'POST', () => import('@/app/api/broadcast/say/route')),
-    // Symon watches (src-tauri symon_watch.rs). No device/worker/spectator grant in panelGateMiddleware, so only the
-    // operator bearer passes, and the handlers add no loopback or principal check of their own. Watches are rows
-    // in SQLite: the automation scheduler in the WS process fires them from the same rows, and a plan claim is decided by an
-    // UPDATE, so either process may register, claim, settle or cancel. (#5422)
-    route('/api/symon/watches', 'GET POST', () => import('@/app/api/symon/watches/route')),
-    route('/api/symon/watches/[id]', 'GET PATCH DELETE', () => import('@/app/api/symon/watches/[id]/route')),
     // o8 team presence, messages and tell for Symon: operator-only through the
     // middleware (none is on a device, worker or loopback list), principal from the
     // bearer. They read and append the files under each registered repo's
