@@ -1,9 +1,9 @@
 /** Reuse the existing authenticated standalone reader for flagged repository GETs. */
-import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { o8dBinaryPath } from './o8d-binary';
 
 const MARKER = 'x-o8d-native-repository-read';
 const PATHS = new Set(['/api/panel/branches']);
@@ -40,8 +40,7 @@ process.once('exit', stopRepositoryReader);
 
 function privateOrigin(): Promise<string> {
   const directory = getDataDir();
-  const binary = resolve(process.env.O8D_BINARY ?? join(process.cwd(), 'crates/o8d/target/release',
-    process.platform === 'win32' ? 'o8d.exe' : 'o8d'));
+  const binary = o8dBinaryPath();
   const key = JSON.stringify([directory, binary]);
   if (reader?.key === key && reader.child.exitCode === null && reader.child.signalCode === null) return reader.ready;
   if (Date.now() < retryAfter) return Promise.reject(new Error('Repository reader unavailable'));

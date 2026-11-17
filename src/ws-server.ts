@@ -78,6 +78,7 @@ import { waitForTerminalResyncBarrier, type TerminalResyncCapture } from '@/lib/
 import { formatTmuxResyncSnapshot, parseTmuxSnapshotCursor } from '@/lib/ws-server/terminal-resync-snapshot';
 import { TerminalWorkloadStats } from '@/lib/ws-server/terminal-workload-stats';
 import { O8dBridge } from '@/lib/ws-server/o8d-bridge';
+import { o8dStartsByDefault } from '@/lib/ws-server/o8d-binary';
 
 migrateDataDirOnce();
 
@@ -8890,7 +8891,9 @@ const httpServer = createServer(async (req, res) => {
 
 // Loopback by default; the phone access setting or launch environment opts in.
 const WS_LISTEN_HOST = resolveListenHost();
-const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
+const o8dBridge = process.env.O8_WS_O8D !== '0'
+  && (process.env.O8_WS_O8D === '1' || o8dStartsByDefault())
+  ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
 
 try { syncTokenFile(); } catch { console.error('[mobile-e2ee] Auth projection unavailable; device HTTP requests will retry.'); }
 const WS_TOKEN = getOrCreateWsToken();

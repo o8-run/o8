@@ -1,0 +1,1 @@
+- The Rust daemon ships inside the Mac app and carries the app's live connection. If it stops, the app falls back to the built-in one. Set `O8_WS_O8D=0` to turn it off.

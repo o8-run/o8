@@ -33,6 +33,7 @@ export const MACOS_REQUIRED_BINARIES = Object.freeze([
   'Contents/MacOS/speech_recognizer',
   'Contents/MacOS/speech-local',
   'Contents/MacOS/o8-pi-write',
+  'Contents/MacOS/o8d',
   'Contents/MacOS/o8-next',
 ]);
 
