@@ -28,9 +28,10 @@ export function prepareReviewFindings(packetId: string, findings: OrchestratorRe
   const seen = new Set<string>();
   const checkedHeadSha = head && /^[a-f0-9]{40}$/i.test(head) ? head.toLowerCase() : undefined;
   const result: OrchestratorReviewFinding[] = findings.map(finding => {
-    const id = finding.id?.trim() || randomUUID();
-    if (seen.has(id)) throw new Error(`Duplicate review finding ID: ${id}`);
-    if (finding.id && !prior.some(item => item.id === id)) throw new Error(`Unknown review finding ID: ${id}`);
+    // A reviewer can invent or repeat an ID. Losing the verdict would be worse than
+    // an extra open finding, so such a finding is stored as newly raised.
+    const given = finding.id?.trim();
+    const id = given && !seen.has(given) && prior.some(item => item.id === given) ? given : randomUUID();
     seen.add(id);
     return { ...finding, id, checkedHeadSha, unchecked: !checkedHeadSha,
       resolution: checkedHeadSha ? finding.resolution : 'deferred' as const };
