@@ -54,7 +54,7 @@ it('threads POST bytes into native dispatch, bounds bodies, and replays a buffer
     expect(read.status).toBe(200);
     expect(read.headers.get('x-o8d-native')).toBe('1');
     await read.arrayBuffer();
-    const denied = await fetch(origin + path, { method: 'POST', headers: { authorization: 'Bearer wrong', 'x-o8d-session-read': 'authorize', 'x-o8d-bridge': 'spoofed' }, body: Buffer.alloc(1024, 'a') });
+    const denied = await fetch(origin + path, { method: 'POST', headers: { authorization: 'Bearer wrong', 'x-o8d-session-read': 'authorize', 'x-o8d-bridge': 'spoofed' }, body: Buffer.alloc(16 * 1024 * 1024 + 1, 'a') });
     expect(denied.status).toBe(401);
     expect(denied.headers.get('x-o8d-native')).toBeNull();
     await denied.arrayBuffer();

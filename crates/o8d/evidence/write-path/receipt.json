@@ -1,0 +1,27 @@
+{
+  "kind": "synthetic-public-socket",
+  "issue": 6370,
+  "checks": {
+    "canonicalPublicSocketAndAdmission": "3/3 passed",
+    "boundaryRecipes": "0,1024,16777216 native200;16777217 native413",
+    "unauthorizedOversized": "401 via TypeScript",
+    "fallback": "exact synthetic messages persisted by TypeScript",
+    "cargoAllFeatures": 0,
+    "typecheckFast": 0,
+    "lint": 0,
+    "rules": 0
+  },
+  "sourceSha256": {
+    "crates/o8d/src/app.rs": "75bf7589a84f4a90ab8d7bc8defb313ce889a1b6565a09decc87ead091fea151",
+    "crates/o8d/src/app/native.rs": "5f3a080fcb6aaf867eca4711b4b7f2154be0492dc84846e9a1b1ea3fe9f0b719",
+    "crates/o8d/src/http/mod.rs": "2c40343629cefbe39881bc824c6d7fc267562a8c628b79607d061c1758e5a9ce",
+    "src/lib/ws-server/native-http-routes.ts": "94a3fb6deab7d121881edf5e72220dc4192eb032afa68fddd853fd81f9a193c7",
+    "scripts/o8d/build-write-fixture.mjs": "8a0149a754c72a51bd62e09246d04248a120f1441118bedee34867aa211f2241",
+    "scripts/o8d/verification-fixture.patch": "1fbfdcc9e31046746c57207b4946dcc71b8dd63b7b91942f3a7c83515789f35a",
+    "tests/o8d-rust-write-path-real-path.test.ts": "2b1c2fd0b8cb22532084d533ff114d7cb329b3617ddb20eec77a0beaa177166a",
+    "tests/o8d-session-read-admission-real-path.test.ts": "d55a0ffec6f4118dca8582ec3e0f88cd5c2801592aac6baaaf7b98d42c241370",
+    "crates/o8d/evidence/write-path/corpus.json": "555138d9e2c8bc1c29b4afdbe7e6b325b6cfe7653e92e5dfce34e67b85e8ccf8"
+  },
+  "fullCompletionAndHosted": "pending",
+  "securityReview": "required before arming"
+}
