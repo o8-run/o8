@@ -63,14 +63,14 @@ describe('paired mobile read routes through the real gate', () => {
   it.each(['/api/mobile/automations/auto_1', '/api/mobile/automations/auto_1/run/extra', '/api/automations', '/api/automations/auto_1/run'])('keeps %s closed to a paired device', path => {
     for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
   });
-  it.each(['stage', 'unstage', 'commit', 'pull', 'push'])('limits source control %s to authenticated POST', action => {
+  it.each(['stage', 'commit'])('limits source control %s to authenticated POST', action => {
     const path = `/api/mobile/source-control/${action}`;
     expect(panelGateMiddleware(request(path, token, 'POST')).status).toBe(200);
     expect(panelGateMiddleware(request(path, '', 'POST')).status).toBe(401);
     expect(panelGateMiddleware(request(path, 'revoked-device', 'POST')).status).toBe(401);
     for (const method of ['GET', 'PUT', 'DELETE', 'PATCH']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
   });
-  it.each(['/api/mobile/source-control/force-push', '/api/mobile/source-control/push/extra', '/api/mobile/source-control'])('keeps %s closed to a paired device', path => {
+  it.each(['/api/mobile/source-control/unstage', '/api/mobile/source-control/pull', '/api/mobile/source-control/push', '/api/mobile/source-control/force-push', '/api/mobile/source-control/push/extra', '/api/mobile/source-control'])('keeps %s closed to a paired device', path => {
     for (const method of ['GET', 'POST']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
   });
   it.each(['/api/panel/prs', '/api/runtime/capacity', '/api/orchestrator/state'])('preserves operator-only %s', path => {
