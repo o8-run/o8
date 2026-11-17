@@ -468,3 +468,7 @@ response. No Next listener runs in that fixture.
 GET /api/mobile/inbox admits only the existing unexpired empty inbox cache, through private canonical TypeScript metadata. Both full and sessions-only cache lanes retain their eight-second lifetime and cross-process generation invalidation. Empty finalization remains with the existing advisory setting owner. Rust reconstructs the empty response shape and applies the original cache/Server-Timing headers; it never invents a fleet from missing files.
 
 Fresh requests, a missing/expired/invalidated cache, nonempty sessions/approvals/review/items and unknown shape defer to the original handler. Live discovery, orphan cleanup, approval expiration, review discovery and urgency work remain TypeScript-owned. No Rust writer or caller permission is introduced. The admission context contains only version/generatedAt/mode/sourceLabel/optional note, not a serialized response or credential.
+
+### Unselected review workspace
+
+GET /api/review/workspace returns its original empty snapshot only when the canonical selection predicate confirms both the workspace query and CORTEX_IDE_REVIEW_REPO_ROOT are empty. The route and private admission use the same live predicate. Selected or configured workspaces stay with their original TS Git,GitHub and review-cache owner. No new listener registration,caller grant or Rust writer is introduced; the private context is one boolean and the idle reader does not open SQLite.

@@ -357,5 +357,18 @@
     "crates/o8d/src/http/review_workspace.rs": "1ee8aeefbd59c2bbbb74b8fddc9ce930bf7600d3aae463cad1a30b4a960582bf",
     "crates/o8d/src/http/mod.rs": "f9f6001d3229a38a769a62329c601601e0f7830e1549b8d6b20f9ce3b1ee851d",
     "crates/o8d/src/app/session_reads.rs": "a0a1fd51e0a66e21cb9a0a94fd16e6ad2967802439dce2c8eaefd58931cf32ef"
+  },
+  "packagingRebase": {
+    "base": "dc855e3a8",
+    "routeModule": 0,
+    "typecheckFast": 0,
+    "touchedLint": 0,
+    "cargoReceiptReused": {
+      "exit": 0,
+      "tests": 30,
+      "rustSourcesAndManifestsUnchanged": true
+    },
+    "preserved": "Packaged helper discovery, settings/mobile admission contexts, existing auth paths and settings window-owner fallback.",
+    "note": "Functional frozen replay on the packaged-daemon base; release samples above are historical and were not remeasured."
   }
 }
