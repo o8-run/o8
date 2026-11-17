@@ -1,0 +1,180 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+
+const require = createRequire(import.meta.url);
+Date.now = () => 1794873600000;
+const { firstDifference, generateRequests, normalize } = require('../../scripts/o8d/parity.ts') as typeof import('../../scripts/o8d/parity');
+const { handleNativeHttp } = require('../../src/lib/ws-server/native-http-routes.ts') as typeof import('../../src/lib/ws-server/native-http-routes');
+const { O8dBridge } = require('../../src/lib/ws-server/o8d-bridge.ts') as typeof import('../../src/lib/ws-server/o8d-bridge');
+const { getSqlite } = require('../../src/lib/db/index.ts') as typeof import('../../src/lib/db');
+const registry = require('../../src/lib/repos/registry.ts') as typeof import('../../src/lib/repos/registry');
+const readiness = require('../../src/lib/repos/readiness.ts') as typeof import('../../src/lib/repos/readiness');
+const icons = require('../../src/lib/repos/project-icon-resolver.ts') as typeof import('../../src/lib/repos/project-icon-resolver');
+const [binary, output] = process.argv.slice(2);
+const directory = process.env.CORTEX_IDE_DATA_DIR!;
+assert.ok(directory.includes('o8d-projects-parity-'));
+assert.equal(process.env.HOME, directory);
+const token = 'owned-projects-parity-fixture';
+writeFileSync(join(directory, 'ws-token'), token, { mode: 0o600 });
+writeFileSync(join(directory, 'instance-id'), 'fixture-projects-instance');
+writeFileSync(join(directory, 'boot-id'), 'fixture-projects-boot');
+const fixtureBin = join(directory, 'bin');
+mkdirSync(fixtureBin);
+writeFileSync(join(fixtureBin, 'gh'), '#!/bin/sh\nprintf \'[{"full_name":"fixture/repo","private":true,"description":"fixture"}]\\n\'\n', { mode: 0o700 });
+for (const name of ['ssh', 'codex', 'claude']) writeFileSync(join(fixtureBin, name), '#!/bin/sh\nexit 127\n', { mode: 0o700 });
+process.env.PATH = fixtureBin + ':/usr/bin:/bin';
+const repoRoot = join(directory, 'fixture-repo');
+mkdirSync(repoRoot);
+execFileSync('git', ['init', '-q', join(directory, 'fixture-git')]);
+const db = getSqlite();
+const reserve = createServer();
+await new Promise<void>(resolve => reserve.listen(0, '127.0.0.1', resolve));
+const port = (reserve.address() as { port: number }).port;
+await new Promise<void>(resolve => reserve.close(() => resolve()));
+Object.assign(process.env, { O8_NEXT_O8D: '1', O8_WS_O8D: '1', O8D_NATIVE_SESSION_READS: '1',
+  O8D_BINARY: binary, O8_API_PORT: String(port), O8_WS_PORT: String(port), PORT: String(port) });
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  const url = String(input instanceof Request ? input.url : input);
+  assert.ok(url.startsWith('http://127.0.0.1:'), 'External fixture network disabled');
+  return originalFetch(input, init);
+};
+const privateServer = createServer(async (req, res) => {
+  try {
+    if (!await handleNativeHttp(req, res, port, bridge.bridged(req), bridge.clientAddress(req))) res.writeHead(404).end();
+  } catch { res.writeHead(500).end(); }
+});
+const bridge = new O8dBridge(privateServer, port, 'projects-parity-epoch', '127.0.0.1');
+async function read(path: string, headers: Record<string, string> = {}, method = 'GET') {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, { method,
+    signal: AbortSignal.timeout(20_000), headers: { authorization: `Bearer ${token}`, ...headers },
+    ...(method === 'POST' ? { body: '{}' } : {}) });
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const type = response.headers.get('content-type');
+  const names = ['content-type', 'cache-control', 'allow', ...(!type?.includes('json')
+    ? ['x-content-type-options', 'content-security-policy', 'content-length'] : [])];
+  return { native: response.headers.get('x-o8d-native-session-read') === '1', wire: normalize({
+    status: response.status, headers: Object.fromEntries(names.map(name => [name, response.headers.get(name)])),
+    body: type?.includes('json') ? JSON.parse(bytes.toString()) : { base64: bytes.toString('base64') } }) };
+}
+function portable(value: unknown): unknown {
+  if (typeof value === 'string') return value.replaceAll(directory, '$FIXTURE_ROOT').replaceAll(process.cwd(), '$SOURCE_ROOT');
+  if (Array.isArray(value)) return value.map(portable);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, portable(item)]));
+  return value;
+}
+function snapshot() {
+  const files: Record<string, string> = {};
+  function walk(folder: string) {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      if (entry.name.startsWith('o8d-request-counts') || entry.name.endsWith('-shm')) continue;
+      const path = join(folder, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else files[path.slice(directory.length + 1)] = createHash('sha256').update(readFileSync(path)).digest('hex');
+    }
+  }
+  walk(directory);
+  return files;
+}
+async function seed(index: number) {
+  const kind = Math.floor(index / 10) % 8;
+  const repos = kind === 0 ? [] : [{ id: 'repo-a', name: kind === 7 ? '雪 repo' : 'Alpha',
+    localPath: kind === 6 ? join(directory, 'fixture-git') : repoRoot,
+    setup: { workspaceIsolationPreference: ['git-worktree', 'apfs-cow-clone', 'worktree', 'auto'][index % 4] },
+    isGitRepo: kind === 6, remoteUrl: null, defaultBranch: 'main', addedAt: '2026-01-01T00:00:00.000Z',
+    lastOpenedAt: '2026-11-16T00:00:00.000Z', extraField: 'retained-fixture' },
+  { id: 'repo-b', name: 'Beta', localPath: join(directory, 'missing-repo'), isGitRepo: false, remoteUrl: null,
+    addedAt: '2026-01-02T00:00:00.000Z', setup: { installCommand: '  fixture command  ', envFiles: [], envMode: 'skip' },
+    lastOpenedAt: '2026-01-02T00:00:00.000Z' }];
+  writeFileSync(join(directory, 'repos.json'), kind === 4 ? '{ broken' : JSON.stringify({ version: 1, repos }));
+  db.exec('DELETE FROM project_repos; DELETE FROM projects;');
+  db.prepare("DELETE FROM app_state WHERE key LIKE 'project-merge-mode:%' OR key LIKE 'repository-icon:%' OR key='active_project_id'").run();
+  const pid = 'proj-01234567-89a', extra = 'proj-12345678-90a';
+  const insert = db.prepare('INSERT INTO projects(id,name,slug,description,main_repo_id,created_at,updated_at,color,sort_order) VALUES(?,?,?,?,?,?,?,?,?)');
+  insert.run(pid, 'Alpha', 'alpha', kind === 5 ? 'Imported from the desktop project rail. fixture' : null,
+    kind === 2 ? null : 'repo-a', 10, 20, '#7fa68f', 1);
+  insert.run(extra, '雪 project', 'snow', ' Fixture description ', null, 30, 40, null, 0);
+  if (kind !== 0 && kind !== 2) {
+    const link = db.prepare('INSERT INTO project_repos(project_id,repo_id,role,suggestion_origin,added_at) VALUES(?,?,?,?,?)');
+    link.run(pid, 'repo-a', 'fullstack', 'manual', 12); link.run(pid, 'repo-b', null, 'fixture-origin', 11);
+  }
+  const ledger = { projects: [{ id: 'legacy-alpha', sqliteProjectId: pid, name: 'Alpha', repoPaths: [],
+    createdAt: '2026-01-01T00:00:00.000Z', color: '#a39565' }, { id: extra, name: '雪 project', repoPaths: [],
+    createdAt: '2026-01-02T00:00:00.000Z' }], activeProjectId: kind === 2 ? 'repo:repo-a' : 'legacy-alpha' };
+  if (kind === 3) rmSync(join(directory, 'projects.json'), { force: true });
+  else writeFileSync(join(directory, 'projects.json'), JSON.stringify(ledger));
+  if (index % 3 !== 0) db.prepare('INSERT OR REPLACE INTO app_state(key,value,updated_at)VALUES(?,?,?)')
+    .run('project-merge-mode:' + pid, index % 3 === 1 ? 'direct' : 'pr_only', 1);
+  if (index % 4 === 0) writeFileSync(join(directory, '.dogfood-pr-only'), 'fixture');
+  else rmSync(join(directory, '.dogfood-pr-only'), { force: true });
+  rmSync(join(repoRoot, 'favicon.svg'), { force: true });
+  if (kind === 7) writeFileSync(join(repoRoot, 'favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><path d="M0 0h1v1H0z"/></svg>');
+  if (kind === 1) db.prepare('INSERT OR REPLACE INTO app_state(key,value,updated_at)VALUES(?,?,?)')
+    .run('repository-icon:repo-a', JSON.stringify({ faviconPath: null, projectIcon: { kind: 'emoji', emoji: ' 🦀 ' } }), 1);
+  for (const repo of repos) { readiness.invalidateRepoReadiness(repo.localPath); icons.projectIconResolver.invalidate(repo.localPath); }
+  try { await registry.listReposFresh(); } catch { /* Malformed registry stays with its owner. */ }
+  return { kind, pid, extra };
+}
+const routes = [
+  { path: '/api/panel/repos', parameters: [{ name: 'source', valid: ['local', 'github'], invalid: ['unknown'], boundary: ['', '雪'] }] },
+  { path: '/api/panel/projects', parameters: [] },
+  { path: '/api/projects', parameters: [] },
+  { path: '/api/panel/repo-icon', parameters: [{ name: 'id', valid: ['repo-a', 'repo-b'], invalid: ['unknown', '雪'], boundary: ['', 'x'.repeat(200)] }] },
+  { path: '/api/projects/[id]', parameters: [{ name: 'id', valid: ['proj-01234567-89a', 'proj-12345678-90a'], invalid: ['unknown', '雪'], boundary: ['', 'x'.repeat(200)] }] },
+];
+const records: unknown[] = [], summary: unknown[] = [], auth: unknown[] = [];
+try {
+  await bridge.start();
+  assert.equal(bridge.status.transport, 'o8d');
+  for (const route of routes) {
+    const generated = generateRequests({ path: route.path, parameters: route.parameters, count: 100 });
+    let native = 0;
+    for (const request of generated) {
+      const fixture = await seed(request.caseIndex);
+      let path = request.path;
+      if (route.path === '/api/projects/[id]') {
+        const id = new URL(path, 'http://fixture.invalid').searchParams.get('id');
+        path = '/api/projects/' + encodeURIComponent(id ?? fixture.pid);
+      }
+      const before = snapshot();
+      process.env.O8D_NATIVE_SESSION_READS = '1'; const actual = await read(path);
+      if (actual.native) assert.deepEqual(snapshot(), before, `Native read changed durable files: ${path}`);
+      process.env.O8D_NATIVE_SESSION_READS = '0'; const expected = await read(path);
+      const pointer = firstDifference(expected.wire, actual.wire);
+      assert.equal(pointer, null, JSON.stringify({ seed: request.seed, caseIndex: request.caseIndex, path, pointer }));
+      if (actual.native) native++;
+      if (request.caseIndex === 0) assert.equal(actual.native, true, `Native route was not reached: ${path}`);
+      records.push({ request: { ...request, path }, route: route.path, fixture: fixture.kind,
+        expected: portable(expected.wire), native: actual.native });
+    }
+    const result = { route: route.path, attempted: generated.length, native, fallback: generated.length - native, differences: 0 };
+    summary.push(result); console.log(JSON.stringify(result));
+    await seed(0);
+    const path = route.path === '/api/projects/[id]' ? '/api/projects/proj-01234567-89a' : route.path;
+    for (const headers of [{ authorization: '' }, { authorization: 'Bearer wrong' }, { authorization: 'Bearer o8ro_fixture' },
+      { host: 'untrusted.invalid' }, { origin: 'https://untrusted.invalid' }, { 'x-o8-relay-forward': '1' },
+      { 'x-o8d-peer': '127.0.0.1', 'x-o8-client-addr': '127.0.0.1', 'x-o8d-bridge': 'spoofed' }]) {
+      process.env.O8D_NATIVE_SESSION_READS = '0'; const expected = await read(path, headers);
+      process.env.O8D_NATIVE_SESSION_READS = '1'; const actual = await read(path, headers);
+      assert.equal(firstDifference(expected.wire, actual.wire), null, `Auth differs: ${path}`);
+      auth.push({ route: route.path, expected: portable(expected.wire), native: actual.native });
+    }
+  }
+  await seed(0);
+  process.env.O8D_NATIVE_SESSION_READS = '1';
+  const actual = await read('/api/panel/repos'); assert.equal(actual.native, true);
+  const mutated = structuredClone(actual.wire) as { body: { repos: unknown } };
+  mutated.body.repos = null;
+  const mutationPointer = firstDifference(actual.wire, mutated);
+  assert.ok(mutationPointer?.startsWith('$/body/repos'));
+  writeFileSync(output, JSON.stringify({ records, summary, auth, mutationPointer }, null, 2) + '\n');
+} finally {
+  db.close(); bridge.stop(); privateServer.closeAllConnections();
+  await new Promise<void>(resolve => privateServer.close(() => resolve()));
+}
+process.exit(0);
