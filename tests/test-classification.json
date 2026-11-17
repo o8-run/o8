@@ -2673,6 +2673,13 @@
       ]
     },
     {
+      "path": "tests/completion-gate.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/completion-ledger-model-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -1,3 +1,6 @@
+import { buildCompletionGate } from './build-completion-gate.mjs';
+buildCompletionGate();
+
 import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();

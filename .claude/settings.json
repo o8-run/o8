@@ -1,13 +1,12 @@
 {
   "hooks": {
-    "PostToolUse": [
+    "Stop": [
       {
-        "matcher": "Stop|TaskComplete",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/dist/hooks/completion-gate.js\"",
-            "timeout": 50
+            "timeout": 75
           }
         ]
       }
