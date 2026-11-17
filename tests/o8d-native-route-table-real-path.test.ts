@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -56,6 +56,24 @@ it('uses the shared GET table through the public socket with Next stopped', asyn
     expect(other.status).toBe(200);
     expect(other.headers.get('x-o8d-native')).toBeNull();
     await other.arrayBuffer();
+    // Counting is best effort. Observe each required template before teardown;
+    // a busy recorder may skip a sample and the last write can trail its reply.
+    const countsPath = join(directory, 'o8d-request-counts.jsonl');
+    const required = [...table.flatMap(({ path }) => [{ path, status: 200 }, { path, status: 401 }]),
+      { path: '/api/panel/ws-info', status: 200 }];
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const observed = existsSync(countsPath) ? readFileSync(countsPath, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+      const missing = required.filter(item => !observed.some(record => record.route === item.path && record.status === item.status));
+      if (!missing.length) break;
+      for (const item of missing) {
+        const response = await fetch(server.origin + item.path + (queries[item.path] ?? ''), {
+          headers: { authorization: item.status === 401 ? 'Bearer wrong' : `Bearer ${server.token}` },
+        });
+        expect(response.status).toBe(item.status);
+        await response.arrayBuffer();
+      }
+    }
     await server.stop();
     server = undefined;
     const raw = readFileSync(join(directory, 'o8d-request-counts.jsonl'), 'utf8');
