@@ -8,6 +8,8 @@ import { promisify } from 'node:util';
 import { startParityReference } from '../../tests/fixtures/ws-parity-server';
 import { runRepositoryParity } from './repository-parity';
 
+export { generateRequests, CHAT_LIST_PARAMETERS, DEFAULT_PARITY_SEED, mismatchReceipt, shrinkRequest } from './generated-requests';
+
 // No patterns, suffix matching or semantic fields. The current fixture needs no exclusions.
 export const VOLATILE_FIELDS: readonly string[] = ['requestId', 'epoch', 'generatedAt'];
 export function normalize(value: unknown): unknown {
