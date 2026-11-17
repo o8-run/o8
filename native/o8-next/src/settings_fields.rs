@@ -87,6 +87,7 @@ impl Field {
                 "Conversations"
             }
             "presentationQuietMode" | "notificationsReviewReady" => "Presentation",
+            "launchAtLogin" => "Startup",
             "editorCommand" => "Editor",
             "productTelemetryEnabled" | "crashReportsEnabled" | "telemetryOptIn" => "Privacy",
             "parallelCap" | "overlapGate" => "Fleet",
@@ -287,6 +288,13 @@ pub const SECTIONS: &[(&str, &str)] = &[
     ("about", "About"),
 ];
 pub const FIELDS: &[Field] = &[
+    field(
+        "launchAtLogin",
+        "Launch at login",
+        "general",
+        "Open o8 when you sign in to this Mac.",
+        BOOL,
+    ),
     field(
         "botRailEnabledIds",
         "Bots in the rail",
