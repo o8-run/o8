@@ -33,6 +33,9 @@ it('keeps linked-work key presence and the chosen machine name through the publi
     const expected = expectedResponses[0];
     await server.stop(); server = undefined;
     server = await startSessionServer(directory, true, binary);
+    // The bridge cached/sent the original name at launch. Changing the file
+    // makes this fail if O8D_MACHINE_DISPLAY_NAME is omitted from the child env.
+    writeFileSync(join(directory, 'computer-name'), 'Different saved computer');
     const actual = await send(server, path);
     expect(actual.native).toBe(true);
     expect(firstDifference(normalize(expected.body), normalize(actual.body))).toBeNull();
