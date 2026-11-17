@@ -1,6 +1,6 @@
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
-import { parse } from 'yaml';
-import { expect, it } from 'vitest';
+import { parse, stringify } from 'yaml';
+import { describe, expect, it } from 'vitest';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -11,6 +11,7 @@ export function createVerifierCoverageFixture(repo: string, parent: string): str
     'scripts/ci/check-verify-ci.mjs', 'scripts/lib/verify-ci.mjs',
     'scripts/lib/test-classification.mjs', 'scripts/lib/browser-prerequisites.mjs',
     '.github/actions/next-linux-setup/action.yml',
+    '.github/actions/node-modules-cache/action.yml',
     '.github/actions/linux-package-prerequisites/action.yml',
     '.github/workflows/ci.yml', 'package.json',
   ]) {
@@ -29,13 +30,13 @@ export function createVerifierCoverageFixture(repo: string, parent: string): str
 
 /** Mutate the real native setup action for verifier refusal checks. */
 export function mutateNativeSetupFixture(setup: { runs: { steps: Array<{
-  id?: string; run?: string; if?: string; with?: Record<string, string>;
+  id?: string; uses?: string; run?: string; if?: string; with?: Record<string, string>;
 }> } }, change: string): void {
   const cache = setup.runs.steps.find(step => step.id === 'native-cache');
   if (change === 'cache dependencies only' && cache?.with) cache.with.path = '.o8-next-cargo/registry';
   if (change === 'cache without source key' && cache?.with) cache.with.key = 'native-tests-lock-only';
   if (change === 'architecture') setup.runs.steps[0].with!.architecture = 'arm64';
-  if (change === 'missing install') setup.runs.steps = setup.runs.steps.filter(step => step.run !== 'npm ci --prefer-offline');
+  if (change === 'missing install') setup.runs.steps = setup.runs.steps.filter(step => step.uses !== './.github/actions/node-modules-cache');
   const registration = setup.runs.steps.find(step => step.id === 'registration-cache');
   if (change === 'registration without headless gate' && registration) registration.if = "inputs.registration-cache == 'true'";
   if (change === 'registration without dependency key' && registration?.with) registration.with.key = 'native-registration-config-only';
@@ -109,5 +110,46 @@ export function registerClassificationCoverageTests(
       expect(result.stderr).toContain('verify:ci coverage:');
     },
   );
+
+}
+
+export function registerNodeCacheCoverageTests(workflowPath: string, coverageRoot: string, guard: string, reuseGate: string) {
+
+describe('exact root dependency cache coverage', () => {
+  it.each(['fallback', 'missing native check', 'install on hit', 'different directory'])('refuses %s in the composite', change => {
+    const file = path.join(coverageRoot, '.github/actions/node-modules-cache/action.yml');
+    const original = readFileSync(file, 'utf8');
+    const action = parse(original);
+    if (change === 'fallback') action.runs.steps[1].with['restore-keys'] = 'root-npm-ci-';
+    if (change === 'missing native check') action.runs.steps.pop();
+    if (change === 'install on hit') delete action.runs.steps[2].if;
+    if (change === 'different directory') action.runs.steps[1].with.path = 'cli/node_modules';
+    try {
+      writeFileSync(file, stringify(action));
+      const result = spawnSync(process.execPath, [guard], { cwd: coverageRoot, encoding: 'utf8' });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules cache action needs a verify:ci equivalent');
+    } finally { writeFileSync(file, original); }
+  });
+});
+
+describe('inline root dependency cache coverage', () => {
+  it.each(['fallback', 'install on hit', 'missing native check'])('refuses %s in a job', change => {
+    const workflow = parse(readFileSync(workflowPath, 'utf8'));
+    const steps = workflow.jobs.lint.steps;
+    const restore = steps.find((step: { id?: string }) => step.id === 'modules');
+    if (change === 'fallback') restore.with['restore-keys'] = 'root-npm-ci-';
+    if (change === 'install on hit') steps.find((step: { run?: string }) => step.run === 'npm ci --prefer-offline').if = reuseGate;
+    if (change === 'missing native check') workflow.jobs.lint.steps = steps.filter((step: { run?: string }) => step.run !== 'node scripts/ci/check-native-modules.cjs');
+    const file = path.join(coverageRoot, '.github/workflows/ci.yml');
+    const original = readFileSync(file, 'utf8');
+    try {
+      writeFileSync(file, stringify(workflow));
+      const result = spawnSync(process.execPath, [guard], { cwd: coverageRoot, encoding: 'utf8' });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules inline cache needs a verify:ci equivalent');
+    } finally { writeFileSync(file, original); }
+  });
+});
 
 }

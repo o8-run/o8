@@ -92,8 +92,29 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - if: needs.reuse.outputs.reuse != 'true'
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Install root dependencies on exact miss
+        if: needs.reuse.outputs.reuse != 'true' && steps.modules.outputs.cache-hit != 'true'
+        shell: bash
         run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
+        if: needs.reuse.outputs.reuse != 'true'
       - if: needs.reuse.outputs.reuse != 'true'
         uses: actions/cache/restore@v4
         id: typecheck-cache
@@ -154,8 +175,29 @@ jobs:
           cache: npm
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - if: needs.reuse.outputs.reuse != 'true'
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Install root dependencies on exact miss
+        if: needs.reuse.outputs.reuse != 'true' && steps.modules.outputs.cache-hit != 'true'
+        shell: bash
         run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
+        if: needs.reuse.outputs.reuse != 'true'
       - name: Build exported server bundles and enforce committed budgets
         if: needs.reuse.outputs.reuse != 'true'
         run: node scripts/check-server-bundle-size.mjs
@@ -175,7 +217,26 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm install -g npm@11
-      - run: npm ci --prefer-offline
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+      - name: Install root dependencies on exact miss
+        if: steps.modules.outputs.cache-hit != 'true'
+        shell: bash
+        run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
       - run: npm run typecheck -- --typegen-only
       - run: npm run typecheck:parity
         env:
@@ -205,8 +266,29 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - if: needs.reuse.outputs.reuse != 'true'
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Install root dependencies on exact miss
+        if: needs.reuse.outputs.reuse != 'true' && steps.modules.outputs.cache-hit != 'true'
+        shell: bash
         run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
+        if: needs.reuse.outputs.reuse != 'true'
       - if: needs.reuse.outputs.reuse != 'true'
         uses: actions/cache/restore@v4
         id: lint-cache
@@ -256,8 +338,29 @@ jobs:
           rm -f "$selection"
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - if: needs.reuse.outputs.reuse != 'true'
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Install root dependencies on exact miss
+        if: needs.reuse.outputs.reuse != 'true' && steps.modules.outputs.cache-hit != 'true'
+        shell: bash
         run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
+        if: needs.reuse.outputs.reuse != 'true'
       - name: Test Classification
         if: needs.reuse.outputs.reuse != 'true'
         run: npm run test:classification:check
@@ -288,8 +391,29 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - if: needs.reuse.outputs.reuse != 'true'
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Install root dependencies on exact miss
+        if: needs.reuse.outputs.reuse != 'true' && steps.modules.outputs.cache-hit != 'true'
+        shell: bash
         run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
+        if: needs.reuse.outputs.reuse != 'true'
       - if: needs.reuse.outputs.reuse != 'true' && matrix.shard == 1
         run: node scripts/ci/check-hermetic-shards.mjs
       - if: needs.reuse.outputs.reuse != 'true'
@@ -358,8 +482,29 @@ jobs:
         run: node scripts/ci/resource-owning-changed.mjs "$BASE_REF" "$HEAD_REF"
       - if: needs.reuse.outputs.reuse != 'true' && steps.select.outputs.count != '0'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - if: needs.reuse.outputs.reuse != 'true' && steps.select.outputs.count != '0'
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        if: needs.reuse.outputs.reuse != 'true' && steps.select.outputs.count != '0'
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+        if: needs.reuse.outputs.reuse != 'true' && steps.select.outputs.count != '0'
+      - name: Install root dependencies on exact miss
+        if: needs.reuse.outputs.reuse != 'true' && steps.select.outputs.count != '0' && steps.modules.outputs.cache-hit != 'true'
+        shell: bash
         run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
+        if: needs.reuse.outputs.reuse != 'true' && steps.select.outputs.count != '0'
       - name: Prepare immutable integration policy
         if: needs.reuse.outputs.reuse != 'true' && steps.select.outputs.count != '0'
         run: node scripts/ci/prepare-integration-policy.mjs
@@ -411,7 +556,26 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - run: npm ci --prefer-offline
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+      - name: Install root dependencies on exact miss
+        if: steps.modules.outputs.cache-hit != 'true'
+        shell: bash
+        run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
       - name: Prepare immutable integration policy
         run: node scripts/ci/prepare-integration-policy.mjs
       - name: Install resource-test prerequisites
@@ -497,8 +661,29 @@ jobs:
           cache: npm
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - if: needs.reuse.outputs.reuse != 'true'
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Install root dependencies on exact miss
+        if: needs.reuse.outputs.reuse != 'true' && steps.modules.outputs.cache-hit != 'true'
+        shell: bash
         run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
+        if: needs.reuse.outputs.reuse != 'true'
       - name: Audit root dependencies
         if: needs.reuse.outputs.reuse != 'true'
         run: npm audit --audit-level=high
@@ -578,8 +763,29 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - if: needs.reuse.outputs.reuse != 'true'
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - if: needs.reuse.outputs.reuse != 'true'
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+        if: needs.reuse.outputs.reuse != 'true'
+      - name: Install root dependencies on exact miss
+        if: needs.reuse.outputs.reuse != 'true' && steps.modules.outputs.cache-hit != 'true'
+        shell: bash
         run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
+        if: needs.reuse.outputs.reuse != 'true'
       - name: Merge-requires-review governance gate
         if: needs.reuse.outputs.reuse != 'true'
         run: timeout --signal=KILL 300 env CORTEX_IDE_DATA_DIR=$(mktemp -d) NODE_OPTIONS=--conditions=react-server npx tsx scripts/smoke-merge-requires-review.ts
@@ -606,7 +812,26 @@ jobs:
       # phantom "Missing: <pkg> from lock file" errors (live-hit 2026-07-05,
       # broke every PR + main). One npm version everywhere.
       - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      - run: npm ci --prefer-offline
+      - name: Identify installed Node and npm
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+      - name: Restore root node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}
+      - name: Install root dependencies on exact miss
+        if: steps.modules.outputs.cache-hit != 'true'
+        shell: bash
+        run: npm ci --prefer-offline
+      - name: Verify native modules after install or restore
+        shell: bash
+        run: node scripts/ci/check-native-modules.cjs
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1
