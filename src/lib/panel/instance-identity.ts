@@ -114,3 +114,8 @@ export function getInstanceIdentity(): InstanceIdentity {
 export function getCachedInstanceIdentity(): InstanceIdentity {
   return cached ?? getInstanceIdentity();
 }
+
+/** Read-only transport snapshot; admission must not initialize identity files. */
+export function peekCachedInstanceIdentity(): InstanceIdentity | null {
+  return cached;
+}

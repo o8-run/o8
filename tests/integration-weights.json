@@ -639,6 +639,7 @@
   "tests/o8-serve-real-path.test.ts": 72,
   "tests/o8-serve-review-mode.test.ts": 3,
   "tests/o8-serve-token-renewal.test.ts": 6,
+  "tests/o8d-default-on-real-path.test.ts": 24,
   "tests/o8d-input-drain-real-path.test.ts": 65,
   "tests/o8d-mcp-parity-real-path.test.ts": 9,
   "tests/o8d-next-http-real-path.test.ts": 14,

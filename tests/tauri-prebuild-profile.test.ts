@@ -166,7 +166,7 @@ fi
     writeFileSync(path.join(scripts, name), readFileSync(path.join(source, 'scripts', name)));
   }
   mkdirSync(path.join(scripts, 'next'), { recursive: true });
-  for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs', 'next/build-sidecar.mjs']) {
+  for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs', 'build-o8d.mjs', 'next/build-sidecar.mjs']) {
     writeFileSync(path.join(scripts, name), 'process.exit(0);');
   }
   writeFileSync(path.join(scripts, 'tauri-export.mjs'), `

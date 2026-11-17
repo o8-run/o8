@@ -59,7 +59,12 @@ function emitItem(phase: 'started' | 'completed', item: Json): void {
     return;
   }
   if (phase === 'started') {
-    out({ type: 'item.started', item: { type, id } });
+    // A command carries its text when it starts, so it can be shown while it runs.
+    if (type === 'commandExecution' && text(item.command)) {
+      out({ type: 'item.started', item: { type: 'command_execution', id, command: text(item.command) } });
+    } else {
+      out({ type: 'item.started', item: { type, id } });
+    }
     return;
   }
   if (type === 'agentMessage') {

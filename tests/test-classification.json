@@ -5477,6 +5477,15 @@
       ]
     },
     {
+      "path": "tests/o8d-default-on-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-devices-owner-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5788,6 +5797,22 @@
     },
     {
       "path": "tests/o8d-rust-chat-list-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-rust-mobile-inbox-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-rust-settings-real-path.test.ts",
       "reasons": [
         "child-process",
         "native-build",
@@ -7726,6 +7751,14 @@
     },
     {
       "path": "tests/rex-auto-shortcut-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/root-npm-audit-real-path.test.ts",
       "reasons": [
         "child-process",
         "executable-fixture",
