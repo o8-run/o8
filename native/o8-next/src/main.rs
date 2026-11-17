@@ -32,6 +32,7 @@ mod grid_sessions;
 mod icon;
 mod inbox;
 mod lineage;
+mod login_item;
 #[cfg(test)]
 mod input_reuse_tests;
 #[cfg(test)]
