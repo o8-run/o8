@@ -700,6 +700,13 @@
       ]
     },
     {
+      "path": "src/lib/mobile/files.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/mobile/inbox.test.ts",
       "reasons": [
         "worktree-api"
