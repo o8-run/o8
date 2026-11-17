@@ -43,6 +43,34 @@ const STATS_QUERY = `query PullRequestListStats($ids: [ID!]!) {
   }
 }`;
 
+// A failing aggregate counts optional checks too. Only a failed check that the
+// base branch requires makes a pull request's checks fail; anything else reads
+// as passing (or pending). Unknown answers keep the failure.
+const FAILED_RUN = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
+const FAILED_STATUS = new Set(['FAILURE', 'ERROR']);
+type RequiredContext = { __typename?: string; conclusion?: string | null; state?: string | null; isRequired?: boolean | null };
+type RequiredAnswer = { commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: { contexts?: { pageInfo?: { hasNextPage?: boolean }; nodes?: Array<RequiredContext | null> } | null } | null } } | null> } } | null;
+
+export function requiredQuery(pulls: Array<{ number: number; node_id: string }>): string {
+  const fields = pulls.map((pull, index) => `p${index}: node(id: ${JSON.stringify(pull.node_id)}) { ... on PullRequest { commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { conclusion isRequired(pullRequestNumber: ${Math.trunc(pull.number)}) } ... on StatusContext { state isRequired(pullRequestNumber: ${Math.trunc(pull.number)}) } } } } } } } } }`);
+  return `query PullRequestListRequiredChecks { ${fields.join(' ')} }`;
+}
+
+/** True only when every context was read and none of the failed ones is required. */
+export function onlyOptionalFailed(answer: RequiredAnswer): boolean {
+  const contexts = answer?.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts;
+  if (!contexts?.nodes || contexts.pageInfo?.hasNextPage !== false) return false;
+  let failed = 0;
+  for (const context of contexts.nodes) {
+    if (!context || typeof context.isRequired !== 'boolean') return false;
+    const isFailed = context.__typename === 'StatusContext' ? FAILED_STATUS.has(context.state ?? '') : FAILED_RUN.has(context.conclusion ?? '');
+    if (!isFailed) continue;
+    if (context.isRequired) return false;
+    failed += 1;
+  }
+  return failed > 0;
+}
+
 const QUEUE_STATES: Record<string, MergeQueueProgress['state']> = {
   QUEUED: 'queued', AWAITING_CHECKS: 'checking', MERGEABLE: 'ready', UNMERGEABLE: 'failed', LOCKED: 'merging',
 };
@@ -76,6 +104,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
   }
   const pulls = await withGitHubAbort(init.signal, () => response.json()) as GitHubListPull[];
   const stats = new Map<number, PullStats>();
+  const optionalOnly = new Set<number>();
   if (pulls.length > 0 && !anonymous) {
     try {
       const result = await githubInstallationFetch(repo, '/graphql', {
@@ -87,6 +116,22 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
         for (const node of payload.data?.nodes ?? []) if (node) stats.set(node.number, node);
       }
     } catch { /* Keep the list usable when optional summary data is unavailable. */ }
+    const failing = pulls.filter((pull) => {
+      const state = stats.get(pull.number)?.commits.nodes[0]?.commit.statusCheckRollup?.state;
+      return state === 'FAILURE' || state === 'ERROR';
+    });
+    if (failing.length > 0) {
+      try {
+        const result = await githubInstallationFetch(repo, '/graphql', {
+          ...init, method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: requiredQuery(failing) }),
+        });
+        if (result.response.ok) {
+          const payload = await withGitHubAbort(init.signal, () => result.response.json()) as { data?: Record<string, RequiredAnswer> };
+          failing.forEach((pull, index) => { if (onlyOptionalFailed(payload.data?.[`p${index}`] ?? null)) optionalOnly.add(pull.number); });
+        }
+      } catch { /* Without the required-check answer the aggregate failure stands. */ }
+    }
   }
   return {
     repo,
@@ -102,7 +147,9 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
       return {
       number: pull.number, title: pull.title, author: pull.user?.login ?? 'Unknown author',
       avatarUrl: pull.user?.avatar_url ?? null, additions: summary?.additions ?? null, deletions: summary?.deletions ?? null,
-      checks: checksState === 'SUCCESS' ? 'success' : checksState === 'FAILURE' || checksState === 'ERROR' ? 'failure' : checksState === 'PENDING' || checksState === 'EXPECTED' ? 'pending' : null,
+      checks: checksState === 'SUCCESS' ? 'success'
+        : checksState === 'FAILURE' || checksState === 'ERROR' ? (optionalOnly.has(pull.number) ? (checksPending ? 'pending' : 'success') : 'failure')
+        : checksState === 'PENDING' || checksState === 'EXPECTED' ? 'pending' : null,
       requestedReviewers: summary ? (summary.reviewRequests?.nodes ?? []).flatMap((request) => request?.requestedReviewer?.login ? [request.requestedReviewer.login] : []) : null,
       state: pull.merged_at ? 'merged' : pull.state, draft: pull.draft ?? false,
       checksPending, headSha: pull.head.sha ?? null,
