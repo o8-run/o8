@@ -67,7 +67,7 @@
         "status": 413,
         "native": true,
         "body": {
-          "error": "Native request exceeds 16 MiB"
+          "error": "Request exceeds 16 MiB"
         }
       }
     }
