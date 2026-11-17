@@ -16,7 +16,7 @@ beforeAll(async () => {
 
 it('uses one four-route GET table through the public socket with Next stopped', async () => {
   const table = JSON.parse(readFileSync('crates/o8d/native-routes.json', 'utf8')) as Array<{
-    path: string; methods: string[]; fallback: boolean; reason: string;
+    path: string; methods: string[]; fallback: boolean; reason: string; state: string; test: string;
   }>;
   expect(table.map(route => route.path).sort()).toEqual([
     '/api/mobile/history', '/api/mobile/orchestrator/threads', '/api/orchestrator/composer-queue', '/api/v2/chat-history',
@@ -24,6 +24,8 @@ it('uses one four-route GET table through the public socket with Next stopped', 
   for (const route of table) {
     expect(route.methods).toEqual(['GET']);
     expect(route.fallback).toBe(true);
+    expect(route.state).toBe('red');
+    expect(route.test).toBe('tests/o8d-native-route-table-real-path.test.ts');
     expect(route.reason.length).toBeGreaterThan(0);
   }
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-route-table-')));
@@ -52,5 +54,21 @@ it('uses one four-route GET table through the public socket with Next stopped', 
     expect(other.status).toBe(200);
     expect(other.headers.get('x-o8d-native')).toBeNull();
     await other.arrayBuffer();
+    await server.stop();
+    server = undefined;
+    const raw = readFileSync(join(directory, 'o8d-request-counts.jsonl'), 'utf8');
+    const records = raw.trim().split('\n').map(line => JSON.parse(line));
+    for (const { path } of table) {
+      expect(records).toContainEqual(expect.objectContaining({ route: path, method: 'GET', status: 200 }));
+      expect(records).toContainEqual(expect.objectContaining({ route: path, method: 'GET', status: 401 }));
+    }
+    expect(records).toContainEqual(expect.objectContaining({ route: '__other__', method: 'GET', status: 200 }));
+    for (const record of records) {
+      expect(Object.keys(record).sort()).toEqual(['durationBucket', 'method', 'route', 'status']);
+      expect(['lt10ms', 'lt100ms', 'lt1s', 'gte1s']).toContain(record.durationBucket);
+    }
+    expect(raw).not.toContain('thoughts-review');
+    expect(raw).not.toContain('Bearer');
+    expect(raw).not.toContain('spoofed');
   } finally { await server?.stop(); rmSync(directory, { recursive: true, force: true }); }
 }, 180_000);
