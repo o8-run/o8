@@ -118,5 +118,15 @@
     "reason": "Only a warm empty canonical inbox cache is admitted; fresh, expired, invalidated, live and nonempty projections remain TypeScript-owned.",
     "state": "rust-with-fallback",
     "test": "tests/o8d-rust-mobile-inbox-real-path.test.ts"
+  },
+  {
+    "path": "/api/lanes",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Only live occupancy reads with the original principal predicate are native; ordinary reconciliation and every writer remain TypeScript-owned.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-lane-live-real-path.test.ts"
   }
 ]

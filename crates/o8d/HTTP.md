@@ -468,3 +468,7 @@ response. No Next listener runs in that fixture.
 GET /api/mobile/inbox admits only the existing unexpired empty inbox cache, through private canonical TypeScript metadata. Both full and sessions-only cache lanes retain their eight-second lifetime and cross-process generation invalidation. Empty finalization remains with the existing advisory setting owner. Rust reconstructs the empty response shape and applies the original cache/Server-Timing headers; it never invents a fleet from missing files.
 
 Fresh requests, a missing/expired/invalidated cache, nonempty sessions/approvals/review/items and unknown shape defer to the original handler. Live discovery, orphan cleanup, approval expiration, review discovery and urgency work remain TypeScript-owned. No Rust writer or caller permission is introduced. The admission context contains only version/generatedAt/mode/sourceLabel/optional note, not a serialized response or credential.
+
+### Live lane occupancy
+
+GET /api/lanes admits only the existing view=live occupancy projection. The handler and private admission use the same operator or packet-bound non-readonly worker predicate, including persisted revocation. Rust reads four saved lane fields in createdAt order. Ordinary reconciliation, transcript, archive, diff and storage reads retain their TypeScript owner. Missing/unsupported/oversized saved state defers. No new caller authority, WS registration or Rust writer is introduced. evidence/lane-live contains the frozen oracle, CLI consumer proof and release-only timings.
