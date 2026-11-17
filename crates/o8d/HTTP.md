@@ -431,3 +431,15 @@ display fallback, not full parity with TypeScript's hostname/scutil, ECMAScript
 trim and UTF-16 truncation rules. App parity requires the bridge's cached
 `O8D_MACHINE_DISPLAY_NAME`; its socket test changes the saved file after launch
 to distinguish that environment value from the standalone fallback.
+
+## Saved chat-list native reader
+
+GET /api/v2/chat-history/list is admitted by the shared table at
+`rust-with-fallback`. The read-only saved projection preserves filtering,
+archive/inbox preference presence and JavaScript title/whitespace behavior.
+Parked workspace projections, local-time placeholder titles, unsupported
+saved encodings and empty-record cleanup retain the TypeScript fallback.
+The oracle for 500 generated requests is committed in
+`evidence/chat-list/corpus.json`; the public-socket test compares the live
+TypeScript reference and native responses with Next stopped. No handler or
+writer is removed by this move.
