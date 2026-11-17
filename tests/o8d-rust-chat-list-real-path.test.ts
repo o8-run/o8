@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { beforeAll, expect, it } from 'vitest';
 import { CHAT_LIST_PARAMETERS, generateRequests, mismatchReceipt, normalize, seedSessionFixture, send, startSessionServer } from '../scripts/o8d/parity';
+import { seedChatListEdges } from '../scripts/o8d/chat-list-fixture';
 
 const targetDir = join(process.cwd(), 'crates/o8d/target/session-reads');
 const binary = process.env.O8D_TEST_BINARY ?? process.env.O8D_BINARY ?? join(targetDir, 'debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
@@ -19,16 +20,7 @@ it('matches the TypeScript chat-list oracle on 500 seeded requests through the p
   let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
   try {
     await seedSessionFixture(directory);
-    // Fix all timestamps in the records; no wall-clock title or empty-file GC in this corpus.
-    for (const [id, fields] of [
-      ['mobile-chat-plain', {}], ['mobile-chat-archived', { archivedAt: '2026-10-02T00:00:00.000Z' }],
-      ['mobile-chat-starred', { starred: true }], ['mobile-chat-assistant', { model: 'o8-operator' }],
-    ] as const) {
-      writeFileSync(join(directory, 'chat-history', `${id}.json`), JSON.stringify({
-        title: 'Fixture review 雪', model: 'fixture-model', backend: 'claude', savedAt: '2026-10-01T00:00:00.000Z',
-        messages: [{ id: 'fixture-message', role: 'user', content: 'Fixture repository review 雪', timestamp: 1790812800000 }], ...fields,
-      }));
-    }
+    seedChatListEdges(directory);
     const requests = generateRequests({ path: '/api/v2/chat-history/list', parameters: CHAT_LIST_PARAMETERS, count: 500 });
     const recorded: Array<{ status: number; body: unknown }> = [];
     server = await startSessionServer(directory, false, binary);

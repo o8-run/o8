@@ -11,9 +11,16 @@ fn truthy(v: &Value) -> bool {
         _ => true,
     }
 }
+// ECMAScript WhiteSpace + LineTerminator: Rust additionally treats NEL as space
+// and omits BOM, both of which change saved titles and diagnostic detection.
+fn js_space(c: char) -> bool {
+    matches!(c, '\u{9}'..='\u{d}' | '\u{20}' | '\u{a0}' | '\u{1680}'
+        | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}'
+        | '\u{205f}' | '\u{3000}' | '\u{feff}')
+}
 fn trimmed(v: &Value) -> Value {
     v.as_str()
-        .map(str::trim)
+        .map(|s| s.trim_matches(js_space))
         .filter(|s| !s.is_empty())
         .map(|s| json!(s))
         .unwrap_or(Value::Null)
@@ -73,10 +80,15 @@ fn legacy_title(s: &str) -> bool {
         })
 }
 fn probe(s: &str) -> bool {
-    s.split_whitespace()
+    let normalized = s
+        .trim_matches(js_space)
+        .split(js_space)
+        .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
-        .join(" ")
-        .trim_end_matches(['.', '!'])
+        .join(" ");
+    normalized
+        .strip_suffix(['.', '!'])
+        .unwrap_or(&normalized)
         .to_lowercase()
         == "reply with exactly: terminal chat is connected"
 }
@@ -210,7 +222,7 @@ fn listing(store: &ReadContext<'_>, params: &Params) -> Result<Vec<Value>, ()> {
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let first = users.first().copied();
         let title = if id.starts_with("thoughts-") {
-            let title = data["title"].as_str().unwrap_or("").trim();
+            let title = data["title"].as_str().unwrap_or("").trim_matches(js_space);
             if title.is_empty() || legacy_title(title) {
                 "Untitled conversation".to_owned()
             } else {
@@ -288,7 +300,6 @@ fn listing(store: &ReadContext<'_>, params: &Params) -> Result<Vec<Value>, ()> {
                 "pinOrderKey",
                 "activeOrderKey",
                 "autoSettleDisabledAt",
-                "inboxRevision",
             ] {
                 if let Some(v) = state.get(field).filter(|v| !v.is_null()) {
                     row[field] = v.clone();
@@ -296,6 +307,10 @@ fn listing(store: &ReadContext<'_>, params: &Params) -> Result<Vec<Value>, ()> {
             }
         }
         if let Some(state) = state {
+            // appendInboxPreferences checks undefined, not null, for revisions.
+            if let Some(revision) = state.get("inboxRevision") {
+                row["inboxRevision"] = revision.clone();
+            }
             if state["settledOverride"] == "settled"
                 && truthy(&state["autoSettledReason"])
                 && truthy(&state["autoSettledAt"])
@@ -420,6 +435,40 @@ mod tests {
         db.execute("UPDATE app_state SET value = 'not-json'", [])
             .unwrap();
         assert!(read(&f, &[]).is_empty());
+    }
+    #[test]
+    fn javascript_probe_punctuation_and_trim_preserve_real_conversations() {
+        assert!(probe(
+            "\u{feff}Reply with exactly: terminal chat is connected!\u{feff}"
+        ));
+        assert!(!probe("Reply with exactly: terminal chat is connected!!"));
+        assert!(!probe(
+            "Reply with exactly:\u{85}terminal chat is connected"
+        ));
+        assert_eq!(trimmed(&json!("\u{feff} model \u{feff}")), json!("model"));
+        assert_eq!(
+            trimmed(&json!("\u{85}model\u{85}")),
+            json!("\u{85}model\u{85}")
+        );
+    }
+    #[test]
+    fn explicit_null_revision_is_present_while_null_listing_fields_are_omitted() {
+        let f = fixture();
+        write(&f, "mobile-chat-visible", json!({"pinned":true}));
+        let db = Connection::open(&f.0.database).unwrap();
+        db.execute(
+            "INSERT INTO app_state VALUES (?,?)",
+            [
+                "inbox:subject:[\"conversation\",null,\"mobile-chat-visible\"]",
+                "{\"pinnedAt\":null,\"inboxRevision\":null,\"settledAt\":null}",
+            ],
+        )
+        .unwrap();
+        let rows = read(&f, &[]);
+        assert_eq!(rows[0]["pinned"], false);
+        assert_eq!(rows[0].get("inboxRevision"), Some(&Value::Null));
+        assert!(rows[0].get("pinnedAt").is_none());
+        assert!(rows[0].get("settledAt").is_none());
     }
     #[test]
     fn utf16_boundaries_and_legacy_titles_do_not_silently_change_content() {
