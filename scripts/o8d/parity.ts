@@ -12,8 +12,9 @@ import { runRepositoryParity } from './repository-parity';
 export { generateRequests, CHAT_LIST_PARAMETERS, DEFAULT_PARITY_SEED, mismatchReceipt, shrinkRequest } from './generated-requests';
 
 // No patterns, suffix matching or semantic fields. The current fixture needs no exclusions.
-// Parsed JSON object-key order is out of scope because clients parse JSON.
-// Key presence, null/missing, scalar values and array order remain strict.
+// Parity compares parsed JSON semantics: object-key wire/enumeration order is
+// out of scope because clients parse JSON. Key presence, null/missing, values
+// and array order remain strict; sorting below canonicalizes object keys only.
 export const VOLATILE_FIELDS: readonly string[] = ['requestId', 'epoch', 'generatedAt'];
 export function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
