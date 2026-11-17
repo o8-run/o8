@@ -202,7 +202,17 @@ fn listing(store: &ReadContext<'_>, params: &Params) -> Result<Vec<Value>, ()> {
             && data["starred"] != true
             && !(include && data["orchestratorVisible"] == true)
         {
-            // Hiding is read-only. GC remains with the canonical TS writer.
+            // This GET owns opportunistic GC in TypeScript. Deferring before
+            // archive/search filters preserves that writer's side effects.
+            let modified = std::fs::metadata(&path)
+                .and_then(|metadata| metadata.modified())
+                .map_err(|_| ())?;
+            if std::time::SystemTime::now()
+                .duration_since(modified)
+                .is_ok_and(|age| age.as_millis() > 3_600_000)
+            {
+                return Err(());
+            }
             continue;
         }
         let archived_at = if !trimmed(&data["archivedAt"]).is_null() {

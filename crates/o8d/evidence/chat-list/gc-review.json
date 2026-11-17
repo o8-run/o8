@@ -1,0 +1,33 @@
+{
+  "kind": "synthetic-public-socket-review-regression",
+  "reviewedHead": "1fb1eb7942391dc62dde42f4d49dd9f383bfcd13",
+  "red": {
+    "exit": 1,
+    "assertion": "Expired empty record must reach the canonical cleanup writer: expected true to be false"
+  },
+  "green": {
+    "allFeatureRustTests": 30,
+    "integrationFiles": 2,
+    "integrationTests": 3,
+    "route": "/api/v2/chat-history/list",
+    "seed": 6327,
+    "generatedComparisons": 500,
+    "native": 500,
+    "fallback": 0,
+    "differences": 0,
+    "chatHistoryContentMutations": 0,
+    "cleanupCases": {
+      "native": 5,
+      "tsFallback": 3,
+      "expiredFilesDeleted": 3
+    },
+    "typecheckExit": 0,
+    "lintExit": 0,
+    "rulesExit": 0,
+    "extractedClientCorpusReplies": 500,
+    "extractedClientRows": 3954
+  },
+  "scope": "Restore original chat files and timestamps before replay; fail on unexpected chat-history content mutations. Cleanup runs before query/archive filtering. Rust remains read-only. Parser uses exact extracted Session declarations and archived row adapter, not a GPUI launch.",
+  "binarySha256": "f83a9682a881769908b582f55941fa23204aa1e8ffd8078b99fcce5b6f88af77",
+  "completionResidual": "Historical full verifier was stopped with exit 130 after four hermetic shards: 919 passing files, 7513 passing tests, three failure files. Focused cost rerun now passes 7 tests; no fresh full verifier/native-suite or hosted-green claim."
+}

@@ -9,3 +9,5 @@ The real-path test checks the committed oracle against the live TypeScript captu
 Retained fallback causes:parked-workspace projections,local-time placeholder titles,unsupported saved encodings,and empty-record cleanup owned by the TypeScript writer. No route handler or writer is deleted by this state move.
 
 Provenance:TypeScript handler at69c016c25;source blob 0ec6992823c9a1a8ba9d9ff361521f2ba0ea9d66. Native implementation and fixture helpers are committed beside this oracle. Associated issues:#6344 and#6327.
+
+Review regression: expired empty unkept records now defer before archive/search filtering so the canonical TypeScript GET deletes them. The public test checks three deletions and five native fresh/kept cases. The generated replay restores the original files and timestamps and detects unexpected history content mutations. See `gc-review.json` for the red/green receipt.
