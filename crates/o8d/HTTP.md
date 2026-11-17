@@ -402,7 +402,11 @@ HTTP record contains only a committed API route template (or `__other__`), a
 bounded method label, status and duration bucket. It includes native answers
 and proxied refusals. Dynamic path values, queries, headers and bodies are never
 written. Templates are checked against API source by Test Classification, along
-with the route-count ceiling and every native table entry's test mapping.
+with every native table entry's test mapping. The TypeScript route count must
+equal `maxTypeScriptRoutes` in `crates/o8d/route-budget.json`. Move the budget
+down with removals in the same pull request; raise it only as an explicit
+reviewed change when the Rust daemon cannot host a route yet. This check does
+not require an `origin/main` ref.
 Two segments of approximately 8 MiB bound disk use; writes have a 100 ms deadline
 and failures do not affect the response. Standalone daemons record only when
 `O8D_REQUEST_COUNTS_PATH` is set. This is synthetic/local counting evidence,
