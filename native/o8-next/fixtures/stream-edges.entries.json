@@ -1,0 +1,805 @@
+{
+  "sessionKey": "llm-chat:thoughts-long",
+  "transcript": [
+    {
+      "id": "long-21",
+      "role": "user",
+      "text": "Corrected completed message.",
+      "type": "message",
+      "timestamp": 1790812821000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-22",
+      "role": "assistant",
+      "text": "Item 22 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 22;\n```",
+      "type": "message",
+      "timestamp": 1790812822000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-23",
+      "role": "user",
+      "text": "Check item 23 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812823000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-24",
+      "role": "assistant",
+      "text": "Item 24 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 24;\n```",
+      "type": "message",
+      "timestamp": 1790812824000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-25",
+      "role": "user",
+      "text": "Check item 25 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812825000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-26",
+      "role": "assistant",
+      "text": "Item 26 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 26;\n```",
+      "type": "message",
+      "timestamp": 1790812826000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-27",
+      "role": "user",
+      "text": "Check item 27 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812827000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-28",
+      "role": "assistant",
+      "text": "Item 28 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 28;\n```",
+      "type": "message",
+      "timestamp": 1790812828000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-29",
+      "role": "user",
+      "text": "Check item 29 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812829000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-30",
+      "role": "assistant",
+      "text": "Item 30 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 30;\n```",
+      "type": "message",
+      "timestamp": 1790812830000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-31",
+      "role": "user",
+      "text": "Check item 31 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812831000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-32",
+      "role": "assistant",
+      "text": "Item 32 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 32;\n```",
+      "type": "message",
+      "timestamp": 1790812832000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-33",
+      "role": "user",
+      "text": "Check item 33 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812833000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-34",
+      "role": "assistant",
+      "text": "Item 34 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 34;\n```",
+      "type": "message",
+      "timestamp": 1790812834000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-35",
+      "role": "user",
+      "text": "Check item 35 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812835000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-36",
+      "role": "assistant",
+      "text": "Item 36 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 36;\n```",
+      "type": "message",
+      "timestamp": 1790812836000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-37",
+      "role": "user",
+      "text": "Check item 37 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812837000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-38",
+      "role": "assistant",
+      "text": "Item 38 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 38;\n```",
+      "type": "message",
+      "timestamp": 1790812838000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-39",
+      "role": "user",
+      "text": "Check item 39 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812839000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-40",
+      "role": "assistant",
+      "text": "Item 40 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 40;\n```",
+      "type": "message",
+      "timestamp": 1790812840000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-41",
+      "role": "user",
+      "text": "Check item 41 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812841000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-42",
+      "role": "assistant",
+      "text": "Item 42 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 42;\n```",
+      "type": "message",
+      "timestamp": 1790812842000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-43",
+      "role": "user",
+      "text": "Check item 43 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812843000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-44",
+      "role": "assistant",
+      "text": "Item 44 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 44;\n```",
+      "type": "message",
+      "timestamp": 1790812844000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-45",
+      "role": "user",
+      "text": "Check item 45 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812845000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-46",
+      "role": "assistant",
+      "text": "Item 46 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 46;\n```",
+      "type": "message",
+      "timestamp": 1790812846000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-47",
+      "role": "user",
+      "text": "Check item 47 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812847000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-48",
+      "role": "assistant",
+      "text": "Item 48 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 48;\n```",
+      "type": "message",
+      "timestamp": 1790812848000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-49",
+      "role": "user",
+      "text": "Check item 49 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812849000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-50",
+      "role": "assistant",
+      "text": "Item 50 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 50;\n```",
+      "type": "message",
+      "timestamp": 1790812850000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-51",
+      "role": "user",
+      "text": "Check item 51 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812851000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-52",
+      "role": "assistant",
+      "text": "Item 52 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 52;\n```",
+      "type": "message",
+      "timestamp": 1790812852000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-53",
+      "role": "user",
+      "text": "Check item 53 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812853000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-54",
+      "role": "assistant",
+      "text": "Item 54 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 54;\n```",
+      "type": "message",
+      "timestamp": 1790812854000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-55",
+      "role": "user",
+      "text": "Check item 55 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812855000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-56",
+      "role": "assistant",
+      "text": "Item 56 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 56;\n```",
+      "type": "message",
+      "timestamp": 1790812856000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-57",
+      "role": "user",
+      "text": "Check item 57 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812857000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-58",
+      "role": "assistant",
+      "text": "Item 58 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 58;\n```",
+      "type": "message",
+      "timestamp": 1790812858000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-59",
+      "role": "user",
+      "text": "Check item 59 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812859000,
+      "timestampLabel": "12:00 AM"
+    },
+    {
+      "id": "long-60",
+      "role": "assistant",
+      "text": "Item 60 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 60;\n```",
+      "type": "message",
+      "timestamp": 1790812860000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-61",
+      "role": "user",
+      "text": "Check item 61 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812861000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-62",
+      "role": "assistant",
+      "text": "Item 62 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 62;\n```",
+      "type": "message",
+      "timestamp": 1790812862000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-63",
+      "role": "user",
+      "text": "Check item 63 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812863000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-64",
+      "role": "assistant",
+      "text": "Item 64 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 64;\n```",
+      "type": "message",
+      "timestamp": 1790812864000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-65",
+      "role": "user",
+      "text": "Check item 65 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812865000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-66",
+      "role": "assistant",
+      "text": "Item 66 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 66;\n```",
+      "type": "message",
+      "timestamp": 1790812866000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-67",
+      "role": "user",
+      "text": "Check item 67 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812867000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-68",
+      "role": "assistant",
+      "text": "Item 68 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 68;\n```",
+      "type": "message",
+      "timestamp": 1790812868000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-69",
+      "role": "user",
+      "text": "Check item 69 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812869000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-70",
+      "role": "assistant",
+      "text": "Item 70 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 70;\n```",
+      "type": "message",
+      "timestamp": 1790812870000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-71",
+      "role": "user",
+      "text": "Check item 71 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812871000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-72",
+      "role": "assistant",
+      "text": "Item 72 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 72;\n```",
+      "type": "message",
+      "timestamp": 1790812872000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-73",
+      "role": "user",
+      "text": "Check item 73 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812873000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-74",
+      "role": "assistant",
+      "text": "Item 74 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 74;\n```",
+      "type": "message",
+      "timestamp": 1790812874000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-75",
+      "role": "user",
+      "text": "Check item 75 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812875000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-76",
+      "role": "assistant",
+      "text": "Item 76 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 76;\n```",
+      "type": "message",
+      "timestamp": 1790812876000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-77",
+      "role": "user",
+      "text": "Check item 77 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812877000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-78",
+      "role": "assistant",
+      "text": "Item 78 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 78;\n```",
+      "type": "message",
+      "timestamp": 1790812878000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-79",
+      "role": "user",
+      "text": "Check item 79 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812879000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-80",
+      "role": "assistant",
+      "text": "Item 80 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 80;\n```",
+      "type": "message",
+      "timestamp": 1790812880000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-81",
+      "role": "user",
+      "text": "Check item 81 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812881000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-82",
+      "role": "assistant",
+      "text": "Item 82 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 82;\n```",
+      "type": "message",
+      "timestamp": 1790812882000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-83",
+      "role": "user",
+      "text": "Check item 83 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812883000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-84",
+      "role": "assistant",
+      "text": "Item 84 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 84;\n```",
+      "type": "message",
+      "timestamp": 1790812884000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-85",
+      "role": "user",
+      "text": "Check item 85 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812885000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-86",
+      "role": "assistant",
+      "text": "Item 86 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 86;\n```",
+      "type": "message",
+      "timestamp": 1790812886000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-87",
+      "role": "user",
+      "text": "Check item 87 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812887000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-88",
+      "role": "assistant",
+      "text": "Item 88 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 88;\n```",
+      "type": "message",
+      "timestamp": 1790812888000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-89",
+      "role": "user",
+      "text": "Check item 89 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812889000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-90",
+      "role": "assistant",
+      "text": "Item 90 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 90;\n```",
+      "type": "message",
+      "timestamp": 1790812890000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-91",
+      "role": "user",
+      "text": "Check item 91 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812891000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-92",
+      "role": "assistant",
+      "text": "Item 92 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 92;\n```",
+      "type": "message",
+      "timestamp": 1790812892000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-93",
+      "role": "user",
+      "text": "Check item 93 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812893000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-94",
+      "role": "assistant",
+      "text": "Item 94 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 94;\n```",
+      "type": "message",
+      "timestamp": 1790812894000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-95",
+      "role": "user",
+      "text": "Check item 95 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812895000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-96",
+      "role": "assistant",
+      "text": "Item 96 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 96;\n```",
+      "type": "message",
+      "timestamp": 1790812896000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-97",
+      "role": "user",
+      "text": "Check item 97 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812897000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-98",
+      "role": "assistant",
+      "text": "Item 98 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 98;\n```",
+      "type": "message",
+      "timestamp": 1790812898000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-99",
+      "role": "user",
+      "text": "Check item 99 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812899000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-100",
+      "role": "assistant",
+      "text": "Item 100 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 100;\n```",
+      "type": "message",
+      "timestamp": 1790812900000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-101",
+      "role": "user",
+      "text": "Check item 101 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812901000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-102",
+      "role": "assistant",
+      "text": "Item 102 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 102;\n```",
+      "type": "message",
+      "timestamp": 1790812902000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-103",
+      "role": "user",
+      "text": "Check item 103 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812903000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-104",
+      "role": "assistant",
+      "text": "Item 104 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 104;\n```",
+      "type": "message",
+      "timestamp": 1790812904000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-105",
+      "role": "user",
+      "text": "Check item 105 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812905000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-106",
+      "role": "assistant",
+      "text": "Item 106 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 106;\n```",
+      "type": "message",
+      "timestamp": 1790812906000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-107",
+      "role": "user",
+      "text": "Check item 107 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812907000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-108",
+      "role": "assistant",
+      "text": "Item 108 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 108;\n```",
+      "type": "message",
+      "timestamp": 1790812908000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-109",
+      "role": "user",
+      "text": "Check item 109 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812909000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-110",
+      "role": "assistant",
+      "text": "Item 110 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 110;\n```",
+      "type": "message",
+      "timestamp": 1790812910000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-111",
+      "role": "user",
+      "text": "Check item 111 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812911000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-112",
+      "role": "assistant",
+      "text": "Item 112 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 112;\n```",
+      "type": "message",
+      "timestamp": 1790812912000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-113",
+      "role": "user",
+      "text": "Check item 113 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812913000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-114",
+      "role": "assistant",
+      "text": "Item 114 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 114;\n```",
+      "type": "message",
+      "timestamp": 1790812914000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-115",
+      "role": "user",
+      "text": "Check item 115 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812915000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-116",
+      "role": "assistant",
+      "text": "Item 116 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 116;\n```",
+      "type": "message",
+      "timestamp": 1790812916000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-117",
+      "role": "user",
+      "text": "Check item 117 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812917000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-118",
+      "role": "assistant",
+      "text": "Item 118 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 118;\n```",
+      "type": "message",
+      "timestamp": 1790812918000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-119",
+      "role": "user",
+      "text": "Check item 119 with `stable_id`.",
+      "type": "message",
+      "timestamp": 1790812919000,
+      "timestampLabel": "12:01 AM"
+    },
+    {
+      "id": "long-120",
+      "role": "assistant",
+      "text": "Item 120 reviewed.\n- Preserve content\n- Preserve order\n\n```ts\nconst item = 120;\n```",
+      "type": "message",
+      "timestamp": 1790812920000,
+      "timestampLabel": "12:02 AM"
+    }
+  ]
+}
