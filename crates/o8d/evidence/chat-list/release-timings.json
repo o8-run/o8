@@ -1,0 +1,182 @@
+{
+  "build": "release with saved diagnostic Server-Timing patch; production source restored",
+  "binarySha256": "fa33ddb0ab406e207433c94f6e475671fb4cf79d2b50a6c0fcf85d3fe38468a9",
+  "samplesPerShape": 100,
+  "warmupsPerShape": 10,
+  "authRefusalsPerTransport": 6,
+  "reference": [
+    {
+      "path": "/api/v2/chat-history/list",
+      "elapsed": {
+        "p50Ms": 6.417504999999437,
+        "p95Ms": 8.597929999999906
+      },
+      "total": {
+        "p50Ms": 1.2,
+        "p95Ms": 1.4
+      },
+      "residual": {
+        "p50Ms": 5.208876999999484,
+        "p95Ms": 7.3186370000010355
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?surface=mobile-assistant",
+      "elapsed": {
+        "p50Ms": 6.060175000000527,
+        "p95Ms": 7.546926000000894
+      },
+      "total": {
+        "p50Ms": 1.1,
+        "p95Ms": 1.3
+      },
+      "residual": {
+        "p50Ms": 4.865151999998853,
+        "p95Ms": 6.346926000000894
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?include=orchestrator",
+      "elapsed": {
+        "p50Ms": 6.012744999999995,
+        "p95Ms": 6.889114999999947
+      },
+      "total": {
+        "p50Ms": 1.2,
+        "p95Ms": 1.4
+      },
+      "residual": {
+        "p50Ms": 4.804202000000077,
+        "p95Ms": 5.385029999999096
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?q=\u96ea",
+      "elapsed": {
+        "p50Ms": 7.065867999999682,
+        "p95Ms": 8.949518999999782
+      },
+      "total": {
+        "p50Ms": 1.3,
+        "p95Ms": 1.8
+      },
+      "residual": {
+        "p50Ms": 5.7299899999987245,
+        "p95Ms": 7.155901000000085
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?archived=only",
+      "elapsed": {
+        "p50Ms": 5.5182629999999335,
+        "p95Ms": 6.583630999999514
+      },
+      "total": {
+        "p50Ms": 1,
+        "p95Ms": 1.1
+      },
+      "residual": {
+        "p50Ms": 4.564811000000191,
+        "p95Ms": 5.483630999999514
+      }
+    }
+  ],
+  "native": [
+    {
+      "path": "/api/v2/chat-history/list",
+      "elapsed": {
+        "p50Ms": 10.440647000000354,
+        "p95Ms": 11.699931000000106
+      },
+      "admission": {
+        "p50Ms": 2.726545,
+        "p95Ms": 3.195564
+      },
+      "reader": {
+        "p50Ms": 5.713142,
+        "p95Ms": 6.401208
+      },
+      "residual": {
+        "p50Ms": 2.030112000000596,
+        "p95Ms": 2.4803990000002596
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?surface=mobile-assistant",
+      "elapsed": {
+        "p50Ms": 10.416300999999294,
+        "p95Ms": 11.812346000000616
+      },
+      "admission": {
+        "p50Ms": 2.646173,
+        "p95Ms": 3.084368
+      },
+      "reader": {
+        "p50Ms": 5.805278,
+        "p95Ms": 6.282554
+      },
+      "residual": {
+        "p50Ms": 1.9706979999992988,
+        "p95Ms": 2.804429000000191
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?include=orchestrator",
+      "elapsed": {
+        "p50Ms": 11.011539999999513,
+        "p95Ms": 14.831415000000561
+      },
+      "admission": {
+        "p50Ms": 2.716691,
+        "p95Ms": 4.180064
+      },
+      "reader": {
+        "p50Ms": 6.132038,
+        "p95Ms": 8.603364
+      },
+      "residual": {
+        "p50Ms": 2.0906939999998144,
+        "p95Ms": 3.500965000000088
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?q=\u96ea",
+      "elapsed": {
+        "p50Ms": 10.775934999999663,
+        "p95Ms": 12.281112000000576
+      },
+      "admission": {
+        "p50Ms": 2.702159,
+        "p95Ms": 3.216592
+      },
+      "reader": {
+        "p50Ms": 5.982071,
+        "p95Ms": 6.645962
+      },
+      "residual": {
+        "p50Ms": 1.96941799999904,
+        "p95Ms": 2.6031020000006393
+      }
+    },
+    {
+      "path": "/api/v2/chat-history/list?archived=only",
+      "elapsed": {
+        "p50Ms": 9.973525999999765,
+        "p95Ms": 10.95658000000003
+      },
+      "admission": {
+        "p50Ms": 2.530455,
+        "p95Ms": 3.006224
+      },
+      "reader": {
+        "p50Ms": 5.446072,
+        "p95Ms": 5.907871
+      },
+      "residual": {
+        "p50Ms": 1.8443299999992782,
+        "p95Ms": 2.2336179999985326
+      }
+    }
+  ],
+  "method": "Native admission, reader and client residual measured per request. Percentiles independent, do not sum. TS handler uses its production Server-Timing duration. Synthetic fixture/public socket/Next stopped; no installed performance claim."
+}
