@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,8 @@ vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(), r
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-transcript-visuals-'));
 const token = 'operator-visualization-test-token-0123456789';
 writeFileSync(join(dataDir, 'ws-token'), token);
+const deviceToken = 'device-visualization-test-token-0123456789';
+writeFileSync(join(dataDir, 'mobile-device-tokens'), `${createHash('sha256').update(deviceToken).digest('hex')}\n`);
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const repo = join(dataDir, 'repo');
@@ -120,6 +123,27 @@ describe('transcript visualizations through authenticated routes and persisted S
     const elsewhere = await route.GET(request(`${BASE}?${new URLSearchParams({ repoPath: repo, threadId: 'thoughts-other' })}`));
     expect((await elsewhere.json()).result.visualizations).toEqual([]);
     expect((await one.GET(request(`${BASE}/${ref.id}`, undefined, null), params(ref.id))).status).toBe(401);
+  });
+
+  it('lets a paired device list and read a thread document, and nothing else', async () => {
+    const input = { repoPath: repo, threadId: 'thoughts-device-read', title: 'Phone visual', html: '<p>phone</p>' };
+    const made = (await (await route.POST(request(BASE, input))).json()).result.visualization;
+    const query = `?repoPath=${encodeURIComponent(repo)}&threadId=thoughts-device-read`;
+    const listed = await route.GET(request(`${BASE}${query}`, undefined, deviceToken));
+    expect(listed.status).toBe(200);
+    expect((await listed.json()).result.visualizations.map((v: { id: string }) => v.id)).toEqual([made.id]);
+    const read = await one.GET(request(`${BASE}/${made.id}`, undefined, deviceToken), params(made.id));
+    expect(read.status).toBe(200);
+    expect((await read.json()).result.visualization.html).toContain('phone');
+    // The request gate admits the two reads and refuses a device write.
+    expect(panelGateMiddleware(request(`${BASE}${query}`, undefined, deviceToken)).status).toBe(200);
+    expect(panelGateMiddleware(request(`${BASE}/${made.id}`, undefined, deviceToken)).status).toBe(200);
+    expect(panelGateMiddleware(request(BASE, input, deviceToken)).status).not.toBe(200);
+    expect(panelGateMiddleware(request(`${BASE}/preview`, input, deviceToken)).status).not.toBe(200);
+    // Reading never becomes writing, and packet transcripts stay closed.
+    expect((await route.POST(request(BASE, { ...input, title: 'From phone' }, deviceToken))).status).toBe(401);
+    expect((await route.GET(request(`${BASE}?packetId=pkt-any`, undefined, deviceToken))).status).toBe(403);
+    expect((await route.GET(request(`${BASE}${query}`, undefined, 'not-a-token'))).status).toBe(401);
   });
 
   it('binds workers to their own packet and hides other documents, including after the packet finishes', async () => {
