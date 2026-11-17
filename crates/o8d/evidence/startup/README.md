@@ -14,5 +14,7 @@ Current `gates.json` uses an optimized release binary, ten warmups and 100 measu
 
 | Route | TS p50/p95 ms | Rust p50/p95 ms |
 | --- | ---: | ---: |
-| /api/panel/ws-info | 7.35/9.43 | 11.12/23.39 |
-| /api/setup/identity | 6.42/8.09 | 10.33/12.11 |
+| /api/panel/ws-info | 5.89/7.60 | 8.11/9.79 |
+| /api/setup/identity | 5.52/7.43 | 10.11/11.32 |
+
+Rebased onto main88657435a after chat-list merged. The shared table proves all seven inherited/startup entries, with chat-list and startup fixture seeds retained. Fresh focused/Rust/typecheck/lint/rules checks pass; current release timings replace the previous table.
