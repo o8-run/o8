@@ -2,7 +2,7 @@
   "kind": "synthetic-public-socket",
   "issue": 6370,
   "checks": {
-    "canonicalPublicSocketAndAdmission": "Four requested modules:11 passed,0 failed on workspace-review rebase",
+    "canonicalPublicSocketAndAdmission": "After startup merge: four requested modules11 passed,0 failed",
     "boundaryRecipes": "0,1024,16777216 native200;16777217 native413",
     "unauthorizedOversized": "401 via TypeScript",
     "fallback": "exact synthetic messages persisted by TypeScript",
@@ -16,7 +16,7 @@
   "sourceSha256": {
     "crates/o8d/src/app.rs": "75bf7589a84f4a90ab8d7bc8defb313ce889a1b6565a09decc87ead091fea151",
     "crates/o8d/src/app/native.rs": "e903a15da85d4271c2df2806950e60205e27c72edfbd2880c32810930f70cfb7",
-    "crates/o8d/src/http/mod.rs": "8a2f1c076792fbbde693e27b090e2ef03cdfb69dd3a9b5ba8c37c9c9c4982ee6",
+    "crates/o8d/src/http/mod.rs": "9be0b92c12b94a62378f0340295d26287aa18d9861a70b6dd27fd85c990e7e33",
     "src/lib/ws-server/native-http-routes.ts": "18e32591d43b234aa2ea64be1492b846d5721710d1cc1202d3d680bde5b10fbc",
     "scripts/o8d/build-write-fixture.mjs": "8a0149a754c72a51bd62e09246d04248a120f1441118bedee34867aa211f2241",
     "scripts/o8d/verification-fixture.patch": "1fbfdcc9e31046746c57207b4946dcc71b8dd63b7b91942f3a7c83515789f35a",
@@ -26,6 +26,6 @@
   },
   "fullCompletionAndHosted": "Authorized focused local checks passed; hosted CI pending",
   "securityReview": "required before arming",
-  "base": "049f562a0be471c34a53be540341697552bc72ee",
+  "base": "88763944bbf93286e2bb90f5da720e0723f18c07",
   "timingFollowup": 6408
 }
