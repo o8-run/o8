@@ -403,8 +403,9 @@ bounded method label, status and duration bucket. It includes native answers
 and proxied refusals. Dynamic path values, queries, headers and bodies are never
 written. Templates are checked against API source by Test Classification, along
 with every native table entry's test mapping. The TypeScript route count must
-equal `maxTypeScriptRoutes` in `crates/o8d/route-budget.json`. Move the budget
-down with removals in the same pull request; raise it only as an explicit
+not exceed `maxTypeScriptRoutes` in `crates/o8d/route-budget.json`. A removal may
+leave the budget above the count, so parallel removals do not conflict on that
+file; lower it in any later change. Raise it only as an explicit
 reviewed change when the Rust daemon cannot host a route yet. This check does
 not require an `origin/main` ref.
 Two segments of approximately 8 MiB bound disk use. Recording has a 100 ms

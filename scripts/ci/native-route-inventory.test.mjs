@@ -9,13 +9,11 @@ test('equal route count passes', () => {
 });
 test('above-budget route count requires an explicit budget update', () => {
   assert.deepEqual(checkInventory([route], tests, 440, 439), [
-    'TypeScript route count 440 does not equal budget 439; update crates/o8d/route-budget.json in this pull request',
+    'TypeScript route count 440 exceeds budget 439; raising crates/o8d/route-budget.json is an explicit reviewed change',
   ]);
 });
-test('below-budget route count requires the matching removal budget update', () => {
-  assert.deepEqual(checkInventory([route], tests, 438, 439), [
-    'TypeScript route count 438 does not equal budget 439; update crates/o8d/route-budget.json in this pull request',
-  ]);
+test('below-budget route count passes so parallel removals do not conflict on the budget', () => {
+  assert.deepEqual(checkInventory([route], tests, 438, 439), []);
 });
 test('an explicitly raised budget admits the matching route count', () => {
   assert.deepEqual(checkInventory([route], tests, 440, 440), []);

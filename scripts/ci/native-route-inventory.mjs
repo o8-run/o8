@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 
 export function checkInventory(routes, tests, count, ceiling) {
   const errors = [];
-  if (count !== ceiling) errors.push(`TypeScript route count ${count} does not equal budget ${ceiling}; update crates/o8d/route-budget.json in this pull request`);
+  if (count > ceiling) errors.push(`TypeScript route count ${count} exceeds budget ${ceiling}; raising crates/o8d/route-budget.json is an explicit reviewed change`);
   const states = ['claimed', 'red', 'rust-with-fallback', 'shadow-clean', 'rust-only', 'removed'];
   const seen = new Set();
   for (const route of routes) {
@@ -35,7 +35,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     catch { return [route.test, '']; }
   }));
   const count = files(join(root, 'src/app/api')).filter(path => relative(root, path).endsWith('/route.ts')).length;
-  // Move the budget down with removals; raise it only as an explicit reviewed change when the Rust daemon cannot host a route yet.
+  // A removal may leave the budget above the count, so parallel removals do not conflict on this file. Lower it in any later change; raise it only as an explicit reviewed change when the Rust daemon cannot host a route yet.
   const ceiling = JSON.parse(readFileSync('crates/o8d/route-budget.json', 'utf8')).maxTypeScriptRoutes;
   const errors = checkInventory(routes, tests, count, ceiling);
   const actualTemplates = files(join(root, 'src/app/api')).filter(path => path.endsWith('/route.ts'))
