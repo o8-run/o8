@@ -1203,6 +1203,7 @@ pub(super) fn open(s: &mut Shell, cx: &mut Context<Shell>) {
 }
 
 fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::AnyElement {
+    let shared_notice = super::launcher_update::owns_notice(s);
     let compact = super::rail_more::compact(s);
     let state = s.features.get::<State>();
     // Frames are requested while rendering: ticks run outside any view, where
@@ -1238,7 +1239,7 @@ fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui:
     let viewport = f32::from(window.viewport_size().height);
     let panel = open.then(|| panel(s, viewport, cx));
     // A narrow dock keeps only the panel's anchor; Tools opens it.
-    if compact {
+    if compact || shared_notice {
         return div()
             .relative()
             .flex_shrink_0()
@@ -1343,13 +1344,14 @@ fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui:
 }
 
 fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElement {
+    let shared_notice = super::launcher_update::owns_notice(s);
     if s.features.get::<State>().current.is_none() {
         s.features.get::<State>().current = bundle_version();
     }
     let state = s.features.get::<State>();
     let (t, _) = appear(state);
     let max_height = (viewport - 24.).clamp(160., 540.);
-    let title = if state.pending.is_some() {
+    let title = if state.pending.is_some() && !shared_notice {
         "Updates ready"
     } else {
         "Updates"
@@ -1370,8 +1372,8 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
         .or_else(|| state.status.clone().map(|status| (status, false)))
         .or_else(|| state.no_updater.then(|| (NO_UPDATER.to_string(), false)));
     let bar = state.progress.as_ref().map(describe);
-    let blockers = state.blockers.clone();
-    let can_update = state.pending.is_some() && blockers.is_none();
+    let blockers = if shared_notice { None } else { state.blockers.clone() };
+    let can_update = state.pending.is_some() && blockers.is_none() && !shared_notice;
     let installing = state.applying || matches!(state.phase, Some(Phase::Installing));
     let tools_open = state.tools_open;
     let tools_rows = state.tools.clone();

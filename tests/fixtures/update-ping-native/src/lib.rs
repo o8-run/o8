@@ -188,11 +188,19 @@ mod tests {
         fallback: &str,
         version: &str,
     ) -> tauri::App<tauri::test::MockRuntime> {
+        build_app_with_key(primary, fallback, version, "fixture")
+    }
+    fn build_app_with_key(
+        primary: &str,
+        fallback: &str,
+        version: &str,
+        key: &str,
+    ) -> tauri::App<tauri::test::MockRuntime> {
         let mut context = mock_context(noop_assets());
         context.package_info_mut().version = version.parse().unwrap();
         context.config_mut().plugins.0.insert("updater".into(), serde_json::json!({
             "endpoints": [format!("{primary}/v1/update/{{{{target}}}}/{{{{arch}}}}/{{{{current_version}}}}"), format!("{fallback}/latest.json")],
-            "pubkey": "fixture",
+            "pubkey": key,
             "dangerousInsecureTransportProtocol": true,
         }));
         let app = mock_builder()

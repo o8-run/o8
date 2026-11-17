@@ -9,7 +9,7 @@ import { checkFreshness, UPDATE_CHECK_INTERVAL_MS } from './fresh-check';
 import { getUpdateIdleWindow } from './idle-window';
 import { isSelfUpdatableInstall } from './install-target';
 import { getRunningInstallInfo } from './install-info';
-import { getAppUpdateState, recordAppUpdateInstall, recordAutoApply, recordAutoApplyWait } from './relaunch-state';
+import { getAppUpdateState, recordHeldUpdate, recordAppUpdateInstall, recordAutoApply, recordAutoApplyWait } from './relaunch-state';
 import { describeUpdateBlockers } from './update-card-view';
 
 // With o8 next as the window there is no webview to run an operator's Update
@@ -44,6 +44,15 @@ export function getNativeApplyRequestTime(): string | null {
 
 /** Native owns the timer and effects. Every admission reads current persisted work. */
 export async function controlAutoApply(input: Record<string, unknown>) {
+  if (input.action === 'held') {
+    const status = input.status as Record<string, unknown> | null;
+    if (status === null) { recordHeldUpdate(null); return { allowed: true }; }
+    if (!status || !['available', 'downloading', 'ready', 'failed'].includes(String(status.phase))
+      || typeof status.version !== 'string') return { allowed: false };
+    recordHeldUpdate({ phase: String(status.phase), version: status.version,
+      error: typeof status.error === 'string' ? status.error.slice(0, 1000) : null });
+    return { allowed: true };
+  }
   if (input.action === 'inspect-restart') {
     if (!validRestartReservation(input.reservationId)) return { allowed: false, error: { code: 'restart_reservation_invalid' } };
     const idle = await getUpdateIdleWindow(input.reservationId);
@@ -65,6 +74,14 @@ export async function controlAutoApply(input: Record<string, unknown>) {
   // A terminal wait report already proves the download ended without installing.
   // Do not misreport its stopped-task receipt as an abandoned installation.
   if (input.action !== 'wait') recoverStoppedNativeTask();
+  // A new click may resume a completed install whose restart was refused.
+  // Bind that request to the existing attempt; its successful install stays protected.
+  const resumable = getAppUpdateState().autoApply;
+  if (manualApply && !manualApply.attemptId && input.action === 'restart'
+    && resumable?.installed && typeof resumable.attemptId === 'string'
+    && resumable.attemptId === input.attemptId) {
+    manualApply = { ...manualApply, attemptId: resumable.attemptId };
+  }
   const manual = manualApply && (input.action === 'admit' ? !manualApply.attemptId
     : manualApply.attemptId === input.attemptId) ? manualApply : null;
   if (manual && (input.action === 'wait' || input.action === 'failed')) manualApply = null;
@@ -99,7 +116,7 @@ export async function controlAutoApply(input: Record<string, unknown>) {
   if (input.action === 'admit') {
     if (!manual && current?.manualRetryRequired && current.version === state.version) return result(false);
     if (current?.attemptId && current.attemptId === input.attemptId && current.phase !== 'failed') {
-      return result(true, { attemptId: current!.attemptId, version: current!.version, installed: current!.installed });
+      return result(true, { attemptId: current!.attemptId, version: current!.version, installed: current!.installed, manual: manual !== null });
     }
     const { checkAgeMs } = checkFreshness();
     if (!state.updatePending || !state.version || state.check.outcome !== 'available'
@@ -132,5 +149,5 @@ export async function controlAutoApply(input: Record<string, unknown>) {
     manualApply = { ...(manualApply && !manualApply.attemptId ? manualApply : manual), attemptId: activity.attemptId };
   }
   recordAutoApply(activity);
-  return result(allowed, { attemptId: activity.attemptId, version: activity.version, installed: activity.installed, idle });
+  return result(allowed, { attemptId: activity.attemptId, version: activity.version, installed: activity.installed, manual: manual !== null, idle });
 }

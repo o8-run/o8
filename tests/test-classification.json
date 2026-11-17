@@ -8735,6 +8735,12 @@
       ]
     },
     {
+      "path": "tests/update-held-state-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-install-entry-points-real-path.test.ts",
       "reasons": [
         "real-path"

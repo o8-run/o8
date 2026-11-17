@@ -138,7 +138,8 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
             .as_ref()
             .and_then(|v| v["applyRequestedAt"].as_str())
             .unwrap_or_default();
-        if !apply.is_empty() && apply != served_apply {
+        let retry = !apply.is_empty() && apply != served_apply;
+        if retry {
             auto_apply.expedite();
             served_apply = apply.to_string();
         }
@@ -149,6 +150,23 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
                 url.trim_end_matches("/api/panel/app/update-state").into(),
                 token.clone(),
             );
+            // Publish downloading before waiting for the signed artifact transport.
+            let status = auto_apply::held_status(&app);
+            let publish = |status| {
+                client
+                    .post(url)
+                    .bearer_auth(&token)
+                    .json(&serde_json::json!({"autoApply":{"action":"held","status":status}}))
+                    .send()
+            };
+            if status["phase"] == "available" || (retry && status["phase"] == "failed") {
+                let _ = publish(status.clone()).await;
+                let mut downloading = status.clone();
+                downloading["phase"] = serde_json::json!("downloading");
+                let _ = publish(downloading).await;
+            }
+            auto_apply::stage(&app, retry).await;
+            let _ = publish(auto_apply::held_status(&app)).await;
             auto_apply.tick(&client, url, &token, &effects).await;
         }
         schedule.awake(now_ms());

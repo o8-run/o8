@@ -15,6 +15,7 @@ export interface AppUpdateAutoApplyState {
 }
 
 export interface AppUpdateState {
+  heldUpdate?: { phase: string; version: string; error: string | null } | null;
   autoApply: AppUpdateAutoApplyState | null;
   info: Record<string, unknown> | null;
   updatePending: boolean;
@@ -102,6 +103,7 @@ export function setAppUpdateState(update: {
     orderedCheck = ticket;
   }
   state = {
+    heldUpdate: state.heldUpdate?.version === update.version ? state.heldUpdate : null,
     autoApply: state.autoApply,
     info: update.info ?? (update.updatePending ? state.info : null),
     updatePending: update.updatePending,
@@ -154,4 +156,8 @@ export function recordAppUpdateInstall(update: { outcome: 'started' | 'installed
     },
   };
   return state;
+}
+
+export function recordHeldUpdate(held: AppUpdateState['heldUpdate']) {
+  state = { ...state, heldUpdate: held };
 }
