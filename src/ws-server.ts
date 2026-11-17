@@ -6,6 +6,7 @@ import { VoiceHostBroker, handleVoiceHostHttp } from '@/lib/ws-server/voice-host
 import { mobileModelError } from './lib/mobile/model-catalog';
 import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
+import { compactionThreadEvent } from '@/lib/realtime/compaction-thread-event';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
 import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
@@ -8618,6 +8619,17 @@ const httpServer = createServer(async (req, res) => {
           },
         );
         broadcastRealtimeEvents([event]);
+        // A thread's own followers (a paired phone among them) hear its
+        // compaction start and end; they do not read the global stream.
+        const compaction = compactionThreadEvent(payload.mutation);
+        if (compaction) {
+          const raw = JSON.stringify(compaction.message);
+          for (const sub of orchestratorSubscriptions.values()) {
+            if (sub.repoPath !== compaction.repoPath || sub.threadId !== compaction.threadId) continue;
+            const follower = clients.get(sub.clientId);
+            if (follower) sendRaw(follower, raw);
+          }
+        }
         const laneLifecyclePayload = mutationToLaneLifecyclePayload(payload.mutation);
         if (laneLifecyclePayload) {
           broadcast({ channel: 'lane-lifecycle', event: 'update', data: laneLifecyclePayload });
