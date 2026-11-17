@@ -89,11 +89,38 @@ export function missionIsTerminal(state: OrchestratorMissionState) {
   return state.packets.length > 0 && state.packets.every((packet) => !packetIsActive(packet));
 }
 
+// Keep a private normalized snapshot per database and durable row version.
+// Readers receive clones because registry mutations edit packet objects in place.
+const normalizedMissions = new WeakMap<ReturnType<typeof getSqlite>, Map<string, {
+  version: number;
+  json: string | null;
+  strict: boolean;
+  mission: OrchestratorMissionState;
+}>>();
+const NORMALIZED_MISSION_CACHE_MAX = 128;
+
 function missionRegistryEntryFromRow(row: MissionStateRow, strict = false): MissionRegistryEntry | null {
-  const mission = parseMissionState(row.mission_state_json, strict);
+  const db = getSqlite();
+  let cache = normalizedMissions.get(db);
+  if (!cache) {
+    cache = new Map();
+    normalizedMissions.set(db, cache);
+  }
+  const cached = cache.get(row.id);
+  // Compare JSON too: older or external writers may not advance updated_at.
+  const hit = cached && cached.version === row.updated_at
+    && cached.json === row.mission_state_json && (!strict || cached.strict);
+  const mission = hit ? cached.mission : parseMissionState(row.mission_state_json, strict);
+  if (!hit) {
+    cache.delete(row.id);
+    if (mission) {
+      if (cache.size >= NORMALIZED_MISSION_CACHE_MAX) cache.delete(cache.keys().next().value!);
+      cache.set(row.id, { version: row.updated_at, json: row.mission_state_json, strict, mission });
+    }
+  }
   return mission ? {
     id: row.id,
-    mission,
+    mission: structuredClone(mission),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     archivedAt: row.archived_at,
