@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { isIP } from 'node:net';
 import { createInterface } from 'node:readline';
-import { isAbsolute, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { access, constants } from 'node:fs/promises';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { spawn, type ChildProcess } from '@/lib/providers/child-process';
@@ -10,6 +10,7 @@ import { childEnvironment } from '@/lib/providers/spawn-environment';
 import type { RealtimeEventEnvelope } from '@/lib/realtime/types';
 import { localMachineName } from '@/lib/mobile/machine-name';
 import { nativeSessionReadsEnabled } from './native-session-reads';
+import { o8dBinaryPath } from './o8d-binary';
 
 const PIPE_LIMIT = 1024 * 1024;
 
@@ -78,12 +79,7 @@ export class O8dBridge {
   }
 
   async start() {
-    const configured = process.env.O8D_BINARY;
-    if (configured && !isAbsolute(configured) && !/[\\/]/.test(configured)) {
-      throw new Error('O8D_BINARY must be an explicit executable path');
-    }
-    this.binary = configured ? resolve(configured) : join(process.cwd(), 'crates/o8d/target/release',
-      process.platform === 'win32' ? 'o8d.exe' : 'o8d');
+    this.binary = o8dBinaryPath();
     await new Promise<void>((resolve) => this.server.listen(0, '127.0.0.1', resolve));
     const address = this.server.address();
     if (!address || typeof address === 'string') throw new Error('o8d upstream unavailable');

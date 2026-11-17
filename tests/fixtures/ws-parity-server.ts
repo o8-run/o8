@@ -23,7 +23,7 @@ async function freePort(): Promise<number> {
 
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
-  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean | 'default'; nativeRepositoryReads?: boolean; ttsPython?: string;
+  logLimit?: number; o8d?: boolean | 'default'; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean | 'default'; nativeRepositoryReads?: boolean; ttsPython?: string;
   /** WS_TOKEN for the WS process when it should differ from the stored ws-token. */
   envToken?: string;
   /** An owned HTTP fixture that executes the Next route in a separate process context. */
@@ -93,7 +93,7 @@ export async function startParityReference(options: {
       O8_API_PORT: String(options.apiOnListener ? port : address.port), O8_WS_PORT: String(port),
       ...(options.apiOnListener ? { PORT: String(port) } : {}),
       CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${port}`,
-      O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
+      O8_WS_O8D: options.o8d === 'default' ? undefined : (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
       O8_NEXT_O8D: options.nativeHttp ? '1' : '0',
       // 'default' leaves the flag unset, so the shipped default applies.
       O8D_NATIVE_SESSION_READS: options.nativeSessionReads === 'default' ? undefined : options.nativeSessionReads ? '1' : '0',

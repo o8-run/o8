@@ -1,0 +1,392 @@
+{
+  "seed": 6327,
+  "auth": [
+    {
+      "case": 0,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "access-control-allow-origin": null,
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      }
+    },
+    {
+      "case": 1,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "access-control-allow-origin": null,
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      }
+    },
+    {
+      "case": 2,
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "access-control-allow-origin": null,
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      }
+    },
+    {
+      "case": 3,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "access-control-allow-origin": null,
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      }
+    },
+    {
+      "case": 4,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "access-control-allow-origin": null,
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      }
+    },
+    {
+      "case": 5,
+      "expected": {
+        "body": {
+          "error": "Origin is not allowed"
+        },
+        "headers": {
+          "access-control-allow-origin": null,
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      }
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "expired",
+      "native": false
+    },
+    {
+      "kind": "cross-process-invalidation",
+      "native": false
+    },
+    {
+      "kind": "local-invalidation",
+      "native": false
+    },
+    {
+      "kind": "fresh",
+      "native": false
+    },
+    {
+      "kind": "nonempty",
+      "native": false
+    },
+    {
+      "kind": "forged-context",
+      "native": false
+    }
+  ],
+  "mutationPointer": "$/body/summary/alerts: expected 0, received 1",
+  "timings": [
+    {
+      "path": "/api/mobile/inbox",
+      "native": false,
+      "p50Ms": 5.6319720000001325,
+      "p95Ms": 7.3370169999998325,
+      "samplesMs": [
+        6.373857999999927,
+        5.2052059999996345,
+        5.239187000000129,
+        5.724987999999939,
+        7.561524999999165,
+        5.633480999999847,
+        5.740509000000202,
+        5.364295000000311,
+        5.460540999999466,
+        5.359440999999606,
+        5.478693000000021,
+        5.479497000000265,
+        5.113004999999248,
+        5.291527000000315,
+        5.831211000000621,
+        5.827570000000378,
+        5.7316060000002835,
+        5.6319720000001325,
+        5.449228999999832,
+        5.276361999999608,
+        5.782345999999961,
+        5.42952299999979,
+        5.598860000000059,
+        5.125803999999334,
+        5.389377000000422,
+        5.355892999999924,
+        5.39610999999968,
+        5.398626999999578,
+        5.478771000000052,
+        5.568866999999955,
+        5.640556000000288,
+        6.474327999999332,
+        5.406569999999192,
+        5.312820000000102,
+        5.461866000000555,
+        5.264065000000301,
+        5.407438000000184,
+        5.1747629999999845,
+        5.552087000000029,
+        5.5761770000008255,
+        6.715280999999777,
+        5.419607000000724,
+        5.7635849999996935,
+        6.105970999999954,
+        5.998921000000337,
+        6.0224189999999,
+        5.602335000000494,
+        5.3344850000003134,
+        5.320298999999977,
+        5.274983999999677,
+        5.453526000000238,
+        5.445875000000342,
+        5.914159999999356,
+        5.392569000000549,
+        5.4197940000003655,
+        5.704142000000502,
+        5.3883599999999205,
+        5.633784999999989,
+        5.2084539999996196,
+        5.053717000000688,
+        5.770946999999978,
+        5.648145999999542,
+        6.209320999999363,
+        5.588689000000159,
+        5.657306000000062,
+        5.028084999999919,
+        5.55910700000004,
+        5.1481800000001385,
+        5.302996000000348,
+        5.640285999999833,
+        5.466013999999632,
+        5.629286999999749,
+        5.353812999999718,
+        6.274110000000292,
+        5.887224999999489,
+        6.044350000000122,
+        8.201702000000296,
+        7.133287999999993,
+        5.337259999999333,
+        7.3370169999998325,
+        7.743542000000161,
+        7.048530000000028,
+        5.811700000000201,
+        5.932167000000845,
+        6.631398999999874,
+        6.16610000000037,
+        6.277532000000065,
+        7.633225000000493,
+        6.287380000000667,
+        6.388657000000421,
+        7.729781000000003,
+        5.909304999999222,
+        6.646730999999818,
+        6.2107990000004065,
+        6.770001999999295,
+        7.10378799999944,
+        6.7407890000004045,
+        6.291269999999713,
+        5.909448999999768,
+        6.278115000000071
+      ]
+    },
+    {
+      "path": "/api/mobile/inbox",
+      "native": true,
+      "p50Ms": 4.372361000001547,
+      "p95Ms": 5.4068459999998595,
+      "samplesMs": [
+        4.45789700000023,
+        6.575591000000713,
+        4.955995000000257,
+        5.0328800000006595,
+        4.563342999999804,
+        4.951321000000462,
+        4.640348999999333,
+        4.975123000000167,
+        4.5660660000012285,
+        4.544484000000011,
+        4.857503999999608,
+        4.617436000000453,
+        4.958308000001125,
+        4.657028999999966,
+        5.764643000000433,
+        5.004402999999002,
+        4.8655370000014955,
+        4.556828000000678,
+        4.385013999999501,
+        4.516693999999916,
+        4.4418569999998,
+        4.811918000001242,
+        4.434779000001072,
+        4.454748000000109,
+        4.792902999999569,
+        4.886206999999558,
+        4.830243000000337,
+        4.5375180000010005,
+        5.330291999998735,
+        5.1589299999996,
+        5.134040000000823,
+        4.222997999999279,
+        4.156734000000142,
+        4.553885999999693,
+        5.302082000000155,
+        5.258517000000211,
+        5.507557999999335,
+        5.4068459999998595,
+        4.352102000000741,
+        4.223252999998294,
+        4.092726000000766,
+        4.929161000000022,
+        6.091125999999349,
+        5.037335000000894,
+        4.271364000000176,
+        4.868832000000111,
+        4.806666000000405,
+        4.841439999998329,
+        4.841877999999269,
+        4.799886999999217,
+        4.414282000001549,
+        4.205461999999898,
+        4.372361000001547,
+        4.396534999999858,
+        4.351067999999941,
+        4.624867999998969,
+        4.529819999999745,
+        3.9139459999987594,
+        4.400395999999091,
+        4.362209000000803,
+        3.890508000000409,
+        4.089175000000978,
+        4.057537000000593,
+        3.8637830000006943,
+        4.076571999999942,
+        3.9473420000012993,
+        4.0296999999991385,
+        3.9015290000006644,
+        3.842371999999159,
+        4.290338999999221,
+        3.997795999999653,
+        3.7721160000000964,
+        3.8678239999990183,
+        3.200619999999617,
+        3.2223720000001776,
+        3.3774450000000797,
+        4.075310000000172,
+        4.087327999999616,
+        3.9074860000000626,
+        4.001948999999513,
+        3.7903169999990496,
+        3.7202089999991586,
+        5.471574999999575,
+        4.132584999999381,
+        3.969676000000618,
+        3.6362779999999475,
+        3.689256999999998,
+        3.7346899999993184,
+        3.225703000000067,
+        3.2234989999997197,
+        3.1086230000000796,
+        3.2898980000009033,
+        3.2752390000005107,
+        3.264427000000069,
+        3.2911889999995765,
+        3.249540999999226,
+        3.326295000000755,
+        3.5167810000002646,
+        3.253873999999996,
+        3.3063939999992726
+      ]
+    }
+  ],
+  "summary": [
+    {
+      "route": "/api/mobile/inbox",
+      "attempted": 100,
+      "native": 78,
+      "fallback": 22,
+      "differences": 0
+    }
+  ],
+  "separateChildLaunchFlags": [
+    false,
+    true
+  ],
+  "referenceAdmissionProbes": 0,
+  "kind": "synthetic-public-socket-release-cached-idle",
+  "build": {
+    "profile": "release",
+    "binarySha256": "d2835f9b5022efe0cab308a41cb41edb8e0ba3ba64bb84ef3bc08ac1c82cea5b",
+    "command": "RUSTC_WRAPPER= cargo build --locked --offline --release --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d"
+  },
+  "warmups": 10,
+  "samplesPerTransport": 100,
+  "failThenPass": {
+    "testFirstCommit": "5d13c66da",
+    "redExit": 1,
+    "failure": "Native route was not reached: /api/mobile/inbox seed=6327 case=0",
+    "greenExit": 0,
+    "frozenExit": 0
+  },
+  "checks": {
+    "cargoAllFeatures": 0,
+    "typecheck": 0,
+    "lint": 0,
+    "focusedFixtureLint": 0
+  },
+  "limitations": [
+    "Only warm empty canonical inbox caches are native. This does not port live discovery, approvals, review units or urgency work.",
+    "Synthetic Linux fixture with owned CLI stand-ins and no external services, not phone runtime or installed build proof.",
+    "Semantic JSON fields and selected contract headers compare; Server-Timing is validated as a nonnegative numeric duration and measured independently.",
+    "No local full verifier/hermetic/native suite, per the current speed rule. Hosted CI remains the gate."
+  ],
+  "sourceSha256": {
+    "src/lib/mobile/inbox.ts": "f183a18d2588104660da0ed6274260349ee2e62198fd541a20a9200d5e6e11af",
+    "src/lib/ws-server/native-http-routes.ts": "c572aa35456798fd50f2e6b5a564961da98942ac786284b4a0676d0c821247f6",
+    "crates/o8d/src/http/mobile_inbox.rs": "f4770743650de2ba4fec94e39b549170c62080ece1567a0c1ac0b25609b2e3f9",
+    "crates/o8d/src/app/session_reads.rs": "a0a1fd51e0a66e21cb9a0a94fd16e6ad2967802439dce2c8eaefd58931cf32ef",
+    "crates/o8d/src/http/mod.rs": "934ff92e3d96d5c8e8fa1a772bb13414bec402487815e6648332f2893e7f939b"
+  }
+}

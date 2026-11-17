@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stageRuntimeInputs } from './packaged-runtime-inputs';
@@ -18,6 +18,13 @@ export function copyRuntimeArchive(source: string, archive: string, signature: s
     execFileSync('tar', ['xzf', source, '-C', root]);
     const server = join(root, 'o8.app/Contents/Resources/server');
     stageRuntimeInputs(server);
+    // The recorded archives predate the bundled daemon. Give each the daemon
+    // with the same architecture as its write helper, so the fixtures stay
+    // small and each test still removes only the binary it is about.
+    const helpers = join(root, 'o8.app/Contents/MacOS');
+    if (existsSync(join(helpers, 'o8-pi-write')) && !existsSync(join(helpers, 'o8d'))) {
+      copyFileSync(join(helpers, 'o8-pi-write'), join(helpers, 'o8d'));
+    }
     if (missingRuntime) rmSync(join(server, missingRuntime), { recursive: true });
     execFileSync('tar', ['czf', archive, '-C', root, 'o8.app']);
     const bytes = sign(null, readFileSync(archive), privateKey);

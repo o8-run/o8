@@ -1,0 +1,27 @@
+{
+  "scope": "All phases, including owned DB initialization and original TypeScript cache builds; not a claim that every listed write happens on a native response.",
+  "ownedFixtureWritableFiles": [
+    ".db-migrated-*",
+    ".provider-keys.lock",
+    ".provider-keys.lock-journal",
+    "chat-history/thoughts-mobile-fixture.json",
+    "cortex-ide.db",
+    "cortex-ide.db-journal",
+    "cortex-ide.db-shm",
+    "cortex-ide.db-wal",
+    "fixture-bin/claude",
+    "fixture-bin/codex",
+    "fixture-bin/gh",
+    "fixture-bin/lsof",
+    "fixture-bin/opencode",
+    "fixture-bin/pi",
+    "fixture-bin/ps",
+    "fixture-bin/tmux",
+    "o8d-request-counts.jsonl",
+    "result.json",
+    "snapshot-inbox.generation",
+    "snapshot-inbox.generation.<uuid>",
+    "ws-token"
+  ],
+  "rawTraceSha256": "50cb8f6e2b863cae63baa50cf4cb54215e3dcd89ea07fc7b50750f8435fb759c"
+}

@@ -34,6 +34,35 @@ describe('Codex orchestrator error events', () => {
     ]);
   });
 
+  it('shows a command when it starts and reports only its result when it ends', () => {
+    const state: CodexLineHandlerState = { threadId: null, cost: null };
+    const onEvent = vi.fn();
+    const line = (type: string, item: object) => JSON.stringify({ type, item });
+    const events = () => onEvent.mock.calls.map(([event]) => event);
+
+    handleCodexJsonLine(line('item.started', { type: 'command_execution', id: 'c1', command: 'npm test' }), state, onEvent, { isLocalModel: false });
+    // The command is visible while it runs: nothing has completed yet.
+    expect(events()).toEqual([{ type: 'tool_use', id: 'c1', name: 'shell', input: { command: 'npm test' } }]);
+
+    handleCodexJsonLine(line('item.completed', { type: 'command_execution', id: 'c1', command: 'npm test', output: '' }), state, onEvent, { isLocalModel: false });
+    // One row, not two, and it is closed even when the command printed nothing.
+    expect(events()).toEqual([
+      { type: 'tool_use', id: 'c1', name: 'shell', input: { command: 'npm test' } },
+      { type: 'tool_result', id: 'c1', name: 'shell', output: '' },
+    ]);
+  });
+
+  it('still lists a command whose start was never announced', () => {
+    const state: CodexLineHandlerState = { threadId: null, cost: null };
+    const onEvent = vi.fn();
+    handleCodexJsonLine(JSON.stringify({ type: 'item.started', item: { type: 'commandExecution', id: 'c2' } }), state, onEvent, { isLocalModel: false });
+    handleCodexJsonLine(JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', id: 'c2', command: 'ls', output: 'a\nb' } }), state, onEvent, { isLocalModel: false });
+    expect(onEvent.mock.calls.map(([event]) => event)).toEqual([
+      { type: 'tool_use', id: 'c2', name: 'shell', input: { command: 'ls' } },
+      { type: 'tool_result', id: 'c2', name: 'shell', output: 'a\nb' },
+    ]);
+  });
+
   it('retains fresh, cached, and output token truth from a completed turn', () => {
     const state: CodexLineHandlerState = { threadId: null, cost: null };
 

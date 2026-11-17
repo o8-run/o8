@@ -126,11 +126,13 @@ function executeFixture(selectedFile: string, nestedDependency = false,
     'scripts/ci/native-test-cache.mjs', 'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs',
     'scripts/lib/browser-prerequisites.mjs', '.github/actions/linux-package-prerequisites/action.yml',
     'scripts/ci/prepare-integration-policy.mjs', '.github/workflows/next-surface-boundary.yml',
-    'scripts/next/check-surface-boundary.mjs'];
+    'scripts/next/check-surface-boundary.mjs', 'scripts/ci/audit-root-dependencies.mjs'];
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
   }
+  // The fixture's npm reports no findings, so the fixture carries no dated exceptions.
+  writeFileSync(path.join(directory, 'scripts/ci/npm-audit-exceptions.json'), '[]\n');
   if (nativeDeadlineMinutes) {
     const file = path.join(directory, '.github/workflows/ci.yml');
     const workflow = parse(readFileSync(file, 'utf8'));

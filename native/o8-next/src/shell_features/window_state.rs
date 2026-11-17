@@ -69,6 +69,20 @@ pub(crate) fn persist(s: &mut Shell) {
         .expect("window-state observer installs the writer before surface initialization")
         .submit(snapshot);
 }
+pub(super) fn flush_for_restart(
+    s: &mut Shell,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> async_channel::Receiver<Result<(), String>> {
+    capture_bounds(s, window);
+    s.capture(window, cx);
+    s.features
+        .get::<Runtime>()
+        .writer
+        .as_ref()
+        .unwrap()
+        .flush(s.state.clone())
+}
 fn capture_bounds(s: &mut Shell, window: &Window) {
     let bounds = window.window_bounds().get_bounds();
     s.state.bounds = [

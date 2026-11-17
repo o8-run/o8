@@ -19,8 +19,9 @@ describe('Linux Pi write helper packaging', () => {
   });
 
   it('builds the helper for Linux gnu targets instead of skipping', () => {
-    const script = read('scripts/build-pi-write.mjs');
-    expect(script).toContain("process.platform !== 'darwin' && process.platform !== 'linux'");
+    expect(read('scripts/build-pi-write.mjs')).toContain('linux: true');
+    const script = read('scripts/lib/build-rust-helper.mjs');
+    expect(script).toContain("process.platform !== 'darwin' && (!linux || process.platform !== 'linux')");
     expect(script).toMatch(/LINUX_TRIPLES = \['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu'\]/);
   });
 
