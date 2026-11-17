@@ -618,5 +618,17 @@
     "generatedCasesPerRoute": 500,
     "differences": 0,
     "publicSocketTests": 4
+  },
+  "sharedAuthReview": {
+    "reviewComment": "https://github.com/o8-run/o8/pull/6372#issuecomment-6952797949",
+    "checks": {
+      "auth-review-red": 1,
+      "auth-review-green": 0,
+      "auth-review-typecheck": 0,
+      "auth-review-lint": 0,
+      "auth-review-rules": 0
+    },
+    "integrationModuleTests": 7,
+    "expectedOutcome": "Capture each route/credential status from a flag-off TS server, assert reference is never native, preserve that status in native mode; refusal bodies remain strict. Public response bodies/headers retain dedicated startup coverage."
   }
 }

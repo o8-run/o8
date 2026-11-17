@@ -18,3 +18,5 @@ Current `gates.json` uses an optimized release binary, ten warmups and 100 measu
 | /api/setup/identity | 5.52/7.43 | 10.11/11.32 |
 
 Rebased onto main88657435a after chat-list merged. The shared table proves all seven inherited/startup entries, with chat-list and startup fixture seeds retained. Fresh focused/Rust/typecheck/lint/rules checks pass; current release timings replace the previous table.
+
+The shared session integration module now records per-route TypeScript auth outcomes instead of assuming every table GET requires a bearer. Public identity/loopback discovery stays covered; refusal bodies remain exact. The existing module fails200-versus401 before this test correction and passes all7 tests after it.
