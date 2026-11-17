@@ -70,7 +70,7 @@
         "p95Ms": 11.035074999999779
       },
       {
-        "path": "/api/v2/chat-history/list?q=雪",
+        "path": "/api/v2/chat-history/list?q=\u96ea",
         "p50Ms": 7.272245999998631,
         "p95Ms": 9.04321600000003
       },
@@ -150,7 +150,7 @@
         "p95Ms": 34.88033500000165
       },
       {
-        "path": "/api/v2/chat-history/list?q=雪",
+        "path": "/api/v2/chat-history/list?q=\u96ea",
         "p50Ms": 21.6253919999981,
         "p95Ms": 25.296329000000696
       },
@@ -160,5 +160,6 @@
         "p95Ms": 30.94908299999952
       }
     ]
-  }
+  },
+  "build": "debug; historical pre-review-fix latency, not release"
 }
