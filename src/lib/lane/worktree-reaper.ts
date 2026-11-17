@@ -266,6 +266,13 @@ async function archiveMergedPullRequestLane(
       comparisonRef: mergedClean.comparisonRef ?? null,
     });
   });
+  // The receipt is evidence for the scorecard. It must never delay or break archival.
+  try {
+    const { recordPullRequestMergeReceipt } = await import('./pull-request-merge-receipt');
+    await recordPullRequestMergeReceipt(lane, pull);
+  } catch (error) {
+    console.warn(`[worktree-reaper] ${lane.id} PR #${pull.number} merge receipt was not recorded:`, error instanceof Error ? error.message : error);
+  }
   return release !== 'held';
 }
 
