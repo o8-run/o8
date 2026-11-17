@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { hostname, platform } from 'node:os';
+import { platform } from 'node:os';
+import { localMachineName } from '@/lib/mobile/machine-name';
 import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
     const installId = getOrCreateInstallId();
     const result = await registerMachine({
       installId,
-      name: hostname(),
+      name: localMachineName(),
       platform: platform(),
       appVersion: appVersion(),
     }, options);
