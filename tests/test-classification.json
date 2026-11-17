@@ -725,6 +725,13 @@
       ]
     },
     {
+      "path": "src/lib/mobile/source-control.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/muse/host.test.ts",
       "reasons": [
         "executable-fixture"
