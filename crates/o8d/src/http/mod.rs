@@ -5,6 +5,11 @@ mod git_remote;
 mod queue;
 mod read_context;
 mod repository;
+mod settings_defaults;
+mod settings_presentation;
+mod settings_native;
+mod settings_roster;
+mod settings_providers;
 mod thread_context;
 mod thread_metadata;
 mod thread_summary;
@@ -38,6 +43,7 @@ type ReadResult = Result<Value, ()>;
 pub struct Store {
     directory: PathBuf,
     database: PathBuf,
+    defaults_context: Option<Value>,
 }
 impl Store {
     fn file(&self, path: &Path, limit: u64) -> Result<Vec<u8>, ()> {
@@ -249,6 +255,9 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params) -> Response {
                 _ => unavailable(),
             }
         }
+        "/api/panel/operator-defaults" | "/api/runtime/provider-instances" | "/api/setup/config"
+        | "/api/v2/keys" | "/api/runtime/capabilities" | "/api/runtime/service-tiers"
+            => settings_defaults::read(store, path, params),
         _ => reply(StatusCode::NOT_FOUND, json!({"error":"Not found"})),
     }
 }
@@ -275,10 +284,11 @@ pub fn is_session_read(path: &str) -> bool {
 }
 
 /// Called only after the app transport's per-request TypeScript auth admission.
-pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &str) -> Response {
+pub fn session_read(directory: PathBuf, database: PathBuf, path: &str, query: &str, defaults_context: Option<Value>) -> Response {
     let store = Store {
         directory,
         database,
+        defaults_context,
     };
     let store = ReadContext::new(&store);
     let mut params = Params::new();
@@ -328,6 +338,7 @@ pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>>
     let store = Store {
         directory,
         database,
+        defaults_context: None,
     };
     store.token().map_err(|_| "existing credential required")?;
     let listener = TcpListener::bind(address).await?;

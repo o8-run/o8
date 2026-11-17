@@ -48,5 +48,65 @@
     "reason": "Parked workspace projections, local-time placeholder titles and unsupported saved encodings remain TypeScript-owned; empty-record cleanup stays with the TypeScript writer.",
     "state": "rust-with-fallback",
     "test": "tests/o8d-rust-chat-list-real-path.test.ts"
+  },
+  {
+    "path": "/api/setup/config",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-settings-real-path.test.ts"
+  },
+  {
+    "path": "/api/runtime/provider-instances",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-settings-real-path.test.ts"
+  },
+  {
+    "path": "/api/runtime/capabilities",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-settings-real-path.test.ts"
+  },
+  {
+    "path": "/api/v2/keys",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-settings-real-path.test.ts"
+  },
+  {
+    "path": "/api/runtime/service-tiers",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-settings-real-path.test.ts"
+  },
+  {
+    "path": "/api/panel/operator-defaults",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-settings-real-path.test.ts"
   }
 ]

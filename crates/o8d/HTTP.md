@@ -443,3 +443,22 @@ The oracle for 500 generated requests is committed in
 `evidence/chat-list/corpus.json`; the public-socket test compares the live
 TypeScript reference and native responses with Next stopped. No handler or
 writer is removed by this move.
+
+## Saved settings reads
+
+Six GETs use the shared table at `rust-with-fallback`: setup/config,
+runtime/provider-instances, runtime/capabilities, runtime/service-tiers, v2/keys
+and panel/operator-defaults. TypeScript keeps all initialization, migration,
+credential, live runtime and write ownership. Existing middleware and each
+handler's additional bearer/window-owner checks remain authoritative. The
+private admission response passes process context (paths and booleans only);
+public client headers cannot supply it. Standalone HTTP lacks this snapshot
+and defers reads requiring it.
+
+The operator reader supports the prepared saved TOML declarations and six
+legacy fields, with unsupported legacy or malformed states falling back. The
+key reader handles only the supported absent-key projection; configured keys
+and unsupported stores defer. Evidence records only synthetic key presence
+and shape. The public-socket fixture captures TypeScript responses, checks
+native replies, durable store hashes, refusal outcomes and a mutated native
+response. No Next listener runs in that fixture.
