@@ -24,6 +24,8 @@ export interface PullRequestListItem {
   /** Merge-readiness inputs; null when GitHub did not report them. */
   reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
   mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
+  /** Set while the pull request waits in the merge queue, with its place as GitHub reports it. */
+  mergeQueue?: { position: number | null } | null;
 }
 
 export interface PullRequestListPage {
