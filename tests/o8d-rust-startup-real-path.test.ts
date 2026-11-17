@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { beforeAll, expect, it } from 'vitest';
+import packageJson from '../package.json';
 import { firstDifference, generateRequests, mismatchReceipt, normalize, seedSessionFixture } from '../scripts/o8d/parity';
 import { startParityReference } from './fixtures/ws-parity-server';
 
@@ -18,13 +19,14 @@ type Running = Awaited<ReturnType<typeof startParityReference>>;
 
 // Bind ephemeral fixture ports and credentials without storing their values.
 // Live TS/Rust comparisons below still compare the original values exactly.
-function portable(value: unknown, ports: { api: number; ws: number }, token: string): unknown {
+function portable(value: unknown, ports: { api: number; ws: number }, token: string, key?: string): unknown {
+  if (key === 'version' && value === packageJson.version) return '$FIXTURE_APP_VERSION';
   if (value === token) return '$FIXTURE_WS_TOKEN';
   if (value === ports.api) return '$FIXTURE_API_PORT';
   if (value === ports.ws) return '$FIXTURE_WS_PORT';
   if (Array.isArray(value)) return value.map(item => portable(item, ports, token));
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
-    .map(([key, item]) => [key, portable(item, ports, token)]));
+    .map(([key, item]) => [key, portable(item, ports, token, key)]));
   return value;
 }
 
@@ -124,7 +126,7 @@ it('records TS startup reads, replays 500 shared-generator requests per route na
         if (process.env.O8D_UPDATE_STARTUP_CORPUS === '1') {
           if (process.env.O8D_PARITY_SEED && process.env.O8D_PARITY_SEED !== '6327') throw new Error('Frozen oracle requires default seed');
           mkdirSync(join(process.cwd(), 'crates/o8d/evidence/startup'), { recursive: true });
-          writeFileSync(frozenCorpusPath, JSON.stringify(frozen, null, 2) + '\n');
+          writeFileSync(frozenCorpusPath, '[\n' + frozen.map(record => JSON.stringify(record)).join(',\n') + '\n]\n');
         }
         if (!process.env.O8D_PARITY_SEED || process.env.O8D_PARITY_SEED === '6327') {
           const recorded = JSON.parse(readFileSync(frozenCorpusPath, 'utf8')) as typeof frozen;
