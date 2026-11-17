@@ -24,7 +24,14 @@ beforeAll(async () => {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Listener did not bind');
   origin = `http://127.0.0.1:${address.port}`;
-});
+  // Exercise the real fallback during bounded setup: both its cold module graph
+  // and lazy store initialization precede the socket protocol's 30-second test.
+  const ready = await fetch(origin + '/api/v2/chat-history?tabId=thoughts-admission', {
+    headers: { authorization }, signal: AbortSignal.timeout(90_000),
+  });
+  expect(ready.status).toBe(200);
+  await ready.arrayBuffer();
+}, 120_000);
 afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   vi.unstubAllEnvs();
@@ -39,6 +46,7 @@ function read(agent: Agent, path: string, headers: Record<string, string>) {
       response.once('error', reject);
     });
     request.once('error', reject);
+    request.setTimeout(5_000, () => request.destroy(new Error('Admission response exceeded 5 seconds')));
   });
 }
 
@@ -66,10 +74,11 @@ it('keeps the bridge admission backhaul open across reads, and closes every othe
     expect(plain.connection).toBe('close');
     // A refused admission closes too.
     const refused = await new Promise<{ status: number | undefined; connection: string | undefined }>((resolve, reject) => {
-      get(`${origin}/api/v2/chat-history?tabId=thoughts-admission`, { agent, headers: admit }, response => {
+      const request = get(`${origin}/api/v2/chat-history?tabId=thoughts-admission`, { agent, headers: admit }, response => {
         response.resume();
         response.once('end', () => resolve({ status: response.statusCode, connection: response.headers.connection }));
       }).once('error', reject);
+      request.setTimeout(5_000, () => request.destroy(new Error('Refused admission exceeded 5 seconds')));
     });
     expect(refused.status).toBe(401);
     expect(refused.connection).toBe('close');

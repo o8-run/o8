@@ -2,16 +2,17 @@
   "kind": "synthetic-public-socket",
   "issue": 6370,
   "checks": {
-    "canonicalPublicSocketAndAdmission": "After startup merge: four requested modules11 passed,0 failed",
+    "canonicalPublicSocketAndAdmission": "Current base: write-path1/1 passed before power loss; recovered admission2/2 passed. Recovery rerun: parity1 passed/6 WS health timeouts; write fixture skipped after shared-target lock/build deadline. Route-table recheck pending.",
     "boundaryRecipes": "0,1024,16777216 native200;16777217 native413",
-    "unauthorizedOversized": "401 via TypeScript",
+    "unauthorizedOversized": "Declared oversized head with body withheld:401 before consumption, exact refusal equal with native reads on/off;10-second deadline",
     "fallback": "exact synthetic messages persisted by TypeScript",
     "cargoAllFeatures": "30 passed, 0 failed",
     "typecheckFast": 0,
     "lint": 0,
     "rules": 0,
     "oversizedError": "Request exceeds 16 MiB (matches the TypeScript boundary)",
-    "settingsMerge": "All settings,mobileInbox,reviewWorkspaceUnselected contexts and refusal terms retained inside probe guard; nonGET panelAuth and disabled/unmatched409 retained"
+    "settingsMerge": "All settings,mobileInbox,reviewWorkspaceUnselected contexts and refusal terms retained inside probe guard; nonGET panelAuth and disabled/unmatched409 retained",
+    "admissionSetup": "Canonical registered handler loaded in bounded120-second setup; protocol deadline remains30seconds; socket deadlines5seconds. Prior cold fallback took51.98seconds and timed out."
   },
   "sourceSha256": {
     "crates/o8d/src/app.rs": "75bf7589a84f4a90ab8d7bc8defb313ce889a1b6565a09decc87ead091fea151",
@@ -20,12 +21,19 @@
     "src/lib/ws-server/native-http-routes.ts": "18e32591d43b234aa2ea64be1492b846d5721710d1cc1202d3d680bde5b10fbc",
     "scripts/o8d/build-write-fixture.mjs": "8a0149a754c72a51bd62e09246d04248a120f1441118bedee34867aa211f2241",
     "scripts/o8d/verification-fixture.patch": "1fbfdcc9e31046746c57207b4946dcc71b8dd63b7b91942f3a7c83515789f35a",
-    "tests/o8d-rust-write-path-real-path.test.ts": "2b1c2fd0b8cb22532084d533ff114d7cb329b3617ddb20eec77a0beaa177166a",
-    "tests/o8d-session-read-admission-real-path.test.ts": "d55a0ffec6f4118dca8582ec3e0f88cd5c2801592aac6baaaf7b98d42c241370",
+    "tests/o8d-rust-write-path-real-path.test.ts": "d6bf34200b719cbc56c7c27fd22800d85fff7bdd31d143250ba7415479113364",
+    "tests/o8d-session-read-admission-real-path.test.ts": "76838484e831007e1f6ed2a6bb47381323140a916d89ce7fafdcd350da890946",
     "crates/o8d/evidence/write-path/corpus.json": "0c1442ba61145eec5a817c5edb3dd1e000fdf14f3cdda79f6c781db1a2fc18c9"
   },
-  "fullCompletionAndHosted": "Authorized focused local checks passed; hosted CI pending",
+  "fullCompletionAndHosted": "Local recovery has health/build deadline failures; hosted CI remains the completion gate. No all-green recovery claim.",
   "securityReview": "required before arming",
-  "base": "88763944bbf93286e2bb90f5da720e0723f18c07",
-  "timingFollowup": 6408
+  "base": "1043781605913b1592170c1c733f81bcfc359303",
+  "timingFollowup": 6408,
+  "ciCorrection": {
+    "run": 44190430576,
+    "job": 134418261490,
+    "before": "Unauthorized full streaming upload: fetch failed/read ECONNRESET",
+    "after": "Check oversized declared head refusal before sending a body; authenticated actual limit payload checks unchanged",
+    "scope": "Test-only correction; no new production behavior in this correction"
+  }
 }
