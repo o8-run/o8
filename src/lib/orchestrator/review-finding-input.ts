@@ -37,7 +37,7 @@ function normalizeFindingStatus(
   if (normalized === 'accepted' || normalized === 'waived' || normalized === 'intentional') {
     return 'accepted';
   }
-  if (normalized === 'deferred' || normalized === 'todo' || normalized === 'followup' || normalized === 'follow-up') {
+  if (normalized === 'still_present' || normalized === 'deferred' || normalized === 'todo' || normalized === 'followup' || normalized === 'follow-up') {
     return 'deferred';
   }
   throw new Error(`Unsupported finding ${fieldName}: ${formatUnsupportedValue(value)}. ${FINDING_STATUS_HINT}`);
@@ -76,6 +76,7 @@ export function parseReviewFindings(value: unknown): OrchestratorReviewFinding[]
       : '';
 
     return {
+      ...(typeof candidate.id === 'string' && candidate.id.trim() ? { id: candidate.id.trim() } : {}),
       file,
       line: typeof line === 'number' ? Math.floor(line) : undefined,
       severity: normalizeFindingSeverity(candidate.severity),

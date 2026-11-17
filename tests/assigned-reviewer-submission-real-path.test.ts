@@ -66,3 +66,28 @@ it('refuses unavailable roles and stale assignment credentials', async () => {
   expect((await submit(f, f.reviewer)).status).toBe(403);
   expect((await submit(f, replacement)).status).toBe(200);
 });
+
+it('stores stable finding resolutions and checked heads through assigned reviewer submissions', async () => {
+  const f = await fixture();
+  const { getSqlite } = await import('@/lib/db');
+  const { priorReviewFindingsPrompt } = await import('@/lib/approvals/review-findings');
+  const send = (findings: unknown[], approved: boolean) => POST(new NextRequest('http://localhost/api/orchestrator/review', {
+    method: 'POST', headers: { host: 'localhost', authorization: `Bearer ${f.reviewer}` },
+    body: JSON.stringify({ packetId: f.packetId, approved, findings, reviewedHeadSha: f.head, clientMutationId: randomUUID() }),
+  }));
+  expect((await send([{ file: 'file.txt', severity: 'bug', description: 'Original', status: 'deferred' }], false)).status).toBe(200);
+  const rows = () => getSqlite().prepare("SELECT args_json,audit_json FROM approvals WHERE packet_id=? AND tool_name='orchestrator_review' ORDER BY created_at").all(f.packetId) as Array<{ args_json: string; audit_json: string }>;
+  const finding = JSON.parse(rows()[0].args_json).findings[0];
+  expect(finding.id).toMatch(/^[a-f0-9-]{36}$/);
+  expect(priorReviewFindingsPrompt(f.packetId)).toContain(finding.id);
+  finishReviewTurn({ laneId: f.lane.id, reviewTurnId: f.turnId, outcome: 'completed' });
+  execFileSync('git', ['-C', f.lane.repoPath, 'commit', '--allow-empty', '-qm', 'correction'], { stdio: 'pipe' });
+  f.head = execFileSync('git', ['-C', f.lane.repoPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  f.turnId = startReviewTurn({ laneId: f.lane.id, threadId: `follow-up-${randomUUID()}`, backend: 'codex', surface: 'auto-review', expectedHeadSha: f.head });
+  f.reviewer = mintAssignedReviewerToken(f.packetId, f.turnId);
+  expect((await send([{ ...finding, line: 5, description: 'Reworded', status: 'fixed' }], true)).status).toBe(200);
+  const latest = rows().at(-1)!;
+  expect(JSON.parse(latest.args_json).findings[0]).toMatchObject({ id: finding.id, resolution: 'fixed', checkedHeadSha: f.head });
+  expect(JSON.parse(latest.audit_json).find((event: { type: string }) => event.type === 'orchestrator_review'))
+    .toMatchObject({ approved: true, reviewedHeadSha: f.head, findings: [expect.objectContaining({ id: finding.id, resolution: 'fixed', checkedHeadSha: f.head })] });
+});

@@ -63,6 +63,9 @@ export interface ApprovalConflictReport {
 }
 
 export interface OrchestratorReviewFinding {
+  id?: string;
+  checkedHeadSha?: string;
+  unchecked?: boolean;
   file: string;
   line?: number;
   severity: 'bug' | 'rule_violation' | 'note';

@@ -125,30 +125,43 @@ function metrics(changes: Change[], corrections: Map<string, number>): Metric[] 
   add('reason-other', 'Needed a person', 'Other recorded human steps', changes.filter(change => human(change) && !reasons.some(([, , matches]) => matches(change))),
     'Operator steers, correction requests and other recorded user actions that do not fall under the named reasons.');
 
-  // A finding has no durable ID. Match exact file/line/description across rounds;
-  // a finding disappearing from a later review does not prove it was fixed.
   const findings = changes.flatMap(change => {
-    const found = new Map<string, { finding: OrchestratorReviewFinding; rejectedAt: number | null; reviewedAt: number }>();
-    for (const review of change.reviews) for (const finding of review.findings ?? []) {
-      const key = JSON.stringify([finding.file, finding.line ?? null, finding.description]);
-      found.set(key, { finding, reviewedAt: review.timestamp,
-        rejectedAt: found.get(key)?.rejectedAt ?? (review.approved === false ? review.timestamp : null) });
+    const found = new Map<string, { finding: OrchestratorReviewFinding; rejectedAt: number | null; reviewedAt: number; unchecked: boolean }>();
+    for (const review of change.reviews) {
+      for (const item of found.values()) if (item.finding.id && item.finding.resolution === 'deferred') item.unchecked = true;
+      for (const stored of review.findings ?? []) {
+        // Records from before stable IDs keep the exact file, line and description
+        // match they always had, so saved history counts as it did. They are
+        // reported as legacy and never matched across a move or a rewording.
+        const key = stored.id || JSON.stringify(['legacy', stored.file, stored.line ?? null, stored.description]);
+        const checked = !!stored.id && !stored.unchecked && !!review.reviewedHeadSha
+          && /^[a-f0-9]{40}$/i.test(review.reviewedHeadSha) && stored.checkedHeadSha === review.reviewedHeadSha;
+        const finding = !stored.id || checked ? stored : { ...stored, resolution: 'deferred' as const };
+        found.set(key, { finding, reviewedAt: review.timestamp, unchecked: !!stored.id && !checked,
+          rejectedAt: found.get(key)?.rejectedAt ?? (review.approved === false ? review.timestamp : null) });
+      }
     }
     return [...found.values()].map(item => ({ ...item, change }));
   });
   const findingMetric = (id: string, label: string, selected: typeof findings, note: string) => {
     add(id, 'Found by review', label, [...new Set(selected.map(item => item.change))], note, selected.length);
+    for (const entry of rows.at(-1)!.changes) {
+      entry.detail += ' · ' + selected.filter(item => item.change.id === entry.id)
+        .map(item => `${item.finding.id ?? 'legacy'}: ${item.finding.description}`).join(' | ');
+    }
   };
-  findingMetric('findings', 'Findings raised', findings, 'Exact file, line and description are deduplicated across review rounds.');
+  findingMetric('findings', 'Findings raised', findings, 'Stable IDs identify findings across rounds. Records without IDs are reported separately as legacy.');
   for (const severity of ['bug', 'rule_violation', 'note']) findingMetric(`severity-${severity}`, severity === 'rule_violation' ? 'Rule violations' : severity === 'bug' ? 'Bugs' : 'Notes',
     findings.filter(item => item.finding.severity === severity), 'Uses stored review severity; no severity is inferred from prose.');
   findingMetric('finding-fixed', 'Fixed after Request changes', findings.filter(item => item.rejectedAt !== null
     && item.reviewedAt > item.rejectedAt && item.finding.resolution === 'fixed'),
-    'A later review explicitly marked the same finding fixed. The fixing author is not recorded.');
+    'A later review explicitly marked the same finding ID fixed against its checked HEAD. The fixing author is not recorded.');
   add('finding-author-fixed', 'Found by review', 'Fixed by the author', [],
     'Stored finding resolutions do not identify the fixing author. A linked author correction and verified resolution are needed.', null);
   findingMetric('finding-waived', 'Waived', findings.filter(item => item.finding.resolution === 'accepted'), 'Stored accepted findings.');
-  findingMetric('finding-open', 'Open', findings.filter(item => item.finding.resolution === 'deferred'), 'No explicit fixed or accepted resolution for this exact finding.');
+  findingMetric('finding-open', 'Open', findings.filter(item => item.finding.resolution === 'deferred'), 'No explicit fixed or accepted resolution with checked HEAD evidence.');
+  findingMetric('finding-unchecked', 'Unchecked', findings.filter(item => item.unchecked), 'Open findings omitted from the latest review or lacking checked HEAD evidence.');
+  findingMetric('finding-legacy', 'Legacy findings', findings.filter(item => !item.finding.id), 'Stored findings without stable IDs, matched by exact file, line and description as before.');
   const corrected = changes.filter(change => (corrections.get(change.id) ?? 0) > 0);
   add('corrections', 'Fix loops', 'Corrections sent', corrected, 'Delivered correction handoffs tied to these changes; failed, pending and uncertain delivery do not count.',
     corrected.reduce((sum, change) => sum + corrections.get(change.id)!, 0));

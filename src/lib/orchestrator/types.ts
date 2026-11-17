@@ -141,7 +141,7 @@ export interface OrchestratorLaneBinding {
   dependencyMaterializationMode?: 'native' | 'image' | null;
 }
 
-export interface OrchestratorPacketReviewFinding {
+export interface OrchestratorPacketReviewFinding extends Pick<OrchestratorReviewFinding, 'id' | 'checkedHeadSha' | 'unchecked'> {
   file: string;
   line?: number | null;
   severity: OrchestratorPacketReviewSeverity;
