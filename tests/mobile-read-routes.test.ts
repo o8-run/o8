@@ -49,11 +49,19 @@ function request(path: string, bearer = token, method = 'GET') {
   return new NextRequest(`http://localhost:3001${path}`, { method, headers: { authorization: `Bearer ${bearer}`, 'x-o8-client-addr': '198.51.100.2' } });
 }
 describe('paired mobile read routes through the real gate', () => {
-  it.each(['/api/mobile/pull-requests', '/api/mobile/usage', '/api/mobile/usage/history', '/api/mobile/files/list', '/api/mobile/files/content', '/api/mobile/orchestrator/models'])('limits %s to authenticated GET', path => {
+  it.each(['/api/mobile/pull-requests', '/api/mobile/usage', '/api/mobile/usage/history', '/api/mobile/files/list', '/api/mobile/files/content', '/api/mobile/automations', '/api/mobile/orchestrator/models'])('limits %s to authenticated GET', path => {
     expect(panelGateMiddleware(request(path)).status).toBe(200);
     expect(panelGateMiddleware(request(path, '')).status).toBe(401);
     expect(panelGateMiddleware(request(path, 'revoked-device')).status).toBe(401);
     for (const method of ['POST', 'PUT', 'DELETE', 'PATCH', 'HEAD']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
+  });
+  it.each(['/api/mobile/automations/auto_1/enabled', '/api/mobile/automations/auto_1/run'])('limits %s to authenticated POST', path => {
+    expect(panelGateMiddleware(request(path, token, 'POST')).status).toBe(200);
+    expect(panelGateMiddleware(request(path, '', 'POST')).status).toBe(401);
+    for (const method of ['GET', 'PUT', 'DELETE', 'PATCH']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
+  });
+  it.each(['/api/mobile/automations/auto_1', '/api/mobile/automations/auto_1/run/extra', '/api/automations', '/api/automations/auto_1/run'])('keeps %s closed to a paired device', path => {
+    for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) expect(panelGateMiddleware(request(path, token, method)).status).toBe(403);
   });
   it.each(['/api/panel/prs', '/api/runtime/capacity', '/api/orchestrator/state'])('preserves operator-only %s', path => {
     expect(panelGateMiddleware(request(path)).status).toBe(403);
