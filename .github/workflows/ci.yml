@@ -501,7 +501,9 @@ jobs:
         run: npm ci --prefer-offline
       - name: Audit root dependencies
         if: needs.reuse.outputs.reuse != 'true'
-        run: npm audit --audit-level=high
+        # High and critical findings fail, except advisories listed with a
+        # reason and an expiry in scripts/ci/npm-audit-exceptions.json.
+        run: node scripts/ci/audit-root-dependencies.mjs
       # A direct cargo-audit run, not rustsec/audit-check: that action reports
       # through the GitHub Checks API, which intermittently fails with
       # "Not Found - update-a-check-run" after a clean audit and blocks the gate
