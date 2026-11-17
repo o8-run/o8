@@ -1,0 +1,21 @@
+{
+  "unselected": {
+    "activeIssues": [],
+    "ahead": "number",
+    "behind": "number",
+    "branch": "string",
+    "changedFiles": [],
+    "diffStat": "string",
+    "dirty": "boolean",
+    "generatedAt": "string",
+    "pullRequests": [],
+    "recentCommits": [],
+    "repoPath": "string",
+    "repoSlug": "string",
+    "worktrees": []
+  },
+  "selected-fallback": {
+    "error": "string",
+    "code": "string"
+  }
+}
