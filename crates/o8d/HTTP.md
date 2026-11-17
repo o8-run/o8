@@ -462,3 +462,9 @@ and unsupported stores defer. Evidence records only synthetic key presence
 and shape. The public-socket fixture captures TypeScript responses, checks
 native replies, durable store hashes, refusal outcomes and a mutated native
 response. No Next listener runs in that fixture.
+
+### Mobile inbox cached idle read
+
+GET /api/mobile/inbox admits only the existing unexpired empty inbox cache, through private canonical TypeScript metadata. Both full and sessions-only cache lanes retain their eight-second lifetime and cross-process generation invalidation. Empty finalization remains with the existing advisory setting owner. Rust reconstructs the empty response shape and applies the original cache/Server-Timing headers; it never invents a fleet from missing files.
+
+Fresh requests, a missing/expired/invalidated cache, nonempty sessions/approvals/review/items and unknown shape defer to the original handler. Live discovery, orphan cleanup, approval expiration, review discovery and urgency work remain TypeScript-owned. No Rust writer or caller permission is introduced. The admission context contains only version/generatedAt/mode/sourceLabel/optional note, not a serialized response or credential.

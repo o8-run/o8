@@ -364,9 +364,9 @@ mod tests {
         let db = Connection::open(&database).unwrap();
         db.execute_batch("CREATE TABLE workspace_snapshots(state TEXT); CREATE TABLE app_state(key TEXT, value TEXT);").unwrap();
         Fixture(Store {
-            defaults_context: None,
             directory: directory.canonicalize().unwrap(),
             database,
+            defaults_context: None,
         })
     }
     fn write(f: &Fixture, id: &str, extra: Value) {

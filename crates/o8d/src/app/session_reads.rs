@@ -107,7 +107,8 @@ pub(super) async fn serve(
     let defaults_context = admission
         .headers()
         .get("x-o8d-defaults-context")
-        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.to_str().ok()).filter(|raw| raw.len() <= 4096)
+
         .and_then(|raw| {
             use base64::Engine;
             let bytes = base64::engine::general_purpose::STANDARD.decode(raw).ok()?;
@@ -126,6 +127,7 @@ pub(super) async fn serve(
     })
     .await
     .map_err(|_| ())?;
+
     // Runtime transcripts, lane overlays, network projections and dynamic steer
     // capabilities remain TS-owned until their readers are ported.
     if response.status() == StatusCode::SERVICE_UNAVAILABLE {
