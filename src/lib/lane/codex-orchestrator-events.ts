@@ -26,6 +26,9 @@ export interface CodexLineHandlerState {
    * complete, and the transcript appends text events, so later messages need
    * their own paragraph break. */
   emittedMessage?: boolean;
+  /** Commands announced when they started. Their completion then reports only
+   * the result, so a command shows while it runs and is not listed twice. */
+  startedCommands?: Set<string>;
 }
 
 function messageText(text: string, state: CodexLineHandlerState): string {
@@ -180,16 +183,27 @@ export function handleCodexJsonLine(
       return true;
     }
 
-    if (type === 'item.completed' && item?.type === 'command_execution') {
+    if ((type === 'item.started' || type === 'item.completed') && item?.type === 'command_execution') {
       const cmd = typeof item.command === 'string'
         ? item.command
         : Array.isArray(item.command)
           ? (item.command as string[]).join(' ')
           : '';
-      const output = typeof item.output === 'string' ? item.output : '';
       const callId = typeof item.id === 'string' ? item.id : null;
-      onEvent({ type: 'tool_use', id: callId, name: 'shell', input: { command: cmd } });
-      if (output) onEvent({ type: 'tool_result', id: callId, name: 'shell', output: output.slice(0, 4_000) });
+      if (type === 'item.started') {
+        // A command is shown from the moment it starts, not when it ends:
+        // a long build or test run is otherwise invisible while it runs.
+        if (callId && cmd) {
+          (state.startedCommands ??= new Set()).add(callId);
+          onEvent({ type: 'tool_use', id: callId, name: 'shell', input: { command: cmd } });
+        }
+        return true;
+      }
+      const output = typeof item.output === 'string' ? item.output : '';
+      const announced = callId !== null && state.startedCommands?.delete(callId) === true;
+      if (!announced) onEvent({ type: 'tool_use', id: callId, name: 'shell', input: { command: cmd } });
+      // An announced command always gets a result, so its row stops showing as running.
+      if (output || announced) onEvent({ type: 'tool_result', id: callId, name: 'shell', output: output.slice(0, 4_000) });
       return true;
     }
 

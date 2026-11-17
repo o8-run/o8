@@ -5833,6 +5833,22 @@
       ]
     },
     {
+      "path": "tests/o8d-rust-mobile-inbox-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-rust-settings-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-session-read-admission-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -7770,6 +7786,14 @@
     },
     {
       "path": "tests/rex-auto-shortcut-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/root-npm-audit-real-path.test.ts",
       "reasons": [
         "child-process",
         "executable-fixture",
