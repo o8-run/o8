@@ -14,7 +14,7 @@ it('matches 100 seeded mobile inbox reads, cache ownership, shape and auth throu
     const { stdout } = await promisify(execFile)('df', ['-Pk', '/']);
     if (Number(stdout.trim().split('\n').at(-1)!.trim().split(/\s+/)[3]) < 15 * 1024 * 1024) throw new Error('15 GiB free required');
     await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml',
-      '--features', 'experimental-session-reads', '--target-dir', target], { maxBuffer: 64 * 1024 * 1024 });
+      '--features', 'experimental-session-reads', '--target-dir', target], { maxBuffer: 64 * 1024 * 1024, env: { ...process.env, RUSTC_WRAPPER: '' } });
   }
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-mobile-inbox-parity-')));
   const result = join(directory, 'result.json');

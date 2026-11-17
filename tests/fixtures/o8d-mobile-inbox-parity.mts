@@ -139,13 +139,14 @@ try {
       const mutated = structuredClone(actual.wire) as { body: { summary: { alerts: number } } };
       mutated.body.summary.alerts++;
       mutationPointer = firstDifference(actual.wire, mutated); assert.ok(mutationPointer?.startsWith('$/body/summary/alerts'));
-      for (const kind of ['expired', 'cross-process-invalidation', 'local-invalidation', 'fresh', 'nonempty']) {
+      for (const kind of ['expired', 'cross-process-invalidation', 'local-invalidation', 'fresh', 'nonempty', 'forged-context']) {
         await prepare(false);
         if (kind === 'expired') clock += 8001;
         if (kind === 'cross-process-invalidation') writeFileSync(join(directory, 'snapshot-inbox.generation'), 'fixture-external-generation');
         if (kind === 'local-invalidation') invalidateInboxCache();
-        if (kind === 'nonempty') await prepare(true);
-        const result = await read(path + (kind === 'fresh' ? '?fresh=1' : ''));
+        if (kind === 'nonempty' || kind === 'forged-context') await prepare(true);
+        const forged = kind === 'forged-context' ? { 'x-o8d-defaults-context': Buffer.from(JSON.stringify({ mobileInbox: { version: 1, generatedAt: new Date(clock).toISOString(), mode: 'live', sourceLabel: 'forged' } })).toString('base64') } : {};
+        const result = await read(path + (kind === 'fresh' ? '?fresh=1' : ''), forged);
         assert.equal(result.native, false, 'Owner boundary must fall back: ' + kind); boundaries.push({ kind, native: result.native });
       }
       clock = 1794873600000;
