@@ -60,6 +60,12 @@ pub async fn run<R: Runtime>(app: AppHandle<R>) {
     }
 }
 
+/// Seconds between update-state reads while nothing is pending.
+const QUIET_POLL_TICKS: u32 = 5;
+/// How long one-second reads continue after a requested check, a click,
+/// a held-state change or a pass that did real work.
+const ATTENTIVE_MS: u64 = 10_000;
+
 pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
     app: AppHandle<R>,
     factory: impl Fn(AppHandle<R>, reqwest::Client, String, String) -> E + Send,
@@ -82,10 +88,29 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
     let mut served_request = String::new();
     let mut served_apply = String::new();
     let mut auto_apply = auto_apply::AutoApply::new(auto_interval);
+    // The held update as the server last heard it; posted again only on change.
+    let mut published_held = serde_json::Value::Bool(false);
+    let mut quiet_ticks: u32 = 0;
+    // A requested check, an Update click or a held-state change keeps one-second reads
+    // for a short while, so follow-up requests are answered promptly.
+    let mut attentive_until: u64 = 0;
     loop {
         // Only the deliberate sleep contributes to gap detection, not awaited I/O.
         let signaled = WOKE.swap(false, Ordering::AcqRel);
         let woke = schedule.due(now_ms(), false) || (signaled && schedule.wake(now_ms()));
+        // Asking the server every second was the app's busiest idle request.
+        // Keep one-second reads while an update downloads or just after
+        // something happened; otherwise ask every few seconds, so a click
+        // waits at most that long to be admitted.
+        let attentive = now_ms() < attentive_until || published_held["phase"] == "downloading";
+        if !woke && !attentive && quiet_ticks % QUIET_POLL_TICKS != 0 {
+            quiet_ticks = quiet_ticks.wrapping_add(1);
+            schedule.awake(now_ms());
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        }
+        quiet_ticks = 1;
+        let started = now_ms();
         // Boot starts before port allocation. Never fall back to another running server.
         let url = std::env::var("O8_API_PORT")
             .ok()
@@ -106,7 +131,11 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
             .as_ref()
             .and_then(|v| v["checkRequestedAt"].as_str())
             .unwrap_or_default();
-        if woke || (!request.is_empty() && request != served_request) {
+        let requested = !request.is_empty() && request != served_request;
+        if requested {
+            attentive_until = now_ms() + ATTENTIVE_MS;
+        }
+        if woke || requested {
             let result = super::run_check(&app).await;
             report = (!result.is_null()).then_some(result);
             served_request = request.to_string();
@@ -140,6 +169,7 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
             .unwrap_or_default();
         let retry = !apply.is_empty() && apply != served_apply;
         if retry {
+            attentive_until = now_ms() + ATTENTIVE_MS;
             auto_apply.expedite();
             served_apply = apply.to_string();
         }
@@ -163,11 +193,26 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
                 let _ = publish(status.clone()).await;
                 let mut downloading = status.clone();
                 downloading["phase"] = serde_json::json!("downloading");
-                let _ = publish(downloading).await;
+                let _ = publish(downloading.clone()).await;
+                published_held = downloading;
             }
             auto_apply::stage(&app, retry).await;
-            let _ = publish(auto_apply::held_status(&app)).await;
+            let held = auto_apply::held_status(&app);
+            if held != published_held {
+                // The first report at startup is not news; a later change
+                // (ready, failed) is when a click is likely.
+                if published_held != serde_json::Value::Bool(false) {
+                    attentive_until = now_ms() + ATTENTIVE_MS;
+                }
+                let _ = publish(held.clone()).await;
+                published_held = held;
+            }
             auto_apply.tick(&client, url, &token, &effects).await;
+        }
+        // A pass that took real time checked, downloaded or installed;
+        // the server's follow-up request should not wait for the idle cadence.
+        if now_ms().saturating_sub(started) >= 1_000 {
+            attentive_until = now_ms() + ATTENTIVE_MS;
         }
         schedule.awake(now_ms());
         tokio::time::sleep(Duration::from_secs(1)).await;

@@ -388,6 +388,10 @@ fn webview_ipc_download_and_install_stage_signed_bytes_without_restarting() {
 
 #[test]
 fn scheduler_downloads_signed_update_without_install_admission() {
+    // O8_API_PORT is process-wide; other scheduler tests read it too.
+    let _serial = super::scheduler_tests::SCHEDULER_ENV
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     for valid in [true, false] {
         let service = service_options(valid, false, false, true);
         let app = super::build_app_with_key(
