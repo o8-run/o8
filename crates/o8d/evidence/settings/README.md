@@ -27,3 +27,5 @@ Release-only latency uses an optimized build,10 warmups and100 measured requests
 | /api/v2/keys | 5.35/7.51 | 5.88/7.95 |
 | /api/runtime/service-tiers | 6.64/11.93 | 7.72/8.83 |
 | /api/panel/operator-defaults?include=native | 16.53/20.64 | 9.72/11.11 |
+
+Final hermetic run:920 files/7515 tests pass,4 tests fail in the same2 baseline files (mobile-model-catalog and providers/instances),3 files/5 tests skipped. Initial cache startup failed before tests; the completed run uses an isolated filesystem cache with the same selection. Focused public/frozen/Rust/typecheck/lint/rules/inventory checks pass. Hosted Ubuntu acceptance remains pending.

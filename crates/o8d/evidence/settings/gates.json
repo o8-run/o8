@@ -1910,5 +1910,20 @@
     "inventory": 0,
     "final-cargo": 0
   },
-  "hermetic": "Final suite running with isolated Vitest cache; first attempt failed during cache startup before tests."
+  "hermetic": {
+    "exit": 1,
+    "filesPassed": 920,
+    "filesFailed": 2,
+    "filesSkipped": 3,
+    "testsPassed": 7515,
+    "testsFailed": 4,
+    "testsSkipped": 5,
+    "durationSeconds": 306.12,
+    "failureFiles": [
+      "tests/mobile-model-catalog.test.ts",
+      "src/lib/providers/instances.test.ts"
+    ],
+    "baseline": "Same four cases in two files recorded by the earlier startup hermetic receipt; unrelated source files unchanged.",
+    "initialAttempt": "Vitest shared filesystem-cache startup ENOENT before tests; rerun uses a separate fsModuleCachePath with identical test selection."
+  }
 }
