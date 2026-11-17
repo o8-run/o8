@@ -11,12 +11,14 @@ const path = '/api/cortex/proposals';
 function generatedCases() {
   let seed = 6411;
   const next = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
-  return Array.from({ length: 100 }, (_, index) => ({
+  const cases = Array.from({ length: 100 }, (_, index) => ({
     action: 'dismiss',
     id: index % 11 === 0 ? ' \uFEFF ' : ` proposal-${next() % 13} `,
     filePattern: [' src/a.ts ', '\uFEFF日本語/修正.ts\u2029', '**/*.rs', ''][next() % 4],
     fixPattern: [' repair ', '保持順序', 'a\u0000b', '\uFEFF'][next() % 4],
   }));
+  cases[0] = { action: 'dismiss', id: 'proposal-1', filePattern: 'src/main.rs', fixPattern: 'preserve saved state' };
+  return cases;
 }
 
 it('replays 100 real dismiss writes and compares every response and stored ledger', async () => {
@@ -48,6 +50,11 @@ it('replays 100 real dismiss writes and compares every response and stored ledge
           expect(response.headers.get('x-o8d-native'), `Native route was not reached: ${path} case ${index}`).toBe('1');
           expect(actual, `case ${index}: response and persisted ledger`).toEqual(records[index]);
         }
+      }
+      if (!native && process.env.O8D_SNOOZE_ORACLE_OUTPUT) {
+        writeFileSync(process.env.O8D_SNOOZE_ORACLE_OUTPUT, JSON.stringify({
+          seed: 6411, now: 1_798_128_000_000, initial, cases: generatedCases(), records,
+        }) + '\n');
       }
       await server.stop(); server = undefined;
     }
