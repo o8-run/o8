@@ -1,0 +1,30 @@
+diff --git a/crates/o8d/native-routes.json b/crates/o8d/native-routes.json
+index 1f8c9b17c..c97ffac3f 100644
+--- a/crates/o8d/native-routes.json
++++ b/crates/o8d/native-routes.json
+@@ -22,7 +22,8 @@
+   {
+     "path": "/api/v2/chat-history",
+     "methods": [
+-      "GET"
++      "GET",
++      "POST"
+     ],
+     "fallback": true,
+     "reason": "Network projections remain TypeScript-owned.",
+diff --git a/crates/o8d/src/http/mod.rs b/crates/o8d/src/http/mod.rs
+index d611699d6..46dbeca54 100644
+--- a/crates/o8d/src/http/mod.rs
++++ b/crates/o8d/src/http/mod.rs
+@@ -196,6 +196,11 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
+     }
+ }
+ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, _body: &[u8]) -> Response {
++    // Verification-only handler; never part of the production patch.
++    if path == "/api/v2/chat-history" && method == "POST" {
++        if value(params, "fixtureFallback") == "1" { return unavailable() }
++        return reply(StatusCode::OK, json!({"method":method,"bytes":_body.len(),"allA":_body.iter().all(|b| *b == b'a')}));
++    }
+     if method != "GET" { return unavailable() }
+     match path {
+         "/api/panel/branches"

@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { createServer, get, Agent, type Server } from 'node:http';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 
@@ -72,4 +74,25 @@ it('keeps the bridge admission backhaul open across reads, and closes every othe
     expect(refused.status).toBe(401);
     expect(refused.connection).toBe('close');
   } finally { agent.destroy(); }
+});
+
+
+it('refuses private admission probes for unsupported methods or a disabled gate without executing a writer', async () => {
+  const { getDataDir } = await import('@/lib/data-dir-migration');
+  const tabId = 'thoughts-admission-must-not-write';
+  const file = join(getDataDir(), 'chat-history', tabId + '.json');
+  expect(existsSync(file)).toBe(false);
+  const headers = { authorization, 'x-o8d-bridge': bridgeKey,
+    'x-o8d-session-read': 'authorize', 'content-type': 'application/json' };
+  const probe = await fetch(origin + '/api/v2/chat-history', { method: 'POST', headers,
+    body: JSON.stringify({ tabId, messages: [], backend: 'claude', model: 'claude-code' }) });
+  expect(probe.status).toBe(409);
+  await probe.arrayBuffer();
+  expect(existsSync(file)).toBe(false);
+  vi.stubEnv('O8D_NATIVE_SESSION_READS', '0');
+  try {
+    const disabled = await fetch(origin + '/api/v2/chat-history', { headers });
+    expect(disabled.status).toBe(409);
+    await disabled.arrayBuffer();
+  } finally { vi.stubEnv('O8D_NATIVE_SESSION_READS', '1'); }
 });
