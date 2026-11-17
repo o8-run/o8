@@ -34,6 +34,9 @@ function normalizeReviewFinding(finding: OrchestratorReviewFinding): Orchestrato
     ? Math.floor(finding.line)
     : undefined;
   return {
+    id: trimOptional(finding.id),
+    checkedHeadSha: finding.checkedHeadSha,
+    unchecked: finding.unchecked,
     file: finding.file.trim(),
     line: normalizedLine,
     severity: finding.severity,

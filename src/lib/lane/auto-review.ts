@@ -1,3 +1,4 @@
+import { priorReviewFindingsPrompt } from '@/lib/approvals/review-findings';
 import { reviewBackpressurePolicy } from '@/lib/orchestrator/review-backpressure';
 import { isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { getSqlite } from '@/lib/db';
@@ -381,7 +382,7 @@ function buildReviewPrompt(
     },
     depth,
     worktreePath,
-    diffSummary,
+    diffSummary: [diffSummary, lane.packetId ? priorReviewFindingsPrompt(lane.packetId) : ''].filter(Boolean).join('\n\n'),
     selfReviewSection: formatSelfReview(selfReview, depth),
     deviationsEntries: deviations?.entries ?? [],
     mergeGateSection,

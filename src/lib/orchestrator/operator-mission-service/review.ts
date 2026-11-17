@@ -1,3 +1,4 @@
+import { prepareReviewFindings } from '@/lib/approvals/review-findings';
 import { completedExternalReviewTurn, isExternalReviewPacket } from '@/lib/tasks/external-review-turn';
 import { prepareRunEvidence, reviewExecution, type ReviewRunEvidence } from '@/lib/orchestrator/review-run-evidence';
 import { assertReviewSubmissionCurrent } from '@/lib/auth/review-submission';
@@ -72,6 +73,9 @@ function buildPacketReview(
     ...reviewExecution(approved, reviewedHeadSha, runEvidence),
     approved,
     findings: findings.map((finding) => ({
+      id: finding.id,
+      checkedHeadSha: finding.checkedHeadSha,
+      unchecked: finding.unchecked,
       file: finding.file,
       line: finding.line ?? null,
       severity: finding.severity === 'bug'
@@ -237,7 +241,7 @@ function recordPacketReviewAudit(
       'Review Turn Outcome': reviewTurn.outcome,
     },
   });
-  recordApprovalAudit(approval.id, 'orchestrator_review', 'system', summary);
+  recordApprovalAudit(approval.id, 'orchestrator_review', 'system', summary, { findings, approved, reviewedHeadSha });
   if (missingContractWaiverReason) {
     recordApprovalAudit(
       approval.id,
@@ -455,6 +459,7 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
       packetId: principal.packetId, reviewTurnId: principal.reviewTurnId, reviewerRuntime: principal.reviewerRuntime }
     : internal && activeReviewTurn?.backend ? { role: 'assigned_reviewer' as const, source: 'server_review_turn' as const,
       packetId: packet.id, reviewTurnId: activeReviewTurn.id, reviewerRuntime: activeReviewTurn.backend } : null;
+  input = { ...input, findings: prepareReviewFindings(packet.id, input.findings, reviewedHeadSha) };
   const submittedEvidence = prepareRunEvidence(input.runEvidence, reviewedHeadSha, evidencePrincipal);
   const execution = reviewExecution(input.approved, reviewedHeadSha, submittedEvidence);
   const summary = buildReviewSummary(input.findings, execution.verdictLabel);

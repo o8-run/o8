@@ -477,8 +477,7 @@ export const MISSION_TOOLS: McpTool[] = [
   },
   {
     name: 'submit_review',
-    description:
-      'Required: packetId, findings, approved. Each finding requires file, severity, description, and either status or resolution (fixed, accepted, deferred); prefer status. Canonical severity values are bug, rule_violation, and note; legacy aliases remain accepted. USE THIS WHEN a packet is awaiting_review and you\'ve inspected the diff (via o8_merge_preview or by reading the worktree). approved:true unlocks the F18 auto-merge path; approved:false records a rejection; delivery to the author is a separate action. Open findings in a rejection use status:"deferred". Findings are relayed to downstream dependent packets. Use status for the finding enum (fixed, accepted, deferred); put free-text fix details in description or fixSuggestion. Example: submit_review({packetId: "pkt-abc", approved: false, findings: [{file: "src/foo.ts", severity: "rule_violation", description: "CSS shorthand used", status: "deferred", fixSuggestion: "Use paddingTop and paddingLeft instead."}]})',
+    description: 'Required: packetId, findings, approved. Each finding requires file, severity, description, and either status or resolution (fixed, accepted, deferred); prefer status. Canonical severity values are bug, rule_violation, and note; legacy aliases remain accepted. USE THIS WHEN a packet is awaiting_review and you\'ve inspected the diff (via o8_merge_preview or by reading the worktree). approved:true unlocks the F18 auto-merge path; approved:false records a rejection; delivery to the author is a separate action. Open findings in a rejection use status:"deferred". Findings are relayed to downstream dependent packets. Use status for the finding enum (fixed, accepted, deferred); put free-text fix details in description or fixSuggestion. Example: submit_review({packetId: "pkt-abc", approved: false, findings: [{file: "src/foo.ts", severity: "rule_violation", description: "CSS shorthand used", status: "deferred", fixSuggestion: "Use paddingTop and paddingLeft instead."}]})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -492,6 +491,7 @@ export const MISSION_TOOLS: McpTool[] = [
           items: {
             type: 'object',
             properties: {
+              id: { type: 'string', description: 'Earlier finding ID. Preserve on follow-up; omit for new findings.' },
               file: { type: 'string' },
               line: { type: 'number' },
               severity: { type: 'string', description: 'Prefer bug for defects, rule_violation for policy failures, or note for observations. Also accepts high, critical, error, medium, warning, policy, low, and info; matching ignores case and surrounding whitespace.' },

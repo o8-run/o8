@@ -1,3 +1,4 @@
+import { prepareReviewFindings } from '@/lib/approvals/review-findings';
 import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { reviewOutcomeForLane } from '@/lib/cortex/review-outcomes';
 import { and, desc, eq, gte, or, sql, type SQL } from 'drizzle-orm';
@@ -604,6 +605,7 @@ export function recordOrchestratorReview(
 ): ApprovalAuditEvent {
   const normalizedPacketId = packetId.trim();
   const normalizedReview = normalizeOrchestratorReview(review);
+  normalizedReview.findings = prepareReviewFindings(normalizedPacketId, normalizedReview.findings, normalizedReview.reviewedHeadSha);
   const reviewTurnId = normalizedReview.reviewTurnId
     ?? `review-turn-standalone-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const reviewTurnOutcome = normalizedReview.reviewTurnOutcome ?? 'completed';

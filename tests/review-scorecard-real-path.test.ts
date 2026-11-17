@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { recordOrchestratorReview, getApproval } from '@/lib/approvals/store';
+import { priorReviewFindingsPrompt } from '@/lib/approvals/review-findings';
+import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import { getSqlite } from '@/lib/db';
 import { GET } from '@/app/api/panel/analytics/route';
 
@@ -36,7 +39,7 @@ it('projects receipts, medians, findings and drill-down membership through the p
   lane('clean'); review('clean', true, -day + 60000);
   event('clean', 'merge_dispatch_succeeded', -day + 180000, 'system', { reviewedHeadSha: 'a'.repeat(40), mergeSha: 'b'.repeat(40) });
   lane('repair');
-  const finding = { file: 'a.ts', severity: 'bug', resolution: 'deferred', description: 'Wrong bound' };
+  const finding = { id: 'bound-finding', checkedHeadSha: 'a'.repeat(40), file: 'a.ts', severity: 'bug', resolution: 'deferred', description: 'Wrong bound' };
   review('repair', false, -day + 60000, [finding]);
   review('repair', true, -day + 120000, [{ ...finding, resolution: 'fixed' }]);
   const body = await score();
@@ -306,4 +309,48 @@ it('counts an automatic pull-request merge of the reviewed head', async () => {
   const body = await score();
   expect(body.metrics.find((row: { id: string }) => row.id === 'without-person').value).toBe(1);
   expect(body.metrics.find((row: { id: string }) => row.id === 'verdict-merge').value).toBe(1000);
+});
+
+it.each(['fixed', 'deferred', 'accepted', 'unchecked', 'legacy'])('tracks %s findings across rounds through GET', async status => {
+  lane('lifecycle');
+  const finding = { ...(status === 'legacy' ? {} : { id: 'stable-finding' }), file: 'old.ts', line: 4,
+    severity: 'bug', description: 'Original wording', resolution: 'deferred' };
+  review('lifecycle', false, -3000, [finding]);
+  review('lifecycle', true, -2000, ['unchecked', 'legacy'].includes(status) ? [] : [{ ...finding,
+    file: 'moved.ts', line: 90, description: 'Reworded', resolution: status, checkedHeadSha: 'a'.repeat(40) }]);
+  const body = await score();
+  const value = (id: string) => body.metrics.find((row: { id: string }) => row.id === id)?.value;
+  expect(value('findings')).toBe(1);
+  expect(value('finding-fixed')).toBe(status === 'fixed' ? 1 : 0);
+  expect(value('finding-waived')).toBe(status === 'accepted' ? 1 : 0);
+  expect(value('finding-open')).toBe(['deferred', 'unchecked', 'legacy'].includes(status) ? 1 : 0);
+  expect(value('finding-unchecked')).toBe(status === 'unchecked' ? 1 : 0);
+  expect(value('finding-legacy')).toBe(status === 'legacy' ? 1 : 0);
+});
+
+it('persists generated IDs, checked heads and omissions through the review writer', async () => {
+  lane('writer');
+  const finding = { file: 'old.ts', severity: 'bug' as const, description: 'Original', resolution: 'deferred' as const };
+  const first = recordOrchestratorReview('writer', { approved: false, reviewedHeadSha: 'a'.repeat(40), findings: [finding] });
+  const saved = first.findings![0];
+  expect(saved.id).toMatch(/^[a-f0-9-]{36}$/);
+  expect(saved.checkedHeadSha).toBe('a'.repeat(40));
+  expect(priorReviewFindingsPrompt('writer')).toContain(saved.id);
+  expect(priorReviewFindingsPrompt('writer')).toContain('Omitted findings remain open and unchecked');
+  const still = recordOrchestratorReview('writer', { approved: false, reviewedHeadSha: 'b'.repeat(40),
+    findings: parseReviewFindings([{ ...saved, file: 'moved.ts', line: 80, description: 'Reworded', status: 'deferred' }]) });
+  expect(still.findings![0]).toMatchObject({ id: saved.id, checkedHeadSha: 'b'.repeat(40), unchecked: false });
+  const omitted = recordOrchestratorReview('writer', { approved: true, reviewedHeadSha: 'c'.repeat(40), findings: [] });
+  expect(omitted.findings![0]).toMatchObject({ id: saved.id, resolution: 'deferred', unchecked: true });
+  expect(omitted.findings![0].checkedHeadSha).toBeUndefined();
+  const row = getSqlite().prepare("SELECT id,audit_json,args_json FROM approvals WHERE packet_id='writer'").get() as { id: string; audit_json: string; args_json: string };
+  expect(JSON.parse(row.args_json).findings[0].id).toBe(saved.id);
+  expect(JSON.parse(row.audit_json).filter((event: { type: string }) => event.type === 'orchestrator_review')).toHaveLength(3);
+  expect(getApproval(row.id)?.status).toBe('pending');
+  const fixed = recordOrchestratorReview('writer', { approved: true, reviewedHeadSha: 'd'.repeat(40),
+    findings: [{ ...saved, description: 'Corrected', resolution: 'fixed' }] });
+  expect(fixed.findings![0]).toMatchObject({ id: saved.id, resolution: 'fixed', checkedHeadSha: 'd'.repeat(40), unchecked: false });
+  expect(priorReviewFindingsPrompt('writer')).toBe('');
+  const body = await score();
+  expect(body.metrics.find((row: { id: string }) => row.id === 'finding-open').value).toBe(0);
 });
