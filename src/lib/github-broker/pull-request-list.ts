@@ -3,7 +3,7 @@ import 'server-only';
 
 import { githubInstallationFetch } from './auth';
 import { withGitHubAbort } from './abort';
-import type { PullRequestListPage, PullRequestListState, PullRequestListSort } from './pull-request-list.types';
+import type { MergeQueueProgress, PullRequestListPage, PullRequestListState, PullRequestListSort } from './pull-request-list.types';
 
 interface GitHubListPull {
   number: number;
@@ -29,19 +29,35 @@ interface PullStats {
   commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string; contexts?: { checkRunCountsByState: Array<{ state: string; count: number }>; statusContextCountsByState: Array<{ state: string; count: number }> } } | null } }> };
   reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
   mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
-  mergeQueueEntry?: { position?: number | null } | null;
+  mergeQueueEntry?: { position?: number | null; state?: string | null; enqueuedAt?: string | null; estimatedTimeToMerge?: number | null } | null;
 }
 
 const STATS_QUERY = `query PullRequestListStats($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on PullRequest {
       number additions deletions reviewDecision mergeable
-      mergeQueueEntry { position }
+      mergeQueueEntry { position state enqueuedAt estimatedTimeToMerge }
       reviewRequests(first: 100) { nodes { requestedReviewer { ... on User { login } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 1) { checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
     }
   }
 }`;
+
+const QUEUE_STATES: Record<string, MergeQueueProgress['state']> = {
+  QUEUED: 'queued', AWAITING_CHECKS: 'checking', MERGEABLE: 'ready', UNMERGEABLE: 'failed', LOCKED: 'merging',
+};
+
+/** GitHub's queue entry in the list's own words; unknown values read as not reported. */
+function mergeQueueProgress(entry: PullStats['mergeQueueEntry']): MergeQueueProgress | null {
+  if (!entry) return null;
+  const seconds = entry.estimatedTimeToMerge;
+  return {
+    position: typeof entry.position === 'number' ? entry.position : null,
+    state: QUEUE_STATES[entry.state ?? ''] ?? null,
+    enqueuedAt: typeof entry.enqueuedAt === 'string' ? entry.enqueuedAt : null,
+    estimatedSeconds: typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 ? seconds : null,
+  };
+}
 
 /** List pages stay lightweight; the detail panel loads only the selected PR. */
 export async function fetchPullRequestListPage(repo: string, state: PullRequestListState, page: number, signal?: AbortSignal, sort: PullRequestListSort = 'updated', fresh = false): Promise<PullRequestListPage> {
@@ -95,7 +111,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
       url: pull.html_url, labels: pull.labels.map((label) => label.name),
       createdAt: pull.created_at,
       reviewDecision: summary?.reviewDecision ?? null, mergeable: summary?.mergeable ?? null,
-      mergeQueue: summary?.mergeQueueEntry ? { position: typeof summary.mergeQueueEntry.position === 'number' ? summary.mergeQueueEntry.position : null } : null,
+      mergeQueue: mergeQueueProgress(summary?.mergeQueueEntry),
     }; }),
   };
 }
