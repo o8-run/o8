@@ -220,6 +220,7 @@ pub(super) async fn run_check<R: Runtime>(app: &AppHandle<R>) -> serde_json::Val
     let result = crate::update_ping::check_for_ticket(app, &ticket).await;
     crate::update_ping::with_current_check(app, &ticket, || match result {
         Ok(Some(update)) => {
+            scheduler::auto_apply::hold(app, update.clone());
             let payload = LaunchUpdatePayload {
                 version: update.version.clone(),
                 current_version: update.current_version.clone(),
@@ -238,7 +239,10 @@ pub(super) async fn run_check<R: Runtime>(app: &AppHandle<R>) -> serde_json::Val
             }
             report
         }
-        Ok(None) => emit_clear(app, "current", None, started_at, ticket.clone()),
+        Ok(None) => {
+            scheduler::auto_apply::clear_held(app);
+            emit_clear(app, "current", None, started_at, ticket.clone())
+        }
         Err(err) => {
             log::warn!("[launch-updater] check failed: {}", err);
             emit_clear(

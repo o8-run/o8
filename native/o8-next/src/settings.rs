@@ -700,7 +700,7 @@ mod render;
 mod about;
 #[cfg(test)]
 #[path = "settings_test_peer.rs"]
-mod test_peer;
+pub(crate) mod test_peer;
 
 #[path = "settings_connections.rs"]
 mod connections;

@@ -26,7 +26,103 @@ pub(crate) async fn download(
         .map_err(|error| error.to_string())
 }
 
+// Verified artifacts belong to this process only. Quitting drops the bytes.
+#[derive(Default)]
+pub(crate) struct HeldUpdate(std::sync::Mutex<Option<Held>>);
+struct Held {
+    update: tauri_plugin_updater::Update,
+    bytes: Option<Vec<u8>>,
+    phase: &'static str,
+    error: Option<String>,
+}
+pub(crate) fn hold<R: Runtime>(app: &AppHandle<R>, update: tauri_plugin_updater::Update) {
+    if app.try_state::<HeldUpdate>().is_none() {
+        app.manage(HeldUpdate::default());
+    }
+    let state = app.state::<HeldUpdate>();
+    let mut held = state.0.lock().unwrap();
+    if held.as_ref().is_some_and(|h| {
+        h.phase != "failed"
+            && h.update.version == update.version
+            && h.update.raw_json["_o8Epoch"] == update.raw_json["_o8Epoch"]
+    }) {
+        return;
+    }
+    *held = Some(Held {
+        update,
+        bytes: None,
+        phase: "available",
+        error: None,
+    });
+}
+pub(crate) fn clear_held<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(state) = app.try_state::<HeldUpdate>() {
+        *state.0.lock().unwrap() = None;
+    }
+}
+pub(crate) fn held_status<R: Runtime>(app: &AppHandle<R>) -> Value {
+    let snapshot = app.try_state::<HeldUpdate>().and_then(|state| {
+        state.0.lock().unwrap().as_ref().map(|h| {
+            (
+                h.update.clone(),
+                json!({"phase":h.phase,"version":h.update.version,"error":h.error}),
+            )
+        })
+    });
+    snapshot
+        .filter(|(update, _)| crate::update_ping::ensure_update_channel(app, update).is_ok())
+        .map(|(_, status)| status)
+        .unwrap_or(Value::Null)
+}
+pub(crate) async fn stage<R: Runtime>(app: &AppHandle<R>, retry: bool) {
+    let Some(state) = app.try_state::<HeldUpdate>() else {
+        return;
+    };
+    let update = {
+        let mut held = state.0.lock().unwrap();
+        let Some(h) = held.as_mut() else { return };
+        if h.phase != "available" && !(retry && h.phase == "failed") {
+            return;
+        }
+        h.phase = "downloading";
+        h.error = None;
+        h.update.clone()
+    };
+    let result = match crate::update_ping::ensure_update_channel(app, &update) {
+        Ok(()) => download(&update, |_, _| {}, || {}).await,
+        Err(error) => Err(error),
+    };
+    let result = result.and_then(|bytes| {
+        crate::update_ping::ensure_update_channel(app, &update)?;
+        Ok(bytes)
+    });
+    let mut held = state.0.lock().unwrap();
+    // A check may have cleared or replaced the held update while this one
+    // downloaded; its bytes then belong to nothing and are dropped.
+    let Some(h) = held.as_mut().filter(|h| {
+        h.phase == "downloading"
+            && h.update.version == update.version
+            && h.update.raw_json["_o8Epoch"] == update.raw_json["_o8Epoch"]
+    }) else {
+        return;
+    };
+    match result {
+        Ok(bytes) => {
+            h.bytes = Some(bytes);
+            h.phase = "ready";
+        }
+        Err(error) => {
+            h.phase = "failed";
+            h.error = Some(error);
+        }
+    }
+}
+
 pub trait Effects: Send + Sync {
+    fn retry_failed(&self, _version: &str) -> Result<(), String> {
+        Ok(())
+    }
+
     fn data_directory(&self) -> Result<Option<std::path::PathBuf>, String> {
         Ok(None)
     }
@@ -46,6 +142,13 @@ pub struct NativeEffects<R: Runtime> {
 }
 
 impl<R: Runtime> Effects for NativeEffects<R> {
+    fn retry_failed(&self, version: &str) -> Result<(), String> {
+        let directory = self
+            .data_directory()?
+            .ok_or("Native update storage is unavailable")?;
+        install_journal::InstallJournal::new(directory).retry_failed(version)
+    }
+
     fn data_directory(&self) -> Result<Option<std::path::PathBuf>, String> {
         self.app
             .try_state::<o8_restart_safety::RestartSafety>()
@@ -168,7 +271,19 @@ impl<R: Runtime> NativeEffects<R> {
             }
         }
         crate::update_ping::ensure_update_channel(&self.app, &update)?;
-        let bytes = self.download_reporting(&update, attempt_id).await?;
+        let cached = self.app.try_state::<HeldUpdate>().and_then(|state| {
+            let mut held = state.0.lock().unwrap();
+            held.as_mut()
+                .filter(|h| {
+                    h.update.version == update.version
+                        && h.update.raw_json["_o8Epoch"] == update.raw_json["_o8Epoch"]
+                })
+                .and_then(|h| h.bytes.clone())
+        });
+        let bytes = match cached {
+            Some(bytes) => bytes,
+            None => self.download_reporting(&update, attempt_id).await?,
+        };
         crate::update_ping::ensure_epoch(&self.app, generation)?;
         let admission = control(
             &self.client,
@@ -220,6 +335,7 @@ pub(crate) fn commit_restart_with_work<R: Runtime>(
 }
 
 struct Attempt {
+    manual: bool,
     id: String,
     version: String,
     installed: bool,
@@ -317,6 +433,7 @@ impl AutoApply {
                 .ok_or("Missing update version")?
                 .to_string();
             self.attempt = Some(Attempt {
+                manual: admission["manual"].as_bool() == Some(true),
                 id: admission["attemptId"]
                     .as_str()
                     .ok_or("Missing update attempt")?
@@ -327,7 +444,16 @@ impl AutoApply {
         }
         let attempt = self.attempt.as_mut().unwrap();
         if !attempt.installed {
-            match effects.install(&attempt.version, &attempt.id).await {
+            let retry = if attempt.manual {
+                effects.retry_failed(&attempt.version)
+            } else {
+                Ok(())
+            };
+            let outcome = match retry {
+                Ok(()) => effects.install(&attempt.version, &attempt.id).await,
+                Err(error) => Err(error),
+            };
+            match outcome {
                 Ok(true) => {
                     attempt.installed = true;
                 }

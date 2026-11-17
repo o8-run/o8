@@ -28,6 +28,23 @@ impl InstallJournal {
             Err(error) => Err(error.to_string()),
         }
     }
+    /// Only a deliberate retry may release a completed failure. An interrupted
+    /// or successful attempt remains protected until it is reconciled.
+    pub fn retry_failed(&self, version: &str) -> Result<(), String> {
+        let path = self.path(version)?;
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.to_string()),
+        };
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        if receipt["outcome"] != "failed" {
+            return Err("The previous install needs recovery before retrying.".into());
+        }
+        std::fs::remove_file(path).map_err(|e| e.to_string())
+    }
+
     pub fn install(
         &self,
         version: &str,

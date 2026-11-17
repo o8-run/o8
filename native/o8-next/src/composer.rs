@@ -32,6 +32,42 @@ pub enum SendAs {
     Fork,
 }
 impl EventEmitter<SendAs> for Composer {}
+thread_local! {
+    static LIVE_COMPOSERS: std::cell::RefCell<Vec<gpui::WeakEntity<Composer>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+/// Snapshot every live draft, including inactive tabs, before requesting replacement.
+pub(crate) fn flush_drafts(cx: &mut gpui::App) -> Vec<gpui::Task<Result<(), String>>> {
+    LIVE_COMPOSERS.with(|live| {
+        let mut live = live.borrow_mut();
+        live.retain(|weak| weak.upgrade().is_some());
+        live.iter()
+            .filter_map(|weak| weak.upgrade())
+            .map(|editor| {
+                editor.update(cx, |editor, cx| {
+                    editor.draft_save = None;
+                    let path = editor
+                        .controls
+                        .prompt
+                        .store
+                        .clone()
+                        .filter(|_| editor.persist_draft);
+                    let draft = mode_store::Draft {
+                        text: editor.text.clone(),
+                        files: editor.controls.files.clone(),
+                    };
+                    let order = mode_store::draft_order();
+                    cx.background_executor().spawn(async move {
+                        if let Some(path) = path {
+                            mode_store::save_draft_in_order(Some(&path), &draft, order)
+                        } else {
+                            Ok(())
+                        }
+                    })
+                })
+            })
+            .collect()
+    })
+}
 pub struct Composer {
     pub focus: FocusHandle,
     pub context: &'static str,
@@ -76,6 +112,11 @@ impl Composer {
         self.scroll.bounds()
     }
     pub fn new(cx: &mut Context<Self>) -> Self {
+        LIVE_COMPOSERS.with(|live| {
+            let mut live = live.borrow_mut();
+            live.retain(|weak| weak.upgrade().is_some());
+            live.push(cx.weak_entity());
+        });
         Self {
             focus: cx.focus_handle(),
             context: "TextInput",
@@ -178,7 +219,13 @@ impl Composer {
     /// attached files and their removal all save; an unchanged draft writes
     /// nothing.
     pub(crate) fn save_draft(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.controls.prompt.store.clone().filter(|_| self.persist_draft) else {
+        let Some(path) = self
+            .controls
+            .prompt
+            .store
+            .clone()
+            .filter(|_| self.persist_draft)
+        else {
             return;
         };
         let draft = mode_store::Draft {
