@@ -23,3 +23,7 @@
 - o8 installs with Homebrew.
 - Agent commands are timed, and a slow rerun is stopped once.
 - Several orchestrator reads do less repeated work.
+- The classic macOS shell no longer leaves empty voice panels floating on the desktop.
+- Symon starts on a phone that was set to the live brain; it runs on the standard brain.
+- A paired phone can show the visuals an agent attaches to a thread.
+- The native transcript keeps earlier messages when a partial update arrives.
