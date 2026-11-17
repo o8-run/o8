@@ -1,0 +1,164 @@
+{
+  "kind": "synthetic-public-socket",
+  "binarySha256": "8738e25a290dd2026d6067b6e62befe431972efe5b71ca6553f22da9afab0b13",
+  "reference": {
+    "native": false,
+    "warmups": 10,
+    "samples": 100,
+    "refusals": [
+      {
+        "label": "missing-bearer",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "wrong-bearer",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "readonly-bearer",
+        "status": 403,
+        "body": {
+          "error": "Read-only worker has no API capability."
+        }
+      },
+      {
+        "label": "spoofed-bridge",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "wrong-host",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "cross-origin-write",
+        "status": 403,
+        "body": {
+          "error": "Origin is not allowed"
+        }
+      }
+    ],
+    "timings": [
+      {
+        "path": "/api/v2/chat-history/list",
+        "p50Ms": 9.227226999999402,
+        "p95Ms": 11.261366999999154
+      },
+      {
+        "path": "/api/v2/chat-history/list?surface=mobile-assistant",
+        "p50Ms": 9.158438000000388,
+        "p95Ms": 15.308050999999978
+      },
+      {
+        "path": "/api/v2/chat-history/list?include=orchestrator",
+        "p50Ms": 8.457483999998658,
+        "p95Ms": 11.035074999999779
+      },
+      {
+        "path": "/api/v2/chat-history/list?q=雪",
+        "p50Ms": 7.272245999998631,
+        "p95Ms": 9.04321600000003
+      },
+      {
+        "path": "/api/v2/chat-history/list?archived=only",
+        "p50Ms": 7.268375999999989,
+        "p95Ms": 9.64799899999889
+      }
+    ]
+  },
+  "native": {
+    "native": true,
+    "warmups": 10,
+    "samples": 100,
+    "refusals": [
+      {
+        "label": "missing-bearer",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "wrong-bearer",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "readonly-bearer",
+        "status": 403,
+        "body": {
+          "error": "Read-only worker has no API capability."
+        }
+      },
+      {
+        "label": "spoofed-bridge",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "wrong-host",
+        "status": 401,
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        }
+      },
+      {
+        "label": "cross-origin-write",
+        "status": 403,
+        "body": {
+          "error": "Origin is not allowed"
+        }
+      }
+    ],
+    "timings": [
+      {
+        "path": "/api/v2/chat-history/list",
+        "p50Ms": 23.70332899999994,
+        "p95Ms": 33.423971000000165
+      },
+      {
+        "path": "/api/v2/chat-history/list?surface=mobile-assistant",
+        "p50Ms": 20.740200000000186,
+        "p95Ms": 24.406176000000414
+      },
+      {
+        "path": "/api/v2/chat-history/list?include=orchestrator",
+        "p50Ms": 25.59119400000054,
+        "p95Ms": 34.88033500000165
+      },
+      {
+        "path": "/api/v2/chat-history/list?q=雪",
+        "p50Ms": 21.6253919999981,
+        "p95Ms": 25.296329000000696
+      },
+      {
+        "path": "/api/v2/chat-history/list?archived=only",
+        "p50Ms": 24.249367000000348,
+        "p95Ms": 30.94908299999952
+      }
+    ]
+  }
+}
