@@ -418,3 +418,15 @@ not an installed usage ranking or a live shadow comparison.
 Parity compares parsed JSON semantics. Object-key wire order is out of scope
 because clients parse JSON; key presence, null versus missing, scalar values
 and array order remain strict.
+
+
+## Native request-body plumbing
+
+Native dispatch carries the original method and admitted Content-Length body,
+bounded at 16 MiB. An admitted body above that limit receives 413. Admission
+precedes body consumption; a deferred consumed body is replayed exactly once
+through the original TypeScript writer. Transfer-Encoding, Expect and ambiguous
+length framing retain streaming fallback. Production route methods remain
+GET-only in this change; no Rust store writer is added. The write-path corpus
+and exported byte-handler fixture verify the seam through the real public
+socket with Next stopped. Generic write admission requires security review.

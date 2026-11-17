@@ -1,0 +1,85 @@
+{
+  "kind": "verification-only-dispatch",
+  "cases": [
+    {
+      "case": "empty",
+      "method": "POST",
+      "path": "/api/v2/chat-history",
+      "body": {
+        "bytes": 0,
+        "fill": "a"
+      },
+      "response": {
+        "status": 200,
+        "native": true,
+        "body": {
+          "method": "POST",
+          "bytes": 0,
+          "allA": true
+        }
+      }
+    },
+    {
+      "case": "one-kib",
+      "method": "POST",
+      "path": "/api/v2/chat-history",
+      "body": {
+        "bytes": 1024,
+        "fill": "a"
+      },
+      "response": {
+        "status": 200,
+        "native": true,
+        "body": {
+          "method": "POST",
+          "bytes": 1024,
+          "allA": true
+        }
+      }
+    },
+    {
+      "case": "exact-limit",
+      "method": "POST",
+      "path": "/api/v2/chat-history",
+      "body": {
+        "bytes": 16777216,
+        "fill": "a"
+      },
+      "response": {
+        "status": 200,
+        "native": true,
+        "body": {
+          "method": "POST",
+          "bytes": 16777216,
+          "allA": true
+        }
+      }
+    },
+    {
+      "case": "over-limit",
+      "method": "POST",
+      "path": "/api/v2/chat-history",
+      "body": {
+        "bytes": 16777217,
+        "fill": "a"
+      },
+      "response": {
+        "status": 413,
+        "native": true,
+        "body": {
+          "error": "Native request exceeds 16 MiB"
+        }
+      }
+    }
+  ],
+  "typescriptFallback": {
+    "path": "/api/v2/chat-history?fixtureFallback=1",
+    "response": {
+      "status": 200,
+      "body": {
+        "ok": true
+      }
+    },
+    "store": "exact synthetic messages from the public-socket test"
+  }
+}

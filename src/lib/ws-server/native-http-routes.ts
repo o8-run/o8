@@ -71,15 +71,20 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     let response: Response;
     let admission = false;
     if (gate.headers.get('x-middleware-next') !== '1') response = gate;
-    else if (authenticatedBridge && nativeSessionReadsEnabled()
-      && req.method === 'GET' && req.headers['x-o8d-session-read'] === 'authorize'
-      && nativeRoutes.some(route => route.path === url.pathname && route.methods.includes(req.method ?? 'GET'))) {
-      // Admission only. Keep the middleware and queue's existing defense-in-depth
-      // gate authoritative; the bridge credential cannot authorize a principal.
-      const denied = url.pathname === '/api/orchestrator/composer-queue'
-        ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
-      response = denied ?? new Response(null, { status: 204 });
-      admission = !denied;
+    else if (authenticatedBridge && req.headers['x-o8d-session-read'] === 'authorize') {
+      // An admission probe must never fall through to a real writer, including
+      // during a binary/table-version mismatch or after the flag is disabled.
+      if (!nativeSessionReadsEnabled()
+        || !nativeRoutes.some(route => route.path === url.pathname && route.methods.includes(req.method ?? 'GET'))) {
+        response = new Response(null, { status: 409 });
+      } else {
+        // Native writes currently have no principal metadata in dispatch. Keep
+        // device/worker writes on their original TS handler and auth floor.
+        const denied = req.method !== 'GET' || url.pathname === '/api/orchestrator/composer-queue'
+          ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
+        response = denied ?? new Response(null, { status: 204 });
+        admission = !denied;
+      }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });
     } else if (match.route.path === '/api/runtime/archive' && typeof mutationWorkspace({ url: url.href }) !== 'string') {
