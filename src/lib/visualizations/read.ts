@@ -13,7 +13,9 @@ import { VisualizationError } from './errors';
 
 // Reads retain packet ownership checks without loading publication/preview code.
 function validateRead(id: string, principal: RequestPrincipalContext): void {
-  if (principal.role !== 'operator' && principal.role !== 'worker') throw new VisualizationError('unauthorized', 'Visualization access requires an operator or packet worker credential.', 401);
+  // A paired phone already reads the operator's transcripts; it may read the
+  // display-only documents attached to them. It cannot publish or preview.
+  if (principal.role !== 'operator' && principal.role !== 'worker' && principal.role !== 'device') throw new VisualizationError('unauthorized', 'Visualization access requires an operator, paired device or packet worker credential.', 401);
   if (!VISUALIZATION_ID.test(id)) throw new VisualizationError('not_found', 'Visualization not found.', 404);
 }
 
@@ -71,6 +73,12 @@ export async function resolveVisualizationTarget(input: Record<string, unknown>,
 }
 
 export async function listTranscriptVisualizations(input: Record<string, unknown>, principal: RequestPrincipalContext) {
+  // Listing is a read. A paired phone lists a thread's documents with the
+  // operator's thread rules; packet transcripts stay with operators and workers.
+  if (principal.role === 'device') {
+    if (string(input.packetId)) throw new VisualizationError('forbidden', 'A paired device may list thread visualizations only.', 403);
+    return listVisualizations(await resolveVisualizationTarget({ threadId: input.threadId, repoPath: input.repoPath }, { role: 'operator' }));
+  }
   return listVisualizations(await resolveVisualizationTarget(input, principal));
 }
 
