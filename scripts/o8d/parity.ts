@@ -10,6 +10,8 @@ import { startParityReference } from '../../tests/fixtures/ws-parity-server';
 import { runRepositoryParity } from './repository-parity';
 
 // No patterns, suffix matching or semantic fields. The current fixture needs no exclusions.
+// Parsed JSON object-key order is out of scope because clients parse JSON.
+// Key presence, null/missing, scalar values and array order remain strict.
 export const VOLATILE_FIELDS: readonly string[] = ['requestId', 'epoch', 'generatedAt'];
 export function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
@@ -35,22 +37,31 @@ export function firstDifference(expected: unknown, actual: unknown, path = '$'):
 }
 export const SESSION_READ_PATHS = nativeRoutes.filter(route => route.methods.includes('GET')).map(route => route.path);
 export function sessionCorpus(directory: string) {
-  const queue = `${SESSION_READ_PATHS[3]}?${new URLSearchParams({ repoPath: join(directory, 'fixture-repo'), threadId: 'thoughts-review', backend: 'claude' })}`;
+  const required = (path: string) => {
+    const selected = SESSION_READ_PATHS.find(candidate => candidate === path);
+    if (!selected) throw new Error(`Missing session corpus route: ${path}`);
+    return selected;
+  };
+  const threads = required('/api/mobile/orchestrator/threads');
+  const history = required('/api/mobile/history');
+  const chat = required('/api/v2/chat-history');
+  const queuePath = required('/api/orchestrator/composer-queue');
+  const queue = `${queuePath}?${new URLSearchParams({ repoPath: join(directory, 'fixture-repo'), threadId: 'thoughts-review', backend: 'claude' })}`;
   return [
-    `${SESSION_READ_PATHS[0]}?limit=500`, `${SESSION_READ_PATHS[0]}?limit=1&offset=1`,
-    `${SESSION_READ_PATHS[0]}?archived=1`, `${SESSION_READ_PATHS[0]}?backend=invalid`,
-    `${SESSION_READ_PATHS[1]}?sessionKey=llm-chat:thoughts-review&limit=100`,
-    `${SESSION_READ_PATHS[1]}?sessionKey=llm-chat:thoughts-long&page=1&limit=100`,
-    `${SESSION_READ_PATHS[1]}?sessionKey=llm-chat:thoughts-long&page=1&before=invalid`,
-    `${SESSION_READ_PATHS[1]}`, `${SESSION_READ_PATHS[1]}?sessionKey=llm-chat:thoughts-missing`,
-    `${SESSION_READ_PATHS[2]}?tabId=thoughts-review&limit=100`,
-    `${SESSION_READ_PATHS[2]}?tabId=thoughts-long&limit=100`,
-    `${SESSION_READ_PATHS[2]}?tabId=thoughts-long&before=invalid`,
-    `${SESSION_READ_PATHS[2]}?tabId=thoughts-missing`, SESSION_READ_PATHS[2], queue, SESSION_READ_PATHS[3],
-    `${SESSION_READ_PATHS[2]}?tabId=thoughts-worktree-root`,
-    `${SESSION_READ_PATHS[1]}?sessionKey=llm-chat:thoughts-worktree-nested`,
+    `${threads}?limit=500`, `${threads}?limit=1&offset=1`,
+    `${threads}?archived=1`, `${threads}?backend=invalid`,
+    `${history}?sessionKey=llm-chat:thoughts-review&limit=100`,
+    `${history}?sessionKey=llm-chat:thoughts-long&page=1&limit=100`,
+    `${history}?sessionKey=llm-chat:thoughts-long&page=1&before=invalid`,
+    `${history}`, `${history}?sessionKey=llm-chat:thoughts-missing`,
+    `${chat}?tabId=thoughts-review&limit=100`,
+    `${chat}?tabId=thoughts-long&limit=100`,
+    `${chat}?tabId=thoughts-long&before=invalid`,
+    `${chat}?tabId=thoughts-missing`, chat, queue, queuePath,
+    `${chat}?tabId=thoughts-worktree-root`,
+    `${history}?sessionKey=llm-chat:thoughts-worktree-nested`,
     // A median-length thread, paged so its revision and cursor bytes are compared too.
-    `${SESSION_READ_PATHS[2]}?tabId=thoughts-tools&limit=3`,
+    `${chat}?tabId=thoughts-tools&limit=3`,
   ];
 }
 export async function seedSessionFixture(directory: string, linkedCheckout = false) {

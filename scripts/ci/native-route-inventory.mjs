@@ -41,7 +41,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const actualTemplates = files(join(root, 'src/app/api')).filter(path => path.endsWith('/route.ts'))
     .map(path => '/api/' + relative(join(root, 'src/app/api'), path).replaceAll('\\', '/').replace(/\/route\.ts$/, '')).sort();
   const templates = JSON.parse(readFileSync('crates/o8d/route-templates.json', 'utf8'));
-  if (JSON.stringify(templates) !== JSON.stringify(actualTemplates)) errors.push('Refresh counts-only route templates from API route paths');
+  if (JSON.stringify(templates) !== JSON.stringify(actualTemplates)) errors.push('Refresh counts-only route templates: node scripts/o8d/generate-route-templates.mjs');
   if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
   else console.log(`Native route inventory: ${count}/${ceiling} TypeScript routes; ${routes.length} covered entries`);
 }

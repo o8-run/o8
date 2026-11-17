@@ -65,28 +65,57 @@ impl Count {
         }))
         .expect("counts JSON");
         bytes.push(b'\n');
-        // Keep each JSON line whole across simultaneous connections. Recording is
-        // best effort and must never change the HTTP response on an I/O failure.
-        static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(100), async {
-            let _guard = LOCK.lock().await;
-            let path = std::path::PathBuf::from(path);
-            // Bound disk use to two 8 MiB segments. Only static labels are saved.
-            if tokio::fs::metadata(&path)
-                .await
-                .is_ok_and(|meta| meta.len() >= 8 * 1024 * 1024)
-            {
-                let _ = tokio::fs::rename(&path, path.with_extension("jsonl.1")).await;
+        // Acquire within the budget; once started, blocking I/O owns the guard
+        // until completion even if the HTTP task stops waiting for the record.
+        static LOCK: std::sync::OnceLock<std::sync::Arc<tokio::sync::Mutex<()>>> =
+            std::sync::OnceLock::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(100);
+        let lock = LOCK
+            .get_or_init(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+            .clone();
+        let Ok(guard) = tokio::time::timeout_at(deadline, lock.lock_owned()).await else {
+            return;
+        };
+        let path = std::path::PathBuf::from(path);
+        let writer = tokio::task::spawn_blocking(move || {
+            let _guard = guard;
+            if tokio::time::Instant::now() >= deadline {
+                return;
             }
-            let mut options = tokio::fs::OpenOptions::new();
-            options.create(true).append(true);
-            #[cfg(unix)]
-            options.mode(0o600);
-            if let Ok(mut file) = options.open(path).await {
-                let _ = file.write_all(&bytes).await;
+            let _ = append_record(&path, &bytes, 8 * 1024 * 1024);
+        });
+        let _ = tokio::time::timeout_at(deadline, writer).await;
+    }
+}
+
+fn append_record(path: &std::path::Path, bytes: &[u8], limit: u64) -> std::io::Result<()> {
+    use std::io::Write;
+    if std::fs::metadata(path).is_ok_and(|meta| meta.len() >= limit) {
+        std::fs::rename(path, path.with_extension("jsonl.1"))?;
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    let previous = file.metadata()?.len();
+    // One syscall for the complete JSON line, including its newline. Never retry
+    // a partial record: roll it back under the same serialization guard instead.
+    match file.write(bytes) {
+        Ok(written) if written == bytes.len() => Ok(()),
+        result => {
+            file.set_len(previous)?;
+            match result {
+                Err(error) => Err(error),
+                _ => Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "short count record",
+                )),
             }
-        })
-        .await;
+        }
     }
 }
 
@@ -190,6 +219,41 @@ impl AsyncWrite for Backend {
 mod tests {
     use super::*;
     use tokio::{io::AsyncReadExt, net::TcpListener};
+
+    #[test]
+    fn rotates_complete_json_lines_and_replaces_the_previous_segment() {
+        let id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("o8-count-rotation-{}-{id}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("counts.jsonl");
+        let first = b"{\"status\":200}\n";
+        let second = b"{\"status\":401}\n";
+        let third = b"{\"status\":403}\n";
+        append_record(&path, first, first.len() as u64).unwrap();
+        append_record(&path, second, first.len() as u64).unwrap();
+        assert_eq!(
+            std::fs::read(path.with_extension("jsonl.1")).unwrap(),
+            first
+        );
+        append_record(&path, third, second.len() as u64).unwrap();
+        assert_eq!(
+            std::fs::read(path.with_extension("jsonl.1")).unwrap(),
+            second
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), third);
+        for segment in [&path, &path.with_extension("jsonl.1")] {
+            let bytes = std::fs::read(segment).unwrap();
+            assert_eq!(bytes.last(), Some(&b'\n'));
+            for line in bytes.split(|b| *b == b'\n').filter(|line| !line.is_empty()) {
+                serde_json::from_slice::<serde_json::Value>(line).unwrap();
+            }
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[tokio::test]
     async fn uploads_stream_and_informational_status_is_not_recorded_as_final() {

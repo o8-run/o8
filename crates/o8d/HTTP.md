@@ -407,7 +407,14 @@ equal `maxTypeScriptRoutes` in `crates/o8d/route-budget.json`. Move the budget
 down with removals in the same pull request; raise it only as an explicit
 reviewed change when the Rust daemon cannot host a route yet. This check does
 not require an `origin/main` ref.
-Two segments of approximately 8 MiB bound disk use; writes have a 100 ms deadline
-and failures do not affect the response. Standalone daemons record only when
+Two segments of approximately 8 MiB bound disk use. Recording has a 100 ms
+wait budget; queued records may be skipped, while a started write retains its
+serialization guard until it finishes. Each complete JSON line uses one write;
+short writes are rolled back rather than retried. Failures do not affect the
+response. Refresh templates with `node scripts/o8d/generate-route-templates.mjs`. Standalone daemons record only when
 `O8D_REQUEST_COUNTS_PATH` is set. This is synthetic/local counting evidence,
 not an installed usage ranking or a live shadow comparison.
+
+Parity compares parsed JSON semantics. Object-key wire order is out of scope
+because clients parse JSON; key presence, null versus missing, scalar values
+and array order remain strict.
