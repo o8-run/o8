@@ -1,0 +1,45 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`keeps linked-work key presence and the chosen machine name through the public socket > mobile thread envelope keys 1`] = `
+[
+  "threads",
+  "updatedAt",
+]
+`;
+
+exports[`keeps linked-work key presence and the chosen machine name through the public socket > mobile thread response keys 1`] = `
+[
+  "activeOrderKey",
+  "agent",
+  "autoSettleDisabledAt",
+  "autoSettledReason",
+  "backend",
+  "branch",
+  "githubOwner",
+  "githubRepo",
+  "id",
+  "inboxRevision",
+  "inboxSubject",
+  "isWorktree",
+  "lastMessageAt",
+  "linkedWork",
+  "machineDisplayName",
+  "messageCount",
+  "parentInboxSubject",
+  "pinOrderKey",
+  "pinned",
+  "pinnedAt",
+  "projectId",
+  "repoBranch",
+  "repoName",
+  "repoPath",
+  "repoSlug",
+  "runtime",
+  "settledAt",
+  "settledOverride",
+  "status",
+  "title",
+  "unsettledAt",
+  "worktreePath",
+]
+`;

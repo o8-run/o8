@@ -77,7 +77,7 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
             return Ok(if archived {
                 json!({"archivedIds":[]})
             } else {
-                json!({"threads":[]})
+                json!({"threads":[],"updatedAt":null})
             });
         }
     };
@@ -257,7 +257,10 @@ pub(super) fn threads(store: &ReadContext<'_>, params: &Params) -> ReadResult {
         })
         .collect();
     thread_context::append_all(store, &mut threads)?;
-    Ok(json!({"threads":threads}))
+    // Durable PR links defer in thread_metadata, so the newest returned
+    // thread timestamp is the same watermark used by the TS handler here.
+    let updated_at = threads.iter().filter_map(|thread| thread["lastMessageAt"].as_str()).max();
+    Ok(json!({"threads":threads,"updatedAt":updated_at}))
 }
 
 pub(super) fn transcript(store: &ReadContext<'_>, params: &Params) -> Response {

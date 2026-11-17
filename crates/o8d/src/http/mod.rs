@@ -5,6 +5,7 @@ mod queue;
 mod read_context;
 mod repository;
 mod thread_context;
+mod thread_metadata;
 mod thread_summary;
 
 use axum::{
