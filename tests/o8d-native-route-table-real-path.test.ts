@@ -16,9 +16,12 @@ beforeAll(async () => {
 }, 900_000);
 
 it('uses the shared GET table through the public socket with Next stopped', async () => {
-  const table = JSON.parse(readFileSync('crates/o8d/native-routes.json', 'utf8')) as Array<{
+  const allRoutes = JSON.parse(readFileSync('crates/o8d/native-routes.json', 'utf8')) as Array<{
     path: string; methods: string[]; fallback: boolean; reason: string; state: string; test: string;
   }>;
+  // Each added group proves its own fixture in the test named by the table.
+  const table = allRoutes.filter(route => route.test === 'tests/o8d-native-route-table-real-path.test.ts'
+    || route.path === '/api/v2/chat-history/list');
   expect(table.map(route => route.path).sort()).toEqual([
     '/api/mobile/history', '/api/mobile/orchestrator/threads', '/api/orchestrator/composer-queue', '/api/v2/chat-history', '/api/v2/chat-history/list',
   ]);
@@ -54,7 +57,7 @@ it('uses the shared GET table through the public socket with Next stopped', asyn
     }
     const other = await fetch(server.origin + '/api/panel/ws-info', { headers: { authorization: `Bearer ${server.token}` } });
     expect(other.status).toBe(200);
-    expect(other.headers.get('x-o8d-native')).toBeNull();
+    if (!allRoutes.some(route => route.path === '/api/panel/ws-info')) expect(other.headers.get('x-o8d-native')).toBeNull();
     await other.arrayBuffer();
     // Counting is best effort. Observe each required template before teardown;
     // a busy recorder may skip a sample and the last write can trail its reply.

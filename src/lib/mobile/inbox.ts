@@ -304,6 +304,30 @@ function clearSnapshotCaches() {
   invalidateMobileBootstrapBroker();
 }
 
+/** Private admission metadata for an already built, empty inbox cache only. */
+export function nativeEmptyInboxContext(options: { fresh: boolean; includeWorkspaceReview: boolean }) {
+  if (options.fresh) return null;
+  if (sharedInvalidation.changed()) { clearSnapshotCaches(); return null; }
+  const cached = inboxCache.get(options.includeWorkspaceReview ? 'full' : 'sessions');
+  if (!cached || Date.now() - cached.timestamp >= INBOX_CACHE_TTL) return null;
+  const snapshot = cached.snapshot;
+  const fields = new Set(['generatedAt', 'staleDrafts', 'mode', 'sourceLabel', 'primarySessionKey', 'note',
+    'sessions', 'fleetSessions', 'approvals', 'reviewUnits', 'items', 'summary', 'review']);
+  if (Object.keys(snapshot).some(key => !fields.has(key)) || snapshot.primarySessionKey !== undefined || snapshot.review !== undefined) return null;
+  if (![snapshot.sessions, snapshot.fleetSessions, snapshot.approvals, snapshot.reviewUnits, snapshot.items]
+    .every(value => Array.isArray(value) && value.length === 0)) return null;
+  const drafts = snapshot.staleDrafts;
+  if (!drafts || Object.keys(drafts).sort().join(',') !== 'drafts,sources'
+    || !Array.isArray(drafts.drafts) || drafts.drafts.length || !Array.isArray(drafts.sources) || drafts.sources.length) return null;
+  if (Object.keys(snapshot.summary).sort().join(',') !== 'activeRuns,alerts,approvals,inspectOnlyReviews,reviewItems'
+    || Object.values(snapshot.summary).some(value => value !== 0)) return null;
+  // Empty finalization still reads the canonical advisory setting, as GET does.
+  // There are no items to score, reorder or attach referee facts to.
+  finalizeMobileInboxSnapshot(snapshot);
+  return { version: 1, generatedAt: snapshot.generatedAt, mode: snapshot.mode, sourceLabel: snapshot.sourceLabel,
+    ...(snapshot.note === undefined ? {} : { note: snapshot.note }) };
+}
+
 export async function getMobileInboxSnapshot(options: {
   fresh?: boolean;
   limit?: number;

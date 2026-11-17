@@ -444,3 +444,32 @@ The oracle for 500 generated requests is committed in
 `evidence/chat-list/corpus.json`; the public-socket test compares the live
 TypeScript reference and native responses with Next stopped. No handler or
 writer is removed by this move.
+
+## Saved settings reads
+
+Six GETs use the shared table at `rust-with-fallback`: setup/config,
+runtime/provider-instances, runtime/capabilities, runtime/service-tiers, v2/keys
+and panel/operator-defaults. TypeScript keeps all initialization, migration,
+credential, live runtime and write ownership. Existing middleware and each
+handler's additional bearer/window-owner checks remain authoritative. The
+private admission response passes process context (paths and booleans only);
+public client headers cannot supply it. Standalone HTTP lacks this snapshot
+and defers reads requiring it.
+
+The operator reader supports the prepared saved TOML declarations and six
+legacy fields, with unsupported legacy or malformed states falling back. The
+key reader handles only the supported absent-key projection; configured keys
+and unsupported stores defer. Evidence records only synthetic key presence
+and shape. The public-socket fixture captures TypeScript responses, checks
+native replies, durable store hashes, refusal outcomes and a mutated native
+response. No Next listener runs in that fixture.
+
+### Mobile inbox cached idle read
+
+GET /api/mobile/inbox admits only the existing unexpired empty inbox cache, through private canonical TypeScript metadata. Both full and sessions-only cache lanes retain their eight-second lifetime and cross-process generation invalidation. Empty finalization remains with the existing advisory setting owner. Rust reconstructs the empty response shape and applies the original cache/Server-Timing headers; it never invents a fleet from missing files.
+
+Fresh requests, a missing/expired/invalidated cache, nonempty sessions/approvals/review/items and unknown shape defer to the original handler. Live discovery, orphan cleanup, approval expiration, review discovery and urgency work remain TypeScript-owned. No Rust writer or caller permission is introduced. The admission context contains only version/generatedAt/mode/sourceLabel/optional note, not a serialized response or credential.
+
+### Unselected review workspace
+
+GET /api/review/workspace returns its original empty snapshot only when the canonical selection predicate confirms both the workspace query and CORTEX_IDE_REVIEW_REPO_ROOT are empty. The route and private admission use the same live predicate. Selected or configured workspaces stay with their original TS Git,GitHub and review-cache owner. No new listener registration,caller grant or Rust writer is introduced; the private context is one boolean and the idle reader does not open SQLite.

@@ -102,6 +102,18 @@ pub(super) async fn serve(
         // unavailable gate never grants native access.
         return Ok(false);
     }
+    // Only the authenticated private admission response provides this context.
+    // It contains paths and booleans, never provider key values.
+    let defaults_context = admission
+        .headers()
+        .get("x-o8d-defaults-context")
+        .and_then(|v| v.to_str().ok()).filter(|raw| raw.len() <= 4096)
+
+        .and_then(|raw| {
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(raw).ok()?;
+            serde_json::from_slice(&bytes).ok()
+        });
     let directory = PathBuf::from(std::env::var("O8D_SESSION_DATA_DIR").map_err(|_| ())?)
         .canonicalize()
         .map_err(|_| ())?;
@@ -110,10 +122,12 @@ pub(super) async fn serve(
         .unwrap_or_else(|| directory.join("cortex-ide.db"));
     let path = path.to_owned();
     let query = query.to_owned();
-    let response =
-        tokio::task::spawn_blocking(move || http::session_read(directory, database, &path, &query))
-            .await
-            .map_err(|_| ())?;
+    let response = tokio::task::spawn_blocking(move || {
+        http::session_read(directory, database, &path, &query, defaults_context)
+    })
+    .await
+    .map_err(|_| ())?;
+
     // Runtime transcripts, lane overlays, network projections and dynamic steer
     // capabilities remain TS-owned until their readers are ported.
     if response.status() == StatusCode::SERVICE_UNAVAILABLE {

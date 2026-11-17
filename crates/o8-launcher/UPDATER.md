@@ -154,3 +154,23 @@ or a separate macOS user with no unsaved work.
 5. Interruption: start an apply on a test build and cut power while the status
    is `installing`. After boot, confirm `/Applications/o8.app` opens (N+1 or
    N+2), and `update-status` records which.
+
+## Background readiness (#6397, first part)
+
+After startup the launcher checks once, then hourly while no update is staged.
+A newer release downloads and passes the existing signature and archive checks
+on the updater worker. Background completion holds `state: staged` without
+requesting restart admission. `update-apply` reuses that verified staged bundle
+and goes through the existing final work inspection and shutdown. Explicit
+apply without a staged bundle retains the previous download-and-apply behavior.
+Debug fixtures can set `background_delay_ms`; release builds refuse that field.
+
+The native window polls `launcher.sock` using the directory of its explicit
+shell-state file. A staged version shows the existing success toast with
+`Update installed` and `Relaunch Now`, plus a quiet persistent restart hint.
+Dismissal leaves the hint. A failed check or stage offers Retry. Before an
+explicit apply the window flushes its layout writer; a save failure keeps the
+window running. This does not establish terminal survival, flush the separate
+composer draft debounce, apply on normal quit, or recover swap failures in the
+old window. Those remain the next lossless-relaunch part of #6397. No terminal
+preservation promise appears until the live-session acceptance test passes.

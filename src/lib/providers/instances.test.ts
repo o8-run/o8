@@ -3,9 +3,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const state = vi.hoisted(() => ({ dir: '' }));
+const state = await vi.hoisted(async () => {
+  const { randomBytes } = await import('node:crypto');
+  const key = randomBytes(32).toString('base64url');
+  vi.stubEnv('O8_MASTER_KEY', key);
+  return { dir: '', key, lookup: vi.fn(), store: vi.fn() };
+});
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => state.dir }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir }));
+vi.mock('@/lib/providers/secret-service', () => ({ lookupSecretSync: state.lookup, storeSecretSync: state.store }));
 import {
   bindThreadProviderInstance, createProviderInstance, deleteProviderInstance, listProviderInstances,
   readInstanceEnvironment, resolveProviderInstanceLaunch, saveInstanceEnvironment, updateProviderInstance,
@@ -15,10 +21,28 @@ import { childEnvironment } from './spawn-environment';
 import { localAcpProcessLaunch, readLocalAcpConnection, saveLocalAcpConnection } from '@/lib/acp/local-connection';
 import { acpEnvironmentId, readAcpEnvironment, saveAcpEnvironment } from '@/lib/acp/connection-environment';
 import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { clearMasterKeyCache } from '@/lib/db/master-key';
 
 state.dir = mkdtempSync(join(tmpdir(), 'o8-provider-instances-'));
 beforeEach(() => { rmSync(join(state.dir, 'provider-instances.json'), { force: true }); vi.stubEnv('O8_ACP_COMMAND', ''); });
-afterAll(() => { rmSync(state.dir, { recursive: true, force: true }); vi.unstubAllEnvs(); });
+afterAll(() => {
+  rmSync(state.dir, { recursive: true, force: true });
+  clearMasterKeyCache();
+  vi.unstubAllEnvs();
+  expect(state.lookup).not.toHaveBeenCalled();
+  expect(state.store).not.toHaveBeenCalled();
+});
+
+it.each(['available', 'absent', 'locked'] as const)('keeps encrypted instance fixtures isolated when the OS store is %s', (backend) => {
+  state.lookup.mockReturnValue(backend === 'available' ? { status: 'found', value: state.key }
+    : backend === 'absent' ? { status: 'absent' } : { status: 'error', detail: 'locked fixture collection' });
+  state.store.mockReturnValue({ status: 'ok' });
+  const instance = createProviderInstance({ runtime: 'codex', name: `isolated-${backend}` });
+  saveInstanceEnvironment(instance.id, 0, [{ name: 'FIXTURE_TOKEN', secret: true, value: 'isolated-fixture-value' }]);
+  expect(readInstanceEnvironment(instance.id).variables).toEqual([{ name: 'FIXTURE_TOKEN', secret: true, configured: true }]);
+  expect(state.lookup).not.toHaveBeenCalled();
+  expect(state.store).not.toHaveBeenCalled();
+});
 
 it('stores instances without secrets and keeps env encrypted in the ACP env store', () => {
   const work = createProviderInstance({ runtime: 'codex', name: 'work', homeDir: '/tmp/codex-work', binaryPath: '/opt/codex-work/codex' });

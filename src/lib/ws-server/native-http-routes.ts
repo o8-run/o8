@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 /** Shell transport work: reuse surface handlers on the opt-in WS listener without Next. */
 import nativeRoutes from '../../../crates/o8d/native-routes.json';
 import { once } from 'node:events';
@@ -76,10 +78,87 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
       && nativeRoutes.some(route => route.path === url.pathname && route.methods.includes(req.method ?? 'GET'))) {
       // Admission only. Keep the middleware and queue's existing defense-in-depth
       // gate authoritative; the bridge credential cannot authorize a principal.
-      const denied = url.pathname === '/api/orchestrator/composer-queue'
+      const denied = ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys'].includes(url.pathname)
         ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
-      response = denied ?? new Response(null, { status: 204 });
-      admission = !denied;
+      // The settings handler's window-owner hop is a refusal floor. Defer it
+      // to the original handler even when the public bearer gate passed.
+      const deferSettingsHop = url.pathname === '/api/panel/operator-defaults'
+        && headers.has('x-o8-settings-window-owner-hop');
+      const mobileInbox = url.pathname === '/api/mobile/inbox'
+        ? (await import('@/lib/mobile/inbox')).nativeEmptyInboxContext({
+          fresh: url.searchParams.get('fresh') === '1', includeWorkspaceReview: url.searchParams.get('workspaceReview') !== '0',
+        }) : undefined;
+      const reviewWorkspaceUnselected = url.pathname === '/api/review/workspace'
+        ? (await import('@/lib/review/workspace-selection')).isReviewWorkspaceUnselected(url.searchParams.get('workspace')) : undefined;
+      const defaultsContext = {
+        reviewWorkspaceUnselected,
+        mobileInbox,
+        operatorEnvClean: [
+          'O8_ACTION_EFFORT',
+          'O8_ACTION_MODEL',
+          'O8_ACTION_RUNTIME',
+          'O8_AUTO_APPLY_UPDATES',
+          'O8_BRAIN_ROUTING_MODE',
+          'O8_BRAIN_USE_CLAUDE_CLI',
+          'O8_BRAIN_WARMUP',
+          'O8_BRANCH_PREFIX',
+          'O8_BUYIN_DOC',
+          'O8_CLASS_A_COMPOSER',
+          'O8_CLAUDE_WORKER_EFFORT',
+          'O8_CODEX_WORKER_EFFORT',
+          'O8_COLLIDE_AGGREGATOR_DEFAULT',
+          'O8_COMMIT_ATTRIBUTION',
+          'O8_CRASH_REPORTS',
+          'O8_DEFAULT_DISPATCH_RUNTIME',
+          'O8_DISPATCH_LOAD_PER_CORE',
+          'O8_DISPATCH_MODEL',
+          'O8_EXPERIMENTAL_CANVAS',
+          'O8_EXPERIMENTAL_CHAT',
+          'O8_EXPERIMENTAL_GEMINI',
+          'O8_EXPERIMENTAL_OPENCODE',
+          'O8_EXPLAINER',
+          'O8_HEAL_BOT_ENABLED',
+          'O8_IN_APP_ORCHESTRATOR_ENABLED',
+          'O8_LOCAL_CHAT_MODEL',
+          'O8_LOCAL_EMBED_MODEL',
+          'O8_LOCAL_INFERENCE_BASE_URL',
+          'O8_MAX_PARALLEL_DISPATCHES',
+          'O8_NATIVE_BROWSER_VIEW',
+          'O8_ORCHESTRATOR_BACKEND',
+          'O8_ORCHESTRATOR_MODEL',
+          'O8_PROMPT_CACHING',
+          'O8_PR_LINK_DESTINATION',
+          'O8_QUIZ_GATE',
+          'O8_REVIEWER_BACKEND',
+          'O8_STORAGE_RESERVE_FLOOR_GB',
+          'O8_STORAGE_RESERVE_RATIO',
+          'O8_STRICT_OVERLAP_GATE',
+          'O8_SUBSCRIPTION_PROFILE',
+          'O8_SUPERVISOR_AUTO_ESCALATE',
+          'O8_TELEMETRY_INGEST_URL',
+          'O8_TELEMETRY_OPT_IN',
+          'O8_THINKING_EFFORT',
+          'O8_TRIAGE_EFFORT',
+          'O8_TRIAGE_MODEL',
+          'O8_TRIAGE_RUNTIME',
+          'O8_UPDATE_AUTO_APPLY',
+          'O8_WORKERS_USE_BRAIN',
+          'O8_WORKSPACE_MANIFEST_POLICY',
+          'O8_WORKSPACE_PARKING_MODE',
+          'O8_WORKTREE_MAX_COUNT',
+          'O8_WORKTREE_MAX_TOTAL_GB',
+        ].every(name => process.env[name] === undefined),
+        grokAgentRoot: process.env.O8_GROK_AGENT_DATA?.trim() || join(homedir(), 'agent-data', 'agents'),
+        machineId: url.pathname === '/api/panel/operator-defaults'
+          ? (await import('@/lib/panel/instance-identity')).peekCachedInstanceIdentity()?.instanceId ?? null : null,
+        claudeConfigDir: process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
+        disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
+        ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
+      };
+      response = denied ?? ((deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+        'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
+      } }));
+      admission = !denied && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });
     } else if (match.route.path === '/api/runtime/archive' && typeof mutationWorkspace({ url: url.href }) !== 'string') {
