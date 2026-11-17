@@ -4,7 +4,7 @@ import { accessSync, constants, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { o8dBinaryPath } from '@/lib/ws-server/o8d-binary';
+import { o8dBinaryPath, o8dStartsByDefault } from '@/lib/ws-server/o8d-binary';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { startParityReference } from './fixtures/ws-parity-server';
 
@@ -57,7 +57,11 @@ it('resolves the bundled helper before source fallback and honors explicit overr
     writeFileSync(shipped, '', { mode: 0o755 });
     expect(o8dBinaryPath({}, moduleUrl)).toBe(shipped);
     expect(o8dBinaryPath({ O8D_BINARY: binary }, moduleUrl)).toBe(binary);
+    expect(o8dStartsByDefault({}, moduleUrl)).toBe(true);
     rmSync(shipped);
     expect(o8dBinaryPath({}, moduleUrl)).toBe(resolve('crates/o8d/target/release/o8d'));
+    // A daemon built in a source checkout is found, but does not start the bridge unasked.
+    expect(o8dStartsByDefault({}, moduleUrl)).toBe(false);
+    expect(o8dStartsByDefault({ O8D_BINARY: binary }, moduleUrl)).toBe(true);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
