@@ -11,6 +11,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const profileRoute = await import('@/app/api/runtime/claude-code-profile/route');
+const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
 
 function request(pathname: string, init?: { method?: string; body?: unknown }) {
   return new NextRequest(`http://localhost:3001${pathname}`, {
@@ -31,7 +32,22 @@ describe('Claude Code worker settings through production routes', () => {
   beforeEach(() => {
     delete process.env.OPENROUTER_API_KEY;
     rmSync(path.join(dataDir, 'claude-code-worker.json'), { force: true });
+    // The API-billed carrier needs Who pays set to My API key (#4280).
+    saveRuntimeBillingMode('claude-code', 'api');
     vi.unstubAllGlobals();
+  });
+
+  it('refuses the API-billed carrier while Who pays is the subscription', async () => {
+    saveRuntimeBillingMode('claude-code', 'subscription');
+    process.env.OPENROUTER_API_KEY = 'sk-or-route-test';
+    const response = await profileRoute.POST(request('/api/runtime/claude-code-profile', {
+      method: 'POST',
+      body: { source: 'openrouter', model: 'x-ai/grok-4.6', codexModel: null },
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, error: expect.stringContaining('Who pays') });
+    expect(existsSync(path.join(dataDir, 'claude-code-worker.json'))).toBe(false);
   });
 
   it('rejects unauthenticated profile reads', async () => {
