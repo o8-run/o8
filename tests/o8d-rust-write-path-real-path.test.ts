@@ -31,20 +31,24 @@ it('threads POST bytes into native dispatch, bounds bodies, and replays a buffer
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const path = '/api/v2/chat-history';
     const headers = { authorization: `Bearer ${server.token}` };
-    const post = await fetch(origin + path, { method: 'POST', headers, body: Buffer.alloc(1024, 'a') });
-    expect(post.headers.get('x-o8d-native'), `Native route was not reached: ${path}`).toBe('1');
-    expect(post.status).toBe(200);
-    expect(await post.json()).toEqual({ method: 'POST', bytes: 1024, allA: true });
-    const big = await fetch(origin + path, { method: 'POST', headers, body: Buffer.alloc(16 * 1024 * 1024 + 1, 'a') });
-    expect(big.status).toBe(413);
-    expect(big.headers.get('x-o8d-native')).toBe('1');
-    expect(await big.json()).toMatchObject({ error: expect.any(String) });
+    const corpus = JSON.parse(readFileSync(resolve('crates/o8d/evidence/write-path/corpus.json'), 'utf8')) as {
+      cases: Array<{ case: string; method: string; path: string; body: { bytes: number; fill: string };
+        response: { status: number; native: boolean; body: unknown } }>;
+      typescriptFallback: { response: { body: unknown } };
+    };
+    for (const record of corpus.cases) {
+      const response = await fetch(origin + record.path, { method: record.method, headers,
+        body: Buffer.alloc(record.body.bytes, record.body.fill) });
+      expect(response.headers.get('x-o8d-native') === '1', `Native route was not reached: ${record.case}`).toBe(record.response.native);
+      expect(response.status).toBe(record.response.status);
+      expect(await response.json()).toEqual(record.response.body);
+    }
     const saved = { tabId: 'thoughts-native-write-fallback', backend: 'claude', model: 'claude-code', repoPath: join(directory, 'fixture-repo'),
       messages: [{ id: 'fixture-write-message', role: 'user', content: 'fallback body '.repeat(90), timestamp: 1790812800000 }] };
     const fallback = await fetch(origin + path + '?fixtureFallback=1', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(saved) });
     expect(fallback.headers.get('x-o8d-native')).toBeNull();
     expect(fallback.status).toBe(200);
-    await fallback.arrayBuffer();
+    expect(await fallback.json()).toEqual(corpus.typescriptFallback.response.body);
     expect(JSON.parse(readFileSync(join(directory, 'chat-history', saved.tabId + '.json'), 'utf8')).messages).toEqual(saved.messages);
     const read = await fetch(origin + path + '?tabId=thoughts-review', { headers });
     expect(read.status).toBe(200);
