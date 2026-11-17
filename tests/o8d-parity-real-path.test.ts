@@ -49,13 +49,25 @@ it('preserves auth refusals, TS writes, other routes and flag-off behavior throu
   let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
   try {
     await seedSessionFixture(directory);
+    const expectedAuth = new Map<string, { status: number; body: unknown }>();
     for (const enabled of [false, true]) {
       server = await startSessionServer(directory, enabled, binary);
       for (const path of SESSION_READ_PATHS) {
         for (const credential of ['', 'wrong', 'o8ro_fixture']) {
           const response = await send(server, path, { authorization: credential ? `Bearer ${credential}` : '',
             'x-o8d-session-read': 'authorize', 'x-o8d-bridge': 'spoofed', 'x-o8d-peer': '127.0.0.1' });
-          expect(response.status).toBe(credential.startsWith('o8ro_') ? 403 : 401);
+          const key = `${path}:${credential.startsWith('o8ro_') ? 'readonly' : credential ? 'invalid' : 'absent'}`;
+          const wire = { status: response.status, body: normalize(response.body) };
+          if (!enabled) {
+            expect(response.native, `Reference route was native: ${path}`).toBe(false);
+            expectedAuth.set(key, wire);
+          } else {
+            const expected = expectedAuth.get(key)!;
+            expect(response.status, `TS auth outcome changed: ${key}`).toBe(expected.status);
+            // Public responses include launch-specific ports. Their complete
+            // bodies/headers are checked by each route's own parity fixture.
+            if (expected.status >= 400) expect(firstDifference(expected, wire)).toBeNull();
+          }
         }
       }
       const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
