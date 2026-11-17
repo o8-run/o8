@@ -5816,6 +5816,14 @@
       ]
     },
     {
+      "path": "tests/o8d-rust-chat-list-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-session-read-admission-real-path.test.ts",
       "reasons": [
         "network-listener",
