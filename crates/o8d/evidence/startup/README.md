@@ -9,3 +9,10 @@ Additional socket cases cover live/dead port probes, permissive integer parsing,
 Source: src/app/api/panel/ws-info/route.ts, src/app/api/setup/identity/route.ts, src/lib/panel/api-port.ts, src/lib/panel/instance-identity.ts and src/lib/ws-auth.ts. Captured on the independent startup branch based on d6d5ff47c. Issue #6365; generator #6327. No route deletion or auth-policy change.
 
 The six auth cases per route match the original TypeScript statuses. Identity discovery is public for missing/wrong bearer, spoofed headers and wrong Host; its read-only bearer and cross-origin write cases remain refused. The test preserves those outcomes. Probe listeners explicitly destroy their owned sockets at cleanup.
+
+Current `gates.json` uses an optimized release binary, ten warmups and 100 measured requests per route and transport. It retains every timing sample and the matching twelve auth outcomes. No debug latency is reported.
+
+| Route | TS p50/p95 ms | Rust p50/p95 ms |
+| --- | ---: | ---: |
+| /api/panel/ws-info | 7.35/9.43 | 11.12/23.39 |
+| /api/setup/identity | 6.42/8.09 | 10.33/12.11 |
