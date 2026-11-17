@@ -86,7 +86,7 @@ it('preserves auth refusals, TS writes, other routes and flag-off behavior throu
       expect(unsupported.native).toBe(false);
       const other = await fetch(`${server.origin}/api/v2/chat-history`, { method: 'HEAD', headers });
       expect(other.status).toBe(405);
-      expect(other.headers.get('x-o8d-native-session-read')).toBeNull();
+      expect(other.headers.get('x-o8d-native-session-read')).toBe(null);
       await server.stop(); server = undefined;
     }
   } finally { await server?.stop(); rmSync(directory, { recursive: true, force: true }); }
