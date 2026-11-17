@@ -24,8 +24,17 @@ export interface PullRequestListItem {
   /** Merge-readiness inputs; null when GitHub did not report them. */
   reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
   mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN' | null;
-  /** Set while the pull request waits in the merge queue, with its place as GitHub reports it. */
-  mergeQueue?: { position: number | null } | null;
+  /** Set while the pull request waits in the merge queue. */
+  mergeQueue?: MergeQueueProgress | null;
+}
+
+/** One pull request's progress through the merge queue, as GitHub reports it. */
+export interface MergeQueueProgress {
+  position: number | null;
+  /** queued: waiting its turn. checking: the queue's own test run. ready and merging: about to land. failed: it will leave the queue. */
+  state: 'queued' | 'checking' | 'ready' | 'merging' | 'failed' | null;
+  enqueuedAt: string | null;
+  estimatedSeconds: number | null;
 }
 
 export interface PullRequestListPage {
