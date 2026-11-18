@@ -7,18 +7,27 @@ fn env(f: &Fixture, name: &str) -> serde_json::Value {
 }
 
 #[test]
-fn front_door_puts_ws_on_the_public_port_and_next_on_a_private_one() {
+fn front_door_keeps_o8d_on_the_public_port_and_producers_on_private_ports() {
     let mut f = Fixture::new();
     f.start_with(&[("O8_API_FRONT_DOOR", "1")]);
     f.ready();
     until(|| f.root.join("api-env").exists());
     let api = f.port("api-port");
-    // WS answers the public port, and clients reading the WS port file go there.
+    // o8d answers the public port, and clients reading the WS port file go there.
     assert_eq!(f.port("ws-port"), api);
     // Both children start without waiting on each other, so their order of
     // arrival is not asserted.
     let ws = env(&f, "ws-env");
     let next = env(&f, "api-env");
+    let owner = env(&f, "launcher-o8d.json");
+    let producer = env(&f, "launcher-ws.json");
+    assert_ne!(owner["pid"], producer["pid"]);
+    assert_eq!(owner["port"], api);
+    assert_ne!(producer["port"], api);
+    assert_eq!(
+        ws["O8D_PRODUCER_UPSTREAM_PORT"],
+        producer["port"].to_string()
+    );
     assert_eq!(ws["O8_API_FRONT_DOOR"], "1");
     assert_eq!(next["O8_API_FRONT_DOOR"], "1");
     assert_eq!(ws["O8_NEXT_OFF"], serde_json::Value::Null);
@@ -42,7 +51,7 @@ fn front_door_puts_ws_on_the_public_port_and_next_on_a_private_one() {
 }
 
 #[test]
-fn next_off_runs_with_ws_alone_and_stays_up() {
+fn next_off_runs_with_native_owner_and_ws_and_stays_up() {
     let mut f = Fixture::new();
     f.start_with(&[("O8_API_FRONT_DOOR", "1"), ("O8_NEXT_OFF", "1")]);
     f.ready();

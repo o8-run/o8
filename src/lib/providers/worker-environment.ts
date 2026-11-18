@@ -63,5 +63,5 @@ export function workerParentEnvironment(source: Record<string, string | undefine
   }
   // Debug/addition knobs do not authorize store or provider credentials. The
   // normal process boundary restores API keys only after the billing decision.
-  return Object.fromEntries([...names].filter(name => source[name] !== undefined && name !== 'O8_MASTER_KEY' && !providerCredentialName(name)).map(name => [name, source[name]]));
+  return Object.fromEntries([...names].filter(name => source[name] !== undefined && name !== 'O8_MASTER_KEY' && name !== 'O8D_BRIDGE_KEY' && !providerCredentialName(name)).map(name => [name, source[name]]));
 }

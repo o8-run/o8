@@ -679,7 +679,7 @@ fn remove(path: &Path) -> Result<(), String> {
 /// records. Nothing is signalled without a live identity re-check.
 pub fn cleanup(directory: &Path, server_dir: &Path) -> Result<(), String> {
     let install = std::env::current_exe().map_err(|_| "Install unavailable")?;
-    for name in ["launcher-api.json", "launcher-ws.json"] {
+    for name in ["launcher-o8d.json", "launcher-api.json", "launcher-ws.json"] {
         let path = directory.join(name);
         let hold = hold_path(&path);
         if let Some(bytes) = read_private(&path)? {

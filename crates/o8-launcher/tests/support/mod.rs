@@ -60,8 +60,8 @@ if Path(sys.argv[0]).name=='window':
 api=sys.argv[1].endswith('server.js')
 front=os.environ.get('O8_API_FRONT_DOOR')=='1'
 http_role=(not api) if front else api
-http_port=int(os.environ['O8_API_PORT'] if front else os.environ.get('PORT','0'))
-keys=['O8_API_FRONT_DOOR','O8_NEXT_OFF','O8_NEXT_WINDOW_OWNER','O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','O8_FORGED_KEY','PATH']
+http_port=int(os.environ.get('O8D_PRODUCER_UPSTREAM_PORT',os.environ['O8_API_PORT']) if front else os.environ.get('PORT','0'))
+keys=['O8D_PRODUCER_UPSTREAM_PORT','O8_API_FRONT_DOOR','O8_NEXT_OFF','O8_NEXT_WINDOW_OWNER','O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','O8_FORGED_KEY','PATH']
 (root/('api-env' if api else 'ws-env')).write_text(json.dumps({k:os.environ.get(k) for k in keys}))
 def terminated(*args):
  (root/'events').open('a').write(('api' if api else 'ws')+'-stop\n'); sys.exit(0)
@@ -112,6 +112,16 @@ class Handler(BaseHTTPRequestHandler):
    window=subprocess.Popen([os.environ['O8_NEXT_BIN'],'--enable-next','--app-shell','--server','http://127.0.0.1:'+str(http_port),'--shell-state',str(root/'next-shell.json')],stdin=subprocess.PIPE)
   (root/'shows').open('a').write('show\n')
   self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
+if front and os.environ.get('O8D_PRODUCER_SOCKET'):
+ import socket,threading
+ def attach():
+  while True:
+   try:
+    producer=socket.socket(socket.AF_UNIX);producer.connect(os.environ['O8D_PRODUCER_SOCKET'])
+    producer.sendall((json.dumps({'version':1,'key':os.environ['O8D_BRIDGE_KEY'],'upstream':'127.0.0.1:'+str(http_port),'epoch':str(os.getpid())})+'\n').encode())
+    producer.recv(16384);producer.recv(1)
+   except OSError: time.sleep(0.05)
+ threading.Thread(target=attach,daemon=True).start()
 HTTPServer(('127.0.0.1',http_port),Handler).serve_forever()
 "#;
         for name in ["node", "dialog", "window", "probe", "focus"] {
@@ -119,6 +129,9 @@ HTTPServer(('127.0.0.1',http_port),Handler).serve_forever()
             fs::write(&p, script).unwrap();
             fs::set_permissions(p, fs::Permissions::from_mode(0o700)).unwrap();
         }
+        let daemon = root.join("o8d");
+        fs::write(&daemon, include_str!("owner.py")).unwrap();
+        fs::set_permissions(&daemon, fs::Permissions::from_mode(0o700)).unwrap();
         for name in ["server.js", "ws-server.mjs"] {
             fs::write(root.join(name), "fixture").unwrap();
         }

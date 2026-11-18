@@ -78,6 +78,22 @@ async fn websocket_run() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("listener required")?
         .parse::<std::net::SocketAddr>()?;
     let upstream = option("--app-upstream");
+    if let Some(path) = option("--producer-socket") {
+        if upstream.is_some() || env::var("O8_API_FRONT_DOOR").as_deref() != Ok("1") {
+            return Err("launcher front door required".into());
+        }
+        let key = env::var("O8D_BRIDGE_KEY")?;
+        if key.is_empty() {
+            return Err("bridge credential required".into());
+        }
+        #[cfg(unix)]
+        {
+            o8d::app::producer::run_owner(address, std::path::Path::new(&path), key).await?;
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        return Err("producer socket unavailable".into());
+    }
     // App backhauls use TS authentication and preserve the public socket peer.
     if upstream.is_none() && !address.ip().is_loopback() {
         return Err("loopback listener required".into());

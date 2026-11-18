@@ -97,6 +97,17 @@ describe('shared process environment boundary', () => {
     });
     expect(observed().leaked, 'parent canaries must not reach any process API').toBe(false);
   });
+  it.each(['inherit', 'allow'])('the private producer key never reaches a child with %s extensions', async setting => {
+    vi.stubEnv('O8D_BRIDGE_KEY', randomBytes(32).toString('base64url'));
+    vi.stubEnv('O8_WORKER_ENV_INHERIT', setting === 'inherit' ? '1' : '0');
+    vi.stubEnv('O8_WORKER_ENV_ALLOW', setting === 'allow' ? 'O8D_BRIDGE_KEY' : '');
+    const capture = join(root, 'producer-key.cjs');
+    writeFileSync(capture, `require('node:fs').writeFileSync(${JSON.stringify(receipt)},JSON.stringify({leaked:Boolean(process.env.O8D_BRIDGE_KEY)}));`);
+    try {
+      await completed(processBoundary.spawn(process.execPath, [capture], { stdio: 'ignore' }));
+      expect(observed().leaked).toBe(false);
+    } finally { vi.stubEnv('O8_WORKER_ENV_INHERIT', '0'); vi.stubEnv('O8_WORKER_ENV_ALLOW', ''); }
+  });
   it('explicit task inputs survive the shared boundary', async () => {
     await completed(processBoundary.spawn(process.execPath, [peer, '--capture'], {
       env: childEnvironment({ env: { FIXTURE_SERVICE_TOKEN: 'explicit-service', O8_WORKER_TOKEN: 'explicit-task' } }), stdio: 'ignore',

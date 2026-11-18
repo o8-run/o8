@@ -9,26 +9,53 @@ use tokio::{
     time::{timeout, timeout_at, Instant},
 };
 use tokio_tungstenite::{
-    accept_async, connect_async,
+    accept_async, accept_async_with_config, connect_async,
     tungstenite::{
         client::IntoClientRequest,
-        protocol::{frame::coding::CloseCode, CloseFrame},
+        protocol::{frame::coding::CloseCode, CloseFrame, WebSocketConfig},
         Error, Message,
     },
 };
 
 mod input;
-mod request_counts;
+#[cfg(unix)]
+pub mod producer;
+
+pub struct Producer {
+    pub bridge_key: String,
+    pub upstream: String,
+    pub bus: Arc<EventBus>,
+    pub startup_port_info: Option<Value>,
+    pub generation: u64,
+}
+pub type Selection = tokio::sync::watch::Receiver<Option<Arc<Producer>>>;
 #[cfg(feature = "experimental-session-reads")]
 mod native;
 #[cfg(feature = "experimental-session-reads")]
 mod prompt_operator;
+mod request_counts;
 
 pub async fn serve(
     listener: TcpListener,
     upstream: String,
     key: String,
     bus: Arc<EventBus>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) -> std::io::Result<()> {
+    let (_owner, selection) = tokio::sync::watch::channel(Some(Arc::new(Producer {
+        bridge_key: key.clone(),
+        upstream,
+        bus,
+        startup_port_info: None,
+        generation: 0,
+    })));
+    serve_producers(listener, key, selection, shutdown).await
+}
+
+pub async fn serve_producers(
+    listener: TcpListener,
+    key: String,
+    selection: Selection,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> std::io::Result<()> {
     let mut connections = tokio::task::JoinSet::new();
@@ -42,11 +69,12 @@ pub async fn serve(
             Some(report) = reports_rx.recv() => { writers.spawn(report.finish()); }
             accepted = listener.accept() => {
                 let (socket, peer) = accepted?;
-                let (upstream, key, bus) = (upstream.clone(), key.clone(), bus.clone());
+                let key = key.clone();
+                let selection = selection.clone();
                 let shutdown = shutdown.clone();
                 let reports = reports.clone();
                 connections.spawn(async move {
-                    let _ = connection(socket, peer.ip().to_string(), upstream, key, bus, shutdown, reports).await;
+                    let _ = connection(socket, peer.ip().to_string(), key, selection, shutdown, reports).await;
                 });
             }
         }
@@ -82,9 +110,8 @@ pub async fn serve(
 async fn connection(
     mut socket: TcpStream,
     peer: String,
-    upstream: String,
     key: String,
-    bus: Arc<EventBus>,
+    mut selection: Selection,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     reports: input::Reports,
 ) -> Result<(), ()> {
@@ -125,19 +152,40 @@ async fn connection(
         })
     });
     // Preserve main's realtime path unless the launcher explicitly enables takeover.
+    let producer = selection.borrow_and_update().clone();
+    let key = producer.as_ref().map(|p| p.bridge_key.clone()).unwrap_or(key);
+    let upstream = producer.as_ref().map(|p| p.upstream.as_str());
     let front_door = std::env::var("O8_API_FRONT_DOOR").as_deref() == Ok("1");
     if !upgrade || (front_door && path.split('?').next() != Some("/ws")) {
         let count = request_counts::Count::new(header);
         #[cfg(feature = "experimental-session-reads")]
-        let replay = match native::serve(&mut socket, header, &upstream, &key, &count).await? {
+        let replay = match native::serve(
+            &mut socket,
+            header,
+            upstream,
+            &key,
+            producer.as_ref().and_then(|p| p.startup_port_info.as_ref()),
+            &count,
+        )
+        .await?
+        {
             native::Outcome::Served => return Ok(()),
             native::Outcome::Replay(body) => Some(body),
             native::Outcome::Proxy => None,
         };
         #[cfg(not(feature = "experimental-session-reads"))]
         let replay: Option<Vec<u8>> = None;
-        let mut backend = match TcpStream::connect(&upstream).await {
+        if producer.as_ref().is_some_and(|old| !selection.borrow().as_ref().is_some_and(|current| Arc::ptr_eq(old, current))) {
+            return unavailable(&mut socket, &count).await;
+        }
+        let Some(upstream) = upstream else {
+            return unavailable(&mut socket, &count).await;
+        };
+        let mut backend = match TcpStream::connect(upstream).await {
             Ok(stream) => request_counts::Backend::new(stream),
+            Err(_) if producer.as_ref().is_some_and(|p| p.generation > 0) => {
+                return unavailable(&mut socket, &count).await;
+            }
             Err(_) => {
                 count.finish(None).await;
                 return Err(());
@@ -166,6 +214,13 @@ async fn connection(
         result.map_err(|_| ())?;
         return Ok(());
     }
+    let Some(producer) = producer else {
+        // No application session, capabilities or checkpoint is granted here.
+        // Producer-backed upgrades still authenticate with the unchanged TS gate.
+        return close_unavailable(socket).await;
+    };
+    let upstream = &producer.upstream;
+    let bus = &producer.bus;
     let mut request = format!("ws://{upstream}{path}")
         .into_client_request()
         .map_err(|_| ())?;
@@ -195,6 +250,9 @@ async fn connection(
             let code = response.status().as_u16();
             socket.write_all(format!("HTTP/1.1 {code} Rejected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.map_err(|_| ())?;
             return Ok(());
+        }
+        Err(_) if producer.generation > 0 => {
+            return close_unavailable(socket).await;
         }
         Err(_) => return Err(()),
     };
@@ -241,6 +299,9 @@ async fn connection(
                 return input::drain(socket, &mut backend, inputs, true, delegated,
                     Message::Close(Some(CloseFrame { code: CloseCode::Away, reason: "server shutting down".into() })), reports).await;
             }
+            _ = selection.changed() => {
+                return input::drain(socket, &mut backend, inputs, false, delegated, producer_close(), reports).await;
+            }
             _ = heartbeat.tick() => {
                 if !alive {
                     return input::drain(socket, &mut backend, inputs, false, delegated,
@@ -251,7 +312,7 @@ async fn connection(
             }
             message = backend.next() => {
                 let Some(Ok(message)) = message else {
-                    return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(None), reports).await;
+                    return input::drain(socket, &mut backend, inputs, false, delegated, if producer.generation > 0 { producer_close() } else { Message::Close(None) }, reports).await;
                 };
                 if let Message::Text(raw) = &message {
                     if let Ok(frame) = serde_json::from_str::<Value>(raw) {
@@ -284,11 +345,16 @@ async fn connection(
                 match message {
                     Message::Ping(data) => {
                         if send(&mut backend, Message::Pong(data)).await.is_err() {
-                            return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(None), reports).await;
+                            return input::drain(socket, &mut backend, inputs, false, delegated, if producer.generation > 0 { producer_close() } else { Message::Close(None) }, reports).await;
                         }
                     }
                     Message::Pong(data) => inputs.confirm(&data),
-                    Message::Close(frame) => return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(frame), reports).await,
+                    Message::Close(frame) => {
+                        let close = if producer.generation > 0 && frame.as_ref().is_none_or(|f| f.code == CloseCode::Away) {
+                            producer_close()
+                        } else { Message::Close(frame) };
+                        return input::drain(socket, &mut backend, inputs, false, delegated, close, reports).await;
+                    }
                     other => send(&mut socket, other).await?,
                 }
             }
@@ -323,13 +389,47 @@ async fn connection(
                     }
                     other => {
                         if inputs.forward(&mut backend, other).await.is_err() {
-                            return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(None), reports).await;
+                            return input::drain(socket, &mut backend, inputs, false, delegated, if producer.generation > 0 { producer_close() } else { Message::Close(None) }, reports).await;
                         }
                     }
                 }
             }
         }
     }
+}
+
+async fn unavailable(socket: &mut TcpStream, count: &request_counts::Count) -> Result<(), ()> {
+    socket.write_all(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nCache-Control: no-store\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.map_err(|_| ())?;
+    count.finish(Some(503)).await;
+    Ok(())
+}
+
+async fn close_unavailable(socket: TcpStream) -> Result<(), ()> {
+    // No application input is accepted. Bound even the close handshake, since
+    // this path intentionally grants no Node-authenticated WS session.
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(16 * 1024))
+        .max_frame_size(Some(16 * 1024));
+    let mut socket = accept_async_with_config(socket, Some(config))
+        .await
+        .map_err(|_| ())?;
+    send(&mut socket, producer_close()).await?;
+    let _ = timeout(Duration::from_millis(250), async {
+        while let Some(Ok(message)) = socket.next().await {
+            if matches!(message, Message::Close(_)) {
+                break;
+            }
+        }
+    })
+    .await;
+    Ok(())
+}
+
+fn producer_close() -> Message {
+    Message::Close(Some(CloseFrame {
+        code: CloseCode::Again,
+        reason: "producer unavailable; reconnect for checkpoint".into(),
+    }))
 }
 
 /// Rewrites a strictly framed request head with the bridge key and the socket
