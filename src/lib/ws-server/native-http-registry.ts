@@ -550,6 +550,13 @@ const producers = [
   // ws-token before every worker launch, so with Next stopped every dispatch was held. No device,
   // worker or spectator grant; the handler reads nothing and answers a fixed body. (#5243)
   route('/api/setup/status', 'GET', () => import('@/app/api/setup/status/route')),
+  // Phone source-control actions share the same handlers and device gate on both listeners.
+  route('/api/mobile/source-control/status', 'GET', () => import('@/app/api/mobile/source-control/status/route')),
+  route('/api/mobile/source-control/stage', 'POST', () => import('@/app/api/mobile/source-control/stage/route')),
+  route('/api/mobile/source-control/unstage', 'POST', () => import('@/app/api/mobile/source-control/unstage/route')),
+  route('/api/mobile/source-control/commit', 'POST', () => import('@/app/api/mobile/source-control/commit/route')),
+  route('/api/mobile/source-control/pull', 'POST', () => import('@/app/api/mobile/source-control/pull/route')),
+  route('/api/mobile/source-control/push', 'POST', () => import('@/app/api/mobile/source-control/push/route')),
   route('/api/mobile/sync', 'POST', () => import('@/app/api/mobile/sync/route')),
   route('/api/mobile/inbox', 'GET', () => import('@/app/api/mobile/inbox/route')),
   route('/api/command-center/snapshot', 'GET', () => import('@/app/api/command-center/snapshot/route')),
