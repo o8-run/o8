@@ -27,6 +27,8 @@ pub struct ServerEnvironment {
     /// Behind the API front door (`O8_API_FRONT_DOOR`), WS answers the public
     /// API port and Next listens on this private loopback port.
     pub private_next_port: Option<u16>,
+    /// Next is not started, so WS runs Next's startup work (`O8_NEXT_OFF`).
+    pub next_off: bool,
 }
 impl ServerEnvironment {
     fn common(&self, command: &mut Command) {
@@ -101,6 +103,9 @@ impl ServerEnvironment {
             .env("O8_APP_VERSION", &self.version);
         if self.private_next_port.is_some() {
             self.window_and_helpers(command);
+            if self.next_off {
+                command.env("O8_NEXT_OFF", "1");
+            }
         }
     }
 }
@@ -165,6 +170,7 @@ mod tests {
             version: "fixture".into(),
             next_origin: "http://127.0.0.1:123".into(),
             private_next_port: None,
+            next_off: false,
         };
         for api in [true, false] {
             let mut command = Command::new("fixture");
@@ -236,6 +242,17 @@ mod tests {
             assert_eq!(map["O8_API_FRONT_DOOR"], "1");
             assert_eq!(map["O8_NEXT_BIN"], "/fixture/window");
             assert_eq!(map["O8_CODEBASE_MEMORY_BIN"], "/fixture/memory");
+            assert!(!map.contains_key("O8_NEXT_OFF"));
         }
+        let off = ServerEnvironment {
+            private_next_port: Some(125),
+            next_off: true,
+            ..Default::default()
+        };
+        let mut command = Command::new("fixture");
+        off.ws(&mut command);
+        assert!(command
+            .get_envs()
+            .any(|(k, v)| k == "O8_NEXT_OFF" && v == Some("1".as_ref())));
     }
 }

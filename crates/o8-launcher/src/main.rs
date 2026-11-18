@@ -183,6 +183,7 @@ fn spawn(
         ),
         version: config.version.clone(),
         private_next_port: config.api_front_door.then_some(config.next_port),
+        next_off: config.api_front_door && config.next_off,
         next_origin: format!(
             "http://127.0.0.1:{}",
             if config.api_front_door {
