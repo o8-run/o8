@@ -5747,6 +5747,12 @@
       ]
     },
     {
+      "path": "tests/o8d-prompt-auth-authority-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-prompt-library-real-path.test.ts",
       "reasons": [
         "child-process",
