@@ -4,8 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { beforeAll, expect, it } from 'vitest';
-import { CHAT_LIST_PARAMETERS, DEFAULT_PARITY_SEED, generateRequests, mismatchReceipt, normalize, seedSessionFixture, send, startSessionServer } from '../scripts/o8d/parity';
+import { CHAT_LIST_PARAMETERS, DEFAULT_PARITY_SEED, generateRequests, mismatchReceipt, normalize, seedSessionFixture, send } from '../scripts/o8d/parity';
+import { startParityReference } from './fixtures/ws-parity-server';
 import { seedChatListEdges } from '../scripts/o8d/chat-list-fixture';
+
+async function startProductSessionServer(directory: string, native: boolean, binary: string) {
+  const server = await startParityReference({ directory, nativeHttp: true, productFrontDoor: true,
+    o8d: native, nativeSessionReads: 'default', binary });
+  try { await server.stopNext(); } catch (error) { await server.stop(); throw error; }
+  return { ...server, origin: server.url.replace('ws:', 'http:').replace('/ws', '') };
+}
 
 const corpusPath = join(process.cwd(), 'crates/o8d/evidence/chat-list/corpus.json');
 function portable(value: unknown, directory: string): unknown {
@@ -25,7 +33,7 @@ beforeAll(async () => {
 
 it('matches the TypeScript chat-list oracle on 500 seeded requests through the public socket with Next stopped', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-chat-list-parity-')));
-  let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
+  let server: Awaited<ReturnType<typeof startProductSessionServer>> | undefined;
   try {
     await seedSessionFixture(directory);
     seedChatListEdges(directory);
@@ -33,7 +41,7 @@ it('matches the TypeScript chat-list oracle on 500 seeded requests through the p
     const initialTimes = Object.fromEntries(readdirSync(join(directory, 'chat-history')).map(file => [file, statSync(join(directory, 'chat-history', file))]));
     const requests = generateRequests({ path: '/api/v2/chat-history/list', parameters: CHAT_LIST_PARAMETERS, count: 500, ...(process.env.O8D_UPDATE_CHAT_LIST_CORPUS === '1' ? { seed: DEFAULT_PARITY_SEED } : {}) });
     const recorded: Array<{ status: number; body: unknown }> = [];
-    server = await startSessionServer(directory, false, binary);
+    server = await startProductSessionServer(directory, false, binary);
     for (const request of requests) {
       const response = await send(server, request.path);
       expect(response.native).toBe(false);
@@ -61,7 +69,7 @@ it('matches the TypeScript chat-list oracle on 500 seeded requests through the p
       utimesSync(path, initialTimes[file].atime, initialTimes[file].mtime);
     }
     if (process.env.O8D_CHAT_LIST_CAPTURE_ONLY === '1') return;
-    server = await startSessionServer(directory, true, binary);
+    server = await startProductSessionServer(directory, true, binary);
     for (const request of requests) {
       const response = await send(server, request.path);
       expect(response.native, `Native route was not reached: /api/v2/chat-history/list; seed=${request.seed} case=${request.caseIndex}`).toBe(true);
@@ -75,10 +83,10 @@ it('matches the TypeScript chat-list oracle on 500 seeded requests through the p
 
 it('defers expired empty-placeholder cleanup to the canonical TS writer through the public socket', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-chat-list-gc-')));
-  let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
+  let server: Awaited<ReturnType<typeof startProductSessionServer>> | undefined;
   try {
     await seedSessionFixture(directory);
-    server = await startSessionServer(directory, true, binary);
+    server = await startProductSessionServer(directory, true, binary);
     const path = join(directory, 'chat-history', 'mobile-chat-gc.json');
     const seed = (fields: Record<string, unknown>, old: boolean) => {
       writeFileSync(path, JSON.stringify({ title: 'Synthetic placeholder', messages: [], ...fields }));

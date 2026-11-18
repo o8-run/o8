@@ -157,7 +157,7 @@ if (releaseReceipt) {
 let mutationPointer: string | null = null;
 try {
   for (const enabled of [false, true]) {
-    server = await startReadParityBridge(binary, port, enabled);
+    server = await startReadParityBridge(binary, port, enabled, true);
     for (const route of routes) {
       const generated = generateRequests({ path: route.path, parameters: route.parameters, count: 100 });
       let native = 0;
