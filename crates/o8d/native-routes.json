@@ -234,5 +234,41 @@
     "reason": "Unsupported redaction grammar, repository configuration, and bounded stream cases defer to TypeScript.",
     "state": "red",
     "test": "tests/o8d-git-diff-real-path.test.ts"
+  },
+  {
+    "path": "/api/panel/file-content",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "redaction": "viewer",
+    "fallback": true,
+    "reason": "Unsupported registry scope, file identity, redaction grammar and listing variants remain TypeScript-owned.",
+    "state": "red",
+    "test": "tests/o8d-file-content-real-path.test.ts"
+  },
+  {
+    "path": "/api/v2/files",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "redaction": "viewer",
+    "fallback": true,
+    "reason": "Unsupported registry scope, file identity, redaction grammar and listing variants remain TypeScript-owned.",
+    "state": "red",
+    "test": "tests/o8d-file-content-real-path.test.ts"
+  },
+  {
+    "path": "/api/panel/files",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "redaction": "viewer",
+    "fallback": true,
+    "reason": "Unsupported registry scope, file identity, redaction grammar and listing variants remain TypeScript-owned.",
+    "state": "red",
+    "test": "tests/o8d-file-content-real-path.test.ts"
   }
 ]
