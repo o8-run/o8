@@ -367,6 +367,7 @@ mod tests {
             directory: directory.canonicalize().unwrap(),
             database,
             defaults_context: None,
+            redaction: None,
         })
     }
     fn write(f: &Fixture, id: &str, extra: Value) {

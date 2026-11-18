@@ -106,7 +106,8 @@ fn command(program: &str, args: &[&str], timeout_ms: u64, limit: usize) -> Resul
             if bytes.len() > limit {
                 return Err(());
             }
-            if !child.wait().await.map_err(|_| ())?.success() {
+            let status = child.wait().await.map_err(|_| ())?;
+            if !status.success() && !(args.contains(&"--no-index") && status.code() == Some(1)) {
                 return Err(());
             }
             Ok(String::from_utf8_lossy(&bytes).into_owned())
@@ -161,7 +162,7 @@ fn generation(repo: &str) -> Option<String> {
     Some(format!("{head}\n{refs}"))
 }
 
-fn supports_native_projection(repo: &str) -> bool {
+pub(super) fn supports_native_projection(repo: &str) -> bool {
     if std::env::var_os("GIT_EXTERNAL_DIFF").is_some() {
         return false;
     }

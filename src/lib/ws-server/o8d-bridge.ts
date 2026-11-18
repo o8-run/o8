@@ -163,6 +163,7 @@ export class O8dBridge {
           O8_API_FRONT_DOOR: apiFrontDoorEnabled() ? '1' : undefined,
           O8D_SERVER_VERSION: packageJson.version, O8D_STARTUP_PORT_INFO: startupPortInfo(),
           O8_INSTANCE_ID: process.env.O8_INSTANCE_ID, O8_BOOT_ID: process.env.O8_BOOT_ID,
+          O8D_NATIVE_OWNED: nativeHttpTransportEnabled() ? '1' : undefined,
           O8D_NATIVE_SESSION_READS: nativeHttpTransportEnabled() && nativeSessionReadsEnabled() ? '1' : undefined,
           O8D_REQUEST_COUNTS_PATH: join(getDataDir(), 'o8d-request-counts.jsonl'),
           O8D_MACHINE_DISPLAY_NAME: nativeSessionReadsEnabled() ? localMachineName() : undefined,
