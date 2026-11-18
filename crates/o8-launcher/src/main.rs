@@ -182,6 +182,7 @@ fn spawn(
             std::env::var("O8_VOICE_ONLY").ok().as_deref(),
         ),
         version: config.version.clone(),
+        private_next_port: config.api_front_door.then_some(config.next_port),
         next_origin: format!(
             "http://127.0.0.1:{}",
             if config.api_front_door {
@@ -197,29 +198,6 @@ fn spawn(
         environment.api(&mut command);
     } else {
         environment.ws(&mut command);
-    }
-    if config.api_front_door {
-        // Both processes and the Node clients they start see the same flag;
-        // Next listens only on its private loopback port.
-        command.env("O8_API_FRONT_DOOR", "1");
-        if script == "server.js" {
-            command
-                .env("PORT", config.next_port.to_string())
-                .env("HOSTNAME", "127.0.0.1");
-        } else {
-            // WS answers the public port, including the native window launch
-            // (POST /api/panel/operator-defaults), so it needs the window and
-            // helper paths Next gets.
-            let window = if environment.native_main && environment.voice_only {
-                std::ffi::OsString::new()
-            } else {
-                config.window.clone().into_os_string()
-            };
-            command.env("O8_NEXT_BIN", window);
-            if let Some(path) = &environment.codebase_memory {
-                command.env("O8_CODEBASE_MEMORY_BIN", path);
-            }
-        }
     }
     let port = match (script == "server.js", config.api_front_door) {
         (true, false) => config.api_port,

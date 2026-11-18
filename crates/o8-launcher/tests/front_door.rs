@@ -7,7 +7,7 @@ fn env(f: &Fixture, name: &str) -> serde_json::Value {
 }
 
 #[test]
-fn front_door_starts_ws_on_the_public_port_before_private_next() {
+fn front_door_puts_ws_on_the_public_port_and_next_on_a_private_one() {
     let mut f = Fixture::new();
     f.start_with(&[("O8_API_FRONT_DOOR", "1")]);
     f.ready();
@@ -15,7 +15,8 @@ fn front_door_starts_ws_on_the_public_port_before_private_next() {
     let api = f.port("api-port");
     // WS answers the public port, and clients reading the WS port file go there.
     assert_eq!(f.port("ws-port"), api);
-    assert_eq!(f.log("start-order"), "ws\napi\n");
+    // Both children start without waiting on each other, so their order of
+    // arrival is not asserted.
     let ws = env(&f, "ws-env");
     let next = env(&f, "api-env");
     assert_eq!(ws["O8_API_FRONT_DOOR"], "1");
@@ -66,6 +67,6 @@ fn next_off_without_the_front_door_still_starts_next() {
         env(&f, "ws-env")["O8_API_FRONT_DOOR"],
         serde_json::Value::Null
     );
-    assert_eq!(f.log("start-order"), "api\nws\n");
+    assert!(f.root.join("ws-env").exists());
     f.stop();
 }
