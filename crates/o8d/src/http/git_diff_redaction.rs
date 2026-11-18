@@ -212,9 +212,9 @@ impl ViewerRedaction {
         let mut cursor = 0;
         for (start, end) in self.ranges(text)? {
             safe.push_str(&text[cursor..start]);
-            spans.push(
-                json!({"start":safe.len(),"end":safe.len()+10,"kind":"credential","path":""}),
-            );
+            // The viewer wire contract uses UTF-8 bytes (TS Buffer.byteLength).
+            let offset = safe.len();
+            spans.push(json!({"start":offset,"end":offset+10,"kind":"credential","path":""}));
             safe.push_str("[redacted]");
             cursor = end;
         }
@@ -247,7 +247,10 @@ impl ViewerRedaction {
                     let mut cursor = 0;
                     for (start, end) in ranges {
                         result.push_str(&text[cursor..start]);
-                        spans.push(json!({"start":result.len(),"end":result.len()+10,"kind":"credential","path":path}));
+                        let offset = result.len();
+                        spans.push(
+                            json!({"start":offset,"end":offset+10,"kind":"credential","path":path}),
+                        );
                         result.push_str("[redacted]");
                         cursor = end;
                     }
@@ -552,6 +555,40 @@ pub(super) fn viewer_diff(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn redaction_spans_use_utf8_offsets_after_unicode_prefixes() {
+        let policy = ViewerRedaction::from_grant(
+            &json!({"normalizedValues":["fixture-value"],"activeCredentialHashes":[]}),
+        )
+        .unwrap();
+        for (prefix, start) in [("雪 ", 4), ("𐐀 ", 5), ("雪 𐐀 ", 9)] {
+            let input = format!("{prefix}fixture-value tail fixture-value");
+            let expected = format!("{prefix}[redacted] tail [redacted]");
+            let (safe, spans) = policy.text(&input).unwrap();
+            assert_eq!(safe, expected);
+            assert_eq!(
+                spans,
+                vec![
+                    json!({"start":start,"end":start+10,"kind":"credential","path":""}),
+                    json!({"start":start+16,"end":start+26,"kind":"credential","path":""}),
+                ]
+            );
+            for (body, path) in [
+                (json!({"content":input}), "/content"),
+                (json!({"files":[{"path":input}]}), "/files/0/path"),
+                (json!({"diff":input}), "/diff"),
+            ] {
+                let safe = policy.json(body, &[input.clone()]).unwrap();
+                assert_eq!(
+                    safe["redaction"]["spans"],
+                    json!([
+                        {"start":start,"end":start+10,"kind":"credential","path":path},
+                        {"start":start+16,"end":start+26,"kind":"credential","path":path},
+                    ])
+                );
+            }
+        }
+    }
     #[test]
     fn unchanged_unicode_maps_utf8_spans_but_transformed_or_removed_input_defers() {
         let policy = ViewerRedaction::from_grant(

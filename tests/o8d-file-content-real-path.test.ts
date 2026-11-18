@@ -39,6 +39,9 @@ it.skipIf(process.platform !== 'linux')('serves file content through the public 
     const registeredRoot = join(directory, 'registered'); mkdirSync(registeredRoot);
     writeFileSync(join(registeredRoot, 'plain.txt'), 'registered content');
     writeFileSync(join(registeredRoot, 'sensitive.txt'), token);
+    // A BMP and an astral letter precede each marker: the wire contract uses UTF-8 bytes.
+    const unicodeName = '雪 𐐀 ' + token + '.txt';
+    writeFileSync(join(registeredRoot, unicodeName), 'plain content');
     writeFileSync(join(directory, 'repos.json'), JSON.stringify({ version: 1, repos: [{ id: 'fixture-registered', name: 'Fixture', localPath: registeredRoot, isGitRepo: false, defaultBranch: 'main', createdAt: '2026-01-01', lastOpenedAt: '2026-01-01' }] }));
     const cases = ['/api/panel/file-content', '/api/v2/files'].flatMap(route => [
       ...['plain.txt', 'sensitive.txt', 'large.txt', 'binary.bin', 'patch.txt'].map(path => route + '?' + new URLSearchParams({ path })),
@@ -46,7 +49,7 @@ it.skipIf(process.platform !== 'linux')('serves file content through the public 
     ]);
     cases.push('/api/v2/files?path=large.txt&preview=1');
     for (const route of ['/api/panel/file-content', '/api/v2/files']) {
-      for (const path of ['plain.txt', 'sensitive.txt', '../outside']) cases.push(route + '?' + new URLSearchParams({ workspace: registeredRoot, path }));
+      for (const path of ['plain.txt', 'sensitive.txt', unicodeName, '../outside']) cases.push(route + '?' + new URLSearchParams({ workspace: registeredRoot, path }));
     }
     const treeQueries: Record<string, string>[] = [{}, { search: 'tracked' }, { recursive: 'files' }];
     for (const query of treeQueries) {
@@ -61,7 +64,9 @@ it.skipIf(process.platform !== 'linux')('serves file content through the public 
     const reference = await startParityReference({ directory, nativeHttp: true, o8d: false });
     await reference.stopNext();
     server = { ...reference, origin: reference.url.replace('ws:', 'http:').replace('/ws', '') };
-    for (const path of cases) { const { status, body } = await send(server, path); recorded.push({ status, body }); }
+    for (const path of cases) { const { status, body } = await send(server, path); recorded.push({ status, body });
+      if (new URL(path, 'http://fixture').searchParams.get('path') === unicodeName) expect(body).toMatchObject({ redaction: { spans: expect.arrayContaining([expect.objectContaining({ start: 9, end: 19, path: '/path' })]) } });
+    }
     const treePath = '/api/panel/files?' + new URLSearchParams({ workspace: treeRoot });
     // Vary only an ignored probe parameter: the handler's cache key stays root.
     const checkCache = async () => {
@@ -168,3 +173,20 @@ it.skipIf(process.platform !== 'linux')('replays content reads through TypeScrip
     await reference?.stop(); rmSync(directory, { recursive: true, force: true });
   }
 }, 90_000);
+
+// Paired with the Rust ViewerRedaction prefix matrix; this is the canonical renderer.
+it('keeps top-level and nested viewer JSON spans in UTF-8 byte units', async () => {
+  const { viewerJson } = await import('../src/lib/viewers/response');
+  for (const [prefix, start] of [['雪 ', 4], ['𐐀 ', 5], ['雪 𐐀 ', 9]] as const) {
+    const input = prefix + 'fixture-value tail fixture-value';
+    const response = viewerJson({ content: input, files: [{ path: input }], diff: input }, undefined,
+      { normalizedValues: ['fixture-value'], verifiedDiffs: new Set([input]) });
+    const body = await response.json();
+    expect(body.redaction).toEqual({ version: 1, offsetEncoding: 'utf-8', spans:
+      ['/content', '/files/0/path', '/diff'].flatMap(path => [
+        { start, end: start + 10, kind: 'credential', path },
+        { start: start + 16, end: start + 26, kind: 'credential', path },
+      ]),
+    });
+  }
+});
