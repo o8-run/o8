@@ -124,9 +124,15 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     try { registered = await fetch(origin + '/api/setup/identity', { signal: AbortSignal.timeout(30_000) }); }
     catch (error) { throw new Error('Advertised API port was not ready with O8_API_FRONT_DOOR=1 and O8_NEXT_O8D=0: ' + (error instanceof Error ? error.name : 'unknown')); }
     expect(registered.status).toBe(200);
-    if (rust) expect(registered.headers.get('x-o8d-native-session-read')).toBe('1');
     expect(requests).toEqual([]);
     expect(await registered.json()).toMatchObject({ apiPort, wsPort: apiPort });
+    if (rust) {
+      // Anonymous loopback identity intentionally falls back: the admission
+      // hop cannot assert loopback authority. Prove native using operator auth.
+      const admitted = await fetch(origin + '/api/setup/identity', { headers: { authorization: 'Bearer ' + token } });
+      expect(admitted.headers.get('x-o8d-native-session-read')).toBe('1');
+      expect(await admitted.json()).toMatchObject({ apiPort, wsPort: apiPort });
+    }
     const wsInfo = await fetch(origin + '/api/panel/ws-info', { headers: { authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(10_000) });
     expect(wsInfo.status).toBe(200);
     if (rust) expect(wsInfo.headers.get('x-o8d-native-session-read')).toBe('1');
