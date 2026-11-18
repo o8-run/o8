@@ -1,4 +1,4 @@
-import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
+import { execFile, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -39,7 +39,6 @@ interface HistoryResponseGate {
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-realtime-history-wire-'));
 const token = 'realtime-history-wire-token';
 const clockFile = join(dataDir, 'clock-offset');
-let bundleDir = '';
 const historyReads = new Map<string, number>();
 const historyVersions = new Map([
   ['worker-a', 1],
@@ -237,17 +236,15 @@ beforeAll(async () => {
   apiServer.listen(apiPort, '127.0.0.1');
   await once(apiServer, 'listening');
 
-  mkdirSync(join(process.cwd(), 'tmp'), { recursive: true });
-  bundleDir = mkdtempSync(join(process.cwd(), 'tmp/history-wire-'));
-  execFileSync(process.execPath, ['--input-type=module', '-e',
-    "import {bundleServers} from './scripts/lib/server-bundles.mjs'; bundleServers({root:process.cwd(),outDir:process.argv[1]});", bundleDir]);
   const clock = join(dataDir, 'clock.cjs');
   writeFileSync(clockFile, '0');
   writeFileSync(clock, `const fs = require('node:fs'), now = Date.now;
     Date.now = () => now() + Number(fs.readFileSync(${JSON.stringify(clockFile)}, 'utf8'));`);
   wsProcess = execFile(process.execPath, [
     `--require=${clock}`,
-    join(bundleDir, 'ws-server-impl.mjs'),
+    '--import=./scripts/register-server-only-stub.mjs',
+    '--import=tsx',
+    'src/ws-server.ts',
   ], {
     cwd: process.cwd(),
     env: {
@@ -271,7 +268,6 @@ afterAll(async () => {
   }
   if (apiServer?.listening) await new Promise<void>((resolve) => apiServer.close(() => resolve()));
   rmSync(dataDir, { recursive: true, force: true });
-  if (bundleDir) rmSync(bundleDir, { recursive: true, force: true });
 });
 
 describe('realtime session history server path', () => {
