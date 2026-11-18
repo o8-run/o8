@@ -86,6 +86,9 @@ async function waitFor(
 
 async function waitForHealth(): Promise<void> {
   await waitFor(async () => {
+    if (wsProcess.exitCode !== null || wsProcess.signalCode !== null) {
+      throw new Error(`WS fixture exited: ${serverOutput.slice(-2_000)}`);
+    }
     try {
       return (await fetch(`http://127.0.0.1:${wsPort}/health`)).ok;
     } catch {
@@ -241,12 +244,16 @@ beforeAll(async () => {
   bundleDir = mkdtempSync(join(process.cwd(), 'tmp/history-wire-'));
   // Compile the WS entry, retaining real installed dependency and HTTP behavior.
   execFileSync(process.execPath, ['--input-type=module', '-e', `
-    import { buildSync } from 'esbuild';
-    const root = process.cwd();
-    buildSync({ entryPoints: ['src/ws-server.ts'], outfile: process.argv[1], bundle: true,
+    import { build, stop } from 'esbuild';
+    import { createRequire } from 'node:module';
+    const root = process.cwd(), resolve = createRequire(import.meta.url).resolve;
+    await build({ entryPoints: ['src/ws-server.ts'], outfile: process.argv[1], bundle: true,
       packages: 'external', platform: 'node', format: 'esm', target: 'node22',
-      alias: { 'server-only': root + '/scripts/server-only-stub.js', 'next/server': root + '/scripts/lib/next-server-exports.mjs' },
-      banner: { js: "import{createRequire as __req}from'node:module';const require=__req(import.meta.url);" } });
+      alias: { 'server-only': root + '/scripts/server-only-stub.js' },
+      plugins: [{ name: 'node-next-paths', setup(b) {
+        b.onResolve({ filter: new RegExp('^next/') }, args => ({ path: resolve(args.path), external: true }));
+      } }], banner: { js: "import{createRequire as __req}from'node:module';const require=__req(import.meta.url);" } });
+    stop();
   `, join(bundleDir, 'ws.mjs')], { timeout: 20_000 });
   const clock = join(dataDir, 'clock.cjs');
   writeFileSync(clockFile, '0');
