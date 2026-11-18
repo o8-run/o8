@@ -23,7 +23,7 @@ it('uses the shared GET table through the public socket with Next stopped', asyn
   const table = allRoutes.filter(route => route.test === 'tests/o8d-native-route-table-real-path.test.ts'
     || route.test === 'tests/o8d-rust-startup-real-path.test.ts' || route.path === '/api/v2/chat-history/list');
   expect(table.map(route => route.path).sort()).toEqual([
-    '/api/mobile/orchestrator/threads', '/api/panel/ws-info', '/api/setup/identity', '/api/v2/chat-history/list',
+    '/api/panel/ws-info', '/api/setup/identity', '/api/v2/chat-history/list',
   ]);
   for (const route of table) {
     expect(route.methods).toEqual(['GET']);

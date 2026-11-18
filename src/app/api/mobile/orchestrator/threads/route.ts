@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { mobileThreadPullRequests } from '@/lib/mobile/pull-request-projection';
+import { composeMobileThreadList, type MobileThreadListPiece } from '@/lib/mobile/thread-list-response';
 import { localMachineName } from '@/lib/mobile/machine-name';
 import { legacyInboxPin } from '@/lib/inbox/preferences';
 import { inboxProjection, inboxRunStartedAt, inboxSubject } from '@/lib/inbox/store';
@@ -71,18 +72,15 @@ export async function GET(request: NextRequest) {
     const pulls = await mobileThreadPullRequests(threads.map(thread => thread.id)).catch(() => []);
     // Counts only, from what is stored locally. The lookup never throws.
     const linkedWork = lookupLinkedWork(threads);
-    return NextResponse.json({ threads: threads.map(thread => {
-      const pr = pulls.find(pr => pr.threadId === thread.id);
+    const pieces: MobileThreadListPiece[] = threads.map(thread => {
       const subject = inboxSubject('conversation', thread.id, thread.repoPath, thread.projectId);
       const projection = inboxProjection(subject, null, undefined, legacyInboxPin(thread));
-      // Additive checkout context: owner/repo (or folder), live branch and worktree identity.
-      const git = threadGitContext(thread.repoPath);
-      const remoteSlug = thread.githubOwner && thread.githubRepo ? `${thread.githubOwner}/${thread.githubRepo}` : null;
-      return { ...thread, ...projection, linkedWork: linkedWork.get(thread.id) ?? null, machineDisplayName: localMachineName(),
-        ...(pr ? { pullRequestNumber: pr.number, pullRequestState: pr.state, changeCount: pr.changedFiles } : {}), ...parkedWorkspaceProjection(subject, parked), pinned: projection.pinnedAt != null,
-        isWorktree: git.isWorktree, worktreePath: git.worktreePath,
-        repoSlug: remoteSlug ?? git.repoSlug ?? thread.repoName, branch: git.branch ?? thread.repoBranch, ...(thread.status === 'busy' ? { runStartedAt: inboxRunStartedAt(subject) ?? undefined } : {}) };
-    }), updatedAt: [...threads.map(thread => thread.lastMessageAt), ...pulls.map(pr => pr.updatedAt ?? '')].sort().at(-1) ?? null }, { headers: { 'Cache-Control': 'private, max-age=5' } });
+      const { repoSlug, branch, isWorktree, worktreePath } = threadGitContext(thread.repoPath);
+      return { thread, projection, linkedWork: linkedWork.get(thread.id) ?? null,
+        parked: parkedWorkspaceProjection(subject, parked), git: { repoSlug, branch, isWorktree, worktreePath },
+        runStartedAt: thread.status === 'busy' ? inboxRunStartedAt(subject) : null };
+    });
+    return composeMobileThreadList({ version: 1, pieces, machineDisplayName: threads.length ? localMachineName() : '' }, pulls);
   } catch {
     console.log('[mobile-orchestrator] thread list failed');
     return NextResponse.json({ threads: [] }, { headers: NO_STORE });

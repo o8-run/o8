@@ -5,9 +5,11 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Network threads and parked workspace receipt projections remain TypeScript-owned.",
-    "state": "red",
-    "test": "tests/o8d-native-route-table-real-path.test.ts"
+    "reason": "Partial ownership: o8d owns fresh local history/SQLite/git listing and projections. Node retains auth, canonical network/history preparation, in-memory network projection health, live GitHub enrichment once, final composition and all writes. Archived GET is native. Unsupported local data and any stage error defer to TypeScript; this is not a fully native endpoint or runtime retirement.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-thread-list-local-real-path.test.ts",
+    "owned": true,
+    "composition": "mobile-threads/1"
   },
   {
     "path": "/api/mobile/history",

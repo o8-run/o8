@@ -5992,6 +5992,15 @@
       ]
     },
     {
+      "path": "tests/o8d-thread-list-local-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-thread-projection-parity-real-path.test.ts",
       "reasons": [
         "child-process",
