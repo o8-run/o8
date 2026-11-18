@@ -24,6 +24,9 @@ pub struct ServerEnvironment {
     pub voice_only: bool,
     pub version: String,
     pub next_origin: String,
+    /// Behind the API front door (`O8_API_FRONT_DOOR`), WS answers the public
+    /// API port and Next listens on this private loopback port.
+    pub private_next_port: Option<u16>,
 }
 impl ServerEnvironment {
     fn common(&self, command: &mut Command) {
@@ -48,25 +51,38 @@ impl ServerEnvironment {
         if self.native_main {
             command.env("O8_NEXT_MAIN_WINDOW", "1");
         }
+        if self.private_next_port.is_some() {
+            command.env("O8_API_FRONT_DOOR", "1");
+        }
         for (key, value) in &self.ai_keys {
             command.env(key, value);
         }
     }
     pub fn api(&self, command: &mut Command) {
         self.common(command);
-        command
-            .env("PORT", self.api_port.to_string())
-            .env(
-                "HOSTNAME",
+        let (port, host) = match self.private_next_port {
+            // Only the WS server reaches Next behind the front door.
+            Some(port) => (port, "127.0.0.1"),
+            None => (
+                self.api_port,
                 ports::listen_host_in(
                     std::env::var("O8_LAN_ACCESS").ok().as_deref(),
                     std::path::Path::new(&self.data_dir),
                 ),
-            )
+            ),
+        };
+        command
+            .env("PORT", port.to_string())
+            .env("HOSTNAME", host)
             .env("NODE_ENV", "production")
             .env("O8_API_PORT", self.api_port.to_string())
             .env("O8_WS_PORT", self.ws_port.to_string())
             .env("WS_PORT", self.ws_port.to_string());
+        self.window_and_helpers(command);
+    }
+    /// The native window and helper paths for whichever server answers the
+    /// public API port, which launches the window.
+    fn window_and_helpers(&self, command: &mut Command) {
         if let Some(path) = &self.window {
             command.env("O8_NEXT_BIN", path);
         }
@@ -83,6 +99,9 @@ impl ServerEnvironment {
             .env("WS_PORT", self.ws_port.to_string())
             .env("NEXT_ORIGIN", &self.next_origin)
             .env("O8_APP_VERSION", &self.version);
+        if self.private_next_port.is_some() {
+            self.window_and_helpers(command);
+        }
     }
 }
 
@@ -145,6 +164,7 @@ mod tests {
             voice_only: true,
             version: "fixture".into(),
             next_origin: "http://127.0.0.1:123".into(),
+            private_next_port: None,
         };
         for api in [true, false] {
             let mut command = Command::new("fixture");
@@ -178,6 +198,44 @@ mod tests {
                 assert!(!map.contains_key("O8_NEXT_BIN"));
                 assert!(!map.contains_key("O8_CODEBASE_MEMORY_BIN"));
             }
+        }
+    }
+    #[test]
+    fn front_door_moves_next_to_private_loopback_and_window_launch_to_ws() {
+        let env = ServerEnvironment {
+            data_dir: "/fixture/data".into(),
+            api_port: 123,
+            ws_port: 124,
+            window: Some("/fixture/window".into()),
+            codebase_memory: Some("/fixture/memory".into()),
+            private_next_port: Some(125),
+            ..Default::default()
+        };
+        let read = |api: bool| -> BTreeMap<String, String> {
+            let mut command = Command::new("fixture");
+            if api {
+                env.api(&mut command);
+            } else {
+                env.ws(&mut command);
+            }
+            command
+                .get_envs()
+                .map(|(k, v)| {
+                    (
+                        k.to_string_lossy().into_owned(),
+                        v.unwrap().to_string_lossy().into_owned(),
+                    )
+                })
+                .collect()
+        };
+        let (next, ws) = (read(true), read(false));
+        assert_eq!(next["PORT"], "125");
+        assert_eq!(next["HOSTNAME"], "127.0.0.1");
+        assert_eq!(next["O8_API_PORT"], "123");
+        for map in [&next, &ws] {
+            assert_eq!(map["O8_API_FRONT_DOOR"], "1");
+            assert_eq!(map["O8_NEXT_BIN"], "/fixture/window");
+            assert_eq!(map["O8_CODEBASE_MEMORY_BIN"], "/fixture/memory");
         }
     }
 }

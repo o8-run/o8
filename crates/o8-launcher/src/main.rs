@@ -44,6 +44,27 @@ struct Config {
     native_lifecycle: bool,
     /// Updater settings; see `UPDATER.md`.
     update: Option<update::UpdateConfig>,
+    /// The API front door (`docs/internals/api-front-door.md`): WS owns the
+    /// public API port and Next binds a private loopback port. Off by default.
+    #[serde(default)]
+    api_front_door: bool,
+    /// With the front door, Next is not started; requests no WS handler
+    /// serves answer 502 from the front door.
+    #[serde(default)]
+    next_off: bool,
+    /// Next's private port in front-door mode, chosen at startup.
+    #[serde(skip)]
+    next_port: u16,
+}
+impl Config {
+    /// The server that answers the public API port.
+    fn public_script(&self) -> &'static str {
+        if self.api_front_door {
+            "ws-server.mjs"
+        } else {
+            "server.js"
+        }
+    }
 }
 struct Server {
     child: Child,
@@ -161,7 +182,15 @@ fn spawn(
             std::env::var("O8_VOICE_ONLY").ok().as_deref(),
         ),
         version: config.version.clone(),
-        next_origin: format!("http://127.0.0.1:{}", config.api_port),
+        private_next_port: config.api_front_door.then_some(config.next_port),
+        next_origin: format!(
+            "http://127.0.0.1:{}",
+            if config.api_front_door {
+                config.next_port
+            } else {
+                config.api_port
+            }
+        ),
         ..Default::default()
     };
     command.env("O8_LAUNCHER_SOCKET", config.data_dir.join("launcher.sock"));
@@ -170,10 +199,11 @@ fn spawn(
     } else {
         environment.ws(&mut command);
     }
-    let port = if script == "server.js" {
-        config.api_port
-    } else {
-        config.ws_port
+    let port = match (script == "server.js", config.api_front_door) {
+        (true, false) => config.api_port,
+        (true, true) => config.next_port,
+        (false, false) => config.ws_port,
+        (false, true) => config.api_port,
     };
     let receipt_path = config.data_dir.join(receipt_name);
     let pending_path = ownership::pending_path(&receipt_path);
@@ -616,9 +646,19 @@ fn serve(
     if config.ws_port == 0 {
         config.ws_port = ports::bind_ephemeral_port(Some(config.api_port));
     }
+    if config.api_front_door {
+        config.next_port = ports::bind_ephemeral_port(Some(config.api_port));
+        if config.next_port == config.ws_port {
+            config.next_port = ports::bind_ephemeral_port(Some(config.ws_port));
+        }
+    }
     if config.api_port == 0
         || config.ws_port == 0
         || config.api_port == config.ws_port
+        || (config.api_front_door
+            && (config.next_port == 0
+                || config.next_port == config.api_port
+                || config.next_port == config.ws_port))
         || !ports::bundled_sidecar_port_available(config.api_port)
         || !ports::bundled_sidecar_port_available(config.ws_port)
     {
@@ -648,7 +688,17 @@ fn serve(
     {
         return Err("Boot identity could not be published".into());
     }
-    for (name, port) in [("api-port", config.api_port), ("ws-port", config.ws_port)] {
+    if config.api_front_door {
+        std::env::set_var("O8_API_FRONT_DOOR", "1");
+    }
+    // With the front door, WS listens on the public API port, so clients that
+    // read the WS port file connect there.
+    let ws_published = if config.api_front_door {
+        config.api_port
+    } else {
+        config.ws_port
+    };
+    for (name, port) in [("api-port", config.api_port), ("ws-port", ws_published)] {
         o8_launch_core::identity::write_port_file(&data_dir, name, port)
             .map_err(|_| "Port publication failed")?;
     }
@@ -662,39 +712,38 @@ fn serve(
     if stop_requested(native, stopped) {
         return Ok(());
     }
-    let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
-    // The shutdown already took the slot: stop the server here, unlocked.
-    let unrecorded = match lock(servers).as_mut() {
-        Some(servers) => {
-            servers.api = Some(api);
-            None
+    // The front door starts WS before Next (api-front-door.md).
+    let mut order = vec![
+        ("server.js", "launcher-api.json"),
+        ("ws-server.mjs", "launcher-ws.json"),
+    ];
+    if config.api_front_door {
+        order.reverse();
+        if config.next_off {
+            order.retain(|(script, _)| *script != "server.js");
         }
-        None => Some(api),
-    };
-    if let Some(mut api) = unrecorded {
-        api.stop(Instant::now() + SHUTDOWN_BOUND)?;
-        return Ok(());
     }
-    if stop_requested(native, stopped) {
-        return Ok(());
-    }
-    let ws = spawn(
-        config,
-        "ws-server.mjs",
-        &boot,
-        &instance,
-        "launcher-ws.json",
-    )?;
-    let unrecorded = match lock(servers).as_mut() {
-        Some(servers) => {
-            servers.ws = Some(ws);
-            None
+    for (index, (script, receipt)) in order.into_iter().enumerate() {
+        if index > 0 && stop_requested(native, stopped) {
+            return Ok(());
         }
-        None => Some(ws),
-    };
-    if let Some(mut ws) = unrecorded {
-        ws.stop(Instant::now() + SHUTDOWN_BOUND)?;
-        return Ok(());
+        let server = spawn(config, script, &boot, &instance, receipt)?;
+        // The shutdown already took the slot: stop the server here, unlocked.
+        let unrecorded = match lock(servers).as_mut() {
+            Some(servers) => {
+                if script == "server.js" {
+                    servers.api = Some(server);
+                } else {
+                    servers.ws = Some(server);
+                }
+                None
+            }
+            None => Some(server),
+        };
+        if let Some(mut server) = unrecorded {
+            server.stop(Instant::now() + SHUTDOWN_BOUND)?;
+            return Ok(());
+        }
     }
     let restart_stop = stopped.clone();
     let restart = o8_launch_core::restart_job_drain::guard(
@@ -789,17 +838,21 @@ fn serve(
                 break;
             }
             let mut guard = lock(servers);
-            let Some(Servers {
-                api: Some(api),
-                ws: Some(ws),
-            }) = guard.as_mut()
-            else {
+            let Some(Servers { api, ws }) = guard.as_mut() else {
                 break;
             };
-            for (server, receipt) in [
-                (&mut *api, "launcher-api.json"),
-                (&mut *ws, "launcher-ws.json"),
-            ] {
+            // Next is expected unless the front door runs without it.
+            if ws.is_none() || (api.is_none() && !(config.api_front_door && config.next_off)) {
+                break;
+            }
+            let mut running: Vec<(&mut Server, &str)> = Vec::new();
+            if let Some(api) = api.as_mut() {
+                running.push((api, "launcher-api.json"));
+            }
+            if let Some(ws) = ws.as_mut() {
+                running.push((ws, "launcher-ws.json"));
+            }
+            for (server, receipt) in running {
                 if let Some(at) = server.retry_at {
                     if Instant::now() < at || stopped.load(Ordering::SeqCst) {
                         continue;
@@ -812,7 +865,7 @@ fn serve(
                             );
                             *server = next;
                             server.tracker = tracker;
-                            if server.script == "server.js" {
+                            if server.script == config.public_script() {
                                 opened = false;
                                 window_failed = false;
                                 launch = None;
@@ -905,13 +958,20 @@ fn serve(
                         pending_show = false;
                     }
                 } else if pending_show {
+                    // The server on the public port started the window.
+                    let owner = if config.api_front_door {
+                        ws.as_ref()
+                    } else {
+                        api.as_ref()
+                    }
+                    .map_or(0, |server| server.child.id());
                     let focused = if let Some(focus) = &config.focus {
                         Command::new(focus)
-                            .arg(api.child.id().to_string())
+                            .arg(owner.to_string())
                             .status()
                             .is_ok_and(|s| s.success())
                     } else {
-                        native.focus(api.child.id(), &config.window)
+                        native.focus(owner, &config.window)
                     };
                     if !focused {
                         opened = false;
@@ -966,6 +1026,16 @@ fn main() {
         o8_launcher::note!("Invalid launch configuration");
         std::process::exit(2);
     };
+    if std::env::var("O8_API_FRONT_DOOR").as_deref() == Ok("1") {
+        config.api_front_door = true;
+    }
+    if std::env::var("O8_NEXT_OFF").as_deref() == Ok("1") {
+        config.next_off = true;
+    }
+    if config.next_off && !config.api_front_door {
+        o8_launcher::note!("O8_NEXT_OFF needs the API front door; starting Next");
+        config.next_off = false;
+    }
     // Only the installed app puts its CLI on PATH; a --config fixture never
     // touches the real bin folders. The servers inherit the outcome.
     #[cfg(target_os = "macos")]

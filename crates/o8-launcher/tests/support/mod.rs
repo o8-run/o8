@@ -58,15 +58,19 @@ if Path(sys.argv[0]).name=='window':
  (root/'window-ready').write_text(str(os.getpid()))
  sys.stdin.buffer.read(); sys.exit(0)
 api=sys.argv[1].endswith('server.js')
-keys=['O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','O8_FORGED_KEY','PATH']
+front=os.environ.get('O8_API_FRONT_DOOR')=='1'
+http_role=(not api) if front else api
+http_port=int(os.environ['O8_API_PORT'] if front else os.environ.get('PORT','0'))
+keys=['O8_API_FRONT_DOOR','O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','O8_FORGED_KEY','PATH']
 (root/('api-env' if api else 'ws-env')).write_text(json.dumps({k:os.environ.get(k) for k in keys}))
 def terminated(*args):
  (root/'events').open('a').write(('api' if api else 'ws')+'-stop\n'); sys.exit(0)
 signal.signal(signal.SIGTERM,terminated)
 (root/('api-starts' if api else 'ws-starts')).open('a').write(str(os.getpid())+'\n')
-if not api:
+(root/'start-order').open('a').write(('api' if api else 'ws')+'\n')
+if not http_role:
  import socket
- s=socket.socket(); s.bind(('127.0.0.1',int(os.environ['WS_PORT']))); s.listen()
+ s=socket.socket(); s.bind(('127.0.0.1',int(os.environ['PORT'] if front else os.environ['WS_PORT']))); s.listen()
  if (root/'graceful-child').exists():
   reader,writer=os.pipe()
   if os.fork()==0:
@@ -105,10 +109,10 @@ class Handler(BaseHTTPRequestHandler):
   if (root/'fail-window').exists():
    self.send_response(500); self.end_headers(); self.wfile.write(b'{"code":"NEXT_STARTUP_FAILED"}'); return
   if window is None:
-   window=subprocess.Popen([os.environ['O8_NEXT_BIN'],'--enable-next','--app-shell','--server','http://127.0.0.1:'+os.environ['PORT'],'--shell-state',str(root/'next-shell.json')],stdin=subprocess.PIPE)
+   window=subprocess.Popen([os.environ['O8_NEXT_BIN'],'--enable-next','--app-shell','--server','http://127.0.0.1:'+str(http_port),'--shell-state',str(root/'next-shell.json')],stdin=subprocess.PIPE)
   (root/'shows').open('a').write('show\n')
   self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
-HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
+HTTPServer(('127.0.0.1',http_port),Handler).serve_forever()
 "#;
         for name in ["node", "dialog", "window", "probe", "focus"] {
             let p = root.join(name);
@@ -172,6 +176,23 @@ HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
     }
     pub fn start(&mut self) {
         self.launcher = Some(self.launch());
+    }
+    /// Starts the launcher with extra environment.
+    #[allow(dead_code)]
+    pub fn start_with(&mut self, extra: &[(&str, &str)]) {
+        let config = self.root.join("config.json");
+        self.launcher = Some(self.launch_with(
+            std::path::Path::new(env!("CARGO_BIN_EXE_o8-launcher")),
+            &config,
+            extra,
+            "launcher-stderr",
+        ));
+    }
+    #[allow(dead_code)]
+    pub fn running(&mut self) -> bool {
+        self.launcher
+            .as_mut()
+            .is_some_and(|child| child.try_wait().unwrap().is_none())
     }
     pub fn ready(&self) {
         until(|| {
