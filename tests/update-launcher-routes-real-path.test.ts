@@ -14,6 +14,7 @@ let peers: Set<Socket>;
 let ops: string[];
 let status: Record<string, unknown>;
 let silent = false;
+let checkDelayMs = 0;
 const post = (body: object) => new Request('http://localhost/api/panel/update/apply', { method: 'POST', body: JSON.stringify(body) });
 async function bounded<T>(promise: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -25,12 +26,14 @@ beforeEach(async () => {
   getUpdateIdleWindow.mockResolvedValue({ idle: true, idleExceptParked: true });
   root = await mkdtemp(join(tmpdir(), 'o8-up-'));
   vi.stubEnv('O8_LAUNCHER_SOCKET', join(root, 'launcher.sock'));
-  ops = []; peers = new Set(); silent = false;
+  ops = []; peers = new Set(); silent = false; checkDelayMs = 0;
   status = { ok: true, state: 'staged', current: '1.0.0', available: { version: '2.0.0', notes: 'Changes' }, error: null };
   server = createServer({ allowHalfOpen: true }, peer => {
     peers.add(peer); peer.on('error', () => {}); peer.on('close', () => peers.delete(peer));
     let bytes = ''; peer.on('data', chunk => { bytes += chunk; });
-    peer.on('end', () => { const { op } = JSON.parse(bytes); ops.push(op); if (!silent) peer.end(JSON.stringify(status) + '\n'); });
+    peer.on('end', () => { const { op } = JSON.parse(bytes); ops.push(op); if (silent) return;
+      const answer = () => peer.end(JSON.stringify(status) + '\n');
+      if (op === 'update-check' && checkDelayMs) setTimeout(answer, checkDelayMs); else answer(); });
   });
   await new Promise<void>(resolve => server.listen(process.env.O8_LAUNCHER_SOCKET, resolve));
 });
@@ -60,6 +63,16 @@ it('checks through launcher and reports current without applying', async () => {
   expect(await (await bounded(route.POST(post({ checkOnly: true })))).json()).toMatchObject({ result: { code: 'check_current' } });
   expect(ops).toEqual(['update-status', 'update-check']);
 });
+it('waits for a launcher check that takes longer than a status read', async () => {
+  // The launcher answers update-check only when its network check finishes.
+  status = { ok: true, state: 'current', current: '1.0.0', available: null };
+  checkDelayMs = 2500;
+  const route = await import('@/app/api/panel/update/apply/route');
+  const response = await route.POST(post({ checkOnly: true }));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ ok: true, result: { code: 'check_current' } });
+  expect(ops).toEqual(['update-status', 'update-check']);
+}, 10_000);
 it('forwards only explicit apply to launcher', async () => {
   const route = await import('@/app/api/panel/update/apply/route');
   const response = await bounded(route.POST(post({})));

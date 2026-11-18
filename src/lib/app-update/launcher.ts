@@ -16,12 +16,15 @@ interface Status {
 }
 const STATES = new Set(['idle', 'checking', 'current', 'available', 'staging', 'staged', 'installing', 'failed', 'unsupported']);
 
+/** The launcher answers a check only when it finishes, so it gets the classic fresh-check wait. */
+const CHECK_DEADLINE_MS = 25_000;
+
 /** Total deadline includes connect and slow/partial replies, with a bounded response. */
 export function launcherRequest(op: 'update-status' | 'update-check' | 'update-apply'): Promise<Status> {
   return new Promise((resolve, reject) => {
     const peer = createConnection({ path: process.env.O8_LAUNCHER_SOCKET! });
     let bytes = '';
-    const timer = setTimeout(() => finish(), 2000);
+    const timer = setTimeout(() => finish(), op === 'update-check' ? CHECK_DEADLINE_MS : 2000);
     function finish(value?: Status) {
       clearTimeout(timer); peer.destroy();
       if (value) resolve(value); else reject(new Error('Launcher updater unavailable.'));
