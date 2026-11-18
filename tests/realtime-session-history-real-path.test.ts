@@ -1,4 +1,4 @@
-import { execFile, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -39,6 +39,7 @@ interface HistoryResponseGate {
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-realtime-history-wire-'));
 const token = 'realtime-history-wire-token';
 const clockFile = join(dataDir, 'clock-offset');
+let bundleDir = '';
 const historyReads = new Map<string, number>();
 const historyVersions = new Map([
   ['worker-a', 1],
@@ -236,15 +237,24 @@ beforeAll(async () => {
   apiServer.listen(apiPort, '127.0.0.1');
   await once(apiServer, 'listening');
 
+  mkdirSync(join(process.cwd(), 'tmp'), { recursive: true });
+  bundleDir = mkdtempSync(join(process.cwd(), 'tmp/history-wire-'));
+  // Compile the WS entry, retaining real installed dependency and HTTP behavior.
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import { buildSync } from 'esbuild';
+    const root = process.cwd();
+    buildSync({ entryPoints: ['src/ws-server.ts'], outfile: process.argv[1], bundle: true,
+      packages: 'external', platform: 'node', format: 'esm', target: 'node22',
+      alias: { 'server-only': root + '/scripts/server-only-stub.js', 'next/server': root + '/scripts/lib/next-server-exports.mjs' },
+      banner: { js: "import{createRequire as __req}from'node:module';const require=__req(import.meta.url);" } });
+  `, join(bundleDir, 'ws.mjs')], { timeout: 20_000 });
   const clock = join(dataDir, 'clock.cjs');
   writeFileSync(clockFile, '0');
   writeFileSync(clock, `const fs = require('node:fs'), now = Date.now;
     Date.now = () => now() + Number(fs.readFileSync(${JSON.stringify(clockFile)}, 'utf8'));`);
   wsProcess = execFile(process.execPath, [
     `--require=${clock}`,
-    '--import=./scripts/register-server-only-stub.mjs',
-    '--import=tsx',
-    'src/ws-server.ts',
+    join(bundleDir, 'ws.mjs'),
   ], {
     cwd: process.cwd(),
     env: {
@@ -268,6 +278,7 @@ afterAll(async () => {
   }
   if (apiServer?.listening) await new Promise<void>((resolve) => apiServer.close(() => resolve()));
   rmSync(dataDir, { recursive: true, force: true });
+  if (bundleDir) rmSync(bundleDir, { recursive: true, force: true });
 });
 
 describe('realtime session history server path', () => {
