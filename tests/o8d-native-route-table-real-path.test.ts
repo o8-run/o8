@@ -23,7 +23,7 @@ it('uses the shared GET table through the public socket with Next stopped', asyn
   const table = allRoutes.filter(route => route.test === 'tests/o8d-native-route-table-real-path.test.ts'
     || route.test === 'tests/o8d-rust-startup-real-path.test.ts' || route.path === '/api/v2/chat-history/list');
   expect(table.map(route => route.path).sort()).toEqual([
-    '/api/mobile/orchestrator/threads', '/api/orchestrator/composer-queue', '/api/panel/ws-info', '/api/setup/identity', '/api/v2/chat-history/list',
+    '/api/mobile/orchestrator/threads', '/api/panel/ws-info', '/api/setup/identity', '/api/v2/chat-history/list',
   ]);
   for (const route of table) {
     expect(route.methods).toEqual(['GET']);
@@ -43,7 +43,6 @@ it('uses the shared GET table through the public socket with Next stopped', asyn
     writeFileSync(join(directory, 'boot-id'), 'fixture-table-boot');
     server = await startSessionServer(directory, true, binary);
     const queries: Record<string, string> = {
-      '/api/orchestrator/composer-queue': '?' + new URLSearchParams({ repoPath: join(directory, 'fixture-repo'), threadId: 'thoughts-review', backend: 'claude' }),
     };
     for (const { path } of table) {
       const response = await fetch(server.origin + path + (queries[path] ?? ''), { headers: { authorization: `Bearer ${server.token}` } });

@@ -59,6 +59,8 @@ pub(super) async fn serve(
     let Some(route) = http::native_route(path, method) else { return Ok(Outcome::Proxy); };
     if !enabled() && !(route["owned"] == true && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1")) { return Ok(Outcome::Proxy); }
     let viewer = route["redaction"] == "viewer";
+    let composer_queue = route["admission"] == "composer-queue";
+    let body_grant = viewer || composer_queue;
     let mut length = None;
     for (name, value) in header
         .lines()
@@ -111,6 +113,7 @@ pub(super) async fn serve(
         request = request.header(name, value.trim());
     }
     if viewer { request = request.header("x-o8d-redaction", "viewer/1"); }
+    if composer_queue { request = request.header("x-o8d-composer-queue", "capabilities/1"); }
     let Ok(mut admission) = request
         .header("x-o8d-bridge", key)
         .header("x-o8d-peer", "unverified-proxy")
@@ -120,10 +123,10 @@ pub(super) async fn serve(
     else {
         // A pooled socket the backend closed as this request went out fails
         // the send. The original handler still owns the request, as it does
-        // for any admission that does not come back 204.
+        // for any admission that does not return the expected grant status.
         return Ok(Outcome::Proxy);
     };
-    if admission.status() != if viewer { StatusCode::OK } else { StatusCode::NO_CONTENT } {
+    if admission.status() != if body_grant { StatusCode::OK } else { StatusCode::NO_CONTENT } {
         // Let the original handler return its exact auth/error response. An
         // unavailable gate never grants native access.
         return Ok(Outcome::Proxy);
@@ -131,7 +134,7 @@ pub(super) async fn serve(
     // Only the authenticated private admission response provides this context.
     // It contains paths and booleans, never provider key values.
     let mut redaction = None;
-    let defaults_context = if viewer {
+    let defaults_context = if body_grant {
         let mut bytes = Vec::new();
         loop {
             match admission.chunk().await {
@@ -142,8 +145,11 @@ pub(super) async fn serve(
         }
         let Ok(grant) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return Ok(Outcome::Proxy); };
         if grant["version"].as_u64() != Some(1) || !grant["defaultsContext"].is_object() { return Ok(Outcome::Proxy); }
-        let Some(policy) = http::ViewerRedaction::from_grant(&grant["redaction"]) else { return Ok(Outcome::Proxy); };
-        redaction = Some(policy);
+        if viewer {
+            let Some(policy) = http::ViewerRedaction::from_grant(&grant["redaction"]) else { return Ok(Outcome::Proxy); };
+            redaction = Some(policy);
+        }
+        if composer_queue && !http::composer_queue_grant_valid(&grant["defaultsContext"]["composerQueue"]) { return Ok(Outcome::Proxy); }
         Some(grant["defaultsContext"].clone())
     } else {
         admission.headers().get("x-o8d-defaults-context")
@@ -183,8 +189,8 @@ pub(super) async fn serve(
     .await
     .map_err(|_| ())?;
 
-    // Runtime transcripts, lane overlays, network projections and dynamic steer
-    // capabilities remain TS-owned until their readers are ported.
+    // Unsupported inputs and runtime-owned cases replay through the original
+    // handler. Dynamic capabilities are trusted only from this request's grant.
     if response.status() == StatusCode::SERVICE_UNAVAILABLE {
         return Ok(Outcome::Replay(replay));
     }

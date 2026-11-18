@@ -21,6 +21,8 @@ mod review_workspace;
 mod git_remote;
 mod projects;
 mod queue;
+mod composer_queue_grant;
+pub use composer_queue_grant::valid as composer_queue_grant_valid;
 mod read_context;
 mod repository;
 mod settings_defaults;
@@ -157,12 +159,10 @@ fn unavailable() -> Response {
         json!({"error":"o8d persisted read unavailable; use the TypeScript server"}),
     )
 }
-fn problem(message: &str) -> Response {
-    reply(StatusCode::BAD_REQUEST, json!({"error":message}))
-}
 fn value<'a>(params: &'a Params, key: &str) -> &'a str {
     params.get(key).map(String::as_str).unwrap_or("")
 }
+
 fn limit(params: &Params, default: usize, max: usize) -> usize {
     let raw = value(params, "limit").trim();
     // Match parseInt(..., 10), including its accepted numeric prefix.
