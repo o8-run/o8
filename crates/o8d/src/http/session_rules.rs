@@ -439,7 +439,12 @@ pub(super) fn write(
     }
     drop(db);
     let release_failed = lease.release().is_err();
-    let mut answer = if release_failed {
+    if release_failed && !hold && result.is_ok() {
+        // COMMIT is confirmed. Keep the plain receipt and its commit notice;
+        // release diagnostics must not turn durable success into an error.
+        eprintln!("o8d: session-rule lease release failed after committed mutation");
+    }
+    let mut answer = if release_failed && (hold || result.is_err()) {
         failure(code, StatusCode::INTERNAL_SERVER_ERROR)
     } else {
         result.unwrap_or_else(|status| if hold {hold_failure(status,reason.unwrap_or("Native correction hold outcome could not be confirmed. No delivery was attempted."))}else{failure(code, status)})
