@@ -109,7 +109,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/status', 'GET', () => import('@/app/api/orchestrator/status/route')),
     route('/api/orchestrator/archive', 'GET', () => import('@/app/api/orchestrator/archive/route')),
     route('/api/task-artifacts/[id]/decision', 'GET POST', () => import('@/app/api/task-artifacts/[id]/decision/route')),
-    route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
+    route('/api/mobile/orchestrator/threads', 'GET POST', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET PATCH', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/shared-team/active', 'GET', () => import('@/app/api/orchestrator/shared-team/active/route')),
     route('/api/runtime/inventory', 'GET', () => import('@/app/api/runtime/inventory/route')),
@@ -568,14 +568,19 @@ const producers = [
   // worker or spectator grant; the handler reads nothing and answers a fixed body. (#5243)
   route('/api/setup/status', 'GET', () => import('@/app/api/setup/status/route')),
   // Phone calls reuse the existing TypeScript handlers in the WS owner.
+  route('/api/mobile/action', 'POST', () => import('@/app/api/mobile/action/route')),
   route('/api/mobile/activity', 'GET', () => import('@/app/api/mobile/activity/route')),
   route('/api/mobile/automations', 'GET', () => import('@/app/api/mobile/automations/route')),
   route('/api/mobile/automations/[id]/enabled', 'POST', () => import('@/app/api/mobile/automations/[id]/enabled/route')),
   route('/api/mobile/automations/[id]/run', 'POST', () => import('@/app/api/mobile/automations/[id]/run/route')),
+  route('/api/mobile/diff-comment', 'POST', () => import('@/app/api/mobile/diff-comment/route')),
   route('/api/mobile/diff-comments', 'GET', () => import('@/app/api/mobile/diff-comments/route')),
+  route('/api/mobile/enroll', 'POST', () => import('@/app/api/mobile/enroll/route')),
   route('/api/mobile/files/content', 'GET', () => import('@/app/api/mobile/files/content/route')),
   route('/api/mobile/files/list', 'GET', () => import('@/app/api/mobile/files/list/route')),
   route('/api/mobile/genui/stream', 'GET POST', () => import('@/app/api/mobile/genui/stream/route')),
+  route('/api/mobile/live-activity/register', 'POST DELETE', () => import('@/app/api/mobile/live-activity/register/route')),
+  route('/api/mobile/live-activity/sync', 'POST', () => import('@/app/api/mobile/live-activity/sync/route')),
   // Phone catalogues read current configuration without owning sessions or stores.
   route('/api/mobile/orchestrator/models', 'GET', () => import('@/app/api/mobile/orchestrator/models/route')),
   route('/api/mobile/orchestrator/openclaw-agents', 'GET', () => import('@/app/api/mobile/orchestrator/openclaw-agents/route')),
@@ -583,7 +588,9 @@ const producers = [
   route('/api/mobile/orchestrator/packets', 'GET', () => import('@/app/api/mobile/orchestrator/packets/route')),
   route('/api/mobile/pairing-discovery', 'GET', () => import('@/app/api/mobile/pairing-discovery/route')),
   route('/api/mobile/pull-requests', 'GET', () => import('@/app/api/mobile/pull-requests/route')),
+  route('/api/mobile/ripple/resolve', 'POST', () => import('@/app/api/mobile/ripple/resolve/route')),
   route('/api/mobile/search', 'GET', () => import('@/app/api/mobile/search/route')),
+  route('/api/mobile/terminal-input', 'POST', () => import('@/app/api/mobile/terminal-input/route')),
   route('/api/mobile/usage', 'GET', () => import('@/app/api/mobile/usage/route')),
   route('/api/mobile/usage/history', 'GET', () => import('@/app/api/mobile/usage/history/route')),
   // Phone source-control actions share the same handlers and device gate on both listeners.
