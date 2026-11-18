@@ -1071,5 +1071,12 @@ mod configuration_tests {
             o8_launch_core::ports::PROD_API_DEFAULT_PORT
         );
         assert_eq!(config.ws_port, o8_launch_core::ports::PROD_WS_DEFAULT_PORT);
+        assert!(!config.api_front_door && !config.next_off);
+    }
+
+    #[test]
+    fn a_bundles_server_mode_marks_reach_the_configuration() {
+        let config: super::Config = serde_json::from_value(serde_json::json!({"data_dir":"/fixture/data","server_dir":"/fixture/server","node":"","window":"/fixture/window","version":"fixture","api_front_door":true,"next_off":true})).unwrap();
+        assert!(config.api_front_door && config.next_off);
     }
 }

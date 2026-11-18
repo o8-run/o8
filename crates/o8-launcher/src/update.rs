@@ -1242,6 +1242,11 @@ pub fn bundle_version(app: &Path) -> Option<String> {
     plist_value(app, "CFBundleShortVersionString").ok()
 }
 
+/// A boolean Info.plist mark; absent or anything but `true` is off.
+pub fn bundle_flag(app: &Path, key: &str) -> bool {
+    plist_value(app, key).is_ok_and(|value| value == "true")
+}
+
 fn plist_value(app: &Path, key: &str) -> Result<String, String> {
     let output = std::process::Command::new("/usr/libexec/PlistBuddy")
         .arg("-c")
