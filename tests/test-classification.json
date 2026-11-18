@@ -9098,6 +9098,12 @@
       ]
     },
     {
+      "path": "tests/ws-retired-voice-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ws-safety-net-real-path.test.ts",
       "reasons": [
         "real-path"

@@ -2,8 +2,8 @@
  * controls the way the realtime VoiceHostBroker does (binding fields,
  * requestId receipts, one active session, decisions) and lists what it
  * admitted, so the shell test cannot pass on a looser contract. The
- * production route forwards to the hidden voice window. Keep the checks in
- * step with the deferred native voice UI fixture. The production WS broker has been removed. */
+ * deferred native UI fixture models the former hidden voice window contract.
+ * The production WS broker has been removed. */
 import type { SurfaceRoutes } from '../surface-routes';
 
 type Body = Record<string, unknown>;

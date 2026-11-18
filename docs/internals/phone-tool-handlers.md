@@ -1,5 +1,7 @@
 # Server phone tool handlers
 
+Historical reference: the phone voice HTTP routes and WS handlers have been removed. The contracts below describe the former implementation.
+
 Phone voice calls now run in the server without a webview or Rust shell (#6130). The authenticated tool route preserves the session grant and scope transform, then uses `phoneToolServer` in `src/lib/symon/execution/server.ts`. Its registry is created with `phoneToolHandler` and held on `globalThis.__o8PhoneToolServer`, so separately bundled tool and confirmation routes share the same calls. Native transport continues to forward both routes to the WS process; classic transport owns them in Next.
 
 The route overwrites `__symonSessionId` and `__symonCallId`. For a supported gated tool it awaits `PHONE_TOOL_REVIEW_BUILDERS[tool]` with scoped arguments before `start()`. Preparation failures return `tool_failed` and create no card. Request review text is ignored. Concurrent preparation is shared per session/call. Re-POST attaches before rebuilding a review and returns the original card or terminal result, even when targets have since changed.
