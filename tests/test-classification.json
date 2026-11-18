@@ -2008,6 +2008,13 @@
       ]
     },
     {
+      "path": "tests/broadcast-static-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/broadcast-voice-repetition-real-path.test.ts",
       "reasons": [
         "real-path"
