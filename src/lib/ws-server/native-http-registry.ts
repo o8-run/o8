@@ -582,6 +582,7 @@ const producers = [
   route('/api/mobile/files/content', 'GET', () => import('@/app/api/mobile/files/content/route')),
   route('/api/mobile/files/list', 'GET', () => import('@/app/api/mobile/files/list/route')),
   route('/api/mobile/genui/stream', 'GET POST', () => import('@/app/api/mobile/genui/stream/route')),
+  route('/api/mobile/issues', 'GET', () => import('@/app/api/mobile/issues/route')),
   route('/api/mobile/live-activity/register', 'POST DELETE', () => import('@/app/api/mobile/live-activity/register/route')),
   route('/api/mobile/live-activity/sync', 'POST', () => import('@/app/api/mobile/live-activity/sync/route')),
   // Phone catalogues read current configuration without owning sessions or stores.

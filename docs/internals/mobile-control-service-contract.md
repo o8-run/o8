@@ -219,3 +219,25 @@ are specific to that conversation's tools and are not device repository grants.
 The two new responses use private 15-second HTTP caches; thread and packet reads
 use private 5-second caches. All retain stable ordering from their source or
 explicit sort. These fields are additive; existing phones may ignore them.
+
+### Registered project issues
+
+`GET /api/mobile/issues` requires an operator or active paired device. The
+`repoPath` parameter selects a registered desktop project. Its GitHub remote
+determines the repository. An optional `expectedRepo` must match that remote.
+For an explicit repository link, `part=resolve&expectedRepo=owner/repo` returns
+the matching registered `repoPath` on the same computer.
+
+The list accepts `state=open|closed|all`, `page` and an optional plain-text
+`query`. Follow `nextPage` until it is null, including after a filtered page
+with no matches. A request scans up to three 30-item GitHub pages. A `number`
+selects an issue detail or a pull request destination. Issues include up to 50
+comments per page. Pass the returned `commentsCursor` as `cursor` to continue.
+The detail includes up to 100 timeline events and same-project pull request
+references. `eventsIncomplete` indicates more events or an unavailable timeline.
+
+GitHub reads use one project-bound installation authorization and fail if the
+active desktop account changes. If the managed connection is missing or does
+not cover the repository owner, the route returns 403. Pairing currently grants
+issue reads. Write permissions are false and the
+available state transitions are empty until a paired write grant exists.

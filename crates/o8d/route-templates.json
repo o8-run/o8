@@ -85,6 +85,7 @@
   "/api/mobile/genui/stream",
   "/api/mobile/history",
   "/api/mobile/inbox",
+  "/api/mobile/issues",
   "/api/mobile/live-activity/register",
   "/api/mobile/live-activity/sync",
   "/api/mobile/media",

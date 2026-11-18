@@ -40,11 +40,11 @@ export interface GitHubInstallationAuthorization {
   token: string;
 }
 
-export async function captureGitHubInstallationAuthorization(repo: string, account: GitHubAccount): Promise<GitHubInstallationAuthorization> {
+export async function captureGitHubInstallationAuthorization(repo: string, account: GitHubAccount, signal?: AbortSignal): Promise<GitHubInstallationAuthorization> {
   requireGitHubAccount(account);
-  const installation = await getInstallationForRepo(repo);
+  const installation = await getInstallationForRepo(repo, signal);
   requireGitHubAccount(account);
-  const token = await getInstallationToken(installation.id);
+  const token = await getInstallationToken(installation.id, signal);
   requireGitHubAccount(account);
   return { account, installation, token };
 }
