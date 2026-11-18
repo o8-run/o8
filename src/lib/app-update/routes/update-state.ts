@@ -1,3 +1,4 @@
+import { launcherOwnsUpdates, launcherSnapshot, launcherUnavailable } from '../launcher';
 import { recoverStoppedNativeTask } from '@/lib/app-update/native-task';
 import { NextResponse } from 'next/server';
 import { getRequestedCheckTime } from '@/lib/app-update/fresh-check';
@@ -24,12 +25,20 @@ function invalidState(code: string, message: string) {
 }
 
 export async function GET() {
+  if (launcherOwnsUpdates()) {
+    try { return NextResponse.json(await launcherSnapshot(), { headers: NO_STORE_HEADERS }); }
+    catch { return launcherUnavailable(); }
+  }
   return NextResponse.json({ ok: true, state: getAppUpdateState(), checkRequestedAt: getRequestedCheckTime(),
     applyRequestedAt: getNativeApplyRequestTime() }, { headers: NO_STORE_HEADERS });
 }
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
+  if (launcherOwnsUpdates() && !(isRecord(body) && isRecord(body.autoApply) && body.autoApply.action === 'inspect-restart')) {
+    return NextResponse.json({ ok: false, allowed: false, error: { code: 'launcher_updater_owned',
+      message: 'The launcher owns updater state and scheduling.' } }, { status: 409, headers: NO_STORE_HEADERS });
+  }
   if (isRecord(body) && isRecord(body.autoApply)) {
     try {
       return NextResponse.json(await controlAutoApply(body.autoApply), { headers: NO_STORE_HEADERS });

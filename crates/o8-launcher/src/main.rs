@@ -164,6 +164,7 @@ fn spawn(
         next_origin: format!("http://127.0.0.1:{}", config.api_port),
         ..Default::default()
     };
+    command.env("O8_LAUNCHER_SOCKET", config.data_dir.join("launcher.sock"));
     if script == "server.js" {
         environment.api(&mut command);
     } else {
