@@ -5025,6 +5025,15 @@
       ]
     },
     {
+      "path": "tests/next-shutdown-nonphone-group3-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-sidebar-real-path.test.ts",
       "reasons": [
         "child-process",

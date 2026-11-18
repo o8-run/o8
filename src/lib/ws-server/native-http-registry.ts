@@ -64,7 +64,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/v2/files/quick-docs', 'GET', () => import('@/app/api/v2/files/quick-docs/route')),
     route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
-    route('/api/panel/resource-usage', 'GET', () => import('@/app/api/panel/resource-usage/route')),
+    // POST reuses the same resource inventory and keeps its current-row/core-pid guards.
+    route('/api/panel/resource-usage', 'GET POST', () => import('@/app/api/panel/resource-usage/route')),
     route('/api/panel/serve-image', 'GET', () => import('@/app/api/panel/serve-image/route')),
     route('/api/visualizations/[id]', 'GET', () => import('@/app/api/visualizations/[id]/route')),
     route('/api/visualizations', 'POST', async () => {
