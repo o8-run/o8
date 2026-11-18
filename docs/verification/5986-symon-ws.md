@@ -1,5 +1,7 @@
 # Symon WS recovery and startup evidence
 
+Historical reference: the Symon WS implementation and its dedicated tests were removed. Paths below describe the former implementation.
+
 Measured on 2026-11-12 for [PR #5986](https://github.com/o8-run/o8/pull/5986), following the store claim from [PR #5990](https://github.com/o8-run/o8/pull/5990).
 
 ## Recovery
