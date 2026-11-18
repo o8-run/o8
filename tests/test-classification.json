@@ -8211,6 +8211,13 @@
       ]
     },
     {
+      "path": "tests/task-artifact-receipts-socket-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/task-artifacts-real-path.test.ts",
       "reasons": [
         "child-process",
