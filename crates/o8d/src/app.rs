@@ -21,6 +21,8 @@ mod input;
 mod request_counts;
 #[cfg(feature = "experimental-session-reads")]
 mod native;
+#[cfg(feature = "experimental-session-reads")]
+mod prompt_operator;
 
 pub async fn serve(
     listener: TcpListener,

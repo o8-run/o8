@@ -1,4 +1,4 @@
-//! Native saved reads after a per-request admission by the existing TS gates.
+//! Saved reads: native prompt operator gate; other reads retain TS admission.
 use crate::http;
 use axum::{body::to_bytes, http::StatusCode};
 use std::{path::PathBuf, sync::OnceLock, time::Duration};
@@ -87,6 +87,10 @@ pub(super) async fn serve(
     if method == "GET" && length != 0 {
         return Ok(Outcome::Proxy);
     }
+    let native_operator = std::env::var("O8_API_FRONT_DOOR").as_deref() == Ok("1")
+        && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1")
+        && method == "GET" && super::prompt_operator::eligible(socket, header, path);
+    let (defaults_context, redaction) = if native_operator { (None, None) } else {
     // Admit the original path/method/headers through production middleware and
     // the queue's in-handler gate. Never cache principal or credential decisions.
     let mut request = admission_client()?.request(
@@ -160,6 +164,8 @@ pub(super) async fn serve(
                 let bytes = base64::engine::general_purpose::STANDARD.decode(raw).ok()?;
                 serde_json::from_slice(&bytes).ok()
             })
+    };
+        (defaults_context, redaction)
     };
     // Only after admission consume bytes. A refusal never gets native access.
     socket

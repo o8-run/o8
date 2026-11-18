@@ -264,6 +264,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         "/api/repo-spec" => repo_spec::read(store, params),
         "/api/prompt-library" => prompt_library::read(store, params),
         "/api/cortex/directives" => directives::read(store, params),
+        path if path.starts_with("/api/prompt-library/") => prompt_library::single(store, path),
         "/api/panel/file-io" | "/api/panel/file-asset" | "/api/panel/serve-image" | "/api/mobile/media" => file_assets::read(store, path, params),
         "/api/worktrees/diff" | "/api/worktrees/diff-summary" | "/api/panel/file-diff" => git_diff::read(store, path, params),
         "/api/panel/branches"
