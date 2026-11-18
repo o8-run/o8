@@ -370,5 +370,17 @@
     "state": "rust-with-fallback",
     "test": "tests/o8d-prompt-library-real-path.test.ts",
     "owned": true
+  },
+  {
+    "path": "/api/lanes/[id]/diff",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "redaction": "viewer",
+    "fallback": true,
+    "reason": "Native: materialized lane review diff, revision, byte bounding and viewer redaction after per-request Node lane/worker/target and Git-directory authority. Node retains canonical legacy remote-base refresh and all writes. Immutable sources, unresolved targets, git or grant errors, unsupported configuration/encodings and unsafe metadata defer in full.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-lane-review-diff-real-path.test.ts"
   }
 ]

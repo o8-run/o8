@@ -9,6 +9,10 @@ use std::io::Read;
 mod sources;
 use sources::sanitize;
 
+pub(super) fn sanitize_review(root: &str, diff: &str, policy: &ViewerRedaction) -> Result<String, ()> {
+    sanitize(root, diff, policy)
+}
+
 // Commit detail patches contain complete index identities. Refuse missing or
 // ambiguous source objects so TS can apply its ref-based fallback exactly.
 pub(super) fn sanitize_commit(root: &str, diff: &str, policy: &ViewerRedaction) -> Result<String, ()> {
