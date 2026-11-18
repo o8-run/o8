@@ -63,6 +63,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/v2/files', 'GET POST', () => import('@/app/api/v2/files/route')),
     route('/api/v2/files/quick-docs', 'GET', () => import('@/app/api/v2/files/quick-docs/route')),
     route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
+    route('/api/panel/search', 'GET', () => import('@/app/api/panel/search/route')),
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
     route('/api/panel/resource-usage', 'GET', () => import('@/app/api/panel/resource-usage/route')),
     route('/api/panel/serve-image', 'GET', () => import('@/app/api/panel/serve-image/route')),
@@ -530,6 +531,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/lanes/discard-orphaned', 'POST', () => import('@/app/api/lanes/discard-orphaned/route')),
     route('/api/lanes/[id]/diff', 'GET', () => import('@/app/api/lanes/[id]/diff/route')),
     route('/api/worktrees/diff', 'GET', () => import('@/app/api/worktrees/diff/route')),
+    route('/api/worktrees/diff-summary', 'GET', () => import('@/app/api/worktrees/diff-summary/route')),
     route('/api/review/last-turn', 'GET', () => import('@/app/api/review/last-turn/route')),
     route('/api/review/push', 'POST', () => import('@/lib/review/push-route')),
     route('/api/review/commit', 'POST', () => import('@/app/api/review/commit/route')),
@@ -555,21 +557,29 @@ const producers = [
   route('/api/devices/agent', 'POST', () => import('@/lib/devices/agent-route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
+  route('/api/setup/orchestrator-backends', 'GET', () => import('@/app/api/setup/orchestrator-backends/route')),
   // Worker-dispatch readiness: dispatch-readiness.ts probes it on the API base with the operator
   // ws-token before every worker launch, so with Next stopped every dispatch was held. No device,
   // worker or spectator grant; the handler reads nothing and answers a fixed body. (#5243)
   route('/api/setup/status', 'GET', () => import('@/app/api/setup/status/route')),
-  // Phone reads reuse the existing TypeScript handlers in the WS owner.
+  // Phone calls reuse the existing TypeScript handlers in the WS owner.
   route('/api/mobile/activity', 'GET', () => import('@/app/api/mobile/activity/route')),
   route('/api/mobile/automations', 'GET', () => import('@/app/api/mobile/automations/route')),
+  route('/api/mobile/automations/[id]/enabled', 'POST', () => import('@/app/api/mobile/automations/[id]/enabled/route')),
+  route('/api/mobile/automations/[id]/run', 'POST', () => import('@/app/api/mobile/automations/[id]/run/route')),
   route('/api/mobile/diff-comments', 'GET', () => import('@/app/api/mobile/diff-comments/route')),
   route('/api/mobile/files/content', 'GET', () => import('@/app/api/mobile/files/content/route')),
   route('/api/mobile/files/list', 'GET', () => import('@/app/api/mobile/files/list/route')),
+  route('/api/mobile/genui/stream', 'GET POST', () => import('@/app/api/mobile/genui/stream/route')),
   // Phone catalogues read current configuration without owning sessions or stores.
   route('/api/mobile/orchestrator/models', 'GET', () => import('@/app/api/mobile/orchestrator/models/route')),
   route('/api/mobile/orchestrator/openclaw-agents', 'GET', () => import('@/app/api/mobile/orchestrator/openclaw-agents/route')),
   route('/api/mobile/orchestrator/openclaw-availability', 'GET', () => import('@/app/api/mobile/orchestrator/openclaw-availability/route')),
   route('/api/mobile/orchestrator/packets', 'GET', () => import('@/app/api/mobile/orchestrator/packets/route')),
+  route('/api/mobile/pairing-discovery', 'GET', () => import('@/app/api/mobile/pairing-discovery/route')),
+  route('/api/mobile/pull-requests', 'GET', () => import('@/app/api/mobile/pull-requests/route')),
+  route('/api/mobile/search', 'GET', () => import('@/app/api/mobile/search/route')),
+  route('/api/mobile/usage', 'GET', () => import('@/app/api/mobile/usage/route')),
   route('/api/mobile/usage/history', 'GET', () => import('@/app/api/mobile/usage/history/route')),
   // Phone source-control actions share the same handlers and device gate on both listeners.
   route('/api/mobile/source-control/status', 'GET', () => import('@/app/api/mobile/source-control/status/route')),
