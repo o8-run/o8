@@ -325,6 +325,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // rest of /api/panel/* (not allowlisted), so both the read and the write are
     // operator-ws-token-only, whatever the caller's address, as on Next. The POST body carries only a boolean; no credential in the response. (#5243)
     route('/api/panel/connect/attach', 'GET POST', () => import('@/app/api/panel/connect/attach/route')),
+    // Pairing settings reuse the saved file and the WS-owned port resolver.
+    // The handler keeps its packaged, attested-loopback operator check.
+    route('/api/panel/mobile-network', 'GET POST', () => import('@/app/api/panel/mobile-network/route')),
     // Mobile pairing config (Settings > Paired devices QR). GET only. No handler-level auth beyond the
     // panelGateMiddleware operator gate PLUS a device-GET capability (DEVICE_CAPABILITIES), so over
     // native an operator OR an enrolled-device bearer passes; everything else 401. The handler is
