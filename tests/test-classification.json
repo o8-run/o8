@@ -5470,6 +5470,16 @@
       ]
     },
     {
+      "path": "tests/o8d-file-assets-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-file-content-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -4,10 +4,10 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 
 const READ_LIMIT: u64 = 4 * 1024 * 1024;
-struct FileError {
-    code: &'static str,
-    message: &'static str,
-    status: StatusCode,
+pub(super) struct FileError {
+    pub(super) code: &'static str,
+    pub(super) message: &'static str,
+    pub(super) status: StatusCode,
 }
 impl FileError {
     fn new(code: &'static str, message: &'static str, status: StatusCode) -> Self {
@@ -37,11 +37,17 @@ fn lexical(root: &Path, raw: &str) -> Option<PathBuf> {
         Some(target)
     }
 }
-fn open_bytes(
+pub(super) struct OpenedRead {
+    pub(super) bytes: Vec<u8>,
+    pub(super) size: u64,
+    pub(super) mtime_ms: f64,
+}
+pub(super) fn open_bytes(
     root: &str,
     raw: &str,
     preview: Option<u64>,
-) -> Result<(Vec<u8>, u64), Option<FileError>> {
+    read_limit: u64,
+) -> Result<OpenedRead, Option<FileError>> {
     #[cfg(target_os = "linux")]
     {
         use std::os::{
@@ -57,7 +63,8 @@ fn open_bytes(
             )));
         }
         let root = Path::new(root);
-        if !root.is_absolute()
+        if !root.is_dir()
+            || !root.is_absolute()
             || root.components().any(|c| {
                 matches!(
                     c,
@@ -123,7 +130,7 @@ fn open_bytes(
             return Err(None);
         }
         let limit = preview.map(|cap| cap.min(stat.len())).unwrap_or(stat.len());
-        if limit > READ_LIMIT {
+        if limit > read_limit {
             return Err(None);
         }
         let mut bytes = Vec::new();
@@ -138,11 +145,15 @@ fn open_bytes(
         {
             return Err(None);
         }
-        Ok((bytes, stat.len()))
+        Ok(OpenedRead {
+            bytes,
+            size: stat.len(),
+            mtime_ms: stat.mtime() as f64 * 1000.0 + stat.mtime_nsec() as f64 / 1_000_000.0,
+        })
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (root, raw, preview);
+        let _ = (root, raw, preview, read_limit);
         Err(None)
     }
 }
@@ -196,7 +207,7 @@ pub(super) fn read(store: &ReadContext<'_>, path: &str, params: &Params) -> Resp
         } else {
             None
         };
-        let (bytes, size) = match open_bytes(&root, &relative, preview) {
+        let opened = match open_bytes(&root, &relative, preview, READ_LIMIT) {
             Ok(value) => value,
             Err(None) => return Err(()),
             Err(Some(error)) => {
@@ -212,7 +223,8 @@ pub(super) fn read(store: &ReadContext<'_>, path: &str, params: &Params) -> Resp
                 )
             }
         };
-        let content = String::from_utf8_lossy(&bytes).into_owned();
+        let size = opened.size;
+        let content = String::from_utf8_lossy(&opened.bytes).into_owned();
         // The shared exact redaction domain is ASCII; UTF-8 normalization defers safely.
         if !content.is_ascii() {
             return Err(());

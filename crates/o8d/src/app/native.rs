@@ -203,6 +203,9 @@ async fn write_response(
         status.canonical_reason().unwrap_or("Response")
     );
     for (name, value) in response.headers() {
+        // The socket writer computes framing from the final body. Byte viewers
+        // already carry Content-Length; never emit a duplicate framing header.
+        if name == axum::http::header::CONTENT_LENGTH { continue; }
         output.push_str(&format!("{name}: {}\r\n", value.to_str().map_err(|_| ())?));
     }
     let body = to_bytes(response.into_body(), 16 * 1024 * 1024)
