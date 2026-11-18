@@ -25,9 +25,10 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Network projections remain TypeScript-owned.",
-    "state": "red",
-    "test": "tests/o8d-native-route-table-real-path.test.ts"
+    "reason": "Per-request Node admission excludes network threads. Projection, unsupported records and every mutation remain TypeScript-owned.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-chat-history-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/orchestrator/composer-queue",

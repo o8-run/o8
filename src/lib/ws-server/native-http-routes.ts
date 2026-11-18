@@ -136,6 +136,8 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
             }
           } catch { fileScopeDenied = true; }
         }
+        const deferChatHistory = url.pathname === '/api/v2/chat-history' && req.method === 'GET'
+          && !(await import('./native-chat-history-admission')).nativeChatHistoryAllowed(url.searchParams.get('tabId'));
         const defaultsContext = {
           fileContentScope, fileReadTarget, fileAssetTarget, repoSpecTarget,
           gitRefsCommitRoot: viewerRoute && match.route.path === '/api/panel/commits/[hash]'
@@ -212,14 +214,14 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
           ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
         };
-        response = denied ?? projectDenied ?? ((fileScopeDenied || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+        response = denied ?? projectDenied ?? ((fileScopeDenied || deferChatHistory || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
           'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
         } }));
         if (viewerRoute && response.status === 204) {
           const grant = req.headers['x-o8d-redaction'] === 'viewer/1' ? viewerRedactionGrant(defaultsContext) : null;
           response = grant === null ? new Response(null, { status: 409 }) : new Response(grant, { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
         }
-        admission = (!viewerRoute || response.status === 200) && !denied && !projectDenied && !fileScopeDenied && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
+        admission = (!viewerRoute || response.status === 200) && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
       }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });

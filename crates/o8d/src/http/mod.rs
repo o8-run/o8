@@ -10,6 +10,8 @@ mod git_diff;
 mod git_diff_redaction;
 pub use git_diff_redaction::ViewerRedaction;
 mod chat;
+mod chat_context;
+mod chat_context_json;
 mod chat_list;
 mod mobile_inbox;
 mod review_workspace;
@@ -243,7 +245,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
             Err(_) => unavailable(),
         },
         "/api/mobile/history" => chat::transcript(store, params),
-        "/api/v2/chat-history" => chat::context(store, params),
+        "/api/v2/chat-history" => chat_context::context(store, params),
         "/api/v2/chat-history/list" => chat_list::read(store, params),
         "/api/orchestrator/composer-queue" => queue::read(store, params),
         "/api/orchestrator/state" => {
