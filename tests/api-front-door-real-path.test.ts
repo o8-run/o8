@@ -7,6 +7,7 @@ import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { O8_WEB_MACHINE_SURFACE } from '../src/lib/connect/web-machine-surface';
 import { bundleServers } from '../scripts/lib/server-bundles.mjs';
 import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
 import WebSocket, { WebSocketServer } from 'ws';
@@ -53,6 +54,9 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
       res.on('close', () => abortedUpstream?.()); return;
     }
     if (req.url === '/fixture/redirect') { res.writeHead(302, { Location: '/fixture/destination' }).end(); return; }
+    if (req.url === '/fixture/redirect-absolute') {
+      res.writeHead(302, { Location: `http://${req.headers.host}/fixture/destination?public=1` }).end(); return;
+    }
     if (req.url === '/fixture/stream') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: first\n\n');
       setTimeout(() => res.end('data: second\n\n'), 20); return;
@@ -61,7 +65,8 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     if (req.method === 'OPTIONS') { res.writeHead(204, { Allow: 'GET, POST' }).end(); return; }
     if (req.url === '/api/fixture/peer') {
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ address: req.headers['x-o8-client-addr'],
-        relay: req.headers['x-o8-relay-forward'] ?? null, bridge: req.headers['x-o8d-bridge'] ?? null })); return;
+        relay: req.headers['x-o8-relay-forward'] ?? null, surface: req.headers['x-o8-relay-surface'] ?? null,
+        peer: req.headers['x-o8d-peer'] ?? null, bridge: req.headers['x-o8d-bridge'] ?? null })); return;
     }
     res.writeHead(207, { 'Content-Type': 'application/json', 'Set-Cookie': ['fixture-a=1; HttpOnly', 'fixture-b=2; SameSite=Strict'] });
     res.end(JSON.stringify(record));
@@ -127,15 +132,15 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     expect(requests).toEqual([]);
     expect(await registered.json()).toMatchObject({ apiPort, wsPort: apiPort });
     if (rust) {
-      // Anonymous loopback identity intentionally falls back: the admission
-      // hop cannot assert loopback authority. Prove native using operator auth.
+      // Front-door takeover keeps native readers off by default (#6453),
+      // including authenticated requests through the real o8d bridge.
       const admitted = await fetch(origin + '/api/setup/identity', { headers: { authorization: 'Bearer ' + token } });
-      expect(admitted.headers.get('x-o8d-native-session-read')).toBe('1');
+      expect(admitted.headers.get('x-o8d-native-session-read')).toBe(null);
       expect(await admitted.json()).toMatchObject({ apiPort, wsPort: apiPort });
     }
     const wsInfo = await fetch(origin + '/api/panel/ws-info', { headers: { authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(10_000) });
     expect(wsInfo.status).toBe(200);
-    if (rust) expect(wsInfo.headers.get('x-o8d-native-session-read')).toBe('1');
+    if (rust) expect(wsInfo.headers.get('x-o8d-native-session-read')).toBe(null);
     expect(await wsInfo.json()).toMatchObject({ wsPort: apiPort });
     const websocket = new WebSocket(`ws://127.0.0.1:${apiPort}/ws?token=${token}`);
     const wsDeadline = setTimeout(() => websocket.terminate(), 30_000);
@@ -158,6 +163,9 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     }
     const redirect = await fetch(origin + '/fixture/redirect', { redirect: 'manual' });
     expect([redirect.status, redirect.headers.get('location')]).toEqual([302, '/fixture/destination']);
+    const absoluteRedirect = await fetch(origin + '/fixture/redirect-absolute', { redirect: 'manual' });
+    expect([absoluteRedirect.status, absoluteRedirect.headers.get('location')])
+      .toEqual([302, origin + '/fixture/destination?public=1']);
     const head = await fetch(origin + '/fixture/head', { method: 'HEAD' });
     expect([head.status, head.headers.get('content-length'), await head.text()]).toEqual([202, '7', '']);
     const options = await fetch(origin + '/fixture/options', { method: 'OPTIONS' });
@@ -179,7 +187,7 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
       { 'x-o8-client-addr': '127.0.0.9', 'x-o8-relay-forward': '1', 'x-o8d-bridge': 'forged' }] as Record<string, string>[]) {
       const response = await fetch(origin + '/api/fixture/peer', { headers });
       expect(await response.json()).toEqual({ address: headers['x-o8-relay-forward'] ? 'o8-relay-forward' : '127.0.0.1',
-        relay: headers['x-o8-relay-forward'] ? '1' : null, bridge: null });
+        relay: headers['x-o8-relay-forward'] ? '1' : null, surface: null, peer: null, bridge: null });
     }
     expect((await fetch(origin + '/api/setup/status')).status).toBe(401);
     expect((await fetch(origin + '/api/setup/status', { headers: { authorization: 'Bearer wrong' } })).status).toBe(401);
@@ -190,6 +198,7 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     for (const relay of [false, true]) {
       const remoteCall = (path: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
         const call = request(origin + path, { localAddress: remoteAddress, headers: {
+          'x-o8-relay-surface': O8_WEB_MACHINE_SURFACE,
           'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
           ...(relay ? { 'x-o8-relay-forward': '1' } : {}),
         } }, response => {
@@ -200,7 +209,7 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
       expect((await remoteCall('/api/setup/status')).status).toBe(401);
       const fallback = await remoteCall('/api/fixture/peer');
       expect(fallback.status).toBe(200);
-      expect(JSON.parse(fallback.body)).toEqual({ address: remoteAddress, relay: '1', bridge: null });
+      expect(JSON.parse(fallback.body)).toEqual({ address: remoteAddress, relay: '1', surface: null, peer: null, bridge: null });
     }
     const badHost = await new Promise<number | undefined>((resolve, reject) => {
       const call = request(origin + '/api/fixture/unknown', { headers: { Host: 'untrusted.invalid' } }, response => {
