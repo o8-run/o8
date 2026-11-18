@@ -5711,6 +5711,14 @@
       ]
     },
     {
+      "path": "tests/o8d-rust-projects-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-rust-review-workspace-real-path.test.ts",
       "reasons": [
         "child-process",

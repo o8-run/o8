@@ -148,5 +148,55 @@
     "reason": "TypeScript owns missing/derived ID creation, failed-write cached IDs and resolver cache changes; unsupported snapshot or saved state defers",
     "state": "rust-with-fallback",
     "test": "tests/o8d-rust-startup-real-path.test.ts"
+  },
+  {
+    "path": "/api/panel/repos",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-projects-real-path.test.ts"
+  },
+  {
+    "path": "/api/panel/projects",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-projects-real-path.test.ts"
+  },
+  {
+    "path": "/api/projects",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-projects-real-path.test.ts"
+  },
+  {
+    "path": "/api/panel/repo-icon",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-projects-real-path.test.ts"
+  },
+  {
+    "path": "/api/projects/[id]",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-projects-real-path.test.ts"
   }
 ]

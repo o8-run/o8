@@ -74,14 +74,21 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     if (gate.headers.get('x-middleware-next') !== '1') response = gate;
     else if (authenticatedBridge && req.headers['x-o8d-session-read'] === 'authorize') {
       // Admission probes must never execute a writer when disabled or unmatched.
-      if (!nativeSessionReadsEnabled()
-        || !nativeRoutes.some(route => route.path === url.pathname && route.methods.includes(req.method ?? 'GET'))) {
+      const retiredProjectPath = ['/api/projects/context', '/api/projects/dismissed-suggestions'].includes(url.pathname);
+      if (!nativeSessionReadsEnabled() || retiredProjectPath
+        || !nativeRoutes.some(route => route.path === match.route.path && route.methods.includes(req.method ?? 'GET'))) {
         response = new Response(null, { status: 409 });
       } else {
         // Admission only. Keep the middleware and queue's existing defense-in-depth
         // gate authoritative; the bridge credential cannot authorize a principal.
-        const denied = req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys'].includes(url.pathname)
+        const denied = req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys', '/api/projects'].includes(url.pathname) || match.route.path === '/api/projects/[id]'
           ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
+        let projectDenied: Response | null = null;
+        if (url.pathname === '/api/panel/repo-icon') {
+          const principal = (await import('@/lib/auth/principal')).resolveRequestPrincipal(new NextRequest(url, init));
+          if (principal !== 'operator' && principal !== 'worker') projectDenied = Response.json({ error: 'Repository icon access requires an operator or dispatched-worker credential.' }, { status: 403 });
+        }
+        const projectRegistryRead = ['/api/panel/repos', '/api/panel/projects', '/api/projects', '/api/panel/repo-icon'].includes(url.pathname);
         // The settings handler's window-owner hop is a refusal floor. Defer it
         // to the original handler even when the public bearer gate passed.
         const deferSettingsHop = url.pathname === '/api/panel/operator-defaults'
@@ -95,6 +102,10 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         const defaultsContext = {
           reviewWorkspaceUnselected,
           mobileInbox,
+          projectIconCachePresent: ['/api/panel/repos', '/api/panel/repo-icon'].includes(url.pathname) && (await import('@/lib/repos/project-icon-resolver')).projectIconResolver.hasFreshEntries(),
+          projectRepoDigest: projectRegistryRead ? await (await import('@/lib/repos/registry')).nativeRepoRegistryFingerprint() : null,
+          projectReadinessCached: url.pathname === '/api/panel/repos' && (await import('@/lib/repos/readiness')).hasCachedRepoReadiness(),
+          projectsCwd: process.cwd(), projectsHome: homedir(),
           operatorEnvClean: [
             'O8_ACTION_EFFORT',
             'O8_ACTION_MODEL',
@@ -157,10 +168,10 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
           ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
         };
-        response = denied ?? ((deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+        response = denied ?? projectDenied ?? ((deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
           'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
         } }));
-        admission = !denied && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
+        admission = !denied && !projectDenied && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
       }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });
