@@ -60,7 +60,8 @@ pub(super) async fn serve(
     if !enabled() && !(route["owned"] == true && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1")) { return Ok(Outcome::Proxy); }
     let viewer = route["redaction"] == "viewer";
     let composer_queue = route["admission"] == "composer-queue";
-    let body_grant = viewer || composer_queue;
+    let thread_list = route["composition"] == "mobile-threads/1";
+    let body_grant = viewer || composer_queue || thread_list;
     let mut length = None;
     for (name, value) in header
         .lines()
@@ -194,7 +195,93 @@ pub(super) async fn serve(
     if response.status() == StatusCode::SERVICE_UNAVAILABLE {
         return Ok(Outcome::Replay(replay));
     }
+    let response = if thread_list && response.headers().contains_key("x-o8d-thread-pieces") {
+        match compose_threads(target, header, upstream, key, response).await {
+            Ok(response) => response,
+            Err(()) => return Ok(Outcome::Replay(replay)),
+        }
+    } else {
+        response
+    };
     write_response(socket, response, count).await
+}
+
+/// One route-specific composition hop on the existing authenticated backhaul.
+/// No public API, new client, policy cache or Node local-stage recomputation.
+async fn compose_threads(
+    target: &str,
+    header: &str,
+    upstream: &str,
+    key: &str,
+    response: axum::response::Response,
+) -> Result<axum::response::Response, ()> {
+    let body = to_bytes(response.into_body(), 8 * 1024 * 1024)
+        .await
+        .map_err(|_| ())?;
+    let mut request = admission_client()?.post(format!("http://{upstream}{target}"));
+    for (name, value) in header
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+    {
+        let lower = name.to_ascii_lowercase();
+        if lower.starts_with("x-o8d-")
+            || [
+                "connection",
+                "content-length",
+                "transfer-encoding",
+                "upgrade",
+                "expect",
+                "content-type",
+            ]
+            .contains(&lower.as_str())
+        {
+            continue;
+        }
+        request = request.header(name, value.trim());
+    }
+    let mut composed = request
+        .header("x-o8d-bridge", key)
+        .header("x-o8d-peer", "unverified-proxy")
+        .header("x-o8d-session-read", "compose-threads/1")
+        .header("content-type", "application/json")
+        .timeout(Duration::from_secs(60))
+        .body(body)
+        .send()
+        .await
+        .map_err(|_| ())?;
+    if composed.status() != StatusCode::OK {
+        return Err(());
+    }
+    let mut response = axum::response::Response::builder().status(composed.status());
+    for (name, value) in composed.headers() {
+        if [
+            "connection",
+            "content-length",
+            "transfer-encoding",
+            "keep-alive",
+            "upgrade",
+        ]
+        .contains(&name.as_str())
+        {
+            continue;
+        }
+        response = response.header(name, value);
+    }
+    let mut body = Vec::new();
+    loop {
+        match composed.chunk().await {
+            Ok(Some(chunk)) if body.len() + chunk.len() <= 16 * 1024 * 1024 => {
+                body.extend_from_slice(&chunk)
+            }
+            Ok(None) => break,
+            _ => return Err(()),
+        }
+    }
+    response
+        .header("x-o8d-local-stage", "threads/1")
+        .body(axum::body::Body::from(body))
+        .map_err(|_| ())
 }
 
 async fn write_response(
@@ -204,10 +291,13 @@ async fn write_response(
 ) -> Result<Outcome, ()> {
     let status = response.status();
     let mut output = format!(
-        "HTTP/1.1 {} {}\r\nConnection: close\r\nx-o8d-native: 1\r\nx-o8d-native-session-read: 1\r\n",
+        "HTTP/1.1 {} {}\r\nConnection: close\r\n",
         status.as_u16(),
         status.canonical_reason().unwrap_or("Response")
     );
+    if !response.headers().contains_key("x-o8d-local-stage") {
+        output.push_str("x-o8d-native: 1\r\nx-o8d-native-session-read: 1\r\n");
+    }
     for (name, value) in response.headers() {
         // The socket writer computes framing from the final body. Byte viewers
         // already carry Content-Length; never emit a duplicate framing header.

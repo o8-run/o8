@@ -162,7 +162,7 @@ export function repairFlippedOrchestratorTranscripts(): void {
   repairFlippedTranscriptHistory(ORCHESTRATOR_HISTORY_DIR, writeHistoryRecord);
 }
 let historyReady = false;
-function ensureHistoryReady(): void {
+export function ensureHistoryReady(): void {
   if (historyReady) return;
   historyReady = true;
   repairFlippedOrchestratorTranscripts();

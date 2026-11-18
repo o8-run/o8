@@ -2,10 +2,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { startParityReference } from './fixtures/ws-parity-server';
 import { beforeAll, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
-import { firstDifference, normalize, seedSessionFixture, send, startSessionServer } from '../scripts/o8d/parity';
+import { firstDifference, normalize, seedSessionFixture, send } from '../scripts/o8d/parity';
 
 const targetDir = join(process.cwd(), 'crates/o8d/target/session-reads');
 const binary = process.env.O8D_TEST_BINARY ?? process.env.O8D_BINARY ?? join(targetDir, 'debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d');
@@ -14,9 +15,20 @@ beforeAll(async () => {
   await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-session-reads', '--target-dir', targetDir],
     { maxBuffer: 64 * 1024 * 1024 });
 }, 900_000);
+async function startFixture(directory: string, native: boolean, binary: string) {
+  const server = await startParityReference({ directory, nativeHttp: true, o8d: native, nativeSessionReads: native, binary,
+    preload: resolve('tests/fixtures/o8d-thread-list-preload.cjs') });
+  await server.stopNext();
+  return { ...server, origin: server.url.replace('ws:', 'http:').replace('/ws', '') };
+}
+async function localSend(server: Awaited<ReturnType<typeof startFixture>>, path: string) {
+  const response = await fetch(server.origin + path, { headers: { authorization: `Bearer ${server.token}` } });
+  return { status: response.status, body: await response.json(), native: response.headers.get('x-o8d-native') === '1',
+    localStage: response.headers.get('x-o8d-local-stage') === 'threads/1' };
+}
 it('keeps linked-work key presence and the chosen machine name through the public socket', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-thread-projection-')));
-  let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
+  let server: Awaited<ReturnType<typeof startFixture>> | undefined;
   try {
     await seedSessionFixture(directory);
     writeFileSync(join(directory, 'computer-name'), 'Fixture computer\nignored line');
@@ -26,25 +38,26 @@ it('keeps linked-work key presence and the chosen machine name through the publi
       }));
     }
     const path = '/api/mobile/orchestrator/threads?limit=500';
-    server = await startSessionServer(directory, false, binary);
+    server = await startFixture(directory, false, binary);
     const paths = [path, `${path}&offset=500`, `${path}&backend=invalid`, `${path}&archived=1`];
     const expectedResponses = [];
     for (const requestPath of paths) expectedResponses.push(await send(server, requestPath));
     const expected = expectedResponses[0];
     await server.stop(); server = undefined;
-    server = await startSessionServer(directory, true, binary);
-    // The bridge cached/sent the original name at launch. Changing the file
-    // makes this fail if O8D_MACHINE_DISPLAY_NAME is omitted from the child env.
+    server = await startFixture(directory, true, binary);
+    // Node cached the original choice at launch. The per-request grant must
+    // carry that authority even after the saved name changes.
     writeFileSync(join(directory, 'computer-name'), 'Different saved computer');
-    const actual = await send(server, path);
-    expect(actual.native).toBe(true);
+    const actual = await localSend(server, path);
+    expect(actual.localStage).toBe(true);
+    expect(actual.native).toBe(false);
     expect(firstDifference(normalize(expected.body), normalize(actual.body))).toBeNull();
     const body = actual.body as { threads: Array<Record<string, unknown>>; updatedAt: string | null };
     expect(body.updatedAt).toBe(body.threads.map(thread => thread.lastMessageAt as string).sort().at(-1) ?? null);
     expect(Object.keys(body).sort()).toMatchSnapshot('mobile thread envelope keys');
     for (let index = 1; index < paths.length; index++) {
-      const response = await send(server, paths[index]);
-      expect(response.native).toBe(true);
+      const response = await localSend(server, paths[index]);
+      expect(response.native || response.localStage).toBe(true);
       expect(firstDifference(normalize(expectedResponses[index].body), normalize(response.body))).toBeNull();
       if (index === 1) expect(response.body).toEqual({ threads: [], updatedAt: null });
       if (index === 2) expect(response.body).toEqual({ threads: [] });
@@ -63,24 +76,28 @@ it('keeps linked-work key presence and the chosen machine name through the publi
   } finally { await server?.stop(); rmSync(directory, { recursive: true, force: true }); }
 }, 180_000);
 
-it('keeps null linkage when storage is absent and defers durable PR links to TypeScript', async () => {
+it('keeps null linkage on storage refusal and composes durable PR links with the Node authority', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-thread-linkage-')));
-  let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
+  let server: Awaited<ReturnType<typeof startFixture>> | undefined;
   try {
     await seedSessionFixture(directory);
     const path = '/api/mobile/orchestrator/threads?limit=500';
-    server = await startSessionServer(directory, true, binary);
+    writeFileSync(join(directory, 'thread-list-control.json'), JSON.stringify({ prThrows: true }));
+    server = await startFixture(directory, true, binary);
     const db = new Database(join(directory, 'cortex-ide.db'));
     try {
       db.prepare(`INSERT INTO conversation_pr_context
         (thread_id, host, repository_id, pull_request_id, number, repository_name, kind, source, created_at)
         VALUES (?, 'github.com', 1, 10, 7, 'fixture/repository', 'context', 'operator', '2026-10-01T00:00:00.000Z')`).run('thoughts-review');
-      // The saved mirror cannot reproduce the live broker fields. A durable
-      // association must never receive a native marker, even if the broker fails.
-      expect((await send(server, path)).native).toBe(false);
+      // The local stage can read associations, while the Node broker still
+      // supplies live fields. A broker failure leaves those fields absent.
+      const linked = await localSend(server, path);
+      expect(linked.localStage).toBe(true);
+      expect(linked.native).toBe(false);
+      expect(linked.body.threads.find((row: { id: string }) => row.id === 'thoughts-review').linkedWork.pullRequests.total).toBe(1);
       db.exec('DROP TABLE conversation_pr_context');
       const absent = await send(server, path);
-      expect(absent.native).toBe(true);
+      expect(absent.native).toBe(false);
       const threads = (absent.body as { threads: Array<Record<string, unknown>> }).threads;
       expect(threads.length).toBeGreaterThan(0);
       for (const thread of threads) expect(thread.linkedWork).toBeNull();

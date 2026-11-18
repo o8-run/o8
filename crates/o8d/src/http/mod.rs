@@ -10,6 +10,9 @@ mod git_diff;
 mod git_diff_redaction;
 pub use git_diff_redaction::ViewerRedaction;
 mod chat;
+mod thread_list;
+mod thread_list_projection;
+mod thread_list_parked;
 mod chat_context;
 mod mobile_history;
 mod mobile_lane_events;
@@ -222,6 +225,7 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
         // This listener is --experimental-http: it authenticates directly and
         // has no admission backhaul. The app/native dispatch always uses true.
         if path == "/api/orchestrator/composer-queue" { queue::read(&read, &params, false) }
+        else if path == "/api/mobile/orchestrator/threads" { match chat::threads(&read,&params) { Ok(v)=>reply(StatusCode::OK,v), Err(())=>unavailable() } }
         else { dispatch(&read, &path, &params, "GET", &[]) }
     })
         .await
@@ -249,10 +253,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         }
         path if git_refs::is_commit(path) => git_refs::commit(store, path),
         "/api/runtime/inventory" => unavailable(),
-        "/api/mobile/orchestrator/threads" => match chat::threads(store, params) {
-            Ok(v) => reply(StatusCode::OK, v),
-            Err(_) => unavailable(),
-        },
+        "/api/mobile/orchestrator/threads" => thread_list::read(store, params),
         "/api/mobile/history" => mobile_history::transcript(store, params),
         "/api/v2/chat-history" => chat_context::context(store, params),
         "/api/v2/chat-history/list" => chat_list::read(store, params),
@@ -383,8 +384,8 @@ pub fn native_request_viewer(directory: PathBuf, database: PathBuf, path: &str, 
     };
     if store.database().ok().is_some_and(|db| {
         db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM bot_network_threads WHERE ? = '/api/mobile/orchestrator/threads' OR thread_id = ?)",
-            [path, id], |r| r.get::<_, bool>(0),
+            "SELECT EXISTS(SELECT 1 FROM bot_network_threads WHERE thread_id = ?)",
+            [id], |r| r.get::<_, bool>(0),
         ).unwrap_or(false)
     }) {
         return unavailable();
