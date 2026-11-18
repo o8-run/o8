@@ -113,9 +113,14 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         let fileContentScope: { repoRoot: string } | undefined;
         let fileReadTarget: { root: string; relativePath: string } | undefined;
         let fileAssetTarget: Awaited<ReturnType<typeof import('@/lib/files/asset-scope').nativeAssetTarget>>;
+        let repoSpecTarget: ReturnType<typeof import('@/lib/o8md/read-scope').nativeSpecReadTarget> | undefined;
         if (viewerRoute && !denied && !projectDenied) {
           try {
             const workspace = url.searchParams.get('workspace');
+            if (url.pathname === '/api/repo-spec') {
+              repoSpecTarget = (await import('@/lib/o8md/read-scope')).nativeSpecReadTarget(new NextRequest(url, init));
+              if (repoSpecTarget === null) fileScopeDenied = true;
+            }
             if (['/api/panel/file-io', '/api/panel/file-asset', '/api/panel/serve-image', '/api/mobile/media'].includes(url.pathname)) {
               fileAssetTarget = await (await import('@/lib/files/asset-scope')).nativeAssetTarget(new NextRequest(url, init));
               if (fileAssetTarget === null) fileScopeDenied = true;
@@ -132,7 +137,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           } catch { fileScopeDenied = true; }
         }
         const defaultsContext = {
-          fileContentScope, fileReadTarget, fileAssetTarget,
+          fileContentScope, fileReadTarget, fileAssetTarget, repoSpecTarget,
           fileTreeLocale: url.pathname === '/api/panel/files' ? new Intl.Collator().resolvedOptions().locale : undefined,
           reviewWorkspaceUnselected,
           mobileInbox,

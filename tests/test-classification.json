@@ -5713,6 +5713,16 @@
       ]
     },
     {
+      "path": "tests/o8d-repo-spec-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-repos-bootstrap-native-real-path.test.ts",
       "reasons": [
         "child-process",
