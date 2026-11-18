@@ -6467,6 +6467,13 @@
       ]
     },
     {
+      "path": "tests/phone-enrollment-dispatch-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/phone-pairing-front-door-real-path.test.ts",
       "reasons": [
         "network-listener",
