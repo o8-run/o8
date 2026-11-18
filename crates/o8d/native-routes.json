@@ -353,5 +353,16 @@
     "test": "tests/o8d-git-refs-real-path.test.ts",
     "owned": true,
     "redaction": "viewer"
+  },
+  {
+    "path": "/api/prompt-library",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Node retains auth, schema and all writes; unavailable databases, schema/SQL errors and malformed rows defer.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-prompt-library-real-path.test.ts",
+    "owned": true
   }
 ]
