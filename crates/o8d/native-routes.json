@@ -330,5 +330,28 @@
     "test": "tests/o8d-repo-spec-real-path.test.ts",
     "owned": true,
     "redaction": "viewer"
+  },
+  {
+    "path": "/api/panel/branches",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Rust owns an independent bounded snapshot; unsupported repository projections retain TypeScript.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-git-refs-real-path.test.ts",
+    "owned": true
+  },
+  {
+    "path": "/api/panel/commits/[hash]",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Node retains auth and canonical root selection; unsupported commit encodings, refs or redaction projections defer.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-git-refs-real-path.test.ts",
+    "owned": true,
+    "redaction": "viewer"
   }
 ]

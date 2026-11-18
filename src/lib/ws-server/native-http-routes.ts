@@ -1,7 +1,7 @@
 import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { viewerRedactionGrant } from './native-git-diff-context';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 /** Shell transport work: reuse surface handlers on the opt-in WS listener without Next. */
 import nativeRoutes from '../../../crates/o8d/native-routes.json';
 import { once } from 'node:events';
@@ -77,7 +77,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     else if (authenticatedBridge && req.headers['x-o8d-session-read'] === 'authorize') {
       // Admission probes must never execute a writer when disabled or unmatched.
       const retiredProjectPath = ['/api/projects/context', '/api/projects/dismissed-suggestions'].includes(url.pathname);
-      const ownedRoute = nativeRoutes.find(route => route.path === url.pathname && route.methods.includes(req.method ?? 'GET') && 'owned' in route && route.owned === true);
+      const ownedRoute = nativeRoutes.find(route => route.path === match.route.path && route.methods.includes(req.method ?? 'GET') && 'owned' in route && route.owned === true);
       const viewerRoute = ownedRoute && 'redaction' in ownedRoute && ownedRoute.redaction === 'viewer';
       if ((!nativeSessionReadsEnabled() && !(nativeHttpTransportEnabled() && ownedRoute)) || retiredProjectPath
         || !nativeRoutes.some(route => route.path === match.route.path && route.methods.includes(req.method ?? 'GET'))) {
@@ -138,6 +138,8 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         }
         const defaultsContext = {
           fileContentScope, fileReadTarget, fileAssetTarget, repoSpecTarget,
+          gitRefsCommitRoot: viewerRoute && match.route.path === '/api/panel/commits/[hash]'
+            ? resolve((await import('@/lib/panel/git-commits')).resolveWorkspaceRoot(url.searchParams.get('workspace'))) : undefined,
           fileTreeLocale: url.pathname === '/api/panel/files' ? new Intl.Collator().resolvedOptions().locale : undefined,
           reviewWorkspaceUnselected,
           mobileInbox,
