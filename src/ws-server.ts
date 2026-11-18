@@ -8399,6 +8399,11 @@ async function bootstrapWsServer() {
   if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_WINDOW_OWNER === 'ws') void import('./lib/next/app-window')
     .then(({ restoreNextWindow }) => restoreNextWindow())
     .catch(() => {});
+  // With Next off (launcher O8_NEXT_OFF), Next's startup hook never runs. This
+  // process schedules the same startup work against its own public API port.
+  if (API_FRONT_DOOR && process.env.O8_NEXT_OFF === '1') void import('./lib/startup/schedule')
+    .then(({ scheduleNextServerStartup }) => scheduleNextServerStartup())
+    .catch(() => {});
   if (shuttingDown) return;
   await terminalHostReady;
   if (shuttingDown) return;
