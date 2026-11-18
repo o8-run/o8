@@ -5,7 +5,7 @@ import { writeDeviceSession } from '@/lib/auth/device-session-store';
 import { writeConnectAttachEnabled } from '@/lib/connect/attach-settings';
 import { getOrCreateInstallId } from '@/lib/entitlement/bootstrap';
 import { POST as registerMachine } from '@/app/api/panel/connect/route';
-import { POST as syncEntitlement } from '@/app/api/panel/entitlement/sync/route';
+import { syncEntitlement } from '@/lib/entitlement/account-sync';
 import { POST as renewDevice } from '@/app/api/panel/auth/device/renew/route';
 import { version } from '../../../../../../../package.json';
 
