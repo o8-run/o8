@@ -1,4 +1,4 @@
-//! Fresh read-only prompt lists. Schema, mutations and admission remain with Node.
+//! Fresh prompt reads; Node retains schema, mutations and other-principal admission.
 use super::*;
 use rusqlite::{params_from_iter, types::Value as SqlValue};
 const QUERY_MAX: usize = 200;
@@ -150,6 +150,44 @@ pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
             prompts.push(entry(row)?);
         }
         let body = json!({"schema":"o8/prompt-library.list/v1","ok":true,"prompts":prompts});
+        if serde_json::to_vec(&body).map_err(|_| ())?.len() > RESPONSE_LIMIT {
+            return Err(());
+        }
+        Ok(reply(StatusCode::OK, body))
+    })();
+    result.unwrap_or_else(|_| unavailable())
+}
+
+pub(super) fn single(store: &ReadContext<'_>, path: &str) -> Response {
+    let result = (|| -> Result<Response, ()> {
+        let id = path.strip_prefix("/api/prompt-library/").ok_or(())?;
+        if id.is_empty()
+            || id == "import"
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        {
+            return Err(());
+        }
+        let db = store.database()?;
+        let mut statement = db
+            .prepare("SELECT * FROM prompt_library WHERE id = ?")
+            .map_err(|_| ())?;
+        if COLUMNS
+            .split(',')
+            .any(|name| !statement.column_names().any(|column| column == name))
+        {
+            return Err(());
+        }
+        let mut rows = statement.query([id]).map_err(|_| ())?;
+        let body = if let Some(row) = rows.next().map_err(|_| ())? {
+            json!({"schema":"o8/prompt-library.entry/v1","ok":true,"prompt":entry(row)?})
+        } else {
+            return Ok(reply(
+                StatusCode::NOT_FOUND,
+                json!({"schema":"o8/prompt-library.error/v1","ok":false,"error":{"code":"prompt_not_found","message":"Saved prompt not found."}}),
+            ));
+        };
         if serde_json::to_vec(&body).map_err(|_| ())?.len() > RESPONSE_LIMIT {
             return Err(());
         }

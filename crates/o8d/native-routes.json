@@ -381,7 +381,7 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Node retains auth, schema and all writes; unavailable databases, schema/SQL errors and malformed rows defer.",
+    "reason": "Window operator reads use the current stored credential without Node admission. Other principals, unsupported authority/boundary forms, schema/SQL errors and malformed rows defer; schema and all writes remain Node.",
     "state": "rust-with-fallback",
     "test": "tests/o8d-prompt-library-real-path.test.ts",
     "owned": true
@@ -408,5 +408,16 @@
     "state": "rust-with-fallback",
     "reason": "Rust owns fresh directive files, supported parsing/trailers, filtering and ordering. Node retains auth, data-directory initialization and canonical per-request project scope; malformed, unsafe, oversized or unsupported files/scope/collation defer in full. All writes and FTS remain Node.",
     "test": "tests/o8d-directives-real-path.test.ts"
+  },
+  {
+    "path": "/api/prompt-library/[id]",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Window operator reads use the fresh canonical stored token natively; all other credential classes retain Node admission. Unsupported database/row/path cases defer; all writes and import remain Node.",
+    "test": "tests/o8d-prompt-native-auth-real-path.test.ts"
   }
 ]
