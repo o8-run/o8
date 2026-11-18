@@ -100,7 +100,7 @@ if (releaseReceipt) {
 let mutationPointer: string | null = null;
 try {
   for (const enabled of [false, true]) {
-    server = await startReadParityBridge(binary, port, enabled);
+    server = await startReadParityBridge(binary, port, enabled, true);
     if (!enabled) {
       // TS initializes its owned stores before the saved-read comparison.
       await read('/api/panel/operator-defaults?include=native');
@@ -122,6 +122,7 @@ try {
           const wire = actual.wire as { body: { providers: Array<{ configured: boolean; maskedKey: unknown }> } };
           for (const provider of wire.body.providers) { assert.equal(provider.configured, false); assert.equal(provider.maskedKey, null); }
         }
+        if (route === '/api/setup/config') assert.equal(actual.native, false, 'Unchecked saved setup fields must remain TypeScript-owned');
         if (actual.native) native++;
         if (route === '/api/panel/operator-defaults' && request.caseIndex >= 100) {
           assert.equal(actual.native, request.caseIndex % 5 !== 4, `Native route was not reached: ${request.path}`);
@@ -129,7 +130,8 @@ try {
         records.push({ request, expected: portable(expected.wire), native: actual.native });
       }
       if (enabled) {
-        assert.ok(native > 0, `Native route was not reached: ${route}`);
+        if (route === '/api/setup/config') assert.equal(native, 0);
+        else assert.ok(native > 0, `Native route was not reached: ${route}`);
         const result = { route, attempted: generated.length, native, fallback: generated.length - native, differences: 0 };
         summary.push(result); console.log(JSON.stringify(result));
       }
@@ -167,7 +169,7 @@ try {
     }
     if (!enabled) assert.deepEqual(server.probes, [], 'Reference child attempted native admission');
     else {
-      const response = await read('/api/setup/config'); assert.equal(response.native, true);
+      const response = await read('/api/setup/config'); assert.equal(response.native, false);
       const mutated = structuredClone(response.wire) as { body: { setupComplete: boolean } };
       mutated.body.setupComplete = !mutated.body.setupComplete;
       mutationPointer = firstDifference(response.wire, mutated);
@@ -175,7 +177,37 @@ try {
     }
     await server.stop(); server = undefined;
   }
-  writeFileSync(output, JSON.stringify({ seed: groups[0].generated[0].seed, records, summary, auth, timings,
+  // Prove why setup/config is excluded, without logging synthetic credential bytes.
+  const probeValue = 'owned-fixture-private-credential-value';
+  const setupPath = join(directory, 'setup.json'), originalSetup = readFileSync(setupPath, 'utf8');
+  const credentialGuard = { setupReaderCopiesUnknownValues: false, setupProductProxied: false, keysExposeOnlyMetadata: false, ambientKeysDefer: false };
+  try {
+    writeFileSync(setupPath, JSON.stringify({ setupComplete: false, skippedSteps: [], cortex: { apiKey: probeValue } }));
+    for (const product of [false, true]) {
+      server = await startReadParityBridge(binary, port, true, product);
+      const actual = await read('/api/setup/config');
+      assert.equal(actual.native, !product);
+      assert.equal(JSON.stringify(actual.wire).includes(probeValue), true);
+      if (product) credentialGuard.setupProductProxied = true;
+      else credentialGuard.setupReaderCopiesUnknownValues = true;
+      await server.stop(); server = undefined;
+    }
+    writeFileSync(setupPath, originalSetup);
+    server = await startReadParityBridge(binary, port, true, true);
+    const keys = await read('/api/v2/keys'); assert.equal(keys.native, true);
+    const providers = (keys.wire as { body: { providers: Array<Record<string, unknown>> } }).body.providers;
+    assert.ok(providers.every(provider => provider.configured === false && provider.maskedKey === null));
+    assert.equal(JSON.stringify(keys.wire).includes(probeValue), false);
+    credentialGuard.keysExposeOnlyMetadata = true;
+    process.env.OPENAI_API_KEY = probeValue;
+    const configured = await read('/api/v2/keys'); assert.equal(configured.native, false);
+    assert.equal(JSON.stringify(configured.wire).includes(probeValue), false);
+    credentialGuard.ambientKeysDefer = true;
+  } finally {
+    delete process.env.OPENAI_API_KEY; writeFileSync(setupPath, originalSetup);
+    await server?.stop(); server = undefined;
+  }
+  writeFileSync(output, JSON.stringify({ seed: groups[0].generated[0].seed, records, summary, auth, timings, credentialGuard,
     separateChildLaunchFlags: [false, true], referenceAdmissionProbes: 0, mutationPointer }, null, 2) + '\n');
 } finally { await server?.stop(); }
 process.exit(0);
