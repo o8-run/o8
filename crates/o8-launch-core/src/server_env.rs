@@ -104,7 +104,11 @@ impl ServerEnvironment {
         if self.private_next_port.is_some() {
             self.window_and_helpers(command);
             if self.next_off {
-                command.env("O8_NEXT_OFF", "1");
+                // WS is the only server, so it runs Next's startup work and
+                // owns the native window (#5709 window-owner switch).
+                command
+                    .env("O8_NEXT_OFF", "1")
+                    .env("O8_NEXT_WINDOW_OWNER", "ws");
             }
         }
     }
@@ -251,8 +255,10 @@ mod tests {
         };
         let mut command = Command::new("fixture");
         off.ws(&mut command);
-        assert!(command
-            .get_envs()
-            .any(|(k, v)| k == "O8_NEXT_OFF" && v == Some("1".as_ref())));
+        for (key, value) in [("O8_NEXT_OFF", "1"), ("O8_NEXT_WINDOW_OWNER", "ws")] {
+            assert!(command
+                .get_envs()
+                .any(|(k, v)| k == key && v == Some(value.as_ref())));
+        }
     }
 }

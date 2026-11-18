@@ -22,6 +22,7 @@ fn front_door_puts_ws_on_the_public_port_and_next_on_a_private_one() {
     assert_eq!(ws["O8_API_FRONT_DOOR"], "1");
     assert_eq!(next["O8_API_FRONT_DOOR"], "1");
     assert_eq!(ws["O8_NEXT_OFF"], serde_json::Value::Null);
+    assert_eq!(ws["O8_NEXT_WINDOW_OWNER"], serde_json::Value::Null);
     assert_eq!(ws["O8_API_PORT"], api.to_string());
     assert_eq!(next["O8_API_PORT"], api.to_string());
     let private: u16 = next["PORT"].as_str().unwrap().parse().unwrap();
@@ -52,6 +53,7 @@ fn next_off_runs_with_ws_alone_and_stays_up() {
     let ws = env(&f, "ws-env");
     // WS runs Next's startup work when Next is off.
     assert_eq!(ws["O8_NEXT_OFF"], "1");
+    assert_eq!(ws["O8_NEXT_WINDOW_OWNER"], "ws");
     let origin = ws["NEXT_ORIGIN"].as_str().unwrap().to_owned();
     let private: u16 = origin.rsplit(':').next().unwrap().parse().unwrap();
     assert_ne!(private, f.port("api-port"));
