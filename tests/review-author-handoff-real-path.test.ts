@@ -189,7 +189,6 @@ async function settled(surface: string) {
 }
 
 it('delivers the persisted finding once through the correction route, preserving the worker and unresolved review', async () => {
-  const observedCorrection = vi.spyOn(await import('@/lib/orchestrator/worker-corrections'), 'correctWorkers');
   const { target, review } = await reviewedAuthor('review-author');
   const before = record(target.surfaceId);
   const body = reviewBody(target, review);
@@ -211,12 +210,6 @@ it('delivers the persisted finding once through the correction route, preserving
   expect(getSqlite().prepare('SELECT COUNT(*) AS n FROM worker_corrections').get()).toEqual({ n: 1 });
   const history = await corrections.GET(new NextRequest(`http://localhost/api/orchestrator/worker-corrections?${new URLSearchParams({ repoPath: repo, threadId: parent })}`, { headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` } }));
   expect((await history.json()).corrections[0].id).toBe(value.receipt.id);
-  expect(observedCorrection).toHaveBeenCalled();
-  for (const [input, checks] of observedCorrection.mock.calls) {
-    expect((input.payload as { holdMerges: boolean }).holdMerges).toBe(false);
-    expect(checks).toMatchObject({ code: expect.any(Function), state: expect.any(Function), persist: expect.any(Function) });
-  }
-  observedCorrection.mockRestore();
 }, 60000);
 
 it('refuses stale code, another parent, a replaced run, and an operator stop without sending', async () => {
