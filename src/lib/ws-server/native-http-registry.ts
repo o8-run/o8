@@ -559,6 +559,18 @@ const producers = [
   // ws-token before every worker launch, so with Next stopped every dispatch was held. No device,
   // worker or spectator grant; the handler reads nothing and answers a fixed body. (#5243)
   route('/api/setup/status', 'GET', () => import('@/app/api/setup/status/route')),
+  // Phone reads reuse the existing TypeScript handlers in the WS owner.
+  route('/api/mobile/activity', 'GET', () => import('@/app/api/mobile/activity/route')),
+  route('/api/mobile/automations', 'GET', () => import('@/app/api/mobile/automations/route')),
+  route('/api/mobile/diff-comments', 'GET', () => import('@/app/api/mobile/diff-comments/route')),
+  route('/api/mobile/files/content', 'GET', () => import('@/app/api/mobile/files/content/route')),
+  route('/api/mobile/files/list', 'GET', () => import('@/app/api/mobile/files/list/route')),
+  // Phone catalogues read current configuration without owning sessions or stores.
+  route('/api/mobile/orchestrator/models', 'GET', () => import('@/app/api/mobile/orchestrator/models/route')),
+  route('/api/mobile/orchestrator/openclaw-agents', 'GET', () => import('@/app/api/mobile/orchestrator/openclaw-agents/route')),
+  route('/api/mobile/orchestrator/openclaw-availability', 'GET', () => import('@/app/api/mobile/orchestrator/openclaw-availability/route')),
+  route('/api/mobile/orchestrator/packets', 'GET', () => import('@/app/api/mobile/orchestrator/packets/route')),
+  route('/api/mobile/usage/history', 'GET', () => import('@/app/api/mobile/usage/history/route')),
   // Phone source-control actions share the same handlers and device gate on both listeners.
   route('/api/mobile/source-control/status', 'GET', () => import('@/app/api/mobile/source-control/status/route')),
   route('/api/mobile/source-control/stage', 'POST', () => import('@/app/api/mobile/source-control/stage/route')),

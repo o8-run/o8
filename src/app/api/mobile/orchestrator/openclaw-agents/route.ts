@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextResponse } from 'next/server';
-import { listOpenclawAgents } from '@/lib/lane/orchestrator-backends/openclaw';
+import { listOpenclawAgents } from '@/lib/lane/orchestrator-backends/openclaw-catalog';
 
 export function GET() {
   return NextResponse.json(

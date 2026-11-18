@@ -20,10 +20,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-
-const OPENCLAW_CONFIG = join(homedir(), '.openclaw', 'openclaw.json');
+import { OPENCLAW_SOURCE_CONFIG as OPENCLAW_CONFIG } from '@/lib/lane/orchestrator-backends/openclaw-catalog';
 
 function checkOpenclawAvailability(): { available: boolean; reason?: string } {
   if (!existsSync(OPENCLAW_CONFIG)) {
