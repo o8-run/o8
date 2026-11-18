@@ -5,6 +5,8 @@ mod repo_spec;
 mod git_refs;
 mod prompt_library;
 mod prompt_writes;
+mod session_rules;
+mod session_rule_lease;
 mod file_assets;
 mod file_asset_viewer;
 mod file_tree;
@@ -255,6 +257,7 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
     }
 }
 fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, body: &[u8]) -> Response {
+    if path == "/api/orchestrator/session-rules" && matches!(method,"POST"|"DELETE") { return session_rules::write(store,params,method,body); }
     if method != "GET" && prompt_writes::matches(path, method) {
         return prompt_writes::write(store, path, params, method, body);
     }

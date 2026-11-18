@@ -18,6 +18,7 @@
  */
 
 import 'server-only';
+import { apiFrontDoorEnabled } from '@/lib/ws-server/api-front-door-config';
 import { randomUUID } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
 
@@ -64,6 +65,7 @@ function normalizeThreadId(threadId: string | null | undefined): string {
  * operator really wants them — cheap, ephemeral).
  */
 export function addSessionRule(threadId: string, text: string, constraint: 'no_merge' | null = null): SessionRuleRecord | null {
+  if (apiFrontDoorEnabled()) throw new Error('Session-rule writes require the native operator transport.');
   const thread = normalizeThreadId(threadId);
   const body = text.trim().slice(0, SESSION_RULE_MAX_LEN);
   if (!thread || !body) return null;
@@ -80,6 +82,7 @@ export function addSessionRule(threadId: string, text: string, constraint: 'no_m
 
 /** Remove a rule by id. Returns true when a row was deleted. */
 export function removeSessionRule(id: string): boolean {
+  if (apiFrontDoorEnabled()) throw new Error('Session-rule writes require the native operator transport.');
   const db = getSqlite();
   const result = db.prepare(`DELETE FROM session_rules WHERE id = ?`).run(id);
   return result.changes > 0;

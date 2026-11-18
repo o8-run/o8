@@ -5937,6 +5937,25 @@
       ]
     },
     {
+      "path": "tests/o8d-session-rule-caller-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-session-rules-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-settings-window-owner-real-path.test.ts",
       "reasons": [
         "network-listener",

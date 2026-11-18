@@ -433,5 +433,17 @@
     "state": "rust-with-fallback",
     "test": "tests/o8d-prompt-writes-real-path.test.ts",
     "owned": true
+  },
+  {
+    "path": "/api/orchestrator/session-rules",
+    "methods": [
+      "POST",
+      "DELETE"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns operator rule mutations and the atomic correction-hold SQLite commit under the shared lifecycle lease. GET, worker read scope, delivery and runtime actions remain Node. Node product rule writers refuse; no post-commit fallback.",
+    "test": "tests/o8d-session-rules-real-path.test.ts"
   }
 ]
