@@ -108,6 +108,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/lead', 'GET POST', () => import('@/lib/orchestrator/http/lead')),
     route('/api/orchestrator/status', 'GET', () => import('@/app/api/orchestrator/status/route')),
     route('/api/orchestrator/archive', 'GET', () => import('@/app/api/orchestrator/archive/route')),
+    route('/api/task-artifacts/[id]/actions', 'GET', () => import('@/app/api/task-artifacts/[id]/actions/route')),
     route('/api/task-artifacts/[id]/decision', 'GET POST', () => import('@/app/api/task-artifacts/[id]/decision/route')),
     route('/api/mobile/orchestrator/threads', 'GET POST', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET PATCH', () => import('@/app/api/orchestrator/state/route')),
