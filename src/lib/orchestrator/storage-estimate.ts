@@ -2,10 +2,12 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { OrchestratorPacketStorageAdmission } from '@/lib/orchestrator/types';
+import type { StorageDependencyCloneContract } from '@/lib/workspace/storage-dependency-contract';
 import type { RepoSetupConfig } from '@/lib/repos/types';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import type { DirectoryStorageTelemetry } from '@/lib/worktree/storage-telemetry';
 import { detectDependencyInstallCommand } from '@/lib/workspace/dependency-install';
+import { observeDependencyReuse, type DependencyReuseEstimate } from './storage-dependency-reuse';
 import {
   measureDependencyTree,
   measureTrackedCheckout,
@@ -28,6 +30,9 @@ export interface RepoStorageEstimate {
   historySamples: number;
   workspacePaths: string[];
   error: string | null;
+  /** Recomputed at the provisioning boundary before accepting a discounted reservation. */
+  dependencyCloneContract?: StorageDependencyCloneContract;
+  nativeInstallEstimateBytes?: number;
 }
 
 export interface RepoStorageEstimateDependencies {
@@ -41,6 +46,7 @@ export interface RepoStorageEstimateDependencies {
   readInput?: typeof readEstimateInput;
   readSetup?: (repoPath: string) => Promise<RepoSetupConfig | null>;
   detectInstall?: (repoPath: string) => Promise<string | null>;
+  observeReuse?: typeof observeDependencyReuse;
 }
 
 async function directoryNames(base: string): Promise<string[]> {
@@ -144,6 +150,7 @@ async function estimateRepo(
     throw new Error('Registered workspace setup has no required install command.');
   }
   let dependencyBytes = 0;
+  let reuse: DependencyReuseEstimate | null = null;
   let error: string | null = null;
   if (installCommand) {
     const directCount = directDependencyCount(packageJson);
@@ -157,18 +164,30 @@ async function estimateRepo(
     if (measured === null || measured < cold) {
       error = 'Dependency growth is estimated from lock or manifest entries; installed bytes are not yet observed.';
     }
+    if (baseCommit) {
+      // An unavailable/changed donor keeps the native estimate. A successful
+      // observation is not permission for a later native-install fallback.
+      reuse = await (dependencies.observeReuse ?? observeDependencyReuse)(repoPath, baseCommit, installCommand).catch(() => null);
+    }
   }
   // Checkout bytes and possible native dependency writes are charged once plus
   // proportional growth. Existing APFS/cache/worktree allocations are not added.
   // Image sharing is discounted only when the materializer can supply exact recipe authority.
-  const exactBytes = Math.ceil((checkout.bytes + dependencyBytes) * WRITE_HEADROOM_RATIO)
+  const nativeInstallEstimateBytes = Math.ceil((checkout.bytes + dependencyBytes) * WRITE_HEADROOM_RATIO)
     + STARTUP_GROWTH_BYTES;
+  const cloneBytes = reuse ? Math.ceil((checkout.bytes + reuse.metadataBytes + reuse.nativeWriteBytes) * WRITE_HEADROOM_RATIO)
+    + STARTUP_GROWTH_BYTES : nativeInstallEstimateBytes;
+  const discounted = reuse !== null && cloneBytes < nativeInstallEstimateBytes;
+  const exactBytes = discounted ? cloneBytes : nativeInstallEstimateBytes;
   if (!Number.isSafeInteger(exactBytes) || exactBytes <= 0) {
     throw new Error('Workspace growth estimate is outside the safe integer range.');
   }
   return {
-    status: 'observed', exactBytes, source: 'source-size-fallback',
-    historySamples: 0, workspacePaths, error,
+    status: 'observed', exactBytes, source: discounted ? 'apfs-clone-growth' : 'source-size-fallback',
+    historySamples: 0, workspacePaths, error: discounted
+      ? 'APFS incremental growth is estimated from entry counts and native/startup headroom, not exact allocated blocks.' : error,
+    ...(discounted ? { dependencyCloneContract: { creationBaseCommit: baseCommit!, recipeKey: reuse!.recipeKey,
+      installCommand: installCommand!, dependencyBytes: reuse!.metadataBytes + reuse!.nativeWriteBytes }, nativeInstallEstimateBytes } : {}),
   };
 }
 

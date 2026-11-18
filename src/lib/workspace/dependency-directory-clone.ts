@@ -22,6 +22,35 @@ export interface DependencySelection {
   pool?: Awaited<ReturnType<typeof dependencyDirectoryPoolStatus>>;
 }
 
+/** Shared read-only eligibility checks for admission and the actual clone. */
+export async function inspectDependencyCloneSource(input: {
+  sourceWorkspace: string;
+  recipe: DependencyInstallRecipe;
+  manifest: { workspaces?: unknown; scripts?: Record<string, unknown> };
+  bindingGyp: boolean;
+}) {
+  const { sourceWorkspace, recipe, manifest } = input;
+  const refused = (reason: string) => ({ status: 'unavailable' as const, reason });
+  if (process.platform !== 'darwin' || recipe.packageManager !== 'npm'
+    || recipe.platform !== process.platform || recipe.architecture !== process.arch
+    || recipe.runtimeAbi !== process.versions.modules || recipe.installArgs[0] !== 'ci'
+    || recipe.installArgs.some((arg) => arg.startsWith('--omit') || arg === '--production')
+    || recipe.localDependencyDigests.length > 0) return refused('ineligible-recipe');
+  const sourceIdentity = await captureWorktreeMaterializationIdentity(sourceWorkspace);
+  try { await lstat(path.join(sourceWorkspace, 'node_modules')); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return refused('source-install-missing'); throw error; }
+  if (manifest.workspaces) return refused('workspace-topology');
+  if (recipe.lifecycleScripts === 'enabled'
+    && ['preinstall', 'install', 'prepublish', 'preprepare', 'prepare', 'postprepare', 'dependencies'].some((stage) => manifest.scripts?.[stage])) return refused('unsupported-root-lifecycle');
+  const requireSameTree = recipe.lifecycleScripts === 'enabled' && recipe.cloneLifecycleInputs === undefined;
+  const sourceMatches = dependencyCloneSourceMatcher(sourceWorkspace, sourceIdentity, recipe, requireSameTree);
+  if (!await profile('source-recipe', sourceMatches)) return refused(requireSameTree ? 'source-inputs-or-unbounded-lifecycle' : 'source-inputs-mismatch');
+  const graph = await profile('source-manifests', () => validateDependencyCloneGraph(sourceWorkspace));
+  if (!graph || input.bindingGyp) return refused('installed-graph-ineligible');
+  await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);
+  return { status: 'ready' as const, sourceIdentity, sourceMatches, graph };
+}
+
 /** Clone a trusted installed npm tree; validate its recipe/metadata, not payload bytes. */
 export async function tryCloneDependencyDirectory(input: {
   sourceWorkspace: string;
@@ -38,25 +67,12 @@ export async function tryCloneDependencyDirectory(input: {
   if (path.resolve(sourceWorkspace) === path.resolve(workspace)) return fallback('same-workspace');
   try { await lstat(path.join(workspace, 'node_modules')); return fallback('destination-exists'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  if (process.platform !== 'darwin' || recipe.packageManager !== 'npm'
-    || recipe.platform !== process.platform || recipe.architecture !== process.arch
-    || recipe.runtimeAbi !== process.versions.modules || recipe.installArgs[0] !== 'ci'
-    || recipe.installArgs.some((arg) => arg.startsWith('--omit') || arg === '--production')
-    || recipe.localDependencyDigests.length > 0) return fallback('ineligible-recipe');
-  const sourceIdentity = await captureWorktreeMaterializationIdentity(sourceWorkspace);
   const sourcePath = path.join(sourceWorkspace, 'node_modules');
-  try { await lstat(sourcePath); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return fallback('source-install-missing'); throw error; }
   const manifest = JSON.parse((await readPinnedWorkspaceFile(workspace, identity, 'package.json'))!) as { workspaces?: unknown; scripts?: Record<string, unknown> };
-  if (manifest.workspaces) return fallback('workspace-topology');
-  if (recipe.lifecycleScripts === 'enabled'
-    && ['preinstall', 'install', 'prepublish', 'preprepare', 'prepare', 'postprepare', 'dependencies'].some((stage) => manifest.scripts?.[stage])) return fallback('unsupported-root-lifecycle');
-  const requireSameTree = recipe.lifecycleScripts === 'enabled' && recipe.cloneLifecycleInputs === undefined;
-  const sourceMatches = dependencyCloneSourceMatcher(sourceWorkspace, sourceIdentity, recipe, requireSameTree);
-  if (!await profile('source-recipe', sourceMatches)) return fallback(requireSameTree ? 'source-inputs-or-unbounded-lifecycle' : 'source-inputs-mismatch');
-  const graph = await profile('source-manifests', () => validateDependencyCloneGraph(sourceWorkspace));
-  if (!graph || await readPinnedWorkspaceFile(workspace, identity, 'binding.gyp') !== null) return fallback('installed-graph-ineligible');
-  await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);
+  const source = await inspectDependencyCloneSource({ sourceWorkspace, recipe, manifest,
+    bindingGyp: await readPinnedWorkspaceFile(workspace, identity, 'binding.gyp') !== null });
+  if (source.status !== 'ready') return fallback(source.reason);
+  const { sourceIdentity, sourceMatches, graph } = source;
   const pooled = input.usePool ? await profile('dependency-pool-publication', () => takeDependencyDirectoryPoolTree({
     key: dependencyDirectoryPoolKey(recipe, sourceIdentity, graph.digest), workspace, identity,
     onSelected: async () => { await input.onDecision?.({ path: 'dependency-pool', reason: 'matching-inputs', pool: await dependencyDirectoryPoolStatus() }); },

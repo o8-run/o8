@@ -257,7 +257,7 @@ export interface OrchestratorPacketStorageAdmission {
   ownerId: string;
   ownerGeneration: number;
   estimateBytes: number;
-  estimateSource: 'same-repo-history' | 'source-size-fallback' | 'unknown';
+  estimateSource: 'same-repo-history' | 'source-size-fallback' | 'apfs-clone-growth' | 'unknown';
   historySamples: number;
   volumeId: string | null;
   physicalAvailableBytes: number | null;

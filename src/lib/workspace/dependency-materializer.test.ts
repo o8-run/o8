@@ -106,6 +106,28 @@ afterEach(() => {
 });
 
 describe('dependency materializer policy boundary', () => {
+  it('refuses native fallback when admission only reserved an APFS clone', async () => {
+    const workspace = fixture();
+    const recipe = await deriveDependencyInstallRecipe(workspace, 'npm ci --ignore-scripts', { resolveVersion: async () => '10.0.0' });
+    const run = vi.fn();
+    await expect(materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
+      resolveVersion: async () => '10.0.0', requiredCloneRecipeKey: recipe.key, run,
+      env: { [APFS_DEPENDENCY_IMAGES_ENV]: '0' },
+    })).rejects.toThrow('fresh native-install reservation');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('checks the actual target recipe rather than trusting prepared reuse evidence', async () => {
+    const workspace = fixture();
+    const recipe = await deriveDependencyInstallRecipe(workspace, 'npm ci --ignore-scripts', { resolveVersion: async () => '10.0.0' });
+    const run = vi.fn();
+    const forged = { ...recipe, key: '0'.repeat(64) };
+    await expect(materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
+      resolveVersion: async () => '10.0.0', requiredCloneRecipeKey: forged.key, preparedRecipe: forged, run,
+      env: { [APFS_DEPENDENCY_IMAGES_ENV]: '0' },
+    })).rejects.toThrow('recipe changed after APFS storage admission');
+    expect(run).not.toHaveBeenCalled();
+  });
   it.each([
     { label: 'uses the operator default when env is unset', setting: true, env: {}, expected: 'image' },
     { label: 'lets env 0 force off', setting: true, env: { [APFS_DEPENDENCY_IMAGES_ENV]: '0' }, expected: 'native' },

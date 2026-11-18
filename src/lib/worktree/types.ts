@@ -119,6 +119,8 @@ export interface CreateWorktreeOptions {
   laneId?: string;
   /** Scheduler-owned reservation reused by the manager admission boundary. */
   storageAdmissionReservationId?: string;
+  /** Internal admission contract: a smaller reservation cannot fund a native install. */
+  requiredDependencyCloneRecipeKey?: string;
   /** Launch ownership must still hold before ready publication ends creation rollback. */
   beforeReady?: (worktree: WorktreeInfo) => void;
 }

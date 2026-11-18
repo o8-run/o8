@@ -114,6 +114,8 @@ export interface DependencyImageProvider {
 export interface DependencyMaterializerOptions extends Pick<DependencyInstallOptions,
   'run' | 'resolveVersion' | 'cacheRoot' | 'now' | 'materializationIdentity'> {
   preparedRecipe?: DependencyInstallRecipe;
+  /** Discounted admission requires this exact target recipe and successful clone reuse. */
+  requiredCloneRecipeKey?: string;
   cloneSourceWorkspace?: string;
   useDependencyPool?: boolean;
   onSelection?: (selection: DependencySelection) => Promise<void>;
@@ -330,11 +332,14 @@ export async function materializeDependencyInstall(
   options: DependencyMaterializerOptions = {},
 ): Promise<DependencyMaterializationResult> {
   const workspace = path.resolve(workspacePath);
-  const recipe = options.preparedRecipe ?? await profileDependencyClone('recipe', () => deriveDependencyInstallRecipe(
+  const recipe = (!options.requiredCloneRecipeKey && options.preparedRecipe) || await profileDependencyClone('recipe', () => deriveDependencyInstallRecipe(
     workspace,
     installCommand,
     { resolveVersion: options.resolveVersion },
   ));
+  if (options.requiredCloneRecipeKey && recipe.key !== options.requiredCloneRecipeKey) {
+    throw new DependencyMaterializationRefusalError('The dependency recipe changed after APFS storage admission.');
+  }
   const identity = await dependencyMaterializationWorkspaceIdentity(
     workspace,
     options.materializationIdentity,
@@ -378,6 +383,11 @@ export async function materializeDependencyInstall(
     };
     await options.persistReceipt?.(receipt);
     return { receipt, installReceipt: null };
+  }
+  if (options.requiredCloneRecipeKey) {
+    throw new DependencyMaterializationRefusalError(
+      `APFS dependency reuse is unavailable (${fallbackReason}); a fresh native-install reservation is required.`,
+    );
   }
   const onSelection = options.onSelection;
   options = { ...options, onSelection: (selection) => onSelection?.({ ...selection, reason: fallbackReason }) ?? Promise.resolve() };

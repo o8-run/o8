@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
+import { readStorageDependencyCloneContract } from './storage-dependency-contract';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -64,7 +65,7 @@ describe('storage admission', () => {
         observeVolume: async () => ({ ...observed(1_000, 15 * gib), totalBytes: totalGiB * gib }),
       });
       const receipt = await store.reserve(reserveInput(1, { exactBytes: 64 * 1024 ** 2, policy: undefined }));
-      expect(receipt).toMatchObject({ decision: 'reserved', requiredReserveBytes: 2 * gib, headroomBytes: 13 * gib });
+      expect(receipt).toMatchObject({ decision: 'reserved', requiredReserveBytes: 5 * gib, headroomBytes: 10 * gib });
     } finally { sqlite.close(); }
   });
 
@@ -429,4 +430,30 @@ describe('storage admission', () => {
     expect(receipt.observedAt).toBeLessThanOrEqual(after);
     rmSync(dir, { recursive: true, force: true });
   });
+});
+
+
+it('retains body-bound clone authority through SQLite reopen and rejects mismatched reservation identity', async () => {
+  const root = mkdtempSync(join(os.tmpdir(), 'o8-clone-contract-reopen-'));
+  const file = join(root, 'admission.db');
+  const dependencyCloneContract = { creationBaseCommit: 'a'.repeat(40), recipeKey: 'b'.repeat(64),
+    installCommand: 'npm ci --ignore-scripts', dependencyBytes: 4096 };
+  const input = reserveInput(71, { dependencyCloneContract });
+  let db = openDatabase(file);
+  try {
+    const original = await new StorageAdmissionStore(db, { now: () => 1000, observeVolume: async () => observed(1000) }).reserve(input);
+    expect(original.dependencyCloneContract).toEqual(dependencyCloneContract);
+    db.close();
+    db = openDatabase(file);
+    const store = new StorageAdmissionStore(db, { now: () => 1000, observeVolume: async () => observed(1000) });
+    const reservation = store.getReservation(input.reservationId)!;
+    expect(readStorageDependencyCloneContract(db, reservation)).toEqual(dependencyCloneContract);
+    await expect(store.reserve({ ...input, dependencyCloneContract: { ...dependencyCloneContract, recipeKey: 'c'.repeat(64) } }))
+      .rejects.toThrow(StorageAdmissionMutationReuseError);
+    expect(readStorageDependencyCloneContract(db, reservation)).toEqual(dependencyCloneContract);
+    expect(() => readStorageDependencyCloneContract(db, { ...reservation, exactBytes: reservation.exactBytes + 1 }))
+      .toThrow(/original receipt/);
+    expect(() => readStorageDependencyCloneContract(db, { ...reservation, ownerId: 'other-owner' }))
+      .toThrow(/original receipt/);
+  } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
 });

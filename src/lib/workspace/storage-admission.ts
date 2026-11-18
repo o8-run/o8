@@ -1,5 +1,5 @@
 import 'server-only';
-
+import { normalizeStorageDependencyCloneContract, type StorageDependencyCloneContract } from './storage-dependency-contract';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
@@ -8,7 +8,7 @@ import { measureHostVolume, resolveStorageVolumeId } from '@/lib/worktree/storag
 
 // Keep a bounded critical margin; requested growth is reserved separately.
 export const DEFAULT_STORAGE_RESERVE_RATIO = 0;
-export const DEFAULT_STORAGE_RESERVE_FLOOR_BYTES = 2 * 1024 * 1024 * 1024;
+export const DEFAULT_STORAGE_RESERVE_FLOOR_BYTES = 5 * 1024 * 1024 * 1024;
 export const DEFAULT_STORAGE_OBSERVATION_MAX_AGE_MS = 30_000;
 
 export type StorageReservationState = 'reserved' | 'committed' | 'released' | 'reconciled';
@@ -77,6 +77,7 @@ export interface StorageReservationRecord {
 }
 
 export interface StorageAdmissionResult {
+  dependencyCloneContract?: StorageDependencyCloneContract;
   operation: StorageAdmissionOperation;
   decision: 'reserved' | 'held' | 'committed' | 'released' | 'reconciled';
   reason: StorageAdmissionReason;
@@ -92,6 +93,7 @@ export interface StorageAdmissionResult {
 }
 
 export interface ReserveStorageInput {
+  dependencyCloneContract?: StorageDependencyCloneContract;
   mutationId: string;
   reservationId: string;
   targetPath: string;
@@ -417,6 +419,7 @@ export class StorageAdmissionStore {
     const policy = normalizePolicy(input.policy);
     const normalized = {
       operation: 'reserve' as const,
+      ...(input.dependencyCloneContract ? { dependencyCloneContract: normalizeStorageDependencyCloneContract(input.dependencyCloneContract) } : {}),
       mutationId: requiredText(input.mutationId, 'mutationId'),
       reservationId: requiredText(input.reservationId, 'reservationId'),
       targetPath: path.resolve(requiredText(input.targetPath, 'targetPath')),
@@ -527,6 +530,7 @@ export class StorageAdmissionStore {
       const result: StoredStorageAdmissionResult = {
         operation: 'reserve',
         decision: 'reserved',
+        ...(normalized.dependencyCloneContract ? { dependencyCloneContract: normalized.dependencyCloneContract } : {}),
         reason: 'admitted',
         mutationId: normalized.mutationId,
         reservation,

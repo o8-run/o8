@@ -807,8 +807,17 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/storage-dependency-reuse.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/storage-estimate.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
         "git-cli",
         "worktree-api"
@@ -1218,6 +1227,14 @@
     },
     {
       "path": "src/lib/workspace/dependency-materializer.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/dependency-recipe-commit.test.ts",
       "reasons": [
         "child-process",
         "git-cli"
@@ -4279,6 +4296,17 @@
     {
       "path": "tests/managed-worktree-admission-real-path.test.ts",
       "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-worktree-clone-admission-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
         "child-process",
         "git-cli",
         "real-path",

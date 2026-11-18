@@ -27,7 +27,7 @@ export function normalizePacketStorageAdmission(
   if (!value || typeof value !== 'object') return null;
   const row = value as Record<string, unknown>;
   const states = new Set(['reserved', 'committed', 'held', 'released', 'quarantined']);
-  const sources = new Set(['same-repo-history', 'source-size-fallback', 'unknown']);
+  const sources = new Set(['same-repo-history', 'source-size-fallback', 'apfs-clone-growth', 'unknown']);
   const numberOrNull = (candidate: unknown) => (
     typeof candidate === 'number' && Number.isSafeInteger(candidate) ? candidate : null
   );

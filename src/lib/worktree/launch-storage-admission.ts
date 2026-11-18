@@ -6,13 +6,17 @@ import {
   getPacketStorageAdmissionCoordinator,
   PacketStorageAdmissionError,
 } from '@/lib/orchestrator/storage-admission';
+import type { RepoSetupConfig } from '@/lib/repos/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { findLatestLaneByPacket, updateLane } from '@/lib/lane/registry';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { StorageAdmissionStore } from '@/lib/workspace/storage-admission';
-import type { StorageRootIdentity } from '@/lib/workspace/storage-admission';
+import { readStorageDependencyCloneContract } from '@/lib/workspace/storage-dependency-contract';
+import { observeDependencyReuse } from '@/lib/orchestrator/storage-dependency-reuse';
+import type { StorageReservationRecord, StorageRootIdentity } from '@/lib/workspace/storage-admission';
 import { probeMetadataLockProcessIdentity } from './metadata-lock-process-identity';
 import { withWorktreeProvisionQueue } from './provision-queue';
+import { observeRepoStorageEstimate } from '@/lib/orchestrator/storage-estimate';
 import {
   assertManagedWorktreeMaterializationBoundary,
   resolveManagedWorktreeStorageTarget,
@@ -22,6 +26,8 @@ interface ManagedWorktreeAdmissionInput {
   repoRoot: string;
   packetId?: string;
   reservationId?: string;
+  creationBaseCommit?: string;
+  repoSetup?: RepoSetupConfig;
   /** Dependency-only idle preparation does not mutate the Git registry. */
   backgroundSetup?: boolean;
 }
@@ -35,7 +41,7 @@ export async function withManagedWorktreeRegistryQueue<T>(repoRoot: string, oper
 
 export async function withManagedWorktreeStorageAdmission<T>(
   input: ManagedWorktreeAdmissionInput,
-  materialize: (volumeId: string, rootIdentity: StorageRootIdentity) => Promise<T>,
+  materialize: (volumeId: string, rootIdentity: StorageRootIdentity, requiredCloneRecipeKey?: string) => Promise<T>,
 ): Promise<T> {
   if (input.backgroundSetup) return withManagedWorktreeStorageAdmissionUnlocked(input, materialize);
   const canonicalRepo = await realpath(input.repoRoot);
@@ -82,8 +88,39 @@ function managedStorageAdmissionEpoch(ownerId: string): number {
 
 async function withManagedWorktreeStorageAdmissionUnlocked<T>(
   input: ManagedWorktreeAdmissionInput,
-  materialize: (volumeId: string, rootIdentity: StorageRootIdentity) => Promise<T>,
+  materialize: (volumeId: string, rootIdentity: StorageRootIdentity, requiredCloneRecipeKey?: string) => Promise<T>,
 ): Promise<T> {
+  const requiredClone = async (reservation: StorageReservationRecord): Promise<string | undefined> => {
+    const contract = readStorageDependencyCloneContract(getSqlite(), reservation);
+    if (contract) {
+      if (!input.creationBaseCommit || input.creationBaseCommit !== contract.creationBaseCommit) {
+        throw new Error('Dependency clone admission requires its original immutable creation base.');
+      }
+      if (input.repoSetup && (!input.repoSetup.installOnCreateWorkspace
+        || input.repoSetup.installCommand?.trim() !== contract.installCommand)) {
+        throw new Error('Dependency clone admission setup changed after reservation.');
+      }
+      // Recheck only the original reuse authority and its metadata bound. Registry
+      // changes cannot remove the clone requirement or authorize native fallback.
+      const reuse = await observeDependencyReuse(input.repoRoot, contract.creationBaseCommit, contract.installCommand);
+      if (!reuse || reuse.recipeKey !== contract.recipeKey
+        || reuse.metadataBytes + reuse.nativeWriteBytes > contract.dependencyBytes) {
+        throw new Error('Dependency reuse changed after clone-only storage admission.');
+      }
+      return contract.recipeKey;
+    }
+    // Unmarked reservations retain the native estimate, and can never acquire a
+    // clone discount by re-estimating after restart or mutable setup changes.
+    const estimate = await observeRepoStorageEstimate(input.repoRoot, {
+      creationBaseCommit: input.creationBaseCommit,
+      readSetup: async () => input.repoSetup ?? null,
+      observeReuse: async () => null,
+    });
+    if (estimate.status !== 'observed' || estimate.exactBytes === null || estimate.exactBytes > reservation.exactBytes) {
+      throw new Error('Workspace growth changed after storage admission; retry with a fresh reservation.');
+    }
+    return undefined;
+  };
   if (input.reservationId) {
     const reservation = new StorageAdmissionStore(getSqlite()).getReservation(input.reservationId);
     if (!reservation
@@ -97,7 +134,7 @@ async function withManagedWorktreeStorageAdmissionUnlocked<T>(
     await assertManagedWorktreeMaterializationBoundary(
       input.repoRoot, reservation.volumeId, reservation.rootIdentity,
     );
-    return materialize(reservation.volumeId, reservation.rootIdentity);
+    return materialize(reservation.volumeId, reservation.rootIdentity, await requiredClone(reservation));
   }
 
   const ownerProbe = await probeMetadataLockProcessIdentity(process.pid);
@@ -113,7 +150,8 @@ async function withManagedWorktreeStorageAdmissionUnlocked<T>(
     launchAttempts: 0,
   } as OrchestratorPacket;
   const admission = getPacketStorageAdmissionCoordinator();
-  const lease = await admission.reserveForLaunch(packet);
+  const lease = await admission.reserveForLaunch(packet, 0,
+    input.creationBaseCommit ? { creationBaseCommit: input.creationBaseCommit } : undefined);
   if (lease.receipt.state !== 'reserved') {
     throw new PacketStorageAdmissionError('Managed worktree creation was not reserved.', lease.receipt);
   }
@@ -124,7 +162,7 @@ async function withManagedWorktreeStorageAdmissionUnlocked<T>(
     await assertManagedWorktreeMaterializationBoundary(
       input.repoRoot, lease.reservation.volumeId, rootIdentity,
     );
-    result = await materialize(lease.reservation.volumeId, rootIdentity);
+    result = await materialize(lease.reservation.volumeId, rootIdentity, await requiredClone(lease.reservation));
   } catch (error) {
     await admission.settleFailedLaunch(packet, lease);
     throw error;

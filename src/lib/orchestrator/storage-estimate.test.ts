@@ -39,6 +39,36 @@ afterEach(() => {
 });
 
 describe('first-launch workspace storage estimation', () => {
+  it('charges clone metadata and native writes instead of shared dependency payloads', async () => {
+    const repo = repository();
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    const result = await observeRepoStorageEstimate(repo, {
+      creationBaseCommit: base,
+      readSetup: async () => setup(true),
+      measureDependencies: async () => 2 * 1024 * MIB,
+      readInput: async (_repo, name) => name === 'package.json' ? '{}' : null,
+      observeReuse: async () => ({ recipeKey: 'a'.repeat(64), metadataBytes: 2 * MIB, nativeWriteBytes: 3 * MIB, entries: 512 }),
+    });
+    expect(result.source).toBe('apfs-clone-growth');
+    expect(result.error).toContain('not exact allocated blocks');
+    expect(result.dependencyCloneContract?.recipeKey).toBe('a'.repeat(64));
+    expect(result.exactBytes).toBeLessThan(100 * MIB);
+    expect(result.nativeInstallEstimateBytes).toBeGreaterThan(128 * MIB);
+  });
+
+  it('retains the native reservation when APFS reuse cannot be proved', async () => {
+    const repo = repository();
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    const result = await observeRepoStorageEstimate(repo, {
+      creationBaseCommit: base,
+      readSetup: async () => setup(true),
+      readInput: async (_repo, name) => name === 'package.json' ? '{}' : null,
+      observeReuse: async () => { throw new Error('source changed'); },
+    });
+    expect(result.source).toBe('source-size-fallback');
+    expect(result.dependencyCloneContract?.recipeKey).toBeUndefined();
+    expect(result.exactBytes).toBeGreaterThan(128 * MIB);
+  });
   it('measures a small repository on the first launch without a telemetry warmup', async () => {
     const result = await observeRepoStorageEstimate(repository());
     expect(result.status).toBe('observed');

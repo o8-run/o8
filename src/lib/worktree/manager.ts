@@ -366,10 +366,14 @@ export class WorktreeManager {
       repoRoot: this.repoRoot,
       packetId: opts.packetId,
       reservationId: opts.storageAdmissionReservationId,
-    }, async (volumeId, rootIdentity) => {
+      repoSetup: opts.repoSetup,
+      creationBaseCommit: opts.warmBaseCommit ?? (opts.laneId
+        ? (await import('@/lib/lane/creation-base')).readPinnedLaneCreationBaseCommit(opts.laneId) ?? undefined
+        : undefined),
+    }, async (volumeId, rootIdentity, requiredCloneRecipeKey) => {
       let baseIdentity: StorageRootIdentity | null = null;
       const created = await this.createMaterialized(
-        opts, volumeId, rootIdentity, (identity) => { baseIdentity = identity; },
+        { ...opts, requiredDependencyCloneRecipeKey: requiredCloneRecipeKey }, volumeId, rootIdentity, (identity) => { baseIdentity = identity; },
       );
       const capturedBase = baseIdentity as StorageRootIdentity | null;
       if (!capturedBase) throw new Error('Managed worktree base ownership was not captured.');
@@ -406,8 +410,10 @@ export class WorktreeManager {
     try {
       const hooks = await readPinnedWorkspaceFileReceipt(info.path, identity, '.claude/settings.local.json');
       if (!hooks) throw new Error('Warm preparation requires managed safety settings.');
-      return await withManagedWorktreeStorageAdmission({ repoRoot: this.repoRoot, backgroundSetup: true }, () => withWorktreeMaterializationExecution(info.path, identity, async () => {
-        const receipt = await this.runSetupWithMaterialization(info.path, identity, opts.repoSetup);
+      return await withManagedWorktreeStorageAdmission({ repoRoot: this.repoRoot, backgroundSetup: true,
+        creationBaseCommit: opts.warmBaseCommit, repoSetup: opts.repoSetup }, (_volumeId, _rootIdentity, requiredCloneRecipeKey) => withWorktreeMaterializationExecution(info.path, identity, async () => {
+        const receipt = await this.runSetupWithMaterialization(info.path, identity, opts.repoSetup,
+          { ...opts, skipSetup: false, requiredDependencyCloneRecipeKey: requiredCloneRecipeKey });
         if (!receipt || receipt.mode !== 'native') throw new Error('Warm worktrees require private native dependencies.');
         info.dependencyRecipeKey = receipt.recipeKey;
         info.dependencyMaterialization = receipt;
@@ -1474,7 +1480,7 @@ export class WorktreeManager {
     worktreePath: string,
     identity?: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
     repoSetup?: CreateWorktreeOptions['repoSetup'],
-    launch?: Pick<CreateWorktreeOptions, 'laneId' | 'packetId' | 'skipSetup'>,
+    launch?: Pick<CreateWorktreeOptions, 'laneId' | 'packetId' | 'skipSetup' | 'requiredDependencyCloneRecipeKey'>,
   ): Promise<DependencyMaterializationReceipt | null> {
     let dependencyMaterialization: DependencyMaterializationReceipt | null = null;
     if (!launch?.skipSetup) {
@@ -1496,6 +1502,7 @@ export class WorktreeManager {
         const result = await timeWorktreePreparation(launch, 'dependency_materialization', () => materializeDependencyInstall(worktreePath, installCommand, {
           materializationIdentity: identity,
           cloneSourceWorkspace: this.repoRoot,
+          requiredCloneRecipeKey: launch?.requiredDependencyCloneRecipeKey,
           useDependencyPool: true,
           onSelection: (selection) => recordDependencySelection(launch, selection),
           persistReceipt: (receipt) => (

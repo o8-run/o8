@@ -9,7 +9,7 @@ export interface StorageReserveDefaults {
 
 export const STORAGE_RESERVE_FALLBACK: StorageReserveDefaults = {
   storageReserveRatio: 0,
-  storageReserveFloorGb: 2,
+  storageReserveFloorGb: 5,
 };
 
 export function resolveStoredStorageReserve(

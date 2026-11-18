@@ -21,7 +21,7 @@ describe('storage reserve operator defaults', () => {
     delete process.env.O8_STORAGE_RESERVE_RATIO;
     delete process.env.O8_STORAGE_RESERVE_FLOOR_GB;
     expect(resolveStorageReserveSettings({})).toEqual({
-      values: { storageReserveRatio: 0, storageReserveFloorGb: 2 },
+      values: { storageReserveRatio: 0, storageReserveFloorGb: 5 },
       sources: { storageReserveRatio: 'default', storageReserveFloorGb: 'default' },
     });
     expect(resolveStorageReserveSettings({ storageReserveRatio: 0.2, storageReserveFloorGb: 24 })).toEqual({
@@ -42,7 +42,7 @@ describe('storage reserve operator defaults', () => {
     process.env.O8_STORAGE_RESERVE_RATIO = '2';
     process.env.O8_STORAGE_RESERVE_FLOOR_GB = '10001';
     expect(resolveStorageReserveSettings({})).toEqual({
-      values: { storageReserveRatio: 0, storageReserveFloorGb: 2 },
+      values: { storageReserveRatio: 0, storageReserveFloorGb: 5 },
       sources: { storageReserveRatio: 'default', storageReserveFloorGb: 'default' },
     });
     expect(() => applyStorageReserveUpdate({}, { storageReserveRatio: -0.1 })).toThrow(/between 0 and 1/);

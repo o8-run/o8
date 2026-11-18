@@ -466,6 +466,10 @@ export function createPacketStorageAdmissionCoordinator(
           receipt,
         );
       }
+      if (observed.source === 'apfs-clone-growth' && (!observed.dependencyCloneContract
+        || observed.dependencyCloneContract.creationBaseCommit !== context?.creationBaseCommit)) {
+        throw new Error('APFS clone estimate has no matching immutable reservation contract.');
+      }
       let rootIdentity;
       try {
         rootIdentity = await observeRootIdentity(packet.workspaceTargetPath);
@@ -485,6 +489,7 @@ export function createPacketStorageAdmissionCoordinator(
         targetPath: reservationTargetPath,
         rootIdentity,
         exactBytes: observed.exactBytes,
+        ...(observed.dependencyCloneContract ? { dependencyCloneContract: observed.dependencyCloneContract } : {}),
         ownerId: packet.id,
         ownerGeneration: launchGeneration,
         leaseExpiresAt: now() + LAUNCH_RESERVATION_LEASE_MS,
