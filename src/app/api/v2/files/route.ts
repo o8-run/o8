@@ -10,67 +10,17 @@ import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
-import { isAbsolute, relative } from 'node:path';
-import { homedir } from 'node:os';
-import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
+import { getDefaultLlmRepoRoot } from '@/lib/llm/repo-scope';
 import {
   isWorkspaceFileError,
   readWorkspaceFile,
   openWorkspaceFile,
   writeWorkspaceFile,
 } from '@/lib/fs/workspace-file';
-import {
-  ABSOLUTE_PATH_NOT_ALLOWLISTED,
-  resolveAllowedOperatorConfigPath,
-  resolveRepoRelativeFilePath,
-} from '@/lib/files/operator-config-docs';
+import { resolveFileTarget } from '@/lib/files/file-target';
 import { contentHash } from '@/lib/markdown/transport';
-import { assertNotKnowledgeSource, KnowledgeSourceWriteError, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
+import { assertNotKnowledgeSource, KnowledgeSourceWriteError } from '@/lib/cortex/knowledge/sources';
 import { FILE_EDIT_MAX_BYTES } from '@/lib/fs/file-size-caps';
-
-async function resolveRoot(workspace?: string | null) {
-  if (!workspace) return getDefaultLlmRepoRoot();
-
-  const requestedPath = normalizeKnowledgeWritePath(workspace);
-
-  const { repoRoot } = await resolveRegisteredRepoScope(requestedPath);
-  return repoRoot;
-}
-
-async function resolveFileTarget(filePath: string, workspace?: string | null) {
-  if (isAbsolute(filePath)) {
-    const resolved = resolveAllowedOperatorConfigPath(filePath);
-    if (!resolved) {
-      return {
-        error: 'Absolute path is not allowlisted',
-        code: ABSOLUTE_PATH_NOT_ALLOWLISTED,
-        status: 400,
-      } as const;
-    }
-    const root = homedir();
-    return { root, relativePath: relative(root, resolved) } as const;
-  }
-
-  const root = await resolveRoot(workspace);
-  if (!root) {
-    return {
-      error: 'Workspace is not registered',
-      code: 'workspace_not_registered',
-      status: 400,
-    } as const;
-  }
-
-  const resolved = resolveRepoRelativeFilePath(root, filePath);
-  if (!resolved) {
-    return {
-      error: 'Path outside repository',
-      code: 'path_outside_repository',
-      status: 400,
-    } as const;
-  }
-
-  return { root, relativePath: relative(root, resolved) } as const;
-}
 
 function fileError(error: unknown) {
   if (error instanceof KnowledgeSourceWriteError) {

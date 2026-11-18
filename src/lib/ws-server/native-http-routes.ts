@@ -107,13 +107,36 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           }) : undefined;
         const reviewWorkspaceUnselected = url.pathname === '/api/review/workspace'
           ? (await import('@/lib/review/workspace-selection')).isReviewWorkspaceUnselected(url.searchParams.get('workspace')) : undefined;
+        // Scope remains the live Node registry/target resolver's authority.
+        // Bind its result to this admitted request; never replicate the registry in Rust.
+        let fileScopeDenied = false;
+        let fileContentScope: { repoRoot: string } | undefined;
+        let fileReadTarget: { root: string; relativePath: string } | undefined;
+        if (viewerRoute && !denied && !projectDenied) {
+          try {
+            const workspace = url.searchParams.get('workspace');
+            if (url.pathname === '/api/panel/file-content' && workspace) {
+              const scope = await (await import('@/lib/llm/repo-scope')).resolveRegisteredRepoScope((await import('@/lib/fs/safe-path')).expandHome(workspace));
+              if (!scope.repoRoot) fileScopeDenied = true;
+              else fileContentScope = { repoRoot: scope.repoRoot };
+            } else if (url.pathname === '/api/v2/files') {
+              const target = await (await import('@/lib/files/file-target')).resolveFileTarget(url.searchParams.get('path') ?? '', workspace);
+              if ('error' in target) fileScopeDenied = true;
+              else fileReadTarget = target;
+            }
+          } catch { fileScopeDenied = true; }
+        }
         const defaultsContext = {
+          fileContentScope, fileReadTarget,
+          fileTreeLocale: url.pathname === '/api/panel/files' ? new Intl.Collator().resolvedOptions().locale : undefined,
           reviewWorkspaceUnselected,
           mobileInbox,
           projectIconCachePresent: ['/api/panel/repos', '/api/panel/repo-icon'].includes(url.pathname) && (await import('@/lib/repos/project-icon-resolver')).projectIconResolver.hasFreshEntries(),
           projectRepoDigest: projectRegistryRead ? await (await import('@/lib/repos/registry')).nativeRepoRegistryFingerprint() : null,
           projectReadinessCached: url.pathname === '/api/panel/repos' && (await import('@/lib/repos/readiness')).hasCachedRepoReadiness(),
           projectsCwd: process.cwd(), projectsHome: homedir(),
+          fileReadMaxBytes: viewerRoute ? (await import('@/lib/fs/file-size-caps')).FILE_EDIT_MAX_BYTES : undefined,
+          filesTreeRoot: viewerRoute ? process.env.CORTEX_IDE_REVIEW_REPO_ROOT || null : undefined,
           gitDiffDefaultRoot: viewerRoute ? process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd() : undefined,
           operatorEnvClean: [
             'O8_ACTION_EFFORT',
@@ -177,14 +200,14 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
           ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
         };
-        response = denied ?? projectDenied ?? ((deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+        response = denied ?? projectDenied ?? ((fileScopeDenied || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
           'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
         } }));
         if (viewerRoute && response.status === 204) {
           const grant = req.headers['x-o8d-redaction'] === 'viewer/1' ? viewerRedactionGrant(defaultsContext) : null;
           response = grant === null ? new Response(null, { status: 409 }) : new Response(grant, { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
         }
-        admission = (!viewerRoute || response.status === 200) && !denied && !projectDenied && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
+        admission = (!viewerRoute || response.status === 200) && !denied && !projectDenied && !fileScopeDenied && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
       }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });

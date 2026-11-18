@@ -1,4 +1,6 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
+mod file_content;
+mod file_tree;
 mod git_diff;
 mod git_diff_redaction;
 pub use git_diff_redaction::ViewerRedaction;
@@ -218,6 +220,8 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         return projects::read(store, path, params);
     }
     match path {
+        "/api/panel/file-content" | "/api/v2/files" => file_content::read(store, path, params),
+        "/api/panel/files" => file_tree::read(store, params),
         "/api/worktrees/diff" | "/api/worktrees/diff-summary" | "/api/panel/file-diff" => git_diff::read(store, path, params),
         "/api/panel/branches"
             if std::env::var("O8D_NATIVE_REPOSITORY_READS").as_deref() == Ok("1") =>

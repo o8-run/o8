@@ -5470,6 +5470,17 @@
       ]
     },
     {
+      "path": "tests/o8d-file-content-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-git-diff-real-path.test.ts",
       "reasons": [
         "child-process",

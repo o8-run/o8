@@ -222,7 +222,11 @@ impl ViewerRedaction {
                     {
                         return Err(());
                     }
-                    let ranges = policy.ranges(text)?;
+                    let ranges = if viewer_diff(text) && !verified.contains(text) {
+                        vec![(0, text.len())]
+                    } else {
+                        policy.ranges(text)?
+                    };
                     let mut result = String::new();
                     let mut cursor = 0;
                     for (start, end) in ranges {
@@ -242,7 +246,18 @@ impl ViewerRedaction {
                 Value::Object(object) => {
                     // viewerJson emits spans in the TS producer's insertion order.
                     // serde_json's map order must not reorder this observable array.
-                    let order: &[&str] = if object.contains_key("sessionKey") {
+                    let order: &[&str] = if object.contains_key("content") {
+                        &[
+                            "content",
+                            "contentHash",
+                            "path",
+                            "exists",
+                            "size",
+                            "truncated",
+                            "error",
+                            "code",
+                        ]
+                    } else if object.contains_key("sessionKey") {
                         &[
                             "sessionKey",
                             "worktreePath",
@@ -438,4 +453,30 @@ fn normalize(text: &str, preserve: bool) -> Result<(String, Vec<(usize, usize)>)
         map = positions;
     }
     Ok((String::from_utf8(bytes).map_err(|_| ())?, map))
+}
+
+fn viewer_diff(text: &str) -> bool {
+    fn digits(raw: &str) -> Option<&str> {
+        let n = raw.bytes().take_while(u8::is_ascii_digit).count();
+        if n == 0 {
+            None
+        } else {
+            Some(&raw[n..])
+        }
+    }
+    fn range(raw: &str) -> Option<&str> {
+        let rest = digits(raw)?;
+        if let Some(count) = rest.strip_prefix(',') {
+            digits(count)
+        } else {
+            Some(rest)
+        }
+    }
+    text.split(['\n', '\r']).any(|line| {
+        (|| {
+            let raw = line.strip_prefix("@@ -")?;
+            let raw = range(raw)?.strip_prefix(" +")?;
+            Some(range(raw)?.starts_with(" @@"))
+        })() == Some(true)
+    })
 }
