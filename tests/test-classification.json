@@ -6478,6 +6478,13 @@
       ]
     },
     {
+      "path": "tests/phone-catalog-registration-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-builtin-worker-real-path.test.ts",
       "reasons": [
         "apfs-tool",

@@ -1,6 +1,8 @@
+import { listOpenclawAgents } from './openclaw-catalog';
+export { listOpenclawAgents } from './openclaw-catalog';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { ensureOpenclawGateway } from './openclaw-gateway';
-import { buildGovernedO8Profile as buildProfile, prepareOpenclawProfile, OPENCLAW_O8_CONFIG, OPENCLAW_SOURCE_CONFIG } from './openclaw-profile';
+import { buildGovernedO8Profile as buildProfile, prepareOpenclawProfile, OPENCLAW_O8_CONFIG } from './openclaw-profile';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * openclaw orchestrator backend.
@@ -198,24 +200,6 @@ export function openclawAgentAllowedModels(agentId: string): Set<string> {
 }
 
 /** The operator's openclaw agents — `{ id, name }` per entry in `agents.list`. */
-export function listOpenclawAgents(): Array<{ id: string; name: string }> {
-  try {
-    const source = JSON.parse(readFileSync(OPENCLAW_SOURCE_CONFIG, 'utf8')) as {
-      agents?: { list?: Array<{ id?: unknown; name?: unknown }> };
-    };
-    const rawList = source.agents?.list;
-    const list = Array.isArray(rawList) ? rawList : [];
-    return list
-      .map((a) => {
-        const id = typeof a.id === 'string' ? a.id : '';
-        const name = typeof a.name === 'string' && a.name.trim() ? a.name : id;
-        return { id, name };
-      })
-      .filter((a) => a.id);
-  } catch {
-    return [];
-  }
-}
 
 /**
  * Resolve the openclaw agent id for a turn: the per-request `agent` when given,
