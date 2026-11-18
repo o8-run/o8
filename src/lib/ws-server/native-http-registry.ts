@@ -49,6 +49,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/tasks/[taskId]', 'GET', () => import('@/lib/tasks/detail-route')),
     route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route'), ARTIFACT_REQUEST_MAX_BYTES),
     route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
+    route('/api/panel/link-preview', 'GET', () => import('@/app/api/panel/link-preview/route')),
     route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
     route('/api/tasks/dispatch-owner', 'POST', () => import('@/lib/tasks/dispatch-owner-route')),
     route('/api/runtime/owner', 'GET', () => import('@/lib/runtime/owner-status-route')),
@@ -64,7 +65,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/v2/files/quick-docs', 'GET', () => import('@/app/api/v2/files/quick-docs/route')),
     route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
-    route('/api/panel/resource-usage', 'GET', () => import('@/app/api/panel/resource-usage/route')),
+    // POST reuses the same resource inventory and keeps its current-row/core-pid guards.
+    route('/api/panel/resource-usage', 'GET POST', () => import('@/app/api/panel/resource-usage/route')),
     route('/api/panel/serve-image', 'GET', () => import('@/app/api/panel/serve-image/route')),
     route('/api/visualizations/[id]', 'GET', () => import('@/app/api/visualizations/[id]/route')),
     route('/api/visualizations', 'POST', async () => {
@@ -114,13 +116,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
     route('/api/v2/chat-history/terminal-turns', 'POST', () => import('@/app/api/v2/chat-history/terminal-turns/route')),
     route('/api/orchestrator/composer-queue', 'GET POST PATCH DELETE', () => import('@/app/api/orchestrator/composer-queue/route')),
+    route('/api/panel/workspaces', 'GET', () => import('@/app/api/panel/workspaces/route')),
     route('/api/panel/ws-info', 'GET', () => import('@/app/api/panel/ws-info/route')),
     route('/api/panel/ports', 'GET', () => import('@/app/api/panel/ports/route')),
     route('/api/orchestrator/handoff', 'POST', () => import('@/app/api/orchestrator/handoff/route')),
     route('/api/orchestrator/reset-session', 'POST', () => import('@/app/api/orchestrator/reset-session/route')),
     route('/api/orchestrator/compact', 'POST', () => import('@/app/api/orchestrator/compact/route')),
     route('/api/orchestrator/session-rules', 'GET POST DELETE', () => import('@/app/api/orchestrator/session-rules/route')),
-    route('/api/orchestrator/delegate', 'POST', () => import('@/app/api/orchestrator/delegate/route')),
+    route('/api/orchestrator/delegate', 'GET POST', () => import('@/app/api/orchestrator/delegate/route')),
     route('/api/orchestrator/stop-packet', 'POST', () => import('@/app/api/orchestrator/stop-packet/route')),
     // Operator-only (requirePanelAuth, then the bearer principal); like stop-packet
     // they run the dispatch tick here. The agent supervisor's watch map is still
@@ -320,6 +323,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // bearer gets 403; no/wrong bearer gets 401. The write marks
     // the device revoked + rewrites the active-token-hash file; the response carries no token. (#5243)
     route('/api/mobile/devices/revoke', 'POST', () => import('@/app/api/mobile/devices/revoke/route')),
+    // CLI code-based sign-in uses the existing local-operator handler.
+    route('/api/panel/auth/device/link', 'POST', () => import('@/app/api/panel/auth/device/link/route')),
     // Connect-attach toggle (Settings > Paired devices). GET reads the setting, POST writes it
     // (env-override locked). No handler-level auth — same panelGateMiddleware operator gate as the
     // rest of /api/panel/* (not allowlisted), so both the read and the write are
@@ -578,6 +583,7 @@ const producers = [
   // against the fixed VERBS set and args are JSON-encoded into the webview eval,
   // so a scoped caller cannot inject JS. Same gate over native as on Next.
   route('/api/browser/agent', 'POST', () => import('@/app/api/browser/agent/route')),
+  route('/api/browser/engine/capture', 'POST', () => import('@/app/api/browser/engine/capture/route')),
   route('/api/runtime/transcript', 'GET', () => import('@/app/api/runtime/transcript/route')),
   route('/api/runtime/launch', 'POST', () => import('@/app/api/runtime/launch/route')),
   route('/api/orchestrator/headless-tick', 'POST', () => import('@/app/api/orchestrator/headless-tick/route')),
