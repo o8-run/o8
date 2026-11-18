@@ -36,11 +36,8 @@ import { refreshDirectiveFts } from '@/lib/db/v14-fts5-migration';
 import {
   type DirectiveProjectScope,
   directiveAppliesToRepo,
-  resolveActiveDirectiveProjectScope,
 } from '@/lib/cortex/directives/filter';
-import { getProjectContext } from '@/lib/projects/context';
-import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
-import { isVirtualRepoProjectId } from '@/lib/repos/virtual-project-id';
+import { resolveDirectiveListScope } from '@/lib/cortex/directives/scope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -125,35 +122,11 @@ export async function GET(req: NextRequest) {
     // Without a repoPath, expose only global + active-project directives.
     let parsed: ParsedDirective[] = parsedAll;
     const projectId = req.nextUrl.searchParams.get('projectId')?.trim();
-    if (projectId) {
-      const context = await getProjectContext({ projectId, repoPath });
-      if (![context.id, context.runtimeProjectId, context.settingsProjectId].includes(projectId)) {
-        return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
-      }
-      const projectScope: DirectiveProjectScope = {
-        projectIds: new Set([context.id, context.runtimeProjectId, context.settingsProjectId].filter((id): id is string => Boolean(id)).map((id) => id.toLowerCase())),
-        // A virtual repo project can share its display-name slug with an
-        // unrelated Settings project. Only its explicit id is unambiguous.
-        projectSlugs: isVirtualRepoProjectId(context.runtimeProjectId)
-          ? new Set()
-          : new Set([context.slug.toLowerCase()]),
-        repoInActiveProject: context.repoInProject,
-      };
-      parsed = parsedAll.filter((directive) => repoPath
-        ? directiveAppliesToRepo(directive, repoPath, projectScope)
-        : directiveAppliesToActiveProject(directive, projectScope));
-    } else if (repoPath) {
-      const projectScope = await resolveActiveDirectiveProjectScope(repoPath);
-      parsed = parsedAll.filter((d) => directiveAppliesToRepo(d, repoPath, projectScope));
-    } else {
-      const active = await getActiveProjectScopeForRepo();
-      const projectScope: DirectiveProjectScope = {
-        projectIds: new Set([active.projectId.toLowerCase()]),
-        projectSlugs: new Set([active.projectSlug.toLowerCase()]),
-        repoInActiveProject: false,
-      };
-      parsed = parsedAll.filter((d) => directiveAppliesToActiveProject(d, projectScope));
-    }
+    const projectScope = await resolveDirectiveListScope(projectId, repoPath);
+    if (!projectScope) return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
+    parsed = parsedAll.filter(directive => repoPath
+      ? directiveAppliesToRepo(directive, repoPath, projectScope)
+      : directiveAppliesToActiveProject(directive, projectScope));
 
     const directives = parsed.map((d) => toSummary(d, fileByDirective.get(d) ?? null));
 

@@ -397,5 +397,16 @@
     "reason": "Native: materialized lane review diff, revision, byte bounding and viewer redaction after per-request Node lane/worker/target and Git-directory authority. Node retains canonical legacy remote-base refresh and all writes. Immutable sources, unresolved targets, git or grant errors, unsupported configuration/encodings and unsafe metadata defer in full.",
     "state": "rust-with-fallback",
     "test": "tests/o8d-lane-review-diff-real-path.test.ts"
+  },
+  {
+    "path": "/api/cortex/directives",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns fresh directive files, supported parsing/trailers, filtering and ordering. Node retains auth, data-directory initialization and canonical per-request project scope; malformed, unsafe, oversized or unsupported files/scope/collation defer in full. All writes and FTS remain Node.",
+    "test": "tests/o8d-directives-real-path.test.ts"
   }
 ]
