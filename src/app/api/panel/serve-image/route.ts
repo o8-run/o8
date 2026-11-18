@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { extname } from 'node:path';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { SERVE_IMAGE_ROOTS as ALLOWED_ROOTS } from '@/lib/files/serve-image-scope';
 import { confineToRoots } from '@/lib/fs/safe-path';
 import { isWorkspaceFileError, openWorkspaceFile } from '@/lib/fs/workspace-file';
 
@@ -18,11 +19,6 @@ const MIME_MAP: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.bmp': 'image/bmp',
 };
-
-const ALLOWED_ROOTS = [
-  process.env.HOME || require('os').homedir(),
-  '/tmp',
-];
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

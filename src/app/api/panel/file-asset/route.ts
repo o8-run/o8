@@ -3,9 +3,8 @@ import { isVerifiableRasterType, viewerImageBytes } from '@/lib/viewers/image-by
 export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
-import { homedir } from 'node:os';
 import { extname } from 'node:path';
-import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
+import { resolveAssetRoot } from '@/lib/files/asset-scope';
 import { openWorkspaceFile } from '@/lib/fs/workspace-file';
 
 const MAX_PREVIEW_BYTES = 50 * 1024 * 1024;
@@ -33,24 +32,13 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   '.flac': 'audio/flac',
 };
 
-async function resolveRoot(workspace?: string | null) {
-  if (!workspace) return getDefaultLlmRepoRoot();
-
-  const requestedPath = workspace.startsWith('~')
-    ? workspace.replace('~', homedir())
-    : workspace;
-
-  const { repoRoot } = await resolveRegisteredRepoScope(requestedPath);
-  return repoRoot;
-}
-
 export async function GET(request: NextRequest) {
   const path = request.nextUrl.searchParams.get('path');
   if (!path) {
     return new Response('path required', { status: 400 });
   }
 
-  const root = await resolveRoot(request.nextUrl.searchParams.get('workspace'));
+  const root = await resolveAssetRoot(request.nextUrl.searchParams.get('workspace'));
   if (!root) {
     return new Response('Workspace is not registered', { status: 400 });
   }

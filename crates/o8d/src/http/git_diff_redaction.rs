@@ -205,6 +205,21 @@ impl ViewerRedaction {
         }
         Ok(merged)
     }
+    pub(super) fn text(&self, text: &str) -> Result<(String, Vec<Value>), ()> {
+        let mut safe = String::new();
+        let mut spans = Vec::new();
+        let mut cursor = 0;
+        for (start, end) in self.ranges(text)? {
+            safe.push_str(&text[cursor..start]);
+            spans.push(
+                json!({"start":safe.len(),"end":safe.len()+10,"kind":"credential","path":""}),
+            );
+            safe.push_str("[redacted]");
+            cursor = end;
+        }
+        safe.push_str(&text[cursor..]);
+        Ok((safe, spans))
+    }
     pub(super) fn json(&self, mut body: Value, verified: &[String]) -> ReadResult {
         fn visit(
             policy: &ViewerRedaction,

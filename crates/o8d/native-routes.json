@@ -270,5 +270,53 @@
     "reason": "Unsupported registry scope, file identity, redaction grammar and listing variants remain TypeScript-owned.",
     "state": "red",
     "test": "tests/o8d-file-content-real-path.test.ts"
+  },
+  {
+    "path": "/api/panel/file-io",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Node supplies live per-request scope and redaction; unsupported encodings, filesystem identity and viewer cases defer.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-file-assets-real-path.test.ts",
+    "owned": true,
+    "redaction": "viewer"
+  },
+  {
+    "path": "/api/panel/file-asset",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Node supplies live per-request scope and redaction; unsupported encodings, filesystem identity and viewer cases defer.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-file-assets-real-path.test.ts",
+    "owned": true,
+    "redaction": "viewer"
+  },
+  {
+    "path": "/api/panel/serve-image",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Node supplies live per-request scope and redaction; unsupported encodings, filesystem identity and viewer cases defer.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-file-assets-real-path.test.ts",
+    "owned": true,
+    "redaction": "viewer"
+  },
+  {
+    "path": "/api/mobile/media",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Node supplies live per-request scope and redaction; unsupported encodings, filesystem identity and viewer cases defer.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-file-assets-real-path.test.ts",
+    "owned": true,
+    "redaction": "viewer"
   }
 ]
