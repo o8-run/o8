@@ -15,9 +15,10 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Runtime-owned transcripts, network projections and durable lane overlays remain TypeScript-owned.",
-    "state": "red",
-    "test": "tests/o8d-native-route-table-real-path.test.ts"
+    "reason": "Node admits only non-network llm-chat sessions without mission cards. Runtime tails, mission-card views, lanes and uncertain records defer to TypeScript.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-mobile-history-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/v2/chat-history",
