@@ -1,4 +1,4 @@
-import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
+import { apiFrontDoorEnabled, nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { isIP } from 'node:net';
@@ -33,7 +33,7 @@ function startupPortInfo(): string | undefined {
     // Reuse the actual TS cache, including its intentional ws-port asymmetry.
     const info = resolvePortInfo();
     if (stamp('api-port') !== apiMtimeNs || stamp('ws-port') !== wsMtimeNs) return undefined;
-    return JSON.stringify({ ...info, apiMtimeNs, wsMtimeNs });
+    return JSON.stringify({ ...info, apiMtimeNs, wsMtimeNs, apiFrontDoor: apiFrontDoorEnabled() });
   } catch { return undefined; }
 }
 

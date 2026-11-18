@@ -97,7 +97,7 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
       NODE_ENV: 'test', LANG: 'C.UTF-8', CORTEX_IDE_DATA_DIR: directory, CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, O8_API_PORT: String(apiPort), PORT: String(apiPort),
       O8_WS_PORT: String(oldWsPort), WS_PORT: String(oldWsPort), NEXT_ORIGIN: `http://127.0.0.1:${nextPort}`,
-      O8_API_FRONT_DOOR: '1', O8_NEXT_O8D: '0', O8_WS_O8D: rust ? '1' : '0', O8D_BINARY: binary, O8D_NATIVE_SESSION_READS: '0',
+      O8_API_FRONT_DOOR: '1', O8_NEXT_O8D: '0', O8_WS_O8D: rust ? '1' : '0', O8D_BINARY: binary,
       O8_TTS_PYTHON: join(directory, 'no-python'), CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${apiPort}` },
   });
   let stderr = '';
@@ -124,10 +124,13 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     try { registered = await fetch(origin + '/api/setup/identity', { signal: AbortSignal.timeout(30_000) }); }
     catch (error) { throw new Error('Advertised API port was not ready with O8_API_FRONT_DOOR=1 and O8_NEXT_O8D=0: ' + (error instanceof Error ? error.name : 'unknown')); }
     expect(registered.status).toBe(200);
+    if (rust) expect(registered.headers.get('x-o8d-native-session-read')).toBe('1');
     expect(requests).toEqual([]);
     expect(await registered.json()).toMatchObject({ apiPort, wsPort: apiPort });
     const wsInfo = await fetch(origin + '/api/panel/ws-info', { headers: { authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(10_000) });
-    expect(wsInfo.status).toBe(200); expect(await wsInfo.json()).toMatchObject({ wsPort: apiPort });
+    expect(wsInfo.status).toBe(200);
+    if (rust) expect(wsInfo.headers.get('x-o8d-native-session-read')).toBe('1');
+    expect(await wsInfo.json()).toMatchObject({ wsPort: apiPort });
     const websocket = new WebSocket(`ws://127.0.0.1:${apiPort}/ws?token=${token}`);
     const wsDeadline = setTimeout(() => websocket.terminate(), 30_000);
     try { await once(websocket, 'open'); }
