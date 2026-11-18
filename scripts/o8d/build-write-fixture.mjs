@@ -2,7 +2,7 @@
 // Usage: node build-write-fixture.mjs ROOT TARGET OUTPUT [BASE CANDIDATE_PATCH]
 // After integration omit BASE/CANDIDATE_PATCH: ROOT is the candidate checkout.
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statfsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -22,9 +22,13 @@ function run(command, args, options = {}) {
   return result.stdout;
 }
 function disk() {
-  const available = run('df', ['--output=avail', '-k', '/'], { encoding: 'utf8', stdio: 'pipe' });
-  if (Number(available.trim().split('\n').at(-1)) < 15 * 1024 * 1024) throw new Error('Less than 15GiB available');
   run('df', ['-h', '/']);
+  // The portable Node API also works with BSD df on macOS. Keep CI's default;
+  // an operator can set a smaller local budget, bounded below by 5 GiB.
+  const minimum = Number(process.env.O8D_FIXTURE_MIN_FREE_GIB ?? 15);
+  if (!Number.isFinite(minimum) || minimum < 5) throw new Error('Disk minimum must be at least 5 GiB');
+  const { bavail, bsize } = statfsSync('/');
+  if (bavail * bsize < minimum * 1024 ** 3) throw new Error(`Less than ${minimum}GiB available`);
 }
 disk();
 const scratch = mkdtempSync(join(tmpdir(), 'o8d-write-fixture-build-'));
