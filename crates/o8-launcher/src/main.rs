@@ -938,12 +938,12 @@ fn main() {
     };
     // With no arguments the launcher is the app bundle's main program and
     // reads its paths from the bundle it runs in.
-    let loaded: Option<Config> = if args.len() == 1
+    let bundled = args.len() == 1
         || args
             .iter()
             .skip(1)
-            .all(|arg| !arg.to_string_lossy().starts_with('-'))
-    {
+            .all(|arg| !arg.to_string_lossy().starts_with('-'));
+    let loaded: Option<Config> = if bundled {
         std::env::current_exe().ok().and_then(|exe| {
             o8_launcher::bundle::configuration(
                 &exe,
@@ -965,6 +965,20 @@ fn main() {
         o8_launcher::note!("Invalid launch configuration");
         std::process::exit(2);
     };
+    // Only the installed app puts its CLI on PATH; a --config fixture never
+    // touches the real bin folders. The servers inherit the outcome.
+    #[cfg(target_os = "macos")]
+    if bundled {
+        if let Some(home) = std::env::var_os("HOME") {
+            let targets = o8_launch_core::cli_link::default_targets(std::path::Path::new(&home));
+            let outcome =
+                o8_launch_core::cli_link::link(&config.server_dir.join("bin").join("o8"), &targets);
+            o8_launcher::note!("CLI: {}", outcome.status);
+            for (name, value) in outcome.env() {
+                std::env::set_var(name, value);
+            }
+        }
+    }
     match run(&mut config, &relaunch) {
         Ok(()) => {}
         Err(Some(reason)) => {
