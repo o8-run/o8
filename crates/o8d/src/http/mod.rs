@@ -7,6 +7,7 @@ mod file_assets;
 mod file_asset_viewer;
 mod file_tree;
 mod git_diff;
+mod lane_diff;
 mod git_diff_redaction;
 pub use git_diff_redaction::ViewerRedaction;
 mod chat;
@@ -251,6 +252,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         {
             repository::read(path, params)
         }
+        path if lane_diff::matches(path) => lane_diff::read(store, path, params),
         path if git_refs::is_commit(path) => git_refs::commit(store, path),
         "/api/runtime/inventory" => unavailable(),
         "/api/mobile/orchestrator/threads" => thread_list::read(store, params),

@@ -116,6 +116,17 @@ async function resolveFetchOutcome(
   return outcome;
 }
 
+/** Canonical remote/base decision before local diff computation. */
+export async function resolvePacketDiffBaseTarget(
+  cwd: string, baseBranch: string, fetchTimeoutMs = DEFAULT_FETCH_TIMEOUT_MS, runGit?: DiffBaseGitRunner,
+) {
+  const base = baseBranch.trim() || 'main';
+  if (!isSafeGitRef(base)) throw new Error(`Unsafe base branch for diff: ${base}`);
+  const originRef = `origin/${base}`;
+  const outcome = await resolveFetchOutcome(cwd, base, originRef, fetchTimeoutMs, runGit);
+  return { baseBranch: base, requestedRef: originRef, ...outcome };
+}
+
 export async function resolvePacketDiffBase(
   cwd: string,
   baseBranch: string,
@@ -123,13 +134,8 @@ export async function resolvePacketDiffBase(
   fetchTimeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
   runGit?: DiffBaseGitRunner,
 ): Promise<PacketDiffBaseResolution> {
-  const base = baseBranch.trim() || 'main';
-  if (!isSafeGitRef(base)) {
-    throw new Error(`Unsafe base branch for diff: ${base}`);
-  }
-
-  const originRef = `origin/${base}`;
-  const fetchOutcome = await resolveFetchOutcome(cwd, base, originRef, fetchTimeoutMs, runGit);
+  const fetchOutcome = await resolvePacketDiffBaseTarget(cwd, baseBranch, fetchTimeoutMs, runGit);
+  const base = fetchOutcome.baseBranch, originRef = fetchOutcome.requestedRef;
   let usedFallback = fetchOutcome.usedFallback;
   let warning = fetchOutcome.warning;
 
