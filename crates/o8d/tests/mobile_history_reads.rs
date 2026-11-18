@@ -12,7 +12,7 @@ impl Fixture {
         let directory = directory.canonicalize().unwrap();
         fs::create_dir(directory.join("chat-history")).unwrap();
         let db = Connection::open(directory.join("cortex-ide.db")).unwrap();
-        db.execute_batch("CREATE TABLE lanes (session_key TEXT); CREATE TABLE bot_network_threads (thread_id TEXT);").unwrap();
+        db.execute_batch("CREATE TABLE lanes (id TEXT, session_key TEXT, created_at TEXT); CREATE TABLE lane_events (id TEXT, lane_id TEXT, verb TEXT, actor TEXT, payload_json TEXT, timestamp TEXT); CREATE TABLE bot_network_threads (thread_id TEXT);").unwrap();
         Self(directory)
     }
     fn db(&self) -> Connection {
@@ -50,7 +50,7 @@ impl Drop for Fixture {
     }
 }
 #[tokio::test]
-async fn refuses_lane_bound_runtime_network_malformed_and_unsupported_histories() {
+async fn refuses_runtime_network_malformed_and_unsupported_histories() {
     let f = Fixture::new();
     let query = "sessionKey=llm-chat:tab";
     assert_eq!(
@@ -84,8 +84,13 @@ async fn refuses_lane_bound_runtime_network_malformed_and_unsupported_histories(
     fs::remove_file(f.path()).unwrap();
     fs::write(f.path(), "{\"messages\":[]}").unwrap();
     let db = f.db();
-    db.execute("INSERT INTO lanes VALUES ('llm-chat:tab')", [])
-        .unwrap();
+    db.execute(
+        "INSERT INTO lanes VALUES ('lane','llm-chat:tab','2026-01-01')",
+        [],
+    )
+    .unwrap();
+    assert_eq!(f.get(query).await.0, StatusCode::OK);
+    db.execute("INSERT INTO lane_events VALUES ('unknown','lane','future_kind','system','{}','2026-01-01T00:00:00.000Z')",[]).unwrap();
     assert_eq!(f.get(query).await.0, StatusCode::SERVICE_UNAVAILABLE);
     db.execute("DELETE FROM lanes", []).unwrap();
     db.execute("DROP TABLE lanes", []).unwrap();

@@ -15,9 +15,9 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Node admits only non-network llm-chat sessions without mission cards. Runtime tails, mission-card views, lanes and uncertain records defer to TypeScript.",
+    "reason": "Native: admitted ordinary llm-chat sessions, unbound or with an unambiguous SQLite lane and supported persisted huddle/steer events. TypeScript: all non-llm-chat keys (including codex/claude/gemini/opencode/cursor/grok tails and subagents), network or mission-card threads, ambiguous lanes, unsupported chat/event/receipt data or timestamps, and any read/schema error. Auth, projections and all writers remain Node-owned.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-mobile-history-real-path.test.ts",
+    "test": "tests/o8d-mobile-lane-overlays-real-path.test.ts",
     "owned": true
   },
   {
