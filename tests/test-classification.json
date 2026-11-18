@@ -8469,6 +8469,13 @@
       ]
     },
     {
+      "path": "tests/update-launcher-routes-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-lease-clock-real-path.test.ts",
       "reasons": [
         "child-process",
