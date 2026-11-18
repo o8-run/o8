@@ -74,7 +74,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/runtime/capabilities",
@@ -84,7 +85,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/v2/keys",
@@ -94,7 +96,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/runtime/service-tiers",
@@ -104,7 +107,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/panel/operator-defaults",
@@ -114,7 +118,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/mobile/inbox",
