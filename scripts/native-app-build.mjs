@@ -3,7 +3,7 @@
 // classic shell (#6130). It writes the bundle where the classic build does, so
 // signing, notarization and the release checks run on it unchanged.
 //
-//   node scripts/native-app-build.mjs [--skip-prebuild | --candidate [--sign]]
+//   node scripts/native-app-build.mjs [--skip-prebuild | --candidate [--sign] [--front-door | --next-off]]
 //
 // --candidate builds for this machine only and keeps work between runs: one
 // chip, incremental compiles, and the packaged server is reused while its
@@ -14,6 +14,11 @@
 // --sign signs a candidate with the identity in APPLE_SIGNING_IDENTITY so it
 // keeps the installed app's permissions and stored items. It is not notarized,
 // so it is for the machine that built it, never for distribution.
+//
+// --front-door marks a candidate to start the API front door (WS on the public
+// API port, Next on a private one); --next-off also leaves Next unstarted. The
+// launcher reads the marks from Info.plist, so an app opened from Finder, which
+// passes no environment, runs that way. Both are off unless given.
 //
 // Nothing in the release pipeline selects this script yet.
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -49,7 +54,15 @@ function escapeXml(text) {
 }
 
 /** The keys the classic bundler wrote, then the repository's own additions on top. */
-export function writeInfoPlist(root, file, version) {
+/** Info.plist marks the launcher reads (`crates/o8-launcher/src/bundle.rs`). */
+export const SERVER_MODE_KEYS = { frontDoor: 'O8APIFrontDoor', nextOff: 'O8NextOff' };
+
+export function serverMode(argv) {
+  const nextOff = argv.includes('--next-off');
+  return { frontDoor: nextOff || argv.includes('--front-door'), nextOff };
+}
+
+export function writeInfoPlist(root, file, version, mode = { frontDoor: false, nextOff: false }) {
   const config = JSON.parse(readFileSync(join(root, 'src-tauri/tauri.conf.json'), 'utf8'));
   const minimum = config.bundle?.macOS?.minimumSystemVersion ?? '14.0';
   const strings = {
@@ -94,6 +107,9 @@ ${body}
 </plist>
 `);
   execFileSync('/usr/libexec/PlistBuddy', ['-c', `Merge ${join(root, 'src-tauri/Info.plist')}`, file], { stdio: 'pipe' });
+  for (const [name, key] of Object.entries(SERVER_MODE_KEYS)) {
+    if (mode[name]) execFileSync('/usr/libexec/PlistBuddy', ['-c', `Add :${key} bool true`, file], { stdio: 'pipe' });
+  }
   execFileSync('plutil', ['-lint', file], { stdio: 'pipe' });
 }
 
@@ -232,6 +248,8 @@ async function main() {
   const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
   const started = Date.now();
   const candidate = process.argv.includes('--candidate');
+  const mode = serverMode(process.argv);
+  if (mode.frontDoor && !candidate) throw new Error('--front-door and --next-off are for --candidate builds; turning them on for a release is a release decision.');
   const arches = candidate ? [process.arch === 'arm64' ? 'aarch64' : 'x86_64'] : ARCHES;
   const staged = candidate ? `${arches[0]}-apple-darwin` : 'universal-apple-darwin';
   // Finer-grained reuse between runs, at the cost of a slightly larger program.
@@ -271,13 +289,13 @@ async function main() {
     copyFileSync(join(root, 'src-tauri/icons/icon.icns'), join(resources, 'icon.icns'));
     copyFileSync(join(root, 'src-tauri/helpers/o8-next-build.json'), join(resources, 'o8-next-build.json'));
     cpSync(server, join(resources, 'server'), { recursive: true, verbatimSymlinks: true });
-    writeInfoPlist(root, join(app, 'Contents/Info.plist'), version);
+    writeInfoPlist(root, join(app, 'Contents/Info.plist'), version, mode);
   });
   if (process.argv.includes('--sign')) {
     if (!candidate) throw new Error('--sign is for --candidate builds; releases use the release signing step.');
     timed('sign', () => signCandidate(root, join(root, APP_BUNDLE)));
   }
-  console.log(`[native-app] ${APP_BUNDLE} assembled for v${version}${candidate ? ` (candidate, ${arches[0]})` : ''} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  console.log(`[native-app] ${APP_BUNDLE} assembled for v${version}${candidate ? ` (candidate, ${arches[0]}${mode.nextOff ? ', Next off' : mode.frontDoor ? ', front door' : ''})` : ''} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
