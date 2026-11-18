@@ -1,5 +1,6 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
 mod file_content;
+mod repo_spec;
 mod file_assets;
 mod file_asset_viewer;
 mod file_tree;
@@ -224,6 +225,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
     match path {
         "/api/panel/file-content" | "/api/v2/files" => file_content::read(store, path, params),
         "/api/panel/files" => file_tree::read(store, params),
+        "/api/repo-spec" => repo_spec::read(store, params),
         "/api/panel/file-io" | "/api/panel/file-asset" | "/api/panel/serve-image" | "/api/mobile/media" => file_assets::read(store, path, params),
         "/api/worktrees/diff" | "/api/worktrees/diff-summary" | "/api/panel/file-diff" => git_diff::read(store, path, params),
         "/api/panel/branches"

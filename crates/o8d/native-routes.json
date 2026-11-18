@@ -318,5 +318,17 @@
     "test": "tests/o8d-file-assets-real-path.test.ts",
     "owned": true,
     "redaction": "viewer"
+  },
+  {
+    "path": "/api/repo-spec",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Node retains live caller scope and target validation; RFM views and unsupported redaction/identity cases defer.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-repo-spec-real-path.test.ts",
+    "owned": true,
+    "redaction": "viewer"
   }
 ]

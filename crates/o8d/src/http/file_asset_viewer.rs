@@ -48,9 +48,10 @@ pub(super) fn json(
     status: StatusCode,
     body: Value,
 ) -> Result<Response, ()> {
-    let safe = policy.json(body, &[])?;
-    let bytes = ordered(
-        &safe,
+    json_ordered(
+        policy,
+        status,
+        body,
         &[
             "content",
             "mtimeMs",
@@ -61,7 +62,15 @@ pub(super) fn json(
             "redaction",
         ],
     )
-    .into_bytes();
+}
+pub(super) fn json_ordered(
+    policy: &ViewerRedaction,
+    status: StatusCode,
+    body: Value,
+    keys: &[&str],
+) -> Result<Response, ()> {
+    let safe = policy.json(body, &[])?;
+    let bytes = ordered(&safe, keys).into_bytes();
     if bytes.len() > RESPONSE_LIMIT {
         return Err(());
     }
