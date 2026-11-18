@@ -25,6 +25,13 @@ it.skipIf(process.platform !== 'linux')('serves owned git diffs with Next absent
     await seedSessionFixture(directory);
     const operator = readFileSync(join(directory, 'ws-token'), 'utf8').trim();
     const corpus = gitDiffCorpus(directory, operator);
+    // Name the inventory routes here and drive each route's real auth matrix;
+    // provenance must not depend on the helper's corpus ordering.
+    const authCases = ['/api/worktrees/diff', '/api/worktrees/diff-summary', '/api/panel/file-diff'].map(route => {
+      const test = corpus.find(test => test.label.startsWith('clean:') && test.path.split('?')[0] === route);
+      expect(test, `Missing clean auth fixture for ${route}`).toBeDefined();
+      return test!;
+    });
     const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
     const capturedStderr = join(directory, 'o8d-stderr');
     const captureBinary = join(directory, 'o8d-capture');
@@ -35,7 +42,7 @@ it.skipIf(process.platform !== 'linux')('serves owned git diffs with Next absent
     await reference.stopNext();
     server = { ...reference, origin: reference.url.replace('ws:', 'http:').replace('/ws', '') };
     for (const test of corpus) { const { status, body } = await send(server, test.path); recorded.push({ status, body }); }
-    for (const test of corpus.slice(0, 3)) for (const bearer of ['', 'wrong', WORKER_SECRET, DEVICE_SECRET, 'o8ro_fixture', 'o8pw_unknownfixture']) {
+    for (const test of authCases) for (const bearer of ['', 'wrong', WORKER_SECRET, DEVICE_SECRET, 'o8ro_fixture', 'o8pw_unknownfixture']) {
       const { status, body } = await send(server, test.path, { authorization: bearer ? `Bearer ${bearer}` : '' });
       auth.set(test.path + bearer, { status, body });
     }
@@ -52,7 +59,7 @@ it.skipIf(process.platform !== 'linux')('serves owned git diffs with Next absent
         expect(wire).toContain('[redacted]');
       }
     }
-    for (const test of corpus.slice(0, 3)) for (const bearer of ['', 'wrong', WORKER_SECRET, DEVICE_SECRET, 'o8ro_fixture', 'o8pw_unknownfixture']) {
+    for (const test of authCases) for (const bearer of ['', 'wrong', WORKER_SECRET, DEVICE_SECRET, 'o8ro_fixture', 'o8pw_unknownfixture']) {
       const { status, body, native } = await send(server, test.path, { authorization: bearer ? `Bearer ${bearer}` : '',
         'x-o8d-redaction': 'viewer/1', 'x-o8d-bridge': 'spoofed', 'x-o8d-session-read': 'authorize' });
       expect(firstDifference(auth.get(test.path + bearer), { status, body })).toBeNull();
@@ -86,11 +93,12 @@ it.skipIf(process.platform !== 'linux')('serves owned git diffs with Next absent
 it.skipIf(process.platform !== 'linux')('refuses missing, malformed, oversized and unsupported per-request grants through the public socket', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8d-git-grant-')));
   let mode = 'valid'; let stderr = ''; let stdout = '';
-  const policy = { knownValues: [ENV_SECRET], normalizedValues: [ENV_SECRET], activeCredentialHashes: [] as string[] };
+  const policy = { normalizedValues: [ENV_SECRET], activeCredentialHashes: [] as string[] };
   const grant = () => ({ version: mode === 'version' ? 2 : 1,
     defaultsContext: { projectsHome: directory, gitDiffDefaultRoot: directory },
-    redaction: mode === 'array' ? { ...policy, knownValues: [false] } : mode === 'count' ? { ...policy, knownValues: Array(1025).fill('x') }
-      : mode === 'string' ? { ...policy, knownValues: ['x'.repeat(16 * 1024 + 1)] } : policy });
+    redaction: mode === 'stale' ? { ...policy, knownValues: [] }
+      : mode === 'array' ? { ...policy, normalizedValues: [false] } : mode === 'count' ? { ...policy, normalizedValues: Array(1025).fill('x') }
+        : mode === 'string' ? { ...policy, activeCredentialHashes: ['x'.repeat(16 * 1024 + 1)] } : policy });
   const upstream = createServer((req, res) => {
     if (req.headers['x-o8d-session-read'] === 'authorize') {
       expect(req.headers['x-o8d-redaction']).toBe('viewer/1');
@@ -116,7 +124,7 @@ it.skipIf(process.platform !== 'linux')('refuses missing, malformed, oversized a
     });
     const request = () => fetch(origin + '/api/worktrees/diff?sessionKey=missing');
     const valid = await request(); expect(valid.headers.get('x-o8d-native')).toBe('1'); await valid.json();
-    for (mode of ['missing', 'malformed', 'version', 'array', 'count', 'string', 'body']) {
+    for (mode of ['missing', 'malformed', 'version', 'stale', 'array', 'count', 'string', 'body']) {
       const response = await request(); expect(response.headers.get('x-o8d-native'), mode).toBeNull();
       expect(await response.json()).toEqual({ fallback: true });
     }

@@ -8,6 +8,10 @@ pub struct ViewerRedaction {
 }
 impl ViewerRedaction {
     pub fn from_grant(value: &Value) -> Option<Self> {
+        // Stale senders must defer instead of transferring redundant raw material.
+        if value.as_object()?.contains_key("knownValues") {
+            return None;
+        }
         let array = |key| {
             value[key]
                 .as_array()?
@@ -15,13 +19,11 @@ impl ViewerRedaction {
                 .map(|v| v.as_str().map(str::to_owned))
                 .collect::<Option<Vec<_>>>()
         };
-        let known = array("knownValues")?;
         let normalized = array("normalizedValues")?;
         let hashes = array("activeCredentialHashes")?;
-        if known.len() + normalized.len() + hashes.len() > 1024
-            || known
+        if normalized.len() + hashes.len() > 1024
+            || normalized
                 .iter()
-                .chain(&normalized)
                 .chain(&hashes)
                 .any(|s| s.len() > 16 * 1024)
         {

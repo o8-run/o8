@@ -8,7 +8,6 @@ export const VIEWER_GRANT_LIMIT = 1024 * 1024;
 export function viewerRedactionGrant(defaultsContext: object): string | null {
   const policy = viewerRedactionPolicy();
   const redaction = {
-    knownValues: [...(policy.knownValues ?? [])],
     normalizedValues: [...(policy.normalizedValues ?? [])],
     activeCredentialHashes: [...(policy.activeCredentialHashes ?? [])],
   };
