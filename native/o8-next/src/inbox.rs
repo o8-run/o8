@@ -513,7 +513,8 @@ impl Inbox {
             vec![],
         ];
         if self.lane != approval_audit::LANE {
-            self.selected = self.selected
+            self.selected = self
+                .selected
                 .min(self.cards[self.lane].len().saturating_sub(1));
         }
         self.reply_focus

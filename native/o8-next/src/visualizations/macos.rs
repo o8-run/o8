@@ -581,10 +581,7 @@ impl Drop for Host {
 }
 /// Window bounds in AppKit's unzoomed window points. Also compiled by the
 /// visualization check, so it does not reach into the app's zoom module.
-fn native(
-    bounds: gpui::Bounds<gpui::Pixels>,
-    window: &gpui::Window,
-) -> gpui::Bounds<gpui::Pixels> {
+fn native(bounds: gpui::Bounds<gpui::Pixels>, window: &gpui::Window) -> gpui::Bounds<gpui::Pixels> {
     let zoom = window.zoom();
     bounds.map(|v| v * zoom)
 }

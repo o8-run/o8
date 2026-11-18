@@ -26,7 +26,9 @@ impl State {
 impl DiffSurface {
     pub(crate) fn allow_orphan_discard(&mut self, allowed: bool) {
         self.discard_allowed = allowed;
-        if !allowed && let Some(state) = &mut self.missing { state.confirming = false; }
+        if !allowed && let Some(state) = &mut self.missing {
+            state.confirming = false;
+        }
     }
     pub(super) fn confirm_missing(&mut self, confirm: bool, cx: &mut Context<Self>) {
         if self.busy || !self.discard_allowed {
@@ -60,14 +62,12 @@ impl DiffSurface {
         let generation = self.generation;
         let target = self.target.clone();
         let client = self.client.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move {
-                discard(&client, &lane_id)?;
-                // Classic lifecycle-reconcile refreshes this same projection.
-                let _ = client.get::<Value>("/api/panel/workspaces", &[]);
-                Ok::<(), String>(())
-            });
+        let task = cx.background_executor().spawn(async move {
+            discard(&client, &lane_id)?;
+            // Classic lifecycle-reconcile refreshes this same projection.
+            let _ = client.get::<Value>("/api/panel/workspaces", &[]);
+            Ok::<(), String>(())
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {

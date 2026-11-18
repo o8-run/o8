@@ -54,7 +54,11 @@ pub(crate) fn typical(switches: &[Switch]) -> Option<String> {
     let mut ms: Vec<_> = switches.iter().map(|switch| switch.ms).collect();
     bytes.sort_unstable();
     ms.sort_unstable();
-    Some(format!("{} · {} ms", size(*bytes.get(middle)?), ms.get(middle)?))
+    Some(format!(
+        "{} · {} ms",
+        size(*bytes.get(middle)?),
+        ms.get(middle)?
+    ))
 }
 
 #[cfg(test)]

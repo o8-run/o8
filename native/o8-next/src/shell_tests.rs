@@ -684,9 +684,14 @@ fn each_clicked_issue_gets_its_own_panel_tab(cx: &mut TestAppContext) {
     draw(cx);
     assert!(cx.debug_bounds("panel-issue-tab-7").is_some());
     assert!(cx.debug_bounds("panel-issue-tab-8").is_some());
-    assert!(cx.debug_bounds("issue-new").is_none(), "only the issue shows");
     assert!(
-        shell.read_with(cx, |s, _| s.active().is_none_or(|tab| tab.label() != "Issues")),
+        cx.debug_bounds("issue-new").is_none(),
+        "only the issue shows"
+    );
+    assert!(
+        shell.read_with(cx, |s, _| s
+            .active()
+            .is_none_or(|tab| tab.label() != "Issues")),
         "the issue stays out of the workspace"
     );
 }
@@ -710,9 +715,14 @@ fn a_thread_link_stays_in_the_app(cx: &mut TestAppContext) {
         s.open_transcript_link("o8://thread/not-listed", window, cx)
     });
     cx.run_until_parked();
-    let toasts = cx.update(|_, cx| crate::shell::toasts::texts(cx)).join("
-");
-    assert!(toasts.contains("That thread is not on this machine yet."), "{toasts}");
+    let toasts = cx.update(|_, cx| crate::shell::toasts::texts(cx)).join(
+        "
+",
+    );
+    assert!(
+        toasts.contains("That thread is not on this machine yet."),
+        "{toasts}"
+    );
 }
 
 #[path = "shell_look_tests.rs"]

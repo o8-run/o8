@@ -11,10 +11,10 @@ mod history;
 pub(crate) mod model;
 #[path = "subagents/trace.rs"]
 pub(crate) mod trace;
-#[path = "subagents/view.rs"]
-mod view;
 #[path = "subagents/transcript_state.rs"]
 mod transcript_state;
+#[path = "subagents/view.rs"]
+mod view;
 use model::{Agent, Scope};
 
 pub(crate) struct Open(pub gpui::AnyWindowHandle);
@@ -286,7 +286,10 @@ impl Inspector {
                 this.tabs = tabs
                     .into_iter()
                     .map(|tab| {
-                        let agent = this.agents.iter().find(|a| a.session.as_ref() == Some(&tab));
+                        let agent = this
+                            .agents
+                            .iter()
+                            .find(|a| a.session.as_ref() == Some(&tab));
                         agent.map_or(tab, |agent| agent.id.clone())
                     })
                     .filter(|tab| open.insert(tab.clone()))
@@ -330,7 +333,11 @@ impl Inspector {
             return;
         };
         let session = agent.session.clone();
-        let root = agent.facts.worktree.clone().unwrap_or_else(|| self.scope.repo.clone());
+        let root = agent
+            .facts
+            .worktree
+            .clone()
+            .unwrap_or_else(|| self.scope.repo.clone());
         let id = agent.id.clone();
         let Some(key) = session else {
             let agent = agent.clone();
@@ -367,7 +374,11 @@ impl Inspector {
                 match result {
                     Ok(mut history) => {
                         if history.transcript.is_empty() {
-                            if let Some(agent) = this.selected.as_ref().and_then(|id| this.agents.iter().find(|a| &a.id == id)) {
+                            if let Some(agent) = this
+                                .selected
+                                .as_ref()
+                                .and_then(|id| this.agents.iter().find(|a| &a.id == id))
+                            {
                                 history = transcript_state::fallback(agent, key.clone());
                             }
                         }
@@ -392,8 +403,14 @@ impl Inspector {
         let same = self.detail_key.as_ref() == Some(&key);
         let history = transcript_state::fallback(agent, key.clone());
         // Its own chat survives a status change; only the placeholder rebuilds.
-        if same && (!self.native_entries.is_empty() || self.detail.as_ref().and_then(|d| d.transcript.as_ref())
-            .is_some_and(|t| t.shown_entries() == history.transcript.as_slice())) {
+        if same
+            && (!self.native_entries.is_empty()
+                || self
+                    .detail
+                    .as_ref()
+                    .and_then(|d| d.transcript.as_ref())
+                    .is_some_and(|t| t.shown_entries() == history.transcript.as_slice()))
+        {
             return;
         }
         let mut detail = crate::pane::Pane::new(Some(key.clone()));

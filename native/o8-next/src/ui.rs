@@ -256,11 +256,7 @@ impl Surface {
     pub(crate) fn new(client: Client, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_focus(client, Some(window), cx)
     }
-    fn new_with_focus(
-        client: Client,
-        window: Option<&mut Window>,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    fn new_with_focus(client: Client, window: Option<&mut Window>, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         if let Some(window) = window {
             focus.focus(window);
@@ -422,9 +418,9 @@ impl Surface {
                     }
                     Err(error) => editor.controls.error = error,
                     Ok(None) => {
-                        if let Some(draft) =
-                            crate::composer::mode_store::load_draft(editor.controls.prompt.store.as_deref())
-                        {
+                        if let Some(draft) = crate::composer::mode_store::load_draft(
+                            editor.controls.prompt.store.as_deref(),
+                        ) {
                             editor.controls.files = draft.files;
                             editor.set_text(&draft.text, cx);
                         }
@@ -855,7 +851,8 @@ impl Surface {
                             this.subscription = None;
                             this.transcript = None;
                             if this.selected.is_some() {
-                                this.navigation_refresh_revision = this.navigation_refresh_revision.wrapping_add(1);
+                                this.navigation_refresh_revision =
+                                    this.navigation_refresh_revision.wrapping_add(1);
                             }
                             this.selected = None;
                             this.saved_visualizations.select(None);
@@ -1061,9 +1058,7 @@ impl Render for Surface {
                             .min_w_0()
                             .when(empty, |view| {
                                 view.when(!self.notice.is_empty(), |view| {
-                                    view.child(
-                                        crate::transcript_view::notice(self.notice.clone()),
-                                    )
+                                    view.child(crate::transcript_view::notice(self.notice.clone()))
                                 })
                                 .child(self.history_control(cx))
                             })

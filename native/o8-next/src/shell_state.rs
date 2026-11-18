@@ -362,9 +362,14 @@ impl State {
             && let Some(scope) = &state.selected
         {
             let panel = &mut state.right_panel;
-            panel.selected_tools.insert(scope.clone(), panel.primary.clone());
+            panel
+                .selected_tools
+                .insert(scope.clone(), panel.primary.clone());
             if panel.split {
-                panel.lower_tools.entry(scope.clone()).or_insert(panel.secondary.clone());
+                panel
+                    .lower_tools
+                    .entry(scope.clone())
+                    .or_insert(panel.secondary.clone());
             }
         }
         Ok(state)

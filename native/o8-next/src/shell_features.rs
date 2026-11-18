@@ -1,8 +1,5 @@
 //! Small, ordered shell registries. Contributions and their state live in modules.
 use super::*;
-pub(super) use window_state::persist as persist_window_state;
-#[cfg(test)]
-pub(super) use window_state::settle_test_window;
 use crate::theme::current as theme;
 use gpui::AnyElement;
 use registry::{Frame, KeyResult};
@@ -10,6 +7,9 @@ use std::{
     any::{Any, TypeId},
     sync::LazyLock,
 };
+pub(super) use window_state::persist as persist_window_state;
+#[cfg(test)]
+pub(super) use window_state::settle_test_window;
 
 type Hook = fn(&mut Shell, &mut Window, &mut Context<Shell>);
 pub(super) struct TickHook {
@@ -96,8 +96,8 @@ pub(super) use rail_more::button as rail_more;
 pub(super) mod rail_more_dock {
     pub(crate) use super::rail_more::Dock;
 }
+pub(super) use header::{close_tab, toggle_sidebar};
 pub(super) use profile_menu::button as profile;
-pub(super) use header::{toggle_sidebar, close_tab};
 pub(super) use right_panel::chrome_focused as panel_chrome_focused;
 
 /// Stable public API; the host remains one discovered shell feature.

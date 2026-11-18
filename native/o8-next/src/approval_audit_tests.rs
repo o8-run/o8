@@ -46,8 +46,12 @@ fn approval_audit_filters_clear_and_read_only_handlers(cx: &mut TestAppContext) 
     cx.run_until_parked();
     inbox.update(cx, |inbox, cx| inbox.select_lane(LANE, cx));
     cx.run_until_parked();
-    for selector in ["approval-audit-session", "approval-audit-risk", "approval-audit-range",
-        "approval-audit-refresh"] {
+    for selector in [
+        "approval-audit-session",
+        "approval-audit-risk",
+        "approval-audit-range",
+        "approval-audit-refresh",
+    ] {
         assert!(cx.debug_bounds(selector).is_some(), "{selector}");
     }
     inbox.update(cx, |inbox, cx| {

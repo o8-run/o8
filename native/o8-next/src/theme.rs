@@ -1,7 +1,7 @@
 //! Native counterparts of src/app/globals.css. Keep appearance selection here;
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, Ordering};
 use std::sync::{LazyLock, Mutex, RwLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,13 +188,21 @@ pub fn bespoke_themes() -> Vec<(String, String, &'static str)> {
     BESPOKE
         .iter()
         .zip(bespoke::DESCRIPTIONS)
-        .map(|(theme, description)| (format!("theme:{}", theme.id), theme.name.clone(), description))
+        .map(|(theme, description)| {
+            (
+                format!("theme:{}", theme.id),
+                theme.name.clone(),
+                description,
+            )
+        })
         .collect()
 }
 /// Four swatches for a choice's card in Settings: background, raised surface,
 /// accent and text. None for System, which has no one palette.
 pub fn swatches(mode: &str) -> Option<[Rgba; 4]> {
-    let of = |theme: &Theme, background: Rgba| [background, theme.surface_raised, theme.accent, theme.text];
+    let of = |theme: &Theme, background: Rgba| {
+        [background, theme.surface_raised, theme.accent, theme.text]
+    };
     match choice_id(mode)? {
         SYSTEM => None,
         choice => match imported(choice) {
@@ -202,7 +210,11 @@ pub fn swatches(mode: &str) -> Option<[Rgba; 4]> {
             None => {
                 let theme = Theme::for_appearance(named(mode)?);
                 // Glass has no fill of its own; show the veil it sits under.
-                let background = if mode == "glass" { veil_color(0.9) } else { theme.background };
+                let background = if mode == "glass" {
+                    veil_color(0.9)
+                } else {
+                    theme.background
+                };
                 Some(of(&theme, background))
             }
         },
@@ -339,14 +351,20 @@ fn parse_glass(saved: &str) -> Option<Glass> {
         "frosted" => false,
         _ => return None,
     };
-    let veil = parts.next()?.parse::<f32>().ok().filter(|veil| veil.is_finite())?;
+    let veil = parts
+        .next()?
+        .parse::<f32>()
+        .ok()
+        .filter(|veil| veil.is_finite())?;
     Some(Glass {
         vivid,
         veil: veil.clamp(0., 1.),
     })
 }
 pub fn glass_settings() -> Glass {
-    *GLASS.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+    *GLASS
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 /// Saves the tuned glass and repaints with it. True when the backdrop kind
 /// changed, so the caller applies the window material again.
@@ -355,7 +373,9 @@ pub fn set_glass(next: Glass) -> bool {
         veil: next.veil.clamp(0., 1.),
         ..next
     };
-    let mut glass = GLASS.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut glass = GLASS
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let backdrop = glass.vivid != next.vivid;
     if *glass != next {
         *glass = next;
@@ -1091,13 +1111,25 @@ pub(crate) fn split_line(
     let line = gpui::div().absolute();
     let (zone, line) = if vertical {
         (
-            zone.top_0().bottom_0().left(gpui::px(center - SPLIT_WAKE)).w(span),
-            line.top_0().bottom_0().left(gpui::px(SPLIT_WAKE)).w(gpui::px(1.)),
+            zone.top_0()
+                .bottom_0()
+                .left(gpui::px(center - SPLIT_WAKE))
+                .w(span),
+            line.top_0()
+                .bottom_0()
+                .left(gpui::px(SPLIT_WAKE))
+                .w(gpui::px(1.)),
         )
     } else {
         (
-            zone.left_0().right_0().top(gpui::px(center - SPLIT_WAKE)).h(span),
-            line.left_0().right_0().top(gpui::px(SPLIT_WAKE)).h(gpui::px(1.)),
+            zone.left_0()
+                .right_0()
+                .top(gpui::px(center - SPLIT_WAKE))
+                .h(span),
+            line.left_0()
+                .right_0()
+                .top(gpui::px(SPLIT_WAKE))
+                .h(gpui::px(1.)),
         )
     };
     zone.child(
@@ -1342,7 +1374,10 @@ mod bespoke {
     use gpui::{Rgba, rgb};
 
     fn wash(hex: u32, alpha: f32) -> Rgba {
-        Rgba { a: alpha, ..rgb(hex) }
+        Rgba {
+            a: alpha,
+            ..rgb(hex)
+        }
     }
 
     /// One line on each theme for its card in Settings, in `themes` order.
@@ -1493,7 +1528,14 @@ mod bespoke {
         #[test]
         fn blackout_is_true_black_and_readable() {
             let blackout = &themes()[0].theme;
-            assert_eq!((blackout.background.r, blackout.background.g, blackout.background.b), (0., 0., 0.));
+            assert_eq!(
+                (
+                    blackout.background.r,
+                    blackout.background.g,
+                    blackout.background.b
+                ),
+                (0., 0., 0.)
+            );
             assert!(blackout.text.r > 0.9 && blackout.background.a == 1.);
         }
     }

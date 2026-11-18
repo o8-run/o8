@@ -322,7 +322,12 @@ fn wheel_action(mode: TermMode, lines: i32, column: usize, row: usize) -> Wheel 
             // The original encoding adds 32 to each value in one byte; past
             // column or row 95 that byte is not ASCII, so those cells clamp.
             let byte = |value: usize| char::from((32 + value.min(95)) as u8);
-            format!("\x1b[M{}{}{}", byte(button), byte(column + 1), byte(row + 1))
+            format!(
+                "\x1b[M{}{}{}",
+                byte(button),
+                byte(column + 1),
+                byte(row + 1)
+            )
         };
         return Wheel::Send(report.repeat(steps));
     }

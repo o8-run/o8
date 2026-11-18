@@ -167,20 +167,34 @@ impl Shell {
         shell
     }
     fn persist(&mut self) {
-        #[cfg(test)] { self.review_persist_calls += 1; }
-        let open = self.state.workspaces.iter().flat_map(|(scope, saved)| {
-            saved.tabs.iter().filter_map(move |tab| match tab {
-                Tab::Session(id) => Some(format!(
-                    "{scope}|{}", saved.selections.get(id).unwrap_or(id)
-                )),
-                _ => None,
+        #[cfg(test)]
+        {
+            self.review_persist_calls += 1;
+        }
+        let open = self
+            .state
+            .workspaces
+            .iter()
+            .flat_map(|(scope, saved)| {
+                saved.tabs.iter().filter_map(move |tab| match tab {
+                    Tab::Session(id) => Some(format!(
+                        "{scope}|{}",
+                        saved.selections.get(id).unwrap_or(id)
+                    )),
+                    _ => None,
+                })
             })
-        }).collect::<BTreeSet<_>>();
+            .collect::<BTreeSet<_>>();
         self.state.thread_titles.retain(|key, _| open.contains(key));
         for key in &open {
-            #[cfg(test)] { self.review_title_visits += 1; }
+            #[cfg(test)]
+            {
+                self.review_title_visits += 1;
+            }
             if let Some(title) = self.session_titles.get(key) {
-                self.state.thread_titles.insert(key.clone(), title.chars().take(256).collect());
+                self.state
+                    .thread_titles
+                    .insert(key.clone(), title.chars().take(256).collect());
             }
         }
         if let Some(local) = self
@@ -541,12 +555,21 @@ impl Shell {
         activate: bool,
         cx: &mut Context<Self>,
     ) -> Option<bool> {
-        let saved = self.state.workspaces.entry(workspace.to_owned()).or_default();
+        let saved = self
+            .state
+            .workspaces
+            .entry(workspace.to_owned())
+            .or_default();
         let index = Self::tab_index(saved, &tab);
         if index.is_none() && saved.tabs.len() >= 32 {
             if activate {
-                toasts::show(toasts::Kind::Info, "Close a surface before opening another.",
-                    vec![], Some(toasts::NOTICE_TIMEOUT), cx);
+                toasts::show(
+                    toasts::Kind::Info,
+                    "Close a surface before opening another.",
+                    vec![],
+                    Some(toasts::NOTICE_TIMEOUT),
+                    cx,
+                );
             }
             return None;
         }

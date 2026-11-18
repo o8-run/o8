@@ -6,8 +6,10 @@ use std::{
     net::SocketAddr,
     sync::{Arc, RwLock},
 };
-pub(crate) use transport::{LOAD_REQUEST_TIMEOUT, get_with_retry, same_workspace, server_reason, stale_notice, transient};
 pub(crate) use transport::Tunnel;
+pub(crate) use transport::{
+    LOAD_REQUEST_TIMEOUT, get_with_retry, same_workspace, server_reason, stale_notice, transient,
+};
 pub use transport::{QueueError, Session};
 use url::Url;
 

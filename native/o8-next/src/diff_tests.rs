@@ -708,9 +708,8 @@ fn change_map_long_label_bounds(cx: &mut TestAppContext, zoom: f32) {
     let first = visual.debug_bounds("change-map-node-0").expect("long node");
     let next = visual.debug_bounds("change-map-node-1").expect("next node");
     let row = visual.debug_bounds("change-map-node-row-0").unwrap();
-    let (viewport, pixel) = visual.update(|w, _| {
-        (w.viewport_size(), gpui::px(1. / w.scale_factor()))
-    });
+    let (viewport, pixel) =
+        visual.update(|w, _| (w.viewport_size(), gpui::px(1. / w.scale_factor())));
     assert_change_map_bounds(zoom, pixel, first, next, row, viewport);
     let map = view.read_with(visual, |s, _| s.map.clone());
     let (_, tracked) = cx.add_window_view(|_, _| ChangeMapTrackedLabels(map));
@@ -725,9 +724,8 @@ fn change_map_long_label_bounds(cx: &mut TestAppContext, zoom: f32) {
     let first = tracked.debug_bounds("change-map-node-0").unwrap();
     let next = tracked.debug_bounds("change-map-node-1").unwrap();
     let row = tracked.debug_bounds("change-map-node-row-0").unwrap();
-    let (viewport, pixel) = tracked.update(|w, _| {
-        (w.viewport_size(), gpui::px(1. / w.scale_factor()))
-    });
+    let (viewport, pixel) =
+        tracked.update(|w, _| (w.viewport_size(), gpui::px(1. / w.scale_factor())));
     assert_change_map_bounds(zoom, pixel, first, next, row, viewport);
 }
 fn assert_change_map_bounds(

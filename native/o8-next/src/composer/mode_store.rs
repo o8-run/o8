@@ -68,16 +68,23 @@ pub(crate) fn save_draft(path: Option<&Path>, draft: &Draft) -> Result<(), Strin
 }
 static DRAFT_ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// The newest ticket written for each draft file.
-static DRAFT_WRITTEN: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, u64>>> =
-    std::sync::LazyLock::new(Default::default);
+static DRAFT_WRITTEN: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, u64>>,
+> = std::sync::LazyLock::new(Default::default);
 /// A ticket taken when a save is asked for, in edit order.
 pub(crate) fn draft_order() -> u64 {
     DRAFT_ORDER.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
 }
 /// Writes one at a time, and never over a newer edit's draft: a debounced
 /// write that starts late cannot land after the empty write a send made.
-pub(crate) fn save_draft_in_order(path: Option<&Path>, draft: &Draft, order: u64) -> Result<(), String> {
-    let mut written = DRAFT_WRITTEN.lock().unwrap_or_else(|poison| poison.into_inner());
+pub(crate) fn save_draft_in_order(
+    path: Option<&Path>,
+    draft: &Draft,
+    order: u64,
+) -> Result<(), String> {
+    let mut written = DRAFT_WRITTEN
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     if let Some(path) = path {
         let newest = written.entry(path.to_path_buf()).or_default();
         if order < *newest {
@@ -201,7 +208,10 @@ mod draft_order_tests {
     fn a_late_older_draft_write_never_lands_over_a_newer_one() {
         let dir = std::env::temp_dir().join(format!("o8-draft-order-{}", std::process::id()));
         let path = dir.join("thread.json");
-        let draft = |text: &str| Draft { text: text.into(), files: vec![] };
+        let draft = |text: &str| Draft {
+            text: text.into(),
+            files: vec![],
+        };
         let (older, newer) = (draft_order(), draft_order());
         save_draft_in_order(Some(&path), &draft(""), newer).unwrap();
         // The debounced write asked for first starts last; it is skipped.

@@ -404,8 +404,7 @@ mod macos {
             unsafe {
                 let parent: id = msg_send![self.view, superview];
                 let flipped: BOOL = msg_send![parent, isFlipped];
-                let height =
-                    f64::from(f32::from(window.viewport_size().height) * window.zoom());
+                let height = f64::from(f32::from(window.viewport_size().height) * window.zoom());
                 let x = |v: gpui::Pixels| f64::from(f32::from(v));
                 let top = if flipped == YES {
                     x(bounds.top())

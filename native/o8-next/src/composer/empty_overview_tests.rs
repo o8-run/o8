@@ -254,16 +254,10 @@ fn finished_threads_land_on_their_day() {
     assert_eq!(days[DAYS - 1], 1);
     assert_eq!(days[DAYS - 2], 2);
     assert_eq!(days.iter().sum::<u32>(), 3);
-    assert_eq!(
-        week_total(&days),
-        "3 in the last 7 days · 3 in 12 weeks"
-    );
+    assert_eq!(week_total(&days), "3 in the last 7 days · 3 in 12 weeks");
     let mut one = [0; DAYS];
     one[0] = 1;
-    assert_eq!(
-        week_total(&one),
-        "0 in the last 7 days · 1 in 12 weeks"
-    );
+    assert_eq!(week_total(&one), "0 in the last 7 days · 1 in 12 weeks");
 }
 
 #[test]
@@ -284,8 +278,14 @@ fn a_thread_finished_in_a_long_day_s_extra_hour_stays_on_that_day() {
     assert_eq!(days[DAYS - 2], 1, "{:?}", &days[DAYS - 3..]);
     // A time ahead of this clock counts as today; one before the window, never.
     let ahead = vec![
-        session("ahead", json!({"status": "merged", "lastMessageAt": "2026-11-12T09:00:00Z"})),
-        session("early", json!({"status": "merged", "lastMessageAt": "2026-08-01T09:00:00Z"})),
+        session(
+            "ahead",
+            json!({"status": "merged", "lastMessageAt": "2026-11-12T09:00:00Z"}),
+        ),
+        session(
+            "early",
+            json!({"status": "merged", "lastMessageAt": "2026-08-01T09:00:00Z"}),
+        ),
     ];
     let days = finished_by_day(&ahead, &starts);
     assert_eq!(days[DAYS - 1], 1);

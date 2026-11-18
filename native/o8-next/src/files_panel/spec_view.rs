@@ -219,11 +219,7 @@ impl Spec {
                                     .pr(px(8.))
                                     .relative()
                                     .child(self.editor.clone())
-                                    .child(crate::theme::edge_fade(
-                                        true,
-                                        24.,
-                                        theme().surface,
-                                    )),
+                                    .child(crate::theme::edge_fade(true, 24., theme().surface)),
                             )
                         },
                     )

@@ -1,0 +1,3 @@
+# Formatting gate for this crate. See issue #5873.
+# Toolchain used to produce this format: rustfmt 1.11.0-stable (rustc 1.100.0).
+style_edition = "2024"

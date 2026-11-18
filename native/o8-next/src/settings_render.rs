@@ -439,17 +439,17 @@ impl Render for Settings {
                     .pb(px(16.))
                     .child(navigation)
                     .child(
-                    div()
-                        .id("settings-scroll")
-                        .debug_selector(|| "settings-scroll".into())
-                        .flex_1()
-                        .min_w_0()
-                        .min_h_0()
-                        .flex()
-                        .flex_col()
-                        .overflow_hidden()
-                        .child(content),
-                ),
+                        div()
+                            .id("settings-scroll")
+                            .debug_selector(|| "settings-scroll".into())
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .overflow_hidden()
+                            .child(content),
+                    ),
             )
             .when(
                 !self.busy

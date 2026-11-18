@@ -3,7 +3,8 @@ use super::*;
 use crate::{model::Row, retained::RowState};
 use std::{cell::RefCell, rc::Rc};
 
-const EYE: &str = "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z";
+const EYE: &str =
+    "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z";
 const EYE_OFF: &str = "M9.9 5.2A9.7 9.7 0 0 1 12 5c6.4 0 10 7 10 7a18 18 0 0 1-2.2 3.2 M6.6 6.6A18 18 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6 M3 3l18 18 M9.9 9.9a3 3 0 0 0 4.2 4.2";
 
 #[derive(Clone, Copy, PartialEq)]

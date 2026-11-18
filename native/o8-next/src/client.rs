@@ -276,9 +276,7 @@ impl Client {
     pub(crate) fn read<T: DeserializeOwned>(response: ureq::Response) -> Result<T, String> {
         Self::read_counted(response).map(|(value, _)| value)
     }
-    fn read_counted<T: DeserializeOwned>(
-        response: ureq::Response,
-    ) -> Result<(T, usize), String> {
+    fn read_counted<T: DeserializeOwned>(response: ureq::Response) -> Result<(T, usize), String> {
         let mut bytes = Vec::new();
         response
             .into_reader()
@@ -374,8 +372,12 @@ mod tests {
     #[test]
     fn transient_errors_are_stale_not_fatal() {
         assert!(super::transient("/api/panel/repos: Request timed out"));
-        assert!(super::transient("/api/panel/repos: Server returned HTTP 503"));
-        assert!(!super::transient("/api/panel/repos: Server returned HTTP 401"));
+        assert!(super::transient(
+            "/api/panel/repos: Server returned HTTP 503"
+        ));
+        assert!(!super::transient(
+            "/api/panel/repos: Server returned HTTP 401"
+        ));
         assert_eq!(
             super::stale_notice("/api/panel/repos: Request timed out"),
             "Showing last loaded data · stale (Request timed out)"
@@ -392,8 +394,10 @@ mod tests {
             // the third a 503 that must not be retried.
             let (first, _) = listener.accept().unwrap();
             drop(first);
-            for body in ["HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}",
-                         "HTTP/1.1 503 Busy\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"] {
+            for body in [
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}",
+                "HTTP/1.1 503 Busy\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            ] {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut buf = [0u8; 4096];
                 let _ = stream.read(&mut buf);
@@ -406,7 +410,12 @@ mod tests {
         let client = super::Client::new(&format!("http://127.0.0.1:{port}")).unwrap();
         let ok: serde_json::Value = client.get("/api/panel/repos", &[]).unwrap();
         assert_eq!(ok["ok"], true);
-        assert!(client.get::<serde_json::Value>("/api/panel/repos", &[]).unwrap_err().contains("HTTP 503"));
+        assert!(
+            client
+                .get::<serde_json::Value>("/api/panel/repos", &[])
+                .unwrap_err()
+                .contains("HTTP 503")
+        );
         assert!(server.join().unwrap(), "a status answer was retried");
     }
 
