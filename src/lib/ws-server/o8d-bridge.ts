@@ -160,6 +160,7 @@ export class O8dBridge {
         '--app-upstream', this.upstream], {
         env: childEnvironment({ inherit: false, env: {
           O8D_BRIDGE_KEY: this.key, O8D_EPOCH: this.epoch,
+          O8_API_FRONT_DOOR: apiFrontDoorEnabled() ? '1' : undefined,
           O8D_SERVER_VERSION: packageJson.version, O8D_STARTUP_PORT_INFO: startupPortInfo(),
           O8_INSTANCE_ID: process.env.O8_INSTANCE_ID, O8_BOOT_ID: process.env.O8_BOOT_ID,
           O8D_NATIVE_SESSION_READS: nativeHttpTransportEnabled() && nativeSessionReadsEnabled() ? '1' : undefined,

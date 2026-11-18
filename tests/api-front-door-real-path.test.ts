@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { connect, type Socket } from 'node:net';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -151,10 +151,10 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     expect(forwarded.headers.getSetCookie()).toEqual(['fixture-a=1; HttpOnly', 'fixture-b=2; SameSite=Strict']);
     expect(await forwarded.json()).toEqual({ method: 'POST', path: '/api/fixture/unregistered?repeat=a&repeat=b&text=%E9%9B%AA',
       host: `127.0.0.1:${apiPort}`, body: bytes.toString('base64') });
-    for (const [path, method] of [['/api/setup/identity', 'POST'], ['/api/lanes/touches', 'GET'],
-      ['/api/prompt-library/import', 'GET'], ['/api/automations/connected', 'PATCH']]) {
+    for (const [path, method] of [['/api/setup/identity', 'POST'], ['/api/lanes/reap', 'GET'],
+      ['/api/prompt-library/import', 'GET'], ['/api/automations/connected', 'PUT']]) {
       const response = await fetch(origin + path, { method, headers: { authorization: 'Bearer ' + token } });
-      expect(response.status).toBe(207); expect((await response.json()).path).toBe(path);
+      expect(response.status, path).toBe(207); expect((await response.json()).path).toBe(path);
     }
     const redirect = await fetch(origin + '/fixture/redirect', { redirect: 'manual' });
     expect([redirect.status, redirect.headers.get('location')]).toEqual([302, '/fixture/destination']);
@@ -184,6 +184,24 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     expect((await fetch(origin + '/api/setup/status')).status).toBe(401);
     expect((await fetch(origin + '/api/setup/status', { headers: { authorization: 'Bearer wrong' } })).status).toBe(401);
     expect((await fetch(origin + '/api/setup/status', { headers: { authorization: 'Bearer ' + token } })).status).toBe(200);
+    // Bind the client to a real non-loopback interface: headers cannot simulate this boundary.
+    const remoteAddress = Object.values(networkInterfaces()).flat().find(address => address?.family === 'IPv4' && !address.internal)?.address;
+    expect(remoteAddress, 'real remote-peer proof requires a non-loopback IPv4 interface').toBeTruthy();
+    for (const relay of [false, true]) {
+      const remoteCall = (path: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const call = request(origin + path, { localAddress: remoteAddress, headers: {
+          'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1', 'x-o8d-bridge': 'forged',
+          ...(relay ? { 'x-o8-relay-forward': '1' } : {}),
+        } }, response => {
+          let body = ''; response.on('data', bytes => { body += bytes; });
+          response.on('end', () => resolve({ status: response.statusCode!, body }));
+        }); call.setTimeout(5000, () => call.destroy(new Error('Remote request timeout'))); call.on('error', reject); call.end();
+      });
+      expect((await remoteCall('/api/setup/status')).status).toBe(401);
+      const fallback = await remoteCall('/api/fixture/peer');
+      expect(fallback.status).toBe(200);
+      expect(JSON.parse(fallback.body)).toEqual({ address: remoteAddress, relay: '1', bridge: null });
+    }
     const badHost = await new Promise<number | undefined>((resolve, reject) => {
       const call = request(origin + '/api/fixture/unknown', { headers: { Host: 'untrusted.invalid' } }, response => {
         response.resume(); response.on('end', () => resolve(response.statusCode));
@@ -220,6 +238,9 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     await new Promise<void>(resolve => upstream.close(() => resolve()));
     const nativeOnly = await fetch(origin + '/api/setup/identity', { signal: AbortSignal.timeout(5000) });
     expect(nativeOnly.status).toBe(200);
+    const broadcast = await fetch(origin + '/broadcast');
+    expect(broadcast.status).toBe(200);
+    expect(await broadcast.text()).toContain('broadcast-root');
     console.info('[api-front-door] registered route remains available with Next stopped');
   } finally {
     const closed = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : once(child, 'close');
@@ -239,3 +260,30 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     rmSync(directory, { recursive: true, force: true });
   }
 }, 180_000);
+
+it.each([undefined, '0'])('preserves main non-/ws upgrade refusal byte-for-byte with front door %s', async flag => {
+  const upstream = createServer();
+  upstream.on('upgrade', (_req, socket) => socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 6\r\nX-Fixture: denied\r\n\r\ndenied'));
+  await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const port = await freePort();
+  const child = spawn(binary, ['--experimental-ws', '--listen', `127.0.0.1:${port}`, '--app-upstream',
+    `127.0.0.1:${(upstream.address() as { port: number }).port}`], { stdio: ['pipe', 'pipe', 'pipe'],
+    env: { NODE_ENV: 'test', PATH: process.env.PATH, O8D_BRIDGE_KEY: 'fixture-key', O8D_EPOCH: 'fixture-epoch',
+      ...(flag === undefined ? {} : { O8_API_FRONT_DOOR: flag }) } });
+  try {
+    await once(child.stdout!, 'data');
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/fixture/websocket`);
+    const response = new Promise<string>((resolve, reject) => {
+      ws.on('unexpected-response', (_req, res) => {
+        let body = ''; res.on('data', bytes => { body += bytes; });
+        res.on('end', () => resolve(`HTTP/${res.httpVersion} ${res.statusCode} ${res.statusMessage}\r\n`
+          + res.rawHeaders.reduce((raw, value, index) => raw + value + (index % 2 ? '\r\n' : ': '), '') + '\r\n' + body));
+      }); ws.on('error', reject);
+    });
+    try { expect(await response).toBe('HTTP/1.1 401 Rejected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'); }
+    finally { ws.terminate(); }
+  } finally {
+    const closed = once(child, 'close'); child.kill(); await closed;
+    await new Promise<void>(resolve => upstream.close(() => resolve()));
+  }
+}, 15_000);

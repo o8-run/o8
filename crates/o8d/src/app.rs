@@ -122,9 +122,9 @@ async fn connection(
             name.eq_ignore_ascii_case("upgrade") && value.trim().eq_ignore_ascii_case("websocket")
         })
     });
-    // Only the app socket speaks the realtime protocol. Other WebSocket
-    // paths belong to the HTTP front door and keep their original frames.
-    if !upgrade || path.split('?').next() != Some("/ws") {
+    // Preserve main's realtime path unless the launcher explicitly enables takeover.
+    let front_door = std::env::var("O8_API_FRONT_DOOR").as_deref() == Ok("1");
+    if !upgrade || (front_door && path.split('?').next() != Some("/ws")) {
         let count = request_counts::Count::new(header);
         #[cfg(feature = "experimental-session-reads")]
         let replay = match native::serve(&mut socket, header, &upstream, &key, &count).await? {

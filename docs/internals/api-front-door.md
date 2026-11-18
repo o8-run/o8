@@ -16,7 +16,9 @@ to a distinct private HTTP loopback origin and bind Next there using its own
 `PORT`. The upstream must have no credentials, path, query or fragment.
 A missing, nonlocal or self-referential upstream refuses startup. An occupied
 public API port fails takeover without evicting the existing listener.
-The launcher owns port-file publication and build-mode defaults.
+The launcher owns port-file publication and build-mode defaults. It also gives
+WS `O8_NEXT_BIN` and `O8_CODEBASE_MEMORY_BIN`: native-window launch via
+POST `/api/panel/operator-defaults` is a WS route (launcher PR #6444).
 
 The existing `O8_WS_O8D` switch and bundled `O8D_BINARY` resolution remain in
 force. When enabled, o8d owns the public listener and forwards to the private
@@ -59,10 +61,9 @@ bearer checks still apply. Bearer grants are unchanged.
 
 GET and HEAD at `/`, `/mobile` and `/dashboard` serve one static desktop-app
 notice. The phone preview links remain usable. `/broadcast#token=...` remains
-available through transitional Next forwarding; its fragment is client-only.
-Before Next retirement, its HTML and JS must be built to static assets and
-served here, and its data handlers must be registered with their existing
-spectator gates. This change does not claim that Next can be stopped for
+served by `serveBroadcastPage` with fingerprinted bundled JS/CSS, independently
+of Next; its fragment is client-only. Its data handlers still need registration
+with their existing spectator gates. This change does not claim that Next can be stopped for
 unregistered routes or pages.
 
 Master review is required before this takeover is armed. It changes the

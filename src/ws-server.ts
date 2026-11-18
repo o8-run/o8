@@ -1,3 +1,4 @@
+import { serveBroadcastPage } from './lib/ws-server/broadcast-page';
 import { apiFrontDoorEnabled } from './lib/ws-server/api-front-door-config';
 import { initiateE2eeHandshake } from './lib/ws-server/device-e2ee-handshake';
 import { handleTokenProjectionRequest } from './lib/mobile/token-projection-http';
@@ -6555,6 +6556,7 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
+  if (API_FRONT_DOOR && serveBroadcastPage(req, res)) return;
   const frontRegistered = frontDoor && req.url?.startsWith('/api/')
     ? frontDoor.registeredFrontDoorRoute(new URL(req.url, `http://127.0.0.1:${WS_PORT}`).pathname, req.method ?? 'GET') : false;
   if ((API_FRONT_DOOR ? frontRegistered : process.env.O8_NEXT_O8D === '1') && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
