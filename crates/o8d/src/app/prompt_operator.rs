@@ -1,4 +1,4 @@
-//! Fresh native operator gate for owned prompts and session-rule mutations.
+//! Fresh native operator gate for owned prompts and session rules.
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path};
 use subtle::ConstantTimeEq;
@@ -68,7 +68,9 @@ pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str)
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
     });
-    if !(if path == "/api/orchestrator/session-rules" { matches!(method,"POST"|"DELETE") } else if use_route {
+    if !(if path == "/api/orchestrator/session-rules" {
+        matches!(method, "GET" | "POST" | "DELETE")
+    } else if use_route {
         single.is_some() && method == "POST"
     } else if target == "/api/prompt-library" {
         matches!(method, "GET" | "POST")

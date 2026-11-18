@@ -57,8 +57,58 @@ fn invalid(message: &str) -> Response {
         json!({"ok":false,"error":{"code":"invalid_request","message":message}}),
     )
 }
+fn rule_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    Ok(
+        json!({"id":r.get::<_,String>(0)?,"threadId":r.get::<_,String>(1)?,"text":row_text(r,2)?,"active":r.get::<_,i64>(3)?==1,"createdAt":r.get::<_,String>(4)?,"constraint":r.get::<_,Option<String>>(5)?}),
+    )
+}
 fn rule(db: &Connection, id: &str) -> Result<Value, ()> {
-    db.query_row("SELECT id,thread_id,text,active,created_at,constraint_kind FROM session_rules WHERE id=?",[id],|r|Ok(json!({"id":r.get::<_,String>(0)?,"threadId":r.get::<_,String>(1)?,"text":row_text(r,2)?,"active":r.get::<_,i64>(3)?==1,"createdAt":r.get::<_,String>(4)?,"constraint":r.get::<_,Option<String>>(5)?}))).map_err(|_|())
+    db.query_row(
+        "SELECT id,thread_id,text,active,created_at,constraint_kind FROM session_rules WHERE id=?",
+        [id],
+        rule_row,
+    )
+    .map_err(|_| ())
+}
+/// Only the app's native operator gate can set this private request context.
+/// A Node-admitted worker must use the original thread-scoped handler.
+pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
+    if store
+        .defaults_context
+        .as_ref()
+        .is_none_or(|v| v["sessionRuleReadAuthority"] != true)
+    {
+        return unavailable();
+    }
+    let thread = trim(value(params, "threadId"));
+    if thread.is_empty() {
+        return invalid("threadId query param is required.");
+    }
+    let result = (|| -> Result<Value, ()> {
+        let db = store.database()?;
+        let mut stmt = db.prepare("SELECT id,thread_id,text,active,created_at,constraint_kind FROM session_rules WHERE thread_id=? AND active=1 ORDER BY created_at ASC,rowid ASC").map_err(|_|())?;
+        let mut rules = Vec::new();
+        let mut bytes = 0usize;
+        for row in stmt.query_map([thread], rule_row).map_err(|_| ())? {
+            let row = row.map_err(|_| ())?;
+            bytes = bytes
+                .checked_add(serde_json::to_vec(&row).map_err(|_| ())?.len() + 1)
+                .ok_or(())?;
+            if bytes > RESPONSE_LIMIT {
+                return Err(());
+            }
+            rules.push(row);
+        }
+        let body = json!({"ok":true,"result":{"rules":rules}});
+        if serde_json::to_vec(&body).map_err(|_| ())?.len() > RESPONSE_LIMIT {
+            return Err(());
+        }
+        Ok(body)
+    })();
+    match result {
+        Ok(body) => reply(StatusCode::OK, body),
+        Err(()) => unavailable(),
+    }
 }
 // Node binds a sliced lone surrogate as WTF-8; its SQLite reader decodes
 // each invalid UTF-8 byte to U+FFFD. Keep both the persisted bytes and response.
@@ -373,6 +423,30 @@ pub(super) fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn read_requires_native_operator_context_before_validation_or_database_access() {
+        let mut store = Store {
+            directory: PathBuf::from("/nonexistent/session-rule-fixture"),
+            database: PathBuf::from("/nonexistent/session-rule-fixture/missing.db"),
+            defaults_context: None,
+            redaction: None,
+        };
+        let params = Params::new();
+        assert_eq!(
+            read(&ReadContext::new(&store), &params).status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        store.defaults_context = Some(json!({"promptWriteAuthority":true}));
+        assert_eq!(
+            read(&ReadContext::new(&store), &params).status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        store.defaults_context = Some(json!({"sessionRuleReadAuthority":true}));
+        assert_eq!(
+            read(&ReadContext::new(&store), &params).status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
     #[test]
     fn clipped_astral_matches_node_sqlite_wtf8_bytes() {
         let prefix = "a".repeat(1999);
