@@ -22,6 +22,7 @@ type Running = Awaited<ReturnType<typeof startParityReference>>;
 function portable(value: unknown, ports: { api: number; ws: number }, token: string, key?: string): unknown {
   if (key === 'version' && value === packageJson.version) return '$FIXTURE_APP_VERSION';
   if (value === token) return '$FIXTURE_WS_TOKEN';
+  if (key === 'apiPort' && value === ports.ws) return '$FIXTURE_API_PORT';
   if (value === ports.api) return '$FIXTURE_API_PORT';
   if (value === ports.ws) return '$FIXTURE_WS_PORT';
   if (Array.isArray(value)) return value.map(item => portable(item, ports, token));
@@ -57,9 +58,9 @@ async function close(server: Server) {
 }
 async function freePort() { const listener = await listen(); await close(listener.server); return listener.port; }
 async function start(directory: string, enabled: boolean, fixedPorts: { api: number; ws: number }, filePorts = false,
-  identityEnv?: { O8_INSTANCE_ID?: string; O8_BOOT_ID?: string }) {
-  const server = await startParityReference({ directory, binary, nativeHttp: true, o8d: true,
-    nativeSessionReads: enabled, fixedPorts, startupFilePorts: filePorts, identityEnv, startupTimeoutMs: 60_000 });
+  identityEnv?: { O8_INSTANCE_ID?: string; O8_BOOT_ID?: string }, product = false) {
+  const server = await startParityReference({ directory, binary, nativeHttp: true, productFrontDoor: product, o8d: enabled,
+    nativeSessionReads: product ? 'default' : enabled, fixedPorts, startupFilePorts: filePorts, identityEnv, startupTimeoutMs: 60_000 });
   await server.stopNext();
   return server;
 }
@@ -67,7 +68,9 @@ async function read(server: Running, path: string, headers: Record<string, strin
   const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
   const response = await fetch(origin + path, { signal: AbortSignal.timeout(20_000), method, headers: { authorization: `Bearer ${server.token}`, ...headers },
     ...(method === 'POST' ? { body: '{}' } : {}) });
-  const body = await response.json() as unknown;
+  const raw = await response.text();
+  let body: unknown;
+  try { body = JSON.parse(raw); } catch { body = { raw }; }
   return { native: response.headers.get('x-o8d-native-session-read') === '1',
     wire: normalize({ status: response.status, body,
       headers: Object.fromEntries(headersToCompare.map(name => [name, response.headers.get(name)])) }) };
@@ -103,7 +106,7 @@ it('records TS startup reads, replays 500 shared-generator requests per route na
     const portCases = [String(live.port), `+${live.port}tail`, '65536', '0', '-1', 'invalid', String(dead)];
     const portExpected: unknown[] = [];
     for (const enabled of [false, true]) {
-      server = await start(directory, enabled, fixedPorts);
+      server = await start(directory, enabled, fixedPorts, false, undefined, true);
       for (const path of paths) {
         // Neither handler accepts query parameters; reuse the shared seeded
         // generator with an empty parameter profile instead of inventing one.
@@ -143,7 +146,7 @@ it('records TS startup reads, replays 500 shared-generator requests per route na
         if (!enabled) portExpected.push(result.wire);
         else { expect(result.native).toBe(true); equal(portExpected[index], result.wire, paths[0]); }
         expect((result.wire as { body: { wsPort: number } }).body.wsPort)
-          .toBe(index < 2 ? live.port : fixedPorts.ws);
+          .toBe(fixedPorts.ws);
       }
       for (const refusal of refusals) {
         console.info(`[startup-parity] auth case ${refusal.method ?? 'GET'} ${refusal.path} native=${enabled}`);

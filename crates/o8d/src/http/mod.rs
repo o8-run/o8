@@ -162,6 +162,22 @@ fn unavailable() -> Response {
         json!({"error":"o8d persisted read unavailable; use the TypeScript server"}),
     )
 }
+
+/// Standalone HTTP has no Node resolver snapshot or admission backhaul.
+fn standalone_ws_info(store: &ReadContext<'_>) -> Response {
+    let port = store
+        .file(&store.directory.join("ws-port"), 32)
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok())
+        .and_then(|s| s.trim().parse::<u16>().ok());
+    match (port, store.token()) {
+        (Some(port), Ok(token)) if port > 0 => {
+            reply(StatusCode::OK, json!({"wsPort":port,"wsToken":token}))
+        }
+        _ => unavailable(),
+    }
+}
+
 fn value<'a>(params: &'a Params, key: &str) -> &'a str {
     params.get(key).map(String::as_str).unwrap_or("")
 }
@@ -225,6 +241,7 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
         // This listener is --experimental-http: it authenticates directly and
         // has no admission backhaul. The app/native dispatch always uses true.
         if path == "/api/orchestrator/composer-queue" { queue::read(&read, &params, false) }
+        else if path == "/api/panel/ws-info" { standalone_ws_info(&read) }
         else if path == "/api/mobile/orchestrator/threads" { match chat::threads(&read,&params) { Ok(v)=>reply(StatusCode::OK,v), Err(())=>unavailable() } }
         else { dispatch(&read, &path, &params, "GET", &[]) }
     })
@@ -281,24 +298,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
                 Err(()) => unavailable(),
             }
         }
-        "/api/panel/ws-info" if std::env::var("O8D_NATIVE_SESSION_READS").as_deref() == Ok("1") => {
-            settings::ws_info(store)
-        }
-        // Preserve the existing standalone saved-file reader. Only the app
-        // transport has the live TypeScript resolver snapshot/admission path.
-        "/api/panel/ws-info" => {
-            let port = store
-                .file(&store.directory.join("ws-port"), 32)
-                .ok()
-                .and_then(|b| String::from_utf8(b).ok())
-                .and_then(|s| s.trim().parse::<u16>().ok());
-            match (port, store.token()) {
-                (Some(port), Ok(token)) if port > 0 => {
-                    reply(StatusCode::OK, json!({"wsPort":port,"wsToken":token}))
-                }
-                _ => unavailable(),
-            }
-        }
+        "/api/panel/ws-info" => settings::ws_info(store),
         "/api/panel/operator-defaults" | "/api/runtime/provider-instances" | "/api/setup/config"
         | "/api/v2/keys" | "/api/runtime/capabilities" | "/api/runtime/service-tiers"
             => settings_defaults::read(store, path, params),
