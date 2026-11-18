@@ -21,19 +21,16 @@ fn optional_integer(row: &rusqlite::Row<'_>, index: usize) -> Result<Value, ()> 
         integer(row, index).map(|n| json!(n))
     }
 }
-fn capability<'a>(payload: &'a Value) -> Result<(&'a str, &'a str), ()> {
+fn capability(payload: &Value) -> Result<&str, ()> {
     let route = &payload["routing"];
     let backend = route["backend"].as_str().ok_or(())?;
     let mode = route["mode"].as_str().ok_or(())?;
     let collide = route["collide"].as_bool().ok_or(())?;
-    Ok((
-        backend,
-        if collide && mode != "single" {
-            "collide"
-        } else {
-            backend
-        },
-    ))
+    Ok(if collide && mode != "single" {
+        "collide"
+    } else {
+        backend
+    })
 }
 fn images(payload: &Value) -> Result<Vec<Value>, ()> {
     let Some(media) = payload.get("deliveredMedia").filter(|v| !v.is_null()) else {
@@ -109,11 +106,8 @@ pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
             if !payload.is_object() {
                 return Err(());
             }
-            let (backend, effective) = capability(&payload)?;
-            if !grant.capabilities.contains_key(backend) {
-                return Err(());
-            }
-            let capable = *grant.capabilities.get(effective).ok_or(())?;
+            let effective = capability(&payload)?;
+            let capable = grant.capabilities.get(effective).copied().unwrap_or(false);
             let id: String = row.get(1).map_err(|_| ())?;
             let intent: String = row.get(4).map_err(|_| ())?;
             let status: String = row.get(6).map_err(|_| ())?;
@@ -147,7 +141,7 @@ pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
             items.push(item);
         }
         let can_steer = match grant.backend {
-            Some(id) => *grant.capabilities.get(&id).ok_or(())?,
+            Some(id) => grant.capabilities.get(&id).copied().unwrap_or(false),
             None => false,
         };
         Ok(json!({"items":items,"canSteer":can_steer,"steerableIds":steerable}))

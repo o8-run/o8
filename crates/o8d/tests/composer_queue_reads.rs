@@ -16,7 +16,7 @@ impl Fixture {
         Self(directory)
     }
     fn context(&self) -> Value {
-        json!({"composerQueue":{"target":{"repoPath":"/fixture","threadId":"thoughts-queue"},"request":{"repoPath":"/fixture","threadId":"thoughts-queue","backend":"pi"},"capabilities":[{"id":"pi","liveSteer":true},{"id":"collide","liveSteer":false}]}})
+        json!({"composerQueue":{"target":{"repoPath":"/fixture","threadId":"thoughts-queue"},"request":{"repoPath":"/fixture","threadId":"thoughts-queue","backend":"pi"},"capabilities":serde_json::from_str::<Vec<String>>(include_str!("../orchestrator-backend-ids.json")).unwrap().iter().map(|id| json!({"id":id,"liveSteer":id == "pi"})).collect::<Vec<_>>()}})
     }
     fn db(&self) -> Connection {
         Connection::open(self.0.join("cortex-ide.db")).unwrap()
@@ -70,11 +70,16 @@ async fn maps_applied_receipts_and_uses_only_granted_routing_capabilities() {
     f.db().execute("UPDATE composer_send_queue SET payload_json=json_set(payload_json,'$.routing.mode','fleet')",[]).unwrap();
     assert_eq!(f.get(Some(f.context())).await.1["steerableIds"], json!([]));
     let mut context = f.context();
-    context["composerQueue"]["capabilities"][0]["liveSteer"] = json!(false);
+    context["composerQueue"]["capabilities"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["id"] == "pi")
+        .unwrap()["liveSteer"] = json!(false);
     assert_eq!(f.get(Some(context)).await.1["canSteer"], false);
 }
 #[tokio::test]
-async fn defers_missing_scope_malformed_grants_unknown_backends_states_and_json() {
+async fn defers_missing_scope_malformed_grants_states_and_json() {
     let f = Fixture::new();
     assert_eq!(f.get(None).await.0, StatusCode::SERVICE_UNAVAILABLE);
     let mut context = f.context();
@@ -90,11 +95,22 @@ async fn defers_missing_scope_malformed_grants_unknown_backends_states_and_json(
         StatusCode::SERVICE_UNAVAILABLE
     );
     let db = f.db();
-    db.execute("UPDATE composer_send_queue SET payload_json=json_set(payload_json,'$.routing.backend','muse')",[]).unwrap();
-    assert_eq!(
-        f.get(Some(f.context())).await.0,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
+    db.execute("UPDATE composer_send_queue SET payload_json=json_set(payload_json,'$.routing.backend','unknown')",[]).unwrap();
+    let (status, body) = f.get(Some(f.context())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["steerableIds"], json!([]));
+    for (field, value) in [
+        ("backend", "12"),
+        ("mode", "false"),
+        ("collide", "\"true\""),
+    ] {
+        db.execute(&format!("UPDATE composer_send_queue SET payload_json=json_set(payload_json, '$.routing.{field}', json(?))"), [value]).unwrap();
+        assert_eq!(
+            f.get(Some(f.context())).await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        db.execute("UPDATE composer_send_queue SET payload_json='{\"routing\":{\"backend\":\"unknown\",\"mode\":\"single\",\"collide\":false}}'", []).unwrap();
+    }
     db.execute("UPDATE composer_send_queue SET status='unknown'", [])
         .unwrap();
     assert_eq!(

@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { ORCHESTRATOR_BACKEND_IDS } from '../src/lib/lane/orchestrator-backends/types';
 import { execFile, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
@@ -58,12 +59,12 @@ it.skipIf(process.platform !== 'linux')('serves ordinary lists through the publi
     await typescript(server.origin,token,pathFor(repo,'thoughts-empty'));
     restoreSending(); corruption(true);
     const call = (path: string,bearer = token) => fetch(server!.origin + path,{ headers: { authorization: `Bearer ${bearer}` } });
-    const cases = [pathFor(repo,'thoughts-empty'),...['pi','claude','codex','collide','unknown',''].map(backend => pathFor(repo,'thoughts-queue',{ backend })),pathFor(repo + '/.','thoughts-queue')];
+    const cases = [pathFor(repo,'thoughts-empty'),...['pi','claude','codex','collide','unknown',''].map(backend => pathFor(repo,'thoughts-queue',{ backend })),pathFor(repo + '/.','thoughts-queue'),pathFor(repo,'thoughts-grant-limit',{ backend: 'future-0' })];
     const expected = []; for (const path of cases) expected.push(await snapshot(await call(path)));
     expect(expected[0].body).toEqual({ items: [],canSteer: false,steerableIds: [] }); expect(expected[1].body.canSteer).toBe(true); expect(expected[2].body.canSteer).toBe(false);
     expect(expected[1].body.steerableIds).toEqual(['queued-fixture','single-collide','applied-fixture']);
     const applied = (expected[1].body.items as { id: string; payload: unknown }[]).find(row => row.id === 'applied-fixture'); expect(applied).toMatchObject({ payload: { text: 'canonical delivered text',images: [{ name: 'Image',dataUri: '/fixture/media.png' }] },steerAnchor: { messageId: 'anchor' } });
-    const fallbackPaths = [pathFor(repo,'thoughts-network'),pathFor(repo,'thoughts-queue',{ id: 'visual-missing' }),pathFor(repo,'invalid-thread'),pathFor(repo,'thoughts-bad-json'),pathFor(repo,'thoughts-unknown-state'),pathFor(repo,'thoughts-bad-receipt'),pathFor(repo,'thoughts-grant-limit')]; const fallbackExpected = []; for (const path of fallbackPaths) fallbackExpected.push(await snapshot(await call(path)));
+    const fallbackPaths = [pathFor(repo,'thoughts-network'),pathFor(repo,'thoughts-queue',{ id: 'visual-missing' }),pathFor(repo,'invalid-thread'),pathFor(repo,'thoughts-bad-json'),pathFor(repo,'thoughts-unknown-state'),pathFor(repo,'thoughts-bad-receipt')]; const fallbackExpected = []; for (const path of fallbackPaths) fallbackExpected.push(await snapshot(await call(path)));
     const denied = await snapshot(await call(cases[0],'')); expect(denied.status).toBe(401);
     corruption(false); await server.stop(); server = undefined;
     const quote = (s: string) => "'" + s.replaceAll("'", "'\"'\"'") + "'"; const stderr = join(directory,'daemon-stderr'); const wrapper = join(directory,'capture-o8d'); writeFileSync(wrapper,'#!/bin/sh\nexec ' + quote(binary) + ' "$@" 2>' + quote(stderr) + '\n',{ mode: 0o700 }); server = await startSessionServer(directory,false,wrapper); await typescript(server.origin,token,pathFor(repo,'thoughts-empty')); restoreSending(); corruption(true);
@@ -86,7 +87,7 @@ it.skipIf(process.platform !== 'linux')('serves ordinary lists through the publi
 it.skipIf(process.platform !== 'linux')('rejects missing, malformed, oversized and incomplete capability grants through the front door',async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(),'o8d-queue-grant-'))); let mode = 'valid'; let stderr = ''; let stdout = '';
   await seedSessionFixture(directory); const repo = seedRows(directory); const path = pathFor(repo,'thoughts-queue',{ backend: 'pi' });
-  const context = () => ({ target: { repoPath: repo,threadId: 'thoughts-queue' },request: { repoPath: repo,threadId: 'thoughts-queue',backend: 'pi' },capabilities: ['pi','claude','collide'].map(id => ({ id,liveSteer: mode !== 'rotate' && id === 'pi' })) });
+  const context = () => ({ target: { repoPath: repo,threadId: 'thoughts-queue' },request: { repoPath: repo,threadId: 'thoughts-queue',backend: 'pi' },capabilities: ORCHESTRATOR_BACKEND_IDS.map(id => ({ id: String(id),liveSteer: mode !== 'rotate' && (id === 'pi' || id === 'muse') })) });
   const upstream = createServer((req,res) => {
     if (req.headers['x-o8d-session-read'] === 'authorize') {
       expect(req.headers['x-o8d-composer-queue']).toBe('capabilities/1'); if (mode === 'missing') { res.writeHead(204).end(); return; }
@@ -94,9 +95,9 @@ it.skipIf(process.platform !== 'linux')('rejects missing, malformed, oversized a
       if (mode === 'outside') grant.defaultsContext.composerQueue.capabilities = [{ id: 'pi',liveSteer: true }];
       if (mode === 'count') grant.defaultsContext.composerQueue.capabilities = Array.from({ length: 33 },(_,i) => ({ id: 'backend-' + i,liveSteer: true }));
       if (mode === 'scope') grant.defaultsContext.composerQueue.request.threadId = 'thoughts-other';
-      if (mode === 'new-backend') {
+      if (mode === 'new-backend' || mode === 'unknown-backend') {
         const db = new Database(join(directory,'cortex-ide.db'));
-        try { db.prepare("INSERT INTO composer_send_queue (id,repo_path,thread_id,intent,payload_json,status,created_at,updated_at) VALUES ('after-admission',?,'thoughts-queue','send-next',?,'queued',1,1)").run(repo,JSON.stringify(payload('muse'))); } finally { db.close(); }
+        try { db.prepare("INSERT INTO composer_send_queue (id,repo_path,thread_id,intent,payload_json,status,created_at,updated_at) VALUES ('after-admission',?,'thoughts-queue','send-next',?,'queued',1,1)").run(repo,JSON.stringify(payload(mode === 'new-backend' ? 'muse' : 'future-backend'))); } finally { db.close(); }
       }
       const body = mode === 'boolean' ? JSON.stringify(grant).replace('"liveSteer":true','"liveSteer":"yes"') : mode === 'json' ? '{' : mode === 'body' ? ' '.repeat(1024*1024+1) : JSON.stringify(grant);
       res.writeHead(200,{ 'content-type': 'application/json',connection: 'close' }).end(body);
@@ -107,9 +108,40 @@ it.skipIf(process.platform !== 'linux')('rejects missing, malformed, oversized a
   try {
     const origin = await new Promise<string>((resolve,reject) => { const timer = setTimeout(() => reject(new Error('o8d startup timeout')),10_000); child.stdout.on('data',chunk => { stdout += chunk.toString(); for (const line of stdout.split('\n')) try { const value = JSON.parse(line); if (value.listening) { clearTimeout(timer); resolve('http://' + value.listening); } } catch { /* Partial startup line. */ } }); child.once('error',reject); });
     const valid = await fetch(origin + path); expect(valid.headers.get('x-o8d-native')).toBe('1'); await valid.json();
-    for (mode of ['missing','json','version','outside','new-backend','boolean','count','scope','body']) { const response = await fetch(origin + path); expect(response.headers.get('x-o8d-native'),mode).toBeNull(); expect(await response.json()).toEqual({ fallback: true }); if (mode === 'new-backend') { const db = new Database(join(directory,'cortex-ide.db')); try { db.prepare("DELETE FROM composer_send_queue WHERE id='after-admission'").run(); } finally { db.close(); } } }
+    for (mode of ['missing','json','version','outside','boolean','count','scope','body']) { const response = await fetch(origin + path); expect(response.headers.get('x-o8d-native'),mode).toBeNull(); expect(await response.json()).toEqual({ fallback: true }); }
+    for (mode of ['new-backend','unknown-backend']) {
+      const response = await fetch(origin + path); expect(response.headers.get('x-o8d-native'),mode).toBe('1');
+      const body = await response.json(); expect(body.canSteer).toBe(true);
+      expect(body.items.some((item: { id: string }) => item.id === 'after-admission')).toBe(true);
+      expect(body.steerableIds.includes('after-admission')).toBe(mode === 'new-backend');
+      const db = new Database(join(directory,'cortex-ide.db')); try { db.prepare("DELETE FROM composer_send_queue WHERE id='after-admission'").run(); } finally { db.close(); }
+    }
     mode = 'rotate'; const rotated = await fetch(origin + path); expect(rotated.headers.get('x-o8d-native')).toBe('1'); expect(await rotated.json()).toMatchObject({ canSteer: false,steerableIds: [] });
     mode = 'valid'; const recovered = await fetch(origin + path); expect(recovered.headers.get('x-o8d-native')).toBe('1'); await recovered.json();
     expect(stderr + stdout + readFileSync(join(directory,'o8d-request-counts.jsonl'),'utf8')).not.toContain('ws-parity-fixture-credential');
   } finally { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGTERM'); await new Promise<void>(resolve => child.once('exit',() => resolve())); } upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); rmSync(directory,{ recursive: true,force: true }); }
+},60_000);
+
+
+it('grants every fixed backend without reading the queue, with the existing backend-id guard',async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(),'o8d-queue-authority-')));
+  try {
+    await seedSessionFixture(directory); const repo = seedRows(directory);
+    const script = `
+      const { getSqlite } = require('./src/lib/db/index.ts');
+      const { nativeComposerQueueContext } = require('./src/lib/ws-server/native-composer-queue-context.ts');
+      const { ORCHESTRATOR_BACKEND_IDS, isOrchestratorBackendId } = require('./src/lib/lane/orchestrator-backends/types.ts');
+      getSqlite().exec('ALTER TABLE composer_send_queue RENAME COLUMN payload_json TO inaccessible_payload');
+      const context = nativeComposerQueueContext(new URL(process.argv[1]));
+      console.log(JSON.stringify({ context, known: ORCHESTRATOR_BACKEND_IDS.every(isOrchestratorBackendId), unknown: [null, 1, 'future-backend', 'PI', ''].some(isOrchestratorBackendId) }));
+      getSqlite().close();
+    `;
+    const { stdout } = await promisify(execFile)(process.execPath,['--import=./scripts/register-server-only-stub.mjs','--import=tsx','-e',script,'http://fixture' + pathFor(repo,'thoughts-queue',{ backend: 'unknown' })],{ env: { ...process.env,O8_DATA_DIR: undefined,CORTEX_IDE_DATA_DIR: directory } });
+    const result = JSON.parse(stdout.trim().split('\n').at(-1)!);
+    expect(result.known).toBe(true); expect(result.unknown).toBe(false);
+    expect(result.context.target).toEqual({ repoPath: repo,threadId: 'thoughts-queue' });
+    expect(result.context.capabilities.map((row: { id: string }) => row.id)).toEqual(ORCHESTRATOR_BACKEND_IDS);
+    expect(result.context.capabilities).toContainEqual({ id: 'pi',liveSteer: true });
+    expect(result.context.capabilities).toContainEqual({ id: 'claude',liveSteer: false });
+  } finally { rmSync(directory,{ recursive: true,force: true }); }
 },60_000);

@@ -46,10 +46,12 @@ pub(super) fn parse(value: &Value) -> Result<Grant, ()> {
             return Err(());
         }
     }
-    if backend
-        .as_ref()
-        .is_some_and(|id| !capabilities.contains_key(id))
-    {
+    // This is the same runtime ID table exported by TypeScript's guard. Only
+    // the fixed known set grants capabilities; unknown strings are not steerable.
+    let ids: Vec<String> =
+        serde_json::from_str(include_str!("../../orchestrator-backend-ids.json"))
+            .map_err(|_| ())?;
+    if capabilities.len() != ids.len() || ids.iter().any(|id| !capabilities.contains_key(id)) {
         return Err(());
     }
     Ok(Grant {

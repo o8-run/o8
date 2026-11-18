@@ -1,10 +1,9 @@
 import { isNetworkThread } from '@/lib/bots/network-store';
-import { listComposerTranscriptSends, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
+import { validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
-import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { ORCHESTRATOR_BACKEND_IDS } from '@/lib/lane/orchestrator-backends/types';
 
 export const COMPOSER_QUEUE_GRANT_LIMIT = 1024 * 1024;
-const MAX_BACKENDS = 32;
 const MAX_BACKEND_BYTES = 64;
 const MAX_TARGET_BYTES = 16 * 1024;
 
@@ -19,17 +18,8 @@ export function nativeComposerQueueContext(url: URL) {
     const target = validateComposerQueueTarget(request, false);
     if ([request.repoPath, target.repoPath].some(s => Buffer.byteLength(s) > MAX_TARGET_BYTES)
       || Buffer.byteLength(target.threadId) > 256) return null;
-    const ids = new Set<string>();
-    if (request.backend !== null) ids.add(request.backend);
-    for (const item of listComposerTranscriptSends(target)) {
-      const routing = item.payload.routing;
-      if (typeof routing.backend !== 'string' || typeof routing.mode !== 'string' || typeof routing.collide !== 'boolean') return null;
-      ids.add(routing.backend);
-      ids.add(routing.collide && routing.mode !== 'single' ? 'collide' : routing.backend);
-      if (ids.size > MAX_BACKENDS) return null;
-    }
-    if (ids.size > MAX_BACKENDS || [...ids].some(id => Buffer.byteLength(id) > MAX_BACKEND_BYTES)) return null;
-    const capabilities = [...ids].map(id => ({ id, liveSteer: isOrchestratorBackendId(id) && Boolean(getOrchestratorBackend(id, target).liveSteer) }));
+    if (request.backend !== null && Buffer.byteLength(request.backend) > MAX_BACKEND_BYTES) return null;
+    const capabilities = ORCHESTRATOR_BACKEND_IDS.map(id => ({ id, liveSteer: Boolean(getOrchestratorBackend(id, target).liveSteer) }));
     return { target, request, capabilities };
   } catch { return null; }
 }
