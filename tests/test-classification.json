@@ -5018,6 +5018,15 @@
       ]
     },
     {
+      "path": "tests/next-shutdown-nonphone-callers-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-shutdown-nonphone-group1-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -5037,15 +5046,6 @@
         "child-process",
         "network-listener",
         "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/next-shutdown-nonphone-callers-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "executable-fixture",
-        "network-listener",
         "real-path"
       ]
     },
