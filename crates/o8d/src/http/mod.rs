@@ -21,6 +21,8 @@ mod review_workspace;
 mod git_remote;
 mod projects;
 mod queue;
+mod composer_queue_grant;
+pub use composer_queue_grant::valid as composer_queue_grant_valid;
 mod read_context;
 mod repository;
 mod settings_defaults;
@@ -157,12 +159,10 @@ fn unavailable() -> Response {
         json!({"error":"o8d persisted read unavailable; use the TypeScript server"}),
     )
 }
-fn problem(message: &str) -> Response {
-    reply(StatusCode::BAD_REQUEST, json!({"error":message}))
-}
 fn value<'a>(params: &'a Params, key: &str) -> &'a str {
     params.get(key).map(String::as_str).unwrap_or("")
 }
+
 fn limit(params: &Params, default: usize, max: usize) -> usize {
     let raw = value(params, "limit").trim();
     // Match parseInt(..., 10), including its accepted numeric prefix.
@@ -217,7 +217,13 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
         params.entry(key).or_insert(value);
     }
     let work = store.clone();
-    match tokio::task::spawn_blocking(move || dispatch(&ReadContext::new(&work), &path, &params, "GET", &[]))
+    match tokio::task::spawn_blocking(move || {
+        let read = ReadContext::new(&work);
+        // This listener is --experimental-http: it authenticates directly and
+        // has no admission backhaul. The app/native dispatch always uses true.
+        if path == "/api/orchestrator/composer-queue" { queue::read(&read, &params, false) }
+        else { dispatch(&read, &path, &params, "GET", &[]) }
+    })
         .await
     {
         Ok(response) => response,
@@ -250,7 +256,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         "/api/mobile/history" => mobile_history::transcript(store, params),
         "/api/v2/chat-history" => chat_context::context(store, params),
         "/api/v2/chat-history/list" => chat_list::read(store, params),
-        "/api/orchestrator/composer-queue" => queue::read(store, params),
+        "/api/orchestrator/composer-queue" => queue::read(store, params, true),
         "/api/orchestrator/state" => {
             // Reconciliation and live runtime evidence still belong to TypeScript.
             // Never invent an empty fleet when persisted lanes require that authority.

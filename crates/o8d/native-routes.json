@@ -37,9 +37,11 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Network projections, visual receipts and live steering capabilities remain TypeScript-owned.",
-    "state": "red",
-    "test": "tests/o8d-native-route-table-real-path.test.ts"
+    "reason": "Native: ordinary non-network GET list reads with repoPath and threadId, no id, a Node-validated canonical target and bounded per-request live capability grant. TypeScript: network queues, id visual receipts, other target/query forms, validation/read/schema errors, malformed or unsupported items/grants, and all writes. Node retains authority; this is not composer-queue removal.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-composer-queue-real-path.test.ts",
+    "owned": true,
+    "admission": "composer-queue"
   },
   {
     "path": "/api/v2/chat-history/list",

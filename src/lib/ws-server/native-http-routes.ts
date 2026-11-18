@@ -78,6 +78,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
       // Admission probes must never execute a writer when disabled or unmatched.
       const retiredProjectPath = ['/api/projects/context', '/api/projects/dismissed-suggestions'].includes(url.pathname);
       const ownedRoute = nativeRoutes.find(route => route.path === match.route.path && route.methods.includes(req.method ?? 'GET') && 'owned' in route && route.owned === true);
+      const composerQueueRoute = ownedRoute && 'admission' in ownedRoute && ownedRoute.admission === 'composer-queue';
       const viewerRoute = ownedRoute && 'redaction' in ownedRoute && ownedRoute.redaction === 'viewer';
       if ((!nativeSessionReadsEnabled() && !(nativeHttpTransportEnabled() && ownedRoute)) || retiredProjectPath
         || !nativeRoutes.some(route => route.path === match.route.path && route.methods.includes(req.method ?? 'GET'))) {
@@ -140,7 +141,10 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           && !(await import('./native-chat-history-admission')).nativeChatHistoryAllowed(url.searchParams.get('tabId'));
         const deferMobileHistory = url.pathname === '/api/mobile/history' && req.method === 'GET'
           && !(await import('./native-chat-history-admission')).nativeMobileHistoryAllowed(url.searchParams.get('sessionKey'));
+        const composerQueue = composerQueueRoute && !denied && !projectDenied
+          ? (await import('./native-composer-queue-context')).nativeComposerQueueContext(url) : undefined;
         const defaultsContext = {
+          composerQueue,
           fileContentScope, fileReadTarget, fileAssetTarget, repoSpecTarget,
           gitRefsCommitRoot: viewerRoute && match.route.path === '/api/panel/commits/[hash]'
             ? resolve((await import('@/lib/panel/git-commits')).resolveWorkspaceRoot(url.searchParams.get('workspace'))) : undefined,
@@ -216,14 +220,19 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
           ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
         };
-        response = denied ?? projectDenied ?? ((fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+        response = denied ?? projectDenied ?? ((composerQueue === null || fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
           'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
         } }));
         if (viewerRoute && response.status === 204) {
           const grant = req.headers['x-o8d-redaction'] === 'viewer/1' ? viewerRedactionGrant(defaultsContext) : null;
           response = grant === null ? new Response(null, { status: 409 }) : new Response(grant, { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
         }
-        admission = (!viewerRoute || response.status === 200) && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
+        if (composerQueueRoute && response.status === 204) {
+          const grant = req.headers['x-o8d-composer-queue'] === 'capabilities/1'
+            ? (await import('./native-composer-queue-context')).composerQueueGrant(defaultsContext) : null;
+          response = grant === null ? new Response(null, { status: 409 }) : new Response(grant, { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+        }
+        admission = (!(viewerRoute || composerQueueRoute) || response.status === 200) && composerQueue !== null && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
       }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });

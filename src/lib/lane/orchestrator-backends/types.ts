@@ -14,6 +14,7 @@
  * See `registry.ts` for the registry + the Codex/Claude delegate backends.
  */
 
+import backendIds from '../../../../crates/o8d/orchestrator-backend-ids.json';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
@@ -36,16 +37,16 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
  */
 export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode' | 'pi' | 'muse';
 
+export const ORCHESTRATOR_BACKEND_IDS = backendIds as readonly OrchestratorBackendId[];
+
 /**
  * The single runtime validation point for the backend-id union. Callers that
  * accept an untrusted `backend` value (ws-server, the chat-history routes,
  * mobile thread history) narrow through this instead of re-inlining the literal
- * comparison — so adding a backend is one edit here (union + guard), not N.
+ * comparison — so every runtime consumer uses the same backend-id table.
  */
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
-  return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes'
-    || value === 'acp' || value === 'collide' || value === 'fable' || value === 'o8'
-    || value === 'opencode' || value === 'pi' || value === 'muse';
+  return typeof value === 'string' && ORCHESTRATOR_BACKEND_IDS.includes(value as OrchestratorBackendId);
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
