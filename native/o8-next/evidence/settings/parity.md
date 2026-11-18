@@ -54,7 +54,8 @@ This is a partial port of the desktop Settings surface. Ported rows share the ex
 | OpenRouter connection: enable / disable / recheck | Turn on / off, Recheck connection, connection state and server refusals | Ported |
 | Quick drawer: Settings | Shell Settings button and shortcut | Ported as shell entry |
 | Provider key masked previews | Intentionally never retained or shown; presence only | Ported (presence only) |
-| `GeneralTab.tsx`: Launch at login; When closing with active agents | None | Missing |
+| `GeneralTab.tsx`: Launch at login | General: Launch at login (`launchAtLogin`), this Mac's launch agent; existing registrations kept, none by default | Ported |
+| `GeneralTab.tsx`: When closing with active agents | None | Missing |
 | `AccountTab.tsx`: Manage account; Sign in to o8; Session | None | Missing |
 | `GitHubTab.tsx`: Connect GitHub; Refresh; GitHub identity; Repository & CLI access; Disconnect; enter this code on github; Open GitHub; Use an access token instead; Connect; Automation app; Install; Sign in | None | Missing |
 | `IndexingTab.tsx`: Loading index state…; Couldn't read index state; No repositories connected yet; Saved instructions; Recorded task outcomes; Knowledge storage | None | Missing |

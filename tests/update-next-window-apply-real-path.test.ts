@@ -43,7 +43,7 @@ it('installs an Update click through the native updater when o8 next is the wind
   expect((await nativeRead()).applyRequestedAt).toEqual(expect.any(String));
 
   // Automatic updates stay off; the click alone admits this one install.
-  expect(await native({ action: 'admit', attemptId: 'clicked' })).toMatchObject({ allowed: true, version: '0.2.0' });
+  expect(await native({ action: 'admit', attemptId: 'clicked' })).toMatchObject({ allowed: true, version: '0.2.0', manual: true });
   expect(await native({ action: 'restart', attemptId: 'clicked' })).toMatchObject({ allowed: true,
     state: { autoApply: { phase: 'restarting' } } });
   expect(await native({ action: 'admit', attemptId: 'later' })).toMatchObject({ allowed: false });
@@ -124,4 +124,17 @@ it('a click while the bound install runs is refused and the install continues', 
   expect(again.status).toBe(409);
   expect(await again.json()).toMatchObject({ error: { code: 'update_apply_in_progress' } });
   expect(await native({ action: 'restart', attemptId: 'clicked' })).toMatchObject({ allowed: true });
+});
+
+it('a new click retries restart after installation without admitting another install', async () => {
+  vi.stubEnv('O8_NEXT_MAIN_WINDOW', '1');
+  expect((await apply({})).status).toBe(202);
+  expect(await native({ action: 'admit', attemptId: 'installed' })).toMatchObject({ allowed: true });
+  expect(await native({ action: 'restart', attemptId: 'installed' })).toMatchObject({ allowed: true,
+    state: { autoApply: { installed: true } } });
+  await native({ action: 'failed', attemptId: 'installed', error: 'Restart was refused.' });
+  expect((await nativeRead()).applyRequestedAt).toBeNull();
+  expect((await apply({})).status).toBe(202);
+  expect(await native({ action: 'restart', attemptId: 'installed' })).toMatchObject({ allowed: true, manual: true,
+    state: { autoApply: { installed: true, phase: 'restarting' } } });
 });

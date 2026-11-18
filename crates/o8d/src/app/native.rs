@@ -31,40 +31,65 @@ fn admission_client() -> Result<&'static reqwest::Client, ()> {
     Ok(CLIENT.get_or_init(|| client))
 }
 
-/// Returns false when the original streaming TS path must own the request.
+pub(super) enum Outcome {
+    Proxy,
+    // Admission succeeded, but Rust deferred after the bounded body was read.
+    // Replay it once through the original TS handler instead of losing bytes.
+    Replay(Vec<u8>),
+    Served,
+}
+
+const BODY_LIMIT: usize = 16 * 1024 * 1024;
+
+/// Keep unsupported framing on the original streaming path without consuming it.
 pub(super) async fn serve(
     socket: &mut TcpStream,
     header: &str,
     upstream: &str,
     key: &str,
     count: &super::request_counts::Count,
-) -> Result<bool, ()> {
+) -> Result<Outcome, ()> {
     if !enabled() {
-        return Ok(false);
+        return Ok(Outcome::Proxy);
     }
     let mut line = header.lines().next().ok_or(())?.split_whitespace();
-    if line.next() != Some("GET") {
-        return Ok(false);
-    }
+    let method = line.next().ok_or(())?;
     let target = line.next().ok_or(())?;
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    if header
+    if http::native_route(path, method).is_none() {
+        return Ok(Outcome::Proxy);
+    }
+    let mut length = None;
+    for (name, value) in header
         .lines()
         .skip(1)
         .filter_map(|line| line.split_once(':'))
-        .any(|(name, value)| {
-            name.eq_ignore_ascii_case("transfer-encoding")
-                || (name.eq_ignore_ascii_case("content-length") && value.trim() != "0")
-        })
     {
-        return Ok(false);
+        // Chunked/expect/ambiguous framing stays with the TS streaming parser.
+        if name.eq_ignore_ascii_case("transfer-encoding") || name.eq_ignore_ascii_case("expect") {
+            return Ok(Outcome::Proxy);
+        }
+        if name.eq_ignore_ascii_case("content-length") {
+            let value = value.trim();
+            if length.is_some() || value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+                return Ok(Outcome::Proxy);
+            }
+            let Ok(value) = value.parse::<usize>() else {
+                return Ok(Outcome::Proxy);
+            };
+            length = Some(value);
+        }
     }
-    if http::native_route(path, "GET").is_none() {
-        return Ok(false);
+    let length = length.unwrap_or(0);
+    if method == "GET" && length != 0 {
+        return Ok(Outcome::Proxy);
     }
     // Admit the original path/method/headers through production middleware and
     // the queue's in-handler gate. Never cache principal or credential decisions.
-    let mut request = admission_client()?.get(format!("http://{upstream}{target}"));
+    let mut request = admission_client()?.request(
+        method.parse().map_err(|_| ())?,
+        format!("http://{upstream}{target}"),
+    );
     for (name, value) in header
         .lines()
         .skip(1)
@@ -95,12 +120,12 @@ pub(super) async fn serve(
         // A pooled socket the backend closed as this request went out fails
         // the send. The original handler still owns the request, as it does
         // for any admission that does not come back 204.
-        return Ok(false);
+        return Ok(Outcome::Proxy);
     };
     if admission.status() != StatusCode::NO_CONTENT {
         // Let the original handler return its exact auth/error response. An
         // unavailable gate never grants native access.
-        return Ok(false);
+        return Ok(Outcome::Proxy);
     }
     // Only the authenticated private admission response provides this context.
     // It contains paths and booleans, never provider key values.
@@ -114,6 +139,19 @@ pub(super) async fn serve(
             let bytes = base64::engine::general_purpose::STANDARD.decode(raw).ok()?;
             serde_json::from_slice(&bytes).ok()
         });
+    // Only after admission consume bytes. A refusal never gets native access.
+    socket
+        .read_exact(&mut vec![0; header.len()])
+        .await
+        .map_err(|_| ())?;
+    if length > BODY_LIMIT {
+        return write_response(socket, http::native_body_too_large(), count).await;
+    }
+    let mut body = vec![0; length];
+    tokio::time::timeout(Duration::from_secs(10), socket.read_exact(&mut body))
+        .await
+        .map_err(|_| ())?
+        .map_err(|_| ())?;
     let directory = PathBuf::from(std::env::var("O8D_SESSION_DATA_DIR").map_err(|_| ())?)
         .canonicalize()
         .map_err(|_| ())?;
@@ -122,8 +160,10 @@ pub(super) async fn serve(
         .unwrap_or_else(|| directory.join("cortex-ide.db"));
     let path = path.to_owned();
     let query = query.to_owned();
+    let method = method.to_owned();
+    let replay = body.clone();
     let response = tokio::task::spawn_blocking(move || {
-        http::session_read(directory, database, &path, &query, defaults_context)
+        http::native_request(directory, database, &path, &query, &method, &body, defaults_context)
     })
     .await
     .map_err(|_| ())?;
@@ -131,13 +171,16 @@ pub(super) async fn serve(
     // Runtime transcripts, lane overlays, network projections and dynamic steer
     // capabilities remain TS-owned until their readers are ported.
     if response.status() == StatusCode::SERVICE_UNAVAILABLE {
-        return Ok(false);
+        return Ok(Outcome::Replay(replay));
     }
-    // The classifier only peeked. Consume the header before closing the socket.
-    socket
-        .read_exact(&mut vec![0; header.len()])
-        .await
-        .map_err(|_| ())?;
+    write_response(socket, response, count).await
+}
+
+async fn write_response(
+    socket: &mut TcpStream,
+    response: axum::response::Response,
+    count: &super::request_counts::Count,
+) -> Result<Outcome, ()> {
     let status = response.status();
     let mut output = format!(
         "HTTP/1.1 {} {}\r\nConnection: close\r\nx-o8d-native: 1\r\nx-o8d-native-session-read: 1\r\n",
@@ -155,5 +198,5 @@ pub(super) async fn serve(
     socket.write_all(&body).await.map_err(|_| ())?;
     socket.shutdown().await.map_err(|_| ())?;
     count.finish(Some(status.as_u16())).await;
-    Ok(true)
+    Ok(Outcome::Served)
 }

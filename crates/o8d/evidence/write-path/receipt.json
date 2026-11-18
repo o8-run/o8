@@ -1,0 +1,31 @@
+{
+  "kind": "synthetic-public-socket",
+  "issue": 6370,
+  "checks": {
+    "canonicalPublicSocketAndAdmission": "After startup merge: four requested modules11 passed,0 failed",
+    "boundaryRecipes": "0,1024,16777216 native200;16777217 native413",
+    "unauthorizedOversized": "401 via TypeScript",
+    "fallback": "exact synthetic messages persisted by TypeScript",
+    "cargoAllFeatures": "30 passed, 0 failed",
+    "typecheckFast": 0,
+    "lint": 0,
+    "rules": 0,
+    "oversizedError": "Request exceeds 16 MiB (matches the TypeScript boundary)",
+    "settingsMerge": "All settings,mobileInbox,reviewWorkspaceUnselected contexts and refusal terms retained inside probe guard; nonGET panelAuth and disabled/unmatched409 retained"
+  },
+  "sourceSha256": {
+    "crates/o8d/src/app.rs": "75bf7589a84f4a90ab8d7bc8defb313ce889a1b6565a09decc87ead091fea151",
+    "crates/o8d/src/app/native.rs": "e903a15da85d4271c2df2806950e60205e27c72edfbd2880c32810930f70cfb7",
+    "crates/o8d/src/http/mod.rs": "9be0b92c12b94a62378f0340295d26287aa18d9861a70b6dd27fd85c990e7e33",
+    "src/lib/ws-server/native-http-routes.ts": "18e32591d43b234aa2ea64be1492b846d5721710d1cc1202d3d680bde5b10fbc",
+    "scripts/o8d/build-write-fixture.mjs": "8a0149a754c72a51bd62e09246d04248a120f1441118bedee34867aa211f2241",
+    "scripts/o8d/verification-fixture.patch": "1fbfdcc9e31046746c57207b4946dcc71b8dd63b7b91942f3a7c83515789f35a",
+    "tests/o8d-rust-write-path-real-path.test.ts": "2b1c2fd0b8cb22532084d533ff114d7cb329b3617ddb20eec77a0beaa177166a",
+    "tests/o8d-session-read-admission-real-path.test.ts": "d55a0ffec6f4118dca8582ec3e0f88cd5c2801592aac6baaaf7b98d42c241370",
+    "crates/o8d/evidence/write-path/corpus.json": "0c1442ba61145eec5a817c5edb3dd1e000fdf14f3cdda79f6c781db1a2fc18c9"
+  },
+  "fullCompletionAndHosted": "Authorized focused local checks passed; hosted CI pending",
+  "securityReview": "required before arming",
+  "base": "88763944bbf93286e2bb90f5da720e0723f18c07",
+  "timingFollowup": 6408
+}

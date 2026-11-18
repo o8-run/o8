@@ -5725,6 +5725,13 @@
       ]
     },
     {
+      "path": "tests/o8d-rust-write-path-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-session-read-admission-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -8441,6 +8448,12 @@
     },
     {
       "path": "tests/update-fresh-apply-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-held-state-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

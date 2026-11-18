@@ -384,12 +384,20 @@ impl Settings {
             Ok(Data::Keys(inventory, false))
         } else {
             let path = scope::read_path(DEFAULTS, project);
-            let data: Snapshot = client.settings_request("GET", &path, Value::Null)?;
+            let mut data: Snapshot = client.settings_request("GET", &path, Value::Null)?;
             if data.values.is_empty() {
                 return Err(RequestError {
                     status: Some(502),
                     message: "Settings are unavailable. Refresh to try again.".into(),
                 });
+            }
+            // Launch at login is this Mac's own registration, not a server value.
+            #[cfg(target_os = "macos")]
+            if let Some(login) = crate::login_item::Paths::current() {
+                data.values.insert(
+                    crate::login_item::FIELD.into(),
+                    Value::Bool(login.enabled()),
+                );
             }
             Ok(Data::Defaults(data))
         }
@@ -604,6 +612,10 @@ impl Settings {
         self.changed(cx);
     }
     fn set(&mut self, field: &'static Field, value: Value, cx: &mut Context<Self>) {
+        if field.id == crate::login_item::FIELD {
+            self.set_login(field, value == true, cx);
+            return;
+        }
         if !self.locked(field) {
             let revision = self
                 .snapshot
@@ -619,6 +631,42 @@ impl Settings {
                 cx,
             );
         }
+    }
+    /// Writes or removes this Mac's launch agent, then rereads the settings.
+    fn set_login(&mut self, field: &'static Field, enabled: bool, cx: &mut Context<Self>) {
+        if self.locked(field) {
+            return;
+        }
+        self.busy = true;
+        self.error = None;
+        self.note = "Saving settings…".into();
+        let client = self.client.clone();
+        self.requested_project = self.project.clone();
+        let project = self.project.clone();
+        let task = cx.background_executor().spawn(async move {
+            crate::login_item::Paths::current()
+                .ok_or_else(|| "HOME is not set.".to_owned())
+                .and_then(|login| {
+                    login.set(
+                        enabled,
+                        crate::login_item::current_executable().as_deref(),
+                    )
+                })
+                .map_err(|message| RequestError {
+                    status: Some(400),
+                    message,
+                })?;
+            Self::read(&client, false, project.as_deref()).map_err(|_| RequestError {
+                status: None,
+                message: "The change was saved, but current settings are unavailable. Refresh before trying again.".into(),
+            })
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| this.receive(result, true, cx));
+        })
+        .detach();
+        self.changed(cx);
     }
     fn save(&mut self, cx: &mut Context<Self>) {
         if self.busy || self.uncertain {
@@ -700,7 +748,7 @@ mod render;
 mod about;
 #[cfg(test)]
 #[path = "settings_test_peer.rs"]
-mod test_peer;
+pub(crate) mod test_peer;
 
 #[path = "settings_connections.rs"]
 mod connections;
