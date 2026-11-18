@@ -14,6 +14,7 @@ use std::{
 struct PortSnapshot {
     api_port: Value,
     ws_port: Value,
+    api_front_door: bool,
     source: String,
     api_mtime_ns: Option<String>,
     ws_mtime_ns: Option<String>,
@@ -48,6 +49,7 @@ fn ports(store: &ReadContext<'_>) -> Result<PortSnapshot, ()> {
     let snapshot = PortSnapshot {
         api_port: raw.get("apiPort").ok_or(())?.clone(),
         ws_port: raw.get("wsPort").ok_or(())?.clone(),
+        api_front_door: raw.get("apiFrontDoor").and_then(Value::as_bool).unwrap_or(false),
         source: raw
             .get("source")
             .and_then(Value::as_str)
@@ -139,8 +141,8 @@ fn response(body: Value, identity: bool) -> Response {
 
 pub(super) fn ws_info(store: &ReadContext<'_>) -> Response {
     let result = (|| {
-        let resolved = ports(store)?
-            .ws_port
+        let snapshot = ports(store)?;
+        let resolved = snapshot.ws_port
             .as_u64()
             .and_then(|port| u16::try_from(port).ok())
             .filter(|port| *port > 0)
@@ -154,7 +156,9 @@ pub(super) fn ws_info(store: &ReadContext<'_>) -> Response {
             return Err(());
         }
         let mut selected = resolved;
-        if let Some(file) = file_port(store)? {
+        // The owner snapshot names the unified API/WS listener in takeover.
+        let candidate = if snapshot.api_front_door { None } else { file_port(store)? };
+        if let Some(file) = candidate {
             if alive(file) {
                 selected = file;
             } else if file != resolved {

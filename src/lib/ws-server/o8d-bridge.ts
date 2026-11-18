@@ -1,3 +1,4 @@
+import { apiFrontDoorEnabled, nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { isIP } from 'node:net';
@@ -32,7 +33,7 @@ function startupPortInfo(): string | undefined {
     // Reuse the actual TS cache, including its intentional ws-port asymmetry.
     const info = resolvePortInfo();
     if (stamp('api-port') !== apiMtimeNs || stamp('ws-port') !== wsMtimeNs) return undefined;
-    return JSON.stringify({ ...info, apiMtimeNs, wsMtimeNs });
+    return JSON.stringify({ ...info, apiMtimeNs, wsMtimeNs, apiFrontDoor: apiFrontDoorEnabled() });
   } catch { return undefined; }
 }
 
@@ -56,11 +57,18 @@ export class O8dBridge {
     private readonly epoch: string,
     /** Public bind host — loopback unless the operator opted in via O8_LAN_ACCESS. */
     private readonly host: string = '127.0.0.1',
+    /** A takeover must never recover by evicting an existing API listener. */
+    private readonly rejectPortConflicts = false,
   ) {
     this.fallback = createServer((req, res) => server.emit('request', req, res));
     this.fallback.on('upgrade', (req, socket, head) => server.emit('upgrade', req, socket, head));
     // A transient bind conflict must leave recovery enabled.
-    this.fallback.on('error', () => this.scheduleRetry());
+    this.fallback.on('error', (error: NodeJS.ErrnoException) => {
+      if (this.rejectPortConflicts && error.code === 'EADDRINUSE') {
+        this.stop(); this.server.emit('error', error); return;
+      }
+      this.scheduleRetry();
+    });
   }
 
   get status() {
@@ -152,9 +160,10 @@ export class O8dBridge {
         '--app-upstream', this.upstream], {
         env: childEnvironment({ inherit: false, env: {
           O8D_BRIDGE_KEY: this.key, O8D_EPOCH: this.epoch,
+          O8_API_FRONT_DOOR: apiFrontDoorEnabled() ? '1' : undefined,
           O8D_SERVER_VERSION: packageJson.version, O8D_STARTUP_PORT_INFO: startupPortInfo(),
           O8_INSTANCE_ID: process.env.O8_INSTANCE_ID, O8_BOOT_ID: process.env.O8_BOOT_ID,
-          O8D_NATIVE_SESSION_READS: process.env.O8_NEXT_O8D === '1' && nativeSessionReadsEnabled() ? '1' : undefined,
+          O8D_NATIVE_SESSION_READS: nativeHttpTransportEnabled() && nativeSessionReadsEnabled() ? '1' : undefined,
           O8D_REQUEST_COUNTS_PATH: join(getDataDir(), 'o8d-request-counts.jsonl'),
           O8D_MACHINE_DISPLAY_NAME: nativeSessionReadsEnabled() ? localMachineName() : undefined,
           O8D_SESSION_DATA_DIR: getDataDir(), O8D_SESSION_DB_PATH: process.env.CORTEX_IDE_DB_PATH, TZ: process.env.TZ,

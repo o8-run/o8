@@ -457,19 +457,27 @@ function stampClientAddr(server) {
       return true;
     };
     try {
+      const peer = req.socket?.remoteAddress || '';
+      const loopbackPeer = peer === '::1' || peer === '127.0.0.1' || peer.startsWith('127.') || peer.startsWith('::ffff:127.');
       // PORT identifies Next's app listener, not auxiliary servers such as the
       // authenticated browser egress proxy, whose Host names the destination.
       // Keep the boundary enabled if the app port cannot be identified.
       const appPort = Number(process.env.PORT);
       if (!Number.isInteger(appPort) || appPort < 1 || appPort > 65535
         || req.socket?.localPort === appPort) {
-        if (!isAllowedLocalHost(req.headers.host, req.socket.localPort)
-          || !requestTargetAllowed(req.url, req.socket.localPort)) return refuse(421);
+        const publicPort = process.env.O8_API_FRONT_DOOR === '1' ? Number(process.env.O8_API_PORT) : req.socket.localPort;
+        if (!Number.isInteger(publicPort) || publicPort < 1 || publicPort > 65535) return refuse(421);
+        const publicTarget = isAllowedLocalHost(req.headers.host, publicPort) && requestTargetAllowed(req.url, publicPort);
+        // Existing internal fetches and the settings-window owner address private
+        // Next directly. Only its actual loopback socket may use that authority;
+        // caller headers cannot attest locality and the bearer gate still runs.
+        const privateTarget = process.env.O8_API_FRONT_DOOR === '1' && loopbackPeer
+          && isAllowedLocalHost(req.headers.host, req.socket.localPort)
+          && requestTargetAllowed(req.url, req.socket.localPort);
+        if (!publicTarget && !privateTarget) return refuse(421);
         const get = (name) => typeof req.headers[name] === 'string' ? req.headers[name] : null;
         if (!browserWriteAllowed(req.method, get, req.socket?.encrypted ? 'https:' : 'http:')) return refuse(403);
       }
-      const peer = req.socket?.remoteAddress || '';
-      const loopbackPeer = peer === '::1' || peer === '127.0.0.1' || peer.startsWith('127.') || peer.startsWith('::ffff:127.');
       const requestedRelaySurface = req.headers['x-o8-relay-surface'];
       delete req.headers['x-o8-relay-surface'];
       // The o8 relay connector (a same-host loopback process) forwards a remote

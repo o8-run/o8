@@ -1,3 +1,5 @@
+import { serveBroadcastPage } from './lib/ws-server/broadcast-page';
+import { apiFrontDoorEnabled } from './lib/ws-server/api-front-door-config';
 import { initiateE2eeHandshake } from './lib/ws-server/device-e2ee-handshake';
 import { handleTokenProjectionRequest } from './lib/mobile/token-projection-http';
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
@@ -410,7 +412,11 @@ const terminalHostReady = import('node-pty')
 
 // ── Config ──
 
+const API_FRONT_DOOR = apiFrontDoorEnabled();
+let frontDoor: typeof import('./lib/ws-server/api-front-door') | null = null;
+let nextPrivateOrigin: URL | undefined;
 const INSTANCE_IDENTITY = getInstanceIdentity();
+
 const { wsPort: WS_PORT } = INSTANCE_IDENTITY;
 const PING_INTERVAL_MS = 25_000;
 // Event-loop lag watchdog (#1498 structural follow-up). ws-server pumps every
@@ -6539,7 +6545,7 @@ const httpServer = createServer(async (req, res) => {
   if (handleTokenProjectionRequest(req, res, isAuthorizedInternalRequest)) return;
   // Rust classifies and stamps only the first request on a connection. End each
   // relayed response so the next request is classified and stamped on a fresh socket.
-  if (o8dBridge && (process.env.O8_NEXT_O8D === '1')) res.setHeader('Connection', 'close');
+  if (o8dBridge && (API_FRONT_DOOR || process.env.O8_NEXT_O8D === '1')) res.setHeader('Connection', 'close');
   // Transport health is independent of Next and recovery. Stateful requests
   // retain the original recovery-before-use ordering.
   if (req.url !== '/health') await wsStartupReady;
@@ -6550,8 +6556,15 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
-  if ((process.env.O8_NEXT_O8D === '1') && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
+  if (API_FRONT_DOOR && serveBroadcastPage(req, res)) return;
+  const frontRegistered = frontDoor && req.url?.startsWith('/api/')
+    ? frontDoor.registeredFrontDoorRoute(new URL(req.url, `http://127.0.0.1:${WS_PORT}`).pathname, req.method ?? 'GET') : false;
+  if ((API_FRONT_DOOR ? frontRegistered : process.env.O8_NEXT_O8D === '1') && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
     o8dBridge ? o8dBridge.clientAddress(req) : req.socket.localPort === WS_PORT ? req.socket.remoteAddress ?? null : null)) return;
+  if (frontDoor && nextPrivateOrigin && req.url?.startsWith('/api/')) {
+    frontDoor.forwardToNext(req, res, nextPrivateOrigin, WS_PORT, o8dBridge ? o8dBridge.clientAddress(req) : req.socket.remoteAddress ?? null); return;
+  }
+  if (frontDoor?.serveFrontDoorNotice(req, res, WS_PORT)) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([
@@ -6572,7 +6585,7 @@ const httpServer = createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
+  if (!API_FRONT_DOOR && req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
     return;
@@ -7584,6 +7597,9 @@ const httpServer = createServer(async (req, res) => {
     }), ...(o8dBridge ? { delivery: o8dBridge.status } : {}) }));
     return;
   }
+  if (frontDoor && nextPrivateOrigin) {
+    frontDoor.forwardToNext(req, res, nextPrivateOrigin, WS_PORT, o8dBridge ? o8dBridge.clientAddress(req) : req.socket.remoteAddress ?? null); return;
+  }
   res.writeHead(404);
   res.end();
 });
@@ -7592,14 +7608,14 @@ const httpServer = createServer(async (req, res) => {
 const WS_LISTEN_HOST = resolveListenHost();
 const o8dBridge = process.env.O8_WS_O8D !== '0'
   && (process.env.O8_WS_O8D === '1' || o8dStartsByDefault())
-  ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
+  ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST, API_FRONT_DOOR) : null;
 
 try { syncTokenFile(); } catch { console.error('[mobile-e2ee] Auth projection unavailable; device HTTP requests will retry.'); }
 const WS_TOKEN = getOrCreateWsToken();
 console.log(`[ws-auth] WS token loaded (source: ${wsTokenSource()})`);
 
 const wss = new WebSocketServer({
-  server: httpServer,
+  ...(API_FRONT_DOOR ? { noServer: true } : { server: httpServer }),
   path: '/ws',
   perMessageDeflate: {
     zlibDeflateOptions: { level: 1 }, // fast compression — good enough for JSON
@@ -7660,6 +7676,12 @@ const wss = new WebSocketServer({
 // The httpServer has its own 'error' handler (stale-port recovery below), but the
 // WebSocketServer can emit 'error' independently (e.g. during upgrade handling).
 // Without a listener that's an uncaughtException that kills every connected client.
+if (API_FRONT_DOOR) httpServer.on('upgrade', (req, socket, head) => {
+  if (!frontDoor || !nextPrivateOrigin) { socket.destroy(); return; }
+  if (req.url?.split('?')[0] === '/ws') wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+  else frontDoor.forwardNextUpgrade(req, socket, head, nextPrivateOrigin, WS_PORT, o8dBridge ? o8dBridge.clientAddress(req) : req.socket.remoteAddress ?? null);
+});
+
 wss.on('error', (err) => {
   console.error('[ws-server] WebSocketServer error (non-fatal):', err);
 });
@@ -8319,6 +8341,10 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
   // A second WS uses the same receiver lock path; on this port it dies with
   // EADDRINUSE before receiver startup. A different port still cannot steal the claim.
   if (err.code === 'EADDRINUSE') {
+    if (API_FRONT_DOOR) {
+      console.error('[ws-server] Advertised API port is occupied; refusing takeover without launcher handoff.');
+      process.exit(1);
+    }
     void recoverFromPortInUse();
   } else {
     throw err;
@@ -8332,6 +8358,10 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 async function bootstrapWsServer() {
+  if (API_FRONT_DOOR) {
+    frontDoor = await import('./lib/ws-server/api-front-door');
+    nextPrivateOrigin = frontDoor.nextUpstream(INSTANCE_IDENTITY.apiPort, INSTANCE_IDENTITY.wsPort);
+  }
   // Persist the default project ledger once; project GETs only read it. A
   // failed write must not stop the server: the GETs still project the default.
   try {
@@ -8361,7 +8391,7 @@ async function bootstrapWsServer() {
 
   // Native producers use this listener. Its stateful requests await this
   // bootstrap, so probing them here waits on ourselves until the timeout.
-  if (process.env.O8_NEXT_O8D !== '1') await waitForNextReady();
+  if (!API_FRONT_DOOR && process.env.O8_NEXT_O8D !== '1') await waitForNextReady();
   // One process opens the o8 next window at startup (#5709). Next does, unless the shell names
   // this process with O8_NEXT_WINDOW_OWNER=ws, as once it serves the API port with Next stopped.
   // Both children inherit the same value, so a launcher that gives both the window environment

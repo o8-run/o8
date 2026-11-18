@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 /** Shell transport work: reuse surface handlers on the opt-in WS listener without Next. */
@@ -52,7 +53,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     const url = new URL(req.url, `http://127.0.0.1:${publicPort}`);
     const match = matchNativeHttpRoute(url.pathname, req.method) ?? matchNativeHttpRoute(url.pathname);
     if (!match) return false;
-    if (process.env.O8_NEXT_O8D === '1') markNativeCortexReader();
+    if (nativeHttpTransportEnabled()) markNativeCortexReader();
     const headers = new Headers();
     for (const [name, value] of Object.entries(req.headers)) {
       if (Array.isArray(value)) for (const item of value) headers.append(name, item);

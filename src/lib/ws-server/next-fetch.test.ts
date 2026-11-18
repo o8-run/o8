@@ -34,6 +34,11 @@ const observedLaunchStatuses: number[] = [];
 beforeAll(async () => {
   server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', origin);
+    const supported = ['/api/runtime/action', '/api/runtime/launch'].includes(url.pathname);
+    if (!supported || request.method !== 'POST') {
+      request.resume(); response.writeHead(supported ? 405 : 404, { 'Content-Type': 'application/json', ...(supported ? { Allow: 'POST' } : {}) });
+      response.end(JSON.stringify({ error: 'Fixture route unavailable' })); return;
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = Buffer.concat(chunks).toString('utf8');
@@ -114,6 +119,10 @@ describe('ws-server runtime action transport', () => {
       await expect(fetchNextJson('/api/setup/identity', { method: 'POST', body: {} })).resolves.toEqual({ owner: 'next' });
       vi.stubEnv('O8_NEXT_O8D', '0');
       await expect(fetchNextJson('/api/setup/identity')).resolves.toEqual({ owner: 'next' });
+      vi.stubEnv('O8_API_FRONT_DOOR', '1');
+      vi.stubEnv('O8_API_PORT', String(nativePort));
+      await expect(fetchNextJson('/api/setup/identity')).resolves.not.toEqual({ owner: 'next' });
+      await expect(fetchNextJson('/api/setup/identity', { method: 'POST', body: {} })).resolves.toEqual({ owner: 'next' });
     } finally {
       vi.unstubAllEnvs();
       next.closeAllConnections();

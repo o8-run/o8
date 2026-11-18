@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { getApiBase, getWsBase } from '@/lib/panel/api-port';
 import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 
@@ -5,7 +6,7 @@ export const SETTINGS_WINDOW_OWNER_HOP = 'x-o8-settings-window-owner-hop';
 
 /** Matches startup ownership, including the legacy default while Next is running. */
 export function nextOwnsSettingsWindow(): boolean {
-  return process.env.O8_NEXT_O8D === '1' && process.env.O8_NEXT_WINDOW_OWNER !== 'ws';
+  return nativeHttpTransportEnabled() && process.env.O8_NEXT_WINDOW_OWNER !== 'ws';
 }
 
 export async function changesSettingsWindow(request: Request): Promise<boolean> {

@@ -6,23 +6,11 @@ listener. `serveBroadcastPage` in `src/lib/ws-server/broadcast-page.ts` serves
 It owns no API routes or state. The HTML uses `no-store`; fingerprinted assets
 are immutable. GET and HEAD return identical headers; other methods return 405.
 
-## Mount required
+## Front-door mount
 
-This change exports the handler without mounting it because #6433 owns the WS
-front-door path. That owner, or a follow-up, must import it in `src/ws-server.ts`:
-
-```ts
-import { serveBroadcastPage } from './lib/ws-server/broadcast-page';
-```
-
-Insert this one-line call in the HTTP callback before native HTTP dispatch and
-Next fallback, preserving the listener's existing startup and boundary checks:
-
-```ts
-if (serveBroadcastPage(req, res)) return;
-```
-
-Until that call is added, the WS production listener does not serve this page.
+`src/ws-server.ts` mounts `serveBroadcastPage` before native HTTP dispatch and
+Next fallback when `O8_API_FRONT_DOOR=1`. The packaged front-door real-path test
+requests `/broadcast` with Next stopped in both Node and o8d modes.
 The broadcast snapshot/events and orchestrator truth handlers must also be
 available on that listener; their registration belongs to the API port owners.
 The CLI URL builder remains `cli/src/commands/broadcast.ts` (`broadcastUrl`),
