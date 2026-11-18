@@ -8,6 +8,7 @@ pub mod ports;
 pub mod restart;
 pub mod next_main_startup;
 pub mod restart_job_drain;
+pub mod cli_link;
 pub mod cli_locate;
 pub mod path_env;
 pub mod server_env;
