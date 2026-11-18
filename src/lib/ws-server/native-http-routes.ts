@@ -85,7 +85,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
       } else {
         // Admission only. Keep the middleware and queue's existing defense-in-depth
         // gate authoritative; the bridge credential cannot authorize a principal.
-        const denied = req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys', '/api/projects'].includes(url.pathname) || match.route.path === '/api/projects/[id]'
+        const denied = req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys', '/api/projects', '/api/prompt-library'].includes(url.pathname) || match.route.path === '/api/projects/[id]'
           ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
         let projectDenied: Response | null = null;
         if (url.pathname === '/api/panel/repo-icon') {
