@@ -1,13 +1,13 @@
-//! Fresh prompt reads; Node retains schema, mutations and other-principal admission.
+//! Fresh prompt reads; Node retains schema and other-principal admission.
 use super::*;
 use rusqlite::{params_from_iter, types::Value as SqlValue};
 const QUERY_MAX: usize = 200;
 const LIMIT_MAX: i64 = 100;
-const COLUMNS: &str = "id,title,body,body_fingerprint,tags_json,scope,repo_path,source_kind,source_id,created_at,updated_at,last_used_at,use_count";
-fn whitespace(c: char) -> bool {
+pub(super) const COLUMNS: &str = "id,title,body,body_fingerprint,tags_json,scope,repo_path,source_kind,source_id,created_at,updated_at,last_used_at,use_count";
+pub(super) fn whitespace(c: char) -> bool {
     matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
 }
-fn trim(value: &str) -> &str {
+pub(super) fn trim(value: &str) -> &str {
     value.trim_matches(whitespace)
 }
 fn limit(raw: Option<&String>) -> Option<i64> {
@@ -46,7 +46,7 @@ fn number(row: &rusqlite::Row<'_>, key: &str) -> Result<i64, ()> {
     }
     Ok(value)
 }
-fn entry(row: &rusqlite::Row<'_>) -> ReadResult {
+pub(super) fn entry(row: &rusqlite::Row<'_>) -> ReadResult {
     let text = |key| row.get::<_, String>(key).map_err(|_| ());
     let nullable = |key| row.get::<_, Option<String>>(key).map_err(|_| ());
     // TS catches malformed tags and emits []; native must instead defer the

@@ -51,26 +51,30 @@ fn read(path: &Path, limit: u64) -> Result<String, ()> {
 pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str) -> bool {
     // The window wire format is ASCII. Defer other header encodings to Node
     // rather than treating UTF-8 bytes as Node HTTP Latin-1 header characters.
-    // Mutations remain in Node, including its per-method browser-origin rule.
-    if header
+    let method = header
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().next())
-        != Some("GET")
-    {
-        return false;
-    }
+        .unwrap_or("");
+    let target = path.strip_suffix("/use").unwrap_or(path);
+    let use_route = target != path;
     if !header.is_ascii() {
         return false;
     }
-    let single = path.strip_prefix("/api/prompt-library/").filter(|id| {
+    let single = target.strip_prefix("/api/prompt-library/").filter(|id| {
         !id.is_empty()
             && *id != "import"
             && id
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
     });
-    if path != "/api/prompt-library" && single.is_none() {
+    if !(if use_route {
+        single.is_some() && method == "POST"
+    } else if target == "/api/prompt-library" {
+        matches!(method, "GET" | "POST")
+    } else {
+        single.is_some() && matches!(method, "GET" | "PATCH" | "DELETE")
+    }) {
         return false;
     }
     // Remote/relay and unsupported boundary forms keep the existing admission.
@@ -106,6 +110,23 @@ pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str)
     .any(|s| s.eq_ignore_ascii_case(host))
     {
         return false;
+    }
+    // Exact native subset of browserWriteAllowed; unsupported forms use Node.
+    if method != "GET" {
+        match headers.get("origin").copied() {
+            None if !headers.contains_key("sec-fetch-site")
+                && !headers.contains_key("sec-fetch-dest")
+                && !headers.get("user-agent").is_some_and(|s| {
+                    s.get(..8)
+                        .is_some_and(|p| p.eq_ignore_ascii_case("Mozilla/"))
+                }) =>
+            {
+                ()
+            }
+            Some("tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost") => (),
+            Some(origin) if origin == format!("http://{host}") => (),
+            _ => return false,
+        }
     }
     let Some(token) = headers
         .get("authorization")

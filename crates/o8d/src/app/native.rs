@@ -89,8 +89,8 @@ pub(super) async fn serve(
     }
     let native_operator = std::env::var("O8_API_FRONT_DOOR").as_deref() == Ok("1")
         && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1")
-        && method == "GET" && super::prompt_operator::eligible(socket, header, path);
-    let (defaults_context, redaction) = if native_operator { (None, None) } else {
+        && super::prompt_operator::eligible(socket, header, path);
+    let (defaults_context, redaction) = if native_operator { (if method == "GET" { None } else { Some(serde_json::json!({"promptWriteAuthority":true})) }, None) } else {
     // Admit the original path/method/headers through production middleware and
     // the queue's in-handler gate. Never cache principal or credential decisions.
     let mut request = admission_client()?.request(

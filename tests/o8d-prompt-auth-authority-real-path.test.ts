@@ -33,8 +33,9 @@ it('uses the current canonical operator token after a same-size same-mtime rotat
     // No credential bytes in assertion output; the canonical file has rotated.
     expect({ oldStatus, newStatus }).toEqual({ oldStatus: 401, newStatus: 200 });
     for (const [method, path, status] of [
-      ['GET', '/api/prompt-library/missing', 404], ['POST', '/api/prompt-library', 400],
-      ['PATCH', '/api/prompt-library/missing', 404], ['DELETE', '/api/prompt-library/missing', 404],
+      ['GET', '/api/prompt-library/missing', 404], ['POST', '/api/prompt-library', 503],
+      ['PATCH', '/api/prompt-library/missing', 503], ['DELETE', '/api/prompt-library/missing', 503],
+      ['POST', '/api/prompt-library/missing/use', 503], ['POST', '/api/prompt-library/import', 503],
     ] as const) {
       for (const [token, expected] of [[oldToken, 401], [newToken, status]] as const) {
         const response = await fetch(origin + path, { method, headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, ...(method === 'POST' || method === 'PATCH' ? { body: '{}' } : {}) });

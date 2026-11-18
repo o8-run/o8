@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { refuseNodePromptWrite } from '@/lib/prompt-library/write-owner';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import {
   PromptLibraryValidationError,
@@ -73,6 +74,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+  const ownerRefusal = refuseNodePromptWrite();
+  if (ownerRefusal) return ownerRefusal;
 
   const payload: unknown = await request.json().catch(() => null);
   if (!isRecord(payload)) {

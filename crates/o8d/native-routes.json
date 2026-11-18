@@ -378,12 +378,13 @@
   {
     "path": "/api/prompt-library",
     "methods": [
-      "GET"
+      "GET",
+      "POST"
     ],
     "fallback": true,
-    "reason": "Window operator reads use the current stored credential without Node admission. Other principals, unsupported authority/boundary forms, schema/SQL errors and malformed rows defer; schema and all writes remain Node.",
+    "reason": "Rust owns operator list/create on the product transport; other principal admission and classic mode remain Node. Product Node writers refuse.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-prompt-library-real-path.test.ts",
+    "test": "tests/o8d-prompt-writes-real-path.test.ts",
     "owned": true
   },
   {
@@ -412,12 +413,25 @@
   {
     "path": "/api/prompt-library/[id]",
     "methods": [
-      "GET"
+      "GET",
+      "PATCH",
+      "DELETE"
     ],
     "owned": true,
     "fallback": true,
     "state": "rust-with-fallback",
-    "reason": "Window operator reads use the fresh canonical stored token natively; all other credential classes retain Node admission. Unsupported database/row/path cases defer; all writes and import remain Node.",
-    "test": "tests/o8d-prompt-native-auth-real-path.test.ts"
+    "reason": "Rust owns operator entry reads/edit/delete on the product transport; product Node writers refuse. Other principal admission and classic mode remain Node.",
+    "test": "tests/o8d-prompt-writes-real-path.test.ts"
+  },
+  {
+    "path": "/api/prompt-library/[id]/use",
+    "methods": [
+      "POST"
+    ],
+    "fallback": true,
+    "reason": "Rust owns product operator prompt use transactions; product Node writers, including import, refuse. Other principals retain Node admission.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-prompt-writes-real-path.test.ts",
+    "owned": true
   }
 ]

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { refuseNodePromptWrite } from '@/lib/prompt-library/write-owner';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { recordPromptLibraryUse } from '@/lib/prompt-library/store';
 
@@ -11,6 +12,8 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function POST(request: NextRequest, context: RouteContext) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+  const ownerRefusal = refuseNodePromptWrite();
+  if (ownerRefusal) return ownerRefusal;
 
   const { id } = await context.params;
   const prompt = recordPromptLibraryUse(id);

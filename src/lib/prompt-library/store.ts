@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createHash, randomUUID } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
+import { assertNodePromptWriter } from './write-owner';
 
 export const PROMPT_LIBRARY_TITLE_MAX = 120;
 export const PROMPT_LIBRARY_BODY_MAX = 100_000;
@@ -298,6 +299,7 @@ export function importPromptLibrarySources(input: {
   sources: PromptLibraryImportRef[];
   repoPath?: string | null;
 }): { entries: PromptLibraryEntry[]; created: number; skipped: number } {
+  assertNodePromptWriter();
   if (input.sources.length > PROMPT_LIBRARY_IMPORT_MAX) {
     throw new PromptLibraryValidationError(
       'too_many_imports',
@@ -363,6 +365,7 @@ function findSource(sourceKind: PromptLibrarySourceKind, sourceId: string): Prom
 export function createPromptLibraryEntry(
   input: CreatePromptLibraryEntryInput,
 ): { entry: PromptLibraryEntry; created: boolean } {
+  assertNodePromptWriter();
   const title = normalizeTitle(input.title);
   const body = normalizeBody(input.body);
   const tags = normalizeTags(input.tags ?? []);
@@ -484,6 +487,7 @@ export function updatePromptLibraryEntry(
   id: string,
   input: UpdatePromptLibraryEntryInput,
 ): PromptLibraryEntry | null {
+  assertNodePromptWriter();
   const existing = getPromptLibraryEntry(id);
   if (!existing) return null;
   if (input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== existing.updatedAt) {
@@ -519,6 +523,7 @@ export function updatePromptLibraryEntry(
 }
 
 export function recordPromptLibraryUse(id: string, usedAt: number = Date.now()): PromptLibraryEntry | null {
+  assertNodePromptWriter();
   const result = getSqlite().prepare(`
     UPDATE prompt_library
     SET last_used_at = ?, use_count = use_count + 1
@@ -528,6 +533,7 @@ export function recordPromptLibraryUse(id: string, usedAt: number = Date.now()):
 }
 
 export function deletePromptLibraryEntry(id: string, expectedUpdatedAt?: number): boolean {
+  assertNodePromptWriter();
   if (expectedUpdatedAt !== undefined) {
     const result = getSqlite().prepare('DELETE FROM prompt_library WHERE id = ? AND updated_at = ?').run(id, expectedUpdatedAt);
     if (result.changes === 0 && getPromptLibraryEntry(id)) throw new PromptLibraryRevisionError();
