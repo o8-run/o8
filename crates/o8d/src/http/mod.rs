@@ -12,6 +12,8 @@ pub use git_diff_redaction::ViewerRedaction;
 mod chat;
 mod chat_context;
 mod mobile_history;
+mod mobile_lane_events;
+mod mobile_lane_overlays;
 mod chat_context_json;
 mod chat_list;
 mod mobile_inbox;
