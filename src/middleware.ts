@@ -75,8 +75,9 @@ function loadPanelToken(freshPrompt = false): string | null {
   return wsTokenFor(loadStoredPanelToken());
 }
 function isSavedPromptOperatorPath(path: string): boolean {
-  return /^\/api\/prompt-library\/?$/.test(path)
-    || /^\/api\/prompt-library\/[^/]+\/?$/.test(path) && !/^\/api\/prompt-library\/import\/?$/.test(path);
+  return /^\/api\/prompt-library\/[^/]+\/use\/?$/.test(path)
+    || /^\/api\/prompt-library\/?$/.test(path)
+    || /^\/api\/prompt-library\/[^/]+\/?$/.test(path);
 }
 
 function loadStoredPanelToken(): string | null {

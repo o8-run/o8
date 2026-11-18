@@ -4,6 +4,7 @@ mod directives;
 mod repo_spec;
 mod git_refs;
 mod prompt_library;
+mod prompt_writes;
 mod file_assets;
 mod file_asset_viewer;
 mod file_tree;
@@ -253,7 +254,10 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
         Err(_) => unavailable(),
     }
 }
-fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, _body: &[u8]) -> Response {
+fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, body: &[u8]) -> Response {
+    if method != "GET" && prompt_writes::matches(path, method) {
+        return prompt_writes::write(store, path, params, method, body);
+    }
     if method != "GET" { return unavailable() }
     if projects::matches(path) {
         return projects::read(store, path, params);
