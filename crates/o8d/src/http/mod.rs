@@ -1,5 +1,6 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
 mod file_content;
+mod directives;
 mod repo_spec;
 mod git_refs;
 mod prompt_library;
@@ -262,6 +263,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         "/api/panel/files" => file_tree::read(store, params),
         "/api/repo-spec" => repo_spec::read(store, params),
         "/api/prompt-library" => prompt_library::read(store, params),
+        "/api/cortex/directives" => directives::read(store, params),
         "/api/panel/file-io" | "/api/panel/file-asset" | "/api/panel/serve-image" | "/api/mobile/media" => file_assets::read(store, path, params),
         "/api/worktrees/diff" | "/api/worktrees/diff-summary" | "/api/panel/file-diff" => git_diff::read(store, path, params),
         "/api/panel/branches"

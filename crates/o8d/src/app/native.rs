@@ -195,6 +195,11 @@ pub(super) async fn serve(
     if response.status() == StatusCode::SERVICE_UNAVAILABLE {
         return Ok(Outcome::Replay(replay));
     }
+    let response = if path_for_completion(target) && response.headers().contains_key("x-o8d-directives-timing") {
+        // After a receipt may have committed, never replay and double-record it.
+        // A backhaul transport failure ends this request; retries are fresh GETs.
+        complete_directives(target, header, upstream, key, response).await?
+    } else { response };
     let response = if thread_list && response.headers().contains_key("x-o8d-thread-pieces") {
         match compose_threads(target, header, upstream, key, response).await {
             Ok(response) => response,
@@ -204,6 +209,82 @@ pub(super) async fn serve(
         response
     };
     write_response(socket, response, count).await
+}
+
+fn path_for_completion(target: &str) -> bool {
+    target.split('?').next() == Some("/api/cortex/directives")
+}
+async fn complete_directives(
+    target: &str,
+    header: &str,
+    upstream: &str,
+    key: &str,
+    response: axum::response::Response,
+) -> Result<axum::response::Response, ()> {
+    let duration: f64 = response
+        .headers()
+        .get("x-o8d-directives-timing")
+        .ok_or(())?
+        .to_str()
+        .map_err(|_| ())?
+        .parse()
+        .map_err(|_| ())?;
+    let bytes = to_bytes(response.into_body(), 8 * 1024 * 1024)
+        .await
+        .map_err(|_| ())?;
+    let body: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| ())?;
+    let payload =
+        serde_json::to_vec(&serde_json::json!({"version":1,"durationMs":duration,"body":body}))
+            .map_err(|_| ())?;
+    if payload.len() > 8 * 1024 * 1024 {
+        return Err(());
+    }
+    let mut request = admission_client()?.post(format!("http://{upstream}{target}"));
+    for (name, value) in header.lines().skip(1).filter_map(|s| s.split_once(':')) {
+        let lower = name.to_ascii_lowercase();
+        if !lower.starts_with("x-o8d-")
+            && ![
+                "connection",
+                "content-length",
+                "content-type",
+                "transfer-encoding",
+                "upgrade",
+                "expect",
+            ]
+            .contains(&lower.as_str())
+        {
+            request = request.header(name, value.trim());
+        }
+    }
+    let mut result = request
+        .header("x-o8d-bridge", key)
+        .header("x-o8d-peer", "unverified-proxy")
+        .header("x-o8d-session-read", "complete-directives/1")
+        .header("content-type", "application/json")
+        .body(payload)
+        .send()
+        .await
+        .map_err(|_| ())?;
+    if result.status() != StatusCode::OK && !result.headers().contains_key("x-o8d-local-stage") {
+        return Err(());
+    }
+    let mut response = axum::response::Response::builder().status(result.status());
+    for name in ["content-type", "cache-control", "x-o8d-local-stage"] {
+        if let Some(value) = result.headers().get(name) {
+            response = response.header(name, value);
+        }
+    }
+    let mut bytes = Vec::new();
+    loop {
+        match result.chunk().await {
+            Ok(Some(chunk)) if bytes.len() + chunk.len() <= 16 * 1024 * 1024 => {
+                bytes.extend_from_slice(&chunk)
+            }
+            Ok(None) => break,
+            _ => return Err(()),
+        }
+    }
+    response.body(axum::body::Body::from(bytes)).map_err(|_| ())
 }
 
 /// One route-specific composition hop on the existing authenticated backhaul.
@@ -301,7 +382,7 @@ async fn write_response(
     for (name, value) in response.headers() {
         // The socket writer computes framing from the final body. Byte viewers
         // already carry Content-Length; never emit a duplicate framing header.
-        if name == axum::http::header::CONTENT_LENGTH { continue; }
+        if name == axum::http::header::CONTENT_LENGTH || name.as_str() == "x-o8d-directives-timing" { continue; }
         output.push_str(&format!("{name}: {}\r\n", value.to_str().map_err(|_| ())?));
     }
     let body = to_bytes(response.into_body(), 16 * 1024 * 1024)

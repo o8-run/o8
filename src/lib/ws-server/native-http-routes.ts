@@ -69,15 +69,20 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     headers.delete('x-o8d-peer');
     headers.delete('x-o8d-bridge');
     headers.delete('x-o8d-relay');
+    const completeDirectives = req.headers['x-o8d-session-read'] === 'complete-directives/1';
     const composeThreads = typeof req.headers['x-o8d-session-read'] === 'string' && req.headers['x-o8d-session-read'].startsWith('compose-threads/');
     // The private POST carries the pieces for an already-admitted GET. Apply
     // that GET's existing gate; never execute the public POST writer here.
-    const init = { method: composeThreads && authenticatedBridge ? 'GET' : req.method, headers, signal: abort.signal };
+    const init = { method: (composeThreads || completeDirectives) && authenticatedBridge ? 'GET' : req.method, headers, signal: abort.signal };
     const gate = panelGateMiddleware(new NextRequest(url, init));
     let response: Response;
     let admission = false;
     if (gate.headers.get('x-middleware-next') !== '1') response = gate;
-    else if (composeThreads) {
+    else if (completeDirectives) {
+      response = url.pathname === '/api/cortex/directives' && nativeHttpTransportEnabled()
+        ? await (await import('./native-directives-completion')).completeNativeDirectives(req, authenticatedBridge, new NextRequest(url, init))
+        : new Response(null, { status: 409 });
+    } else if (composeThreads) {
       response = url.pathname === '/api/mobile/orchestrator/threads' && nativeHttpTransportEnabled()
         ? await (await import('./native-thread-list-compose')).composeNativeThreadList(req, authenticatedBridge)
         : new Response(null, { status: 409 });
@@ -165,8 +170,10 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
             threadList = Buffer.byteLength(machineDisplayName) <= 16 * 1024 ? { machineDisplayName } : null;
           } catch { threadList = null; }
         }
+        const directivesScope = url.pathname === '/api/cortex/directives' && !denied && !projectDenied
+          ? await (await import('./native-directives-context')).nativeDirectivesScope(url) : undefined;
         const defaultsContext = {
-          composerQueue, threadList, laneDiffTarget,
+          composerQueue, threadList, laneDiffTarget, directivesScope,
           fileContentScope, fileReadTarget, fileAssetTarget, repoSpecTarget,
           gitRefsCommitRoot: viewerRoute && match.route.path === '/api/panel/commits/[hash]'
             ? resolve((await import('@/lib/panel/git-commits')).resolveWorkspaceRoot(url.searchParams.get('workspace'))) : undefined,
@@ -242,7 +249,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
           ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
         };
-        response = denied ?? projectDenied ?? ((laneDiffTarget === null || threadList === null || composerQueue === null || fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+        response = denied ?? projectDenied ?? ((laneDiffTarget === null || directivesScope === null || threadList === null || composerQueue === null || fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
           'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
         } }));
         if (viewerRoute && response.status === 204) {
@@ -258,7 +265,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           response = new Response(JSON.stringify({ version: 1, defaultsContext: { threadList } }), { status: 200,
             headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
         }
-        admission = (!(viewerRoute || composerQueueRoute || threadListRoute) || response.status === 200) && composerQueue !== null && threadList !== null && laneDiffTarget !== null && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
+        admission = (!(viewerRoute || composerQueueRoute || threadListRoute) || response.status === 200) && composerQueue !== null && threadList !== null && laneDiffTarget !== null && directivesScope !== null && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
       }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });
