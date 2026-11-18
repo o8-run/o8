@@ -6,6 +6,7 @@ import { expireStaleApprovals, listApprovalsForContext } from '@/lib/approvals/s
 import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
 import { recordDispatchRule } from '@/lib/dispatch/rules-store';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { WebviewBridgeError } from '@/lib/mcp/o8-webview-error';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { reportMissingArchiveEnding, resolveArchiveEnding, type ArchiveEndingOverride } from './archive-ending';
@@ -229,6 +230,10 @@ async function captureReviewBoundaryScreenshot(
 
     updateLaneEventPayload(eventId, payload);
   } catch (error) {
+    if (error instanceof WebviewBridgeError
+      && (error.code === 'webview_socket_unconfigured' || error.code === 'webview_bridge_missing')) {
+      return;
+    }
     console.error(`[lane-registry] Failed to capture review screenshot for lane ${laneId}:`, error);
   }
 }
