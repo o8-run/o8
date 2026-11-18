@@ -272,6 +272,21 @@ impl ViewerRedaction {
                             "error",
                             "code",
                         ]
+                    } else if object.contains_key("shortHash") && object.contains_key("hash") {
+                        &[
+                            "hash",
+                            "shortHash",
+                            "subject",
+                            "body",
+                            "author",
+                            "email",
+                            "date",
+                            "files",
+                            "totalAdditions",
+                            "totalDeletions",
+                            "stat",
+                            "diff",
+                        ]
                     } else if object.contains_key("sessionKey") {
                         &[
                             "sessionKey",

@@ -185,6 +185,13 @@ remaining domains on TypeScript.
 
 ## Flagged native repository reads
 
+Owned `GET /api/panel/branches` reads use the app transport's per-request admission
+and `O8D_NATIVE_OWNED` selection, independently of the legacy repository flag. Its
+Rust snapshot cache is independent of the TypeScript snapshot cache.
+
+The standalone compatibility client still uses the separate flag below, so that
+flag remains supported for existing callers.
+
 `O8D_NATIVE_REPOSITORY_READS=1` enables `GET /api/panel/branches` through the
 native registry, independently of the session flag. It defaults off. Use the
 same `O8_NEXT_O8D=1 O8_WS_O8D=1` transport and an `O8D_BINARY` built with

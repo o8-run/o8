@@ -9,6 +9,21 @@ use std::io::Read;
 mod sources;
 use sources::sanitize;
 
+// Commit detail patches contain complete index identities. Refuse missing or
+// ambiguous source objects so TS can apply its ref-based fallback exactly.
+pub(super) fn sanitize_commit(root: &str, diff: &str, policy: &ViewerRedaction) -> Result<String, ()> {
+    for line in diff.split('\n').filter_map(|line| line.strip_prefix("index ")) {
+        let (before, after) = line.split_whitespace().next().ok_or(())?.split_once("..").ok_or(())?;
+        for id in [before, after] {
+            if id.is_empty() || !id.bytes().all(|b| b.is_ascii_hexdigit()) { return Err(()); }
+            if !id.bytes().all(|b| b == b'0') {
+                git(root, &["cat-file", "blob", id], 5000, 2 * 1024 * 1024)?;
+            }
+        }
+    }
+    sanitize(root, diff, policy)
+}
+
 const LIMIT: usize = 16 * 1024 * 1024;
 fn run(root: &str, args: &[&str]) -> Result<String, ()> {
     git(root, args, 15_000, LIMIT)

@@ -13,9 +13,9 @@ const MAX_BRANCHES: usize = 512;
 thread_local! {
     static DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
 }
-struct Deadline(Option<Instant>);
+pub(super) struct Deadline(Option<Instant>);
 impl Deadline {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         Self(DEADLINE.replace(Some(Instant::now() + PROJECTION_TIMEOUT)))
     }
 }
