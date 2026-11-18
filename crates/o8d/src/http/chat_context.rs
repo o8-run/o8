@@ -16,7 +16,7 @@ fn empty() -> Value {
     json!({"messages":[],"model":null,"savedAt":null,"starred":false,"title":null,"planText":null,"repoName":null,"repoPath":null,"repoBranch":null,"projectId":null,"githubOwner":null,"githubRepo":null,"remoteUrl":null,"backend":null,"agent":null,"archivedAt":null,"orchestratorSessionIds":null,"orchestratorSessionUpdatedAt":null,"exists":false})
 }
 #[cfg(unix)]
-fn read(store: &ReadContext<'_>, id: &str) -> ReadResult {
+pub(super) fn read(store: &ReadContext<'_>, id: &str) -> ReadResult {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
     // The canonical Node filename replacement works on UTF-16 code units.
     let safe: String = id
@@ -90,11 +90,11 @@ fn read(store: &ReadContext<'_>, id: &str) -> ReadResult {
     serde_json::from_slice(&bytes).map_err(|_| ())
 }
 #[cfg(not(unix))]
-fn read(_store: &ReadContext<'_>, _id: &str) -> ReadResult {
+pub(super) fn read(_store: &ReadContext<'_>, _id: &str) -> ReadResult {
     Err(())
 }
 
-fn stable(messages: &mut [Value]) -> Result<(), ()> {
+pub(super) fn stable(messages: &mut [Value]) -> Result<(), ()> {
     let has_id = |m: &Value| {
         m.get("id")
             .and_then(Value::as_str)
@@ -206,7 +206,7 @@ fn decode(raw: &str) -> ReadResult {
     }
     Ok(value)
 }
-fn page(record: &mut Value, params: &Params) -> Result<(), Response> {
+pub(super) fn page(record: &mut Value, params: &Params, mobile: bool) -> Result<(), Response> {
     if !params.contains_key("limit") && !params.contains_key("before") {
         return Ok(());
     }
@@ -234,10 +234,11 @@ fn page(record: &mut Value, params: &Params) -> Result<(), Response> {
     let total = messages.len();
     let mut end = total;
     let invalid = || {
-        respond(
-            StatusCode::CONFLICT,
-            json!({"error":"cursor_invalid","currentRevision":revision}),
-        )
+        let mut body = json!({"error":"cursor_invalid","currentRevision":revision});
+        if mobile {
+            body["ok"] = json!(false);
+        }
+        respond(StatusCode::CONFLICT, body)
     };
     if let Some(raw) = params.get("before") {
         let cursor = decode(raw).map_err(|_| invalid())?;
@@ -344,7 +345,7 @@ fn identity(record: &Value) -> (Value, Value) {
         .map(|(owner, repo)| (json!(owner), json!(repo)))
         .unwrap_or((Value::Null, Value::Null))
 }
-fn respond(status: StatusCode, body: Value) -> Response {
+pub(super) fn respond(status: StatusCode, body: Value) -> Response {
     let Ok(bytes) = canonical(&body) else {
         return unavailable();
     };
@@ -387,7 +388,7 @@ fn run(store: &ReadContext<'_>, params: &Params) -> Response {
         .map(trim)
         .filter(|s| !s.is_empty())
         .map_or(Value::Null, |s| json!(s));
-    if let Err(response) = page(&mut record, params) {
+    if let Err(response) = page(&mut record, params, false) {
         return response;
     }
     let (owner, repo) = identity(&record);

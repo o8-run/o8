@@ -131,6 +131,13 @@ export function listTaskArtifactsByPacket(packetId: string, limit = 50): TaskArt
   return rows.map(rowToArtifact);
 }
 
+/** Admission checks the same card selection without constructing transcript views. */
+export function hasMissionCardsByThread(threadId: string): boolean {
+  return getSqlite().prepare(
+    'SELECT 1 FROM task_artifacts WHERE thread_id = ? AND card_json IS NOT NULL LIMIT 1',
+  ).get(threadId) !== undefined;
+}
+
 /** Mission cards on one orchestrator thread, oldest first, for the transcript. */
 export function listMissionCardsByThread(threadId: string, limit = 100): TaskArtifactRecord[] {
   const rows = getSqlite().prepare(
