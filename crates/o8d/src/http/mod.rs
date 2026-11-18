@@ -1,4 +1,7 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
+mod git_diff;
+mod git_diff_redaction;
+pub use git_diff_redaction::ViewerRedaction;
 mod chat;
 mod chat_list;
 mod mobile_inbox;
@@ -49,6 +52,7 @@ pub struct Store {
     directory: PathBuf,
     database: PathBuf,
     defaults_context: Option<Value>,
+    redaction: Option<ViewerRedaction>,
 }
 impl Store {
     fn file(&self, path: &Path, limit: u64) -> Result<Vec<u8>, ()> {
@@ -214,6 +218,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         return projects::read(store, path, params);
     }
     match path {
+        "/api/worktrees/diff" | "/api/worktrees/diff-summary" | "/api/panel/file-diff" => git_diff::read(store, path, params),
         "/api/panel/branches"
             if std::env::var("O8D_NATIVE_REPOSITORY_READS").as_deref() == Ok("1") =>
         {
@@ -320,11 +325,16 @@ pub fn native_body_too_large() -> Response {
 }
 
 pub fn native_request(directory: PathBuf, database: PathBuf, path: &str, query: &str, method: &str, body: &[u8], defaults_context: Option<Value>) -> Response {
+    native_request_viewer(directory, database, path, query, method, body, defaults_context, None)
+}
+
+pub fn native_request_viewer(directory: PathBuf, database: PathBuf, path: &str, query: &str, method: &str, body: &[u8], defaults_context: Option<Value>, redaction: Option<ViewerRedaction>) -> Response {
     if body.len() > 16 * 1024 * 1024 { return native_body_too_large() }
     let store = Store {
         directory,
         database,
         defaults_context,
+        redaction,
     };
     let store = ReadContext::new(&store);
     let mut params = Params::new();
@@ -377,6 +387,7 @@ pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>>
         directory,
         database,
         defaults_context: None,
+        redaction: None,
     };
     store.token().map_err(|_| "existing credential required")?;
     let listener = TcpListener::bind(address).await?;

@@ -49,16 +49,16 @@ pub(super) async fn serve(
     key: &str,
     count: &super::request_counts::Count,
 ) -> Result<Outcome, ()> {
-    if !enabled() {
+    if !enabled() && std::env::var("O8D_NATIVE_OWNED").as_deref() != Ok("1") {
         return Ok(Outcome::Proxy);
     }
     let mut line = header.lines().next().ok_or(())?.split_whitespace();
     let method = line.next().ok_or(())?;
     let target = line.next().ok_or(())?;
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    if http::native_route(path, method).is_none() {
-        return Ok(Outcome::Proxy);
-    }
+    let Some(route) = http::native_route(path, method) else { return Ok(Outcome::Proxy); };
+    if !enabled() && !(route["owned"] == true && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1")) { return Ok(Outcome::Proxy); }
+    let viewer = route["redaction"] == "viewer";
     let mut length = None;
     for (name, value) in header
         .lines()
@@ -110,7 +110,8 @@ pub(super) async fn serve(
         }
         request = request.header(name, value.trim());
     }
-    let Ok(admission) = request
+    if viewer { request = request.header("x-o8d-redaction", "viewer/1"); }
+    let Ok(mut admission) = request
         .header("x-o8d-bridge", key)
         .header("x-o8d-peer", "unverified-proxy")
         .header("x-o8d-session-read", "authorize")
@@ -122,23 +123,37 @@ pub(super) async fn serve(
         // for any admission that does not come back 204.
         return Ok(Outcome::Proxy);
     };
-    if admission.status() != StatusCode::NO_CONTENT {
+    if admission.status() != if viewer { StatusCode::OK } else { StatusCode::NO_CONTENT } {
         // Let the original handler return its exact auth/error response. An
         // unavailable gate never grants native access.
         return Ok(Outcome::Proxy);
     }
     // Only the authenticated private admission response provides this context.
     // It contains paths and booleans, never provider key values.
-    let defaults_context = admission
-        .headers()
-        .get("x-o8d-defaults-context")
-        .and_then(|v| v.to_str().ok()).filter(|raw| raw.len() <= 4096)
-
-        .and_then(|raw| {
-            use base64::Engine;
-            let bytes = base64::engine::general_purpose::STANDARD.decode(raw).ok()?;
-            serde_json::from_slice(&bytes).ok()
-        });
+    let mut redaction = None;
+    let defaults_context = if viewer {
+        let mut bytes = Vec::new();
+        loop {
+            match admission.chunk().await {
+                Ok(Some(chunk)) if bytes.len() + chunk.len() <= 1024 * 1024 => bytes.extend_from_slice(&chunk),
+                Ok(None) => break,
+                _ => return Ok(Outcome::Proxy),
+            }
+        }
+        let Ok(grant) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return Ok(Outcome::Proxy); };
+        if grant["version"].as_u64() != Some(1) || !grant["defaultsContext"].is_object() { return Ok(Outcome::Proxy); }
+        let Some(policy) = http::ViewerRedaction::from_grant(&grant["redaction"]) else { return Ok(Outcome::Proxy); };
+        redaction = Some(policy);
+        Some(grant["defaultsContext"].clone())
+    } else {
+        admission.headers().get("x-o8d-defaults-context")
+            .and_then(|v| v.to_str().ok()).filter(|raw| raw.len() <= 4096)
+            .and_then(|raw| {
+                use base64::Engine;
+                let bytes = base64::engine::general_purpose::STANDARD.decode(raw).ok()?;
+                serde_json::from_slice(&bytes).ok()
+            })
+    };
     // Only after admission consume bytes. A refusal never gets native access.
     socket
         .read_exact(&mut vec![0; header.len()])
@@ -163,7 +178,7 @@ pub(super) async fn serve(
     let method = method.to_owned();
     let replay = body.clone();
     let response = tokio::task::spawn_blocking(move || {
-        http::native_request(directory, database, &path, &query, &method, &body, defaults_context)
+        http::native_request_viewer(directory, database, &path, &query, &method, &body, defaults_context, redaction)
     })
     .await
     .map_err(|_| ())?;

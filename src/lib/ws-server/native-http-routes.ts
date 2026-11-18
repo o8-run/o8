@@ -1,4 +1,5 @@
 import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
+import { viewerRedactionGrant } from './native-git-diff-context';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 /** Shell transport work: reuse surface handlers on the opt-in WS listener without Next. */
@@ -76,7 +77,9 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     else if (authenticatedBridge && req.headers['x-o8d-session-read'] === 'authorize') {
       // Admission probes must never execute a writer when disabled or unmatched.
       const retiredProjectPath = ['/api/projects/context', '/api/projects/dismissed-suggestions'].includes(url.pathname);
-      if (!nativeSessionReadsEnabled() || retiredProjectPath
+      const ownedRoute = nativeRoutes.find(route => route.path === url.pathname && route.methods.includes(req.method ?? 'GET') && 'owned' in route && route.owned === true);
+      const viewerRoute = ownedRoute && 'redaction' in ownedRoute && ownedRoute.redaction === 'viewer';
+      if ((!nativeSessionReadsEnabled() && !(nativeHttpTransportEnabled() && ownedRoute)) || retiredProjectPath
         || !nativeRoutes.some(route => route.path === match.route.path && route.methods.includes(req.method ?? 'GET'))) {
         response = new Response(null, { status: 409 });
       } else {
@@ -88,6 +91,10 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         if (url.pathname === '/api/panel/repo-icon') {
           const principal = (await import('@/lib/auth/principal')).resolveRequestPrincipal(new NextRequest(url, init));
           if (principal !== 'operator' && principal !== 'worker') projectDenied = Response.json({ error: 'Repository icon access requires an operator or dispatched-worker credential.' }, { status: 403 });
+        }
+        if (url.pathname === '/api/worktrees/diff' || url.pathname === '/api/worktrees/diff-summary') {
+          const principal = (await import('@/lib/auth/principal')).resolveRequestPrincipal(new NextRequest(url, init));
+          if (principal !== 'operator' && principal !== 'device') projectDenied = new Response(null, { status: 409 });
         }
         const projectRegistryRead = ['/api/panel/repos', '/api/panel/projects', '/api/projects', '/api/panel/repo-icon'].includes(url.pathname);
         // The settings handler's window-owner hop is a refusal floor. Defer it
@@ -107,6 +114,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           projectRepoDigest: projectRegistryRead ? await (await import('@/lib/repos/registry')).nativeRepoRegistryFingerprint() : null,
           projectReadinessCached: url.pathname === '/api/panel/repos' && (await import('@/lib/repos/readiness')).hasCachedRepoReadiness(),
           projectsCwd: process.cwd(), projectsHome: homedir(),
+          gitDiffDefaultRoot: viewerRoute ? process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd() : undefined,
           operatorEnvClean: [
             'O8_ACTION_EFFORT',
             'O8_ACTION_MODEL',
@@ -172,7 +180,11 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         response = denied ?? projectDenied ?? ((deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
           'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
         } }));
-        admission = !denied && !projectDenied && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
+        if (viewerRoute && response.status === 204) {
+          const grant = req.headers['x-o8d-redaction'] === 'viewer/1' ? viewerRedactionGrant(defaultsContext) : null;
+          response = grant === null ? new Response(null, { status: 409 }) : new Response(grant, { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+        }
+        admission = (!viewerRoute || response.status === 200) && !denied && !projectDenied && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
       }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });

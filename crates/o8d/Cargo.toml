@@ -9,7 +9,7 @@ default = []
 experimental-mcp = ["dep:libc", "dep:axum", "dep:reqwest", "dep:rusqlite", "dep:sha2", "dep:chrono", "dep:unicode-normalization", "dep:uuid"]
 experimental-ws = ["dep:tokio-tungstenite", "dep:futures-util", "dep:form_urlencoded", "dep:subtle", "dep:uuid"]
 experimental-supervisor = ["dep:libc", "dep:base64", "dep:subtle", "dep:uuid"]
-experimental-http = ["dep:axum", "dep:form_urlencoded", "dep:subtle", "dep:rusqlite", "dep:chrono", "dep:sha2", "dep:base64", "dep:toml", "dep:url", "dep:unicode-normalization"]
+experimental-http = ["dep:axum", "dep:form_urlencoded", "dep:subtle", "dep:rusqlite", "dep:chrono", "dep:sha2", "dep:sha1", "dep:base64", "dep:toml", "dep:url", "dep:unicode-normalization"]
 
 # Native session reads on the app transport (on by default behind O8_NEXT_O8D=1;
 # O8D_NATIVE_SESSION_READS=0 turns them off).
@@ -20,6 +20,7 @@ experimental-session-reads = ["experimental-ws", "experimental-http", "dep:reqwe
 axum = { version = "0.8", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json"], optional = true }
 rusqlite = { version = "0.41", features = ["bundled"], optional = true }
+sha1 = { version = "0.10", optional = true }
 sha2 = { version = "0.10", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
 unicode-normalization = { version = "0.1", optional = true }
