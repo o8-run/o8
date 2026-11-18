@@ -129,7 +129,8 @@
     "fallback": true,
     "reason": "Only a warm empty canonical inbox cache is admitted; fresh, expired, invalidated, live and nonempty projections remain TypeScript-owned.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-mobile-inbox-real-path.test.ts"
+    "test": "tests/o8d-rust-mobile-inbox-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/review/workspace",
@@ -139,7 +140,8 @@
     "fallback": true,
     "reason": "Only an unselected workspace with no configured default root is native; selected Git/cache/GitHub work remains TypeScript-owned.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-review-workspace-real-path.test.ts"
+    "test": "tests/o8d-rust-review-workspace-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/panel/ws-info",
@@ -149,7 +151,8 @@
     "fallback": true,
     "reason": "TypeScript owns missing/invalid credential creation and resolver cache changes; unsupported snapshot, encoding, size or port defers",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-startup-real-path.test.ts"
+    "test": "tests/o8d-rust-startup-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/setup/identity",
@@ -159,7 +162,8 @@
     "fallback": true,
     "reason": "TypeScript owns missing/derived ID creation, failed-write cached IDs and resolver cache changes; unsupported snapshot or saved state defers",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-startup-real-path.test.ts"
+    "test": "tests/o8d-rust-startup-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/panel/repos",

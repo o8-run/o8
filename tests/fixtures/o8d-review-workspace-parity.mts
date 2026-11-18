@@ -96,7 +96,7 @@ let envReference: unknown, nativeCount = 0, mutationPointer: string | null = nul
 try {
   for (const enabled of [false, true]) {
     process.env.CORTEX_IDE_REVIEW_REPO_ROOT = repo;
-    server = await startReadParityBridge(binary, port, enabled);
+    server = await startReadParityBridge(binary, port, enabled, true);
     const configured = await read(path + '?fresh=1'); assert.equal(configured.native, false);
     if (!enabled) envReference = configured.wire; else assert.deepEqual(configured.wire, envReference);
     delete process.env.CORTEX_IDE_REVIEW_REPO_ROOT;
