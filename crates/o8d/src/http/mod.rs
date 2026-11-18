@@ -257,7 +257,10 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
     }
 }
 fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, body: &[u8]) -> Response {
-    if path == "/api/orchestrator/session-rules" && matches!(method,"POST"|"DELETE") { return session_rules::write(store,params,method,body); }
+    if path == "/api/orchestrator/session-rules" {
+        if method == "GET" { return session_rules::read(store, params); }
+        if matches!(method, "POST" | "DELETE") { return session_rules::write(store, params, method, body); }
+    }
     if method != "GET" && prompt_writes::matches(path, method) {
         return prompt_writes::write(store, path, params, method, body);
     }

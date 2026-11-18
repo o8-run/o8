@@ -445,5 +445,16 @@
     "state": "rust-with-fallback",
     "reason": "Rust owns operator rule mutations and the atomic correction-hold SQLite commit under the shared lifecycle lease. GET, worker read scope, delivery and runtime actions remain Node. Node product rule writers refuse; no post-commit fallback.",
     "test": "tests/o8d-session-rules-real-path.test.ts"
+  },
+  {
+    "path": "/api/orchestrator/session-rules",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns operator session-rule lists through the native operator gate, without Node admission. Worker reads keep the original Node packet-to-thread scope check; other principals, unsupported inputs and read errors stay on Node. Mutation and correction ownership is unchanged.",
+    "test": "tests/o8d-session-rule-reads-real-path.test.ts"
   }
 ]
