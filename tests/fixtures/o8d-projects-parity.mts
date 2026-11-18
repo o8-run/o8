@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -138,6 +140,8 @@ const routes = [
   { path: '/api/panel/repo-icon', parameters: [{ name: 'id', valid: ['repo-a', 'repo-b'], invalid: ['unknown', '雪'], boundary: ['', 'x'.repeat(200)] }] },
   { path: '/api/projects/[id]', parameters: [{ name: 'id', valid: ['proj-01234567-89a', 'proj-12345678-90a'], invalid: ['unknown', '雪'], boundary: ['', 'x'.repeat(200)] }] },
 ];
+const edgeCases: unknown[] = [], edgeFailures: unknown[] = [];
+const edgeReferences = new Map<string, Awaited<ReturnType<typeof read>>>();
 const records: unknown[] = [], summary: unknown[] = [], auth: unknown[] = [], timings: unknown[] = [];
 const references = new Map<string, Awaited<ReturnType<typeof read>>>();
 const authReferences = new Map<string, Awaited<ReturnType<typeof read>>>();
@@ -148,6 +152,7 @@ const retiredProof: unknown[] = [];
 const reservedReferences = new Map<string, Awaited<ReturnType<typeof read>>>();
 const reservedProof: unknown[] = [];
 let creationFallback: unknown;
+let deadlineProof: unknown;
 const releaseReceipt = process.env.O8D_PROJECTS_RELEASE_RECEIPT;
 if (releaseReceipt) {
   const receipt = JSON.parse(readFileSync(releaseReceipt, 'utf8'));
@@ -197,6 +202,36 @@ try {
           assert.equal(firstDifference(expected.wire, actual.wire), null, `Auth differs: ${path}`);
           auth.push({ route: route.path, expected: portable(expected.wire), native: actual.native });
         }
+      }
+    }
+    for (const name of ['equal-membership-time', 'conflicting-registry-path']) {
+      const fixture = await seed(10);
+      let path = '/api/projects/' + fixture.pid;
+      if (name === 'equal-membership-time') {
+        db.prepare('DELETE FROM project_repos WHERE project_id=?').run(fixture.pid);
+        const link = db.prepare('INSERT INTO project_repos(project_id,repo_id,role,suggestion_origin,added_at) VALUES(?,?,?,?,?)');
+        link.run(fixture.pid, 'repo-b', null, 'manual', 12);
+        link.run(fixture.pid, 'repo-a', null, 'manual', 12);
+      } else {
+        const registryPath = join(directory, 'repos.json');
+        const saved = JSON.parse(readFileSync(registryPath, 'utf8'));
+        saved.repos[0].path = join(directory, 'preferred-path');
+        writeFileSync(registryPath, JSON.stringify(saved));
+        const ledgerPath = join(directory, 'projects.json');
+        const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8'));
+        ledger.projects[0].repoPaths = [repoRoot];
+        writeFileSync(ledgerPath, JSON.stringify(ledger));
+        await registry.listReposFresh();
+        path = '/api/panel/projects';
+      }
+      const before = snapshot(); const actual = await read(path);
+      if (!enabled) edgeReferences.set(name, actual);
+      else {
+        if (actual.native) assert.deepEqual(snapshot(), before, 'Edge native read changed durable files');
+        const pointer = firstDifference(edgeReferences.get(name)!.wire, actual.wire);
+        console.log(JSON.stringify({ edge: name, native: actual.native, pointer }));
+        if (pointer) edgeFailures.push({ name, pointer, native: actual.native });
+        edgeCases.push({ name, path, expected: portable(edgeReferences.get(name)!.wire), native: actual.native });
       }
     }
     await seed(0);
@@ -254,7 +289,54 @@ try {
     }
     await server.stop(); server = undefined;
   }
-  writeFileSync(output, JSON.stringify({ records, summary, auth, timings, reservedProof, retiredProof, creationFallback, separateChildLaunchFlags: [false, true],
+  // A real blocked filesystem read, isolated from the healthy TypeScript store.
+  // No production delay hook: opening this FIFO blocks the native reader only.
+  await seed(0);
+  const faultDirectory = join(directory, 'blocked-native');
+  mkdirSync(faultDirectory);
+  execFileSync('mkfifo', [join(faultDirectory, 'repos.json')]);
+  writeFileSync(join(faultDirectory, 'ws-token'), token);
+  const publicPort = await freeReadParityPort();
+  const bridgeKey = 'owned-native-deadline-key';
+  const { handleNativeHttp } = require('../../src/lib/ws-server/native-http-routes.ts') as typeof import('../../src/lib/ws-server/native-http-routes');
+  let admissions = 0, fallbacks = 0;
+  const backend = createServer(async (req, res) => {
+    res.setHeader('Connection', 'close');
+    if (req.headers['x-o8d-bridge'] !== bridgeKey) { res.writeHead(401).end(); return; }
+    if (req.headers['x-o8d-session-read'] === 'authorize') admissions++;
+    else fallbacks++;
+    if (!await handleNativeHttp(req, res, publicPort, true, '127.0.0.1')) res.writeHead(404).end();
+  });
+  await new Promise<void>(resolve => backend.listen(0, '127.0.0.1', resolve));
+  const daemon = spawn(binary, ['--experimental-ws', '--listen', `127.0.0.1:${publicPort}`, '--app-upstream',
+    `127.0.0.1:${(backend.address() as { port: number }).port}`], {
+    stdio: ['pipe', 'pipe', 'pipe'], env: { NODE_ENV: 'test', PATH: process.env.PATH,
+      O8D_BRIDGE_KEY: bridgeKey, O8D_EPOCH: 'deadline-fixture', O8D_NATIVE_SESSION_READS: '1',
+      O8D_SESSION_DATA_DIR: faultDirectory, O8D_SESSION_DB_PATH: join(faultDirectory, 'cortex-ide.db') },
+  });
+  daemon.stderr.resume();
+  server = { origin: `http://127.0.0.1:${publicPort}`, probes: [], async stop() {
+    const closed = once(daemon, 'close'); daemon.kill('SIGKILL'); await closed;
+    backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve()));
+  } };
+  try {
+    await once(daemon.stdout, 'data');
+    const start = performance.now();
+    try {
+      const actual = await read('/api/projects');
+      assert.equal(actual.native, false);
+      assert.equal(firstDifference(references.get('/api/projects:0')!.wire, actual.wire), null);
+      assert.equal(admissions, 1); assert.equal(fallbacks, 1);
+      assert.ok(performance.now() - start < 5000, 'Hung read fallback exceeded response deadline');
+      deadlineProof = { fault: 'native-registry-fifo', admissions, fallbacks, native: false, elapsedMs: performance.now() - start };
+      console.log(JSON.stringify(deadlineProof));
+    } catch (error) {
+      edgeFailures.push({ name: 'hung-native-read', admissions, fallbacks, error: String(error) });
+      console.log(JSON.stringify(edgeFailures.at(-1)));
+    }
+  } finally { await server.stop(); server = undefined; }
+  writeFileSync(output, JSON.stringify({ records, edgeCases, deadlineProof, summary, auth, timings, reservedProof, retiredProof, creationFallback, separateChildLaunchFlags: [false, true],
     referenceAdmissionProbes: 0, mutationPointer }, null, 2) + '\n');
+  assert.deepEqual(edgeFailures, [], 'Project edge corpus differs');
 } finally { db.close(); await server?.stop(); }
 process.exit(0);

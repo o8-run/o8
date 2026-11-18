@@ -1,0 +1,90 @@
+[
+  {
+    "name": "equal-membership-time",
+    "path": "/api/projects/proj-01234567-89a",
+    "expected": {
+      "body": {
+        "mergePolicy": {
+          "mode": "direct",
+          "note": null
+        },
+        "project": {
+          "createdAt": 10,
+          "description": null,
+          "id": "proj-01234567-89a",
+          "mainRepoId": "repo-a",
+          "name": "Alpha",
+          "repos": [
+            {
+              "addedAt": 12,
+              "projectId": "proj-01234567-89a",
+              "repoId": "repo-a",
+              "role": null,
+              "suggestionOrigin": "manual"
+            },
+            {
+              "addedAt": 12,
+              "projectId": "proj-01234567-89a",
+              "repoId": "repo-b",
+              "role": null,
+              "suggestionOrigin": "manual"
+            }
+          ],
+          "slug": "alpha",
+          "updatedAt": 20
+        },
+        "savedMergeMode": "direct"
+      },
+      "headers": {
+        "allow": null,
+        "cache-control": "no-store, max-age=0",
+        "content-type": "application/json"
+      },
+      "status": 200
+    },
+    "native": true
+  },
+  {
+    "name": "conflicting-registry-path",
+    "path": "/api/panel/projects",
+    "expected": {
+      "body": {
+        "activeProjectId": "legacy-alpha",
+        "projects": [
+          {
+            "createdAt": "2026-01-02T00:00:00.000Z",
+            "id": "proj-12345678-90a",
+            "mergePolicy": {
+              "mode": "pr_only",
+              "note": "PR-first project policy. Direct integration requires an explicit operator opt-in in project settings."
+            },
+            "name": "雪 project",
+            "repoPaths": [],
+            "sqliteProjectId": "proj-12345678-90a"
+          },
+          {
+            "color": "#7fa68f",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "id": "legacy-alpha",
+            "mergePolicy": {
+              "mode": "pr_only",
+              "note": "PR-first project policy. Direct integration requires an explicit operator opt-in in project settings."
+            },
+            "name": "Alpha",
+            "repoPaths": [
+              "$FIXTURE_ROOT/missing-repo"
+            ],
+            "sqliteProjectId": "proj-01234567-89a"
+          }
+        ]
+      },
+      "headers": {
+        "allow": null,
+        "cache-control": "no-store, max-age=0",
+        "content-type": "application/json"
+      },
+      "status": 200
+    },
+    "native": false
+  }
+]

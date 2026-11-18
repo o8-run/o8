@@ -32,6 +32,9 @@ it('matches 100 seeded TS requests per projects route, durable stores and auth t
     expect(report.summary.every((item: { attempted: number; native: number; differences: number }) =>
       item.attempted >= 100 && item.native > 0 && item.differences === 0)).toBe(true);
     if (process.env.O8D_PROJECTS_REPORT) writeFileSync(process.env.O8D_PROJECTS_REPORT, JSON.stringify(report, null, 2) + '\n');
+    const edgePath = join(process.cwd(), 'crates/o8d/evidence/projects/edge-corpus.json');
+    if (process.env.O8D_CAPTURE_PROJECT_EDGES === '1') writeFileSync(edgePath, JSON.stringify(report.edgeCases, null, 2) + '\n');
+    else expect(report.edgeCases).toEqual(JSON.parse(readFileSync(edgePath, 'utf8')));
     const corpus = { records: report.records };
     const path = join(process.cwd(), 'crates/o8d/evidence/projects/corpus.json');
     if (process.env.O8D_CAPTURE_PROJECTS === '1') {

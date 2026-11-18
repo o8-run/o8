@@ -39,6 +39,11 @@ pub(super) enum Outcome {
     Served,
 }
 
+// A timed-out blocking read cannot be cancelled. Keep its permit until it
+// exits so hung filesystem reads cannot grow the blocking pool without bound.
+static READ_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+const READ_DEADLINE: Duration = Duration::from_secs(2);
+
 const BODY_LIMIT: usize = 16 * 1024 * 1024;
 
 /// Keep unsupported framing on the original streaming path without consuming it.
@@ -162,11 +167,28 @@ pub(super) async fn serve(
     let query = query.to_owned();
     let method = method.to_owned();
     let replay = body.clone();
-    let response = tokio::task::spawn_blocking(move || {
+    let read_only = method == "GET";
+    let read_permit = if read_only {
+        match READ_SLOTS.try_acquire() {
+            Ok(permit) => Some(permit),
+            Err(_) => return Ok(Outcome::Replay(replay)),
+        }
+    } else {
+        None
+    };
+    let work = tokio::task::spawn_blocking(move || {
+        let _read_permit = read_permit;
         http::native_request(directory, database, &path, &query, &method, &body, defaults_context)
-    })
-    .await
-    .map_err(|_| ())?;
+    });
+    let response = if read_only {
+        match tokio::time::timeout(READ_DEADLINE, work).await {
+            Ok(Ok(response)) => response,
+            _ => return Ok(Outcome::Replay(replay)),
+        }
+    } else {
+        // Never replay a timed-out mutation: its blocking worker may commit.
+        work.await.map_err(|_| ())?
+    };
 
     // Runtime transcripts, lane overlays, network projections and dynamic steer
     // capabilities remain TS-owned until their readers are ported.

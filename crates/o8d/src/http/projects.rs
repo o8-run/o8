@@ -54,6 +54,14 @@ fn registry(store: &ReadContext<'_>) -> Result<Vec<Value>> {
     let mut repos = Vec::new();
     for item in raw["repos"].as_array().ok_or(())? {
         let mut repo = item.as_object().ok_or(())?.clone();
+        // The TS path registry prefers stored `path` over `localPath` during
+        // reconciliation. Leave conflicting legacy entries with that owner.
+        if repo.get("path").and_then(Value::as_str).is_some_and(|path| {
+            Some(path) != repo.get("localPath").and_then(Value::as_str)
+        }) {
+            return Err(());
+        }
+
         for key in ["id", "name", "localPath"] {
             repo.get(key).and_then(Value::as_str).ok_or(())?;
         }
@@ -146,7 +154,7 @@ fn sql_projects(store: &ReadContext<'_>) -> Result<Vec<Value>> {
     let mut projects = rows
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|_| ())?;
-    let mut stmt=db.prepare("SELECT project_id,repo_id,role,suggestion_origin,added_at FROM project_repos ORDER BY added_at ASC").map_err(|_|())?;
+    let mut stmt=db.prepare("SELECT project_id,repo_id,role,suggestion_origin,added_at FROM project_repos ORDER BY added_at ASC, repo_id ASC").map_err(|_|())?;
     let rows=stmt.query_map([],|r|Ok(json!({"projectId":r.get::<_,String>(0)?,"repoId":r.get::<_,String>(1)?,"role":r.get::<_,Option<String>>(2)?,"suggestionOrigin":r.get::<_,String>(3)?,"addedAt":r.get::<_,i64>(4)?}))).map_err(|_|())?;
     for row in rows {
         let row = row.map_err(|_| ())?;

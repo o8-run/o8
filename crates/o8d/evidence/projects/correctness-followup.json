@@ -1,0 +1,81 @@
+{
+  "baseline": "a2f734e630a84d1105a915c00ec0cf3e63d61117",
+  "referencePR": 6386,
+  "red": {
+    "equalMembershipTime": "$/body/project/repos/0/repoId: expected repo-a, received repo-b",
+    "conflictingRegistryPath": "$/body/projects/1/repoPaths/1: unexpected in candidate",
+    "hungNativeRead": {
+      "requestTimeoutMs": 20000,
+      "admissions": 1,
+      "fallbacks": 0
+    }
+  },
+  "green": {
+    "summary": [
+      {
+        "route": "/api/panel/repos",
+        "attempted": 100,
+        "native": 38,
+        "fallback": 62,
+        "differences": 0
+      },
+      {
+        "route": "/api/panel/projects",
+        "attempted": 100,
+        "native": 80,
+        "fallback": 20,
+        "differences": 0
+      },
+      {
+        "route": "/api/projects",
+        "attempted": 100,
+        "native": 60,
+        "fallback": 40,
+        "differences": 0
+      },
+      {
+        "route": "/api/panel/repo-icon",
+        "attempted": 100,
+        "native": 80,
+        "fallback": 20,
+        "differences": 0
+      },
+      {
+        "route": "/api/projects/[id]",
+        "attempted": 100,
+        "native": 48,
+        "fallback": 52,
+        "differences": 0
+      }
+    ],
+    "authOutcomes": 35,
+    "edgeCases": [
+      {
+        "name": "equal-membership-time",
+        "native": true
+      },
+      {
+        "name": "conflicting-registry-path",
+        "native": false
+      }
+    ],
+    "deadlineProof": {
+      "fault": "native-registry-fifo",
+      "admissions": 1,
+      "fallbacks": 1,
+      "native": false,
+      "elapsedMs": 2023.983619999999
+    }
+  },
+  "limits": {
+    "nativeGetDeadlineMs": 2000,
+    "nativeReadSlots": 8,
+    "blockedWorker": "Read-only worker retains its slot until completion; mutation awaits are unchanged."
+  },
+  "sourceSha256": {
+    "crates/o8d/src/app/native.rs": "977394642af2bbe6f8a3d04d8189337b62e2c4a21106df72ea15db03d11da01d",
+    "crates/o8d/src/http/projects.rs": "fe1690ff81a954bd6e2a33b22f7688cf57f146a5e9063c3d0ab794d6b464deaa",
+    "tests/fixtures/o8d-projects-parity.mts": "a9a3b9d21dc9ec12579ea81ca8ad51ab849708054ed3db020d4cdda0d04f7071",
+    "tests/o8d-rust-projects-real-path.test.ts": "d951bd9aea6f04ad08766ccb211040cf995ca9bb13ddc1e69c2d127a432428a9"
+  }
+}
