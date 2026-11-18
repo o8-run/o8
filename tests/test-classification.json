@@ -5041,6 +5041,15 @@
       ]
     },
     {
+      "path": "tests/next-shutdown-nonphone-callers-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-sidebar-real-path.test.ts",
       "reasons": [
         "child-process",
