@@ -81,7 +81,13 @@ async fn maps_applied_receipts_and_uses_only_granted_routing_capabilities() {
 #[tokio::test]
 async fn defers_missing_scope_malformed_grants_states_and_json() {
     let f = Fixture::new();
+    // native_request is the app admission transport, even when its supplied
+    // context is absent/empty. It must never enter the standalone read mode.
     assert_eq!(f.get(None).await.0, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        f.get(Some(json!({}))).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
     let mut context = f.context();
     context["composerQueue"]["request"]["repoPath"] = json!("/other");
     assert_eq!(
@@ -133,6 +139,73 @@ async fn defers_missing_scope_malformed_grants_states_and_json() {
     .unwrap();
     assert_eq!(
         f.get(Some(f.context())).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn standalone_http_reads_saved_queue_with_no_grant_and_all_capabilities_false() {
+    use std::{
+        io::{BufRead, BufReader},
+        process::{Command, Stdio},
+    };
+    let f = Fixture::new();
+    fs::write(f.0.join("ws-token"), "standalone-fixture-credential").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_o8d"))
+        .args([
+            "--experimental-http",
+            "--listen",
+            "127.0.0.1:0",
+            "--data-dir",
+        ])
+        .arg(&f.0)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    struct Stop(std::process::Child);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let line = BufReader::new(child.stdout.take().unwrap())
+        .lines()
+        .next()
+        .unwrap()
+        .unwrap();
+    let _stop = Stop(child);
+    let ready: Value = serde_json::from_str(&line).unwrap();
+    let url = format!("http://{}/api/orchestrator/composer-queue?repoPath=/fixture&threadId=thoughts-queue&backend=pi", ready["listening"].as_str().unwrap());
+    let client = reqwest::Client::new();
+    assert_eq!(
+        client.get(&url).send().await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let response = client
+        .get(&url)
+        .bearer_auth("standalone-fixture-credential")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+    assert_eq!(body["canSteer"], false);
+    assert_eq!(body["steerableIds"], json!([]));
+    assert_eq!(body["items"][0]["id"], "item");
+    assert_eq!(body["items"][0]["payload"]["text"], "delivered text");
+    f.db()
+        .execute("UPDATE composer_send_queue SET payload_json='{bad'", [])
+        .unwrap();
+    assert_eq!(
+        client
+            .get(&url)
+            .bearer_auth("standalone-fixture-credential")
+            .send()
+            .await
+            .unwrap()
+            .status(),
         StatusCode::SERVICE_UNAVAILABLE
     );
 }

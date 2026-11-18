@@ -63,13 +63,19 @@ fn images(payload: &Value) -> Result<Vec<Value>, ()> {
         })
         .collect()
 }
-pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
+// The transport selects this mode, never the presence/absence of a grant.
+// Only the standalone authenticated HTTP listener passes false.
+pub(super) fn read(store: &ReadContext<'_>, params: &Params, admission: bool) -> Response {
     let result = (|| -> Result<Value, ()> {
         if params.contains_key("id") {
             return Err(());
         }
-        let context = store.defaults_context.as_ref().ok_or(())?;
-        let grant = composer_queue_grant::parse(&context["composerQueue"])?;
+        let grant = if admission {
+            let context = store.defaults_context.as_ref().ok_or(())?;
+            composer_queue_grant::parse(&context["composerQueue"])?
+        } else {
+            saved_target(params)?
+        };
         if params.get("repoPath") != Some(&grant.request_repo)
             || params.get("threadId") != Some(&grant.thread)
             || params.get("backend") != grant.backend.as_ref()
@@ -82,7 +88,13 @@ pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
             return Err(());
         }
         let history = chat_context::read(store, &grant.thread)?;
-        if !history.is_object() || history["source"] == "bot-network" {
+        if !history.is_object()
+            || history["source"] == "bot-network"
+            || (!admission
+                && history["repoPath"]
+                    .as_str()
+                    .is_some_and(|saved| !saved.is_empty() && repo_key(saved) != grant.repo))
+        {
             return Err(());
         }
         let messages = history["messages"].as_array().ok_or(())?;
@@ -157,4 +169,36 @@ pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
         }
         Err(()) => unavailable(),
     }
+}
+
+/// Standalone saved reads have no Node backhaul or runtime authority. Preserve
+/// their existing target checks and never advertise any steering capability.
+fn saved_target(params: &Params) -> Result<composer_queue_grant::Grant, ()> {
+    let repo = value(params, "repoPath");
+    let thread = value(params, "threadId");
+    if !repo.starts_with('/')
+        || repo.len() > 4096
+        || !thread.strip_prefix("thoughts-").is_some_and(|s| {
+            !s.is_empty()
+                && s.len() <= 80
+                && s.bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+        })
+    {
+        return Err(());
+    }
+    Ok(composer_queue_grant::Grant {
+        repo: repo_key(repo),
+        thread: thread.to_owned(),
+        request_repo: repo.to_owned(),
+        backend: params.get("backend").cloned(),
+        capabilities: HashMap::new(),
+    })
+}
+
+fn repo_key(repo: &str) -> String {
+    std::fs::canonicalize(repo)
+        .unwrap_or_else(|_| thread_context::resolve(Path::new(repo)))
+        .to_string_lossy()
+        .into_owned()
 }
