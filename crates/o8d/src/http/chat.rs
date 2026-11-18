@@ -441,21 +441,6 @@ fn page(
     ))
 }
 
-/// The TS `chatHistoryRevision`: the record without `savedAt` and `page`.
-/// Hashed in place instead of on a clone; `savedAt` goes back afterwards.
-/// `page` does not: a paged reply always replaces it.
-fn semantic_revision(record: &mut Value) -> String {
-    let Some(object) = record.as_object_mut() else {
-        return hash(record);
-    };
-    let saved_at = object.remove("savedAt");
-    object.remove("page");
-    let revision = hash(record);
-    if let (Some(saved_at), Some(object)) = (saved_at, record.as_object_mut()) {
-        object.insert("savedAt".to_owned(), saved_at);
-    }
-    revision
-}
 fn hash(value: &Value) -> String {
     format!(
         "{:x}",
@@ -503,50 +488,4 @@ fn stable(messages: Vec<Value>) -> Vec<Value> {
             m
         })
         .collect()
-}
-pub(super) fn context(store: &ReadContext<'_>, params: &Params) -> Response {
-    let id = value(params, "tabId");
-    if id.is_empty() {
-        return problem("tabId required");
-    }
-    let mut record = store.history(id).unwrap_or_else(|_|json!({"messages":[],"model":null,"savedAt":null,"starred":false,"title":null,"planText":null,"repoName":null,"repoPath":null,"repoBranch":null,"projectId":null,"githubOwner":null,"githubRepo":null,"remoteUrl":null,"backend":null,"agent":null,"archivedAt":null,"orchestratorSessionIds":null,"orchestratorSessionUpdatedAt":null,"exists":false}));
-    if !record.is_object() || record["source"] == "bot-network" {
-        return unavailable();
-    }
-    // Move the messages rather than copy them: on a long thread each deep copy
-    // costs milliseconds, and TS does none.
-    let messages = match record["messages"].take() {
-        Value::Array(messages) => messages,
-        _ => Vec::new(),
-    };
-    record["messages"] = Value::Array(stable(messages));
-    record["projectId"] = json!(
-        record["projectId"]
-            .as_str()
-            .filter(|s| !s.trim().is_empty())
-            .map(str::trim)
-    );
-    if params.contains_key("limit") || params.contains_key("before") {
-        let revision = semantic_revision(&mut record);
-        let messages = record["messages"].as_array().map_or(&[][..], Vec::as_slice);
-        match page(messages, params, 50, &revision) {
-            Ok((messages, metadata)) => {
-                record["messages"] = Value::Array(messages);
-                record["page"] = metadata;
-            }
-            Err(()) => {
-                return reply(
-                    StatusCode::CONFLICT,
-                    json!({"error":"cursor_invalid","currentRevision":revision}),
-                );
-            }
-        }
-    }
-    let (owner, repo) = github(
-        git_remote::origin(text(&record, "repoPath")).as_deref(),
-        text(&record, "remoteUrl"),
-    );
-    record["githubOwner"] = owner;
-    record["githubRepo"] = repo;
-    reply(StatusCode::OK, record)
 }
