@@ -7568,20 +7568,20 @@
       ]
     },
     {
+      "path": "tests/remote-task-attempt-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/remote-task-dispatch-real-path.test.ts",
       "reasons": [
         "child-process",
         "git-cli",
         "real-path",
         "worktree-api"
-      ]
-    },
-    {
-      "path": "tests/remote-task-evidence-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
-        "real-path"
       ]
     },
     {
@@ -8547,6 +8547,13 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/task-evidence-retirement-real-path.test.ts",
+      "reasons": [
+        "network-listener",
         "real-path"
       ]
     },

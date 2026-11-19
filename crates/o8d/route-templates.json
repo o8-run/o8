@@ -329,7 +329,6 @@
   "/api/tasks/[taskId]/block",
   "/api/tasks/[taskId]/claim",
   "/api/tasks/[taskId]/dispatch",
-  "/api/tasks/[taskId]/evidence",
   "/api/tasks/[taskId]/preview",
   "/api/tasks/[taskId]/prune",
   "/api/tasks/[taskId]/report",
