@@ -6917,6 +6917,13 @@
       ]
     },
     {
+      "path": "tests/plugin-front-door-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/plugin-principal-real-path.test.ts",
       "reasons": [
         "real-path"
