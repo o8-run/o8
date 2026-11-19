@@ -1,13 +1,17 @@
 import { safeErrorText } from '@/lib/mcp/api-error';
+import { SharedCheckoutError } from '@/lib/orchestrator/shared-checkout-team';
 
-type ControlCall = 'cortex_reconcile_shared_team' | 'cortex_finish_shared_team';
+type ControlCall = 'cortex_reconcile_shared_team' | 'cortex_finish_shared_team' | 'cortex_shared_team_status';
 const REVIEW = 'Run cortex_shared_team_status, review the current diff, then retry with its exact review ID, HEAD and paths.';
 const RECONCILE = 'Run cortex_shared_team_status, review and explicitly reconcile the preserved edits, then retry cortex_finish_shared_team.';
 
 // These are fixed descriptions of known pre-write checkout holds. Do not echo
 // arbitrary exceptions, path suffixes or subprocess output into a tool reply.
 const HOLDS: Array<{ matches: RegExp; reason: string; next: string }> = [
-  { matches: /^This checkout is owned by another orchestrator\./,
+  { matches: /^Owned session liveness unavailable: unreadable metadata\.$/,
+    reason: 'Shared-checkout membership repair is held: owned-session liveness cannot be verified because of unreadable metadata.',
+    next: 'Keep checkout ownership and preserved edits in place. Inspect the owned runtime metadata, then retry this control after liveness can be verified.' },
+  { matches: /^This checkout is owned by (?:another orchestrator\.|orchestrator .+\. Return to its owner\.$)/,
     reason: 'Another orchestrator thread owns this checkout.', next: 'Continue in the owning thread, or use a separate checkout.' },
   { matches: /^Checkout review is stale\./, reason: 'Checkout review is stale.', next: REVIEW },
   { matches: /^Pre-existing operator edits changed during this team:/,
@@ -22,9 +26,10 @@ const HOLDS: Array<{ matches: RegExp; reason: string; next: string }> = [
     reason: 'The acknowledged paths do not match the exact checkout review.', next: REVIEW },
   { matches: /^Nested repositories or special files need separate review:/,
     reason: 'Nested repositories or special files need separate review.', next: 'Run cortex_shared_team_status and review those files separately before retrying.' },
-  { matches: /^Worker .+ is still active\. Wait for it to finish or interrupt it first\.$/,
+  // Do not let a worker name pattern span multiple joined blocker sentences.
+  { matches: /^Worker [^.]+ is still active\. Wait for it to finish or interrupt it first\.$/,
     reason: 'A Shared worker is still active.', next: 'Wait for it to settle or interrupt it, then run cortex_shared_team_status before retrying.' },
-  { matches: /^Worker .+ has no (?:settled launch|matching owned runtime completion) receipt\.$/,
+  { matches: /^Worker [^.]+ has no (?:settled launch|matching owned runtime completion) receipt\.$/,
     reason: 'A Shared worker has no verified completion receipt.', next: 'Run cortex_shared_team_status and inspect the worker outcome before retrying. Keep its edits in place.' },
   { matches: /^Shared checkout is busy; retry after its current operation\.$/,
     reason: 'Another checkout operation is still running.', next: 'Wait for it to finish, then retry the same control.' },
@@ -45,6 +50,9 @@ const HOLDS: Array<{ matches: RegExp; reason: string; next: string }> = [
 export function sharedCheckoutControlFailure(call: ControlCall, error: unknown): string {
   const hold = error instanceof Error ? HOLDS.find(entry => entry.matches.test(error.message)) : undefined;
   if (hold) return `${call} failed: ${hold.reason} ${hold.next}`;
+  // Checkout authority writes these diagnostics for its caller, including every
+  // joined worker blocker. Keep that detail when no complete hold matches.
+  if (error instanceof SharedCheckoutError) return `${call} failed: ${error.message}`;
   const detail = safeErrorText(error);
   const reason = detail === 'o8 operation failed' ? 'The cause of this checkout failure is unknown' : detail;
   return `${call} failed: ${reason}. Run cortex_shared_team_status and inspect the current outcome before deciding whether to retry; the control may already have completed.`;
