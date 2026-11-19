@@ -3,6 +3,7 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import { addRepoToProject, getProjectWithRepos } from '@/lib/projects/store';
 import { syncPanelLedgerFromProjectStore } from '@/lib/projects/context';
 import type { ProjectRole, SuggestionOrigin } from '@/lib/projects/types';
+import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ interface AddRepoBody {
   suggestionOrigin?: unknown;
 }
 
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -55,3 +56,5 @@ export async function POST(
     return NextResponse.json({ error: message }, { status });
   }
 }
+
+export const POST = withRepoInventoryChange('project-repo-add', handlePOST);
