@@ -2127,6 +2127,13 @@
       ]
     },
     {
+      "path": "tests/claim-unbacked-http-retirement-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/claude-auth-preflight-real-path.test.ts",
       "reasons": [
         "executable-fixture",
