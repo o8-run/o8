@@ -934,6 +934,12 @@ fn serve(
             // Reap a launcher-owned window that exited, as Node's exit handler did.
             if let Some(window) = window.as_mut() {
                 window.running();
+                // ⌘Q in the window quits o8 (#6532): the same stop as a signal,
+                // through the same bounded shutdown that follows this loop.
+                if window.quit_requested() {
+                    stopped.store(true, Ordering::SeqCst);
+                    break;
+                }
             }
             #[cfg(debug_assertions)]
             if let Some(owner) = o8d.as_mut() { owner::fixture_commit(config, &mut owner.child); }

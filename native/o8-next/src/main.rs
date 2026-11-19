@@ -48,6 +48,7 @@ mod pane;
 mod pane_tree;
 mod pane_grid;
 mod pane_layout;
+mod parent_quit;
 mod project_icon;
 mod projects;
 mod projects_model;

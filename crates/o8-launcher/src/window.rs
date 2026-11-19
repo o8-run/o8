@@ -19,7 +19,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc, Mutex, PoisonError,
     },
     time::{Duration, Instant},
@@ -27,6 +27,9 @@ use std::{
 
 const READY: &str = "o8-next-ready";
 const RESULT: &str = "o8-next-browser-result:";
+/// The window's ⌘Q and app-menu Quit (#6532). Only this launcher reads the
+/// window's stdout, so the request reaches this instance and no other.
+const QUIT: &str = "o8-next-quit";
 /// The same spawn-to-first-paint bound the server used (`app-window.ts`).
 const READY_WITHIN: Duration = Duration::from_secs(15);
 /// The window drops a control frame larger than this; so does the relay.
@@ -172,6 +175,8 @@ struct Relay {
     input: Mutex<Option<mpsc::SyncSender<Vec<u8>>>>,
     /// The WS generation attached now, which receives result lines.
     attached: Mutex<Option<(u64, UnixStream)>>,
+    /// Set when the window asks to quit o8; the main loop answers it.
+    quit: AtomicBool,
 }
 
 pub(super) struct Window {
@@ -242,6 +247,12 @@ impl Window {
         false
     }
 
+    /// True once the window asked to quit o8 (#6532). The launcher's own
+    /// bounded shutdown answers it, as it answers Dock Quit.
+    pub(super) fn quit_requested(&self) -> bool {
+        self.relay.quit.load(Ordering::SeqCst)
+    }
+
     /// Starts the window and reports first paint without blocking the event loop.
     pub(super) fn open(
         &mut self,
@@ -271,7 +282,9 @@ impl Window {
         }
         command
             .env("O8_NEXT_API_TOKEN", token)
-            .env("O8_NEXT_PARENT_PIPE", "1");
+            .env("O8_NEXT_PARENT_PIPE", "1")
+            // Quit belongs to this launcher, not to the window process (#6532).
+            .env("O8_NEXT_QUIT_VIA_PARENT", "1");
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(_) => {
@@ -295,6 +308,8 @@ impl Window {
                 let text = String::from_utf8_lossy(&line);
                 if text.trim_end() == READY {
                     let _ = ready.send(());
+                } else if text.trim_end() == QUIT {
+                    relay.quit.store(true, Ordering::SeqCst);
                 } else if text.starts_with(RESULT) {
                     let mut attached = lock(&relay.attached);
                     if let Some((_, stream)) = attached.as_mut() {
