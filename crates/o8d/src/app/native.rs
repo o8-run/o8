@@ -395,7 +395,7 @@ async fn compose_threads(
         .map_err(|_| ())
 }
 
-async fn write_response(
+pub(super) async fn write_response(
     socket: &mut TcpStream,
     response: axum::response::Response,
     count: &super::request_counts::Count,

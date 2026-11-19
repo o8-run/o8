@@ -84,3 +84,20 @@ fn next_off_without_the_front_door_still_starts_next() {
     assert!(f.root.join("ws-env").exists());
     f.stop();
 }
+
+#[test]
+fn exhausted_producer_budget_presents_degraded_mode_and_keeps_owner_alive() {
+    let mut f = Fixture::new();
+    fs::write(f.root.join("crash-ws"), "fixture").unwrap();
+    f.start_with(&[("O8_API_FRONT_DOOR", "1"), ("O8_NEXT_OFF", "1")]);
+    f.ready();
+    let owner = env(&f, "launcher-o8d.json")["pid"].as_u64().unwrap();
+    until(|| {
+        f.log("dialog-reached")
+            .contains("Native features remain available")
+    });
+    assert!(f.running());
+    assert_eq!(env(&f, "launcher-o8d.json")["pid"], owner);
+    assert_eq!(f.starts("ws-starts").len(), 4);
+    f.stop();
+}

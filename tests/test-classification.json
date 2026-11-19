@@ -3945,6 +3945,16 @@
       ]
     },
     {
+      "path": "tests/launcher-native-global-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/launcher-o8d-owner-real-path.test.ts",
       "reasons": [
         "child-process",

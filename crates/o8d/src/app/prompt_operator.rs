@@ -79,27 +79,50 @@ pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str)
     }) {
         return false;
     }
+    operator_token(socket, header, None).is_some()
+}
+
+fn operator_token(
+    socket: &tokio::net::TcpStream,
+    header: &str,
+    query_token: Option<&str>,
+) -> Option<String> {
+    if !header.is_ascii() {
+        return None;
+    }
+    let parts: Vec<_> = header.lines().next()?.split(' ').collect();
+    if parts.len() != 3 || !matches!(parts[2], "HTTP/1.0" | "HTTP/1.1") {
+        return None;
+    }
+    let method = parts[0];
     // Remote/relay and unsupported boundary forms keep the existing admission.
     if !socket.peer_addr().is_ok_and(|a| a.ip().is_loopback()) {
-        return false;
+        return None;
     }
     let mut headers = std::collections::HashMap::new();
-    for (name, value) in header.lines().skip(1).filter_map(|s| s.split_once(':')) {
+    for line in header.strip_suffix("\r\n\r\n")?.split("\r\n").skip(1) {
+        let (name, value) = line.split_once(':')?;
+        if name.is_empty()
+            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            || value.bytes().any(|b| b.is_ascii_control() && b != b'\t')
+        {
+            return None;
+        }
         let name = name.to_ascii_lowercase();
         if headers.insert(name, trim(value)).is_some() {
-            return false;
+            return None;
         }
     }
     if headers.keys().any(|name| {
         name.starts_with("x-o8d-") || name.starts_with("x-o8-relay-") || name == "x-o8-client-addr"
     }) {
-        return false;
+        return None;
     }
     let Some(host) = headers.get("host") else {
-        return false;
+        return None;
     };
     let Ok(port) = socket.local_addr().map(|a| a.port()) else {
-        return false;
+        return None;
     };
     if ![
         format!("127.0.0.1:{port}"),
@@ -111,7 +134,7 @@ pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str)
     .iter()
     .any(|s| s.eq_ignore_ascii_case(host))
     {
-        return false;
+        return None;
     }
     // Exact native subset of browserWriteAllowed; unsupported forms use Node.
     if method != "GET" {
@@ -127,30 +150,36 @@ pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str)
             }
             Some("tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost") => (),
             Some(origin) if origin == format!("http://{host}") => (),
-            _ => return false,
+            _ => return None,
         }
     }
-    let Some(token) = headers
-        .get("authorization")
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .map(trim)
-    else {
-        return false;
+    let token = match query_token {
+        Some(token) if !headers.contains_key("authorization") => token,
+        Some(_) => return None,
+        None => headers
+            .get("authorization")
+            .and_then(|s| s.strip_prefix("Bearer "))
+            .map(trim)?,
     };
+    current_token(token)
+}
+
+/// A fresh canonical read, also used before native-session delivery.
+pub(super) fn current_token(token: &str) -> Option<String> {
     if token.is_empty()
         || ["o8br_", "o8ro_", "o8p_"]
             .iter()
             .any(|p| token.starts_with(p))
     {
-        return false;
+        return None;
     }
     let Some(root) =
         std::env::var_os("O8D_SESSION_DATA_DIR").and_then(|p| std::fs::canonicalize(p).ok())
     else {
-        return false;
+        return None;
     };
     let Ok(stored) = read(&root.join("ws-token"), 16384) else {
-        return false;
+        return None;
     };
     let stored = trim(&stored);
     if !token.is_ascii()
@@ -159,21 +188,56 @@ pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str)
         || stored.encode_utf16().count() < 16
         || !bool::from(token.as_bytes().ct_eq(stored.as_bytes()))
     {
-        return false;
+        return None;
     }
     let spectators = root.join("broadcast-spectator-tokens");
     match std::fs::symlink_metadata(&spectators) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
         Ok(_) => {
             let Ok(hashes) = read(&spectators, 1024 * 1024) else {
-                return false;
+                return None;
             };
             let hash = format!("{:x}", Sha256::digest(token.as_bytes()));
             if hashes.lines().any(|line| trim(line) == hash) {
-                return false;
+                return None;
             }
         }
-        Err(_) => return false,
+        Err(_) => return None,
     }
-    true
+    Some(stored.to_owned())
+}
+
+fn read_request(header: &str, wanted: &str) -> bool {
+    let mut parts = header.lines().next().unwrap_or("").split_whitespace();
+    parts.next() == Some("GET")
+        && parts
+            .next()
+            .is_some_and(|p| p.split('?').next() == Some(wanted))
+        && !header
+            .lines()
+            .skip(1)
+            .filter_map(|s| s.split_once(':'))
+            .any(|(name, value)| {
+                name.eq_ignore_ascii_case("transfer-encoding")
+                    || name.eq_ignore_ascii_case("expect")
+                    || (name.eq_ignore_ascii_case("content-length") && value.trim() != "0")
+            })
+}
+pub(super) fn bootstrap_token(socket: &tokio::net::TcpStream, header: &str) -> Option<String> {
+    if !read_request(header, "/api/panel/ws-info") {
+        return None;
+    }
+    operator_token(socket, header, None).filter(|s| s.len() <= 4096)
+}
+pub(super) fn websocket_token(socket: &tokio::net::TcpStream, header: &str) -> Option<String> {
+    if !read_request(header, "/ws") {
+        return None;
+    }
+    let target = header.lines().next()?.split_whitespace().nth(1)?;
+    let (_, query) = target.split_once('?')?;
+    let pairs: Vec<_> = form_urlencoded::parse(query.as_bytes()).collect();
+    if pairs.len() != 1 || pairs[0].0 != "token" {
+        return None;
+    }
+    operator_token(socket, header, Some(&pairs[0].1))
 }

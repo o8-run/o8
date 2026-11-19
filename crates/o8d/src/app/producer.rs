@@ -72,6 +72,9 @@ impl Listener {
                 _ = shutdown.changed() => break,
                 _ = tasks.join_next(), if !tasks.is_empty() => {},
                 accepted = self.listener.accept() => {
+                    // Intentional fail-closed: a listener accept error drains the
+                    // daemon; the launcher supervises its public owner. Never
+                    // retain a port that can no longer accept its producer.
                     let (stream, _) = accepted?;
                     if stream.peer_cred()?.uid() != unsafe { libc::geteuid() } { continue; }
                     // Bound unauthenticated local handshakes as well as frames.
@@ -125,7 +128,12 @@ fn target(value: &Value, key: &str, port: u16, generation: u64) -> Result<Arc<Pr
     }
     let epoch = value["epoch"]
         .as_str()
-        .filter(|s| !s.is_empty() && s.len() <= 128 && !s.chars().any(char::is_control))
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 128
+                && !s.chars().any(char::is_control)
+                && !s.starts_with(super::native_global::EPOCH_PREFIX)
+        })
         .ok_or(())?;
     let startup_port_info = match value.get("startupPortInfo") {
         None | Some(Value::Null) => None,
@@ -201,6 +209,7 @@ mod tests {
             ("upstream", json!("192.0.2.1:18002")),
             ("upstream", json!("127.0.0.1:18001")),
             ("epoch", json!("x".repeat(129))),
+            ("epoch", json!("o8d-native:reserved")),
             ("startupPortInfo", json!([])),
         ] {
             let mut bad = grant.clone();
@@ -301,7 +310,10 @@ mod tests {
 pub async fn run_owner(address: std::net::SocketAddr, path: &Path, key: String) -> io::Result<()> {
     // Keep the launcher's ownership proof in this process, not git children.
     if let Some(raw) = std::env::var_os("O8_LAUNCH_HOLD_FD") {
-        let fd = raw.to_str().and_then(|v| v.parse::<i32>().ok()).filter(|fd| *fd > 2)
+        let fd = raw
+            .to_str()
+            .and_then(|v| v.parse::<i32>().ok())
+            .filter(|fd| *fd > 2)
             .ok_or_else(|| io::Error::other("ownership hold unavailable"))?;
         if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
             return Err(io::Error::other("ownership hold unavailable"));
@@ -317,13 +329,43 @@ pub async fn run_owner(address: std::net::SocketAddr, path: &Path, key: String) 
         let key = key.clone();
         async move { socket.run(key, public_port, receiver, selected).await }
     });
+    let global = super::native_global::NativeGlobal::new();
+    #[cfg(all(debug_assertions, feature = "experimental-session-reads"))]
+    let fixture = {
+        let root = std::env::var_os("O8D_SESSION_DATA_DIR").map(PathBuf::from);
+        let enabled = root.is_some_and(|root| {
+            std::fs::read_to_string(root.join("fixture-owner"))
+                .ok()
+                .as_deref()
+                == Some("o8d-native-read/v1")
+        });
+        (enabled, tokio::runtime::Handle::current(), global.clone())
+    };
     let (gone, mut lifeline) = tokio::sync::oneshot::channel();
     // A plain thread avoids leaving Tokio's uninterruptible stdin blocking task
     // behind when SIGTERM drains the server while the parent pipe is still open.
     std::thread::spawn(move || {
         use std::io::Read;
         let mut bytes = [0; 64];
-        while matches!(std::io::stdin().read(&mut bytes), Ok(count) if count > 0) {}
+        #[cfg(all(debug_assertions, feature = "experimental-session-reads"))]
+        let mut line = Vec::with_capacity(64);
+        while let Ok(count) = std::io::stdin().read(&mut bytes) {
+            if count == 0 {
+                break;
+            }
+            #[cfg(all(debug_assertions, feature = "experimental-session-reads"))]
+            for byte in &bytes[..count] {
+                // Fixed bounded debug fixture command, not a general protocol.
+                if *byte == b'\n' {
+                    if fixture.0 && line == b"fixture-global" {
+                        fixture.1.block_on(fixture.2.fixture_commit());
+                    }
+                    line.clear();
+                } else if line.len() < 64 {
+                    line.push(*byte);
+                }
+            }
+        }
         let _ = gone.send(());
     });
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -331,7 +373,7 @@ pub async fn run_owner(address: std::net::SocketAddr, path: &Path, key: String) 
         "{}",
         json!({"listening":listener.local_addr()?.to_string()})
     );
-    let app = super::serve_producers(listener, key, selection, receiver);
+    let app = super::serve_producers(listener, key, selection, receiver, global);
     tokio::pin!(app);
     let result = tokio::select! {
         result = &mut app => result,
