@@ -5,6 +5,7 @@ mod repo_spec;
 mod git_refs;
 mod prompt_library;
 mod prompt_writes;
+pub(crate) mod commit_notice;
 mod session_rules;
 mod session_rule_lease;
 mod file_assets;

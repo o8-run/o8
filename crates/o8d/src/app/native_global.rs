@@ -6,16 +6,52 @@ use std::sync::Arc;
 pub(super) const EPOCH_PREFIX: &str = "o8d-native:";
 pub(super) struct NativeGlobal {
     bus: EventBus,
-    #[cfg(all(debug_assertions, feature = "experimental-session-reads"))]
+    #[cfg(feature = "experimental-session-reads")]
     sequence: tokio::sync::Mutex<u64>,
 }
 impl NativeGlobal {
     pub(super) fn new() -> Arc<Self> {
         Arc::new(Self {
             bus: EventBus::new(format!("{EPOCH_PREFIX}{}", uuid::Uuid::new_v4()), 400),
-            #[cfg(all(debug_assertions, feature = "experimental-session-reads"))]
+            #[cfg(feature = "experimental-session-reads")]
             sequence: tokio::sync::Mutex::new(0),
         })
+    }
+
+    #[cfg(feature = "experimental-session-reads")]
+    pub(super) async fn committed(
+        &self,
+        request: serde_json::Value,
+        selection: &super::Selection,
+        header: &str,
+    ) {
+        use serde_json::json;
+        let producer = selection.borrow().clone();
+        let result = if let Some(producer) = producer {
+            let wire = json!({"version":1,"kind":"native-commit","epoch":producer.bus.epoch(),"request":request.clone()}).to_string()+"\n";
+            if wire.len() > 16 * 1024 {
+                Err(())
+            } else if producer.notices.is_none() {
+                // Compatibility with the existing static app backhaul. Reuse
+                // its operator-authenticated realtime endpoint, not a new gate.
+                super::native::publish_legacy_notice(&producer, request, header).await
+            } else {
+                producer
+                    .notices
+                    .as_ref()
+                    .ok_or(())
+                    .and_then(|tx| tx.try_send(wire).map_err(|_| ()))
+            }
+        } else {
+            let mut seq = self.sequence.lock().await;
+            *seq += 1;
+            self.bus.publish(vec![json!({"protocol":1,"seq":*seq,"stream":"global","channel":"mutation",
+                "event":"mutation.settled","ts":chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),
+                "entityId":request["mutation"]["surfaceId"],"health":{"state":"live"},"data":{"mutation":request["mutation"]}})]).await.map_err(|_| ())
+        };
+        if result.is_err() {
+            eprintln!("[o8d] committed notification unavailable");
+        }
     }
 
     /// Only the debug launcher's inherited lifeline can request this fixed

@@ -29,6 +29,7 @@ pub struct Producer {
     pub bus: Arc<EventBus>,
     pub startup_port_info: Option<Value>,
     pub generation: u64,
+    pub notices: Option<tokio::sync::mpsc::Sender<String>>,
 }
 pub type Selection = tokio::sync::watch::Receiver<Option<Arc<Producer>>>;
 #[cfg(feature = "experimental-session-reads")]
@@ -50,6 +51,7 @@ pub async fn serve(
         bus,
         startup_port_info: None,
         generation: 0,
+        notices: None,
     })));
     serve_producers(listener, key, selection, shutdown, native_global::NativeGlobal::new()).await
 }
@@ -186,6 +188,8 @@ async fn connection(
             &key,
             producer.as_ref().and_then(|p| p.startup_port_info.as_ref()),
             &count,
+            &global,
+            &selection,
         )
         .await?
         {
