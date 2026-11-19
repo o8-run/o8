@@ -1021,11 +1021,36 @@ function resolveRoleArg(value: unknown): ProjectRole | null {
   return trimmed ? (trimmed as ProjectRole) : null;
 }
 
+function unknownProjectCreateOutcome(): McpToolResult {
+  return textResult('Project creation outcome is unknown. Run cortex_list_projects to inspect the current projects before deciding whether to retry.', true);
+}
+
 async function handleCreateProject(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const name = typeof args.name === 'string' ? args.name.trim() : '';
     if (!name) return textResult('name is required.', true);
     const description = typeof args.description === 'string' ? args.description : null;
+
+    if (apiFrontDoorEnabled()) {
+      const repoIds = Array.isArray(args.repoIds)
+        ? args.repoIds.filter((value): value is string => typeof value === 'string' && Boolean(value))
+        : [];
+      const roles = args.roles;
+      // Pair before dropping whitespace-only IDs so roles never shift to a
+      // different repository. Classic's direct-store normalization stays below.
+      const links = repoIds.map((repoId, index) => ({
+        repoId,
+        role: resolveRoleArg(Array.isArray(roles) ? roles[index]
+          : roles && typeof roles === 'object' ? (roles as Record<string, unknown>)[repoId] : null),
+      })).filter(link => Boolean(link.repoId.trim()));
+      const result = await apiFetch('/api/projects', { method: 'POST', body: JSON.stringify({
+        name, description, repoIds: links.map(link => link.repoId), roles: links.map(link => link.role),
+      }) }) as { project?: { id?: unknown; slug?: unknown } } | null;
+      const project = result?.project;
+      if (typeof project?.id !== 'string' || !project.id.trim()
+        || typeof project.slug !== 'string' || !project.slug.trim()) return unknownProjectCreateOutcome();
+      return jsonResult({ projectId: project.id, slug: project.slug });
+    }
 
     const project = createProject({ name, description });
 
@@ -1047,6 +1072,8 @@ async function handleCreateProject(args: Record<string, unknown>): Promise<McpTo
 
     return jsonResult({ projectId: project.id, slug: project.slug });
   } catch (err) {
+    if (apiFrontDoorEnabled() && err instanceof O8ApiError && (err.status === null
+      || err.status >= 500 || (err.status >= 200 && err.status < 300))) return unknownProjectCreateOutcome();
     return textResult(`Failed to create project: ${safeErrorText(err)}`, true);
   }
 }
