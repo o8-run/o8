@@ -104,7 +104,7 @@ pub(super) fn command(config: &Config, boot: &str, instance: &str) -> Result<Com
         .args([
             "--experimental-ws",
             "--listen",
-            &format!("{host}:{}", config.api_port),
+            &format!("{host}:{}", config.owner_port()),
             "--producer-socket",
         ])
         .arg(&config.producer_socket)

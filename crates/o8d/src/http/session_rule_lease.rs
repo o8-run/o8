@@ -169,12 +169,17 @@ impl Lease {
         path: &Path,
         thread: &str,
     ) -> Result<Self, &'static str> {
+        Self::acquire_key(directory, path, format!("session-rules-{:x}", Sha256::digest(thread.as_bytes())))
+    }
+    pub(super) fn acquire_storage_policy(directory: &Path, path: &Path) -> Result<Self, &'static str> {
+        Self::acquire_key(directory, path, "system:storage-pressure-policy".into())
+    }
+    fn acquire_key(directory: &Path, path: &Path, key: String) -> Result<Self, &'static str> {
         let mut db = open(directory, path).map_err(|_| BUSY)?;
         super::session_rules::restrict(&mut db, true).map_err(|_| BUSY)?;
         let own = identity(std::process::id())
             .map_err(|_| BUSY)?
             .ok_or(BUSY)?;
-        let key = format!("session-rules-{:x}", Sha256::digest(thread.as_bytes()));
         let reservation = uuid::Uuid::new_v4().to_string();
         loop {
             db.execute_batch("BEGIN IMMEDIATE").map_err(|_| BUSY)?;

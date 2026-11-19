@@ -63,7 +63,7 @@ export class O8dBridge {
     /** A takeover must never recover by evicting an existing API listener. */
     private readonly rejectPortConflicts = false,
   ) {
-    this.producerSocket = apiFrontDoorEnabled() ? process.env.O8D_PRODUCER_SOCKET : undefined;
+    this.producerSocket = process.env.O8D_PRODUCER_SOCKET;
     if (this.producerSocket && !process.env.O8D_BRIDGE_KEY) throw new Error('Launcher producer credential unavailable');
     this.key = this.producerSocket ? process.env.O8D_BRIDGE_KEY! : randomUUID();
     this.fallback = createServer((req, res) => server.emit('request', req, res));

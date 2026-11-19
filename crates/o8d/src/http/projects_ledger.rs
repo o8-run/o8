@@ -103,6 +103,9 @@ pub(super) fn read(store: &ReadContext<'_>, repos: &[Value], sql: &[Value]) -> R
     // Missing/invalid sidecars derive fresh timestamps and can trigger SQL sync.
     // Preserve that original owner instead of inventing a cached default ledger.
     let raw = optional_json(store, "projects.json")?.ok_or(())?;
+    project(store, repos, sql, &raw)
+}
+pub(in crate::http) fn project(store: &ReadContext<'_>, repos: &[Value], sql: &[Value], raw: &Value) -> Result<Value> {
     let entries = raw["projects"].as_array().ok_or(())?;
     let mut projects = Vec::new();
     for entry in entries {

@@ -1,6 +1,6 @@
 //! Saved project reads after the original principal/handler gates. No writers.
 #[path = "projects_ledger.rs"]
-mod ledger;
+pub(super) mod ledger;
 use super::{json, unavailable, value, Params, ReadContext, Value, RESPONSE_LIMIT};
 use axum::{
     http::StatusCode,
@@ -139,7 +139,7 @@ fn policy(store: &ReadContext<'_>, id: &str) -> Result<Value> {
         },
     )
 }
-fn sql_projects(store: &ReadContext<'_>) -> Result<Vec<Value>> {
+pub(super) fn sql_projects(store: &ReadContext<'_>) -> Result<Vec<Value>> {
     let db = store.database()?;
     let mut stmt=db.prepare("SELECT id,name,slug,description,main_repo_id,created_at,updated_at FROM projects ORDER BY created_at DESC").map_err(|_|())?;
     let rows=stmt.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"slug":r.get::<_,String>(2)?,"description":r.get::<_,Option<String>>(3)?,"mainRepoId":r.get::<_,Option<String>>(4)?,"createdAt":r.get::<_,i64>(5)?,"updatedAt":r.get::<_,i64>(6)?,"repos":[]}))).map_err(|_|())?;

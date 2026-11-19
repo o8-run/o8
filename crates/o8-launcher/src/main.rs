@@ -60,6 +60,8 @@ struct Config {
     #[serde(skip)]
     producer_key: String,
     #[serde(skip)]
+    producer_upstream_port: u16,
+    #[serde(skip)]
     producer_socket: PathBuf,
     #[serde(skip)]
     window_socket: PathBuf,
@@ -67,6 +69,10 @@ struct Config {
     window_key: String,
 }
 impl Config {
+    fn owner_port(&self) -> u16 {
+        if self.api_front_door { self.api_port } else { self.ws_port }
+    }
+
     /// The server that answers the public API port.
     fn public_script(&self) -> &'static str {
         if self.api_front_door {
@@ -236,11 +242,11 @@ fn spawn(
         environment.api(&mut command);
     } else {
         environment.ws(&mut command);
-        if config.api_front_door {
+        {
             command
                 .env("O8D_PRODUCER_SOCKET", &config.producer_socket)
                 .env("O8D_BRIDGE_KEY", &config.producer_key)
-                .env("O8D_PRODUCER_UPSTREAM_PORT", config.ws_port.to_string())
+                .env("O8D_PRODUCER_UPSTREAM_PORT", config.producer_upstream_port.to_string())
                 .env("O8_WS_O8D", "1");
         }
         if config.owns_window() {
@@ -250,7 +256,7 @@ fn spawn(
         }
     }
     let port = if script == "o8d" {
-        config.api_port
+        config.owner_port()
     } else {
         match (script == "server.js", config.api_front_door) {
             (true, false) => config.api_port,
@@ -768,9 +774,14 @@ fn serve(
     }
     if config.api_front_door {
         std::env::set_var("O8_API_FRONT_DOOR", "1");
-        config.producer_key = uuid::Uuid::new_v4().to_string();
-        config.producer_socket = owner::producer_socket(&config.data_dir)?;
     }
+    config.producer_key = uuid::Uuid::new_v4().to_string();
+    config.producer_socket = owner::producer_socket(&config.data_dir)?;
+    config.producer_upstream_port = if config.api_front_door { config.ws_port } else {
+        let mut private = ports::bind_ephemeral_port(Some(config.ws_port));
+        while private == config.api_port { private = ports::bind_ephemeral_port(Some(config.ws_port)); }
+        private
+    };
     if config.owns_window() {
         // Bound before WS starts, so its first generation can attach.
         let window = window::Window::bind(config)?;
@@ -813,9 +824,7 @@ fn serve(
             order.retain(|(script, _)| *script != "server.js");
         }
     }
-    if config.api_front_door {
-        order.insert(0, ("o8d", "launcher-o8d.json"));
-    }
+    order.insert(0, ("o8d", "launcher-o8d.json"));
     for (index, (script, receipt)) in order.into_iter().enumerate() {
         if index > 0 && stop_requested(native, stopped) {
             return Ok(());

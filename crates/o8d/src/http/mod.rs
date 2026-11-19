@@ -30,6 +30,7 @@ mod mobile_inbox;
 mod review_workspace;
 mod git_remote;
 mod projects;
+mod workspace_registry;
 mod queue;
 mod composer_queue_grant;
 pub use composer_queue_grant::valid as composer_queue_grant_valid;
