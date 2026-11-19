@@ -218,17 +218,15 @@ mode = "custom"
     const reparsed = parseOperatorDefaultsToml(raw);
     const rawDocument = parse(raw) as Record<string, Record<string, unknown>>;
     const expectedPersisted = {
-      ...OPERATOR_DEFAULTS_FALLBACK,
       parallelCap: 4,
       thinkingEffort: 'xhigh',
       branchPrefix: 'agent',
       requireApproval: 'always',
     };
 
-    expect(Object.keys(reparsed).sort()).toEqual(Object.keys(OPERATOR_DEFAULTS_FALLBACK).sort());
-    for (const key of Object.keys(OPERATOR_DEFAULTS_FALLBACK) as Array<keyof typeof OPERATOR_DEFAULTS_FALLBACK>) {
-      expect(reparsed[key], `TOML key for ${key} evaporated`).toEqual(expectedPersisted[key]);
-    }
+    expect(reparsed).toEqual(expectedPersisted);
+    expect(JSON.parse(readFileSync(jsonPath, 'utf8'))).toEqual(expectedPersisted);
+    expect((await getOperatorDefaults()).values).toEqual({ ...OPERATOR_DEFAULTS_FALLBACK, ...expectedPersisted });
     expect(rawDocument.operator.future_toggle).toBe('keep-me');
     expect(rawDocument.agent_extension.mode).toBe('custom');
   });

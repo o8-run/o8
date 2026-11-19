@@ -241,12 +241,15 @@ export async function persistOperatorDefaults(
 export async function applyOperatorDefaultsTomlFile(
   raw: string,
   expectedRevision: string,
-  fallback: OperatorDefaults,
+  _fallback: OperatorDefaults,
   resolve: () => Promise<OperatorDefaultsWithSources>,
 ): Promise<OperatorDefaultsWithSources> {
   await assertSettingsTomlRevision(expectedRevision);
   const parsed = parseOperatorDefaultsToml(raw);
-  const stored: Record<string, unknown> = { ...fallback, ...parsed };
+  // The last-good backup records editor intent, just like a field save.
+  // Both readers resolve absent keys at read time; persisting fallbacks here
+  // would make the next field save treat inherited defaults as explicit.
+  const stored: Record<string, unknown> = { ...parsed };
   if (Object.prototype.hasOwnProperty.call(parsed, 'defaultDispatchRuntime')) {
     stored.defaultDispatchRuntimeExplicit = true;
   }

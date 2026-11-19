@@ -72,11 +72,51 @@ it('retains materialized profiles and explicit max, whose original intent cannot
   await save(fixture.unrelatedUpdate);
   expect(parseOperatorDefaultsToml(readFileSync(join(directory, 'settings.toml'), 'utf8'))).toEqual({ ...existing, ...fixture.unrelatedUpdate });
 });
+it('keeps editor intent sparse through a following field save and last-good reload', async () => {
+  const before = await read();
+  const editor = await fetch(origin + '/api/panel/operator-defaults?include=values', {
+    method: 'POST', headers,
+    body: JSON.stringify({ settingsToml: '[operator]\nparallel_cap = 9\n', settingsTomlRevision: before.settingsToml.revision }),
+  });
+  expect(editor.status).toBe(200);
+  const editorBackup = JSON.parse(readFileSync(join(directory, 'operator-defaults.json'), 'utf8'));
+  const after = await save({ parallelCap: 7 });
+  expect(after.sources.thinkingEffort).toBe('default');
+  expect(editorBackup).toEqual({ parallelCap: 9 });
+  expect(parseOperatorDefaultsToml(readFileSync(join(directory, 'settings.toml'), 'utf8'))).toEqual({ parallelCap: 7 });
+  expect(JSON.parse(readFileSync(join(directory, 'operator-defaults.json'), 'utf8'))).toEqual({ parallelCap: 7 });
+  for (const key of fixture.effortKeys) {
+    expect(after.values[key]).toEqual(before.values[key]);
+    expect(after.sources[key]).toBe('default');
+  }
+  writeFileSync(join(directory, 'settings.toml'), '[broken');
+  const lastGood = await read();
+  expect(lastGood.values).toEqual(after.values);
+  for (const key of fixture.effortKeys) expect(lastGood.sources[key]).toBe('default');
+});
 it('retains previously stored legacy-only effort when migrating it on a field save', async () => {
   writeFileSync(join(directory, 'operator-defaults.json'), JSON.stringify(fixture.existingExplicit));
   const after = await save(fixture.unrelatedUpdate);
   expect(parseOperatorDefaultsToml(readFileSync(join(directory, 'settings.toml'), 'utf8'))).toEqual({ ...fixture.existingExplicit, ...fixture.unrelatedUpdate });
   for (const key of fixture.effortKeys) { expect(after.values[key]).toBe('max'); expect(after.sources[key]).toBe('file'); }
+});
+it('retains explicit editor max through a field save and last-good reload', async () => {
+  const before = await read();
+  const editor = await fetch(origin + '/api/panel/operator-defaults?include=values', {
+    method: 'POST', headers,
+    body: JSON.stringify({ settingsToml: '[models]\nthinking_effort = "max"\ncodex_worker_effort = "max"\nclaude_worker_effort = "max"\n', settingsTomlRevision: before.settingsToml.revision }),
+  });
+  expect(editor.status).toBe(200);
+  const after = await save(fixture.unrelatedUpdate);
+  expect(parseOperatorDefaultsToml(readFileSync(join(directory, 'settings.toml'), 'utf8'))).toEqual({ ...fixture.existingExplicit, ...fixture.unrelatedUpdate });
+  writeFileSync(join(directory, 'settings.toml'), '[broken');
+  const lastGood = await read();
+  expect(lastGood.values).toEqual(after.values);
+  for (const key of fixture.effortKeys) {
+    expect(after.values[key]).toBe('max');
+    expect(after.sources[key]).toBe('file');
+    expect(lastGood.sources[key]).toBe('file');
+  }
 });
 it('preserves unknown TOML tables, direct-editor comments and last-good effective values under the existing contract', async () => {
   writeFileSync(join(directory, 'settings.toml'), fixture.unknownToml);
