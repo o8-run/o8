@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,8 +77,13 @@ beforeAll(async () => {
       if (request.method === 'POST') hits.push({ bearer: request.headers.authorization,
         marker: request.headers['x-o8-agent-tool'] as string | undefined, body: JSON.parse(body) });
       if (request.url !== '/api/projects') { response.writeHead(404).end(); return; }
+      const headers: Record<string, string> = {};
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (typeof value === 'string') headers[name] = value;
+      }
+      headers['x-o8-client-addr'] = '192.0.2.1';
       const req = new NextRequest(origin + request.url, { method: request.method,
-        headers: { ...request.headers, 'x-o8-client-addr': '192.0.2.1' } as Record<string, string>, ...(body ? { body } : {}) });
+        headers, ...(body ? { body } : {}) });
       const result = request.method === 'GET' ? await GET(req) : await POST(req);
       const mode = replyMode; replyMode = 'normal';
       if (mode === 'drop') { response.destroy(); return; }
