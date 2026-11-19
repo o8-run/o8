@@ -12,10 +12,16 @@
 use super::Config;
 use std::{
     io::{BufRead, BufReader, Read, Write},
-    os::unix::{fs::PermissionsExt, net::UnixListener, net::UnixStream},
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt, PermissionsExt},
+        net::{UnixListener, UnixStream},
+    },
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::{mpsc, Arc, Mutex, PoisonError},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, Mutex, PoisonError,
+    },
     time::{Duration, Instant},
 };
 
@@ -25,6 +31,8 @@ const RESULT: &str = "o8-next-browser-result:";
 const READY_WITHIN: Duration = Duration::from_secs(15);
 /// The window drops a control frame larger than this; so does the relay.
 const FRAME_LIMIT: usize = 1024 * 1024;
+/// Unauthenticated local handshakes in flight, as the o8d producer socket bounds them.
+const HANDSHAKES: usize = 16;
 /// The window only needs the variables that display a native window.
 const DISPLAY: [&str; 14] = [
     "PATH",
@@ -71,13 +79,56 @@ fn peer_is_owner(stream: &UnixStream) -> bool {
                 &mut length,
             )
         }) == 0
-            && credentials.uid == unsafe { libc::getuid() }
+            && credentials.uid == unsafe { libc::geteuid() }
     }
     #[cfg(not(target_os = "linux"))]
     {
         let (mut uid, mut gid) = (0, 0);
         (unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) }) == 0
-            && uid == unsafe { libc::getuid() }
+            && uid == unsafe { libc::geteuid() }
+    }
+}
+
+/// Binds the private socket under the o8d producer socket's rules (#6527).
+/// Anything already at the path is kept unless it is an unchanged, dead socket
+/// this user owns privately: a regular file, symlink, foreign or shared socket,
+/// or a socket something still listens on is never unlinked. Returns the bound
+/// socket's identity, so cleanup removes only this instance's socket.
+fn bind_private(path: &Path) -> std::io::Result<(UnixListener, (u64, u64))> {
+    use std::io::{Error, ErrorKind};
+    if !path.is_absolute() {
+        return Err(Error::other("absolute window socket required"));
+    }
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if !meta.file_type().is_socket()
+            || meta.uid() != unsafe { libc::geteuid() }
+            || meta.mode() & 0o077 != 0
+        {
+            return Err(Error::other("private window socket required"));
+        }
+        match UnixStream::connect(path) {
+            Err(error) if error.kind() == ErrorKind::ConnectionRefused => {}
+            _ => return Err(Error::other("window socket already owned")),
+        }
+        let current = std::fs::symlink_metadata(path)?;
+        if (current.dev(), current.ino()) != (meta.dev(), meta.ino()) {
+            return Err(Error::other("window socket changed"));
+        }
+        std::fs::remove_file(path)?;
+    }
+    let listener = UnixListener::bind(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    let meta = std::fs::symlink_metadata(path)?;
+    Ok((listener, (meta.dev(), meta.ino())))
+}
+
+/// Unlinks the path only while it is still the socket this instance bound.
+fn unlink_if_bound(path: &Path, identity: (u64, u64)) {
+    if std::fs::symlink_metadata(path)
+        .ok()
+        .is_some_and(|meta| (meta.dev(), meta.ino()) == identity)
+    {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -115,6 +166,7 @@ struct Relay {
 pub(super) struct Window {
     relay: Arc<Relay>,
     socket: PathBuf,
+    identity: (u64, u64),
     key: String,
     child: Option<Child>,
     stopped: bool,
@@ -124,24 +176,34 @@ impl Window {
     /// Binds the control socket before WS starts, so WS can attach at boot.
     pub(super) fn bind(config: &Config) -> Result<Self, String> {
         let socket = control_socket(&config.data_dir)?;
-        let _ = std::fs::remove_file(&socket);
-        let listener = UnixListener::bind(&socket).map_err(|_| "Window control unavailable")?;
-        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))
-            .map_err(|_| "Window control unavailable")?;
+        let (listener, identity) = bind_private(&socket).map_err(|_| {
+            "Window control unavailable: another o8 or file holds window-control.sock"
+        })?;
         let key = uuid::Uuid::new_v4().to_string();
         let relay = Arc::new(Relay::default());
         let (accepting, expected) = (relay.clone(), key.clone());
         std::thread::spawn(move || {
             let mut generation = 0u64;
+            let pending = Arc::new(AtomicUsize::new(0));
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { continue };
+                if pending.load(Ordering::SeqCst) >= HANDSHAKES {
+                    continue;
+                }
                 generation += 1;
-                attach(&accepting, stream, expected.as_bytes(), generation);
+                attach(
+                    &accepting,
+                    stream,
+                    expected.as_bytes(),
+                    generation,
+                    &pending,
+                );
             }
         });
         Ok(Self {
             relay,
             socket,
+            identity,
             key,
             child: None,
             stopped: false,
@@ -265,7 +327,7 @@ impl Window {
         if let Some((_, stream)) = lock(&self.relay.attached).take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
-        let _ = std::fs::remove_file(&self.socket);
+        unlink_if_bound(&self.socket, self.identity);
         let Some(mut child) = self.child.take() else {
             return Ok(());
         };
@@ -302,13 +364,29 @@ impl Drop for Window {
 
 /// One WS generation: same user, then the launcher key, then frames until it
 /// leaves. A newer generation replaces an older one.
-fn attach(relay: &Arc<Relay>, stream: UnixStream, key: &[u8], generation: u64) {
+fn attach(
+    relay: &Arc<Relay>,
+    stream: UnixStream,
+    key: &[u8],
+    generation: u64,
+    pending: &Arc<AtomicUsize>,
+) {
     if !peer_is_owner(&stream) {
         return;
     }
     let relay = relay.clone();
     let key = key.to_vec();
+    pending.fetch_add(1, Ordering::SeqCst);
+    let pending = pending.clone();
     std::thread::spawn(move || {
+        // Released when the handshake ends, accepted or not.
+        struct Handshake(Arc<AtomicUsize>);
+        impl Drop for Handshake {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        let mut handshake = Some(Handshake(pending));
         let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
         let Ok(results) = stream.try_clone() else {
             return;
@@ -323,6 +401,7 @@ fn attach(relay: &Arc<Relay>, stream: UnixStream, key: &[u8], generation: u64) {
             return;
         }
         let _ = reader.get_ref().set_read_timeout(None);
+        handshake.take();
         if let Some((_, previous)) = lock(&relay.attached).replace((generation, results)) {
             let _ = previous.shutdown(std::net::Shutdown::Both);
         }
@@ -361,5 +440,79 @@ mod tests {
         assert!(same_key(b"abc", b"abc"));
         assert!(!same_key(b"abc", b"abd"));
         assert!(!same_key(b"ab", b"abc"));
+    }
+
+    fn root() -> PathBuf {
+        let root = PathBuf::from("/tmp").join(format!("o8-window-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn binding_keeps_files_symlinks_shared_and_live_sockets() {
+        let root = root();
+        let path = root.join("window-control.sock");
+        // A regular file is never removed.
+        std::fs::write(&path, b"preserve").unwrap();
+        assert!(bind_private(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"preserve");
+        std::fs::remove_file(&path).unwrap();
+        // Nor a symlink, nor its target.
+        let target = root.join("target");
+        std::fs::write(&target, b"target").unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(bind_private(&path).is_err());
+        assert!(std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read(&target).unwrap(), b"target");
+        std::fs::remove_file(&path).unwrap();
+        // Nor a live owner's socket.
+        let (live, identity) = bind_private(&path).unwrap();
+        assert!(bind_private(&path).is_err());
+        let meta = std::fs::symlink_metadata(&path).unwrap();
+        assert_eq!((meta.dev(), meta.ino()), identity);
+        assert_eq!(meta.mode() & 0o777, 0o600);
+        drop(live);
+        // A dead socket readable by others is not this launcher's to reclaim.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660)).unwrap();
+        assert!(bind_private(&path).is_err());
+        assert_eq!(
+            std::fs::symlink_metadata(&path).unwrap().dev_ino(),
+            identity
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_dead_private_socket_is_reclaimed_and_cleanup_spares_a_replacement() {
+        let root = root();
+        let path = root.join("window-control.sock");
+        // A crashed launcher leaves its socket behind; the next start reclaims it.
+        let (stale, stale_identity) = bind_private(&path).unwrap();
+        drop(stale);
+        let (_listener, identity) = bind_private(&path).unwrap();
+        assert_ne!(identity, stale_identity);
+        // Another owner replaced the path: cleanup leaves the replacement.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, b"replacement").unwrap();
+        unlink_if_bound(&path, identity);
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
+        // The socket this instance bound is removed.
+        std::fs::remove_file(&path).unwrap();
+        let (_again, identity) = bind_private(&path).unwrap();
+        unlink_if_bound(&path, identity);
+        assert!(std::fs::symlink_metadata(&path).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    trait DevIno {
+        fn dev_ino(&self) -> (u64, u64);
+    }
+    impl DevIno for std::fs::Metadata {
+        fn dev_ino(&self) -> (u64, u64) {
+            (self.dev(), self.ino())
+        }
     }
 }

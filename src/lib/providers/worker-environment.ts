@@ -53,6 +53,9 @@ const RUNTIME_KEYS: Record<string, readonly string[]> = {
     'COPILOT_PROVIDER_TYPE', 'COPILOT_PROVIDER_BASE_URL'],
 };
 
+/** Private launcher credentials (#6527, #6529): no inherit or allow setting passes them to a worker. */
+const LAUNCHER_KEYS = new Set(['O8_MASTER_KEY', 'O8D_BRIDGE_KEY', 'O8_NEXT_WINDOW_CONTROL_KEY']);
+
 /** Operator extensions accept comma-separated, exact environment variable names. */
 export function workerParentEnvironment(source: Record<string, string | undefined>, runtimeId?: string): Record<string, string | undefined> {
   const npmNames = Object.keys(source).filter(name => NPM_CONFIG_KEYS.has(name.toLowerCase()));
@@ -63,5 +66,5 @@ export function workerParentEnvironment(source: Record<string, string | undefine
   }
   // Debug/addition knobs do not authorize store or provider credentials. The
   // normal process boundary restores API keys only after the billing decision.
-  return Object.fromEntries([...names].filter(name => source[name] !== undefined && name !== 'O8_MASTER_KEY' && name !== 'O8D_BRIDGE_KEY' && !providerCredentialName(name)).map(name => [name, source[name]]));
+  return Object.fromEntries([...names].filter(name => source[name] !== undefined && !LAUNCHER_KEYS.has(name) && !providerCredentialName(name)).map(name => [name, source[name]]));
 }

@@ -204,3 +204,19 @@ fn next_off_show_focuses_the_launcher_window_and_reopens_a_closed_one() {
     f.stop();
     until(|| gone(reopened));
 }
+
+/// #6529 review: a file already at the window socket path is never removed.
+/// The launcher refuses to start instead, and quitting leaves the file.
+#[test]
+fn next_off_keeps_a_foreign_file_at_the_window_socket_path() {
+    let mut f = Fixture::new();
+    let path = f.root.join("window-control.sock");
+    fs::write(&path, b"preserve").unwrap();
+    f.start_with(&[("O8_API_FRONT_DOOR", "1"), ("O8_NEXT_OFF", "1")]);
+    until(|| f.log("dialog-reached").contains("Window control unavailable"));
+    assert!(!f.root.join("ws-env").exists(), "WS started without window control");
+    assert_eq!(fs::read(&path).unwrap(), b"preserve");
+    until(|| !f.running());
+    f.launcher = None;
+    assert_eq!(fs::read(&path).unwrap(), b"preserve");
+}
