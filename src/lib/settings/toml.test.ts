@@ -3,7 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { parse } from 'smol-toml';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Persistence exercises the production handler and files, not installed CLIs
+// queried only to decorate the legacy response. Match the other settings tests.
+vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
+  getRuntimeAuthSnapshot: vi.fn(async () => ({ statuses: {}, suggestedSubscriptionProfile: {} })),
+  getDispatchableRuntimeAvailability: vi.fn(async () => []),
+}));
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-settings-toml-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -21,9 +28,14 @@ const {
   parseOperatorDefaultsToml,
 } = await import('./toml');
 const { GET, POST } = await import('@/app/api/panel/operator-defaults/route');
+const { getSqlite, closeDb } = await import('@/lib/db');
 
 const tomlPath = getOperatorDefaultsTomlPath();
 const jsonPath = join(dataDir, 'operator-defaults.json');
+
+// Provision the real lifecycle-lease schema before timing individual actions.
+beforeAll(() => { getSqlite(); }, 120_000);
+afterAll(() => { closeDb(); });
 
 beforeEach(() => {
   rmSync(tomlPath, { force: true });

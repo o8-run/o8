@@ -231,7 +231,10 @@ export async function persistOperatorDefaults(
   expectedRevision?: string,
 ): Promise<void> {
   if (!expectedRevision) throw new Error('A settings.toml revision is required for field updates.');
-  await writeSettingsTomlAtRevision(serializeOperatorDefaultsToml(values, existingToml), expectedRevision);
+  // Preserve stored intent, including legacy values normalized to a fallback,
+  // without materializing keys inherited only from the current defaults.
+  const explicitValues = Object.fromEntries(Object.entries(values).filter(([key]) => Object.hasOwn(stored, key)));
+  await writeSettingsTomlAtRevision(serializeOperatorDefaultsToml(explicitValues, existingToml), expectedRevision);
   await writeFileAtomic(getLegacyOperatorDefaultsPath(), `${JSON.stringify(stored, null, 2)}\n`);
 }
 
