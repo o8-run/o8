@@ -60,6 +60,12 @@ pages reach it and no kept entry point does.
 - npm dependencies used only by removed code are listed in the dependency
   commit of the removal pull request.
 
+The follow-up removal drops the unreferenced desktop and mobile browser components
+left after the voice windows retired, including the timeline, model picker, workspace
+preview, diff viewer and old settings panels. The standalone dashboard-startup and
+transcript-reading-position probes also depended on that removed interface.
+The four remaining page entry points are unchanged.
+
 ## Phone app
 
 The native phone app is not in this repository. The pairing route
@@ -125,7 +131,7 @@ removal pull request.
 
 - Browser benchmarks that drive `/dashboard` now measure the notice:
   `scripts/bench/run-interactions.mjs` and `scripts/bench/interactions/*`,
-  `run-speed.mjs`, `dashboard-startup.mjs`, `transcript-reading-position.mjs`,
+  `run-speed.mjs`,
   `standalone-memory.mjs`, `run-terminal-workload.mjs`, `measure-browser-boot.mjs`,
   `prepare-launch-stage-build.mjs` (used by the manual
   `current-app-launch-stages` workflow), `scripts/measure-render-speed.sh`,
