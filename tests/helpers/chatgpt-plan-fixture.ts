@@ -26,7 +26,7 @@ export async function createPlanFixture(store: PlanStore) {
   const key = { ...await exportJWK(pair.publicKey), kid: 'plan-fixture', alg: 'RS256', use: 'sig' };
   const calls: Array<{ path: string; body: Record<string, string>; authorization?: string }> = [];
   let base = ''; let nonce = ''; let expectedVerifierChallenge = ''; let expectedRedirect = '';
-  const control = { scopes: PLAN_SCOPES, subject: 'fixture-openai-subject', audience: 'fixture-issued-client', nonceOverride: '', responseMode: 'complete', refreshFailure: '', refreshStatus: 400, refreshCount: 0, expectedRefresh: 'fixture-refresh-0', revokeFailure: false, toolName: 'list_files' };
+  const control = { scopes: PLAN_SCOPES, subject: 'fixture-openai-subject', audience: 'fixture-issued-client', nonceOverride: '', responseMode: 'complete', heldResponsesClosed: 0, refreshFailure: '', refreshStatus: 400, refreshCount: 0, expectedRefresh: 'fixture-refresh-0', revokeFailure: false, toolName: 'list_files' };
   const server: Server = createServer((request, response) => {
     void (async () => {
       const chunks: Buffer[] = [];
@@ -72,6 +72,10 @@ export async function createPlanFixture(store: PlanStore) {
           : { type: 'response.completed', response: { status: 'completed', usage: { input_tokens: 12, output_tokens: 3 } } };
         response.writeHead(200, { 'Content-Type': 'text/event-stream' });
         for (const frame of frames) response.write(`data: ${JSON.stringify(frame)}\n\n`);
+        if (control.responseMode === 'hold') {
+          response.once('close', () => { control.heldResponsesClosed += 1; });
+          return;
+        }
         if (control.responseMode !== 'incomplete') response.write(`data: ${JSON.stringify(ending)}\n\n`);
         response.end(); return;
       }
