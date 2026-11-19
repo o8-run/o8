@@ -4,6 +4,7 @@ import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
+import { parse } from 'smol-toml';
 import { parseOperatorDefaultsToml, serializeOperatorDefaultsToml } from '@/lib/settings/toml';
 import fixture from './fixtures/settings-explicit-intent.json';
 
@@ -31,6 +32,35 @@ const read = async () => {
   return response.json();
 };
 const post = (body: Record<string, unknown>) => fetch(origin + path, { method: 'POST', headers, body: JSON.stringify(body) });
+it.each(['triage', 'action'] as const)('preserves hidden %s keys when native editor text omits the tier', async tier => {
+  const other = tier === 'triage' ? 'action' : 'triage';
+  writeFileSync(join(directory, 'settings.toml'), '[accepted_table]\nopaque = "keep-me"\n'
+    + `[targeting.${tier}]\nruntime = "codex"\nmodel = "m"\neffort = "low"\nhidden_extra = "keep-me-too"\n`
+    + `[targeting.${other}]\nruntime = "codex"\nmodel = "m"\neffort = "low"\n`
+    + '[models]\nthinking_effort = "high"\n');
+  const before = await read();
+  expect(before.settingsToml.additionalSettingsSet).toBe(true);
+  expect(before.settingsToml.text).not.toMatch(/hidden_extra|keep-me|accepted_table/);
+  const response = await post({ settingsToml: '[operator]\nparallel_cap = 9\n', settingsTomlRevision: before.settingsToml.revision });
+  expect(response.status).toBe(200);
+  const raw = readFileSync(join(directory, 'settings.toml'), 'utf8');
+  const stored = parse(raw);
+  expect(stored.accepted_table).toEqual({ opaque: 'keep-me' });
+  expect(stored.targeting).toEqual({ [tier]: { hidden_extra: 'keep-me-too' } });
+  expect(stored.models).not.toHaveProperty('thinking_effort');
+  const after = await read();
+  expect(after.values.parallelCap).toBe(9);
+  expect(after.sources.thinkingEffort).toBe('default');
+  expect(after.sources[tier === 'triage' ? 'targetingTriage' : 'targetingAction']).toBe('default');
+  expect(after.settingsToml.additionalSettingsSet).toBe(true);
+  expect(after.settingsToml.text).not.toContain('hidden_extra');
+  const backup = readFileSync(join(directory, 'operator-defaults.json'), 'utf8');
+  expect((await post({ settingsToml: '[operator]\nparallel_cap = 3\n', settingsTomlRevision: before.settingsToml.revision })).status).toBe(409);
+  expect(readFileSync(join(directory, 'settings.toml'), 'utf8')).toBe(raw);
+  expect(readFileSync(join(directory, 'operator-defaults.json'), 'utf8')).toBe(backup);
+  await save({ parallelCap: 7 });
+  expect(parse(readFileSync(join(directory, 'settings.toml'), 'utf8')).targeting).toEqual(stored.targeting);
+});
 async function save(update: Record<string, unknown>) {
   const before = await read();
   const response = await post({ ...update, settingsTomlRevision: before.settingsToml.revision });

@@ -45,6 +45,8 @@ type TomlRecord = Record<string, unknown>;
 interface TomlField<T> {
   path: readonly [string, ...string[]];
   parse: (value: unknown, key: string) => T;
+  /** Record sub-keys exposed by the editor; other stored keys stay opaque. */
+  declaredKeys?: readonly string[];
   /**
    * How the value is written back to TOML, when that differs from `parse`.
    * TOML has no null, so a nullable field whose value is null would be dropped
@@ -253,6 +255,7 @@ function branchPrefixField(section: string, key: string): TomlField<string> {
 function targetingTierField(section: string, key: string): TomlField<OperatorDefaults['targetingTriage']> {
   return {
     path: [section, key],
+    declaredKeys: ['runtime', 'model', 'effort'],
     parse: (value, tomlKey) => isTargetingTier(value)
       ? value
       : invalid(tomlKey, 'a table with dispatchable runtime, string model, and valid thinking effort'),
@@ -476,6 +479,8 @@ export function parseOperatorDefaultsToml(raw: string): Partial<OperatorDefaults
     const field = OPERATOR_DEFAULTS_TOML_MAPPING[operatorKey] as unknown as TomlField<unknown>;
     const rawValue = readPath(document, field);
     if (rawValue === undefined) continue;
+    if (isRecord(rawValue) && field.declaredKeys
+      && !field.declaredKeys.some(key => Object.hasOwn(rawValue, key))) continue;
     const tomlKey = field.path.join('.');
     (values as Record<string, unknown>)[operatorKey] = field.parse(rawValue, tomlKey);
   }
@@ -503,7 +508,14 @@ export function serializeOperatorDefaultsToml(
           if (!isRecord(table[segment])) { table = {}; break; }
           table = table[segment] as TomlRecord;
         }
-        delete table[field.path[field.path.length - 1]];
+        const key = field.path[field.path.length - 1];
+        const stored = table[key];
+        if (isRecord(stored) && field.declaredKeys) {
+          for (const declaredKey of field.declaredKeys) delete stored[declaredKey];
+          if (!Object.keys(stored).length) delete table[key];
+        } else {
+          delete table[key];
+        }
       }
       continue;
     }
