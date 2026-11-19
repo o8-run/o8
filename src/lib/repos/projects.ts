@@ -1,10 +1,11 @@
 import 'server-only';
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { serializeProjectsLedgerMutation as serializeMutation, writeProjectsLedgerAtomically } from './projects-ledger-writer';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { getSqlite } from '@/lib/db';
 import { readRepoPathRegistry } from './repo-path-registry';
@@ -269,7 +270,7 @@ async function writeLedger(ledger: ProjectsLedger) {
     ...ledger,
     projects: ledger.projects.filter((p) => !isVirtualRepoProjectId(p.id)),
   };
-  await writeFile(PROJECTS_PATH, JSON.stringify(persistable, null, 2), 'utf8');
+  await writeProjectsLedgerAtomically(JSON.stringify(persistable, null, 2));
   // #1099 Phase 2 — mirror the migrated metadata into SQLite so the overlay
   // reads see fresh values. Best-effort: the JSON write is the authoritative
   // surface; SQLite failure logs + continues.
@@ -294,8 +295,10 @@ async function defaultLedger(): Promise<ProjectsLedger> {
 
 /** Process startup owns persistence; GETs only project the default in memory. */
 export async function initializeProjectsLedger(): Promise<void> {
-  if (await readRawLedger()) return;
-  await writeLedger(await defaultLedger());
+  return serializeMutation(async () => {
+    if (await readRawLedger()) return;
+    await writeLedger(await defaultLedger());
+  });
 }
 
 export async function getProjectsLedger(): Promise<ProjectsLedger> {
@@ -485,11 +488,13 @@ export async function getActiveProjectScopeForRepo(repoPath?: string | null): Pr
 }
 
 export async function setActiveProject(projectId: string): Promise<ProjectsLedger> {
-  const ledger = await getProjectsLedger();
-  const { project } = resolveProjectIdentity(projectId, ledger);
-  const next: ProjectsLedger = { ...ledger, activeProjectId: project.id };
-  await writeLedger(next);
-  return next;
+  return serializeMutation(async () => {
+    const ledger = await getProjectsLedger();
+    const { project } = resolveProjectIdentity(projectId, ledger);
+    const next: ProjectsLedger = { ...ledger, activeProjectId: project.id };
+    await writeLedger(next);
+    return next;
+  });
 }
 
 function pickAutoColor(used: Set<ProjectColor | undefined>): ProjectColor {
@@ -516,68 +521,76 @@ function uniqueProjectSlugForName(name: string, projects: ProjectRecord[], owner
 }
 
 export async function createProject(name: string): Promise<ProjectsLedger> {
-  const trimmed = name.trim();
-  if (!trimmed) throw new Error('Project name is required.');
-  if (trimmed.length > 60) throw new Error('Project name must be 60 characters or fewer.');
-  // Create the project in SQLite (the source of truth). It surfaces in the
-  // ledger via the projection in enrich(), so we DON'T add a separate ledger
-  // record (that double-created it) — we just point the active project at it.
-  const ledger = await getProjectsLedger();
-  const slug = uniqueProjectSlugForName(trimmed, ledger.projects);
-  const sqlite = createSqliteProject({ name: trimmed, slug, description: null });
-  const next: ProjectsLedger = {
-    ...ledger,
-    activeProjectId: sqlite?.id ?? ledger.activeProjectId,
-  };
-  await writeLedger(next);
-  return getProjectsLedger();
+  return serializeMutation(async () => {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('Project name is required.');
+    if (trimmed.length > 60) throw new Error('Project name must be 60 characters or fewer.');
+    // Create the project in SQLite (the source of truth). It surfaces in the
+    // ledger via the projection in enrich(), so we DON'T add a separate ledger
+    // record (that double-created it) — we just point the active project at it.
+    const ledger = await getProjectsLedger();
+    const slug = uniqueProjectSlugForName(trimmed, ledger.projects);
+    const sqlite = createSqliteProject({ name: trimmed, slug, description: null });
+    const next: ProjectsLedger = {
+      ...ledger,
+      activeProjectId: sqlite?.id ?? ledger.activeProjectId,
+    };
+    await writeLedger(next);
+    return getProjectsLedger();
+  });
 }
 
 export async function setProjectColor(projectId: string, color: ProjectColor): Promise<ProjectsLedger> {
-  if (!PROJECT_COLOR_PALETTE.includes(color)) {
-    throw new Error('Unknown project color.');
-  }
-  const ledger = await getProjectsLedger();
-  const { project } = resolveProjectIdentity(projectId, ledger);
-  const next: ProjectsLedger = {
-    ...ledger,
-    projects: ledger.projects.map((p) => (p.id === project.id ? { ...p, color } : p)),
-  };
-  await writeLedger(next);
-  return next;
+  return serializeMutation(async () => {
+    if (!PROJECT_COLOR_PALETTE.includes(color)) {
+      throw new Error('Unknown project color.');
+    }
+    const ledger = await getProjectsLedger();
+    const { project } = resolveProjectIdentity(projectId, ledger);
+    const next: ProjectsLedger = {
+      ...ledger,
+      projects: ledger.projects.map((p) => (p.id === project.id ? { ...p, color } : p)),
+    };
+    await writeLedger(next);
+    return next;
+  });
 }
 
 export async function renameProject(projectId: string, name: string): Promise<ProjectsLedger> {
-  const trimmed = name.trim();
-  if (!trimmed) throw new Error('Project name is required.');
-  const ledger = await getProjectsLedger();
-  const { project: target, sqlite } = resolveProjectIdentity(projectId, ledger);
-  if (sqlite) {
-    updateSqliteProject(sqlite.id, {
-      name: trimmed,
-      slug: uniqueProjectSlugForName(trimmed, ledger.projects, target.id),
-    });
-  }
-  const next: ProjectsLedger = {
-    ...ledger,
-    projects: ledger.projects.map((p) => (p.id === target.id ? { ...p, name: trimmed } : p)),
-  };
-  await writeLedger(next);
-  return getProjectsLedger();
+  return serializeMutation(async () => {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('Project name is required.');
+    const ledger = await getProjectsLedger();
+    const { project: target, sqlite } = resolveProjectIdentity(projectId, ledger);
+    if (sqlite) {
+      updateSqliteProject(sqlite.id, {
+        name: trimmed,
+        slug: uniqueProjectSlugForName(trimmed, ledger.projects, target.id),
+      });
+    }
+    const next: ProjectsLedger = {
+      ...ledger,
+      projects: ledger.projects.map((p) => (p.id === target.id ? { ...p, name: trimmed } : p)),
+    };
+    await writeLedger(next);
+    return getProjectsLedger();
+  });
 }
 
 export async function deleteProject(projectId: string): Promise<ProjectsLedger> {
-  const ledger = await getProjectsLedger();
-  if (ledger.projects.length <= 1) {
-    throw new Error('Cannot delete the only project.');
-  }
-  const removedIds = await removeProjectRepositories(projectId, ledger);
-  const remaining = ledger.projects.filter((p) => !removedIds.has(p.id));
-  const activeProjectId = removedIds.has(ledger.activeProjectId)
-    ? remaining[0]!.id
-    : ledger.activeProjectId;
-  await writeLedger({ projects: remaining, activeProjectId });
-  return getProjectsLedger();
+  return serializeMutation(async () => {
+    const ledger = await getProjectsLedger();
+    if (ledger.projects.length <= 1) {
+      throw new Error('Cannot delete the only project.');
+    }
+    const removedIds = await removeProjectRepositories(projectId, ledger);
+    const remaining = ledger.projects.filter((p) => !removedIds.has(p.id));
+    const activeProjectId = removedIds.has(ledger.activeProjectId)
+      ? remaining[0]!.id
+      : ledger.activeProjectId;
+    await writeLedger({ projects: remaining, activeProjectId });
+    return getProjectsLedger();
+  });
 }
 
 /**
@@ -587,15 +600,17 @@ export async function deleteProject(projectId: string): Promise<ProjectsLedger> 
  * overwritten by the SQLite-derived ledger projection on the next read.
  */
 export async function setProjectRepos(projectId: string, repoPaths: string[]): Promise<ProjectsLedger> {
-  const ledger = await getProjectsLedger();
-  const { project } = resolveProjectIdentity(projectId, ledger);
-  const normalized = Array.from(new Set(repoPaths.map(normalizeRepoPath)));
-  if (project) {
-    // Membership goes to SQLite (the source of truth). The ledger's repoPaths are
-    // derived from SQLite via enrich, so re-read rather than persisting them here.
-    await reconcileSqliteProjectRepos(project, normalized);
-  }
-  return getProjectsLedger();
+  return serializeMutation(async () => {
+    const ledger = await getProjectsLedger();
+    const { project } = resolveProjectIdentity(projectId, ledger);
+    const normalized = Array.from(new Set(repoPaths.map(normalizeRepoPath)));
+    if (project) {
+      // Membership goes to SQLite (the source of truth). The ledger's repoPaths are
+      // derived from SQLite via enrich, so re-read rather than persisting them here.
+      await reconcileSqliteProjectRepos(project, normalized);
+    }
+    return getProjectsLedger();
+  });
 }
 
 export async function upsertProjectLedgerRecord(input: {
@@ -605,45 +620,47 @@ export async function upsertProjectLedgerRecord(input: {
   slug?: string | null;
   repoPaths: string[];
 }): Promise<ProjectsLedger> {
-  const ledger = await getProjectsLedger();
-  const normalized = Array.from(new Set(input.repoPaths.map(normalizeRepoPath)));
-  const existingIndex = ledger.projects.findIndex((project) =>
-    project.id === input.id || project.sqliteProjectId === input.id);
+  return serializeMutation(async () => {
+    const ledger = await getProjectsLedger();
+    const normalized = Array.from(new Set(input.repoPaths.map(normalizeRepoPath)));
+    const existingIndex = ledger.projects.findIndex((project) =>
+      project.id === input.id || project.sqliteProjectId === input.id);
 
-  if (existingIndex >= 0) {
-    const target = ledger.projects[existingIndex];
-    const nextProjects = ledger.projects
-      .filter((project) => project.id === target.id || project.id !== input.sqliteProjectId)
-      .map((project) => (
-        project.id === target.id
-          ? {
-              ...project,
-              sqliteProjectId: input.sqliteProjectId ?? project.sqliteProjectId,
-              name: input.name.trim(),
-              repoPaths: normalized,
-            }
-          : project
-      ));
-    const next: ProjectsLedger = { ...ledger, projects: nextProjects };
+    if (existingIndex >= 0) {
+      const target = ledger.projects[existingIndex];
+      const nextProjects = ledger.projects
+        .filter((project) => project.id === target.id || project.id !== input.sqliteProjectId)
+        .map((project) => (
+          project.id === target.id
+            ? {
+                ...project,
+                sqliteProjectId: input.sqliteProjectId ?? project.sqliteProjectId,
+                name: input.name.trim(),
+                repoPaths: normalized,
+              }
+            : project
+        ));
+      const next: ProjectsLedger = { ...ledger, projects: nextProjects };
+      await writeLedger(next);
+      return next;
+    }
+
+    const used = new Set<ProjectColor | undefined>(ledger.projects.map((project) => project.color));
+    const project: ProjectRecord = {
+      id: input.id.trim(),
+      sqliteProjectId: input.sqliteProjectId,
+      name: input.name.trim(),
+      repoPaths: normalized,
+      createdAt: nowIso(),
+      color: pickAutoColor(used),
+    };
+    const next: ProjectsLedger = {
+      ...ledger,
+      projects: [...ledger.projects, project],
+    };
     await writeLedger(next);
     return next;
-  }
-
-  const used = new Set<ProjectColor | undefined>(ledger.projects.map((project) => project.color));
-  const project: ProjectRecord = {
-    id: input.id.trim(),
-    sqliteProjectId: input.sqliteProjectId,
-    name: input.name.trim(),
-    repoPaths: normalized,
-    createdAt: nowIso(),
-    color: pickAutoColor(used),
-  };
-  const next: ProjectsLedger = {
-    ...ledger,
-    projects: [...ledger.projects, project],
-  };
-  await writeLedger(next);
-  return next;
+  });
 }
 
 /**
@@ -661,37 +678,39 @@ export async function upsertProjectLedgerRecord(input: {
  * project unique to the JSON ledger needed dead-path cleanup.
  */
 export async function reconcileProjectsWithRegistry(): Promise<ProjectsLedger> {
-  const ledger = await getProjectsLedger();
-  const registry = await readRepoPathRegistry();
-  if (!registry.ok) {
+  return serializeMutation(async () => {
+    const ledger = await getProjectsLedger();
+    const registry = await readRepoPathRegistry();
+    if (!registry.ok) {
+      const normalizedActive = preferConcreteActiveProject(ledger);
+      if (normalizedActive.activeProjectId !== ledger.activeProjectId) {
+        await writeLedger(normalizedActive);
+        return normalizedActive;
+      }
+      return ledger;
+    }
+    const knownPaths = new Set(registry.repos.map((entry) => normalizeRepoPath(entry.path)));
+    // Strip stale paths that no longer exist in the registry from each project.
+    // No more orphan-add — orphans stay orphans until explicit project assignment.
+    let mutated = false;
+    const projects = ledger.projects.map((project) => {
+      const filtered = project.repoPaths.filter((p) => knownPaths.has(p));
+      if (filtered.length !== project.repoPaths.length) {
+        mutated = true;
+        return { ...project, repoPaths: filtered };
+      }
+      return project;
+    });
+    if (mutated) {
+      const next = preferConcreteActiveProject({ ...ledger, projects });
+      await writeLedger(next);
+      return next;
+    }
     const normalizedActive = preferConcreteActiveProject(ledger);
     if (normalizedActive.activeProjectId !== ledger.activeProjectId) {
       await writeLedger(normalizedActive);
       return normalizedActive;
     }
     return ledger;
-  }
-  const knownPaths = new Set(registry.repos.map((entry) => normalizeRepoPath(entry.path)));
-  // Strip stale paths that no longer exist in the registry from each project.
-  // No more orphan-add — orphans stay orphans until explicit project assignment.
-  let mutated = false;
-  const projects = ledger.projects.map((project) => {
-    const filtered = project.repoPaths.filter((p) => knownPaths.has(p));
-    if (filtered.length !== project.repoPaths.length) {
-      mutated = true;
-      return { ...project, repoPaths: filtered };
-    }
-    return project;
   });
-  if (mutated) {
-    const next = preferConcreteActiveProject({ ...ledger, projects });
-    await writeLedger(next);
-    return next;
-  }
-  const normalizedActive = preferConcreteActiveProject(ledger);
-  if (normalizedActive.activeProjectId !== ledger.activeProjectId) {
-    await writeLedger(normalizedActive);
-    return normalizedActive;
-  }
-  return ledger;
 }
