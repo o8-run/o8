@@ -8188,6 +8188,14 @@
       ]
     },
     {
+      "path": "tests/shared-worker-chat-return-display-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/shared-worker-return-real-path.test.ts",
       "reasons": [
         "child-process",
