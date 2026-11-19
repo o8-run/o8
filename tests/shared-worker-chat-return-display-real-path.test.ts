@@ -48,7 +48,7 @@ afterAll(() => {
 it('displays original attributed worker reports while sending quoted evidence to the same parent', async () => {
   let origin: ReviewChatOrigin = { threadId: 'thoughts-worker-display', turnId: 'assistant-origin',
     backend: 'codex', model: 'fixture-model', effort: 'low', mode: 'single', permissionMode: 'plan' };
-  writePersistedLlmChat(origin.threadId, { repoPath: repo, backend: origin.backend, messages: [
+  writePersistedLlmChat(origin.threadId, { repoPath: repo, messages: [
     { id: origin.turnId, role: 'assistant', content: 'Existing worker inspection.', timestamp: 1,
       backend: origin.backend, model: origin.model,
       receipt: { leadModel: origin.model, effort: origin.effort, mode: 'solo', permissionMode: 'plan' } },
