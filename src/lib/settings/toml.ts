@@ -536,8 +536,9 @@ export function projectOperatorDefaultsToml(raw: string): { text: string; additi
   const text = serializeOperatorDefaultsToml(values);
   const hasAdditional = (stored: unknown, declared: unknown): boolean => {
     if (!isRecord(stored)) return false;
-    return Object.entries(stored).some(([key, value]) => !isRecord(declared)
-      || !Object.hasOwn(declared, key) || hasAdditional(value, declared[key]));
+    return Object.entries(stored).some(([key, value]) => isRecord(value)
+      ? hasAdditional(value, isRecord(declared) ? declared[key] : undefined)
+      : !isRecord(declared) || !Object.hasOwn(declared, key));
   };
   return { text, additionalSettingsSet: hasAdditional(parseDocument(raw), parseDocument(text)) };
 }

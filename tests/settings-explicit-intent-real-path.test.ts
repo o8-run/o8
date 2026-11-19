@@ -32,6 +32,36 @@ const read = async () => {
   return response.json();
 };
 const post = (body: Record<string, unknown>) => fetch(origin + path, { method: 'POST', headers, body: JSON.stringify(body) });
+it.each(['high', 'xhigh'] as const)('returns to inherited effort when the editor removes its only %s setting', async effort => {
+  await save({ thinkingEffort: effort });
+  const before = await read();
+  expect(before.settingsToml.text).toContain(`thinking_effort = "${effort}"`);
+  const omitted = before.settingsToml.text.split('\n').filter((line: string) => !line.startsWith('thinking_effort = ')).join('\n');
+  expect(omitted.trim()).toBe('[models]');
+  expect((await post({ settingsToml: omitted, settingsTomlRevision: before.settingsToml.revision })).status).toBe(200);
+  expect((await read()).sources.thinkingEffort).toBe('default');
+  expect((await save({ parallelCap: 7 })).sources.thinkingEffort).toBe('default');
+});
+it('accepts tables containing only empty records as an empty declared document', async () => {
+  const before = await read();
+  expect((await post({ settingsToml: '[models]\n[unknown.branch.leaf]\n', settingsTomlRevision: before.settingsToml.revision })).status).toBe(200);
+  const after = await read();
+  expect(after.sources.thinkingEffort).toBe('default');
+  expect(after.settingsToml.additionalSettingsSet).toBe(false);
+  expect(parseOperatorDefaultsToml(readFileSync(join(directory, 'settings.toml'), 'utf8'))).toEqual({});
+});
+it.each([
+  'unknown = "opaque"\n',
+  '[unknown]\nvalue = "opaque"\n',
+  '[unknown.empty]\n[unknown.nonempty]\nvalue = "opaque"\n',
+  '[models]\nhidden = "opaque"\n',
+])('refuses editor input with undeclared values: %s', async settingsToml => {
+  const before = await save({ parallelCap: 7 });
+  const files = () => ['settings.toml', 'operator-defaults.json'].map(name => readFileSync(join(directory, name), 'utf8'));
+  const stored = files();
+  expect((await post({ settingsToml, settingsTomlRevision: before.settingsToml.revision })).status).toBe(400);
+  expect(files()).toEqual(stored);
+});
 it.each(['fresh', 'legacy-high', 'legacy-max', 'toml-high', 'toml-max'] as const)(
   'saves displayed native editor text as stored intent for a %s profile', async profile => {
     const explicit = profile === 'fresh' ? undefined : profile.endsWith('high') ? 'high' : 'max';
