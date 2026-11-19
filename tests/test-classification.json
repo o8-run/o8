@@ -7169,6 +7169,13 @@
       ]
     },
     {
+      "path": "tests/projects-ledger-permissions-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/promote-beta-real-path.test.ts",
       "reasons": [
         "child-process",
