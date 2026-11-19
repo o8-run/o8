@@ -101,9 +101,9 @@ export async function mergeNativeSettingsToml(text: string, revision: string): P
   }
   const state = await getOperatorDefaultsTomlState();
   if (state.revision !== revision) throw new SettingsTomlConflictError();
-  // Omitted declared settings reset to their defaults, like a desktop file
-  // replacement. Unknown tables (including credentials) remain only on server.
-  return serializeOperatorDefaultsToml({ ...OPERATOR_DEFAULTS_FALLBACK, ...safeValues(parseOperatorDefaultsToml(text)) }, state.text);
+  // Replacement removes omitted declared keys, leaving defaults inherited.
+  // Unknown tables (including credentials) remain only on server.
+  return serializeOperatorDefaultsToml(safeValues(parseOperatorDefaultsToml(text)), state.text, true);
 }
 
 export async function updateNativeSettings(update: Partial<OperatorDefaults>, revision: unknown) {

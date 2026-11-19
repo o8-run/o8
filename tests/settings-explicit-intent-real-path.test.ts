@@ -145,3 +145,26 @@ it('keeps revision conflicts terminal and rejects invalid changes without changi
   expect((await post({ thinkingEffort: 'not-an-effort', settingsTomlRevision: revision })).status).toBe(400);
   expect(state()).toEqual(before);
 });
+
+it('keeps native editor omissions default and explicit high through field saves', async () => {
+  const editor = async (text: string) => {
+    const revision = (await read()).settingsToml.revision;
+    const response = await post({ settingsToml: text, settingsTomlRevision: revision });
+    expect(response.status).toBe(200);
+    return read();
+  };
+  await editor('[operator]\nparallel_cap = 9\n');
+  const sparse = await save({ parallelCap: 7 });
+  expect(sparse.sources.thinkingEffort).toBe('default');
+  expect(parseOperatorDefaultsToml(readFileSync(join(directory, 'settings.toml'), 'utf8'))).toEqual({ parallelCap: 7 });
+  const explicit = await editor('[operator]\nparallel_cap = 9\n[models]\nthinking_effort = "high"\n');
+  expect(explicit.values.thinkingEffort).toBe('high');
+  expect(explicit.sources.thinkingEffort).toBe('file');
+  const kept = await save({ parallelCap: 7 });
+  expect(kept.values.thinkingEffort).toBe('high');
+  expect(kept.sources.thinkingEffort).toBe('file');
+  // Replacing the declared document unsets a previously explicit effort.
+  const reset = await editor('[operator]\nparallel_cap = 9\n');
+  expect(reset.sources.thinkingEffort).toBe('default');
+  expect((await save({ parallelCap: 7 })).sources.thinkingEffort).toBe('default');
+});

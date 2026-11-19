@@ -491,11 +491,22 @@ export function parseOperatorDefaultsToml(raw: string): Partial<OperatorDefaults
 export function serializeOperatorDefaultsToml(
   values: Partial<OperatorDefaults>,
   existingRaw?: string,
+  replaceDeclared = false,
 ): string {
   const document = existingRaw === undefined ? {} : parseDocument(existingRaw);
   for (const operatorKey of OPERATOR_DEFAULTS_TOML_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(values, operatorKey)) continue;
     const field = OPERATOR_DEFAULTS_TOML_MAPPING[operatorKey] as unknown as TomlField<unknown>;
+    if (!Object.prototype.hasOwnProperty.call(values, operatorKey)) {
+      if (replaceDeclared) {
+        let table = document;
+        for (const segment of field.path.slice(0, -1)) {
+          if (!isRecord(table[segment])) { table = {}; break; }
+          table = table[segment] as TomlRecord;
+        }
+        delete table[field.path[field.path.length - 1]];
+      }
+      continue;
+    }
     const tomlKey = field.path.join('.');
     const parsed = field.parse(values[operatorKey], tomlKey);
     writePath(document, field, field.serialize ? field.serialize(parsed) : parsed);
