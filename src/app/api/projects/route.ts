@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 import {
   addRepoToProject,
   createProject,
@@ -128,7 +129,7 @@ function normalizeReposField(
   return { ok: true, repoIds, roles };
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const denied = requirePanelAuth(req);
   if (denied) return denied;
 
@@ -211,3 +212,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = withRepoInventoryChange('project-create', handlePOST);

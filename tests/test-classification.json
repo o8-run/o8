@@ -7073,6 +7073,13 @@
       ]
     },
     {
+      "path": "tests/project-create-refresh-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/project-delete.test.ts",
       "reasons": [
         "child-process",
