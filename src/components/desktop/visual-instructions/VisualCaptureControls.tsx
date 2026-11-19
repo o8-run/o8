@@ -13,6 +13,6 @@ export function VisualCaptureControls(props: { elapsedMs: number; busy: boolean;
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 3 2 6l3 3M2 6h7a4 4 0 0 1 0 8" /></svg>
     </button>
     <button type="button" disabled={props.busy} onClick={props.onCancel} style={button}>Cancel</button>
-    <button type="button" disabled={props.busy} onClick={props.onFinish} title="Add capture to this chat · ⌘⇧Y" style={{ ...button, color: 'var(--t-text)', borderRadius: 8, background: 'var(--t-hover)' }}>{props.busy ? 'Finishing…' : 'Finish'}</button>
+    <button type="button" disabled={props.busy} onClick={props.onFinish} title="Add capture to this chat" style={{ ...button, color: 'var(--t-text)', borderRadius: 8, background: 'var(--t-hover)' }}>{props.busy ? 'Finishing…' : 'Finish'}</button>
   </div>;
 }
