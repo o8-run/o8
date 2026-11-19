@@ -62,6 +62,19 @@ export function serverMode(argv) {
   return { frontDoor: nextOff || argv.includes('--front-door'), nextOff };
 }
 
+/**
+ * The Next payload in `out/server`. With Next off the launcher never starts
+ * server.js, and the WS bundles alias `next/server` to their own exports, so a
+ * Next-off candidate leaves these out. Every other build keeps them.
+ */
+export const NEXT_PAYLOAD = ['.next', 'node_modules/next', 'node_modules/@next'];
+
+/** Copies `out/server` into the bundle; the source is never changed. */
+export function copyServerTree(source, destination, { candidate = false, nextOff = false } = {}) {
+  const omitted = new Set(candidate && nextOff ? NEXT_PAYLOAD.map((path) => join(source, path)) : []);
+  cpSync(source, destination, { recursive: true, verbatimSymlinks: true, filter: (path) => !omitted.has(path) });
+}
+
 export function writeInfoPlist(root, file, version, mode = { frontDoor: false, nextOff: false }) {
   const config = JSON.parse(readFileSync(join(root, 'src-tauri/tauri.conf.json'), 'utf8'));
   const minimum = config.bundle?.macOS?.minimumSystemVersion ?? '14.0';
@@ -288,7 +301,7 @@ async function main() {
     for (const name of ['o8', 'speech_recognizer', ...HELPERS]) chmodSync(join(macos, name), 0o755);
     copyFileSync(join(root, 'src-tauri/icons/icon.icns'), join(resources, 'icon.icns'));
     copyFileSync(join(root, 'src-tauri/helpers/o8-next-build.json'), join(resources, 'o8-next-build.json'));
-    cpSync(server, join(resources, 'server'), { recursive: true, verbatimSymlinks: true });
+    copyServerTree(server, join(resources, 'server'), { candidate, nextOff: mode.nextOff });
     writeInfoPlist(root, join(app, 'Contents/Info.plist'), version, mode);
   });
   if (process.argv.includes('--sign')) {
