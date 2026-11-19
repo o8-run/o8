@@ -547,13 +547,31 @@ pub(super) fn write(
         if bytes.len() > RESPONSE_LIMIT {
             return Err(Failure::Refuse);
         }
-        let response = reply(status, body);
+        let changed = !create || body["created"] == true;
+        let surface = body["prompt"]["id"]
+            .as_str()
+            .or_else(|| body["deletedId"].as_str())
+            .unwrap_or("")
+            .to_owned();
+        let mut response = reply(status, body);
         if db.execute_batch("COMMIT").is_err() {
             // A commit attempt is a terminal write outcome: never replay it.
             return Ok(reply(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 json!({"schema":"o8/prompt-library.error/v1","ok":false,"error":{"code":"prompt_library_failed","message":"The prompt library request could not be completed."}}),
             ));
+        }
+        let action = if create {
+            "prompt-library.create"
+        } else if method == "PATCH" {
+            "prompt-library.edit"
+        } else if method == "DELETE" {
+            "prompt-library.delete"
+        } else {
+            "prompt-library.use"
+        };
+        if changed {
+            super::commit_notice::committed(&mut response, action, &surface);
         }
         Ok(response)
     })();

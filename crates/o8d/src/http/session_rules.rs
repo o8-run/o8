@@ -178,7 +178,7 @@ fn payload_shape(p: &Value) -> bool {
                 .all(|key| o.contains_key(*key))
     })
 }
-fn correction(db: &Connection, p: &Value) -> Result<Value, (StatusCode, &'static str)> {
+fn correction(db: &Connection, p: &Value) -> Result<(Value, bool), (StatusCode, &'static str)> {
     let bad = (StatusCode::BAD_REQUEST, "Invalid correction-hold data.");
     let err = (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -230,7 +230,7 @@ fn correction(db: &Connection, p: &Value) -> Result<Value, (StatusCode, &'static
                 "This correction identity belongs to another request.",
             ));
         }
-        return Ok(prior);
+        return Ok((prior, false));
     }
     let fences = p["fences"].as_array().ok_or(bad)?;
     if fences.len() != scopes.len() {
@@ -279,7 +279,10 @@ fn correction(db: &Connection, p: &Value) -> Result<Value, (StatusCode, &'static
     for target in targets {
         db.execute("INSERT INTO worker_correction_deliveries (correction_id,surface_id,run_id,status,note,updated_at) VALUES (?,?,?,'pending','Awaiting delivery.',?)",params![id,target["surfaceId"].as_str(),target["runId"].as_str(),now]).map_err(|_|err)?;
     }
-    receipt(db, id).map_err(|_| err)?.ok_or(err)
+    receipt(db, id)
+        .map_err(|_| err)?
+        .ok_or(err)
+        .map(|r| (r, true))
 }
 pub(super) fn write(
     store: &ReadContext<'_>,
@@ -378,15 +381,19 @@ pub(super) fn write(
         }
     };
     let mut reason = None;
+    let mut notice = None;
     let result = (|| -> Result<Response, StatusCode> {
         db.execute_batch("BEGIN IMMEDIATE")
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         restrict(&mut db, false).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut fresh_hold = false;
         let result = if hold {
-            correction(&db, &p).map_err(|(status, message)| {
+            let (receipt, fresh) = correction(&db, &p).map_err(|(status, message)| {
                 reason = Some(message);
                 status
-            })?
+            })?;
+            fresh_hold = fresh;
+            receipt
         } else if method == "DELETE" {
             let removed = db
                 .execute("DELETE FROM session_rules WHERE id=?", [id])
@@ -395,6 +402,13 @@ pub(super) fn write(
             json!({"removed":removed})
         } else {
             json!({"rule":insert_rule(&db,&thread,p["text"].as_str().unwrap(),p["constraint"].as_str()).map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?})
+        };
+        let changed = if hold {
+            fresh_hold
+        } else if method == "DELETE" {
+            result["removed"] == true
+        } else {
+            true
         };
         let value = json!({"ok":true,"result":result});
         if serde_json::to_vec(&value)
@@ -407,6 +421,16 @@ pub(super) fn write(
         let answer = reply(StatusCode::OK, value);
         db.execute_batch("COMMIT")
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if changed {
+            notice = super::commit_notice::CommitNotice::new(
+                if method == "DELETE" {
+                    "session-rule.remove"
+                } else {
+                    "session-rule.add"
+                },
+                &thread,
+            );
+        }
         Ok(answer)
     })();
     // End a failed transaction BEFORE releasing the separately owned lease.
@@ -414,10 +438,16 @@ pub(super) fn write(
         let _ = db.execute_batch("ROLLBACK");
     }
     drop(db);
-    if lease.release().is_err() {
-        return failure(code, StatusCode::INTERNAL_SERVER_ERROR);
+    let release_failed = lease.release().is_err();
+    let mut answer = if release_failed {
+        failure(code, StatusCode::INTERNAL_SERVER_ERROR)
+    } else {
+        result.unwrap_or_else(|status| if hold {hold_failure(status,reason.unwrap_or("Native correction hold outcome could not be confirmed. No delivery was attempted."))}else{failure(code, status)})
+    };
+    if let Some(notice) = notice {
+        answer.extensions_mut().insert(notice);
     }
-    result.unwrap_or_else(|status| if hold {hold_failure(status,reason.unwrap_or("Native correction hold outcome could not be confirmed. No delivery was attempted."))}else{failure(code, status)})
+    answer
 }
 
 #[cfg(test)]

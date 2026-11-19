@@ -1,6 +1,8 @@
 /** Front-door producer attachment; the launcher owns the daemon and public port. */
 import { lstat } from 'node:fs/promises';
 import { connect, type Socket } from 'node:net';
+import { nativeCommitNotice } from './native-commit-notice';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 
 const LIMIT = 1024 * 1024;
 export class O8dProducer {
@@ -41,17 +43,33 @@ export class O8dProducer {
           socket.write(grant);
         } catch { failed(); }
       });
+      let publishing = 0;
       socket.on('data', chunk => {
-        if (this.stopped || this.socket !== socket || ready || reply.length + chunk.length > 4096) { failed(); return; }
-        reply = Buffer.concat([reply, chunk]);
-        if (!reply.includes(10)) return;
-        try {
-          if (reply.at(-1) !== 10 || reply.indexOf(10) !== reply.length - 1) throw Error('Malformed producer receipt');
-          const value = JSON.parse(reply.toString());
-          if (value.version !== 1 || value.epoch !== this.epoch || !Number.isSafeInteger(value.pid) || value.pid <= 0
-            || !Number.isSafeInteger(value.generation) || value.generation <= 0) throw Error('Invalid producer receipt');
-          ready = true; socket.setTimeout(0); this.pid = value.pid; this.generation = value.generation; this.delay = 250; resolve();
-        } catch { failed(); }
+        if (this.stopped || this.socket !== socket) { failed(); return; }
+        // Process frames before retaining a partial line. Both the incomplete
+        // frame and outstanding publication work are independently bounded.
+        for (let offset = 0; offset < chunk.length;) {
+          const end = chunk.indexOf(10, offset);
+          const part = chunk.subarray(offset, end < 0 ? chunk.length : end + 1);
+          if (reply.length + part.length > (ready ? 16 * 1024 : 4096)) { failed(); return; }
+          reply = Buffer.concat([reply, part]); offset += part.length;
+          if (end < 0) return;
+          try {
+            const value = JSON.parse(reply.toString()); reply = Buffer.alloc(0);
+            if (!ready) {
+              if (value.version !== 1 || value.epoch !== this.epoch || !Number.isSafeInteger(value.pid) || value.pid <= 0
+                || !Number.isSafeInteger(value.generation) || value.generation <= 0) throw Error('Invalid producer receipt');
+              ready = true; socket.setTimeout(0); this.pid = value.pid; this.generation = value.generation; this.delay = 250; resolve();
+            } else {
+              const notice = nativeCommitNotice(value, this.epoch);
+              if (!notice || publishing >= 32) throw Error('Invalid commit notice');
+              publishing++;
+              // Node assigns the canonical producer sequence through its existing
+              // publisher. Failure cannot change the already committed write.
+              void publishRealtimeMutation(notice).catch(() => false).finally(() => { publishing--; });
+            }
+          } catch { failed(); return; }
+        }
       });
     });
   }

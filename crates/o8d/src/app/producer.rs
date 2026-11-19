@@ -146,6 +146,7 @@ fn target(value: &Value, key: &str, port: u16, generation: u64) -> Result<Arc<Pr
         bus: Arc::new(EventBus::new(epoch.into(), 400)),
         startup_port_info,
         generation,
+        notices: None,
     }))
 }
 async fn attach(
@@ -161,7 +162,9 @@ async fn attach(
         .await
         .map_err(|_| ())??;
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| ())?;
-    let producer = target(&value, key, port, generation)?;
+    let mut producer = target(&value, key, port, generation)?;
+    let (notices, mut pending) = tokio::sync::mpsc::channel::<String>(32);
+    Arc::get_mut(&mut producer).ok_or(())?.notices = Some(notices);
     {
         let selected = authority.lock().await;
         if selected.borrow().is_some() {
@@ -174,9 +177,21 @@ async fn attach(
     }
     let result = async {
         loop {
-            let bytes = line(&mut input, FRAME_LIMIT).await?;
-            let events: Vec<Value> = serde_json::from_slice(&bytes).map_err(|_| ())?;
-            producer.bus.publish(events).await.map_err(|_| ())?;
+            // Keep the bounded read future alive across notices: cancelling a
+            // partially consumed line would corrupt the producer's event stream.
+            let frame = line(&mut input, FRAME_LIMIT);
+            tokio::pin!(frame);
+            loop { tokio::select! {
+                notice = pending.recv() => {
+                    let Some(notice) = notice else { return Err(()); };
+                    timeout(Duration::from_millis(250), output.write_all(notice.as_bytes())).await.map_err(|_| ())?.map_err(|_| ())?;
+                }
+                bytes = &mut frame => {
+                    let events: Vec<Value> = serde_json::from_slice(&bytes?).map_err(|_| ())?;
+                    producer.bus.publish(events).await.map_err(|_| ())?;
+                    break;
+                }
+            } }
         }
         #[allow(unreachable_code)]
         Ok::<(), ()>(())
@@ -251,6 +266,34 @@ mod tests {
         assert!(!String::from_utf8(ack).unwrap().contains("fixture-key"));
         view.changed().await.unwrap();
         let first = view.borrow_and_update().clone().unwrap();
+        // An outgoing notice must not cancel and discard an incoming partial
+        // batch. The peer authenticates once; both directions remain bounded.
+        let batch = json!([{"protocol":1,"seq":1,"stream":"global","channel":"mutation","event":"mutation.settled","ts":"fixture","data":{}}]).to_string()+"\n";
+        let split = batch.len() / 2;
+        peer.get_mut()
+            .write_all(&batch.as_bytes()[..split])
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        first
+            .notices
+            .as_ref()
+            .unwrap()
+            .send("bounded-notice\n".into())
+            .await
+            .unwrap();
+        assert_eq!(line(&mut peer, 4096).await.unwrap(), b"bounded-notice\n");
+        peer.get_mut()
+            .write_all(&batch.as_bytes()[split..])
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(1), async {
+            while first.bus.latest().await != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         drop(peer);
         assert!(task.await.unwrap().is_err());
         view.changed().await.unwrap();

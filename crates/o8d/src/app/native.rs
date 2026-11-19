@@ -49,6 +49,8 @@ pub(super) async fn serve(
     key: &str,
     startup_port_info: Option<&serde_json::Value>,
     count: &super::request_counts::Count,
+    global: &super::native_global::NativeGlobal,
+    selection: &super::Selection,
 ) -> Result<Outcome, ()> {
     if !enabled() && std::env::var("O8D_NATIVE_OWNED").as_deref() != Ok("1") {
         return Ok(Outcome::Proxy);
@@ -212,12 +214,16 @@ pub(super) async fn serve(
     let query = query.to_owned();
     let method = method.to_owned();
     let replay = body.clone();
-    let response = tokio::task::spawn_blocking(move || {
+    let mut response = tokio::task::spawn_blocking(move || {
         http::native_request_viewer(directory, database, &path, &query, &method, &body, defaults_context, redaction)
     })
     .await
     .map_err(|_| ())?;
 
+    if let Some(notice) = response.extensions_mut().remove::<http::commit_notice::CommitNotice>() {
+        // COMMIT is terminal even when delivery fails. Never replay a receipt.
+        global.committed(notice.0, selection, header).await;
+    }
     // Unsupported inputs and runtime-owned cases replay through the original
     // handler. Dynamic capabilities are trusted only from this request's grant.
     if response.status() == StatusCode::SERVICE_UNAVAILABLE {
@@ -424,4 +430,16 @@ pub(super) async fn write_response(
     socket.shutdown().await.map_err(|_| ())?;
     count.finish(Some(status.as_u16())).await;
     Ok(Outcome::Served)
+}
+
+/// Existing static backhaul compatibility; the public native gate already
+/// verified this operator credential. Delivery never authorizes a write.
+pub(super) async fn publish_legacy_notice(producer: &super::Producer, notice: serde_json::Value, header: &str) -> Result<(), ()> {
+    let bearer = header.lines().skip(1).filter_map(|line| line.split_once(':'))
+        .find(|(name,_)| name.eq_ignore_ascii_case("authorization")).map(|(_,v)| v.trim()).ok_or(())?;
+    let response = admission_client()?.post(format!("http://{}/internal/realtime", producer.upstream))
+        .header("authorization", bearer).header("x-o8d-bridge", &producer.bridge_key)
+        .header("x-o8d-peer", "127.0.0.1").timeout(Duration::from_millis(250))
+        .json(&notice).send().await.map_err(|_| ())?;
+    if response.status().is_success() { Ok(()) } else { Err(()) }
 }

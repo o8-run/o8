@@ -2,7 +2,9 @@ import { mkdtempSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Socket } from 'node:net';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => true) }));
 import { O8dProducer } from '@/lib/ws-server/o8d-producer';
 
 async function until(check: () => boolean) {
@@ -69,4 +71,19 @@ it('binds private bridge admission to the current producer epoch', async () => {
     expect(bridge.bridged(request('producer-binding-fixture-key'))).toBe(false);
     expect(bridge.bridged(request('wrong-binding-fixture-key:next-epoch'))).toBe(false);
   } finally { bridge.stop(); vi.unstubAllEnvs(); }
+});
+
+it('accepts fragmented commit metadata only after the authenticated epoch acknowledgement', async () => {
+  const root=mkdtempSync(join(tmpdir(),'o8-producer-notice-')),path=join(root,'producer.sock');
+  let peer:Socket|undefined;
+  const server=createServer(socket=>{peer=socket;socket.on('error',()=>{});socket.once('data',()=>socket.write(JSON.stringify({version:1,pid:process.pid,generation:1,epoch:'notice-epoch'})+'\n'));});
+  const producer=new O8dProducer(path,'isolated-bridge-fixture','127.0.0.1:18002','notice-epoch',()=>undefined);
+  const request={kind:'mutation',refreshTargets:['global'],mutation:{mutationId:'fixture-committed-id',source:'server',action:'prompt-library.create',status:'completed',surfaceId:'fixture-prompt-id',createdAt:'2026-11-18T00:00:00.000Z'}};
+  try {
+    await new Promise<void>(resolve=>server.listen(path,resolve));chmodSync(path,0o600);await producer.start();vi.mocked(publishRealtimeMutation).mockClear();
+    const line=JSON.stringify({version:1,kind:'native-commit',epoch:'notice-epoch',request})+'\n';
+    peer!.write(line.slice(0,17));await new Promise(r=>setTimeout(r,20));expect(publishRealtimeMutation).not.toHaveBeenCalled();
+    peer!.write(line.slice(17));await until(()=>vi.mocked(publishRealtimeMutation).mock.calls.length===1);expect(publishRealtimeMutation).toHaveBeenCalledWith(request);
+    peer!.write(JSON.stringify({version:1,kind:'native-commit',epoch:'old-epoch',request})+'\n');await until(()=>producer.status.pid===null);expect(publishRealtimeMutation).toHaveBeenCalledTimes(1);
+  } finally {producer.stop();peer?.destroy();await new Promise<void>(resolve=>server.close(()=>resolve()));rmSync(root,{recursive:true,force:true});}
 });
