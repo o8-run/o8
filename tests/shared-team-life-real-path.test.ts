@@ -180,7 +180,7 @@ describe('shared team lifecycle through delegate and persisted owned receipts', 
     const member = { ...target, runtime: 'codex', taskName: 'Completed fixture', clientMutationId: id };
     await reserveSharedCheckoutMember({ ...member, paths: ['worker.txt'] });
     await recordSharedCheckoutMember({ ...member, surfaceId, parentTurnId: 'assistant' });
-    writePersistedLlmChat(owner, { repoPath, backend: 'codex', messages: [
+    writePersistedLlmChat(owner, { repoPath, messages: [
       { id: 'assistant', role: 'assistant', content: 'Existing inspection.', backend: 'codex', model: 'fixture-model', timestamp: 1,
         receipt: { leadModel: 'fixture-model', effort: 'low', mode: 'solo', permissionMode: 'plan' } },
     ] });
