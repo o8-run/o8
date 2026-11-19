@@ -130,6 +130,9 @@ fn bind_private(path: &Path) -> std::io::Result<(UnixListener, (u64, u64))> {
 }
 
 /// Unlinks the path only while it is still the socket this instance bound.
+/// Call it before the listener closes: the open listener pins the socket's
+/// inode, so no replacement at the path can reuse its (dev, inode) meanwhile.
+/// `Window` keeps the listener in its accept thread for the launcher's life.
 fn unlink_if_bound(path: &Path, identity: (u64, u64)) {
     if std::fs::symlink_metadata(path)
         .ok()
@@ -514,12 +517,16 @@ mod tests {
     fn a_dead_private_socket_is_reclaimed_and_cleanup_spares_a_replacement() {
         let root = root();
         let path = root.join("window-control.sock");
-        // A crashed launcher leaves its socket behind; the next start reclaims it.
-        let (stale, stale_identity) = bind_private(&path).unwrap();
+        // A crashed launcher leaves its socket behind; the next start reclaims
+        // it. Closing the stale listener frees its inode, so the new socket may
+        // reuse the same inode number (Linux does): only liveness is asserted.
+        let (stale, _) = bind_private(&path).unwrap();
         drop(stale);
         let (_listener, identity) = bind_private(&path).unwrap();
-        assert_ne!(identity, stale_identity);
-        // Another owner replaced the path: cleanup leaves the replacement.
+        assert!(UnixStream::connect(&path).is_ok());
+        // Another owner replaced the path while this listener is open. The open
+        // listener pins its inode, so the replacement cannot share its identity
+        // and cleanup leaves it.
         std::fs::remove_file(&path).unwrap();
         std::fs::write(&path, b"replacement").unwrap();
         unlink_if_bound(&path, identity);
