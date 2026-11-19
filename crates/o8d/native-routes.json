@@ -456,5 +456,27 @@
     "state": "rust-with-fallback",
     "reason": "Rust owns operator session-rule lists through the native operator gate, without Node admission. Worker reads keep the original Node packet-to-thread scope check; other principals, unsupported inputs and read errors stay on Node. Mutation and correction ownership is unchanged.",
     "test": "tests/o8d-session-rule-reads-real-path.test.ts"
+  },
+  {
+    "path": "/api/mobile/diff-comment",
+    "methods": [
+      "POST"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns product diff-comment create/list against the existing SQLite table with fresh operator/device file authorization. Workers are refused. Unsupported credential forms retain request-scoped Node admission; product Node comment writers refuse. Classic handlers and Node schema/enrollment ownership remain. No comment cache or post-commit fallback.",
+    "test": "tests/o8d-diff-comments-real-path.test.ts"
+  },
+  {
+    "path": "/api/mobile/diff-comments",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns product diff-comment create/list against the existing SQLite table with fresh operator/device file authorization. Workers are refused. Unsupported credential forms retain request-scoped Node admission; product Node comment writers refuse. Classic handlers and Node schema/enrollment ownership remain. No comment cache or post-commit fallback.",
+    "test": "tests/o8d-diff-comments-real-path.test.ts"
   }
 ]

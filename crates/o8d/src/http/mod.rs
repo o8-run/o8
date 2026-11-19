@@ -5,6 +5,7 @@ mod repo_spec;
 mod git_refs;
 mod prompt_library;
 mod prompt_writes;
+mod diff_comments;
 pub(crate) mod commit_notice;
 mod session_rules;
 mod session_rule_lease;
@@ -258,6 +259,7 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
     }
 }
 fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, body: &[u8]) -> Response {
+    if diff_comments::matches(path, method) { return diff_comments::handle(store, params, method, body); }
     if path == "/api/orchestrator/session-rules" {
         if method == "GET" { return session_rules::read(store, params); }
         if matches!(method, "POST" | "DELETE") { return session_rules::write(store, params, method, body); }
@@ -385,6 +387,7 @@ pub fn native_request_viewer(directory: PathBuf, database: PathBuf, path: &str, 
     if native_route(path, method).is_none() {
         return unavailable();
     }
+    if diff_comments::matches(path, method) { return dispatch(&store,path,&params,method,body); }
     if path == "/api/mobile/inbox" { return mobile_inbox::read(&store); }
     if path == "/api/review/workspace" { return review_workspace::read(&store); }
     // A missing JSON file can still be a network thread. Its agent-bus

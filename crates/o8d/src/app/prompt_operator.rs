@@ -2,10 +2,10 @@
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path};
 use subtle::ConstantTimeEq;
-fn trim(s: &str) -> &str {
+pub(super) fn trim(s: &str) -> &str {
     s.trim_matches(|c| matches!(c,'\u{0009}'..='\u{000d}'|'\u{0020}'|'\u{00a0}'|'\u{1680}'|'\u{2000}'..='\u{200a}'|'\u{2028}'|'\u{2029}'|'\u{202f}'|'\u{205f}'|'\u{3000}'|'\u{feff}'))
 }
-fn read(path: &Path, limit: u64) -> Result<String, ()> {
+pub(super) fn read(path: &Path, limit: u64) -> Result<String, ()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};

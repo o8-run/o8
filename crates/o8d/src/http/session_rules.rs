@@ -112,13 +112,13 @@ pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
 }
 // Node binds a sliced lone surrogate as WTF-8; its SQLite reader decodes
 // each invalid UTF-8 byte to U+FFFD. Keep both the persisted bytes and response.
-fn row_text(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<String> {
+pub(super) fn row_text(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<String> {
     match row.get_ref(index)? {
         rusqlite::types::ValueRef::Text(bytes) => Ok(String::from_utf8_lossy(bytes).into_owned()),
         _ => row.get(index),
     }
 }
-fn clipped_text(text: &str) -> Vec<u8> {
+pub(super) fn clipped_text(text: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
     let mut units = 0;
     for ch in trim(text).chars() {
