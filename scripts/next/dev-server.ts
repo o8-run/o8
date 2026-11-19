@@ -75,6 +75,15 @@ async function main() {
           timestamp: 1790812800000, receipt: { permissionMode: 'plan' } }],
       }));
     }
+    // A Codex chat on a model whose route cannot take every effort tier.
+    if (process.argv.includes('--composer-codex')) {
+      seeds.push({ id: 'thoughts-composer-codex', title: 'thoughts-composer-codex', messages: [] });
+      writeFileSync(join(dataDir, 'chat-history', 'thoughts-composer-codex.json'), JSON.stringify({
+        title: 'thoughts-composer-codex', repoPath: repo, backend: 'codex', model: 'gpt-5.5', orchestratorVisible: true,
+        savedAt: '2026-10-01T00:00:00.000Z', messages: [{ id: 'initial', role: 'assistant', content: 'Fixture ready',
+          timestamp: 1790812800000, receipt: { permissionMode: 'plan' } }],
+      }));
+    }
     // A chat saved with no project, as #5503 saved them before Home.
     if (process.argv.includes('--composer-scratch')) {
       seeds.push({ id: 'thoughts-composer-scratch', title: 'Older scratch chat', messages: [] });

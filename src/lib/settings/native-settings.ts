@@ -86,9 +86,9 @@ export async function readNativeSettings(projectId: string | null = null) {
     // A direct file editor does not take our lock. Verify the read as well as
     // the later write, so values and their revision describe the same file.
     for (let attempt = 0; attempt < 3; attempt++) {
-      const before = await getOperatorDefaultsTomlState();
+      const before = await getOperatorDefaultsTomlState({ storedIntentOnly: true });
       const data = await getOperatorDefaults();
-      const after = await getOperatorDefaultsTomlState();
+      const after = await getOperatorDefaultsTomlState({ storedIntentOnly: true });
       if (before.revision === after.revision) return nativeSettingsPayload(data, after, projectId);
     }
     throw new SettingsTomlConflictError();
@@ -99,7 +99,7 @@ export async function mergeNativeSettingsToml(text: string, revision: string): P
   if (projectOperatorDefaultsToml(text).additionalSettingsSet) {
     throw new Error('This editor accepts declared settings only. Use the write-only provider controls to replace keys.');
   }
-  const state = await getOperatorDefaultsTomlState();
+  const state = await getOperatorDefaultsTomlState({ storedIntentOnly: true });
   if (state.revision !== revision) throw new SettingsTomlConflictError();
   // Replacement removes omitted declared keys, leaving defaults inherited.
   // Unknown tables (including credentials) remain only on server.

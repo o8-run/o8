@@ -832,12 +832,13 @@ export function getOperatorDefaultsSync(): OperatorDefaultsWithSources {
 
 export type { OperatorDefaultsTomlState };
 
-export async function getOperatorDefaultsTomlState(): Promise<OperatorDefaultsTomlState> {
+export async function getOperatorDefaultsTomlState(options?: { storedIntentOnly?: boolean }): Promise<OperatorDefaultsTomlState> {
   const legacyRaw = await readLegacyOperatorDefaults();
   const stored = legacyRaw ? parseStoredDefaults(legacyRaw) : {};
-  const values: OperatorDefaults = {
+  const fileValues = resolveFromFile(stored);
+  const values = options?.storedIntentOnly ? fileValues : {
     ...OPERATOR_DEFAULTS_FALLBACK,
-    ...resolveFromFile(stored),
+    ...fileValues,
   };
   return readOperatorDefaultsTomlState(values);
 }

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
@@ -32,6 +32,70 @@ const read = async () => {
   return response.json();
 };
 const post = (body: Record<string, unknown>) => fetch(origin + path, { method: 'POST', headers, body: JSON.stringify(body) });
+it.each(['high', 'xhigh'] as const)('returns to inherited effort when the editor removes its only %s setting', async effort => {
+  await save({ thinkingEffort: effort });
+  const before = await read();
+  expect(before.settingsToml.text).toContain(`thinking_effort = "${effort}"`);
+  const omitted = before.settingsToml.text.split('\n').filter((line: string) => !line.startsWith('thinking_effort = ')).join('\n');
+  expect(omitted.trim()).toBe('[models]');
+  expect((await post({ settingsToml: omitted, settingsTomlRevision: before.settingsToml.revision })).status).toBe(200);
+  expect((await read()).sources.thinkingEffort).toBe('default');
+  expect((await save({ parallelCap: 7 })).sources.thinkingEffort).toBe('default');
+});
+it('accepts tables containing only empty records as an empty declared document', async () => {
+  const before = await read();
+  expect((await post({ settingsToml: '[models]\n[unknown.branch.leaf]\n', settingsTomlRevision: before.settingsToml.revision })).status).toBe(200);
+  const after = await read();
+  expect(after.sources.thinkingEffort).toBe('default');
+  expect(after.settingsToml.additionalSettingsSet).toBe(false);
+  expect(parseOperatorDefaultsToml(readFileSync(join(directory, 'settings.toml'), 'utf8'))).toEqual({});
+});
+it.each([
+  'unknown = "opaque"\n',
+  '[unknown]\nvalue = "opaque"\n',
+  '[unknown.empty]\n[unknown.nonempty]\nvalue = "opaque"\n',
+  '[models]\nhidden = "opaque"\n',
+])('refuses editor input with undeclared values: %s', async settingsToml => {
+  const before = await save({ parallelCap: 7 });
+  const files = () => ['settings.toml', 'operator-defaults.json'].map(name => readFileSync(join(directory, name), 'utf8'));
+  const stored = files();
+  expect((await post({ settingsToml, settingsTomlRevision: before.settingsToml.revision })).status).toBe(400);
+  expect(files()).toEqual(stored);
+});
+it.each(['fresh', 'legacy-high', 'legacy-max', 'toml-high', 'toml-max'] as const)(
+  'saves displayed native editor text as stored intent for a %s profile', async profile => {
+    const explicit = profile === 'fresh' ? undefined : profile.endsWith('high') ? 'high' : 'max';
+    expect(existsSync(join(directory, 'settings.toml'))).toBe(false);
+    expect(existsSync(join(directory, 'operator-defaults.json'))).toBe(false);
+    if (profile.startsWith('legacy')) writeFileSync(join(directory, 'operator-defaults.json'), JSON.stringify({ thinkingEffort: explicit }));
+    if (profile.startsWith('toml')) writeFileSync(join(directory, 'settings.toml'), `[models]\nthinking_effort = "${explicit}"\n`);
+    const before = await read();
+    const originalIntent = explicit ? { thinkingEffort: explicit } : {};
+    const classicResponse = await fetch(origin + '/api/panel/operator-defaults?include=values', { headers });
+    expect(classicResponse.status).toBe(200);
+    const classic = await classicResponse.json();
+    expect(classic.settingsToml.revision).toBe(before.settingsToml.revision);
+    if (!profile.startsWith('toml')) {
+      expect(Object.keys(parseOperatorDefaultsToml(classic.settingsToml.text)).length).toBeGreaterThan(1);
+    }
+    // Edit exactly the returned editor text. Resolved values remain read-only.
+    const displayed = before.settingsToml.text as string;
+    const edited = /^parallel_cap\s*=/m.test(displayed)
+      ? displayed.replace(/^parallel_cap\s*=.*$/m, 'parallel_cap = 9')
+      : `${displayed}\n[operator]\nparallel_cap = 9\n`;
+    expect((await post({ settingsToml: edited, settingsTomlRevision: before.settingsToml.revision })).status).toBe(200);
+    const after = await save({ parallelCap: 7 });
+    expect(after.values.thinkingEffort).toBe(explicit ?? before.values.thinkingEffort);
+    expect(after.sources.thinkingEffort).toBe(explicit ? 'file' : 'default');
+    for (const key of ['codexWorkerEffort', 'claudeWorkerEffort']) {
+      expect(after.values[key]).toBe(before.values[key]);
+      expect(after.sources[key]).toBe('default');
+    }
+    expect(parseOperatorDefaultsToml(displayed)).toEqual(originalIntent);
+    expect(Object.keys(before.values).length).toBeGreaterThan(Object.keys(originalIntent).length);
+    expect(before.sources.thinkingEffort).toBe(explicit ? 'file' : 'default');
+    expect(parseOperatorDefaultsToml(readFileSync(join(directory, 'settings.toml'), 'utf8'))).toEqual({ ...originalIntent, parallelCap: 7 });
+  });
 it.each(['triage', 'action'] as const)('preserves hidden %s keys when native editor text omits the tier', async tier => {
   const other = tier === 'triage' ? 'action' : 'triage';
   writeFileSync(join(directory, 'settings.toml'), '[accepted_table]\nopaque = "keep-me"\n'

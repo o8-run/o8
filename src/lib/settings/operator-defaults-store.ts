@@ -198,7 +198,7 @@ export async function readLegacyOperatorDefaults(): Promise<string | null> {
 }
 
 export async function getOperatorDefaultsTomlState(
-  projection: OperatorDefaults,
+  projection: Partial<OperatorDefaults>,
 ): Promise<OperatorDefaultsTomlState> {
   const filePath = getOperatorDefaultsTomlPath();
   let raw: string | null = null;
