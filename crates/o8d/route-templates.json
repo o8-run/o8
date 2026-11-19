@@ -150,8 +150,6 @@
   "/api/orchestrator/stop-mission",
   "/api/orchestrator/stop-packet",
   "/api/orchestrator/truth",
-  "/api/orchestrator/ui-loop",
-  "/api/orchestrator/ui-loop/steer",
   "/api/orchestrator/visual-inspection",
   "/api/orchestrator/worker-corrections",
   "/api/orchestrator/workspace",
