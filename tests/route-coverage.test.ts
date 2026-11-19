@@ -278,7 +278,6 @@ const EXPLICIT_GATED = [
   /^\/api\/mcp\/?$/,
   /^\/api\/leases\/?$/,
   /^\/api\/orchestrator\/receipts\/?$/,
-  /^\/api\/orchestrator\/ui-loop(?:\/steer)?\/?$/,
   /^\/api\/broadcast\/tokens\/?$/,
   /^\/api\/broadcast\/post\/?$/,
   /^\/api\/broadcast\/say\/?$/,
