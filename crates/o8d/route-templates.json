@@ -114,7 +114,6 @@
   "/api/operator/status",
   "/api/orchestrator/archive",
   "/api/orchestrator/backend-models",
-  "/api/orchestrator/claim-unbacked",
   "/api/orchestrator/compact",
   "/api/orchestrator/comparison-diff",
   "/api/orchestrator/comparison-pick",

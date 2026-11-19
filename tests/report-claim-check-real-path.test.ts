@@ -17,7 +17,6 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync 
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -75,9 +74,9 @@ const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { judgmentKeyPath } = await import('@/lib/judgment/key');
 const { registerRuntime } = await import('@/lib/runtimes/registry');
-const { setReportClaimCheckTransportForTests, waitForReportClaimCheck } = await import('@/lib/lane/report-claim-check');
+const { setReportClaimCheckTransportForTests, waitForReportClaimCheck, readLatestClaimUnbacked } = await import('@/lib/lane/report-claim-check');
 const { codexRuntime } = await import('@/lib/runtimes/codex');
-const claimRoute = await import('@/app/api/orchestrator/claim-unbacked/route');
+const { getPacketTailBatch } = await import('@/lib/lane/packet-tail');
 
 const KEY = 'ts-fixture-key-report-claim-2447';
 const PACKET_TITLE = 'Rewrite the billing reconciler';
@@ -197,14 +196,6 @@ function writeCodexSession(threadId: string, cwd: string): void {
     'create table if not exists logs (thread_id text, process_uuid text, ts integer);',
     `insert into threads values (${sqlString(threadId)}, 'fixture', ${sqlString(cwd)}, ${Math.floor(Date.now() / 1_000)}, ${sqlString(rolloutPath)}, 'main', 'abc123', '', 'fixture task', 'fixture-model', 0);`,
   ].join(' ')]);
-}
-
-function routeRequest(laneId: string | null, principal: 'operator' | 'worker'): NextRequest {
-  const query = laneId === null ? '' : `?laneId=${encodeURIComponent(laneId)}`;
-  return new NextRequest(`http://localhost:3001/api/orchestrator/claim-unbacked${query}`, {
-    method: 'GET',
-    headers: { host: 'localhost:3001', authorization: `Bearer ${principal === 'worker' ? WORKER_TOKEN : WS_TOKEN}` },
-  });
 }
 
 async function complete(packetId: string, sessionKey: string) {
@@ -394,7 +385,7 @@ describe('claim-versus-evidence check at packet completion', () => {
     expect(sent).not.toContain(PACKET_TITLE);
   }, 30_000);
 
-  it('serves the latest unbacked claim to the operator only, through the real route handler', async () => {
+  it('keeps the latest advisory readable from lane data and the live packet-tail path', async () => {
     const unbacked = setupPacket('pkt-claim-route-unbacked', false);
     fixture.replies.push(reportReply({ claimsTestsRun: 0.94, evidenceShowsTestsRun: 0.03, claimsFilesNotInDiff: 0.06, claimsVerifiedRealPath: 0.2 }));
     await complete('pkt-claim-route-unbacked', unbacked.sessionKey);
@@ -404,20 +395,13 @@ describe('claim-versus-evidence check at packet completion', () => {
     await complete('pkt-claim-route-clean', clean.sessionKey);
     await settleCheck(clean.lane.id, 'pkt-claim-route-clean');
 
-    const worker = await claimRoute.GET(routeRequest(unbacked.lane.id, 'worker'));
-    expect(worker.status).toBe(403);
-    expect(await worker.json()).toMatchObject({ ok: false, error: { code: 'forbidden' } });
-
-    const operator = await claimRoute.GET(routeRequest(unbacked.lane.id, 'operator'));
-    expect(operator.status).toBe(200);
     const recorded = claimEvents(unbacked.lane.id)[0].payload;
-    expect((await operator.json()).result.claim).toEqual(recorded);
-
-    const operatorClean = await claimRoute.GET(routeRequest(clean.lane.id, 'operator'));
-    expect(operatorClean.status).toBe(200);
-    expect((await operatorClean.json()).result.claim).toBeNull();
-
-    const missing = await claimRoute.GET(routeRequest(null, 'operator'));
-    expect(missing.status).toBe(400);
+    expect(readLatestClaimUnbacked(unbacked.lane.id)).toEqual(recorded);
+    expect(readLatestClaimUnbacked(clean.lane.id)).toBeNull();
+    expect(readLatestClaimUnbacked('missing-lane')).toBeNull();
+    const tail = await getPacketTailBatch({ packetId: 'pkt-claim-route-unbacked', since: 0 });
+    expect(tail.events).toContainEqual(expect.objectContaining({
+      verb: 'claim_unbacked', laneId: unbacked.lane.id, payload: recorded,
+    }));
   }, 60_000);
 });
