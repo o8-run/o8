@@ -26,7 +26,7 @@ beforeAll(async () => {
     if (origin && configDir) { lines.close(); break; }
   }
   configDir = realpathSync(configDir);
-}, 60_000);
+}, 120_000); // Cold production-module imports on the shared Linux runner.
 afterAll(async () => {
   if (host?.exitCode === null) { host.kill('SIGTERM'); await once(host, 'exit'); }
 });

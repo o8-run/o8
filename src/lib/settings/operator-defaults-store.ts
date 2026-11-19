@@ -231,19 +231,25 @@ export async function persistOperatorDefaults(
   expectedRevision?: string,
 ): Promise<void> {
   if (!expectedRevision) throw new Error('A settings.toml revision is required for field updates.');
-  await writeSettingsTomlAtRevision(serializeOperatorDefaultsToml(values, existingToml), expectedRevision);
+  // Preserve stored intent, including legacy values normalized to a fallback,
+  // without materializing keys inherited only from the current defaults.
+  const explicitValues = Object.fromEntries(Object.entries(values).filter(([key]) => Object.hasOwn(stored, key)));
+  await writeSettingsTomlAtRevision(serializeOperatorDefaultsToml(explicitValues, existingToml), expectedRevision);
   await writeFileAtomic(getLegacyOperatorDefaultsPath(), `${JSON.stringify(stored, null, 2)}\n`);
 }
 
 export async function applyOperatorDefaultsTomlFile(
   raw: string,
   expectedRevision: string,
-  fallback: OperatorDefaults,
+  _fallback: OperatorDefaults,
   resolve: () => Promise<OperatorDefaultsWithSources>,
 ): Promise<OperatorDefaultsWithSources> {
   await assertSettingsTomlRevision(expectedRevision);
   const parsed = parseOperatorDefaultsToml(raw);
-  const stored: Record<string, unknown> = { ...fallback, ...parsed };
+  // The last-good backup records editor intent, just like a field save.
+  // Both readers resolve absent keys at read time; persisting fallbacks here
+  // would make the next field save treat inherited defaults as explicit.
+  const stored: Record<string, unknown> = { ...parsed };
   if (Object.prototype.hasOwnProperty.call(parsed, 'defaultDispatchRuntime')) {
     stored.defaultDispatchRuntimeExplicit = true;
   }

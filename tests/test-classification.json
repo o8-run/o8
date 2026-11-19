@@ -8133,6 +8133,14 @@
       ]
     },
     {
+      "path": "tests/settings-explicit-intent-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/settings-scope-real-path.test.ts",
       "reasons": [
         "child-process",
