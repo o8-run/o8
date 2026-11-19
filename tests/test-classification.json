@@ -7213,6 +7213,15 @@
       ]
     },
     {
+      "path": "tests/queued-route-refusal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/quiet-mode-settings-real-path.test.ts",
       "reasons": [
         "real-path"
