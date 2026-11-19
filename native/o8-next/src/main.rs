@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod launcher_owner_tests;
 mod render_region;
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;

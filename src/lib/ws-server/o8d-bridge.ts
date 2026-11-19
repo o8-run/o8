@@ -15,6 +15,7 @@ import type { RealtimeEventEnvelope } from '@/lib/realtime/types';
 import { localMachineName } from '@/lib/mobile/machine-name';
 import { nativeSessionReadsEnabled } from './native-session-reads';
 import { o8dBinaryPath } from './o8d-binary';
+import { O8dProducer } from './o8d-producer';
 
 const PIPE_LIMIT = 1024 * 1024;
 
@@ -33,13 +34,15 @@ function startupPortInfo(): string | undefined {
     // Reuse the actual TS cache, including its intentional ws-port asymmetry.
     const info = resolvePortInfo();
     if (stamp('api-port') !== apiMtimeNs || stamp('ws-port') !== wsMtimeNs) return undefined;
-    return JSON.stringify({ ...info, apiMtimeNs, wsMtimeNs, apiFrontDoor: apiFrontDoorEnabled() });
+    return JSON.stringify({ ...info, serverVersion: packageJson.version, apiMtimeNs, wsMtimeNs, apiFrontDoor: apiFrontDoorEnabled() });
   } catch { return undefined; }
 }
 
 /** TS owns authentication, checkpoints and commands; Rust owns the public socket. */
 export class O8dBridge {
-  private readonly key = randomUUID();
+  private readonly key: string;
+  private readonly producerSocket: string | undefined;
+  private producer: O8dProducer | null = null;
   private child: ChildProcess | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -60,6 +63,9 @@ export class O8dBridge {
     /** A takeover must never recover by evicting an existing API listener. */
     private readonly rejectPortConflicts = false,
   ) {
+    this.producerSocket = apiFrontDoorEnabled() ? process.env.O8D_PRODUCER_SOCKET : undefined;
+    if (this.producerSocket && !process.env.O8D_BRIDGE_KEY) throw new Error('Launcher producer credential unavailable');
+    this.key = this.producerSocket ? process.env.O8D_BRIDGE_KEY! : randomUUID();
     this.fallback = createServer((req, res) => server.emit('request', req, res));
     this.fallback.on('upgrade', (req, socket, head) => server.emit('upgrade', req, socket, head));
     // A transient bind conflict must leave recovery enabled.
@@ -72,14 +78,16 @@ export class O8dBridge {
   }
 
   get status() {
+    if (this.producer) return this.producer.status;
     return { transport: this.transport, pid: this.child?.pid ?? null, generation: this.generation };
   }
 
   /** True when o8d sent this request: only Rust holds the per-process key. */
   bridged(req: IncomingMessage): boolean {
     const supplied = req.headers['x-o8d-bridge'];
-    if (typeof supplied !== 'string' || Buffer.byteLength(supplied) !== Buffer.byteLength(this.key)) return false;
-    return timingSafeEqual(Buffer.from(supplied), Buffer.from(this.key));
+    const expected = this.producerSocket ? `${this.key}:${this.epoch}` : this.key;
+    if (typeof supplied !== 'string' || Buffer.byteLength(supplied) !== Buffer.byteLength(expected)) return false;
+    return timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
   }
 
   /** Headers from the public client are replaced by Rust, never trusted verbatim. */
@@ -109,15 +117,21 @@ export class O8dBridge {
   }
 
   async start() {
-    this.binary = o8dBinaryPath();
-    await new Promise<void>((resolve) => this.server.listen(0, '127.0.0.1', resolve));
+    if (!this.producerSocket) this.binary = o8dBinaryPath();
+    const producerPort = this.producerSocket ? Number(process.env.O8D_PRODUCER_UPSTREAM_PORT) : 0;
+    if (this.producerSocket && (!Number.isInteger(producerPort) || producerPort <= 0 || producerPort > 65535 || producerPort === this.port)) throw new Error('Private producer port unavailable');
+    await new Promise<void>((resolve) => this.server.listen(producerPort, '127.0.0.1', resolve));
     const address = this.server.address();
     if (!address || typeof address === 'string') throw new Error('o8d upstream unavailable');
     this.upstream = `127.0.0.1:${address.port}`;
-    await this.launch();
+    if (this.producerSocket) {
+      this.producer = new O8dProducer(this.producerSocket, this.key, this.upstream, this.epoch, startupPortInfo);
+      await this.producer.start();
+    } else await this.launch();
   }
 
   publish(events: RealtimeEventEnvelope[]) {
+    if (this.producer) { this.producer.publish(events); return; }
     const child = this.child;
     if (this.transport !== 'o8d' || !child?.stdin?.writable) return;
     const line = `${JSON.stringify(events)}\n`;
@@ -218,6 +232,7 @@ export class O8dBridge {
     this.stopped = true;
     if (this.retry) clearTimeout(this.retry);
     this.retry = null;
+    this.producer?.stop();
     this.child?.stdin?.end();
     if (this.fallback.listening) this.fallback.close();
   }

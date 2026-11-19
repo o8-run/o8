@@ -45,8 +45,9 @@ const BODY_LIMIT: usize = 16 * 1024 * 1024;
 pub(super) async fn serve(
     socket: &mut TcpStream,
     header: &str,
-    upstream: &str,
+    upstream: Option<&str>,
     key: &str,
+    startup_port_info: Option<&serde_json::Value>,
     count: &super::request_counts::Count,
 ) -> Result<Outcome, ()> {
     if !enabled() && std::env::var("O8D_NATIVE_OWNED").as_deref() != Ok("1") {
@@ -96,7 +97,7 @@ pub(super) async fn serve(
     if path == "/api/orchestrator/session-rules" && method == "GET" && !native_operator {
         return Ok(Outcome::Proxy);
     }
-    let (defaults_context, redaction) = if native_operator {
+    let (mut defaults_context, redaction) = if native_operator {
         let context = if method != "GET" {
             Some(serde_json::json!({"promptWriteAuthority":true}))
         } else if path == "/api/orchestrator/session-rules" {
@@ -106,6 +107,7 @@ pub(super) async fn serve(
         };
         (context, None)
     } else {
+    let Some(upstream) = upstream else { return Ok(Outcome::Proxy); };
     // Admit the original path/method/headers through production middleware and
     // the queue's in-handler gate. Never cache principal or credential decisions.
     let mut request = admission_client()?.request(
@@ -182,6 +184,11 @@ pub(super) async fn serve(
     };
         (defaults_context, redaction)
     };
+    if let Some(snapshot) = startup_port_info.filter(|_| matches!(path, "/api/panel/ws-info" | "/api/setup/identity")) {
+        let context = defaults_context.get_or_insert_with(|| serde_json::json!({}));
+        let Some(context) = context.as_object_mut() else { return Ok(Outcome::Proxy); };
+        context.insert("nativeStartupPortInfo".into(), snapshot.clone());
+    }
     // Only after admission consume bytes. A refusal never gets native access.
     socket
         .read_exact(&mut vec![0; header.len()])
@@ -219,9 +226,11 @@ pub(super) async fn serve(
     let response = if path_for_completion(target) && response.headers().contains_key("x-o8d-directives-timing") {
         // After a receipt may have committed, never replay and double-record it.
         // A backhaul transport failure ends this request; retries are fresh GETs.
+        let Some(upstream) = upstream else { return Ok(Outcome::Replay(replay)); };
         complete_directives(target, header, upstream, key, response).await?
     } else { response };
     let response = if thread_list && response.headers().contains_key("x-o8d-thread-pieces") {
+        let Some(upstream) = upstream else { return Ok(Outcome::Replay(replay)); };
         match compose_threads(target, header, upstream, key, response).await {
             Ok(response) => response,
             Err(()) => return Ok(Outcome::Replay(replay)),

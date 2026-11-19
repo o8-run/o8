@@ -3945,6 +3945,16 @@
       ]
     },
     {
+      "path": "tests/launcher-o8d-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lead-background-agents-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5737,6 +5747,14 @@
     {
       "path": "tests/o8d-pr-context-say-native-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-producer-attachment-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "network-listener",
         "real-path"
       ]
     },
