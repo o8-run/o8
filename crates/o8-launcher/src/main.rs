@@ -401,6 +401,8 @@ fn schedule_restart(config: &Config, server: &mut Server) -> Result<(), String> 
     server.retry_at = Some(Instant::now() + delay);
     Ok(())
 }
+/// How often a start that passed its health window is probed again.
+const LATE_PROBE_INTERVAL: Duration = Duration::from_secs(1);
 /// How long a start may take before the launcher reports it. Debug builds let
 /// the late-readiness test shorten it.
 fn health_window() -> Duration {
@@ -858,6 +860,7 @@ fn serve(
     let mut pending_show = false;
     let mut window_failed = false;
     let mut late = false;
+    let mut next_probe: Option<Instant> = None;
     let mut credential_deadline: Option<Instant> = None;
     let mut launch: Option<std::sync::mpsc::Receiver<Result<(), String>>> = None;
     let outcome = (|| -> Result<(), String> {
@@ -990,6 +993,7 @@ fn serve(
                                 launch = None;
                                 deadline = Instant::now() + health_window();
                                 late = false;
+                                next_probe = None;
                             }
                         }
                         Err(_) => schedule_restart(config, server)?,
@@ -1034,21 +1038,30 @@ fn serve(
                 window_failed = false;
                 deadline = Instant::now() + health_window();
                 late = false;
+                next_probe = None;
             }
             if voice_only {
                 pending_show = false;
             }
             if !voice_only && launch.is_none() && !window_failed {
                 if !opened {
-                    let healthy = client
-                        .get(format!(
-                            "http://127.0.0.1:{}/api/setup/identity",
-                            config.api_port
-                        ))
-                        .send()
-                        .ok()
-                        .and_then(|r| r.json::<serde_json::Value>().ok())
-                        .is_some_and(|v| v["bootId"].as_str() == Some(&boot));
+                    // After a reported slow start, probe once a second so a fast
+                    // foreign-boot or error reply does not loop at the 25 ms tick.
+                    let now = Instant::now();
+                    let probe = !late || next_probe.is_none_or(|at| now >= at);
+                    if late && probe {
+                        next_probe = Some(now + LATE_PROBE_INTERVAL);
+                    }
+                    let healthy = probe
+                        && client
+                            .get(format!(
+                                "http://127.0.0.1:{}/api/setup/identity",
+                                config.api_port
+                            ))
+                            .send()
+                            .ok()
+                            .and_then(|r| r.json::<serde_json::Value>().ok())
+                            .is_some_and(|v| v["bootId"].as_str() == Some(&boot));
                     // On a first start the API answers before the WS server has
                     // written the window credential. Give it a few seconds, then
                     // fail the start as before.
@@ -1112,6 +1125,7 @@ fn serve(
                         opened = false;
                         deadline = Instant::now() + health_window();
                         late = false;
+                        next_probe = None;
                     }
                     pending_show = false;
                 }

@@ -299,8 +299,8 @@ fn next_off_window_quit_stops_this_launcher_and_no_other_instance() {
 }
 
 /// A populated profile can keep WS starting past the health window. The launcher
-/// reports the slow start once and keeps waiting, so the window opens when WS
-/// becomes healthy without a second Show.
+/// reports the slow start once and keeps probing at a slower rate, so the window
+/// opens when WS becomes healthy without a second Show.
 #[test]
 fn next_off_window_opens_when_ws_becomes_healthy_after_the_health_window() {
     let mut f = Fixture::new();
@@ -314,6 +314,13 @@ fn next_off_window_opens_when_ws_becomes_healthy_after_the_health_window() {
     let reported = f.log("dialog-reached");
     assert!(reported.contains("Server did not become healthy"));
     assert!(!f.root.join("window-ready").exists());
+    // Past the window, a fast foreign-boot reply is probed about once a second,
+    // not on every 25 ms supervisor tick.
+    fs::write(f.root.join("count-identity"), "1").unwrap();
+    std::thread::sleep(Duration::from_millis(2500));
+    fs::remove_file(f.root.join("count-identity")).unwrap();
+    let probes = f.log("identity-gets").lines().count();
+    assert!((1..=4).contains(&probes), "{probes} identity probes in 2.5 s");
     fs::remove_file(f.root.join("wrong-boot")).unwrap();
     f.ready();
     assert_eq!(f.starts("window-starts").len(), 1, "one window");
