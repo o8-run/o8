@@ -2646,6 +2646,13 @@
       ]
     },
     {
+      "path": "tests/composer-http-body-limit-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/composer-image-operator-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -5486,6 +5493,15 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-composer-admission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "process-signal",
         "real-path"
       ]
     },

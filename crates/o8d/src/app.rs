@@ -19,6 +19,8 @@ use tokio_tungstenite::{
 };
 
 mod input;
+#[cfg(feature = "experimental-session-reads")]
+mod composer_queue;
 mod native_global;
 #[cfg(unix)]
 pub mod producer;
@@ -29,6 +31,7 @@ pub struct Producer {
     pub bus: Arc<EventBus>,
     pub startup_port_info: Option<Value>,
     pub generation: u64,
+    pub composer_queue_epoch: Option<String>,
     pub notices: Option<tokio::sync::mpsc::Sender<String>>,
 }
 pub type Selection = tokio::sync::watch::Receiver<Option<Arc<Producer>>>;
@@ -53,6 +56,7 @@ pub async fn serve(
         bus,
         startup_port_info: None,
         generation: 0,
+        composer_queue_epoch: None,
         notices: None,
     })));
     serve_producers(listener, key, selection, shutdown, native_global::NativeGlobal::new()).await
@@ -183,7 +187,9 @@ async fn connection(
             }
         }
         #[cfg(feature = "experimental-session-reads")]
-        let replay = match native::serve(
+        let queue_result=composer_queue::serve_http(&mut socket,header,&count,&global,&selection).await?;
+        #[cfg(feature = "experimental-session-reads")]
+        let replay = match if let Some(result)=queue_result {result}else{native::serve(
             &mut socket,
             header,
             upstream,
@@ -193,7 +199,7 @@ async fn connection(
             &global,
             &selection,
         )
-        .await?
+        .await?}
         {
             native::Outcome::Served => return Ok(()),
             native::Outcome::Replay(body) => Some(body),

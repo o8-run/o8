@@ -32,7 +32,7 @@ fn capability(payload: &Value) -> Result<&str, ()> {
         backend
     })
 }
-fn images(payload: &Value) -> Result<Vec<Value>, ()> {
+pub(super) fn images(payload: &Value) -> Result<Vec<Value>, ()> {
     let Some(media) = payload.get("deliveredMedia").filter(|v| !v.is_null()) else {
         return Ok(Vec::new());
     };

@@ -7,15 +7,31 @@ pub(super) const EPOCH_PREFIX: &str = "o8d-native:";
 pub(super) struct NativeGlobal {
     bus: EventBus,
     #[cfg(feature = "experimental-session-reads")]
+    pub(super) composer_queue: Option<Arc<crate::http::composer_queue_owner::Owner>>,
+    #[cfg(feature = "experimental-session-reads")]
     sequence: tokio::sync::Mutex<u64>,
 }
 impl NativeGlobal {
     pub(super) fn new() -> Arc<Self> {
+        #[cfg(feature = "experimental-session-reads")]
+        let composer_queue=if std::env::var_os("O8D_SESSION_DATA_DIR").is_some() {
+            match crate::http::composer_queue_owner::Owner::configured() {
+                Ok(owner)=>Some(Arc::new(owner)),
+                Err(_)=>{eprintln!("[o8d] composer queue initialization unavailable");None},
+            }
+        }else{None};
         Arc::new(Self {
+            #[cfg(feature = "experimental-session-reads")]
+            composer_queue,
             bus: EventBus::new(format!("{EPOCH_PREFIX}{}", uuid::Uuid::new_v4()), 400),
             #[cfg(feature = "experimental-session-reads")]
             sequence: tokio::sync::Mutex::new(0),
         })
+    }
+
+    #[cfg(all(test,feature="experimental-session-reads"))]
+    pub(super) fn with_composer(owner:Arc<crate::http::composer_queue_owner::Owner>)->Arc<Self> {
+        Arc::new(Self{bus:EventBus::new(format!("{EPOCH_PREFIX}{}",uuid::Uuid::new_v4()),400),sequence:tokio::sync::Mutex::new(0),composer_queue:Some(owner)})
     }
 
     #[cfg(feature = "experimental-session-reads")]
