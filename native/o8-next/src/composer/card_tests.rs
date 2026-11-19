@@ -12,6 +12,8 @@ mod prompt_acceptance_tests;
 mod prompt_persistence_tests;
 #[path = "prompt_tests.rs"]
 mod prompt_tests;
+#[path = "effort_acceptance_tests.rs"]
+mod effort_acceptance_tests;
 #[path = "shell_persist_tests.rs"]
 mod shell_persist_tests;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
@@ -39,6 +41,13 @@ impl Fixture {
         Self::with_loaded(false)
     }
     fn with_loaded(loaded: bool) -> Self {
+        Self::with_args(if loaded {
+            &["--composer-loaded"]
+        } else {
+            &[]
+        })
+    }
+    fn with_args(extra: &[&str]) -> Self {
         let mut server = Command::new("node")
             .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .args([
@@ -51,11 +60,7 @@ impl Fixture {
                 "--settings",
                 "--composer-controls",
             ])
-            .args(if loaded {
-                vec!["--composer-loaded"]
-            } else {
-                vec![]
-            })
+            .args(extra)
             .env("O8_NEXT_API_TOKEN", "fixture-composer-card")
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
