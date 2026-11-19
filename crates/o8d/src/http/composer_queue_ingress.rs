@@ -133,15 +133,16 @@ mod tests {
     use super::*;
     #[test]
     fn mixed_case_prefix_is_bounded_and_round_trips_without_duplicate_image_bytes() {
-        let wire = r#"{"attachments":[{"dataUri":"DATA:image/PNG;Base64,YQ=="}]}"#;
-        let images = json!([{"dataUri":"data:image/png;base64,YQ=="}]);
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/composer-queue-v1.12-vectors.json"
+        ))
+        .unwrap();
+        let wire = fixture["wireJson"].as_str().unwrap();
+        let images = json!([{"dataUri":fixture["canonicalDataUri"]}]);
         let saved = compact(wire, &images).unwrap();
         let parsed: Value = serde_json::from_str(&saved.json).unwrap();
-        assert_eq!(
-            parsed["attachments"][0]["dataUri"],
-            json!({"payloadImageIndex":0,"dataUriPrefix":"DATA:image/PNG;Base64,"})
-        );
-        assert_eq!(saved.hash, format!("{:x}", Sha256::digest(wire.as_bytes())));
+        assert_eq!(parsed, fixture["ingressJsonValue"]);
+        assert_eq!(saved.hash, fixture["ingressHash"]);
         assert!(!saved.json.contains("YQ=="));
         assert_eq!(
             rebuild(&saved.json, &images).unwrap(),

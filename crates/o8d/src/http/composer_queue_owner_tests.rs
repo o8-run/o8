@@ -200,5 +200,31 @@ fn retry_keeps_unsaved_target_after_history_appears_and_rejects_changed_wire() {
             f.owner.execute("enqueue", &input).err().unwrap().code,
             "conflict"
         );
+        let claim = f
+            .owner
+            .execute("claim", &json!({"id":id,"intent":"ingress"}))
+            .unwrap();
+        assert_eq!(claim.result["ingress"]["kind"], "ws");
+        assert_eq!(
+            claim.result["ingress"]["clientMutationId"],
+            "fixture-mutation"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(claim.result["ingress"]["wireJson"].as_str().unwrap())
+                .unwrap(),
+            serde_json::from_str::<Value>(&wire).unwrap()
+        );
     }
+}
+
+#[test]
+fn empty_claim_has_an_explicit_private_null_token() {
+    let f = Fixture::new();
+    assert_eq!(
+        f.owner
+            .execute("claim", &json!({"target":f.target,"intent":"send-next"}))
+            .unwrap()
+            .result,
+        json!({"item":null,"claimToken":null})
+    );
 }

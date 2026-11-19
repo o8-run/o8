@@ -280,12 +280,12 @@ impl Owner {
                     _ => return Err(QueueError::invalid("Invalid composer queue claim.")),
                 };
                 match claim {
-                    None => json!({"item":null}),
+                    None => json!({"item":null,"claimToken":null}),
                     Some(claim) => {
                         record_notice(&claim.item);
                         let mut answer = json!({"item":claim.item,"claimToken":claim.token});
                         if let Some(ingress) = claim.ingress {
-                            answer["ingress"] = ingress;
+                            answer["ingress"] = json!({"kind":"ws","clientMutationId":ingress["clientMutationId"],"wireJson":ingress.to_string()});
                         }
                         answer
                     }
