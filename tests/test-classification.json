@@ -668,6 +668,12 @@
       ]
     },
     {
+      "path": "src/lib/next/app-window-launcher.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/auto-compact-excerpt.test.ts",
       "reasons": [
         "executable-fixture"

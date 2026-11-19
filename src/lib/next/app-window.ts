@@ -3,6 +3,7 @@ import { renameSync } from 'node:fs';
 import type { ChildProcess } from '@/lib/providers/child-process';
 import { access, constants, rename, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
+import { EventEmitter } from 'node:events';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { getApiBase } from '@/lib/panel/api-port';
@@ -44,6 +45,8 @@ function waitForStartup(child: ChildProcess): Promise<void> {
 type WindowState = { child?: ChildProcess; error: string | null; queue: Promise<unknown>; cleanup?: boolean };
 /** Set by the packaged macOS shell: o8 next is the main window, not a Settings switch. */
 const isMainWindow = () => process.env.O8_NEXT_MAIN_WINDOW === '1';
+/** With Next off, the launcher owns the window and this process only attaches to its control (#6529). */
+const launcherControl = () => process.env.O8_NEXT_WINDOW_CONTROL;
 const runtime = globalThis as typeof globalThis & { __o8NativeWindow?: WindowState };
 const state = runtime.__o8NativeWindow ??= { error: null, queue: Promise.resolve() };
 
@@ -115,6 +118,8 @@ async function start(startupResult?: string): Promise<void> {
 }
 
 async function apply(enabled: boolean, startupResult?: string): Promise<void> {
+  // The launcher starts, focuses and closes its window; a server restart never does.
+  if (launcherControl()) { state.error = null; return; }
   try {
     if (enabled) await start(startupResult); else await stop();
     state.error = null;
@@ -149,6 +154,8 @@ export function setNextWindowEnabled(enabled: boolean): Promise<void> {
 
 /** Called only by packaged server startup; false never reads the bearer or binary. */
 export async function restoreNextWindow(): Promise<void> {
+  const control = launcherControl();
+  if (control) { attachLauncherWindow(control, process.env.O8_NEXT_WINDOW_CONTROL_KEY ?? ''); return; }
   const result = process.platform === 'linux' && isMainWindow() ? process.env.O8_NEXT_STARTUP_RESULT : undefined;
   await serialized(async () => {
     // The shell gives the window binary only to the process that owns the
@@ -167,4 +174,29 @@ export async function restoreNextWindow(): Promise<void> {
     await writeFile(`${result}.tmp`, JSON.stringify({ status }), { mode: 0o600 })
       .then(() => rename(`${result}.tmp`, result)).catch(() => {});
   }
+}
+
+/**
+ * Browser control for the launcher-owned window, over the launcher's private socket.
+ * The socket stands in for the child pipe: lines in reach the window's stdin, result
+ * lines come back. Its close ends pending requests exactly as a window exit did.
+ */
+function attachLauncherWindow(path: string, key: string): void {
+  if (!isAbsolute(path) || !key) return;
+  void import('node:net').then(({ createConnection }) => {
+    const socket = createConnection(path);
+    // Written before any frame; a stream keeps write order across the connect.
+    socket.write(`${key}\n`);
+    const window = Object.assign(new EventEmitter(), {
+      stdin: socket, stdout: socket, pid: undefined, exitCode: null as number | null, signalCode: null,
+    });
+    socket.on('error', () => {});
+    socket.once('close', () => {
+      window.exitCode = 0;
+      window.emit('exit', 0, null);
+      // The launcher outlives this process; a lost attachment is retried.
+      setTimeout(() => attachLauncherWindow(path, key), 1_000).unref?.();
+    });
+    bindNextBrowserPipe(window as unknown as ChildProcess);
+  }).catch(() => {});
 }

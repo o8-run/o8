@@ -63,6 +63,18 @@ fn next_off_runs_with_native_owner_and_ws_and_stays_up() {
     // WS runs Next's startup work when Next is off.
     assert_eq!(ws["O8_NEXT_OFF"], "1");
     assert_eq!(ws["O8_NEXT_WINDOW_OWNER"], "ws");
+    // The launcher owns the window (#6529); WS only attaches to its control.
+    assert_eq!(ws["O8_NEXT_BIN"], serde_json::Value::Null);
+    let socket = f.root.join("window-control.sock");
+    assert_eq!(
+        ws["O8_NEXT_WINDOW_CONTROL"],
+        socket.to_string_lossy().as_ref()
+    );
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        fs::metadata(&socket).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     let origin = ws["NEXT_ORIGIN"].as_str().unwrap().to_owned();
     let private: u16 = origin.rsplit(':').next().unwrap().parse().unwrap();
     assert_ne!(private, f.port("api-port"));
@@ -100,4 +112,95 @@ fn exhausted_producer_budget_presents_degraded_mode_and_keeps_owner_alive() {
     assert_eq!(env(&f, "launcher-o8d.json")["pid"], owner);
     assert_eq!(f.starts("ws-starts").len(), 4);
     f.stop();
+}
+
+/// #6529: with Next off, the window outlives a WS restart, and each WS
+/// generation reattaches to its browser control through the launcher.
+#[test]
+fn next_off_window_survives_a_ws_restart_and_keeps_browser_control() {
+    let mut f = Fixture::new();
+    f.start_with(&[("O8_API_FRONT_DOOR", "1"), ("O8_NEXT_OFF", "1")]);
+    f.ready();
+    until(|| f.log("browser-results").lines().count() == 1);
+    let window = f.starts("window-starts");
+    assert_eq!(window.len(), 1);
+    let window = window[0];
+    let first: serde_json::Value = serde_json::from_str(
+        f.log("browser-results")
+            .lines()
+            .next()
+            .unwrap()
+            .strip_prefix("o8-next-browser-result:")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(first["result"]["window"], window);
+    let ws = f.starts("ws-starts")[0];
+    unsafe {
+        libc::kill(ws as i32, libc::SIGKILL);
+    }
+    until(|| f.starts("ws-starts").len() == 2);
+    until(|| f.log("browser-results").lines().count() == 2);
+    let second: serde_json::Value = serde_json::from_str(
+        f.log("browser-results")
+            .lines()
+            .nth(1)
+            .unwrap()
+            .strip_prefix("o8-next-browser-result:")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(second["id"], f.starts("ws-starts")[1].to_string());
+    assert_eq!(second["result"]["window"], window);
+    // Same window process, never relaunched.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(f.starts("window-starts"), vec![window]);
+    assert!(!gone(window));
+    // The window reaches the public port with the operator credential and no
+    // server environment.
+    let env = env(&f, "window-env");
+    assert_eq!(env["O8_NEXT_API_TOKEN"], "fixture-token");
+    assert_eq!(env["O8_NEXT_PARENT_PIPE"], "1");
+    assert_eq!(env["O8_DATA_DIR"], serde_json::Value::Null);
+    let args: Vec<String> =
+        serde_json::from_slice(&fs::read(f.root.join("window-args")).unwrap()).unwrap();
+    let api = f.port("api-port");
+    assert_eq!(
+        args[..4],
+        [
+            "--enable-next",
+            "--app-shell",
+            "--server",
+            &format!("http://127.0.0.1:{api}")
+        ]
+    );
+    // Quit closes the lifeline and the window exits with the launcher.
+    f.stop();
+    until(|| gone(window));
+}
+
+/// A launcher-owned window is focused as the launcher's child, and a closed one
+/// opens again on Show, as it did when the public server owned it.
+#[test]
+fn next_off_show_focuses_the_launcher_window_and_reopens_a_closed_one() {
+    let mut f = Fixture::new();
+    f.start_with(&[("O8_API_FRONT_DOOR", "1"), ("O8_NEXT_OFF", "1")]);
+    f.ready();
+    let launcher = f.launcher.as_ref().unwrap().id();
+    let window = f.starts("window-starts")[0];
+    assert_eq!(control(&f, serde_json::json!({"op": "show"}))["ok"], true);
+    until(|| f.log("focus-shows").lines().count() == 1);
+    assert_eq!(f.log("focus-shows").trim(), launcher.to_string());
+    assert_eq!(f.starts("window-starts"), vec![window]);
+    unsafe {
+        libc::kill(window as i32, libc::SIGKILL);
+    }
+    until(|| gone(window));
+    assert_eq!(control(&f, serde_json::json!({"op": "show"}))["ok"], true);
+    until(|| f.starts("window-starts").len() == 2);
+    // No server was asked to open a window.
+    assert!(!f.root.join("shows").exists());
+    let reopened = f.starts("window-starts")[1];
+    f.stop();
+    until(|| gone(reopened));
 }
