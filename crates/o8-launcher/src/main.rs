@@ -401,6 +401,15 @@ fn schedule_restart(config: &Config, server: &mut Server) -> Result<(), String> 
     server.retry_at = Some(Instant::now() + delay);
     Ok(())
 }
+/// How long a start may take before the launcher reports it. Debug builds let
+/// the late-readiness test shorten it.
+fn health_window() -> Duration {
+    let fixture = cfg!(debug_assertions)
+        .then(|| std::env::var("O8_LAUNCHER_HEALTH_WINDOW_MS").ok())
+        .flatten()
+        .and_then(|ms| ms.parse().ok());
+    Duration::from_millis(fixture.unwrap_or(90_000))
+}
 /// Debug-build crash injection for the real-entry recovery tests.
 fn fault(point: &str, script: &str) {
     if cfg!(debug_assertions)
@@ -842,7 +851,7 @@ fn serve(
         .timeout(Duration::from_millis(500))
         .build()
         .map_err(|_| "Health client unavailable")?;
-    let mut deadline = Instant::now() + Duration::from_secs(90);
+    let mut deadline = Instant::now() + health_window();
     let mut voice_only =
         o8_launch_core::server_env::voice_only(std::env::var("O8_VOICE_ONLY").ok().as_deref());
     let mut opened = false;
@@ -978,7 +987,7 @@ fn serve(
                                 opened = false;
                                 window_failed = false;
                                 launch = None;
-                                deadline = Instant::now() + Duration::from_secs(90);
+                                deadline = Instant::now() + health_window();
                             }
                         }
                         Err(_) => schedule_restart(config, server)?,
@@ -1021,7 +1030,7 @@ fn serve(
             }
             if pending_show && window_failed {
                 window_failed = false;
-                deadline = Instant::now() + Duration::from_secs(90);
+                deadline = Instant::now() + health_window();
             }
             if voice_only {
                 pending_show = false;
@@ -1095,7 +1104,7 @@ fn serve(
                     };
                     if !focused {
                         opened = false;
-                        deadline = Instant::now() + Duration::from_secs(90);
+                        deadline = Instant::now() + health_window();
                     }
                     pending_show = false;
                 }

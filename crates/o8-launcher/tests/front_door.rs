@@ -297,3 +297,26 @@ fn next_off_window_quit_stops_this_launcher_and_no_other_instance() {
     other.stop();
     until(|| gone(other_window));
 }
+
+/// A populated profile can keep WS starting past the health window. The launcher
+/// reports the slow start once and keeps waiting, so the window opens when WS
+/// becomes healthy without a second Show.
+#[test]
+fn next_off_window_opens_when_ws_becomes_healthy_after_the_health_window() {
+    let mut f = Fixture::new();
+    fs::write(f.root.join("wrong-boot"), "1").unwrap();
+    f.start_with(&[
+        ("O8_API_FRONT_DOOR", "1"),
+        ("O8_NEXT_OFF", "1"),
+        ("O8_LAUNCHER_HEALTH_WINDOW_MS", "500"),
+    ]);
+    until(|| f.root.join("dialog-reached").exists());
+    let reported = f.log("dialog-reached");
+    assert!(reported.contains("Server did not become healthy"));
+    assert!(!f.root.join("window-ready").exists());
+    fs::remove_file(f.root.join("wrong-boot")).unwrap();
+    f.ready();
+    assert_eq!(f.starts("window-starts").len(), 1, "one window");
+    assert!(f.running());
+    f.stop();
+}
