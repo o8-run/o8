@@ -100,10 +100,8 @@ it('runs the direct Codex fallback in WS', async () => {
 it('routes the UI-loop caller to WS', async () => {
   const f = await fixture('design-mode'); flag('steer-busy');
   (await import('@/lib/orchestrator/ui-loop')).setUiLoopSettleTimeoutForTest(20);
-  const ui = await import('@/app/api/orchestrator/ui-loop/steer/route');
-  const response = await ui.POST(request('/api/orchestrator/ui-loop/steer', { repo, text: 'Edit the button' }));
-  expect(response.status, await response.clone().text()).toBe(200);
-  expect((await response.json()).result.kind).toBe('steered');
+  const { steerWarmUiLoop } = await import('@/lib/orchestrator/ui-loop');
+  expect(await steerWarmUiLoop({ repoPath: repo, text: 'Edit the button' })).toMatchObject({ kind: 'steered' });
   expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(0);
   flag('steer-busy', false);
   await fetch(origin + '/api/orchestrator/headless-tick', { method: 'POST', headers: { authorization: `Bearer ${server.token}` } });

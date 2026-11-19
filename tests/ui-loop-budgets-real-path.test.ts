@@ -2,7 +2,6 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
-import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -20,7 +19,6 @@ const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-ui-loop-budgets-'));
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
-const steerRoute = await import('@/app/api/orchestrator/ui-loop/steer/route');
 const { closeDb } = await import('@/lib/db');
 const { reportAgentEvent } = await import('@/lib/lane/agent-report');
 const { createLane, deleteLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
@@ -31,7 +29,7 @@ const {
   writeOrchestratorControlPlaneState,
 } = await import('@/lib/orchestrator/control-plane');
 const { resetPacketFields } = await import('@/lib/orchestrator/operator-mission-service/rerun-with-feedback');
-const { setUiLoopSettleTimeoutForTest } = await import('@/lib/orchestrator/ui-loop');
+const { steerWarmUiLoop, setUiLoopSettleTimeoutForTest } = await import('@/lib/orchestrator/ui-loop');
 const {
   createEmptyOrchestratorMissionState,
   normalizeOrchestratorMissionState,
@@ -112,18 +110,8 @@ function createWarmLane(packet: OrchestratorPacket, attachWorktree = true) {
   return lane;
 }
 
-function postRequest(repoPath: string, text: string) {
-  return new NextRequest('http://localhost:3001/api/orchestrator/ui-loop/steer', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ repo: repoPath, text }),
-  });
-}
-
-async function postJson(repoPath: string, text: string) {
-  const response = await steerRoute.POST(postRequest(repoPath, text));
-  expect(response.status).toBe(200);
-  return response.json() as Promise<{ ok: true; result: Record<string, unknown> }>;
+function steer(repoPath: string, text: string) {
+  return steerWarmUiLoop({ repoPath, text });
 }
 
 function completedRuntimeAction(input: { surfaceId: string }) {
@@ -182,21 +170,18 @@ describe('UI loop single-writer lease and budgets real path', () => {
       }))
       .mockImplementation(async (input: { surfaceId: string }) => completedRuntimeAction(input));
 
-    const firstResponse = steerRoute.POST(postRequest(repoPath, 'first edit'));
+    const firstResponse = steer(repoPath, 'first edit');
     await vi.waitFor(() => expect(h.perform).toHaveBeenCalledTimes(1));
-    const second = await postJson(repoPath, 'second edit');
-    const third = await postJson(repoPath, 'third edit');
-    const fourth = await postJson(repoPath, 'fourth edit');
-    expect(second.result).toMatchObject({ queued: true, position: 1 });
-    expect(third.result).toMatchObject({ queued: true, position: 2 });
-    expect(fourth.result).toMatchObject({ rejected: 'queue_full' });
+    const second = await steer(repoPath, 'second edit');
+    const third = await steer(repoPath, 'third edit');
+    const fourth = await steer(repoPath, 'fourth edit');
+    expect(second).toMatchObject({ queued: true, position: 1 });
+    expect(third).toMatchObject({ queued: true, position: 2 });
+    expect(fourth).toMatchObject({ rejected: 'queue_full' });
     expect(h.perform).toHaveBeenCalledTimes(1);
 
     resolveFirst();
-    await expect((await firstResponse).json()).resolves.toMatchObject({
-      ok: true,
-      result: { kind: 'steered' },
-    });
+    await expect(firstResponse).resolves.toMatchObject({ kind: 'steered' });
     reportAgentEvent({ laneId: lane.id, event: 'progress', message: 'first settled' });
     await vi.waitFor(() => expect(h.perform).toHaveBeenCalledTimes(2));
     expect(h.perform.mock.calls[1]?.[0]?.message).toContain('second edit');
@@ -214,11 +199,11 @@ describe('UI loop single-writer lease and budgets real path', () => {
     const lane = createWarmLane(packet);
     setUiLoopSettleTimeoutForTest(300);
 
-    await expect(postJson(repoPath, 'silent first edit')).resolves.toMatchObject({
-      result: { kind: 'steered' },
+    await expect(steer(repoPath, 'silent first edit')).resolves.toMatchObject({
+      kind: 'steered',
     });
-    const second = await postJson(repoPath, 'promoted second edit');
-    expect(second.result).toMatchObject({ queued: true, position: 1 });
+    const second = await steer(repoPath, 'promoted second edit');
+    expect(second).toMatchObject({ queued: true, position: 1 });
     expect(h.perform).toHaveBeenCalledTimes(1);
 
     await vi.waitFor(() => expect(h.perform).toHaveBeenCalledTimes(2), { timeout: 2_000 });
@@ -243,13 +228,13 @@ describe('UI loop single-writer lease and budgets real path', () => {
     persistPacket(packet);
     const lane = createWarmLane(packet);
 
-    await expect(postJson(repoPath, 'iteration one')).resolves.toMatchObject({ result: { kind: 'steered' } });
+    await expect(steer(repoPath, 'iteration one')).resolves.toMatchObject({ kind: 'steered' });
     await settleTurn(lane.id, repoPath);
-    await expect(postJson(repoPath, 'iteration two')).resolves.toMatchObject({ result: { kind: 'steered' } });
+    await expect(steer(repoPath, 'iteration two')).resolves.toMatchObject({ kind: 'steered' });
     await settleTurn(lane.id, repoPath);
-    const blocked = await postJson(repoPath, 'iteration three');
+    const blocked = await steer(repoPath, 'iteration three');
 
-    expect(blocked.result).toMatchObject({
+    expect(blocked).toMatchObject({
       blocked: 'iterations',
       values: {
         iterations: 2,
@@ -303,9 +288,10 @@ describe('UI loop single-writer lease and budgets real path', () => {
     persistPacket(packet);
     const lane = createWarmLane(packet);
 
-    const blocked = await postJson(repoPath, 'late edit');
-    expect(blocked.result).toMatchObject({ blocked: 'time' });
-    expect((blocked.result.values as { elapsedMs: number }).elapsedMs).toBeGreaterThanOrEqual(60_000);
+    const blocked = await steer(repoPath, 'late edit');
+    expect(blocked).toMatchObject({ blocked: 'time' });
+    if (!('values' in blocked)) throw new Error('Expected a budget refusal');
+    expect((blocked.values as { elapsedMs: number }).elapsedMs).toBeGreaterThanOrEqual(60_000);
     expect(getLane(lane.id)?.status).toBe('awaiting_human');
     expect(h.perform).not.toHaveBeenCalled();
   });
@@ -318,10 +304,11 @@ describe('UI loop single-writer lease and budgets real path', () => {
     const lane = createWarmLane(packet);
     writeFileSync(join(repoPath, 'README.md'), `changed\n${'x'.repeat(512)}\n`);
 
-    const blocked = await postJson(repoPath, 'large diff edit');
-    expect(blocked.result).toMatchObject({ blocked: 'diff_bytes' });
-    expect(blocked.result.values).toMatchObject({ diffMeasured: true });
-    expect((blocked.result.values as { diffBytes: number }).diffBytes).toBeGreaterThan(64);
+    const blocked = await steer(repoPath, 'large diff edit');
+    expect(blocked).toMatchObject({ blocked: 'diff_bytes' });
+    if (!('values' in blocked)) throw new Error('Expected a budget refusal');
+    expect(blocked.values).toMatchObject({ diffMeasured: true });
+    expect((blocked.values as { diffBytes: number }).diffBytes).toBeGreaterThan(64);
     expect(getLane(lane.id)?.status).toBe('awaiting_human');
     expect(h.perform).not.toHaveBeenCalled();
   });
@@ -334,8 +321,8 @@ describe('UI loop single-writer lease and budgets real path', () => {
     const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
 
     try {
-      await expect(postJson(repoPath, 'unmeasured diff edit')).resolves.toMatchObject({
-        result: { kind: 'steered' },
+      await expect(steer(repoPath, 'unmeasured diff edit')).resolves.toMatchObject({
+        kind: 'steered',
       });
       expect(debug).toHaveBeenCalledWith(
         '[ui-loop] Diff unavailable; treating the diff budget as unmeasured.',

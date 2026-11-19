@@ -8798,6 +8798,13 @@
       ]
     },
     {
+      "path": "tests/ui-loop-http-retirement-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ui-loop-preview-real-path.test.ts",
       "reasons": [
         "network-listener",

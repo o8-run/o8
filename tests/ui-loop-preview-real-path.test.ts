@@ -18,6 +18,9 @@ const dataDir = realpathSync(mkdtempSync(join(os.tmpdir(), 'o8-ui-loop-preview-d
 const repoPath = realpathSync(mkdtempSync(join(os.tmpdir(), 'o8-ui-loop-preview-repo-')));
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
+// macOS temp roots are outside /tmp. Keep the private proof fixture inside
+// the real serve-image allowlist without widening production roots.
+vi.stubEnv('HOME', dataDir);
 
 const { closeDb } = await import('@/lib/db');
 const { GET: serveImage } = await import('@/app/api/panel/serve-image/route');
@@ -131,6 +134,7 @@ afterEach(() => {
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
+  vi.unstubAllEnvs();
   rmSync(dataDir, { recursive: true, force: true });
   rmSync(repoPath, { recursive: true, force: true });
 });
