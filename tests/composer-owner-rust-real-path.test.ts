@@ -104,7 +104,7 @@ describe.skipIf(!binary)('real TS client and Rust composer owner', () => {
     await queue.enqueueComposerSend({ ...target(), id, intent: 'steer-now', payload });
     const a = await queue.claimComposerSteer(id); expect(a.claimToken).toBeTruthy();
     await queue.deferComposerSteer(id, 'Known pre-admit refusal.', a.claimToken!);
-    const b = await queue.claimComposerSteer(id); expect(b.claimToken).not.toBe(a.claimToken);
+    const b = await queue.claimNextComposerSend(target()); expect(b.claimToken).not.toBe(a.claimToken);
     await until(() => notices.length === 4);
     expect(await queue.admitComposerSend(id, a.claimToken!)).toBe(false);
     expect(await queue.settleComposerSend(id, { status: 'applied' }, a.claimToken!)).toBe(false);
