@@ -857,6 +857,7 @@ fn serve(
     let mut opened = false;
     let mut pending_show = false;
     let mut window_failed = false;
+    let mut late = false;
     let mut credential_deadline: Option<Instant> = None;
     let mut launch: Option<std::sync::mpsc::Receiver<Result<(), String>>> = None;
     let outcome = (|| -> Result<(), String> {
@@ -988,6 +989,7 @@ fn serve(
                                 window_failed = false;
                                 launch = None;
                                 deadline = Instant::now() + health_window();
+                                late = false;
                             }
                         }
                         Err(_) => schedule_restart(config, server)?,
@@ -1031,6 +1033,7 @@ fn serve(
             if pending_show && window_failed {
                 window_failed = false;
                 deadline = Instant::now() + health_window();
+                late = false;
             }
             if voice_only {
                 pending_show = false;
@@ -1074,9 +1077,12 @@ fn serve(
                         });
                         launch = Some(receive);
                         pending_show = false;
-                    } else if Instant::now() >= deadline {
+                    } else if Instant::now() >= deadline && !late {
+                        // Report a slow start once and keep waiting: a server that
+                        // is still starting (a populated profile) opens its window
+                        // when it becomes healthy, without a second Show.
                         present_async(config, "Server did not become healthy");
-                        window_failed = true;
+                        late = true;
                         pending_show = false;
                     }
                 } else if pending_show {
@@ -1105,6 +1111,7 @@ fn serve(
                     if !focused {
                         opened = false;
                         deadline = Instant::now() + health_window();
+                        late = false;
                     }
                     pending_show = false;
                 }
