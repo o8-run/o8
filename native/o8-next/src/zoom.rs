@@ -37,11 +37,7 @@ fn apply_to(window: &mut Window, shell: bool, cx: &mut App) {
 /// more than half a point below `min`. `current` comes from the zoomed
 /// viewport, so a window exactly at its minimum can read a hair short. A
 /// fullscreen or maximized window (`fixed`) never resizes.
-pub(crate) fn grown(
-    current: Size<Pixels>,
-    min: Size<Pixels>,
-    fixed: bool,
-) -> Option<Size<Pixels>> {
+pub(crate) fn grown(current: Size<Pixels>, min: Size<Pixels>, fixed: bool) -> Option<Size<Pixels>> {
     let short = |current: Pixels, min: Pixels| min - current > px(0.5);
     (!fixed && (short(current.width, min.width) || short(current.height, min.height)))
         .then(|| current.max(&min))
@@ -149,7 +145,11 @@ fn reload_bindings() {
     let mut lines = text.lines().map(|line| {
         crate::shell::shortcuts::keymap::parse(line).filter(|_| !line.trim().is_empty())
     });
-    keep_bindings([lines.next().flatten(), lines.next().flatten(), lines.next().flatten()]);
+    keep_bindings([
+        lines.next().flatten(),
+        lines.next().flatten(),
+        lines.next().flatten(),
+    ]);
 }
 /// The zoom command a pop-out window runs for a key: a rebound chord, else
 /// a default chord that was not rebound. A terminal keeps every key except
@@ -241,7 +241,10 @@ mod mac {
                 return None;
             }
             let frame: NSRect = msg_send![screen, visibleFrame];
-            Some(size(px(frame.size.width as f32), px(frame.size.height as f32)))
+            Some(size(
+                px(frame.size.width as f32),
+                px(frame.size.height as f32),
+            ))
         }
     }
     pub(super) fn set_min_size(window: &Window, min: Size<Pixels>) {
@@ -430,9 +433,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn zoom_popout_windows_open_at_the_saved_zoom_and_take_the_shortcuts(
-        cx: &mut TestAppContext,
-    ) {
+    fn zoom_popout_windows_open_at_the_saved_zoom_and_take_the_shortcuts(cx: &mut TestAppContext) {
         cx.update(|cx| {
             super::install(false, cx);
             crate::theme::set_zoom_percent(120);
@@ -505,7 +506,10 @@ mod tests {
     fn zoom_window_grows_to_the_new_minimum() {
         use gpui::size;
         let min = super::min_size(1.2, None);
-        assert_eq!(super::grown(size(px(600.), px(400.)), min, false), Some(min));
+        assert_eq!(
+            super::grown(size(px(600.), px(400.)), min, false),
+            Some(min)
+        );
         assert_eq!(
             super::grown(size(px(900.), px(400.)), min, false),
             Some(size(px(900.), min.height))
@@ -520,7 +524,10 @@ mod tests {
         use gpui::size;
         // A small display caps the floor; the window fills it exactly, and
         // its size read back through the zoomed viewport is a hair short.
-        for (zoom, display) in [(1.1, size(px(640.), px(430.))), (1.3, size(px(700.), px(480.)))] {
+        for (zoom, display) in [
+            (1.1, size(px(640.), px(430.))),
+            (1.3, size(px(700.), px(480.))),
+        ] {
             let min = super::min_size(zoom, Some(display));
             assert_eq!(min, display, "the floor is capped at {zoom}");
             let current = display.map(|v| v / zoom).map(|v| v * zoom);
@@ -564,7 +571,8 @@ mod tests {
             super::apply(window, cx);
             Popout
         });
-        let percent = |cx: &mut gpui::VisualTestContext| cx.update(|_, _| crate::theme::zoom_percent());
+        let percent =
+            |cx: &mut gpui::VisualTestContext| cx.update(|_, _| crate::theme::zoom_percent());
         cx.simulate_keystrokes("alt-z");
         assert_eq!(percent(cx), 110);
         cx.simulate_keystrokes("secondary-=");

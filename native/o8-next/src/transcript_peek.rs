@@ -69,7 +69,11 @@ pub(crate) fn window(content: &str, line: Option<usize>) -> Snippet {
 /// The header's note for a file: its length and how long ago it changed.
 pub(crate) fn meta(content: &str, mtime_ms: Option<f64>, now_ms: f64) -> String {
     let count = content.lines().count();
-    let lines = if count == 1 { "1 line".to_owned() } else { format!("{count} lines") };
+    let lines = if count == 1 {
+        "1 line".to_owned()
+    } else {
+        format!("{count} lines")
+    };
     let Some(mtime) = mtime_ms else {
         return lines;
     };
@@ -195,9 +199,13 @@ pub(crate) fn github_link(url: &str) -> bool {
     let path = rest.split(['?', '#']).next().unwrap_or_default();
     let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
     let name = |part: &str| {
-        part.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        part.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
             && part.len() <= 100
-            && part.chars().all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c))
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c))
     };
     let number = |part: &str| {
         part.len() <= 7 && !part.starts_with('0') && part.chars().all(|c| c.is_ascii_digit())
@@ -241,7 +249,11 @@ fn wrap(text: &str, width: usize, rows: usize) -> Vec<String> {
 }
 
 fn plural(count: u64, one: &str) -> String {
-    if count == 1 { format!("1 {one}") } else { format!("{count} {one}s") }
+    if count == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{count} {one}s")
+    }
 }
 
 /// The card for the server's answer about a GitHub link.
@@ -251,14 +263,25 @@ pub(crate) fn link_card(body: &Value) -> Option<(String, Vec<String>)> {
     let count = |key: &str| preview[key].as_u64().unwrap_or(0);
     match preview["kind"].as_str()? {
         "repo" => {
-            let mut lines = wrap(preview["description"].as_str().unwrap_or("No description"), 64, 2);
-            let mut facts = vec![plural(count("stars"), "star"), plural(count("forks"), "fork")];
+            let mut lines = wrap(
+                preview["description"].as_str().unwrap_or("No description"),
+                64,
+                2,
+            );
+            let mut facts = vec![
+                plural(count("stars"), "star"),
+                plural(count("forks"), "fork"),
+            ];
             facts.extend(preview["language"].as_str().map(str::to_owned));
             lines.push(facts.join(" · "));
             Some((format!("github.com/{repo}"), lines))
         }
         kind @ ("issue" | "pull") => {
-            let what = if kind == "pull" { "pull request" } else { "issue" };
+            let what = if kind == "pull" {
+                "pull request"
+            } else {
+                "issue"
+            };
             let state = match preview["state"].as_str().unwrap_or("open") {
                 "merged" => "Merged",
                 "closed" => "Closed",
@@ -266,7 +289,11 @@ pub(crate) fn link_card(body: &Value) -> Option<(String, Vec<String>)> {
             };
             let mut lines = wrap(preview["title"].as_str().unwrap_or_default(), 64, 2);
             let mut facts = vec![format!("{state} {what}")];
-            facts.extend(preview["author"].as_str().map(|author| format!("by {author}")));
+            facts.extend(
+                preview["author"]
+                    .as_str()
+                    .map(|author| format!("by {author}")),
+            );
             facts.push(plural(count("comments"), "comment"));
             lines.push(facts.join(" · "));
             Some((format!("{repo} #{}", count("number")), lines))
@@ -440,7 +467,14 @@ impl Peeks {
             (None, Lookup::Miss) => None,
         };
         let note = match (&target.preview, state.cache.0.get(&target.file())) {
-            (None, Some(Entry { read: Read::Text(content), mtime, .. })) => {
+            (
+                None,
+                Some(Entry {
+                    read: Read::Text(content),
+                    mtime,
+                    ..
+                }),
+            ) => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0., |elapsed| elapsed.as_millis() as f64);
@@ -449,7 +483,10 @@ impl Peeks {
             _ => None,
         };
         let title = match state.cache.0.get(&target.file()) {
-            Some(Entry { read: Read::Card(title, _), .. }) => Some(title.clone()),
+            Some(Entry {
+                read: Read::Card(title, _),
+                ..
+            }) => Some(title.clone()),
             _ => None,
         };
         let at = place(pill, size(px(WIDTH), height(&snippet)), viewport);
@@ -653,12 +690,27 @@ mod tests {
     fn the_header_counts_lines_and_says_how_long_ago_the_file_changed() {
         let now = 1_000_000_000.;
         assert_eq!(meta("one", None, now), "1 line");
-        assert_eq!(meta("a\nb\nc\n", Some(now - 20_000.), now), "3 lines · modified just now");
-        assert_eq!(meta("a\nb", Some(now - 5. * 60_000.), now), "2 lines · modified 5 min ago");
-        assert_eq!(meta("a\nb", Some(now - 3. * 3_600_000.), now), "2 lines · modified 3 h ago");
-        assert_eq!(meta("a\nb", Some(now - 2. * 86_400_000.), now), "2 lines · modified 2 d ago");
+        assert_eq!(
+            meta("a\nb\nc\n", Some(now - 20_000.), now),
+            "3 lines · modified just now"
+        );
+        assert_eq!(
+            meta("a\nb", Some(now - 5. * 60_000.), now),
+            "2 lines · modified 5 min ago"
+        );
+        assert_eq!(
+            meta("a\nb", Some(now - 3. * 3_600_000.), now),
+            "2 lines · modified 3 h ago"
+        );
+        assert_eq!(
+            meta("a\nb", Some(now - 2. * 86_400_000.), now),
+            "2 lines · modified 2 d ago"
+        );
         // A clock behind the file's time reads as just now, never negative.
-        assert_eq!(meta("a", Some(now + 5_000.), now), "1 line · modified just now");
+        assert_eq!(
+            meta("a", Some(now + 5_000.), now),
+            "1 line · modified just now"
+        );
     }
 
     #[test]
@@ -754,7 +806,10 @@ mod tests {
             link_card(&repo),
             Some((
                 "github.com/o8-run/o8".into(),
-                vec!["Review and merge layer".into(), "60 stars · 1 fork · TypeScript".into()]
+                vec![
+                    "Review and merge layer".into(),
+                    "60 stars · 1 fork · TypeScript".into()
+                ]
             ))
         );
         let pull = serde_json::json!({"ok": true, "preview": {
@@ -764,7 +819,10 @@ mod tests {
             link_card(&pull),
             Some((
                 "o8-run/o8 #6261".into(),
-                vec!["Install with Homebrew".into(), "Merged pull request · by q · 1 comment".into()]
+                vec![
+                    "Install with Homebrew".into(),
+                    "Merged pull request · by q · 1 comment".into()
+                ]
             ))
         );
         let issue = serde_json::json!({"preview": {"kind": "issue", "repo": "a/b", "number": 2,
@@ -778,7 +836,10 @@ mod tests {
         let text = "word ".repeat(40);
         let lines = wrap(&text, 20, 2);
         assert_eq!(lines.len(), 2);
-        assert!(lines.iter().all(|line| line.chars().count() <= 20), "{lines:?}");
+        assert!(
+            lines.iter().all(|line| line.chars().count() <= 20),
+            "{lines:?}"
+        );
         assert!(lines[1].ends_with('…'));
         assert_eq!(wrap("short one", 20, 2), vec!["short one"]);
         assert!(wrap("", 20, 2).is_empty());

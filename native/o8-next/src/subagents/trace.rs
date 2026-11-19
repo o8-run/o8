@@ -334,7 +334,10 @@ pub(crate) fn element(
             crate::trace::APPEAR,
         );
         let swap = crate::trace::progress(
-            crate::trace::seen(&format!("subagent:{row}:{}:{}", item.id, status(item)), settled),
+            crate::trace::seen(
+                &format!("subagent:{row}:{}:{}", item.id, status(item)),
+                settled,
+            ),
             crate::trace::SWAP,
         );
         animating |= arrive < 1. || swap < 1.;

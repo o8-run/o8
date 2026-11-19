@@ -15,7 +15,12 @@ pub(super) const HOUSES: &[(&str, &[(&str, &str, &str, &str)])] = &[
             ("claude", "claude-opus-4-8", "Opus 4.8", "previous Opus"),
             ("claude", "claude-sonnet-5-5", "Sonnet 5.5", "everyday"),
             ("claude", "claude-sonnet-5", "Sonnet 5", "previous Sonnet"),
-            ("claude", "claude-haiku-5-5", "Haiku 5.5", "fast, light tasks"),
+            (
+                "claude",
+                "claude-haiku-5-5",
+                "Haiku 5.5",
+                "fast, light tasks",
+            ),
         ],
     ),
     (

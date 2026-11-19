@@ -5,7 +5,11 @@ use gpui::KeyDownEvent;
 pub(super) const LANE: usize = 5;
 const RISKS: [&str; 4] = ["All risks", "High", "Medium", "Low"];
 const RANGES: [&str; 5] = [
-    "All time", "Last hour", "Last 24 hours", "Last 7 days", "Last 30 days",
+    "All time",
+    "Last hour",
+    "Last 24 hours",
+    "Last 7 days",
+    "Last 30 days",
 ];
 
 #[derive(Clone, Debug)]
@@ -90,7 +94,10 @@ impl Audit {
         match result {
             Ok(response) => {
                 self.rows = flatten(&response.approvals);
-                self.total = response.total.unwrap_or(self.rows.len()).max(self.rows.len());
+                self.total = response
+                    .total
+                    .unwrap_or(self.rows.len())
+                    .max(self.rows.len());
                 self.loaded = true;
                 self.error = None;
             }
@@ -145,11 +152,17 @@ impl Audit {
     }
     fn focusable_controls(&self) -> Vec<usize> {
         let mut controls = vec![0, 1, 2];
-        if self.has_filters() { controls.push(3); }
+        if self.has_filters() {
+            controls.push(3);
+        }
         if !self.loading {
             controls.push(4);
-            if self.more() { controls.push(6); }
-            if self.error.is_some() { controls.push(5); }
+            if self.more() {
+                controls.push(6);
+            }
+            if self.error.is_some() {
+                controls.push(5);
+            }
         }
         controls
     }

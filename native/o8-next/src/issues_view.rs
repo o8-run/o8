@@ -159,7 +159,13 @@ impl Issues {
                             .text_color(theme().text_muted)
                             .child(format!("#{}", item.number)),
                     )
-                    .child(div().flex_1().min_w_0().truncate().child(item.title.clone()))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(item.title.clone()),
+                    )
                     .child(
                         div()
                             .flex_shrink_0()
@@ -415,14 +421,14 @@ impl Issues {
                             "issue-github",
                             format!("{} #{number} ↗", self.slug().unwrap_or_default()),
                         )
-                            .px(px(0.))
-                            .py(px(0.))
-                            .text_color(theme().text_muted)
-                            .on_click(cx.listener(move |s, _, _, cx| {
-                                if let Some(issue) = &s.detail {
-                                    s.open_url(&issue.url, cx);
-                                }
-                            })),
+                        .px(px(0.))
+                        .py(px(0.))
+                        .text_color(theme().text_muted)
+                        .on_click(cx.listener(move |s, _, _, cx| {
+                            if let Some(issue) = &s.detail {
+                                s.open_url(&issue.url, cx);
+                            }
+                        })),
                     )
                     .child(
                         div()
@@ -463,22 +469,28 @@ impl Issues {
                     ),
             )
             .when(!issue.labels.is_empty(), |v| {
-                v.child(div().flex().gap(px(6.)).flex_wrap().children(
-                    issue.labels.iter().filter(|l| l["name"].is_string()).map(|label| {
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(5.))
-                            .px(px(8.))
-                            .py(px(2.))
-                            .rounded(px(10.))
-                            .bg(theme().surface_raised)
-                            .text_size(px(11.))
-                            .text_color(theme().text_secondary)
-                            .child(dot(label_tone(label), 7.))
-                            .child(label["name"].as_str().unwrap_or("").to_owned())
-                    }),
-                ))
+                v.child(
+                    div().flex().gap(px(6.)).flex_wrap().children(
+                        issue
+                            .labels
+                            .iter()
+                            .filter(|l| l["name"].is_string())
+                            .map(|label| {
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(5.))
+                                    .px(px(8.))
+                                    .py(px(2.))
+                                    .rounded(px(10.))
+                                    .bg(theme().surface_raised)
+                                    .text_size(px(11.))
+                                    .text_color(theme().text_secondary)
+                                    .child(dot(label_tone(label), 7.))
+                                    .child(label["name"].as_str().unwrap_or("").to_owned())
+                            }),
+                    ),
+                )
             })
             .when(repository.missing(), |v| {
                 v.child(
@@ -509,18 +521,24 @@ impl Issues {
                         .unwrap_or("No description provided."),
                 ),
             )
-            .children(issue.discussion.iter().enumerate().flat_map(|(index, comment)| {
-                [
-                    divider().into_any_element(),
-                    self.entry(
-                        format!("issue-comment-{index}"),
-                        index + 1,
-                        &comment.author,
-                        age(&comment.created_at),
-                        &comment.body,
-                    ),
-                ]
-            }))
+            .children(
+                issue
+                    .discussion
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(index, comment)| {
+                        [
+                            divider().into_any_element(),
+                            self.entry(
+                                format!("issue-comment-{index}"),
+                                index + 1,
+                                &comment.author,
+                                age(&comment.created_at),
+                                &comment.body,
+                            ),
+                        ]
+                    }),
+            )
             .when(issue.discussion_incomplete, |v| {
                 v.child(
                     div()
@@ -602,11 +620,14 @@ impl Issues {
                     div()
                         .debug_selector(|| "issue-preview-body".into())
                         .child(self.marker("issue-preview-body"))
-                        .child(self.markdown(0, &format!(
-                            "# {}\n\n{}",
-                            self.title.read(cx).text,
-                            self.body.read(cx).text
-                        ))),
+                        .child(self.markdown(
+                            0,
+                            &format!(
+                                "# {}\n\n{}",
+                                self.title.read(cx).text,
+                                self.body.read(cx).text
+                            ),
+                        )),
                 )
             })
             .when(!self.preview, |v| {

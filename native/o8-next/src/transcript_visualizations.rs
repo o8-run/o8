@@ -272,7 +272,8 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(
-            std::iter::from_fn(|| request.recv().ok()).any(|path| path.contains("before=older-page"))
+            std::iter::from_fn(|| request.recv().ok())
+                .any(|path| path.contains("before=older-page"))
         );
         view.update(cx, |s, cx| {
             assert!(!s.history_loading && s.history_error.is_none());

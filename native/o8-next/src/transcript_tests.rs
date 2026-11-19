@@ -52,10 +52,12 @@ fn issue_pills_in_different_rows_each_click(cx: &mut TestAppContext) {
     let (view, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
     view.update(cx, |s, cx| {
         let transcript = Transcript::new(
-            serde_json::from_value(serde_json::json!({"sessionKey":"llm-chat:pills","transcript":[
-                {"id":"a","role":"assistant","text":"Fixed in #5244","timestamp":1},
-                {"id":"b","role":"assistant","text":"Tracked in #5209","timestamp":2}
-            ]}))
+            serde_json::from_value(
+                serde_json::json!({"sessionKey":"llm-chat:pills","transcript":[
+                    {"id":"a","role":"assistant","text":"Fixed in #5244","timestamp":1},
+                    {"id":"b","role":"assistant","text":"Tracked in #5209","timestamp":2}
+                ]}),
+            )
             .unwrap(),
         );
         let rows = transcript.rows.clone();
@@ -112,7 +114,10 @@ fn rows_from_a_saved_read_keep_a_reader_at_the_end(cx: &mut TestAppContext) {
     install(80, &view, cx);
     install(90, &view, cx);
     view.update(cx, |s, _| {
-        assert!(crate::retained::at_end(&s.list), "the new rows stay in view");
+        assert!(
+            crate::retained::at_end(&s.list),
+            "the new rows stay in view"
+        );
     });
 }
 

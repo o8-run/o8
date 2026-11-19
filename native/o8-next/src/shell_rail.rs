@@ -214,7 +214,12 @@ fn ring_path(radius: f32, share: f32) -> String {
 }
 
 /// Codex's ring colour in every theme, as Claude's is o8 orange.
-const CODEX_BLUE: gpui::Rgba = gpui::Rgba { r: 0.231, g: 0.510, b: 0.965, a: 1. };
+const CODEX_BLUE: gpui::Rgba = gpui::Rgba {
+    r: 0.231,
+    g: 0.510,
+    b: 0.965,
+    a: 1.,
+};
 
 /// The usage mark: two rings that fill with the week's use, Codex outside in
 /// blue and Claude inside in orange.
@@ -478,7 +483,11 @@ pub(crate) fn now_seconds() -> u64 {
 
 /// "39m", "9h 34m", "6d 11h": the time left until a window resets.
 fn countdown(seconds: u64) -> String {
-    let (days, hours, minutes) = (seconds / 86_400, seconds % 86_400 / 3600, seconds % 3600 / 60);
+    let (days, hours, minutes) = (
+        seconds / 86_400,
+        seconds % 86_400 / 3600,
+        seconds % 3600 / 60,
+    );
     if days > 0 {
         format!("{days}d {hours}h")
     } else if hours > 0 {
@@ -517,7 +526,11 @@ fn standing(capacity: &Value, now: u64) -> (String, bool) {
     let Some(tightest) = buckets
         .iter()
         .filter(|bucket| used(bucket).is_some())
-        .max_by(|a, b| used(a).partial_cmp(&used(b)).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| {
+            used(a)
+                .partial_cmp(&used(b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     else {
         return (state_label(capacity).into(), false);
     };
@@ -666,7 +679,9 @@ pub(crate) fn usage_runtime(capacity: &Value, now: u64) -> Div {
 
 /// "$12.50", "12.50 EUR", "120.5 credits": an amount the server reported.
 fn amount_label(amount: &Value) -> Option<String> {
-    let value = amount["amount"].as_f64().filter(|value| value.is_finite())?;
+    let value = amount["amount"]
+        .as_f64()
+        .filter(|value| value.is_finite())?;
     Some(match amount["currency"].as_str() {
         Some("USD") => format!("${value:.2}"),
         Some(currency) => format!("{value:.2} {currency}"),
@@ -792,44 +807,40 @@ fn usage_card(cx: &mut Context<Shell>) -> impl IntoElement {
             )
         });
     // Above the gauge, left-aligned with it.
-    div()
-        .absolute()
-        .left(px(0.))
-        .top(px(-8.))
-        .child(
-            gpui::deferred(
-                gpui::anchored()
-                    .anchor(gpui::Corner::BottomLeft)
-                    .snap_to_window_with_margin(px(12.))
-                    .child(
-                        div()
-                            .id("rail-usage-card")
-                            .debug_selector(|| "rail-usage-card".into())
-                            .occlude()
-                            .w(px(320.))
-                            .rounded(px(12.))
-                            .bg(crate::theme::popover_background())
-                            .border_1()
-                            .border_color(theme().border)
-                            .shadow_lg()
-                            .cursor_pointer()
-                            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                                if *hovered {
-                                    this.features.get::<UsageCard>().leave += 1;
-                                } else {
-                                    leave_usage(this, cx);
-                                }
-                            }))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.features.get::<UsageCard>().open = false;
-                                this.close_rail_overlays(window, cx);
-                                this.execute(Command::Usage, window, cx);
-                            }))
-                            .child(body),
-                    ),
-            )
-            .with_priority(2),
+    div().absolute().left(px(0.)).top(px(-8.)).child(
+        gpui::deferred(
+            gpui::anchored()
+                .anchor(gpui::Corner::BottomLeft)
+                .snap_to_window_with_margin(px(12.))
+                .child(
+                    div()
+                        .id("rail-usage-card")
+                        .debug_selector(|| "rail-usage-card".into())
+                        .occlude()
+                        .w(px(320.))
+                        .rounded(px(12.))
+                        .bg(crate::theme::popover_background())
+                        .border_1()
+                        .border_color(theme().border)
+                        .shadow_lg()
+                        .cursor_pointer()
+                        .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                            if *hovered {
+                                this.features.get::<UsageCard>().leave += 1;
+                            } else {
+                                leave_usage(this, cx);
+                            }
+                        }))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.features.get::<UsageCard>().open = false;
+                            this.close_rail_overlays(window, cx);
+                            this.execute(Command::Usage, window, cx);
+                        }))
+                        .child(body),
+                ),
         )
+        .with_priority(2),
+    )
 }
 
 #[cfg(test)]
@@ -862,7 +873,8 @@ mod usage_card_tests {
                 ("Extra usage", "$4.20 of $50.00".to_string()),
             ]
         );
-        let codex = json!({"account": {"resetsLeft": 0, "credits": {"amount": 120.5, "currency": null}}});
+        let codex =
+            json!({"account": {"resetsLeft": 0, "credits": {"amount": 120.5, "currency": null}}});
         assert_eq!(
             account_rows(&codex),
             vec![
@@ -870,8 +882,12 @@ mod usage_card_tests {
                 ("Credits", "120.5 credits".to_string()),
             ]
         );
-        let uncapped = json!({"account": {"extraUsage": {"used": {"amount": 3, "currency": "EUR"}}}});
-        assert_eq!(account_rows(&uncapped), vec![("Extra usage", "3.00 EUR".to_string())]);
+        let uncapped =
+            json!({"account": {"extraUsage": {"used": {"amount": 3, "currency": "EUR"}}}});
+        assert_eq!(
+            account_rows(&uncapped),
+            vec![("Extra usage", "3.00 EUR".to_string())]
+        );
         // A runtime without account facts gets no rows, never zeros.
         assert!(account_rows(&json!({"buckets": []})).is_empty());
     }
@@ -897,15 +913,25 @@ mod usage_card_tests {
     fn a_runtime_standing_names_the_limit_then_the_pace_then_what_is_left() {
         // 1970-01-08T00:00:00Z is one week after the epoch.
         let week = |used: f64| json!({"label": "Weekly", "usedRatio": used, "resetsAt": "1970-01-08T00:00:00.000Z"});
-        let exact = |bucket| json!({"confidence": "exact", "status": "available", "buckets": [bucket]});
+        let exact =
+            |bucket| json!({"confidence": "exact", "status": "available", "buckets": [bucket]});
         // Half way through the week.
         let now = 7 * 86_400 / 2;
         assert_eq!(elapsed_share(&week(0.1), now), Some(0.5));
-        assert_eq!(standing(&exact(week(1.0)), now), ("Limit reached".into(), true));
-        assert_eq!(standing(&exact(week(0.7)), now), ("Ahead of pace".into(), true));
+        assert_eq!(
+            standing(&exact(week(1.0)), now),
+            ("Limit reached".into(), true)
+        );
+        assert_eq!(
+            standing(&exact(week(0.7)), now),
+            ("Ahead of pace".into(), true)
+        );
         assert_eq!(standing(&exact(week(0.4)), now), ("60% left".into(), false));
         let unsupported = json!({"confidence": "none", "reason": "subscription_limits_unsupported", "buckets": []});
-        assert_eq!(standing(&unsupported, now), ("No subscription limits".into(), false));
+        assert_eq!(
+            standing(&unsupported, now),
+            ("No subscription limits".into(), false)
+        );
     }
 }
 
@@ -927,8 +953,7 @@ fn symon_mark(active: bool) -> impl IntoElement {
 pub(crate) fn symon_mark_sized(size: f32, active: bool) -> impl IntoElement {
     static DARK: OnceLock<Arc<Image>> = OnceLock::new();
     static LIGHT: OnceLock<Arc<Image>> = OnceLock::new();
-    let load =
-        |bytes: &'static [u8]| Arc::new(Image::from_bytes(ImageFormat::Png, bytes.to_vec()));
+    let load = |bytes: &'static [u8]| Arc::new(Image::from_bytes(ImageFormat::Png, bytes.to_vec()));
     let mark = if crate::theme::light() {
         LIGHT.get_or_init(|| load(include_bytes!("symon_mark_light.png")))
     } else {

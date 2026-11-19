@@ -31,8 +31,7 @@ impl Surface {
         let agents = Rc::new(view.read(cx).agents.clone());
         for (index, row) in self.rows.iter().enumerate() {
             let mut row = row.borrow_mut();
-            if !crate::subagents::trace::delegates(&row.row)
-            {
+            if !crate::subagents::trace::delegates(&row.row) {
                 continue;
             }
             row.bind_subagent_focus(cx);

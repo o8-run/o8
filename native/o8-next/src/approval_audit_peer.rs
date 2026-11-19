@@ -53,8 +53,12 @@ impl Peer {
                             }
                             let request = String::from_utf8_lossy(&bytes).to_string();
                             let audit = request.starts_with("GET /api/panel/approvals?status=all");
-                            let limit = request.split("auditLimit=").nth(1)
-                                .and_then(|value| value.split(['&', ' ']).next()?.parse::<usize>().ok())
+                            let limit = request
+                                .split("auditLimit=")
+                                .nth(1)
+                                .and_then(|value| {
+                                    value.split(['&', ' ']).next()?.parse::<usize>().ok()
+                                })
                                 .unwrap_or(usize::MAX);
                             seen.lock().unwrap().push(request);
                             let status = if audit && refused.load(Ordering::Relaxed) {
@@ -73,7 +77,8 @@ impl Peer {
                                     "contributions":[],"replies":[],"sources":[],
                                     "truncated":false,"repliesTruncated":false
                                 }})
-                            }.to_string();
+                            }
+                            .to_string();
                             let _ = write!(
                                 socket,
                                 "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

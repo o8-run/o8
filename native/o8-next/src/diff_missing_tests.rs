@@ -41,66 +41,70 @@ impl Fixture {
                 let worker_mode = worker_mode.clone();
                 std::thread::spawn(move || {
                     stream.set_nonblocking(false).unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
-                let mut header = Vec::new();
-                while !header.ends_with(b"\r\n\r\n") {
-                    let mut byte = [0];
-                    if stream.read_exact(&mut byte).is_err() { return; }
-                    header.push(byte[0]);
-                }
-                let header = String::from_utf8(header).unwrap();
-                let length = header
-                    .lines()
-                    .find_map(|line| {
-                        line.to_lowercase()
-                            .strip_prefix("content-length:")
-                            .and_then(|value| value.trim().parse::<usize>().ok())
-                    })
-                    .unwrap_or(0);
-                let mut body = vec![0; length];
-                if stream.read_exact(&mut body).is_err() { return; }
-                let (status, value) = if header.starts_with("GET ") {
-                    worker_gets
-                        .lock()
-                        .unwrap()
-                        .push(header.lines().next().unwrap().into());
-                    (
-                        status,
-                        if code.is_empty() {
-                            json!({"diff":"", "headSha":"a".repeat(40)})
-                        } else {
-                            json!({"ok":false,"error":{"code":code,"message":"Fixture checkout is absent.","laneId":lane}})
-                        },
-                    )
-                } else {
-                    assert!(header.starts_with("POST /api/lanes/discard-orphaned "));
-                    worker_posts
-                        .lock()
-                        .unwrap()
-                        .push(serde_json::from_slice(&body).unwrap());
-                    if worker_mode.load(Ordering::SeqCst) == 0 {
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut header = Vec::new();
+                    while !header.ends_with(b"\r\n\r\n") {
+                        let mut byte = [0];
+                        if stream.read_exact(&mut byte).is_err() {
+                            return;
+                        }
+                        header.push(byte[0]);
+                    }
+                    let header = String::from_utf8(header).unwrap();
+                    let length = header
+                        .lines()
+                        .find_map(|line| {
+                            line.to_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    let mut body = vec![0; length];
+                    if stream.read_exact(&mut body).is_err() {
+                        return;
+                    }
+                    let (status, value) = if header.starts_with("GET ") {
+                        worker_gets
+                            .lock()
+                            .unwrap()
+                            .push(header.lines().next().unwrap().into());
                         (
-                            409,
-                            json!({"ok":false,"error":{"code":"worktree_present","message":"Fixture discard refused."}}),
+                            status,
+                            if code.is_empty() {
+                                json!({"diff":"", "headSha":"a".repeat(40)})
+                            } else {
+                                json!({"ok":false,"error":{"code":code,"message":"Fixture checkout is absent.","laneId":lane}})
+                            },
                         )
                     } else {
-                        (200, json!({"ok":true,"laneId":lane,"status":"archived"}))
-                    }
-                };
-                let body = value.to_string();
-                write!(
-                    stream,
-                    concat!(
-                        "HTTP/1.1 {} Response\r\nContent-Type: application/json\r\n",
-                        "Content-Length: {}\r\nConnection: close\r\n\r\n{}"
-                    ),
-                    status,
-                    body.len(),
-                    body
-                )
-                .unwrap();
+                        assert!(header.starts_with("POST /api/lanes/discard-orphaned "));
+                        worker_posts
+                            .lock()
+                            .unwrap()
+                            .push(serde_json::from_slice(&body).unwrap());
+                        if worker_mode.load(Ordering::SeqCst) == 0 {
+                            (
+                                409,
+                                json!({"ok":false,"error":{"code":"worktree_present","message":"Fixture discard refused."}}),
+                            )
+                        } else {
+                            (200, json!({"ok":true,"laneId":lane,"status":"archived"}))
+                        }
+                    };
+                    let body = value.to_string();
+                    write!(
+                        stream,
+                        concat!(
+                            "HTTP/1.1 {} Response\r\nContent-Type: application/json\r\n",
+                            "Content-Length: {}\r\nConnection: close\r\n\r\n{}"
+                        ),
+                        status,
+                        body.len(),
+                        body
+                    )
+                    .unwrap();
                 });
             }
         });
@@ -202,7 +206,15 @@ fn diff_missing_checkout_notice_and_discard(cx: &mut TestAppContext) {
         assert!(state.failure.is_none());
     });
     assert_eq!(fixture.posts.lock().unwrap().len(), 2);
-    assert!(fixture.gets.lock().unwrap().iter().any(|path| path.contains("/api/panel/workspaces")), "discard refreshes the lifecycle projection");
+    assert!(
+        fixture
+            .gets
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|path| path.contains("/api/panel/workspaces")),
+        "discard refreshes the lifecycle projection"
+    );
     assert!(cx.debug_bounds("diff-discard-orphan").is_none());
     view.update(cx, |view, cx| view.load(cx));
     cx.run_until_parked();

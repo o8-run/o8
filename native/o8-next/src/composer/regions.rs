@@ -123,9 +123,7 @@ impl Surface {
                 this.pinned = false;
             }))
             .when(!self.notice.is_empty(), |view| {
-                view.child(
-                    crate::transcript_view::notice(self.notice.clone()),
-                )
+                view.child(crate::transcript_view::notice(self.notice.clone()))
             })
             .child(crate::transcript_view::list_view(
                 self.list.clone(),

@@ -126,14 +126,25 @@ fn a_press_lands_on_the_named_control(cx: &mut TestAppContext) {
     let (probe, cx) = probe(cx);
     let answer = ask(cx, json!({"command": "press", "selector": "probe-ok"}));
     assert_eq!(answer["ok"], true, "{answer}");
-    assert_eq!(probe.read_with(cx, |probe, _| (probe.ok, probe.stop)), (1, 0));
+    assert_eq!(
+        probe.read_with(cx, |probe, _| (probe.ok, probe.stop)),
+        (1, 0)
+    );
     // A name that is not in the frame is an error, never a press elsewhere.
     let answer = ask(cx, json!({"command": "press", "selector": "probe-gone"}));
     assert_eq!(answer["ok"], false);
-    assert!(answer["error"].as_str().unwrap().contains("no control named"));
+    assert!(
+        answer["error"]
+            .as_str()
+            .unwrap()
+            .contains("no control named")
+    );
     let answer = ask(cx, json!({"command": "press", "selector": "probe-far"}));
     assert!(answer["error"].as_str().unwrap().contains("not on screen"));
-    assert_eq!(probe.read_with(cx, |probe, _| (probe.ok, probe.stop)), (1, 0));
+    assert_eq!(
+        probe.read_with(cx, |probe, _| (probe.ok, probe.stop)),
+        (1, 0)
+    );
 }
 
 #[gpui::test]
@@ -144,7 +155,12 @@ fn a_control_that_changes_real_state_must_be_named(cx: &mut TestAppContext) {
         json!({"command": "press", "selector": "probe-stop-mission"}),
     );
     assert_eq!(answer["ok"], false);
-    assert!(answer["error"].as_str().unwrap().contains("changes real state"));
+    assert!(
+        answer["error"]
+            .as_str()
+            .unwrap()
+            .contains("changes real state")
+    );
     assert_eq!(probe.read_with(cx, |probe, _| probe.stop), 0);
     // Naming another control does not unlock this one.
     let answer = ask(
@@ -163,7 +179,12 @@ fn a_control_that_changes_real_state_must_be_named(cx: &mut TestAppContext) {
     // press would go to the one on top.
     let answer = ask(cx, json!({"command": "press", "selector": "probe-covered"}));
     assert_eq!(answer["ok"], false);
-    assert!(answer["error"].as_str().unwrap().contains("probe-merge-over"));
+    assert!(
+        answer["error"]
+            .as_str()
+            .unwrap()
+            .contains("probe-merge-over")
+    );
     assert_eq!(probe.read_with(cx, |probe, _| probe.covered), 0);
 }
 
@@ -198,7 +219,10 @@ fn the_snapshot_lists_named_controls_and_marks_guarded_ones(cx: &mut TestAppCont
         ]
     );
     let ok = &controls[4];
-    assert_eq!((ok["width"].as_f64(), ok["height"].as_f64()), (Some(120.), Some(30.)));
+    assert_eq!(
+        (ok["width"].as_f64(), ok["height"].as_f64()),
+        (Some(120.), Some(30.))
+    );
     assert_eq!(ok["guarded"], false);
     assert_eq!(controls[5]["guarded"], true);
     assert!(answer["result"]["viewport"]["width"].as_f64().unwrap() > 0.);
@@ -209,7 +233,10 @@ fn keys_and_the_wheel_reach_the_window(cx: &mut TestAppContext) {
     let (probe, cx) = probe(cx);
     let answer = ask(cx, json!({"command": "key", "keys": "escape cmd-k"}));
     assert_eq!(answer["ok"], true, "{answer}");
-    assert_eq!(probe.read_with(cx, |probe, _| probe.keys.clone()), ["escape", "k"]);
+    assert_eq!(
+        probe.read_with(cx, |probe, _| probe.keys.clone()),
+        ["escape", "k"]
+    );
     // Keys that confirm, send or run something must each be named.
     for (keys, name) in [
         ("enter", "key:enter"),
@@ -221,7 +248,10 @@ fn keys_and_the_wheel_reach_the_window(cx: &mut TestAppContext) {
     ] {
         let answer = ask(cx, json!({"command": "key", "keys": keys}));
         assert_eq!(answer["ok"], false, "{keys}");
-        let answer = ask(cx, json!({"command": "key", "keys": keys, "allow": ["key:escape"]}));
+        let answer = ask(
+            cx,
+            json!({"command": "key", "keys": keys, "allow": ["key:escape"]}),
+        );
         assert_eq!(answer["ok"], false, "{keys}");
         assert!(answer["error"].as_str().unwrap().contains(name), "{answer}");
     }
@@ -239,7 +269,12 @@ fn keys_and_the_wheel_reach_the_window(cx: &mut TestAppContext) {
     assert_eq!(answer["ok"], true, "{answer}");
     assert_eq!(probe.read_with(cx, |probe, _| probe.scrolled), 36.);
     let answer = ask(cx, json!({"command": "dance"}));
-    assert!(answer["error"].as_str().unwrap().contains("unknown command"));
+    assert!(
+        answer["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown command")
+    );
 }
 
 #[gpui::test]
@@ -259,14 +294,20 @@ fn text_for_a_focused_terminal_must_be_named(cx: &mut TestAppContext) {
         settle(window, cx);
         terminal_has_focus();
         let refused = handle(&json!({"command": "type", "text": "y"}), window, cx);
-        assert!(refused["error"].as_str().unwrap().contains("type:terminal"), "{refused}");
+        assert!(
+            refused["error"].as_str().unwrap().contains("type:terminal"),
+            "{refused}"
+        );
         // Named, it gets as far as finding nothing here that takes text.
         let named = handle(
             &json!({"command": "type", "text": "y", "allow": ["type:terminal"]}),
             window,
             cx,
         );
-        assert!(named["error"].as_str().unwrap().contains("takes text"), "{named}");
+        assert!(
+            named["error"].as_str().unwrap().contains("takes text"),
+            "{named}"
+        );
     });
 }
 
@@ -309,7 +350,12 @@ fn names_that_change_real_state_are_guarded() {
     ] {
         assert!(guarded(name), "{name}");
     }
-    for name in ["activity-refresh", "header-sidebar", "sender-name", "stopwatch"] {
+    for name in [
+        "activity-refresh",
+        "header-sidebar",
+        "sender-name",
+        "stopwatch",
+    ] {
         assert!(!guarded(name), "{name}");
     }
 }

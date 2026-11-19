@@ -449,14 +449,31 @@ fn home_and_end_select_prompts_with_rail_focus_and_scroll_otherwise(cx: &mut Tes
         grid.read_with(cx, |g, _| {
             let offset = g.panes[0].list.logical_scroll_top();
             assert!(g.panes[0].navigator.borrow().is_aligned());
-            assert_eq!((offset.item_ix, offset.offset_in_item), (before.item_ix, before.offset_in_item), "rail selection previews without scrolling");
-            assert_eq!(g.panes[0].navigator.borrow().cached_preview().unwrap().0.as_ref(), title);
+            assert_eq!(
+                (offset.item_ix, offset.offset_in_item),
+                (before.item_ix, before.offset_in_item),
+                "rail selection previews without scrolling"
+            );
+            assert_eq!(
+                g.panes[0]
+                    .navigator
+                    .borrow()
+                    .cached_preview()
+                    .unwrap()
+                    .0
+                    .as_ref(),
+                title
+            );
         });
     }
     cx.simulate_keystrokes("enter");
     draw(cx);
     grid.read_with(cx, |g, _| {
-        let index = g.panes[0].rows.iter().position(|r| r.borrow().row.id() == "grid-nav-p2").unwrap();
+        let index = g.panes[0]
+            .rows
+            .iter()
+            .position(|r| r.borrow().row.id() == "grid-nav-p2")
+            .unwrap();
         assert_eq!(g.panes[0].list.logical_scroll_top().item_ix, index);
     });
     grid.update_in(cx, |g, w, _| g.focus.focus(w));

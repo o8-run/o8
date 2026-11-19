@@ -16,10 +16,10 @@ use std::{
     rc::Rc,
 };
 
-#[path = "diff_ui_map.rs"]
-mod map;
 #[path = "diff_ui_init.rs"]
 mod init;
+#[path = "diff_ui_map.rs"]
+mod map;
 #[path = "diff_missing_ui.rs"]
 mod missing;
 #[path = "diff_ui_scope.rs"]
@@ -103,7 +103,9 @@ impl DiffSurface {
         if self.busy {
             return;
         }
-        if let Some(control) = &self.request_changes { control.update(cx, |control, cx| control.refresh(cx)); }
+        if let Some(control) = &self.request_changes {
+            control.update(cx, |control, cx| control.refresh(cx));
+        }
         self.generation += 1;
         let generation = self.generation;
         self.ready = false;
@@ -365,7 +367,9 @@ impl Render for DiffSurface {
         let request_trigger = self
             .request_changes
             .as_ref()
-            .filter(|control| self.missing.is_none() && saved_rejection && control.read(cx).visible())
+            .filter(|control| {
+                self.missing.is_none() && saved_rejection && control.read(cx).visible()
+            })
             .map(|control| control.update(cx, |control, cx| control.trigger(cx)));
         let doc = self.document.clone();
         let painted = self.painted.clone();
@@ -508,7 +512,13 @@ impl Render for DiffSurface {
                     cx.stop_propagation();
                     return;
                 }
-                if this.request_changes.as_ref().is_some_and(|view| view.read(cx).editing(window, cx)) { return; }
+                if this
+                    .request_changes
+                    .as_ref()
+                    .is_some_and(|view| view.read(cx).editing(window, cx))
+                {
+                    return;
+                }
                 match event.keystroke.key.as_str() {
                     key @ ("home" | "end") if this.stacked() => {
                         let shown = this.shown();
@@ -645,9 +655,9 @@ impl Render for DiffSurface {
                     }),
             )
             .when_some(
-                self.request_changes
-                    .clone()
-                    .filter(|control| self.missing.is_none() && saved_rejection && control.read(cx).details_visible()),
+                self.request_changes.clone().filter(|control| {
+                    self.missing.is_none() && saved_rejection && control.read(cx).details_visible()
+                }),
                 |view, control| {
                     view.child(
                         div()
@@ -660,10 +670,11 @@ impl Render for DiffSurface {
                 },
             )
             .when(
-                self.missing.is_none() && matches!(
-                    &self.target,
-                    Target::Packet(_) | Target::Worktree { file: None, .. }
-                ),
+                self.missing.is_none()
+                    && matches!(
+                        &self.target,
+                        Target::Packet(_) | Target::Worktree { file: None, .. }
+                    ),
                 |view| {
                     view.child(
                         div()

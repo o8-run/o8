@@ -151,7 +151,9 @@ pub(crate) fn file_ref(text: &str) -> Option<(&str, Option<usize>)> {
     let name = path.rsplit('/').next()?;
     let (stem, extension) = name.rsplit_once('.')?;
     let inside = !path.starts_with(['/', '~'])
-        && path.split(['/', '\\']).all(|part| !part.is_empty() && part != "..");
+        && path
+            .split(['/', '\\'])
+            .all(|part| !part.is_empty() && part != "..");
     let plain = inside
         && !stem.is_empty()
         && extension.len() >= 2

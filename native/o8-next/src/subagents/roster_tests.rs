@@ -93,7 +93,9 @@ impl Http {
                 let body = match path {
                     "/api/panel/ws-info" => json!({"wsPort":ws_port,"wsToken":"fixture"}),
                     "/api/orchestrator/state" => served_state.lock().unwrap().clone(),
-                    "/api/orchestrator/shared-team/active" => json!({"threadId":"thoughts-lead","workers":[]}),
+                    "/api/orchestrator/shared-team/active" => {
+                        json!({"threadId":"thoughts-lead","workers":[]})
+                    }
                     "/api/v2/chat-history" => json!({"backend":"pi"}),
                     "/api/lanes" if first.starts_with("GET") => {
                         served_lanes.lock().unwrap().clone()
@@ -101,7 +103,8 @@ impl Http {
                     "/api/lanes" => json!({"ok":true,"lane":{"worktreePath":null}}),
                     _ if failed => json!({"ok":false,"error":"Stop refused"}),
                     _ => json!({"ok":true}),
-                }.to_string();
+                }
+                .to_string();
                 write!(stream, "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", if failed {"409 Conflict"} else {"200 OK"}, body.len()).unwrap();
             }
         });
@@ -548,15 +551,24 @@ fn roster_rebuilds_rows_states_and_clocks_from_server_state(cx: &mut TestAppCont
     assert_eq!(gets(&http, "/api/lanes").len(), 1);
     assert_eq!(gets(&http, "/api/orchestrator/state").len(), 2);
     // A lane the server doesn't return isn't asked for on every refresh.
-    http.lanes.lock().unwrap()["lanes"].as_array_mut().unwrap().pop();
+    http.lanes.lock().unwrap()["lanes"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
     view.update(cx, |v, cx| {
-        v.inspector.update(cx, |i, _| i.lanes.remove("lane-working"));
+        v.inspector
+            .update(cx, |i, _| i.lanes.remove("lane-working"));
     });
     for _ in 0..2 {
         view.update(cx, |v, cx| v.inspector.update(cx, |i, cx| i.tick(true, cx)));
         cx.run_until_parked();
     }
-    assert_eq!(gets(&http, "/api/lanes").len(), 2, "{:?}", gets(&http, "/api/lanes"));
+    assert_eq!(
+        gets(&http, "/api/lanes").len(),
+        2,
+        "{:?}",
+        gets(&http, "/api/lanes")
+    );
 }
 
 #[gpui::test]

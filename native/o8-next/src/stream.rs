@@ -732,7 +732,9 @@ impl Transcript {
             .chain(self.live.iter())
             .filter(|entry| entry.id == id)
             .find_map(|entry| {
-                entry.extra.get("receipt")
+                entry
+                    .extra
+                    .get("receipt")
                     .and_then(|receipt| receipt["terminal"]["completedAt"].as_f64())
             })
             .unwrap_or_else(|| {
@@ -1107,7 +1109,13 @@ mod tests {
                 .all(|tool| tool["status"] != "running")
         );
         // A fixed stamp makes replay proof independent of clock resolution.
-        let receipt = transcript.live.as_mut().unwrap().extra.get_mut("receipt").unwrap();
+        let receipt = transcript
+            .live
+            .as_mut()
+            .unwrap()
+            .extra
+            .get_mut("receipt")
+            .unwrap();
         receipt["terminal"]["completedAt"] = serde_json::json!(1234.);
         transcript.refresh();
         assert!(!transcript.interrupted(), "a second stop changes nothing");
@@ -1134,7 +1142,13 @@ mod tests {
         assert!(transcript.rows.iter().any(|row| matches!(row,
             crate::model::Row::Activity { steps, trace, .. } if steps.is_empty() && trace.stopped && !trace.live)));
         // A fixed stamp makes replay proof independent of clock resolution.
-        let receipt = transcript.live.as_mut().unwrap().extra.get_mut("receipt").unwrap();
+        let receipt = transcript
+            .live
+            .as_mut()
+            .unwrap()
+            .extra
+            .get_mut("receipt")
+            .unwrap();
         receipt["terminal"]["completedAt"] = serde_json::json!(1234.);
         transcript.refresh();
         assert!(!transcript.interrupted(), "a second stop changes nothing");

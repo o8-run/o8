@@ -1,19 +1,19 @@
 use super::*;
-#[path = "pr_status_tests.rs"]
-mod pr_status_tests;
 #[path = "context_card_tests.rs"]
 mod context_tests;
+#[path = "effort_acceptance_tests.rs"]
+mod effort_acceptance_tests;
 mod image_tests;
 #[path = "picker_dismiss_tests.rs"]
 mod picker_dismiss_tests;
+#[path = "pr_status_tests.rs"]
+mod pr_status_tests;
 #[path = "prompt_acceptance_tests.rs"]
 mod prompt_acceptance_tests;
 #[path = "prompt_persistence_tests.rs"]
 mod prompt_persistence_tests;
 #[path = "prompt_tests.rs"]
 mod prompt_tests;
-#[path = "effort_acceptance_tests.rs"]
-mod effort_acceptance_tests;
 #[path = "shell_persist_tests.rs"]
 mod shell_persist_tests;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
@@ -21,7 +21,10 @@ use gpui::{Modifiers, TestAppContext, VisualTestContext};
 #[test]
 fn a_dropped_thread_joins_the_draft_as_a_link_on_its_own_line() {
     use super::composer_card::with_thread_link;
-    assert_eq!(with_thread_link("", "Fix [login]", "t-1"), "[Fix login](o8://thread/t-1)");
+    assert_eq!(
+        with_thread_link("", "Fix [login]", "t-1"),
+        "[Fix login](o8://thread/t-1)"
+    );
     assert_eq!(
         with_thread_link("look at this\n", "Fix login", "t-1"),
         "look at this\n[Fix login](o8://thread/t-1)"
@@ -41,11 +44,7 @@ impl Fixture {
         Self::with_loaded(false)
     }
     fn with_loaded(loaded: bool) -> Self {
-        Self::with_args(if loaded {
-            &["--composer-loaded"]
-        } else {
-            &[]
-        })
+        Self::with_args(if loaded { &["--composer-loaded"] } else { &[] })
     }
     fn with_args(extra: &[&str]) -> Self {
         let mut server = Command::new("node")

@@ -45,10 +45,12 @@ fn session_rules_without_node() {
         assert_eq!(rules.len(), old.len() + 1);
         assert_eq!(&rules[..old.len()], old.as_slice());
         assert_eq!(rules.last().unwrap()["text"], "composer native rule");
-        assert!(client
-            .get::<Value>(route, &[])
-            .unwrap_err()
-            .contains("HTTP 400"));
+        assert!(
+            client
+                .get::<Value>(route, &[])
+                .unwrap_err()
+                .contains("HTTP 400")
+        );
         std::fs::write(
             state,
             serde_json::to_vec(
