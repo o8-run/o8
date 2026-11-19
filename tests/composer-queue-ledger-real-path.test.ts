@@ -1,3 +1,5 @@
+import { restartComposerOwnerFixture, installComposerOwnerFixture } from './fixtures/composer-queue-owner';
+import { fixtureComposerClaim } from './fixtures/composer-queue-attempt';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -16,7 +18,7 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', () => ({ getOrchestratorBac
   id, label: id, ensureSession: () => ({ sessionName: 'ledger-session', status: 'ready' }),
   peekSession: () => ({ sessionName: 'ledger-session', status: 'ready' }),
   liveSteer: async (_repo: string, _message: string, options: Parameters<NonNullable<OrchestratorBackend['liveSteer']>>[2]) => {
-    provider.steers++; options.beforeAdmit(); return { accepted: true };
+    provider.steers++; await options.beforeAdmit(); return { accepted: true };
   },
   sendTurn: async (_repo: string, _message: string, emit: (event: OrchestratorEvent) => void, options: OrchestratorTurnOptions) => {
     provider.sends++;
@@ -36,7 +38,7 @@ vi.stubEnv('CORTEX_IDE_DB_PATH', join(data, 'queue.db'));
 const { getSqlite, closeDb } = await import('@/lib/db');
 const queue = await import('@/lib/orchestrator/composer-queue');
 const routes = await import('@/app/api/orchestrator/composer-queue/route');
-const { createComposerQueueHeartbeat, runQueuedComposerSteer } = await import('@/lib/ws-server/composer-queue-heartbeat');
+const { createComposerQueueHeartbeat, runQueuedComposerSteer } = await import('./fixtures/composer-queue-executor');
 const target = { repoPath: repo, threadId: 'thoughts-ledger' };
 const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5S8AAAAASUVORK5CYII=', 'base64');
 const image = `data:image/png;base64,${Buffer.concat([pixel, Buffer.alloc(3 * 1024 * 1024 - pixel.length)]).toString('base64')}`;
@@ -91,7 +93,7 @@ function heartbeat() {
 }
 async function deliver(tick: () => void, id: string, status = 'applied') {
   tick();
-  await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).toBe(status), { interval: 10 });
+  await vi.waitFor(async () => expect((await queue.readComposerSend(id))?.status).toBe(status), { interval: 10 });
 }
 beforeAll(async () => {
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -149,7 +151,7 @@ it('delivers 20 3 MiB screenshots once, drops applied bytes, and deduplicates th
 it.each(['current', 'legacy'])('preserves delivered steer transcript text and media while compacting its %s receipt', async source => {
   const id = `ledger-steer-${source}`;
   expect((await api('POST', id, payload(0), target.threadId, 'steer-now')).status).toBe(200);
-  if (source === 'current') await runQueuedComposerSteer(queue.claimComposerSteer(id)!);
+  if (source === 'current') await runQueuedComposerSteer((await fixtureComposerClaim(queue.claimComposerSteer(id)))!);
   else {
     // Legacy steers saved text but depended on inline ledger images for media.
     writeFileSync(join(data, 'chat-history', `${target.threadId}.json`), JSON.stringify({ repoPath: repo, backend: 'codex',
@@ -158,9 +160,9 @@ it.each(['current', 'legacy'])('preserves delivered steer transcript text and me
   }
   // Older builds read delivered steer text directly from payload_json.
   // Assert before reopen too, so settlement and startup migration both retain it.
-  if (source === 'current') expect(queue.readComposerSend(id)?.payload.text).toBe(payload(0).text);
+  if (source === 'current') expect((await queue.readComposerSend(id))?.payload.text).toBe(payload(0).text);
   closeDb(); getSqlite();
-  expect(queue.readComposerSend(id)?.payload).toMatchObject({ text: payload(0).text, wireMessage: '', images: [] });
+  expect((await queue.readComposerSend(id))?.payload).toMatchObject({ text: payload(0).text, wireMessage: '', images: [] });
   const items = (await (await api('GET')).json()).items;
   expect(items[0]).toMatchObject({ id, status: 'applied', payload: { text: payload(0).text } });
   expect(items[0].payload.images).toHaveLength(1);
@@ -171,7 +173,7 @@ it.each(['current', 'legacy'])('preserves delivered steer transcript text and me
   closeDb(); const restarted = heartbeat();
   expect(getSqlite().prepare('SELECT * FROM composer_send_queue WHERE id = ?').get(id)).toEqual(compacted);
   restarted(); await new Promise(resolve => setTimeout(resolve, 30));
-  expect(queue.claimComposerSteer(id)).toBeNull();
+  expect((await fixtureComposerClaim(queue.claimComposerSteer(id)))).toBeNull();
   expect(provider.steers).toBe(source === 'current' ? 1 : 0);
   expect(measure().ledgerBytes).toBeLessThan(2_000);
 });
@@ -196,21 +198,21 @@ it('compacts legacy applied entries at connection startup while preserving every
   db.prepare("UPDATE composer_send_queue SET status = 'held' WHERE id = ?").run('ledger-legacy-held');
   db.prepare("UPDATE composer_send_queue SET status = 'dispatching' WHERE id = ?").run('ledger-legacy-dispatching');
   db.prepare("UPDATE composer_send_queue SET status = 'applied', admitted_at = NULL WHERE id = ?").run('ledger-legacy-unconfirmed');
-  const before = measure(); closeDb(); getSqlite();
+  const before = measure(); closeDb(); getSqlite(); await restartComposerOwnerFixture();
   const after = measure(); receipt('legacy-ledger', { before, after });
-  expect(queue.readComposerSend('ledger-legacy-applied')?.payload.images.length).toBe(0);
-  expect(queue.readComposerSend('ledger-legacy-queued')).toMatchObject({ status: 'queued', payload: payload(1) });
-  expect(queue.readComposerSend('ledger-legacy-held')).toMatchObject({ status: 'held', payload: payload(2) });
-  expect(queue.readComposerSend('ledger-legacy-dispatching')).toMatchObject({ status: 'dispatching', payload: payload(3) });
-  expect(queue.readComposerSend('ledger-legacy-unconfirmed')).toMatchObject({ status: 'applied', admittedAt: null, payload: payload(4) });
+  expect((await queue.readComposerSend('ledger-legacy-applied'))?.payload.images.length).toBe(0);
+  expect((await queue.readComposerSend('ledger-legacy-queued'))).toMatchObject({ status: 'queued', payload: payload(1) });
+  expect((await queue.readComposerSend('ledger-legacy-held'))).toMatchObject({ status: 'held', payload: payload(2) });
+  expect((await queue.readComposerSend('ledger-legacy-dispatching'))).toMatchObject({ status: 'dispatching', payload: payload(3) });
+  expect((await queue.readComposerSend('ledger-legacy-unconfirmed'))).toMatchObject({ status: 'applied', admittedAt: null, payload: payload(4) });
   expect((await enqueue('ledger-legacy-applied')).status).toBe('applied');
   expect((await api('POST', 'ledger-legacy-applied', payload(9))).status).toBe(400);
   closeDb(); getSqlite();
-  expect(queue.readComposerSend('ledger-legacy-queued')?.payload).toEqual(payload(1));
+  expect((await queue.readComposerSend('ledger-legacy-queued'))?.payload).toEqual(payload(1));
   // An older still-running server can settle an already-hashed pending row.
   getSqlite().prepare("UPDATE composer_send_queue SET status = 'applied', admitted_at = 1 WHERE id = ?").run('ledger-legacy-queued');
-  closeDb(); getSqlite();
-  expect(queue.readComposerSend('ledger-legacy-queued')?.payload.images.length).toBe(0);
+  closeDb(); getSqlite(); await restartComposerOwnerFixture();
+  expect((await queue.readComposerSend('ledger-legacy-queued'))?.payload.images.length).toBe(0);
   expect((await enqueue('ledger-legacy-queued', payload(1))).status).toBe('applied');
 });
 
@@ -218,10 +220,12 @@ it('retains unknown delivery bytes until cancellation resolves it, then keeps du
   const tick = heartbeat(); provider.uncertain = true;
   await enqueue('ledger-unknown'); await deliver(tick, 'ledger-unknown', 'held');
   closeDb(); getSqlite();
-  expect(queue.readComposerSend('ledger-unknown')).toMatchObject({ status: 'held', payload: payload(0), admittedAt: expect.any(Number) });
+  expect((await queue.readComposerSend('ledger-unknown'))).toMatchObject({ status: 'held', payload: payload(0), admittedAt: expect.any(Number) });
   expect((await enqueue('ledger-unknown')).payload).toEqual(payload(0));
   expect((await api('DELETE', 'ledger-unknown')).status).toBe(200);
-  expect(queue.readComposerSend('ledger-unknown')?.payload.images.length).toBe(0);
+  expect((await queue.readComposerSend('ledger-unknown'))?.payload.images.length).toBe(0);
   expect((await enqueue('ledger-unknown')).status).toBe('cancelled');
   expect(provider.sends).toBe(1);
 });
+
+installComposerOwnerFixture();

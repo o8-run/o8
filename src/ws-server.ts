@@ -124,7 +124,6 @@ import { appendOperatorStopNote, createAssistantTextBuffer, createPersistPacer, 
 import { prepareOrchestratorProjectTurn } from './lib/ws-server/orchestrator-project-context';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
-import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrator/service-tier';
 import { normalizeObservedOrchestratorTurnModel, normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
@@ -216,10 +215,15 @@ import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orch
 import type { ReviewChatOrigin } from './lib/orchestrator/review-continuation-origin';
 import { queueReviewContinuation as queueChatReviewMessage } from './lib/orchestrator/review-continuation';
 import { runReviewChatContinuation } from './lib/ws-server/review-chat-continuation';
-import { createChatContinuationHeartbeat, publishComposerQueueChange } from './lib/ws-server/composer-queue-heartbeat';
+import { createChatContinuationHeartbeat } from './lib/ws-server/composer-queue-heartbeat';
 import { withImmediateComposerSend, orchestratorContinuationAbortKey as orchestratorAbortKey } from './lib/ws-server/composer-send-admission';
 import { sendLeadTerminalStatus } from './lib/ws-server/lead-terminal-status';
+import { readPersistedLlmChat } from './lib/llm/chat-history-store';
 import { holdComposerSends } from './lib/orchestrator/composer-queue';
+import { executeComposerWsIngress, composerWsSelection } from './lib/ws-server/composer-ws-ingress';
+import { ComposerAttemptUncertain, type ComposerExecutorAttempt } from './lib/ws-server/composer-executor-attempt';
+import { ComposerOwnerUnknownOutcome } from './lib/ws-server/composer-owner-rpc';
+import type { ComposerQueuePayload } from './lib/orchestrator/composer-queue-types';
 import { holdWorkerCorrections } from './lib/orchestrator/worker-corrections';
 import { stopSharedWorkerReturns } from './lib/orchestrator/shared-worker-returns';
 import {
@@ -330,7 +334,6 @@ import {
   duplicateOrchestratorSendAck,
   orchestratorCommandAckCorrelation,
   orchestratorInterruptAckDisposition,
-  orchestratorSendIdempotencyScope,
   resolveOrchestratorCommandCorrelationId,
   type OrchestratorInterruptAckState,
   type OrchestratorSendAckState,
@@ -3926,11 +3929,7 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
   }
 }
 
-const ORCHESTRATOR_SEND_IDEMPOTENCY_VERB = 'orchestrator-send';
-// A governed turn may legitimately run far longer than the generic store's
-// ten-minute default. Keep its reservation alive for a full operator day so a
-// reconnect/retry cannot fork the same command while the original is working.
-const ORCHESTRATOR_SEND_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+const reportedOrchestratorSendErrors = new WeakSet<Error>();
 
 class OrchestratorSendRejectedBeforeAcceptance extends Error {
   constructor(cause: unknown) {
@@ -3991,20 +3990,62 @@ function sendOrchestratorInterruptAck(client: ClientState, input: {
   });
 }
 
-async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string, unknown>) {
-  const repoPath = resolveOrchestratorMessageRepoPath(msg);
-  const threadId = resolveMsgThreadId(msg);
-  if (!repoPath || !threadId?.startsWith('thoughts-')) return handleOrchestratorSendMsgAdmitted(client, msg);
-  try {
-    await withImmediateComposerSend({ repoPath, threadId }, () => handleOrchestratorSendMsgAdmitted(client, msg));
-  } catch (error) {
-    send(client, { channel: 'orchestrator', event: 'error', data: { repoPath, threadId,
-      error: error instanceof Error ? error.message : 'Unable to admit this message.',
-      ...orchestratorCommandAckCorrelation(resolveOrchestratorCommandCorrelationId(msg)) } });
+function assertWsExecutorAuthority(client: ClientState): void {
+  if (shuttingDown || (client.deviceId && !isDeviceActive(client.deviceId))) {
+    throw new Error('Orchestrator command authority is no longer active.');
   }
 }
 
-async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Record<string, unknown>) {
+async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string, unknown>) {
+  const repoPath = resolveOrchestratorMessageRepoPath(msg);
+  const message = typeof msg.message === 'string' ? msg.message : null;
+  if (!repoPath || !message) return;
+  const threadId = resolveMsgThreadId(msg);
+  const correlationId = resolveOrchestratorCommandCorrelationId(msg);
+  try {
+    await executeComposerWsIngress({ repoPath, wire: msg, clientMutationId: correlationId,
+      savedThoughtsThread: Boolean(threadId && readPersistedLlmChat(threadId)),
+      ...(threadId ? { guardNew: (run: () => Promise<void>) => withImmediateComposerSend({ repoPath, threadId }, run) } : {}),
+      prepare: snapshot => {
+        const selected = snapshot ? { ...msg, ...snapshot }
+          : resolveMobileTurnSelection({ ...msg, backend: resolveMsgBackendId(msg) }, repoPath, threadId, resolveMsgBackendId(msg));
+        const selection = snapshot ?? composerWsSelection(selected);
+        const backend = resolveMsgBackendId(selected);
+        const mode = resolveOrchestratorExecutionMode(selected.orchestrationMode);
+        const images = 'attachments' in msg ? validateComposerImageAttachments(msg.attachments) : [];
+        const payload: ComposerQueuePayload = {
+          text: resolveOrchestratorTranscriptMessage({ message, displayMessage: msg.displayMessage }), wireMessage: message,
+          images: images.map(image => ({ name: image.name ?? 'Image', dataUri: image.dataUri })),
+          routing: { backend, model: normalizeOrchestratorTurnModel(selected.model) ?? '',
+            effort: isManualThinkingEffort(selected.thinkingEffort) ? selected.thinkingEffort : 'adaptive',
+            permissionMode: resolveOrchestratorPermissionMode(selected.permissionMode), mode,
+            pickedMode: isComposerWireMode(selected.pickedMode) ? selected.pickedMode : resolveTurnReceiptMode(backend, mode),
+            collide: backend === 'collide', ...(typeof selected.projectId === 'string' ? { projectId: selected.projectId } : {}),
+            ...(isOrchestratorServiceTier(selected.serviceTier) ? { serviceTier: selected.serviceTier } : {}),
+          },
+        };
+        return { payload, selection };
+      },
+      duplicate: (inProgress, item) => sendOrchestratorSendAck(client, { repoPath, threadId,
+        backend: item.payload.routing.backend, agent: resolveMsgAgentId(msg, item.payload.routing.backend) || undefined,
+        correlationId, ...duplicateOrchestratorSendAck(inProgress) }),
+      execute: async (wire, selected, attempt) => {
+        assertWsExecutorAuthority(client);
+        await handleOrchestratorSendMsgAdmitted(client, selected, attempt, wire);
+      },
+    });
+  } catch (error) {
+    if (error instanceof OrchestratorSendRejectedBeforeAcceptance || (error instanceof Error && reportedOrchestratorSendErrors.has(error))) return;
+    send(client, { channel: 'orchestrator', event: 'error', data: { repoPath, threadId,
+      error: error instanceof Error ? error.message : 'Unable to admit this message.',
+      ...(correlationId ? { voiceTerminal: { userMessageId: `orch-user-${correlationId}`,
+        outcome: error instanceof ComposerAttemptUncertain || error instanceof ComposerOwnerUnknownOutcome ? 'unconfirmed' : 'failed',
+        text: error instanceof ComposerAttemptUncertain || error instanceof ComposerOwnerUnknownOutcome ? '' : 'The backend did not accept this request.' } } : {}),
+      ...orchestratorCommandAckCorrelation(correlationId) } });
+  }
+}
+
+async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Record<string, unknown>, attempt: ComposerExecutorAttempt, originalWire: Record<string, unknown>) {
   const repoPath = resolveOrchestratorMessageRepoPath(msg);
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
@@ -4052,6 +4093,12 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
       const leadAttachments = attachments ? validateLeadAttachments(attachments) : undefined;
       const transcriptMessage = resolveOrchestratorTranscriptMessage({ message, displayMessage: msg.displayMessage });
       const leadReceipt = await sendLeadThreadMessage({
+        beforeAdmit: async () => {
+          await attempt.assertLive(); assertWsExecutorAuthority(client);
+          if (!(await attempt.admit())) throw new Error('Queued message admission was cancelled.');
+          await attempt.assertLive();
+          assertWsExecutorAuthority(client);
+        },
         threadId,
         repoPath,
         message,
@@ -4101,7 +4148,10 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
           ...orchestratorCommandAckCorrelation(correlationId),
         },
       });
-      return;
+      if (error instanceof ComposerAttemptUncertain || error instanceof ComposerOwnerUnknownOutcome) {
+        reportedOrchestratorSendErrors.add(error); throw error;
+      }
+      throw new OrchestratorSendRejectedBeforeAcceptance(error);
     }
   }
   const requestedBackendId = resolveMsgBackendId(msg);
@@ -4130,82 +4180,21 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
     });
     return;
   }
-  // Legacy clients did not send a correlation id. Preserve their exact
-  // execution behavior; the one-shot handler still emits an uncorrelated
-  // accepted ACK at the later, truthful acceptance point.
-  if (!correlationId) {
-    await handleOrchestratorSendMsgOnce(client, msg, undefined, attachments);
-    return;
-  }
-  const agentId = backendId === requestedBackendId ? resolveMsgAgentId(msg, backendId) : '';
-  const scopeId = orchestratorSendIdempotencyScope({
-    repoPath,
-    backend: backendId,
-    agent: agentId,
-    threadId,
-  });
-  const key = deriveIdempotencyKey({
-    verb: ORCHESTRATOR_SEND_IDEMPOTENCY_VERB,
-    scopeId,
-    clientKey: correlationId,
-  });
-
-  try {
-    const outcome = await withIdempotency<void>({
-      key,
-      verb: ORCHESTRATOR_SEND_IDEMPOTENCY_VERB,
-      scopeId,
-      ttlMs: ORCHESTRATOR_SEND_IDEMPOTENCY_TTL_MS,
-    }, async () => {
-      await handleOrchestratorSendMsgOnce(client, msg, correlationId, attachments);
-    });
-
-    // The first caller receives `accepted` from inside the reserved execution,
-    // after the turn is durably owned. A duplicate never re-enters that body,
-    // so acknowledge its exact disposition here instead.
-    if (outcome.replayed) {
-      const duplicateAck = duplicateOrchestratorSendAck(outcome.inProgress);
-      sendOrchestratorSendAck(client, {
-        repoPath,
-        threadId,
-        backend: backendId,
-        agent: agentId || undefined,
-        correlationId,
-        ...duplicateAck,
-      });
-    }
-  } catch (error) {
-    if (error instanceof OrchestratorSendRejectedBeforeAcceptance) return;
-    // A keyed command fails closed when its durable reservation cannot be
-    // established. Executing without the guard would make a retry capable of
-    // starting a second governed turn.
-    send(client, {
-      channel: 'orchestrator',
-      event: 'error',
-      data: {
-        error: error instanceof Error ? error.message : 'Failed to reserve orchestrator command',
-        voiceTerminal: { userMessageId: `orch-user-${correlationId}`, outcome: 'failed', text: 'The backend did not accept this request.' },
-        repoPath,
-        threadId,
-        backend: backendId,
-        agent: agentId || undefined,
-        ...orchestratorCommandAckCorrelation(correlationId),
-      },
-    });
-  }
+  await handleOrchestratorSendMsgOnce(client, msg, correlationId, attachments, attempt, originalWire);
 }
-
 
 async function handleOrchestratorSendMsgOnce(
   client: ClientState,
   incoming: Record<string, unknown>,
   correlationId: string | undefined,
   attachments: ComposerImageAttachment[] | undefined,
+  attempt: ComposerExecutorAttempt,
+  originalWire: Record<string, unknown>,
 ) {
   const repoPath = resolveOrchestratorMessageRepoPath(incoming);
   const message = typeof incoming.message === 'string' ? incoming.message : null;
   if (!repoPath || !message) return;
-  const msg = resolveMobileTurnSelection(incoming, repoPath, resolveMsgThreadId(incoming), resolveMsgBackendId(incoming));
+  const msg = incoming; // Selection was recorded once at durable admission.
   // The transcript persists the operator's OWN words. `message` may carry
   // model-facing scaffolding the client prepends (mode directives, compaction
   // resume prelude) — persisting it verbatim rendered those directives
@@ -4228,8 +4217,8 @@ async function handleOrchestratorSendMsgOnce(
   // model inherited from the thread's last turn, or one on a backend with no
   // phone catalog, was not picked from the list and must not block the turn.
   const phoneBackend = resolveMsgBackendId(msg);
-  if (msg.surface === 'mobile' && typeof incoming.model === 'string' && (phoneBackend === 'claude' || phoneBackend === 'codex')) {
-    const error = mobileModelError(phoneBackend, incoming.model);
+  if (msg.surface === 'mobile' && typeof originalWire.model === 'string' && (phoneBackend === 'claude' || phoneBackend === 'codex')) {
+    const error = mobileModelError(phoneBackend, originalWire.model);
     if (error) {
       send(client, { channel: 'orchestrator', event: 'error', data: { error, code: 'invalid_model', status: 400, ...orchestratorCommandAckCorrelation(correlationId) } });
       throw new OrchestratorSendRejectedBeforeAcceptance(error);
@@ -4552,7 +4541,13 @@ async function handleOrchestratorSendMsgOnce(
     // Receipt is not acceptance. Only ACK after the route is subscribed, the
     // canonical user message has been persisted (for thoughts-* threads), and
     // the in-flight controller owns this turn. For keyed clients the outer
-    // withIdempotency call has also durably reserved the command by this point.
+    // The Rust claim fence owns this exact attempt; no generic reservation remains.
+    await attempt.assertLive();
+    assertWsExecutorAuthority(client);
+    if (!(await attempt.admit())) throw new Error('Queued message admission was cancelled.');
+    await attempt.assertLive();
+    if (turnController.signal.aborted) throw new Error('Orchestrator turn stopped before admission.');
+    assertWsExecutorAuthority(client);
     commandAccepted = true;
     sendOrchestratorSendAck(client, {
       repoPath,
@@ -5112,7 +5107,8 @@ async function handleOrchestratorSendMsgOnce(
       event: 'error' as const,
       data: {
         error,
-        voiceTerminal: { userMessageId, outcome: commandAccepted ? 'unconfirmed' : 'failed', text: commandAccepted ? '' : 'The backend did not accept this request.' },
+        voiceTerminal: { userMessageId, outcome: commandAccepted || err instanceof ComposerAttemptUncertain || err instanceof ComposerOwnerUnknownOutcome ? 'unconfirmed' : 'failed',
+          text: commandAccepted || err instanceof ComposerAttemptUncertain || err instanceof ComposerOwnerUnknownOutcome ? '' : 'The backend did not accept this request.' },
         ...(projectError?.toPayload() ?? {}),
         repoPath,
         threadId,
@@ -5126,9 +5122,11 @@ async function handleOrchestratorSendMsgOnce(
     } else {
       send(client, errorMsg);
     }
-    // withIdempotency releases a thrown reservation. Only do that when the
-    // command failed before the accepted ACK point; once accepted, a backend
-    // failure is the terminal outcome for this id and must replay, not rerun.
+    // A pre-accept failure is held by the fenced owner. Accepted failures remain
+    // terminal receipts, so reconnect never starts the provider turn again.
+    if (err instanceof ComposerAttemptUncertain || err instanceof ComposerOwnerUnknownOutcome) {
+      reportedOrchestratorSendErrors.add(err); throw err;
+    }
     if (correlationId && !commandAccepted) {
       throw new OrchestratorSendRejectedBeforeAcceptance(err);
     }
@@ -5149,8 +5147,9 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   if (!repoPath) return;
   const threadId = resolveMsgThreadId(msg);
   if (threadId) {
-    stopSharedWorkerReturns(repoPath, threadId); holdComposerSends({ repoPath, threadId }); holdWorkerCorrections({ repoPath, threadId });
-    publishComposerQueueChange(threadId);
+    stopSharedWorkerReturns(repoPath, threadId);
+    void holdComposerSends({ repoPath, threadId }).catch(error => console.warn('[composer-queue] Stop owner unavailable:', error));
+    holdWorkerCorrections({ repoPath, threadId });
   }
   const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;
   if (leadBinding) {

@@ -1,3 +1,4 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
 /**
  * Mission cards (#5468) — real entry-point coverage.
  *
@@ -157,7 +158,7 @@ describe('mission cards — real path', () => {
     expect(body.result.card.summary).toMatch(/^Approve · Merge cards packet\? · by operator at \d\d:\d\d UTC$/);
 
     // The lead's next turn: the decision waits on the existing composer queue.
-    const queued = listQueuedComposerSends({ repoPath: repo, threadId });
+    const queued = (await listQueuedComposerSends({ repoPath: repo, threadId }));
     expect(queued).toHaveLength(1);
     expect(queued[0]).toMatchObject({ id: body.result.action.id, intent: 'send-next', payload: { routing: ROUTING } });
     const block = /```json\n([\s\S]+)\n```/.exec(queued[0].payload.wireMessage)?.[1];
@@ -176,7 +177,7 @@ describe('mission cards — real path', () => {
     const refused = await again.json() as { error: { code: string; message: string }; result: { card: { state: string } } };
     expect(refused.error).toEqual({ code: 'read_only', message: 'The card was already decided.' });
     expect(refused.result.card.state).toBe('decided');
-    expect(listQueuedComposerSends({ repoPath: repo, threadId })).toHaveLength(1);
+    expect((await listQueuedComposerSends({ repoPath: repo, threadId }))).toHaveLength(1);
   });
 
   it('reload rebuilds the receipt from server state', async () => {
@@ -236,6 +237,8 @@ describe('mission cards — real path', () => {
     const entry = (await readCards(`llm-chat:${threadId}`)).find((candidate) => candidate.id === `card-${cardId}`)!;
     expect(entry.card).toMatchObject({ state: 'expired', receipt: null });
     expect(entry.text).toMatch(/^Expired · Approve hotfix\? · no decision by \d\d:\d\d UTC$/);
-    expect(listQueuedComposerSends({ repoPath: repo, threadId })).toHaveLength(1);
+    expect((await listQueuedComposerSends({ repoPath: repo, threadId }))).toHaveLength(1);
   });
 });
+
+installComposerOwnerFixture();

@@ -1,3 +1,4 @@
+import { assertInboxComposerQueueEmpty } from '@/lib/inbox/composer-queue-guard';
 import { assertSettledCompletedWorkspace, canRestoreCompletedWorkspace } from '@/lib/workspace/completed-packet';
 import { lstat } from 'node:fs/promises';
 
@@ -300,7 +301,7 @@ export async function GET(request: NextRequest) {
         : null;
     let completedCanPark = false;
     if (target.lane.status === 'completed') {
-      try { assertSettledCompletedWorkspace(target.lane, undefined, target.snapshot); completedCanPark = true; }
+      try { await assertInboxComposerQueueEmpty(assertSettledCompletedWorkspace(target.lane, undefined, target.snapshot).subject); completedCanPark = true; }
       catch { /* Fresh settled ownership is required for completed parking. */ }
     }
     return operatorSuccess({

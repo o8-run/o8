@@ -1,3 +1,4 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -114,7 +115,7 @@ const pi = createPiOrchestratorBackend({ stateRoot: () => join(root, 'pi-state')
 state.backend = pi;
 const { POST: enqueue } = await import('@/app/api/orchestrator/composer-queue/route');
 const { runBoundChatContinuation } = await import('@/lib/ws-server/bound-chat-continuation');
-const { createComposerQueueHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
+const { createComposerQueueHeartbeat } = await import('./fixtures/composer-queue-executor');
 const { readComposerSend } = await import('@/lib/orchestrator/composer-queue');
 const { routeReviewContinuation } = await import('@/lib/orchestrator/review-continuation');
 const { runReviewChatContinuation } = await import('@/lib/ws-server/review-chat-continuation');
@@ -138,7 +139,7 @@ async function queuedOutside(id: string) {
   expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
   createComposerQueueHeartbeat({ ...hooks, isBusy: () => false,
     publish: (_thread, session, event, payload) => chatHooks.publish(session, event, payload) })();
-  await vi.waitFor(() => expect(readComposerSend(id)?.status).toBe('applied'), { timeout: 30_000 });
+  await vi.waitFor(async () => expect((await readComposerSend(id))?.status).toBe('applied'), { timeout: 30_000 });
   expect(readFileSync(outside, 'utf8')).toBe('changed');
   expect(readPersistedLlmChat(parent)?.history.messages.at(-1)?.receipt?.permissionMode).toBe('outside-workspace');
 }
@@ -238,3 +239,5 @@ it('retains a deliberately queued operator Outside workspace choice after a conf
   await pi.closeAll();
   await queuedOutside('operator-outside-again');
 }, 90_000);
+
+installComposerOwnerFixture();

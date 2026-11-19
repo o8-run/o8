@@ -9,7 +9,11 @@ export function nativeCommitNotice(value: unknown, epoch: string): RealtimeMutat
   if (!r || Object.keys(r).length !== 3 || r.kind !== 'mutation' || !Array.isArray(r.refreshTargets)
     || r.refreshTargets.length !== 1 || r.refreshTargets[0] !== 'global') return null;
   const m = r.mutation;
-  if (!m || typeof m !== 'object' || Object.keys(m).length !== 6 || m.source !== 'server' || m.status !== 'completed' || !ACTIONS.has(m.action)) return null;
+  if (!m || typeof m !== 'object' || m.status !== 'completed') return null;
+  if (m.action === 'composer-queue') {
+    if (Object.keys(m).length !== 7 || m.source !== 'desktop' || typeof m.repoPath !== 'string'
+      || !m.repoPath.startsWith('/') || Buffer.byteLength(m.repoPath) > 4096) return null;
+  } else if (Object.keys(m).length !== 6 || m.source !== 'server' || !ACTIONS.has(m.action)) return null;
   if (![m.mutationId, m.surfaceId, m.createdAt].every(s => typeof s === 'string' && s.length > 0 && Buffer.byteLength(s) <= 4096)) return null;
   if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(m.createdAt) || !Number.isFinite(Date.parse(m.createdAt))) return null;
   return r;

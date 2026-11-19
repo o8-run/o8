@@ -16,7 +16,11 @@ export interface ComposerMention {
   jump?: { kind: 'worktree' | 'script' | 'terminal'; target: string };
 }
 export type ComposerQueueStatus = 'queued' | 'dispatching' | 'applied' | 'held' | 'cancelled';
+export type ComposerWsSelection = Partial<Record<'backend' | 'model' | 'thinkingEffort' | 'permissionMode' |
+  'orchestrationMode' | 'pickedMode' | 'serviceTier' | 'projectId' | 'handoffMode' | 'pinBackend' | 'collideBaseBackend', unknown>>;
 export interface ComposerQueuePayload {
+  /** Private routing snapshot for WS ingress only; never contains wire text or authority. */
+  wsSelection?: ComposerWsSelection;
   /** A deliberate follow-up may run only after this exact task settles. */
   afterTaskId?: string;
   text: string;

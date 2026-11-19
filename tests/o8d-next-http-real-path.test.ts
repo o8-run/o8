@@ -1,3 +1,4 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash, randomBytes } from 'node:crypto';
@@ -81,10 +82,10 @@ beforeAll(async () => {
   writeFileSync(join(directory, 'chat-history', 'thoughts-archived.json'), JSON.stringify({ messages: [], archivedAt: '2026-01-01', backend: 'codex' }));
   writeFileSync(join(directory, 'chat-history', 'thoughts-openclaw.json'), JSON.stringify({ messages: [], backend: 'openclaw' }));
   writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({ missionId: 'fixture-mission', packets: [] }));
-  enqueueComposerSend({ repoPath: repo, threadId: 'thoughts-review', id: 'fixture-queue-item', intent: 'send-next', payload: {
+  (await enqueueComposerSend({ repoPath: repo, threadId: 'thoughts-review', id: 'fixture-queue-item', intent: 'send-next', payload: {
     text: 'Fixture queued message', wireMessage: 'Fixture queued message', images: [],
     routing: { backend: 'claude', model: 'claude-code', effort: 'medium', permissionMode: 'full', mode: 'single', pickedMode: 'solo', collide: false },
-  } });
+  } }));
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
@@ -218,3 +219,5 @@ it.runIf(Boolean(process.env.O8_NEXT_HTTP_BENCH_REPORT))('measures per-route HTT
     reference: 'Vitest HTTP adapter using production Next handlers and middleware; not the Next server',
     o8dRssKiB: rssKiB, node: process.versions.node, results }, null, 2));
 }, 120_000);
+
+installComposerOwnerFixture();

@@ -2541,6 +2541,14 @@
       ]
     },
     {
+      "path": "tests/codex-owner-ws-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-review-config-isolation-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2668,6 +2676,22 @@
       "reasons": [
         "child-process",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/composer-owner-client-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/composer-owner-rust-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
         "real-path"
       ]
     },
@@ -3680,6 +3704,13 @@
       "path": "tests/inbox-auto-settle-integration.test.ts",
       "reasons": [
         "integration"
+      ]
+    },
+    {
+      "path": "tests/inbox-composer-owner-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
       ]
     },
     {
