@@ -256,3 +256,44 @@ fn next_off_quit_is_bounded_with_a_window_that_stops_reading() {
     assert!(!f.root.join("window-control.sock").exists());
     assert!(!f.root.join("launcher.sock").exists());
 }
+
+/// #6532: ⌘Q or the app menu's Quit in a launcher-owned window quits o8 through
+/// this launcher's own bounded shutdown, and leaves another instance running.
+#[test]
+fn next_off_window_quit_stops_this_launcher_and_no_other_instance() {
+    let mut other = Fixture::new();
+    other.start_with(&[("O8_API_FRONT_DOOR", "1"), ("O8_NEXT_OFF", "1")]);
+    other.ready();
+    until(|| !other.starts("window-starts").is_empty());
+    let other_window = other.starts("window-starts")[0];
+    let mut f = Fixture::new();
+    f.start_with(&[("O8_API_FRONT_DOOR", "1"), ("O8_NEXT_OFF", "1")]);
+    f.ready();
+    until(|| !f.starts("window-starts").is_empty());
+    let window = f.starts("window-starts")[0];
+    let ws = f.starts("ws-starts")[0];
+    let owner = env(&f, "launcher-o8d.json")["pid"].as_u64().unwrap() as u32;
+    let api = f.port("api-port");
+    assert_eq!(env(&f, "window-env")["O8_NEXT_QUIT_VIA_PARENT"], "1");
+    // The window stays up and keeps its lifeline until the launcher answers.
+    fs::write(f.root.join("press-quit"), "1").unwrap();
+    let status = {
+        let launcher = f.launcher.as_mut().unwrap();
+        until(|| launcher.try_wait().unwrap().is_some());
+        launcher.try_wait().unwrap().unwrap()
+    };
+    f.launcher = None;
+    assert!(status.success(), "the launcher must exit cleanly: {status:?}");
+    for pid in [window, ws, owner] {
+        until(|| gone(pid));
+    }
+    assert!(TcpStream::connect(("127.0.0.1", api)).is_err());
+    assert!(!f.root.join("launcher.sock").exists());
+    assert!(!f.root.join("window-control.sock").exists());
+    // Another instance, with its own launcher and window, is untouched.
+    assert!(other.running());
+    assert!(!gone(other_window));
+    assert!(TcpStream::connect(("127.0.0.1", other.port("api-port"))).is_ok());
+    other.stop();
+    until(|| gone(other_window));
+}
