@@ -330,6 +330,42 @@ impl Client {
 #[cfg(test)]
 mod tests {
     #[test]
+    #[ignore = "driven by the owned product-front-door saved-prompt fixture"]
+    fn saved_prompts_product_transport_without_node() {
+        let directory = std::path::PathBuf::from(
+            std::env::var_os("O8_PROMPT_CLIENT_DATA").expect("owned fixture data"),
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.join("fixture-owner")).unwrap(),
+            "o8d-native-read/v1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.join("node-stopped")).unwrap(),
+            "stopped"
+        );
+        let token = std::fs::read_to_string(directory.join("ws-token")).unwrap();
+        let client = Client::authenticated(
+            &std::env::var("O8_PROMPT_CLIENT_ORIGIN").unwrap(),
+            Some(token.trim().to_owned()),
+        )
+        .unwrap();
+        let list: serde_json::Value = client
+            .get(
+                "/api/prompt-library",
+                &[
+                    ("scope", "available"),
+                    ("query", "fixture"),
+                    ("limit", "100"),
+                ],
+            )
+            .unwrap();
+        let id = list["prompts"][0]["id"].as_str().expect("saved prompt");
+        let single: serde_json::Value = client
+            .get(&format!("/api/prompt-library/{id}"), &[])
+            .unwrap();
+        assert_eq!(single["prompt"], list["prompts"][0]);
+    }
+    #[test]
     fn a_tunneled_client_names_the_far_server_as_host() {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

@@ -3,13 +3,14 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import { getProjectWithRepos, removeRepoFromProject, setRepoRole } from '@/lib/projects/store';
 import { syncPanelLedgerFromProjectStore } from '@/lib/projects/context';
 import type { ProjectRole } from '@/lib/projects/types';
+import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' } as const;
 
-export async function DELETE(
+async function handleDELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; repoId: string }> },
 ) {
@@ -32,7 +33,7 @@ interface PatchRepoBody {
   role?: unknown;
 }
 
-export async function PATCH(
+async function handlePATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; repoId: string }> },
 ) {
@@ -65,3 +66,6 @@ export async function PATCH(
   }
   return NextResponse.json({ link }, { headers: NO_STORE });
 }
+
+export const PATCH = withRepoInventoryChange('project-repo-role-update', handlePATCH);
+export const DELETE = withRepoInventoryChange('project-repo-remove', handleDELETE);

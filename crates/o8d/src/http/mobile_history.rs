@@ -12,6 +12,13 @@ fn truthy(v: &Value) -> bool {
         _ => true,
     }
 }
+pub(super) fn time_label(ms: i64) -> Result<String, ()> {
+    Ok(DateTime::<Utc>::from_timestamp_millis(ms)
+        .ok_or(())?
+        .with_timezone(&Local)
+        .format("%-I:%M %p")
+        .to_string())
+}
 fn clock(message: &Value) -> Result<Value, ()> {
     if let Some(label) = message.get("timestampLabel").filter(|v| !v.is_null()) {
         return Ok(label.clone());
@@ -24,11 +31,7 @@ fn clock(message: &Value) -> Result<Value, ()> {
         .as_f64()
         .filter(|n| n.is_finite() && n.abs() <= 8.64e15)
         .ok_or(())?;
-    let date = DateTime::<Utc>::from_timestamp_millis(number.trunc() as i64).ok_or(())?;
-    Ok(json!(date
-        .with_timezone(&Local)
-        .format("%-I:%M %p")
-        .to_string()))
+    Ok(json!(time_label(number.trunc() as i64)?))
 }
 fn valid(message: &Value) -> bool {
     message.is_object()
@@ -248,17 +251,9 @@ pub(super) fn transcript(store: &ReadContext<'_>, params: &Params) -> Response {
     let Some(id) = key.strip_prefix("llm-chat:") else {
         return unavailable();
     };
-    let Ok(db) = store.database() else {
+    let Ok(lane) = mobile_lane_events::lane(store, key) else {
         return unavailable();
     };
-    let bound: Result<bool, _> = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM lanes WHERE session_key = ?)",
-        [key],
-        |r| r.get(0),
-    );
-    if bound != Ok(false) {
-        return unavailable();
-    }
     let Ok(mut record) = chat_context::read(store, id) else {
         return unavailable();
     };
@@ -275,6 +270,14 @@ pub(super) fn transcript(store: &ReadContext<'_>, params: &Params) -> Response {
         },
     ) else {
         return unavailable();
+    };
+    let transcript = if let Some(lane) = lane {
+        match mobile_lane_overlays::merge(store, &lane, transcript) {
+            Ok(transcript) => transcript,
+            Err(()) => return unavailable(),
+        }
+    } else {
+        transcript
     };
     let mut payload = json!({"sessionKey":key,"transcript":transcript});
     if paged {

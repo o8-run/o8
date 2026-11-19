@@ -1,6 +1,7 @@
 //! Request-local viewer authority. Unsupported grammar defers to the canonical TS implementation.
 use super::*;
 use sha2::{Digest, Sha256};
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
 pub struct ViewerRedaction {
     normalized: Vec<String>,
@@ -211,9 +212,9 @@ impl ViewerRedaction {
         let mut cursor = 0;
         for (start, end) in self.ranges(text)? {
             safe.push_str(&text[cursor..start]);
-            spans.push(
-                json!({"start":safe.len(),"end":safe.len()+10,"kind":"credential","path":""}),
-            );
+            // The viewer wire contract uses UTF-8 bytes (TS Buffer.byteLength).
+            let offset = safe.len();
+            spans.push(json!({"start":offset,"end":offset+10,"kind":"credential","path":""}));
             safe.push_str("[redacted]");
             cursor = end;
         }
@@ -246,7 +247,10 @@ impl ViewerRedaction {
                     let mut cursor = 0;
                     for (start, end) in ranges {
                         result.push_str(&text[cursor..start]);
-                        spans.push(json!({"start":result.len(),"end":result.len()+10,"kind":"credential","path":path}));
+                        let offset = result.len();
+                        spans.push(
+                            json!({"start":offset,"end":offset+10,"kind":"credential","path":path}),
+                        );
                         result.push_str("[redacted]");
                         cursor = end;
                     }
@@ -286,6 +290,38 @@ impl ViewerRedaction {
                             "totalDeletions",
                             "stat",
                             "diff",
+                        ]
+                    } else if object.contains_key("laneId") && object.contains_key("reviewSource") {
+                        &[
+                            "ok",
+                            "laneId",
+                            "packetId",
+                            "headSha",
+                            "revision",
+                            "base",
+                            "diffBase",
+                            "branch",
+                            "worktreePath",
+                            "reviewSource",
+                            "repositoryUuid",
+                            "mergeAvailable",
+                            "stat",
+                            "diff",
+                            "sizeBytes",
+                            "truncated",
+                            "maxBytes",
+                        ]
+                    } else if object.contains_key("baseBranch")
+                        && object.contains_key("comparisonRef")
+                    {
+                        &[
+                            "baseBranch",
+                            "requestedRef",
+                            "comparisonRef",
+                            "mergeBase",
+                            "fetchedRemoteBase",
+                            "usedFallback",
+                            "warning",
                         ]
                     } else if object.contains_key("sessionKey") {
                         &[
@@ -377,10 +413,15 @@ fn word(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
 }
 
-// Exact source offsets for the supported ASCII escape domain. Unicode and other
-// normalization cases defer, rather than substituting a different source map.
+// Byte offsets are exact for ASCII escapes and literal Unicode letters/numbers
+// that TypeScript leaves unchanged. Transformed/removed Unicode still defers.
 fn normalize(text: &str, preserve: bool) -> Result<(String, Vec<(usize, usize)>), ()> {
-    if !text.is_ascii() {
+    if !text.chars().all(|c| {
+        c.is_ascii()
+            || (c.is_alphanumeric()
+                && !is_combining_mark(c)
+                && c.to_string().nfkc().eq(std::iter::once(c)))
+    }) {
         return Err(());
     }
     let mut bytes = text.as_bytes().to_vec();
@@ -485,7 +526,7 @@ fn normalize(text: &str, preserve: bool) -> Result<(String, Vec<(usize, usize)>)
     Ok((String::from_utf8(bytes).map_err(|_| ())?, map))
 }
 
-fn viewer_diff(text: &str) -> bool {
+pub(super) fn viewer_diff(text: &str) -> bool {
     fn digits(raw: &str) -> Option<&str> {
         let n = raw.bytes().take_while(u8::is_ascii_digit).count();
         if n == 0 {
@@ -509,4 +550,59 @@ fn viewer_diff(text: &str) -> bool {
             Some(range(raw)?.starts_with(" @@"))
         })() == Some(true)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn redaction_spans_use_utf8_offsets_after_unicode_prefixes() {
+        let policy = ViewerRedaction::from_grant(
+            &json!({"normalizedValues":["fixture-value"],"activeCredentialHashes":[]}),
+        )
+        .unwrap();
+        for (prefix, start) in [("雪 ", 4), ("𐐀 ", 5), ("雪 𐐀 ", 9)] {
+            let input = format!("{prefix}fixture-value tail fixture-value");
+            let expected = format!("{prefix}[redacted] tail [redacted]");
+            let (safe, spans) = policy.text(&input).unwrap();
+            assert_eq!(safe, expected);
+            assert_eq!(
+                spans,
+                vec![
+                    json!({"start":start,"end":start+10,"kind":"credential","path":""}),
+                    json!({"start":start+16,"end":start+26,"kind":"credential","path":""}),
+                ]
+            );
+            for (body, path) in [
+                (json!({"content":input}), "/content"),
+                (json!({"files":[{"path":input}]}), "/files/0/path"),
+                (json!({"diff":input}), "/diff"),
+            ] {
+                let safe = policy.json(body, &[input.clone()]).unwrap();
+                assert_eq!(
+                    safe["redaction"]["spans"],
+                    json!([
+                        {"start":start,"end":start+10,"kind":"credential","path":path},
+                        {"start":start+16,"end":start+26,"kind":"credential","path":path},
+                    ])
+                );
+            }
+        }
+    }
+    #[test]
+    fn unchanged_unicode_maps_utf8_spans_but_transformed_or_removed_input_defers() {
+        let policy = ViewerRedaction::from_grant(
+            &json!({"normalizedValues":["雪"],"activeCredentialHashes":[]}),
+        )
+        .unwrap();
+        let body = policy.json(json!({"content":"a雪b"}), &[]).unwrap();
+        assert_eq!(body["content"], "a[redacted]b");
+        assert_eq!(
+            body["redaction"]["spans"],
+            json!([{"start":1,"end":11,"kind":"credential","path":"/content"}])
+        );
+        for raw in ["e\u{301}", "x\u{200d}y", "Ａ", "\\u96ea", "%E9%9B%AA"] {
+            assert!(policy.json(json!({"content":raw}), &[]).is_err());
+        }
+    }
 }

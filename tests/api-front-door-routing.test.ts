@@ -23,7 +23,9 @@ describe('launcher-controlled API takeover', () => {
     expect(registeredFrontDoorRoute('/api/setup/identity', 'GET')).toBe(true);
     expect(registeredFrontDoorRoute('/api/setup/identity', 'POST')).toBe(false);
     expect(registeredFrontDoorRoute('/api/lanes/reap', 'GET')).toBe(false);
-    expect(registeredFrontDoorRoute('/api/prompt-library/import', 'GET')).toBe(false);
+    // Import is registered (GET POST) so the product transport serves its owner refusal.
+    expect(registeredFrontDoorRoute('/api/prompt-library/import', 'GET')).toBe(true);
+    expect(registeredFrontDoorRoute('/api/prompt-library/import', 'PATCH')).toBe(false);
     expect(registeredFrontDoorRoute('/api/automations/connected', 'PUT')).toBe(false);
     expect(registeredFrontDoorRoute('/api/lanes/%FF', 'GET')).toBe(false);
     expect(registeredFrontDoorRoute('/api/fixture/unknown', 'GET')).toBe(false);

@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod launcher_owner_tests;
 mod render_region;
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
@@ -43,6 +45,7 @@ mod pane;
 mod pane_grid;
 mod pane_layout;
 mod pane_tree;
+mod parent_quit;
 mod project_icon;
 mod projects;
 mod projects_model;

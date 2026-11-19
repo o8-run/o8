@@ -17,6 +17,7 @@ import { closeSync, readFileSync } from 'node:fs';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import {
   readOrchestratorBackendSessionId,
   writeOrchestratorBackendSessionId,
@@ -387,9 +388,11 @@ async function sendToCodexOrchestratorAttempt(
   } catch (err) {
     if (settleBeforeSpawnIfAborted()) return;
     session.status = 'dead';
-    const note = err instanceof CliNotFoundError
-      ? `Codex binary not found: ${err.message}`
-      : `Failed to resolve Codex binary: ${err instanceof Error ? err.message : String(err)}`;
+    // An effort refusal is a routing answer, not a binary problem (#6533).
+    const note = err instanceof EffortPinRejectionError ? err.message
+      : err instanceof CliNotFoundError
+        ? `Codex binary not found: ${err.message}`
+        : `Failed to resolve Codex binary: ${err instanceof Error ? err.message : String(err)}`;
     onEvent({ type: 'error', error: note });
     onEvent({ type: 'done', sessionId: session.threadId, cost: null });
     return;

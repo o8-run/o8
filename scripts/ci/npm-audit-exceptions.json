@@ -1,8 +1,1 @@
-[
-  {
-    "id": "GHSA-fc5q-39xc-vjpf",
-    "package": "picomatch",
-    "reason": "No patched release exists as of 2026-11-17 (latest 4.0.7). Build/test tooling inherits the advisory; neither an upgrade nor an override can remove it. Remove when a patched release is available.",
-    "expires": "2026-12-01"
-  }
-]
+[]

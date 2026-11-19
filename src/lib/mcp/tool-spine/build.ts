@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { apiFrontDoorEnabled } from '@/lib/ws-server/api-front-door-config';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { fastDelegationCapability } from '@/lib/orchestrator/fast-delegation-auth';
 import { toolProfileCanDispatch, type ServerEntry, type ToolProfile, type ToolRegistry } from './registry';
@@ -276,6 +277,7 @@ export function buildToolRegistry(
         CORTEX_REPO_SLUG: repoSlug,
         WS_PORT: resolveToolSpineWsPort(),
         WS_TOKEN: getOrCreateWsToken(),
+        ...(apiFrontDoorEnabled() ? { O8_API_FRONT_DOOR: '1' } : {}),
       },
     },
   });

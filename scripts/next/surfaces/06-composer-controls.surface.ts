@@ -44,6 +44,7 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
   const rules = await import('../../../src/app/api/orchestrator/session-rules/route');
   const directives = await import('../../../src/app/api/cortex/directives/route');
   const archive = await import('../../../src/app/api/orchestrator/archive/route');
+  const models = await import('../../../src/app/api/mobile/orchestrator/models/route');
   return {
     priority: 6,
     admit: ({ url, method, body }) => {
@@ -71,6 +72,7 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
       'DELETE /api/orchestrator/session-rules': rules.DELETE,
       'GET /api/cortex/directives': directives.GET,
       'GET /api/orchestrator/archive': archive.GET,
+      'GET /api/mobile/orchestrator/models': models.GET,
     },
     match: (method, path) => {
       const id = path.match(/^\/api\/prompt-library\/([^/]+)\/use$/)?.[1];

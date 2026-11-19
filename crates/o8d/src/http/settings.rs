@@ -39,8 +39,10 @@ fn mtime_ns(_path: &Path) -> Result<Option<String>, ()> {
 }
 
 fn ports(store: &ReadContext<'_>) -> Result<PortSnapshot, ()> {
-    let raw: Value = serde_json::from_str(&std::env::var("O8D_STARTUP_PORT_INFO").map_err(|_| ())?)
-        .map_err(|_| ())?;
+    let raw: Value = match store.defaults_context.as_ref().and_then(|v| v.get("nativeStartupPortInfo")) {
+        Some(snapshot) => snapshot.clone(),
+        None => serde_json::from_str(&std::env::var("O8D_STARTUP_PORT_INFO").map_err(|_| ())?).map_err(|_| ())?,
+    };
     let stamp = |name: &str| match raw.get(name) {
         Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => Ok(Some(value.clone())),
@@ -198,7 +200,10 @@ pub(super) fn identity(store: &ReadContext<'_>) -> Response {
         let ports = ports(store)?;
         let instance = id(store, "O8_INSTANCE_ID", "instance-id")?;
         let boot = id(store, "O8_BOOT_ID", "boot-id")?;
-        let version = std::env::var("O8D_SERVER_VERSION").map_err(|_| ())?;
+        let version = match store.defaults_context.as_ref().and_then(|v| v.get("nativeStartupPortInfo")) {
+            Some(snapshot) => snapshot["serverVersion"].as_str().ok_or(())?.to_owned(),
+            None => std::env::var("O8D_SERVER_VERSION").map_err(|_| ())?,
+        };
         if version.is_empty() {
             return Err(());
         }

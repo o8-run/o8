@@ -147,6 +147,11 @@ fn git_context(repo: &str) -> GitContext {
     }
 }
 
+pub(super) fn git_piece(repo: &str) -> Value {
+    let git = git_context(repo);
+    json!({"repoSlug":git.slug,"branch":git.branch,"isWorktree":git.is_worktree,"worktreePath":git.worktree_path})
+}
+
 /// Share one fresh connection and repository projection across the response. Nothing
 /// survives the request, so WAL commits, replacements and branch changes stay visible.
 pub(super) fn append_all(store: &ReadContext<'_>, threads: &mut [Value]) -> Result<(), ()> {

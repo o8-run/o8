@@ -548,6 +548,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/cortex/directives', 'GET POST', () => import('@/app/api/cortex/directives/route')),
     route('/api/setup/mcp-servers', 'GET POST PATCH DELETE', () => import('@/lib/mcp/setup-mcp-servers-route')),
     route('/api/prompt-library', 'GET POST', () => import('@/app/api/prompt-library/route')),
+    route('/api/prompt-library/import', 'GET POST', () => import('@/app/api/prompt-library/import/route')),
+    route('/api/prompt-library/[id]/use', 'POST', () => import('@/app/api/prompt-library/[id]/use/route')),
     route('/api/prompt-library/[id]', 'GET PATCH DELETE', () => import('@/app/api/prompt-library/[id]/route')),
   ],
 };

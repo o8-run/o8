@@ -1,17 +1,29 @@
 //! Opt-in persisted reads for the native client. No upstream, migration or writer.
 mod file_content;
+mod directives;
 mod repo_spec;
 mod git_refs;
 mod prompt_library;
+mod prompt_writes;
+mod diff_comments;
+pub(crate) mod commit_notice;
+mod session_rules;
+mod session_rule_lease;
 mod file_assets;
 mod file_asset_viewer;
 mod file_tree;
 mod git_diff;
+mod lane_diff;
 mod git_diff_redaction;
 pub use git_diff_redaction::ViewerRedaction;
 mod chat;
+mod thread_list;
+mod thread_list_projection;
+mod thread_list_parked;
 mod chat_context;
 mod mobile_history;
+mod mobile_lane_events;
+mod mobile_lane_overlays;
 mod chat_context_json;
 mod chat_list;
 mod mobile_inbox;
@@ -19,6 +31,8 @@ mod review_workspace;
 mod git_remote;
 mod projects;
 mod queue;
+mod composer_queue_grant;
+pub use composer_queue_grant::valid as composer_queue_grant_valid;
 mod read_context;
 mod repository;
 mod settings_defaults;
@@ -155,12 +169,26 @@ fn unavailable() -> Response {
         json!({"error":"o8d persisted read unavailable; use the TypeScript server"}),
     )
 }
-fn problem(message: &str) -> Response {
-    reply(StatusCode::BAD_REQUEST, json!({"error":message}))
+
+/// Standalone HTTP has no Node resolver snapshot or admission backhaul.
+fn standalone_ws_info(store: &ReadContext<'_>) -> Response {
+    let port = store
+        .file(&store.directory.join("ws-port"), 32)
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok())
+        .and_then(|s| s.trim().parse::<u16>().ok());
+    match (port, store.token()) {
+        (Some(port), Ok(token)) if port > 0 => {
+            reply(StatusCode::OK, json!({"wsPort":port,"wsToken":token}))
+        }
+        _ => unavailable(),
+    }
 }
+
 fn value<'a>(params: &'a Params, key: &str) -> &'a str {
     params.get(key).map(String::as_str).unwrap_or("")
 }
+
 fn limit(params: &Params, default: usize, max: usize) -> usize {
     let raw = value(params, "limit").trim();
     // Match parseInt(..., 10), including its accepted numeric prefix.
@@ -215,14 +243,30 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
         params.entry(key).or_insert(value);
     }
     let work = store.clone();
-    match tokio::task::spawn_blocking(move || dispatch(&ReadContext::new(&work), &path, &params, "GET", &[]))
+    match tokio::task::spawn_blocking(move || {
+        let read = ReadContext::new(&work);
+        // This listener is --experimental-http: it authenticates directly and
+        // has no admission backhaul. The app/native dispatch always uses true.
+        if path == "/api/orchestrator/composer-queue" { queue::read(&read, &params, false) }
+        else if path == "/api/panel/ws-info" { standalone_ws_info(&read) }
+        else if path == "/api/mobile/orchestrator/threads" { match chat::threads(&read,&params) { Ok(v)=>reply(StatusCode::OK,v), Err(())=>unavailable() } }
+        else { dispatch(&read, &path, &params, "GET", &[]) }
+    })
         .await
     {
         Ok(response) => response,
         Err(_) => unavailable(),
     }
 }
-fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, _body: &[u8]) -> Response {
+fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, body: &[u8]) -> Response {
+    if diff_comments::matches(path, method) { return diff_comments::handle(store, params, method, body); }
+    if path == "/api/orchestrator/session-rules" {
+        if method == "GET" { return session_rules::read(store, params); }
+        if matches!(method, "POST" | "DELETE") { return session_rules::write(store, params, method, body); }
+    }
+    if method != "GET" && prompt_writes::matches(path, method) {
+        return prompt_writes::write(store, path, params, method, body);
+    }
     if method != "GET" { return unavailable() }
     if projects::matches(path) {
         return projects::read(store, path, params);
@@ -232,6 +276,8 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         "/api/panel/files" => file_tree::read(store, params),
         "/api/repo-spec" => repo_spec::read(store, params),
         "/api/prompt-library" => prompt_library::read(store, params),
+        "/api/cortex/directives" => directives::read(store, params),
+        path if path.starts_with("/api/prompt-library/") => prompt_library::single(store, path),
         "/api/panel/file-io" | "/api/panel/file-asset" | "/api/panel/serve-image" | "/api/mobile/media" => file_assets::read(store, path, params),
         "/api/worktrees/diff" | "/api/worktrees/diff-summary" | "/api/panel/file-diff" => git_diff::read(store, path, params),
         "/api/panel/branches"
@@ -239,16 +285,14 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         {
             repository::read(path, params)
         }
+        path if lane_diff::matches(path) => lane_diff::read(store, path, params),
         path if git_refs::is_commit(path) => git_refs::commit(store, path),
         "/api/runtime/inventory" => unavailable(),
-        "/api/mobile/orchestrator/threads" => match chat::threads(store, params) {
-            Ok(v) => reply(StatusCode::OK, v),
-            Err(_) => unavailable(),
-        },
+        "/api/mobile/orchestrator/threads" => thread_list::read(store, params),
         "/api/mobile/history" => mobile_history::transcript(store, params),
         "/api/v2/chat-history" => chat_context::context(store, params),
         "/api/v2/chat-history/list" => chat_list::read(store, params),
-        "/api/orchestrator/composer-queue" => queue::read(store, params),
+        "/api/orchestrator/composer-queue" => queue::read(store, params, true),
         "/api/orchestrator/state" => {
             // Reconciliation and live runtime evidence still belong to TypeScript.
             // Never invent an empty fleet when persisted lanes require that authority.
@@ -272,24 +316,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
                 Err(()) => unavailable(),
             }
         }
-        "/api/panel/ws-info" if std::env::var("O8D_NATIVE_SESSION_READS").as_deref() == Ok("1") => {
-            settings::ws_info(store)
-        }
-        // Preserve the existing standalone saved-file reader. Only the app
-        // transport has the live TypeScript resolver snapshot/admission path.
-        "/api/panel/ws-info" => {
-            let port = store
-                .file(&store.directory.join("ws-port"), 32)
-                .ok()
-                .and_then(|b| String::from_utf8(b).ok())
-                .and_then(|s| s.trim().parse::<u16>().ok());
-            match (port, store.token()) {
-                (Some(port), Ok(token)) if port > 0 => {
-                    reply(StatusCode::OK, json!({"wsPort":port,"wsToken":token}))
-                }
-                _ => unavailable(),
-            }
-        }
+        "/api/panel/ws-info" => settings::ws_info(store),
         "/api/panel/operator-defaults" | "/api/runtime/provider-instances" | "/api/setup/config"
         | "/api/v2/keys" | "/api/runtime/capabilities" | "/api/runtime/service-tiers"
             => settings_defaults::read(store, path, params),
@@ -360,6 +387,7 @@ pub fn native_request_viewer(directory: PathBuf, database: PathBuf, path: &str, 
     if native_route(path, method).is_none() {
         return unavailable();
     }
+    if diff_comments::matches(path, method) { return dispatch(&store,path,&params,method,body); }
     if path == "/api/mobile/inbox" { return mobile_inbox::read(&store); }
     if path == "/api/review/workspace" { return review_workspace::read(&store); }
     // A missing JSON file can still be a network thread. Its agent-bus
@@ -375,8 +403,8 @@ pub fn native_request_viewer(directory: PathBuf, database: PathBuf, path: &str, 
     };
     if store.database().ok().is_some_and(|db| {
         db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM bot_network_threads WHERE ? = '/api/mobile/orchestrator/threads' OR thread_id = ?)",
-            [path, id], |r| r.get::<_, bool>(0),
+            "SELECT EXISTS(SELECT 1 FROM bot_network_threads WHERE thread_id = ?)",
+            [id], |r| r.get::<_, bool>(0),
         ).unwrap_or(false)
     }) {
         return unavailable();

@@ -1,6 +1,6 @@
 # Packaged API front door
 
-The launcher can give the WS process the advertised API listener with
+The launcher can enable the public API front door with
 `O8_API_FRONT_DOOR=1`. The server does not infer this from `NODE_ENV`.
 The launcher enables it by default only for development app builds; release
 builds retain the existing listener arrangement until explicitly approved.
@@ -20,12 +20,24 @@ The launcher owns port-file publication and build-mode defaults. It also gives
 WS `O8_NEXT_BIN` and `O8_CODEBASE_MEMORY_BIN`: native-window launch via
 POST `/api/panel/operator-defaults` is a WS route (launcher PR #6444).
 
-The existing `O8_WS_O8D` switch and bundled `O8D_BINARY` resolution remain in
-force. When enabled, o8d owns the public listener and forwards to the private
-WS listener; otherwise Node owns it. Native-reader opt-outs remain independent.
+In the standalone launcher, front-door mode starts and supervises o8d directly
+on the public port before starting the Node WS producer. The launcher creates
+one ephemeral bridge key for its lifetime; the producer attaches over the
+profile's owner-only Unix socket, announcing its private loopback upstream and
+realtime epoch. It never spawns o8d or takes over the public listener in this
+mode. The launcher's existing ownership receipts, recovery and bounded shutdown
+also cover o8d. Classic mode and older launchers retain the existing Node-owned
+`O8_WS_O8D` behavior.
+
+Without a producer, independent native operator routes keep answering. Requests
+that need Node return 503 with Retry-After; `/ws` accepts no application session
+or checkpoint and closes with 1013. Attachment changes close existing WS streams
+for a fresh checkpoint. The actual window transport reconnects without `since`.
+Node still authenticates every producer-backed WS upgrade and owns checkpoints,
+commands, runtime state, and the GUI window's parent-pipe lifetime. This step
+neither adds standalone native WS subscriptions nor native commit publication.
+Native-reader opt-outs remain independent; session reads are not enabled globally.
 `O8_NEXT_O8D` is unnecessary for registered dispatch when takeover is enabled.
-The shared transport predicate also keeps the existing owner forwarding
-wrappers active with that legacy flag off.
 
 ## Dispatch and ownership
 

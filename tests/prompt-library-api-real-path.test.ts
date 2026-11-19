@@ -72,15 +72,15 @@ describe('prompt library API real path', () => {
 
   it('is operator-gated and persists searchable prompts through the route handlers', async () => {
     const remoteGate = panelGateMiddleware(new NextRequest(
-      'http://192.0.2.10:3001/api/prompt-library',
-      { method: 'GET', headers: { host: '192.0.2.10:3001' } },
+      'http://localhost:3001/api/prompt-library',
+      { method: 'GET', headers: { host: 'localhost:3001', 'x-o8-client-addr': '192.0.2.10' } },
     ));
     expect(remoteGate.status).toBe(401);
     const operatorGate = panelGateMiddleware(new NextRequest(
-      'http://192.0.2.10:3001/api/prompt-library',
+      'http://localhost:3001/api/prompt-library',
       {
         method: 'GET',
-        headers: { host: '192.0.2.10:3001', authorization: `Bearer ${token}` },
+        headers: { host: 'localhost:3001', 'x-o8-client-addr': '192.0.2.10', authorization: `Bearer ${token}` },
       },
     ));
     expect(operatorGate.status).toBe(200);

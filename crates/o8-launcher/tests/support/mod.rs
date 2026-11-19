@@ -55,13 +55,31 @@ if Path(sys.argv[0]).name=='focus':
  (root/'focus-shows').open('a').write(sys.argv[1]+'\n'); sys.exit(0)
 if Path(sys.argv[0]).name=='window':
  (root/'window-args').write_text(json.dumps(sys.argv[1:]))
+ (root/'window-env').write_text(json.dumps({k:os.environ.get(k) for k in ['O8_NEXT_API_TOKEN','O8_NEXT_PARENT_PIPE','O8_NEXT_QUIT_VIA_PARENT','O8_DATA_DIR','O8_API_FRONT_DOOR','O8_BOOT_ID']}))
+ (root/'window-starts').open('a').write(str(os.getpid())+'\n')
  (root/'window-ready').write_text(str(os.getpid()))
- sys.stdin.buffer.read(); sys.exit(0)
+ if os.environ.get('O8_NEXT_PARENT_PIPE')=='1': print('o8-next-ready',flush=True)
+ # ⌘Q in the window, as native/o8-next/src/parent_quit.rs sends it (#6532).
+ def press_quit():
+  while not (root/'press-quit').exists(): time.sleep(0.02)
+  print('o8-next-quit',flush=True)
+ import threading; threading.Thread(target=press_quit,daemon=True).start()
+ if (root/'stall-window').exists():
+  # A window that stops reading its control pipe and ignores TERM.
+  signal.signal(signal.SIGTERM,signal.SIG_IGN)
+  while True: time.sleep(1)
+ # Parent-owned control frames, as native/o8-next/src/app_parent.rs reads them.
+ for line in sys.stdin.buffer:
+  try: frame=json.loads(line)
+  except ValueError: continue
+  if frame.get('type')=='browser-agent':
+   print('o8-next-browser-result:'+json.dumps({'id':frame['id'],'result':{'ok':True,'window':os.getpid()}}),flush=True)
+ sys.exit(0)
 api=sys.argv[1].endswith('server.js')
 front=os.environ.get('O8_API_FRONT_DOOR')=='1'
 http_role=(not api) if front else api
-http_port=int(os.environ['O8_API_PORT'] if front else os.environ.get('PORT','0'))
-keys=['O8_API_FRONT_DOOR','O8_NEXT_OFF','O8_NEXT_WINDOW_OWNER','O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','O8_FORGED_KEY','PATH']
+http_port=int(os.environ.get('O8D_PRODUCER_UPSTREAM_PORT',os.environ['O8_API_PORT']) if front else os.environ.get('PORT','0'))
+keys=['O8D_PRODUCER_UPSTREAM_PORT','O8_API_FRONT_DOOR','O8_NEXT_OFF','O8_NEXT_WINDOW_OWNER','O8_DATA_DIR','CORTEX_IDE_DATA_DIR','O8_NODE_BIN','O8_PACKAGED_APP','O8_BOOT_ID','O8_INSTANCE_ID','O8_SIDECAR_PID','NODE_COMPILE_CACHE','O8_PI_WRITE_BIN','O8_BUNDLED_MCP_DIR','O8_BUNDLED_MCP_PATH','O8_NEXT_MAIN_WINDOW','PORT','HOSTNAME','NODE_ENV','O8_API_PORT','O8_WS_PORT','CORTEX_IDE_API_PORT','CORTEX_IDE_WS_PORT','WS_PORT','O8_NEXT_BIN','O8_NEXT_WINDOW_CONTROL','O8_NEXT_WINDOW_CONTROL_KEY','O8_CODEBASE_MEMORY_BIN','O8_APP_VERSION','NEXT_ORIGIN','GEMINI_API_KEY','O8_FORGED_KEY','PATH']
 (root/('api-env' if api else 'ws-env')).write_text(json.dumps({k:os.environ.get(k) for k in keys}))
 def terminated(*args):
  (root/'events').open('a').write(('api' if api else 'ws')+'-stop\n'); sys.exit(0)
@@ -112,13 +130,55 @@ class Handler(BaseHTTPRequestHandler):
    window=subprocess.Popen([os.environ['O8_NEXT_BIN'],'--enable-next','--app-shell','--server','http://127.0.0.1:'+str(http_port),'--shell-state',str(root/'next-shell.json')],stdin=subprocess.PIPE)
   (root/'shows').open('a').write('show\n')
   self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
-HTTPServer(('127.0.0.1',http_port),Handler).serve_forever()
+if front and os.environ.get('O8D_PRODUCER_SOCKET'):
+ import socket,threading
+ def attach():
+  while True:
+   try:
+    producer=socket.socket(socket.AF_UNIX);producer.connect(os.environ['O8D_PRODUCER_SOCKET'])
+    producer.sendall((json.dumps({'version':1,'key':os.environ['O8D_BRIDGE_KEY'],'upstream':'127.0.0.1:'+str(http_port),'epoch':str(os.getpid())})+'\n').encode())
+    producer.recv(16384);producer.recv(1)
+   except OSError: time.sleep(0.05)
+ threading.Thread(target=attach,daemon=True).start()
+if front and os.environ.get('O8_NEXT_WINDOW_CONTROL'):
+ import socket,threading
+ def browse():
+  # One browser-agent round trip per WS generation through the launcher's window control.
+  # A frame sent while no window runs is dropped, never replayed.
+  while not (root/'window-ready').exists(): time.sleep(0.05)
+  while True:
+   try:
+    control=socket.socket(socket.AF_UNIX);control.connect(os.environ['O8_NEXT_WINDOW_CONTROL'])
+    control.sendall((os.environ['O8_NEXT_WINDOW_CONTROL_KEY']+'\n').encode())
+    if (root/'stall-window').exists():
+     # Far more than the pipe buffer: a stalled window must not wedge the relay.
+     filler='x'*4000
+     for index in range(200):
+      control.sendall((json.dumps({'type':'browser-agent','id':str(index),'verb':'read','args':{'filler':filler}})+'\n').encode())
+     (root/'flooded').write_text('1')
+     while True: time.sleep(1)
+    control.sendall((json.dumps({'type':'browser-agent','id':str(os.getpid()),'verb':'read','args':{}})+'\n').encode())
+    reply=control.makefile('rb').readline()
+    if reply:
+     (root/'browser-results').open('a').write(reply.decode()); break
+   except OSError: pass
+   time.sleep(0.05)
+  while True: time.sleep(1)
+ threading.Thread(target=browse,daemon=True).start()
+http=HTTPServer(('127.0.0.1',http_port),Handler)
+if front and not api and (root/'crash-ws').exists():
+ import threading
+ threading.Timer(0.5,lambda:os._exit(17)).start()
+http.serve_forever()
 "#;
         for name in ["node", "dialog", "window", "probe", "focus"] {
             let p = root.join(name);
             fs::write(&p, script).unwrap();
             fs::set_permissions(p, fs::Permissions::from_mode(0o700)).unwrap();
         }
+        let daemon = root.join("o8d");
+        fs::write(&daemon, include_str!("owner.py")).unwrap();
+        fs::set_permissions(&daemon, fs::Permissions::from_mode(0o700)).unwrap();
         for name in ["server.js", "ws-server.mjs"] {
             fs::write(root.join(name), "fixture").unwrap();
         }

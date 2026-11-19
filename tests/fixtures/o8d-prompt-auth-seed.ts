@@ -1,0 +1,14 @@
+import { writeFileSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { mintPluginToken } from '../../src/lib/auth/plugin-token';
+import { mintBrainReadWorkerToken } from '../../src/lib/auth/brain-read-worker-token';
+import { getOrCreateLocalWorkerToken } from '../../src/lib/auth/worker-token';
+import { writeActiveSpectatorTokenHashes } from '../../src/lib/broadcast/spectator-token-file';
+import { writeActiveTokenHashes } from '../../src/lib/mobile/device-token-file';
+const root=process.env.CORTEX_IDE_DATA_DIR!;
+if(readFileSync(join(root,'fixture-owner'),'utf8')!=='o8d-native-read/v1')throw Error('Owned fixture required');
+const spectator='fixture-prompt-spectator-value',device='fixture-prompt-device-value';
+writeActiveSpectatorTokenHashes([createHash('sha256').update(spectator).digest('hex')]);
+writeActiveTokenHashes([createHash('sha256').update(device).digest('hex')]);
+writeFileSync(join(root,'prompt-credentials.json'),JSON.stringify({spectator,device,worker:getOrCreateLocalWorkerToken(),brain:mintBrainReadWorkerToken(join(root,'fixture-repo'),null),plugin:mintPluginToken({machineId:'fixture',clientId:'fixture',scopes:['o8:read']}),readonly:'o8ro_fixture'}),{mode:0o600});

@@ -30,14 +30,21 @@ it('matches 100 seeded TS requests per settings route, durable stores and auth t
     console.info(stdout);
     const report = JSON.parse(readFileSync(result, 'utf8'));
     expect(report.summary.map((item: { route: string }) => item.route)).toEqual(routes);
-    expect(report.summary.every((item: { attempted: number; native: number; differences: number }) =>
-      item.attempted >= 100 && item.native > 0 && item.differences === 0)).toBe(true);
+    expect(report.summary.every((item: { route: string; attempted: number; native: number; differences: number }) =>
+      item.attempted >= 100 && (item.route === '/api/setup/config' ? item.native === 0 : item.native > 0) && item.differences === 0)).toBe(true);
     if (process.env.O8D_SETTINGS_REPORT) writeFileSync(process.env.O8D_SETTINGS_REPORT, JSON.stringify(report, null, 2) + '\n');
+    expect(report.credentialGuard).toEqual({ setupReaderCopiesUnknownValues: true, setupProductProxied: true, keysExposeOnlyMetadata: true, ambientKeysDefer: true });
     const corpus = { seed: report.seed, records: report.records };
     const path = join(process.cwd(), 'crates/o8d/evidence/settings/corpus.json');
     if (process.env.O8D_CAPTURE_SETTINGS === '1') {
       mkdirSync(join(process.cwd(), 'crates/o8d/evidence/settings'), { recursive: true });
       writeFileSync(path, JSON.stringify(corpus, null, 2) + '\n');
-    } else if (!process.env.O8D_PARITY_SEED) expect(corpus).toEqual(JSON.parse(readFileSync(path, 'utf8')));
+    } else if (!process.env.O8D_PARITY_SEED) {
+      const frozen = JSON.parse(readFileSync(path, 'utf8'));
+      // Keep every body and defer oracle. Only setup's selection deliberately
+      // changes: its unchecked saved fields must not become product-native.
+      for (const row of frozen.records) if (row.request.path.split('?')[0] === '/api/setup/config') row.native = false;
+      expect(corpus).toEqual(frozen);
+    }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }, 900_000);

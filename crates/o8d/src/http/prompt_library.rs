@@ -1,13 +1,13 @@
-//! Fresh read-only prompt lists. Schema, mutations and admission remain with Node.
+//! Fresh prompt reads; Node retains schema and other-principal admission.
 use super::*;
 use rusqlite::{params_from_iter, types::Value as SqlValue};
 const QUERY_MAX: usize = 200;
 const LIMIT_MAX: i64 = 100;
-const COLUMNS: &str = "id,title,body,body_fingerprint,tags_json,scope,repo_path,source_kind,source_id,created_at,updated_at,last_used_at,use_count";
-fn whitespace(c: char) -> bool {
+pub(super) const COLUMNS: &str = "id,title,body,body_fingerprint,tags_json,scope,repo_path,source_kind,source_id,created_at,updated_at,last_used_at,use_count";
+pub(super) fn whitespace(c: char) -> bool {
     matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
 }
-fn trim(value: &str) -> &str {
+pub(super) fn trim(value: &str) -> &str {
     value.trim_matches(whitespace)
 }
 fn limit(raw: Option<&String>) -> Option<i64> {
@@ -46,7 +46,7 @@ fn number(row: &rusqlite::Row<'_>, key: &str) -> Result<i64, ()> {
     }
     Ok(value)
 }
-fn entry(row: &rusqlite::Row<'_>) -> ReadResult {
+pub(super) fn entry(row: &rusqlite::Row<'_>) -> ReadResult {
     let text = |key| row.get::<_, String>(key).map_err(|_| ());
     let nullable = |key| row.get::<_, Option<String>>(key).map_err(|_| ());
     // TS catches malformed tags and emits []; native must instead defer the
@@ -150,6 +150,44 @@ pub(super) fn read(store: &ReadContext<'_>, params: &Params) -> Response {
             prompts.push(entry(row)?);
         }
         let body = json!({"schema":"o8/prompt-library.list/v1","ok":true,"prompts":prompts});
+        if serde_json::to_vec(&body).map_err(|_| ())?.len() > RESPONSE_LIMIT {
+            return Err(());
+        }
+        Ok(reply(StatusCode::OK, body))
+    })();
+    result.unwrap_or_else(|_| unavailable())
+}
+
+pub(super) fn single(store: &ReadContext<'_>, path: &str) -> Response {
+    let result = (|| -> Result<Response, ()> {
+        let id = path.strip_prefix("/api/prompt-library/").ok_or(())?;
+        if id.is_empty()
+            || id == "import"
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        {
+            return Err(());
+        }
+        let db = store.database()?;
+        let mut statement = db
+            .prepare("SELECT * FROM prompt_library WHERE id = ?")
+            .map_err(|_| ())?;
+        if COLUMNS
+            .split(',')
+            .any(|name| !statement.column_names().any(|column| column == name))
+        {
+            return Err(());
+        }
+        let mut rows = statement.query([id]).map_err(|_| ())?;
+        let body = if let Some(row) = rows.next().map_err(|_| ())? {
+            json!({"schema":"o8/prompt-library.entry/v1","ok":true,"prompt":entry(row)?})
+        } else {
+            return Ok(reply(
+                StatusCode::NOT_FOUND,
+                json!({"schema":"o8/prompt-library.error/v1","ok":false,"error":{"code":"prompt_not_found","message":"Saved prompt not found."}}),
+            ));
+        };
         if serde_json::to_vec(&body).map_err(|_| ())?.len() > RESPONSE_LIMIT {
             return Err(());
         }

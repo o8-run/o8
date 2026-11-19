@@ -668,6 +668,12 @@
       ]
     },
     {
+      "path": "src/lib/next/app-window-launcher.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/auto-compact-excerpt.test.ts",
       "reasons": [
         "executable-fixture"
@@ -2751,6 +2757,16 @@
       ]
     },
     {
+      "path": "tests/cortex-create-project-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-launch-agent-readonly-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2778,6 +2794,16 @@
     {
       "path": "tests/cortex-observation-worker-authz-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cortex-project-membership-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },
@@ -3941,6 +3967,36 @@
       "reasons": [
         "child-process",
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/launcher-native-commits-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/launcher-native-global-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/launcher-o8d-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
         "real-path"
       ]
     },
@@ -5409,6 +5465,16 @@
       ]
     },
     {
+      "path": "tests/o8d-composer-queue-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-cortex-ask-answer-native-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5459,6 +5525,24 @@
     },
     {
       "path": "tests/o8d-devices-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-diff-comments-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-directives-real-path.test.ts",
       "reasons": [
         "child-process",
         "native-build",
@@ -5542,6 +5626,15 @@
       ]
     },
     {
+      "path": "tests/o8d-lane-review-diff-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-lane-worker-routes-native-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5573,6 +5666,14 @@
     },
     {
       "path": "tests/o8d-mobile-history-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-mobile-lane-overlays-real-path.test.ts",
       "reasons": [
         "child-process",
         "native-build",
@@ -5706,7 +5807,21 @@
       ]
     },
     {
+      "path": "tests/o8d-producer-attachment-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-projects-create-native-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-prompt-auth-authority-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -5716,6 +5831,24 @@
       "reasons": [
         "child-process",
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-prompt-native-auth-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-prompt-writes-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "process-signal",
         "real-path"
       ]
     },
@@ -5878,6 +6011,34 @@
       ]
     },
     {
+      "path": "tests/o8d-session-rule-caller-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-session-rule-reads-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-session-rules-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-settings-window-owner-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -5970,6 +6131,15 @@
     {
       "path": "tests/o8d-terminal-turns-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8d-thread-list-local-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
         "real-path"
       ]
     },
@@ -6912,6 +7082,15 @@
       ]
     },
     {
+      "path": "tests/project-membership-refresh-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/project-merge-mode-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -7068,6 +7247,15 @@
       "path": "tests/queued-composer-execution-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/queued-route-refusal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
         "git-cli",
         "real-path"
       ]
@@ -7984,6 +8172,14 @@
       ]
     },
     {
+      "path": "tests/settings-explicit-intent-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/settings-scope-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -8016,6 +8212,14 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/shared-worker-chat-return-display-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "git-cli",
         "real-path"
       ]

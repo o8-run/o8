@@ -8682,6 +8682,8 @@ async function bootstrapWsServer() {
         },
         publish: (threadId, sessionName, event, data) => broadcastToOrchestratorSession(
           orchestratorRouteSessionName(sessionName, threadId), JSON.stringify({ channel: 'orchestrator', event, data })),
+     
+        publishThread: thread => broadcast({ channel: 'orchestrator-threads', event: 'upsert', data: { thread } }),
       }),
       async fetchFleetStatus() {
         // #476 — Use cached inventory (15s TTL) instead of forcing fresh discovery every 5s.

@@ -5,9 +5,11 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Network threads and parked workspace receipt projections remain TypeScript-owned.",
-    "state": "red",
-    "test": "tests/o8d-native-route-table-real-path.test.ts"
+    "reason": "Partial ownership: o8d owns fresh local history/SQLite/git listing and projections. Node retains auth, canonical network/history preparation, in-memory network projection health, live GitHub enrichment once, final composition and all writes. Archived GET is native. Unsupported local data and any stage error defer to TypeScript; this is not a fully native endpoint or runtime retirement.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-thread-list-local-real-path.test.ts",
+    "owned": true,
+    "composition": "mobile-threads/1"
   },
   {
     "path": "/api/mobile/history",
@@ -15,9 +17,9 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Node admits only non-network llm-chat sessions without mission cards. Runtime tails, mission-card views, lanes and uncertain records defer to TypeScript.",
+    "reason": "Native: admitted ordinary llm-chat sessions, unbound or with an unambiguous SQLite lane and supported persisted huddle/steer events. TypeScript: all non-llm-chat keys (including codex/claude/gemini/opencode/cursor/grok tails and subagents), network or mission-card threads, ambiguous lanes, unsupported chat/event/receipt data or timestamps, and any read/schema error. Auth, projections and all writers remain Node-owned.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-mobile-history-real-path.test.ts",
+    "test": "tests/o8d-mobile-lane-overlays-real-path.test.ts",
     "owned": true
   },
   {
@@ -37,9 +39,11 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "Network projections, visual receipts and live steering capabilities remain TypeScript-owned.",
-    "state": "red",
-    "test": "tests/o8d-native-route-table-real-path.test.ts"
+    "reason": "Native: ordinary non-network GET list reads with repoPath and threadId, no id, a Node-validated canonical target and bounded per-request live capability grant. TypeScript: network queues, id visual receipts, other target/query forms, validation/read/schema errors, malformed or unsupported items/grants, and all writes. Node retains authority; this is not composer-queue removal.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-composer-queue-real-path.test.ts",
+    "owned": true,
+    "admission": "composer-queue"
   },
   {
     "path": "/api/v2/chat-history/list",
@@ -49,7 +53,8 @@
     "fallback": true,
     "reason": "Parked workspace projections, local-time placeholder titles and unsupported saved encodings remain TypeScript-owned; empty-record cleanup stays with the TypeScript writer.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-chat-list-real-path.test.ts"
+    "test": "tests/o8d-rust-chat-list-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/setup/config",
@@ -69,7 +74,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/runtime/capabilities",
@@ -79,7 +85,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/v2/keys",
@@ -89,7 +96,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/runtime/service-tiers",
@@ -99,7 +107,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/panel/operator-defaults",
@@ -109,7 +118,8 @@
     "fallback": true,
     "reason": "TypeScript owns initialization, live runtime and unsupported saved-state or credential cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-settings-real-path.test.ts"
+    "test": "tests/o8d-rust-settings-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/mobile/inbox",
@@ -119,7 +129,8 @@
     "fallback": true,
     "reason": "Only a warm empty canonical inbox cache is admitted; fresh, expired, invalidated, live and nonempty projections remain TypeScript-owned.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-mobile-inbox-real-path.test.ts"
+    "test": "tests/o8d-rust-mobile-inbox-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/review/workspace",
@@ -129,7 +140,8 @@
     "fallback": true,
     "reason": "Only an unselected workspace with no configured default root is native; selected Git/cache/GitHub work remains TypeScript-owned.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-review-workspace-real-path.test.ts"
+    "test": "tests/o8d-rust-review-workspace-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/panel/ws-info",
@@ -137,9 +149,10 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "TypeScript owns missing/invalid credential creation and resolver cache changes; unsupported snapshot, encoding, size or port defers",
+    "reason": "TypeScript owns missing/invalid credential creation and resolver cache changes; unsupported snapshot, encoding, size or port defers. With no producer, only independently authenticated loopback operators bootstrap the actual public port and fresh canonical token.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-startup-real-path.test.ts"
+    "test": "tests/o8d-rust-startup-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/setup/identity",
@@ -149,7 +162,8 @@
     "fallback": true,
     "reason": "TypeScript owns missing/derived ID creation, failed-write cached IDs and resolver cache changes; unsupported snapshot or saved state defers",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-startup-real-path.test.ts"
+    "test": "tests/o8d-rust-startup-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/panel/repos",
@@ -159,7 +173,8 @@
     "fallback": true,
     "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-projects-real-path.test.ts"
+    "test": "tests/o8d-rust-projects-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/panel/projects",
@@ -169,7 +184,8 @@
     "fallback": true,
     "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-projects-real-path.test.ts"
+    "test": "tests/o8d-rust-projects-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/projects",
@@ -179,7 +195,8 @@
     "fallback": true,
     "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-projects-real-path.test.ts"
+    "test": "tests/o8d-rust-projects-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/panel/repo-icon",
@@ -189,7 +206,8 @@
     "fallback": true,
     "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-projects-real-path.test.ts"
+    "test": "tests/o8d-rust-projects-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/projects/[id]",
@@ -199,7 +217,8 @@
     "fallback": true,
     "reason": "TypeScript retains store repair, live discovery and unsupported cache or saved-state cases.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-projects-real-path.test.ts"
+    "test": "tests/o8d-rust-projects-real-path.test.ts",
+    "owned": true
   },
   {
     "path": "/api/worktrees/diff",
@@ -359,12 +378,105 @@
   {
     "path": "/api/prompt-library",
     "methods": [
-      "GET"
+      "GET",
+      "POST"
     ],
     "fallback": true,
-    "reason": "Node retains auth, schema and all writes; unavailable databases, schema/SQL errors and malformed rows defer.",
+    "reason": "Rust owns operator list/create on the product transport; other principal admission and classic mode remain Node. Product Node writers refuse.",
     "state": "rust-with-fallback",
-    "test": "tests/o8d-prompt-library-real-path.test.ts",
+    "test": "tests/o8d-prompt-writes-real-path.test.ts",
     "owned": true
+  },
+  {
+    "path": "/api/lanes/[id]/diff",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "redaction": "viewer",
+    "fallback": true,
+    "reason": "Native: materialized lane review diff, revision, byte bounding and viewer redaction after per-request Node lane/worker/target and Git-directory authority. Node retains canonical legacy remote-base refresh and all writes. Immutable sources, unresolved targets, git or grant errors, unsupported configuration/encodings and unsafe metadata defer in full.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-lane-review-diff-real-path.test.ts"
+  },
+  {
+    "path": "/api/cortex/directives",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns fresh directive files, supported parsing/trailers, filtering and ordering. Node retains auth, data-directory initialization and canonical per-request project scope; malformed, unsafe, oversized or unsupported files/scope/collation defer in full. All writes and FTS remain Node.",
+    "test": "tests/o8d-directives-real-path.test.ts"
+  },
+  {
+    "path": "/api/prompt-library/[id]",
+    "methods": [
+      "GET",
+      "PATCH",
+      "DELETE"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns operator entry reads/edit/delete on the product transport; product Node writers refuse. Other principal admission and classic mode remain Node.",
+    "test": "tests/o8d-prompt-writes-real-path.test.ts"
+  },
+  {
+    "path": "/api/prompt-library/[id]/use",
+    "methods": [
+      "POST"
+    ],
+    "fallback": true,
+    "reason": "Rust owns product operator prompt use transactions; product Node writers, including import, refuse. Other principals retain Node admission.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-prompt-writes-real-path.test.ts",
+    "owned": true
+  },
+  {
+    "path": "/api/orchestrator/session-rules",
+    "methods": [
+      "POST",
+      "DELETE"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns operator rule mutations and the atomic correction-hold SQLite commit under the shared lifecycle lease. GET, worker read scope, delivery and runtime actions remain Node. Node product rule writers refuse; no post-commit fallback.",
+    "test": "tests/o8d-session-rules-real-path.test.ts"
+  },
+  {
+    "path": "/api/orchestrator/session-rules",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns operator session-rule lists through the native operator gate, without Node admission. Worker reads keep the original Node packet-to-thread scope check; other principals, unsupported inputs and read errors stay on Node. Mutation and correction ownership is unchanged.",
+    "test": "tests/o8d-session-rule-reads-real-path.test.ts"
+  },
+  {
+    "path": "/api/mobile/diff-comment",
+    "methods": [
+      "POST"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns product diff-comment create/list against the existing SQLite table with fresh operator/device file authorization. Workers are refused. Unsupported credential forms retain request-scoped Node admission; product Node comment writers refuse. Classic handlers and Node schema/enrollment ownership remain. No comment cache or post-commit fallback.",
+    "test": "tests/o8d-diff-comments-real-path.test.ts"
+  },
+  {
+    "path": "/api/mobile/diff-comments",
+    "methods": [
+      "GET"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns product diff-comment create/list against the existing SQLite table with fresh operator/device file authorization. Workers are refused. Unsupported credential forms retain request-scoped Node admission; product Node comment writers refuse. Classic handlers and Node schema/enrollment ownership remain. No comment cache or post-commit fallback.",
+    "test": "tests/o8d-diff-comments-real-path.test.ts"
   }
 ]

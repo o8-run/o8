@@ -1,3 +1,4 @@
+import { apiFrontDoorEnabled } from '@/lib/ws-server/api-front-door-config';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import {
@@ -77,6 +78,8 @@ export async function POST(request: NextRequest) {
     return operatorError('forbidden', 'Editing session rules is operator-only; a dispatched worker can read but not add rules.', 403);
   }
 
+  if (apiFrontDoorEnabled()) return operatorError('session_rules_native_owner', 'Session-rule writes require the native operator transport.', 503);
+
   const record = asRecord(await parseJsonBody(request));
   if (!record) {
     return operatorError('invalid_request', 'Invalid JSON body.', 400);
@@ -111,6 +114,8 @@ export async function DELETE(request: NextRequest) {
   if (resolveRequestPrincipal(request) !== 'operator') {
     return operatorError('forbidden', 'Editing session rules is operator-only; a dispatched worker can read but not remove rules.', 403);
   }
+
+  if (apiFrontDoorEnabled()) return operatorError('session_rules_native_owner', 'Session-rule writes require the native operator transport.', 503);
 
   const id = requireThreadId(request.nextUrl.searchParams.get('id'));
   if (!id) {

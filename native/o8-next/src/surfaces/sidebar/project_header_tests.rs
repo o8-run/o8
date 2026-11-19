@@ -235,3 +235,131 @@ fn sidebar_project_menu_opens_the_project_in_the_editor(cx: &mut TestAppContext)
         "the action closes the menu"
     );
 }
+
+#[gpui::test]
+fn project_inventory_notice_refreshes_real_window_without_losing_draft(cx: &mut TestAppContext) {
+    struct Producer(std::process::Child);
+    impl Drop for Producer {
+        fn drop(&mut self) {
+            drop(self.0.stdin.take());
+            let _ = self.0.wait();
+        }
+    }
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut producer = Producer(
+        Process::new("node")
+            .current_dir(&repo)
+            .args([
+                "--import",
+                "./scripts/register-server-only-stub.mjs",
+                "--import",
+                "tsx",
+                "tests/fixtures/projects-refresh-ws.ts",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    let mut lines = BufReader::new(producer.0.stdout.take().unwrap()).lines();
+    let receipt: Value = lines
+        .by_ref()
+        .find_map(|line| {
+            let value: Value = serde_json::from_str(&line.ok()?).ok()?;
+            value["origin"].as_str()?;
+            Some(value)
+        })
+        .expect("production WS fixture receipt");
+    std::thread::spawn(move || for _ in lines {});
+    let client = crate::client::Client::authenticated(
+        receipt["origin"].as_str().unwrap(),
+        Some(receipt["token"].as_str().unwrap().into()),
+    )
+    .unwrap();
+    let root = std::path::PathBuf::from(receipt["root"].as_str().unwrap());
+    let (shell, mut visual) = open(
+        client.clone(),
+        root.join("window.json"),
+        State::default(),
+        cx,
+    );
+    shell.update(&mut visual, |s, _| s.surfaces.setup.skip_first_run());
+    wait_for(&shell, &mut visual, |s, _| s.connected);
+    shell.update_in(&mut visual, |s, window, cx| {
+        s.open_thread_by_id("thoughts-review".into(), window, cx)
+    });
+    wait_for(&shell, &mut visual, |s, cx| {
+        s.active()
+            .and_then(|t| s.content.get(&s.key(&t)))
+            .is_some_and(|c| c.ready(cx))
+    });
+    let surface = shell.read_with(&visual, |s, _| {
+        match s.content.get(&s.key(&s.active().unwrap())).unwrap() {
+            Content::Session(surface) => surface.clone(),
+            _ => panic!("selected transcript"),
+        }
+    });
+    surface.update_in(&mut visual, |s, window, cx| s.shell_focus(true, window, cx));
+    visual.simulate_input("Unsent inventory refresh draft");
+    let selection = shell.read_with(&visual, |s, _| (s.state.selected.clone(), s.active()));
+    wait_for(&shell, &mut visual, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .diagnostic()["projectNames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p == "Inventory A")
+    });
+    // Let connected's initial dirty read complete before the external mutation.
+    wait_for(&shell, &mut visual, |s, cx| {
+        let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+        list.diagnostic()["loading"] == false && list.diagnostic()["dirty"] == false
+    });
+    let project = receipt["project"].as_str().unwrap();
+    client
+        .project_request(
+            "PATCH",
+            &format!("/api/panel/projects/{project}"),
+            &json!({"name":"Inventory B"}),
+        )
+        .unwrap();
+    wait_for(&shell, &mut visual, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .diagnostic()["projectNames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p == "Inventory B")
+    });
+    assert_eq!(
+        shell.read_with(&visual, |s, _| (s.state.selected.clone(), s.active())),
+        selection
+    );
+    assert_eq!(
+        surface.read_with(&visual, |s, cx| s.shell_issue_state(cx)["draft"].clone()),
+        "Unsent inventory refresh draft"
+    );
+    assert_eq!(
+        shell.read_with(&visual, |s, cx| s
+            .surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .diagnostic()["project"]
+            .clone()),
+        project
+    );
+}

@@ -878,3 +878,7 @@ mod receipt_tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "composer/session_rule_product_tests.rs"]
+mod session_rule_product_tests;

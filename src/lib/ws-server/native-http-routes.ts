@@ -1,4 +1,4 @@
-import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
+import { apiFrontDoorEnabled, nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { viewerRedactionGrant } from './native-git-diff-context';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -69,23 +69,40 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     headers.delete('x-o8d-peer');
     headers.delete('x-o8d-bridge');
     headers.delete('x-o8d-relay');
-    const init = { method: req.method, headers, signal: abort.signal };
+    const completeDirectives = req.headers['x-o8d-session-read'] === 'complete-directives/1';
+    const composeThreads = typeof req.headers['x-o8d-session-read'] === 'string' && req.headers['x-o8d-session-read'].startsWith('compose-threads/');
+    // The private POST carries the pieces for an already-admitted GET. Apply
+    // that GET's existing gate; never execute the public POST writer here.
+    const init = { method: (composeThreads || completeDirectives) && authenticatedBridge ? 'GET' : req.method, headers, signal: abort.signal };
     const gate = panelGateMiddleware(new NextRequest(url, init));
     let response: Response;
     let admission = false;
     if (gate.headers.get('x-middleware-next') !== '1') response = gate;
-    else if (authenticatedBridge && req.headers['x-o8d-session-read'] === 'authorize') {
+    else if (completeDirectives) {
+      response = url.pathname === '/api/cortex/directives' && nativeHttpTransportEnabled()
+        ? await (await import('./native-directives-completion')).completeNativeDirectives(req, authenticatedBridge, new NextRequest(url, init))
+        : new Response(null, { status: 409 });
+    } else if (composeThreads) {
+      response = url.pathname === '/api/mobile/orchestrator/threads' && nativeHttpTransportEnabled()
+        ? await (await import('./native-thread-list-compose')).composeNativeThreadList(req, authenticatedBridge)
+        : new Response(null, { status: 409 });
+    } else if (authenticatedBridge && req.headers['x-o8d-session-read'] === 'authorize') {
       // Admission probes must never execute a writer when disabled or unmatched.
       const retiredProjectPath = ['/api/projects/context', '/api/projects/dismissed-suggestions'].includes(url.pathname);
       const ownedRoute = nativeRoutes.find(route => route.path === match.route.path && route.methods.includes(req.method ?? 'GET') && 'owned' in route && route.owned === true);
+      const threadListRoute = ownedRoute && 'composition' in ownedRoute && ownedRoute.composition === 'mobile-threads/1';
+      const composerQueueRoute = ownedRoute && 'admission' in ownedRoute && ownedRoute.admission === 'composer-queue';
       const viewerRoute = ownedRoute && 'redaction' in ownedRoute && ownedRoute.redaction === 'viewer';
+      const diffCommentRoute = ownedRoute && ['/api/mobile/diff-comment', '/api/mobile/diff-comments'].includes(url.pathname);
       if ((!nativeSessionReadsEnabled() && !(nativeHttpTransportEnabled() && ownedRoute)) || retiredProjectPath
         || !nativeRoutes.some(route => route.path === match.route.path && route.methods.includes(req.method ?? 'GET'))) {
         response = new Response(null, { status: 409 });
       } else {
         // Admission only. Keep the middleware and queue's existing defense-in-depth
         // gate authoritative; the bridge credential cannot authorize a principal.
-        const denied = req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys', '/api/projects', '/api/prompt-library'].includes(url.pathname) || match.route.path === '/api/projects/[id]'
+        // Diff comments have only the mobile middleware gate, including paired
+        // devices. Do not add the unrelated remote operator-only panel gate.
+        const denied = !diffCommentRoute && (req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys', '/api/projects', '/api/prompt-library'].includes(url.pathname) || match.route.path === '/api/projects/[id]' || match.route.path === '/api/prompt-library/[id]')
           ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
         let projectDenied: Response | null = null;
         if (url.pathname === '/api/panel/repo-icon') {
@@ -109,6 +126,8 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           ? (await import('@/lib/review/workspace-selection')).isReviewWorkspaceUnselected(url.searchParams.get('workspace')) : undefined;
         // Scope remains the live Node registry/target resolver's authority.
         // Bind its result to this admitted request; never replicate the registry in Rust.
+        const laneDiffTarget = viewerRoute && match.route.path === '/api/lanes/[id]/diff' && !denied && !projectDenied
+          ? await (await import('./native-lane-diff-context')).nativeLaneDiffTarget(new NextRequest(url, init), match.params?.id ?? '') : undefined;
         let fileScopeDenied = false;
         let fileContentScope: { repoRoot: string } | undefined;
         let fileReadTarget: { root: string; relativePath: string } | undefined;
@@ -140,7 +159,25 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           && !(await import('./native-chat-history-admission')).nativeChatHistoryAllowed(url.searchParams.get('tabId'));
         const deferMobileHistory = url.pathname === '/api/mobile/history' && req.method === 'GET'
           && !(await import('./native-chat-history-admission')).nativeMobileHistoryAllowed(url.searchParams.get('sessionKey'));
+        const composerQueue = composerQueueRoute && !denied && !projectDenied
+          ? (await import('./native-composer-queue-context')).nativeComposerQueueContext(url) : undefined;
+        let threadList: { machineDisplayName: string } | null | undefined;
+        if (threadListRoute && !denied && !projectDenied) {
+          try {
+            const backend = url.searchParams.get('backend')?.trim();
+            if (url.searchParams.get('archived') !== '1' && (!backend || (await import('@/lib/lane/orchestrator-backends/types')).isOrchestratorBackendId(backend))) {
+              (await import('@/lib/bots/network-projection')).projectAllNetworkThreads();
+              (await import('@/lib/mobile/orchestrator-thread-history')).ensureHistoryReady();
+            }
+            const machineDisplayName = (await import('@/lib/mobile/machine-name')).localMachineName();
+            threadList = Buffer.byteLength(machineDisplayName) <= 16 * 1024 ? { machineDisplayName } : null;
+          } catch { threadList = null; }
+        }
+        const directivesScope = url.pathname === '/api/cortex/directives' && !denied && !projectDenied
+          ? await (await import('./native-directives-context')).nativeDirectivesScope(url) : undefined;
         const defaultsContext = {
+          ...(diffCommentRoute ? { diffCommentAuthority: apiFrontDoorEnabled() } : {}),
+          composerQueue, threadList, laneDiffTarget, directivesScope,
           fileContentScope, fileReadTarget, fileAssetTarget, repoSpecTarget,
           gitRefsCommitRoot: viewerRoute && match.route.path === '/api/panel/commits/[hash]'
             ? resolve((await import('@/lib/panel/git-commits')).resolveWorkspaceRoot(url.searchParams.get('workspace'))) : undefined,
@@ -216,14 +253,23 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
           ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
         };
-        response = denied ?? projectDenied ?? ((fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+        response = denied ?? projectDenied ?? ((laneDiffTarget === null || directivesScope === null || threadList === null || composerQueue === null || fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
           'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
         } }));
         if (viewerRoute && response.status === 204) {
           const grant = req.headers['x-o8d-redaction'] === 'viewer/1' ? viewerRedactionGrant(defaultsContext) : null;
           response = grant === null ? new Response(null, { status: 409 }) : new Response(grant, { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
         }
-        admission = (!viewerRoute || response.status === 200) && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
+        if (composerQueueRoute && response.status === 204) {
+          const grant = req.headers['x-o8d-composer-queue'] === 'capabilities/1'
+            ? (await import('./native-composer-queue-context')).composerQueueGrant(defaultsContext) : null;
+          response = grant === null ? new Response(null, { status: 409 }) : new Response(grant, { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+        }
+        if (threadListRoute && response.status === 204) {
+          response = new Response(JSON.stringify({ version: 1, defaultsContext: { threadList } }), { status: 200,
+            headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+        }
+        admission = (!(viewerRoute || composerQueueRoute || threadListRoute) || response.status === 200) && composerQueue !== null && threadList !== null && laneDiffTarget !== null && directivesScope !== null && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
       }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });
