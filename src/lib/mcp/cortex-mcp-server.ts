@@ -54,6 +54,7 @@ import { createWorkerObservationHandlers } from './worker-observation';
 import { TRANSCRIPT_READ_TOOL } from './transcript-read-tool';
 import { deferredMcpRequest } from './deferred-tools';
 import type { McpTool, McpToolResult } from './operator-handlers/shared';
+import { apiFrontDoorEnabled } from '@/lib/ws-server/api-front-door-config';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -1003,10 +1004,16 @@ async function handleRegisterMcp(args: Record<string, unknown>): Promise<McpTool
 
 // ── Projects handlers (epic #899) ──
 //
-// These call the storage layer directly rather than going through HTTP. The
+// Classic calls the storage layer directly rather than going through HTTP. The
 // MCP server runs in its own node process but shares the SQLite file with the
 // Next backend; better-sqlite3 + WAL mode is multi-process safe. This keeps
 // project mutations atomic and avoids the panel-auth round-trip.
+
+function unknownProjectMembershipOutcome(error: unknown): McpToolResult | null {
+  if (!apiFrontDoorEnabled() || !(error instanceof O8ApiError)
+    || (error.status !== null && (error.status < 200 || error.status >= 300))) return null;
+  return textResult('Project membership outcome is unknown. Run cortex_list_projects to inspect the current membership before deciding whether to retry.', true);
+}
 
 function resolveRoleArg(value: unknown): ProjectRole | null {
   if (typeof value !== 'string') return null;
@@ -1052,9 +1059,21 @@ async function handleAddRepoToProject(args: Record<string, unknown>): Promise<Mc
       return textResult('projectId and repoId are required.', true);
     }
     const role = resolveRoleArg(args.role);
+    if (apiFrontDoorEnabled()) {
+      await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/repos`, {
+        method: 'POST', body: JSON.stringify({ repoId, role, suggestionOrigin: 'manual' }),
+      });
+      return jsonResult({ ok: true });
+    }
     addRepoToProject(projectId, repoId, role, 'manual');
     return jsonResult({ ok: true });
   } catch (err) {
+    const unknown = unknownProjectMembershipOutcome(err);
+    if (unknown) return unknown;
+    if (apiFrontDoorEnabled() && err instanceof O8ApiError && err.status === 404) {
+      // Classic hides the missing-project store exception through safeErrorText.
+      return textResult('Failed to add repo: o8 operation failed', true);
+    }
     return textResult(`Failed to add repo: ${safeErrorText(err)}`, true);
   }
 }
@@ -1066,9 +1085,16 @@ async function handleRemoveRepoFromProject(args: Record<string, unknown>): Promi
     if (!projectId || !repoId) {
       return textResult('projectId and repoId are required.', true);
     }
+    if (apiFrontDoorEnabled()) {
+      await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/repos/${encodeURIComponent(repoId)}`, { method: 'DELETE' });
+      return jsonResult({ ok: true });
+    }
     const removed = removeRepoFromProject(projectId, repoId);
     return jsonResult({ ok: removed });
   } catch (err) {
+    const unknown = unknownProjectMembershipOutcome(err);
+    if (unknown) return unknown;
+    if (apiFrontDoorEnabled() && err instanceof O8ApiError && err.status === 404) return jsonResult({ ok: false });
     return textResult(`Failed to remove repo: ${safeErrorText(err)}`, true);
   }
 }
@@ -1081,12 +1107,21 @@ async function handleSetRepoRole(args: Record<string, unknown>): Promise<McpTool
       return textResult('projectId and repoId are required.', true);
     }
     const role = resolveRoleArg(args.role);
+    if (apiFrontDoorEnabled()) {
+      await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/repos/${encodeURIComponent(repoId)}`, {
+        method: 'PATCH', body: JSON.stringify({ role }),
+      });
+      return jsonResult({ ok: true });
+    }
     const link = setRepoRole(projectId, repoId, role);
     if (!link) {
       return textResult('Project repo link not found.', true);
     }
     return jsonResult({ ok: true });
   } catch (err) {
+    const unknown = unknownProjectMembershipOutcome(err);
+    if (unknown) return unknown;
+    if (apiFrontDoorEnabled() && err instanceof O8ApiError && err.status === 404) return textResult('Project repo link not found.', true);
     return textResult(`Failed to set role: ${safeErrorText(err)}`, true);
   }
 }

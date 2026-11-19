@@ -2788,6 +2788,16 @@
       ]
     },
     {
+      "path": "tests/cortex-project-membership-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-transcript-text-pages-real-path.test.ts",
       "reasons": [
         "child-process",
