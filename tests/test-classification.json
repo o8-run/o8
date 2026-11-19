@@ -7161,6 +7161,14 @@
       ]
     },
     {
+      "path": "tests/projects-ledger-concurrency-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/promote-beta-real-path.test.ts",
       "reasons": [
         "child-process",
