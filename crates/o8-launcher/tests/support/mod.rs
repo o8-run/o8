@@ -59,6 +59,10 @@ if Path(sys.argv[0]).name=='window':
  (root/'window-starts').open('a').write(str(os.getpid())+'\n')
  (root/'window-ready').write_text(str(os.getpid()))
  if os.environ.get('O8_NEXT_PARENT_PIPE')=='1': print('o8-next-ready',flush=True)
+ if (root/'stall-window').exists():
+  # A window that stops reading its control pipe and ignores TERM.
+  signal.signal(signal.SIGTERM,signal.SIG_IGN)
+  while True: time.sleep(1)
  # Parent-owned control frames, as native/o8-next/src/app_parent.rs reads them.
  for line in sys.stdin.buffer:
   try: frame=json.loads(line)
@@ -141,6 +145,13 @@ if front and os.environ.get('O8_NEXT_WINDOW_CONTROL'):
    try:
     control=socket.socket(socket.AF_UNIX);control.connect(os.environ['O8_NEXT_WINDOW_CONTROL'])
     control.sendall((os.environ['O8_NEXT_WINDOW_CONTROL_KEY']+'\n').encode())
+    if (root/'stall-window').exists():
+     # Far more than the pipe buffer: a stalled window must not wedge the relay.
+     filler='x'*4000
+     for index in range(200):
+      control.sendall((json.dumps({'type':'browser-agent','id':str(index),'verb':'read','args':{'filler':filler}})+'\n').encode())
+     (root/'flooded').write_text('1')
+     while True: time.sleep(1)
     control.sendall((json.dumps({'type':'browser-agent','id':str(os.getpid()),'verb':'read','args':{}})+'\n').encode())
     reply=control.makefile('rb').readline()
     if reply:

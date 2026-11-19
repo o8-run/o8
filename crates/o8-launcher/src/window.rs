@@ -31,6 +31,13 @@ const RESULT: &str = "o8-next-browser-result:";
 const READY_WITHIN: Duration = Duration::from_secs(15);
 /// The window drops a control frame larger than this; so does the relay.
 const FRAME_LIMIT: usize = 1024 * 1024;
+/// Control frames waiting for the window. A full queue drops new frames, so a
+/// window that stops reading never blocks WS, Show, reopen or Quit.
+const QUEUED_FRAMES: usize = 32;
+/// After the lifeline closes, how long a window may take to exit before it is
+/// killed: the same one second the server gave it (`app-window.ts`). The rest
+/// of the shared shutdown deadline stays with o8d and the servers.
+const EXIT_WITHIN: Duration = Duration::from_secs(1);
 /// Unauthenticated local handshakes in flight, as the o8d producer socket bounds them.
 const HANDSHAKES: usize = 16;
 /// The window only needs the variables that display a native window.
@@ -157,8 +164,9 @@ fn frame(reader: &mut impl BufRead) -> Option<Vec<u8>> {
 
 #[derive(Default)]
 struct Relay {
-    /// The current window's lifeline and control input.
-    input: Mutex<Option<ChildStdin>>,
+    /// Queue to the current window's writer thread, which alone owns the
+    /// lifeline. The lock is held only for a non-blocking send, never a write.
+    input: Mutex<Option<mpsc::SyncSender<Vec<u8>>>>,
     /// The WS generation attached now, which receives result lines.
     attached: Mutex<Option<(u64, UnixStream)>>,
 }
@@ -272,7 +280,7 @@ impl Window {
             }
         };
         let output = child.stdout.take();
-        *lock(&self.relay.input) = child.stdin.take();
+        *lock(&self.relay.input) = child.stdin.take().map(writer);
         let pid = child.id();
         self.child = Some(child);
         let (ready, painted) = mpsc::channel();
@@ -312,10 +320,6 @@ impl Window {
         receive
     }
 
-    pub(super) fn pid(&self) -> Option<u32> {
-        self.child.as_ref().map(Child::id)
-    }
-
     /// Drops the lifeline so the window exits as it did when its server
     /// stopped, then escalates within the shared shutdown deadline.
     pub(super) fn stop(&mut self, deadline: Instant) -> Result<(), String> {
@@ -323,18 +327,25 @@ impl Window {
             return Ok(());
         }
         self.stopped = true;
+        // Closing the queue ends an idle writer and its lifeline. A writer
+        // stuck on a window that stopped reading is never waited for: the
+        // kill below closes that pipe.
         *lock(&self.relay.input) = None;
-        if let Some((_, stream)) = lock(&self.relay.attached).take() {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
+        // A result write is bounded by its timeout; never wait on it here.
+        if let Ok(mut attached) = self.relay.attached.try_lock() {
+            if let Some((_, stream)) = attached.take() {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
         }
         unlink_if_bound(&self.socket, self.identity);
         let Some(mut child) = self.child.take() else {
             return Ok(());
         };
-        // Leave the last second of the deadline for SIGKILL and the reap.
-        let grace = deadline
-            .checked_sub(Duration::from_secs(1))
-            .unwrap_or(deadline);
+        let grace = (Instant::now() + EXIT_WITHIN).min(
+            deadline
+                .checked_sub(Duration::from_millis(500))
+                .unwrap_or(deadline),
+        );
         loop {
             match child.try_wait() {
                 Ok(Some(_)) => return Ok(()),
@@ -360,6 +371,20 @@ impl Drop for Window {
     fn drop(&mut self) {
         let _ = self.stop(Instant::now() + super::SHUTDOWN_BOUND);
     }
+}
+
+/// The window's only stdin writer. Dropping the queue's last sender ends the
+/// thread and closes the lifeline once no write is in progress.
+fn writer(mut stdin: ChildStdin) -> mpsc::SyncSender<Vec<u8>> {
+    let (send, frames) = mpsc::sync_channel::<Vec<u8>>(QUEUED_FRAMES);
+    std::thread::spawn(move || {
+        while let Ok(frame) = frames.recv() {
+            if stdin.write_all(&frame).and_then(|_| stdin.flush()).is_err() {
+                break;
+            }
+        }
+    });
+    send
 }
 
 /// One WS generation: same user, then the launcher key, then frames until it
@@ -408,8 +433,8 @@ fn attach(
         while let Some(line) = frame(&mut reader) {
             // With no window, the request times out in WS as it did when the
             // window was gone. A frame is never queued or replayed.
-            if let Some(input) = lock(&relay.input).as_mut() {
-                let _ = input.write_all(&line).and_then(|_| input.flush());
+            if let Some(input) = lock(&relay.input).as_ref() {
+                let _ = input.try_send(line);
             }
         }
         let mut attached = lock(&relay.attached);

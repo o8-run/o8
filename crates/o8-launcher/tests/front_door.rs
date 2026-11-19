@@ -220,3 +220,39 @@ fn next_off_keeps_a_foreign_file_at_the_window_socket_path() {
     f.launcher = None;
     assert_eq!(fs::read(&path).unwrap(), b"preserve");
 }
+
+/// #6531 review: a window that stops reading its control pipe never holds up
+/// Quit. Its writer is not waited for, it is killed after its one-second exit
+/// bound, and o8d, WS, their ports and the private sockets are gone within the
+/// shutdown deadline. Quit enters through TERM, the shared shutdown coordinator.
+#[test]
+fn next_off_quit_is_bounded_with_a_window_that_stops_reading() {
+    let mut f = Fixture::new();
+    fs::write(f.root.join("stall-window"), "1").unwrap();
+    f.start_with(&[("O8_API_FRONT_DOOR", "1"), ("O8_NEXT_OFF", "1")]);
+    f.ready();
+    let window = f.starts("window-starts")[0];
+    let o8d = env(&f, "launcher-o8d.json")["pid"].as_u64().unwrap() as u32;
+    let ws = f.starts("ws-starts")[0];
+    let (api, private) = (f.port("api-port"), env(&f, "launcher-ws.json")["port"].as_u64().unwrap() as u16);
+    // WS floods the relay; dropped frames must not block its socket either.
+    until(|| f.root.join("flooded").exists());
+    std::thread::sleep(Duration::from_millis(300));
+    let started = std::time::Instant::now();
+    let launcher = f.launcher.as_mut().unwrap();
+    unsafe {
+        libc::kill(launcher.id() as i32, libc::SIGTERM);
+    }
+    until(|| launcher.try_wait().unwrap().is_some());
+    let elapsed = started.elapsed();
+    f.launcher = None;
+    // Well inside the 10-second shutdown bound: one second for the window.
+    assert!(elapsed < Duration::from_secs(5), "quit took {elapsed:?}");
+    for pid in [window, o8d, ws] {
+        assert!(gone(pid), "{pid} survived quit");
+    }
+    assert!(TcpStream::connect(("127.0.0.1", api)).is_err());
+    assert!(TcpStream::connect(("127.0.0.1", private)).is_err());
+    assert!(!f.root.join("window-control.sock").exists());
+    assert!(!f.root.join("launcher.sock").exists());
+}
