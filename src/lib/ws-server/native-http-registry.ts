@@ -425,6 +425,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // (tests/o8d-backend-models-native-real-path.test.ts). The OpenRouter metadata cache is per process and
     // the probe cache is on disk, so neither needs a single owner. (#5243)
     route('/api/orchestrator/backend-models', 'GET', () => import('@/app/api/orchestrator/backend-models/route')),
+    route('/api/plugins/audit', 'GET', () => import('@/app/api/plugins/audit/route')),
+    route('/api/plugins/mcp', 'POST', () => import('@/app/api/plugins/mcp/route')),
     // Existing local operator review; account, epoch and single-attempt admission stay in the handlers.
     route('/api/plugins/task-drafts', 'GET', () => import('@/app/api/plugins/task-drafts/route')),
     route('/api/plugins/task-drafts/control', 'POST', () => import('@/app/api/plugins/task-drafts/control/route')),
