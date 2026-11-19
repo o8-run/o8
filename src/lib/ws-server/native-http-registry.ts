@@ -34,6 +34,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
     route('/api/worktrees/conflicts', 'GET', () => import('@/app/api/worktrees/conflicts/route')),
     route('/api/orchestrator/workspace/maintenance', 'GET POST', () => import('@/app/api/orchestrator/workspace/maintenance/route')),
+    // Documented operator API: recorded SQLite inventory only, through the DB
+    // already shared by the WS maintenance handler; no disposition execution.
+    route('/api/orchestrator/workspace/output-disposition', 'GET', () => import('@/app/api/orchestrator/workspace/output-disposition/route')),
     route('/api/orchestrator/workspace/preservation', 'GET POST', () => import('@/app/api/orchestrator/workspace/preservation/route')),
     route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
     route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),

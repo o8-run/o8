@@ -7,12 +7,13 @@ import { promisify } from 'node:util';
 import { NextRequest } from 'next/server';
 import { afterAll, expect, it } from 'vitest';
 import type { LegacyOutputPark } from '@/lib/workspace/legacy-output-parking';
+import { startParityReference } from './fixtures/ws-parity-server';
 
 // Synthetic recorded metadata only; these tests never park output or run a build.
 const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-parked-preview-')));
 const data = path.join(root, 'data');
 const previous = { O8_DATA_DIR: process.env.O8_DATA_DIR, CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR, CORTEX_IDE_DB_PATH: process.env.CORTEX_IDE_DB_PATH };
-Object.assign(process.env, { O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: path.join(data, 'fixture.db') });
+Object.assign(process.env, { O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: path.join(data, 'cortex-ide.db') });
 const { getSqlite, closeDb } = await import('@/lib/db');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
@@ -152,3 +153,37 @@ it.each([legacy, failed])('preserves the existing $kind status script command', 
   expect(selected.kind === 'legacy' ? result.legacy[0].operationId : result.retention.operationId).toBe(selected.operationId);
   expect(snapshot()).toEqual(before);
 });
+
+it('serves the recorded operator preview through the public WS front door with Next absent', async () => {
+  const selection = new URLSearchParams({ kind: legacy.kind, operationId: legacy.operationId });
+  const expected = await (await request(Object.fromEntries(selection))).json();
+  const before = snapshot(); const bytes = readFileSync(path.join(legacy.retainedPath, 'proof'));
+  closeDb();
+  const server = await startParityReference({ directory: data, productFrontDoor: true, nativeHttp: true, o8d: false });
+  try {
+    await server.stopNext();
+    const url = server.url.replace('ws:', 'http:').replace('/ws', '') + new URL(endpoint).pathname;
+    const read = (query: string, bearer = server.token, method = 'GET') => fetch(`${url}?${query}`, {
+      method, headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+    });
+    const response = await read(String(selection));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(expected);
+    expect(expected.result.executionSupported).toBe(false);
+    expect(expected.result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    for (const bearer of ['', 'invalid', mintPacketWorkerToken('socket-fixture-worker')]) {
+      expect([401, 403]).toContain((await read(String(selection), bearer)).status);
+    }
+    for (const query of ['', 'kind=legacy', `kind=other&operationId=${legacy.operationId}`,
+      'kind=legacy&operationId=../other', `${selection}&kind=failed-prebuild`, `${selection}&action=delete`]) {
+      const refused = await read(query);
+      expect(refused.status).toBe(400);
+      expect((await refused.json()).error.code).toBe('invalid_request');
+    }
+    expect((await read(`kind=legacy&operationId=${randomUUID()}`)).status).toBe(409);
+    // Only GET is registered; no new mutation method is introduced.
+    expect((await read(String(selection), server.token, 'POST')).status).toBe(502);
+    expect(snapshot()).toEqual(before);
+    expect(readFileSync(path.join(legacy.retainedPath, 'proof'))).toEqual(bytes);
+  } finally { await server.stop(); }
+}, 60_000);
