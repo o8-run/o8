@@ -401,6 +401,17 @@ fn schedule_restart(config: &Config, server: &mut Server) -> Result<(), String> 
     server.retry_at = Some(Instant::now() + delay);
     Ok(())
 }
+/// How often a start that passed its health window is probed again.
+const LATE_PROBE_INTERVAL: Duration = Duration::from_secs(1);
+/// How long a start may take before the launcher reports it. Debug builds let
+/// the late-readiness test shorten it.
+fn health_window() -> Duration {
+    let fixture = cfg!(debug_assertions)
+        .then(|| std::env::var("O8_LAUNCHER_HEALTH_WINDOW_MS").ok())
+        .flatten()
+        .and_then(|ms| ms.parse().ok());
+    Duration::from_millis(fixture.unwrap_or(90_000))
+}
 /// Debug-build crash injection for the real-entry recovery tests.
 fn fault(point: &str, script: &str) {
     if cfg!(debug_assertions)
@@ -842,12 +853,14 @@ fn serve(
         .timeout(Duration::from_millis(500))
         .build()
         .map_err(|_| "Health client unavailable")?;
-    let mut deadline = Instant::now() + Duration::from_secs(90);
+    let mut deadline = Instant::now() + health_window();
     let mut voice_only =
         o8_launch_core::server_env::voice_only(std::env::var("O8_VOICE_ONLY").ok().as_deref());
     let mut opened = false;
     let mut pending_show = false;
     let mut window_failed = false;
+    let mut late = false;
+    let mut next_probe: Option<Instant> = None;
     let mut credential_deadline: Option<Instant> = None;
     let mut launch: Option<std::sync::mpsc::Receiver<Result<(), String>>> = None;
     let outcome = (|| -> Result<(), String> {
@@ -978,7 +991,9 @@ fn serve(
                                 opened = false;
                                 window_failed = false;
                                 launch = None;
-                                deadline = Instant::now() + Duration::from_secs(90);
+                                deadline = Instant::now() + health_window();
+                                late = false;
+                                next_probe = None;
                             }
                         }
                         Err(_) => schedule_restart(config, server)?,
@@ -1021,22 +1036,32 @@ fn serve(
             }
             if pending_show && window_failed {
                 window_failed = false;
-                deadline = Instant::now() + Duration::from_secs(90);
+                deadline = Instant::now() + health_window();
+                late = false;
+                next_probe = None;
             }
             if voice_only {
                 pending_show = false;
             }
             if !voice_only && launch.is_none() && !window_failed {
                 if !opened {
-                    let healthy = client
-                        .get(format!(
-                            "http://127.0.0.1:{}/api/setup/identity",
-                            config.api_port
-                        ))
-                        .send()
-                        .ok()
-                        .and_then(|r| r.json::<serde_json::Value>().ok())
-                        .is_some_and(|v| v["bootId"].as_str() == Some(&boot));
+                    // After a reported slow start, probe once a second so a fast
+                    // foreign-boot or error reply does not loop at the 25 ms tick.
+                    let now = Instant::now();
+                    let probe = !late || next_probe.is_none_or(|at| now >= at);
+                    if late && probe {
+                        next_probe = Some(now + LATE_PROBE_INTERVAL);
+                    }
+                    let healthy = probe
+                        && client
+                            .get(format!(
+                                "http://127.0.0.1:{}/api/setup/identity",
+                                config.api_port
+                            ))
+                            .send()
+                            .ok()
+                            .and_then(|r| r.json::<serde_json::Value>().ok())
+                            .is_some_and(|v| v["bootId"].as_str() == Some(&boot));
                     // On a first start the API answers before the WS server has
                     // written the window credential. Give it a few seconds, then
                     // fail the start as before.
@@ -1065,9 +1090,12 @@ fn serve(
                         });
                         launch = Some(receive);
                         pending_show = false;
-                    } else if Instant::now() >= deadline {
+                    } else if Instant::now() >= deadline && !late {
+                        // Report a slow start once and keep waiting: a server that
+                        // is still starting (a populated profile) opens its window
+                        // when it becomes healthy, without a second Show.
                         present_async(config, "Server did not become healthy");
-                        window_failed = true;
+                        late = true;
                         pending_show = false;
                     }
                 } else if pending_show {
@@ -1095,7 +1123,9 @@ fn serve(
                     };
                     if !focused {
                         opened = false;
-                        deadline = Instant::now() + Duration::from_secs(90);
+                        deadline = Instant::now() + health_window();
+                        late = false;
+                        next_probe = None;
                     }
                     pending_show = false;
                 }

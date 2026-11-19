@@ -110,6 +110,7 @@ window=None
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args): pass
  def do_GET(self):
+  if (root/'count-identity').exists() and self.path.startswith('/api/setup/identity'): (root/'identity-gets').open('a').write('1\n')
   time.sleep(float((root/'health-delay').read_text()) if (root/'health-delay').exists() else 0)
   self.send_response(200); self.end_headers(); self.wfile.write(json.dumps({'bootId':'foreign-boot' if (root/'wrong-boot').exists() else os.environ['O8_BOOT_ID']}).encode())
  def do_POST(self):
