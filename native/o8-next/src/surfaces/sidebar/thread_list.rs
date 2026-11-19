@@ -109,6 +109,14 @@ fn workspace_parked(frame: &Value) -> bool {
         && frame["data"]["mutation"]["status"] == "completed"
 }
 
+fn repo_inventory_changed(frame: &Value) -> bool {
+    frame["stream"] == "global"
+        && frame["channel"] == "mutation"
+        && frame["event"] == "mutation.settled"
+        && frame["data"]["mutation"]["runtime"] == "repo-registry"
+        && frame["data"]["mutation"]["status"] == "completed"
+}
+
 pub struct ThreadList {
     client: Client,
     pub(crate) links: machine_threads::Links,
@@ -275,7 +283,7 @@ impl EventEmitter<Event> for ThreadList {}
 impl ThreadList {
     #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> serde_json::Value {
-        json!({"headerMenu":self.header_menu,"project":self.header.ledger.active_project_id,"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"settling":self.settling.is_some(),"inventoryLoading":self.inventory_loading,"selected":self.selected,"choice":self.choice_row(),"dirty":self.dirty.is_some(),"generation":self.generation,"scopes":self.scopes,"searchRunning":self.search_running,"searchPending":self.search_pending.is_some()})
+        json!({"projectNames":self.header.identities.values().map(|p| p.name.clone()).collect::<Vec<_>>(),"headerMenu":self.header_menu,"project":self.header.ledger.active_project_id,"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"settling":self.settling.is_some(),"inventoryLoading":self.inventory_loading,"selected":self.selected,"choice":self.choice_row(),"dirty":self.dirty.is_some(),"generation":self.generation,"scopes":self.scopes,"searchRunning":self.search_running,"searchPending":self.search_pending.is_some()})
     }
     #[cfg(test)]
     pub(crate) fn expire_inventory_cadence(&mut self) {
@@ -980,6 +988,7 @@ impl ThreadList {
                     frame["channel"].as_str(),
                     Some("orchestrator-threads" | "agent-lifecycle" | "lane-lifecycle")
                 ) || workspace_parked(&frame)
+                    || repo_inventory_changed(&frame)
                     || frame["channel"] == "system" && frame["event"] == "connected"
                     || frame["channel"] == "realtime"
                         && frame["event"] == "batch"
@@ -987,6 +996,7 @@ impl ThreadList {
                             events.iter().any(|event| {
                                 event["stream"] == "global"
                                     && (workspace_parked(event)
+                                        || repo_inventory_changed(event)
                                         || matches!(
                                             event["channel"].as_str(),
                                             Some(
