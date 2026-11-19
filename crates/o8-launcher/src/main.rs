@@ -9,6 +9,7 @@ mod native;
 mod owner;
 mod prepare;
 mod shutdown;
+mod window;
 use control::{Instance, Request};
 use prepare::{kill_group, prepare};
 use shutdown::{Shutdown, SHUTDOWN_BOUND};
@@ -60,6 +61,10 @@ struct Config {
     producer_key: String,
     #[serde(skip)]
     producer_socket: PathBuf,
+    #[serde(skip)]
+    window_socket: PathBuf,
+    #[serde(skip)]
+    window_key: String,
 }
 impl Config {
     /// The server that answers the public API port.
@@ -69,6 +74,11 @@ impl Config {
         } else {
             "server.js"
         }
+    }
+    /// With Next off, the launcher holds the window's lifeline (#6529), so a
+    /// WS restart never closes it. Otherwise the public server owns it.
+    fn owns_window(&self) -> bool {
+        self.api_front_door && self.next_off
     }
 }
 struct Server {
@@ -117,14 +127,20 @@ struct Servers {
     o8d: Option<Server>,
     api: Option<Server>,
     ws: Option<Server>,
+    window: Option<window::Window>,
 }
 impl Servers {
     /// Drain the public owner before API and WS, within one shared deadline.
     fn stop(&mut self, deadline: Instant) -> Result<(), String> {
+        // The window exits first, as it did when its owning server drained.
+        let window = self
+            .window
+            .as_mut()
+            .map_or(Ok(()), |window| window.stop(deadline));
         let o8d = self.o8d.as_mut().map_or(Ok(()), |o8d| o8d.stop(deadline));
         let api = self.api.as_mut().map_or(Ok(()), |api| api.stop(deadline));
         let ws = self.ws.as_mut().map_or(Ok(()), |ws| ws.stop(deadline));
-        o8d.and(api).and(ws)
+        window.and(o8d).and(api).and(ws)
     }
 }
 impl Drop for Servers {
@@ -191,7 +207,8 @@ fn spawn(
             .into_owned(),
         pi_write: pi_write.is_file().then_some(pi_write),
         mcp: mcp.is_file().then_some(mcp),
-        window: Some(config.window.clone()),
+        // A launcher-owned window is never given to a server to start.
+        window: (!config.owns_window()).then(|| config.window.clone()),
         codebase_memory: std::env::var("O8_CODEBASE_MEMORY_BIN")
             .ok()
             .filter(|value| !value.is_empty()),
@@ -225,6 +242,11 @@ fn spawn(
                 .env("O8D_BRIDGE_KEY", &config.producer_key)
                 .env("O8D_PRODUCER_UPSTREAM_PORT", config.ws_port.to_string())
                 .env("O8_WS_O8D", "1");
+        }
+        if config.owns_window() {
+            command
+                .env("O8_NEXT_WINDOW_CONTROL", &config.window_socket)
+                .env("O8_NEXT_WINDOW_CONTROL_KEY", &config.window_key);
         }
     }
     let port = if script == "o8d" {
@@ -588,6 +610,7 @@ fn run(config: &mut Config, relaunch: &update::Relaunch) -> Result<(), Option<St
         o8d: None,
         api: None,
         ws: None,
+        window: None,
     })));
     let preparing: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let control = Arc::new(Mutex::new(Some(instance_lock)));
@@ -736,6 +759,16 @@ fn serve(
         std::env::set_var("O8_API_FRONT_DOOR", "1");
         config.producer_key = uuid::Uuid::new_v4().to_string();
         config.producer_socket = owner::producer_socket(&config.data_dir)?;
+    }
+    if config.owns_window() {
+        // Bound before WS starts, so its first generation can attach.
+        let window = window::Window::bind(config)?;
+        config.window_socket = window.socket().to_path_buf();
+        config.window_key = window.key().to_owned();
+        match lock(servers).as_mut() {
+            Some(servers) => servers.window = Some(window),
+            None => return Ok(()),
+        }
     }
     // With the front door, WS listens on the public API port, so clients that
     // read the WS port file connect there.
@@ -889,9 +922,19 @@ fn serve(
                 break;
             }
             let mut guard = lock(servers);
-            let Some(Servers { api, ws, o8d }) = guard.as_mut() else {
+            let Some(Servers {
+                api,
+                ws,
+                o8d,
+                window,
+            }) = guard.as_mut()
+            else {
                 break;
             };
+            // Reap a launcher-owned window that exited, as Node's exit handler did.
+            if let Some(window) = window.as_mut() {
+                window.running();
+            }
             #[cfg(debug_assertions)]
             if let Some(owner) = o8d.as_mut() { owner::fixture_commit(config, &mut owner.child); }
             // Next is expected unless the front door runs without it.
@@ -924,7 +967,8 @@ fn serve(
                             );
                             *server = next;
                             server.tracker = tracker;
-                            if server.script == config.public_script() {
+                            // A launcher-owned window stays open and reconnects.
+                            if server.script == config.public_script() && !config.owns_window() {
                                 opened = false;
                                 window_failed = false;
                                 launch = None;
@@ -1001,7 +1045,11 @@ fn serve(
                             return Err("Window credential unavailable".into());
                         }
                     }
-                    if let Some(token) = token {
+                    if let (Some(token), Some(window)) = (&token, window.as_mut()) {
+                        credential_deadline = None;
+                        launch = Some(window.open(config, token.trim()));
+                        pending_show = false;
+                    } else if let Some(token) = token {
                         credential_deadline = None;
                         let port = config.api_port;
                         let (send, receive) = std::sync::mpsc::channel();
@@ -1017,14 +1065,21 @@ fn serve(
                         pending_show = false;
                     }
                 } else if pending_show {
-                    // The server on the public port started the window.
-                    let owner = if config.api_front_door {
-                        ws.as_ref()
-                    } else {
-                        api.as_ref()
-                    }
-                    .map_or(0, |server| server.child.id());
-                    let focused = if let Some(focus) = &config.focus {
+                    // The server on the public port started the window, or
+                    // this launcher did when it owns the window.
+                    let owner = match window.as_ref() {
+                        Some(_) => std::process::id(),
+                        None => if config.api_front_door {
+                            ws.as_ref()
+                        } else {
+                            api.as_ref()
+                        }
+                        .map_or(0, |server| server.child.id()),
+                    };
+                    // A launcher-owned window that was closed is started again.
+                    let focused = if window.as_mut().is_some_and(|window| !window.running()) {
+                        false
+                    } else if let Some(focus) = &config.focus {
                         Command::new(focus)
                             .arg(owner.to_string())
                             .status()
