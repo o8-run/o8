@@ -55,6 +55,7 @@ import { TRANSCRIPT_READ_TOOL } from './transcript-read-tool';
 import { deferredMcpRequest } from './deferred-tools';
 import type { McpTool, McpToolResult } from './operator-handlers/shared';
 import { apiFrontDoorEnabled } from '@/lib/ws-server/api-front-door-config';
+import { publishRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -1215,6 +1216,8 @@ async function handleCreateProjectFromSuggestion(args: Record<string, unknown>):
     }
 
     removeSuggestionFromCache(suggestionId);
+
+    await publishRepoInventoryChange('project-create-from-suggestion');
 
     return jsonResult({
       projectId: project.id,

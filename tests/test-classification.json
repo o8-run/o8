@@ -2808,6 +2808,15 @@
       ]
     },
     {
+      "path": "tests/cortex-suggestion-refresh-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-transcript-text-pages-real-path.test.ts",
       "reasons": [
         "child-process",
