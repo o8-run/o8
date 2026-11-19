@@ -2,6 +2,59 @@
 use super::Config;
 use std::{path::PathBuf, process::Command};
 
+fn socket_path_fits(path: &std::path::Path, capacity: usize) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes().len() < capacity
+}
+
+pub(super) fn producer_socket(data_dir: &std::path::Path) -> Result<PathBuf, String> {
+    let path = data_dir.join("o8d-producer.sock");
+    let address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if !socket_path_fits(&path, address.sun_path.len()) {
+        return Err("O8_DATA_DIR is too long for the private producer socket; choose a shorter data directory".into());
+    }
+    Ok(path)
+}
+
+/// No public publishing command. Debug fixtures can request one fixed commit
+/// over the launcher's existing inherited lifeline, without a new listener.
+#[cfg(debug_assertions)]
+pub(super) fn fixture_commit(config: &Config, child: &mut std::process::Child) {
+    use std::{io::Write, os::fd::AsRawFd};
+    if std::fs::read_to_string(config.data_dir.join("fixture-owner"))
+        .ok()
+        .as_deref()
+        != Some("o8d-native-read/v1")
+        || std::fs::remove_file(config.data_dir.join("publish-native-global")).is_err()
+    {
+        return;
+    }
+    if let Some(stdin) = child.stdin.as_mut() {
+        // Never block the lifecycle loop if a stopped fixture cannot read.
+        let fd = stdin.as_raw_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags >= 0 && unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != -1 {
+            let _ = stdin.write_all(b"fixture-global\n");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn socket_path_counts_bytes_and_reserves_the_terminator_on_darwin() {
+        let path = |n| PathBuf::from(format!("/{}", "a".repeat(n)));
+        assert!(socket_path_fits(&path(102), 104));
+        assert!(!socket_path_fits(&path(103), 104));
+        assert!(!socket_path_fits(
+            &PathBuf::from(format!("/{}", "雪".repeat(35))),
+            104
+        ));
+        assert!(producer_socket(std::path::Path::new(&format!("/{}", "x".repeat(120)))).is_err());
+    }
+}
+
 pub(super) fn binary(config: &Config) -> Result<PathBuf, String> {
     let explicit = std::env::var_os("O8D_BINARY").map(PathBuf::from);
     if let Some(path) = explicit {

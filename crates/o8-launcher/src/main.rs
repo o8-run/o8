@@ -357,6 +357,7 @@ fn schedule_restart(config: &Config, server: &mut Server) -> Result<(), String> 
         {
             server.retry_at = None;
             o8_launcher::note!("Producer restart budget exhausted; native owner remains available");
+            present_async(config, "The app server could not restart. Native features remain available; chat and other server features are unavailable until you restart o8.");
             return Ok(());
         }
         RestartDecision::Exhausted { .. } => return Err("Server restart budget exhausted".into()),
@@ -734,7 +735,7 @@ fn serve(
     if config.api_front_door {
         std::env::set_var("O8_API_FRONT_DOOR", "1");
         config.producer_key = uuid::Uuid::new_v4().to_string();
-        config.producer_socket = config.data_dir.join("o8d-producer.sock");
+        config.producer_socket = owner::producer_socket(&config.data_dir)?;
     }
     // With the front door, WS listens on the public API port, so clients that
     // read the WS port file connect there.
@@ -891,6 +892,8 @@ fn serve(
             let Some(Servers { api, ws, o8d }) = guard.as_mut() else {
                 break;
             };
+            #[cfg(debug_assertions)]
+            if let Some(owner) = o8d.as_mut() { owner::fixture_commit(config, &mut owner.child); }
             // Next is expected unless the front door runs without it.
             if ws.is_none() || (api.is_none() && !(config.api_front_door && config.next_off)) {
                 break;

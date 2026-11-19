@@ -122,7 +122,11 @@ if front and os.environ.get('O8D_PRODUCER_SOCKET'):
     producer.recv(16384);producer.recv(1)
    except OSError: time.sleep(0.05)
  threading.Thread(target=attach,daemon=True).start()
-HTTPServer(('127.0.0.1',http_port),Handler).serve_forever()
+http=HTTPServer(('127.0.0.1',http_port),Handler)
+if front and not api and (root/'crash-ws').exists():
+ import threading
+ threading.Timer(0.5,lambda:os._exit(17)).start()
+http.serve_forever()
 "#;
         for name in ["node", "dialog", "window", "probe", "focus"] {
             let p = root.join(name);

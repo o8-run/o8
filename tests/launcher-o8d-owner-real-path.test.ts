@@ -78,7 +78,7 @@ it.runIf(process.platform === 'linux')('launcher keeps the public o8d owner acro
     expect(Number(readFileSync(join(root, 'ws-port'), 'utf8').trim())).toBe(port);
     const gap = await fetch(origin + '/api/prompt-library', { headers }); expect(gap.headers.get('x-o8d-native')).toBe('1'); expect((await gap.json()).prompts).toContainEqual(prompt);
     const proxy = await fetch(origin + '/health'); expect(proxy.status).toBe(503); expect(proxy.headers.get('retry-after')).toBeTruthy();
-    const closed = await new Promise<number>((resolve, reject) => { const ws = new WebSocket(origin.replace('http:', 'ws:') + '/ws?token=' + encodeURIComponent(token)); ws.on('message', () => reject(Error('No producer must not serve WS application data'))); ws.on('close', code => resolve(code)); ws.on('error', reject); }); expect(closed).toBe(1013);
+    const closed = await new Promise<number>((resolve, reject) => { const ws = new WebSocket(origin.replace('http:', 'ws:') + '/ws?token=wrong-token'); ws.on('message', () => reject(Error('No producer must not serve WS application data'))); ws.on('close', code => resolve(code)); ws.on('error', reject); }); expect(closed).toBe(1013);
     if (client) await until(() => Boolean(json(join(root, 'transport-reconnecting.json'))), 'window reconnecting during gap');
     rmSync(join(root, 'hold-ws-start'));
     await until(async () => { try { const value = await (await fetch(origin + '/health')).json(); return value.delivery?.pid === o8dPid; } catch { return false; } }, 'replacement producer attach');

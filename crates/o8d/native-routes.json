@@ -149,7 +149,7 @@
       "GET"
     ],
     "fallback": true,
-    "reason": "TypeScript owns missing/invalid credential creation and resolver cache changes; unsupported snapshot, encoding, size or port defers",
+    "reason": "TypeScript owns missing/invalid credential creation and resolver cache changes; unsupported snapshot, encoding, size or port defers. With no producer, only independently authenticated loopback operators bootstrap the actual public port and fresh canonical token.",
     "state": "rust-with-fallback",
     "test": "tests/o8d-rust-startup-real-path.test.ts",
     "owned": true

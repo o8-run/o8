@@ -1,4 +1,5 @@
-//! App cutover: authenticated TS backhauls retain command and checkpoint ownership.
+//! App transport: TS owns producer-backed sessions; producer gaps permit only
+//! independent native operator bootstrap and daemon-owned global delivery.
 use crate::EventBus;
 use futures_util::{Sink, SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -18,6 +19,7 @@ use tokio_tungstenite::{
 };
 
 mod input;
+mod native_global;
 #[cfg(unix)]
 pub mod producer;
 
@@ -49,14 +51,15 @@ pub async fn serve(
         startup_port_info: None,
         generation: 0,
     })));
-    serve_producers(listener, key, selection, shutdown).await
+    serve_producers(listener, key, selection, shutdown, native_global::NativeGlobal::new()).await
 }
 
-pub async fn serve_producers(
+async fn serve_producers(
     listener: TcpListener,
     key: String,
     selection: Selection,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
+    global: Arc<native_global::NativeGlobal>,
 ) -> std::io::Result<()> {
     let mut connections = tokio::task::JoinSet::new();
     let mut writers = tokio::task::JoinSet::new();
@@ -73,8 +76,9 @@ pub async fn serve_producers(
                 let selection = selection.clone();
                 let shutdown = shutdown.clone();
                 let reports = reports.clone();
+                let global = global.clone();
                 connections.spawn(async move {
-                    let _ = connection(socket, peer.ip().to_string(), key, selection, shutdown, reports).await;
+                    let _ = connection(socket, peer.ip().to_string(), key, selection, shutdown, reports, global).await;
                 });
             }
         }
@@ -114,6 +118,8 @@ async fn connection(
     mut selection: Selection,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     reports: input::Reports,
+    #[cfg_attr(not(feature = "experimental-session-reads"), allow(unused_variables))]
+    global: Arc<native_global::NativeGlobal>,
 ) -> Result<(), ()> {
     // Peek leaves the handshake available to tungstenite. HTTP remains a bounded
     // streaming proxy to the original handlers, including authenticated ingress.
@@ -158,6 +164,20 @@ async fn connection(
     let front_door = std::env::var("O8_API_FRONT_DOOR").as_deref() == Ok("1");
     if !upgrade || (front_door && path.split('?').next() != Some("/ws")) {
         let count = request_counts::Count::new(header);
+        #[cfg(feature = "experimental-session-reads")]
+        if producer.is_none() && selection.borrow().is_none() && front_door
+            && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1") {
+            if let Some(token) = prompt_operator::bootstrap_token(&socket, header).filter(|_| selection.borrow().is_none()) {
+                use axum::response::IntoResponse;
+                let port = socket.local_addr().map_err(|_| ())?.port();
+                socket.read_exact(&mut vec![0; end]).await.map_err(|_| ())?;
+                // Existing ws-info contract, with the actual public port and a
+                // fresh verified credential; no saved port/token snapshot.
+                native::write_response(&mut socket,
+                    axum::Json(json!({"wsPort":port,"wsToken":token})).into_response(), &count).await?;
+                return Ok(());
+            }
+        }
         #[cfg(feature = "experimental-session-reads")]
         let replay = match native::serve(
             &mut socket,
@@ -215,8 +235,14 @@ async fn connection(
         return Ok(());
     }
     let Some(producer) = producer else {
-        // No application session, capabilities or checkpoint is granted here.
-        // Producer-backed upgrades still authenticate with the unchanged TS gate.
+        #[cfg(feature = "experimental-session-reads")]
+        if front_door && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1") {
+            if let Some(token) = prompt_operator::websocket_token(&socket, header) {
+                return native_global::serve(socket, token, global, selection, shutdown).await;
+            }
+        }
+        // Other callers receive no session. Producer-backed upgrades still
+        // authenticate with the unchanged TS gate below.
         return close_unavailable(socket).await;
     };
     let upstream = &producer.upstream;
