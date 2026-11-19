@@ -157,13 +157,15 @@ Paths below are existing application routes, not proposed new endpoints.
 | Effective project context | `GET /api/projects/context?projectId=…&repoPath=…` returns `context` plus `taskBrief`: panel/settings/runtime IDs, instructions, repositories and roles, primary/current repository, source warnings and `files` capability. |
 | Thread inventory | `GET /api/panel/threads?projectId=…&repoPath=…&limit=250&offset=…` (repeat `repoPath`). Response schema `o8/project.threads/v1`: revision, counts, tasks, offset, nextOffset and observedAt. Later pages send the same revision; 409 restarts a complete read while retaining the last committed snapshot. |
 | Detail evidence | Same route with `taskId` and exact repository scope. The optional `task` contains `thread` evidence: kind/state/session, children, requirements, artifacts, merges, workers, stages, history and truncation. A missing task is unavailable, not an empty successful detail. |
-| Attempt output | `GET /api/tasks/{taskId}/evidence?jobId=…&attempt=…`; match the returned job and attempt before installing logs or changed files. |
 | Artifacts | Use the supplied artifact reference. Recorded thread artifacts can use `GET /api/panel/threads/artifact?id=…&projectId=…` (interactive records also specify `source=interactive`). Do not construct filesystem paths from labels. |
 | Native chat | Existing session inventory/history and the shared native conversation/composer. Resolve `thread.sessionKey` or the task's recorded session reference, including the `llm-chat:` convention; runtime histories can be read-only. |
 | Exchanges | `GET /api/agents/presence?repo=…&includeStale=true`; `GET /api/agents/message?repo=…&limit=50`. Keep structured errors and `live`/delivery state. |
 | Exchange actions | Existing `POST /api/agents/message` with repo, recipient, text, replyToId and stable requestId; `POST /api/agents/conversation` with id, repo and close/extend. This design adds no alternate identity or admission path. |
 | Task actions | `POST /api/tasks` saves a task; `/api/tasks/{id}/dispatch` is a distinct request. Existing claim/report/block/archive/prune/remove routes remain kind-specific. Mutation bodies carry the recorded project/repository and action data. |
 | Packet steering | Existing `POST /api/orchestrator/steer-packet` uses packetId, message, source and stable idempotencyKey. Preserve uncertain-delivery state and inspect the same request on retry; do not create a second steer. |
+
+The former `GET /api/tasks/{taskId}/evidence` route is retired. Its browser
+caller was removed; this design does not retain an attempt-output API.
 
 Sources: [thread route][thread-route], [thread types][thread-types],
 [project ledger route][project-route], [repository lookup][classic-repos],
