@@ -14,6 +14,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
+import { apiFrontDoorEnabled } from '@/lib/ws-server/api-front-door-config';
 
 export type DiffCommentSide = 'old' | 'new';
 
@@ -72,6 +73,8 @@ export function createDiffComment(input: CreateDiffCommentInput): DiffComment | 
   if (!sessionKey || !path || !text) return null;
   if (!Number.isInteger(lineNumber) || lineNumber < 0) return null;
 
+  if (apiFrontDoorEnabled()) throw new Error('Diff-comment writes require the native mobile transport.');
+
   const id = randomUUID();
   const clipped = text.length > MAX_TEXT_CHARS ? text.slice(0, MAX_TEXT_CHARS) : text;
   const sqlite = getSqlite();
@@ -115,6 +118,7 @@ export function countOpenDiffComments(sessionKey: string): number {
 
 /** Mark a comment resolved (the agent addressed it / the operator dismissed it). */
 export function resolveDiffComment(id: string): boolean {
+  if (apiFrontDoorEnabled()) throw new Error('Diff-comment writes require the native mobile transport.');
   const trimmed = id?.trim();
   if (!trimmed) return false;
   const sqlite = getSqlite();

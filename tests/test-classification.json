@@ -5512,6 +5512,16 @@
       ]
     },
     {
+      "path": "tests/o8d-diff-comments-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-directives-real-path.test.ts",
       "reasons": [
         "child-process",

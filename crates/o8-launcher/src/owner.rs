@@ -88,6 +88,9 @@ pub(super) fn command(config: &Config, boot: &str, instance: &str) -> Result<Com
     command.env_clear();
     for name in [
         "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TMP", "TEMP",
+        // The same existing transport override used to bind this listener and
+        // inherited by WS. Native mobile Host checks must not infer it from bind.
+        "O8_LAN_ACCESS",
     ] {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);

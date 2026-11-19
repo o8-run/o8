@@ -36,6 +36,8 @@ pub type Selection = tokio::sync::watch::Receiver<Option<Arc<Producer>>>;
 mod native;
 #[cfg(feature = "experimental-session-reads")]
 mod prompt_operator;
+#[cfg(feature = "experimental-session-reads")]
+mod diff_comment_auth;
 mod request_counts;
 
 pub async fn serve(

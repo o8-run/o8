@@ -64,7 +64,7 @@ pub(super) fn matches(path: &str, method: &str) -> bool {
             matches!(method, "PATCH" | "DELETE")
         }
 }
-fn normalize_sql(sql: &str) -> String {
+pub(super) fn normalize_sql(sql: &str) -> String {
     let mut result = String::new();
     let mut quoted = false;
     for c in sql.chars() {

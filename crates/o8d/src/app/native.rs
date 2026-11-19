@@ -90,6 +90,18 @@ pub(super) async fn serve(
     if method == "GET" && length != 0 {
         return Ok(Outcome::Proxy);
     }
+    let diff_comment = super::diff_comment_auth::matches(path, method);
+    let mut native_diff_comment = false;
+    if diff_comment {
+        // Classic mode retains its original Node owner. Product requests can
+        // use only the route-scoped gate or this request's Node admission.
+        if std::env::var("O8_API_FRONT_DOOR").as_deref() != Ok("1") { return Ok(Outcome::Proxy); }
+        match super::diff_comment_auth::check(header, socket.local_addr().map_err(|_|())?.port()) {
+            super::diff_comment_auth::Gate::Allow => native_diff_comment = true,
+            super::diff_comment_auth::Gate::Reply(response) => return write_response(socket,response,count).await,
+            super::diff_comment_auth::Gate::Proxy => (),
+        }
+    }
     let native_operator = std::env::var("O8_API_FRONT_DOOR").as_deref() == Ok("1")
         && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1")
         && super::prompt_operator::eligible(socket, header, path);
@@ -99,8 +111,10 @@ pub(super) async fn serve(
     if path == "/api/orchestrator/session-rules" && method == "GET" && !native_operator {
         return Ok(Outcome::Proxy);
     }
-    let (mut defaults_context, redaction) = if native_operator {
-        let context = if method != "GET" {
+    let (mut defaults_context, redaction) = if native_operator || native_diff_comment {
+        let context = if native_diff_comment {
+            Some(serde_json::json!({"diffCommentAuthority":true}))
+        } else if method != "GET" {
             Some(serde_json::json!({"promptWriteAuthority":true}))
         } else if path == "/api/orchestrator/session-rules" {
             Some(serde_json::json!({"sessionRuleReadAuthority":true}))

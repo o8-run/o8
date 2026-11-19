@@ -1,4 +1,4 @@
-import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
+import { apiFrontDoorEnabled, nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { viewerRedactionGrant } from './native-git-diff-context';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -93,13 +93,16 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
       const threadListRoute = ownedRoute && 'composition' in ownedRoute && ownedRoute.composition === 'mobile-threads/1';
       const composerQueueRoute = ownedRoute && 'admission' in ownedRoute && ownedRoute.admission === 'composer-queue';
       const viewerRoute = ownedRoute && 'redaction' in ownedRoute && ownedRoute.redaction === 'viewer';
+      const diffCommentRoute = ownedRoute && ['/api/mobile/diff-comment', '/api/mobile/diff-comments'].includes(url.pathname);
       if ((!nativeSessionReadsEnabled() && !(nativeHttpTransportEnabled() && ownedRoute)) || retiredProjectPath
         || !nativeRoutes.some(route => route.path === match.route.path && route.methods.includes(req.method ?? 'GET'))) {
         response = new Response(null, { status: 409 });
       } else {
         // Admission only. Keep the middleware and queue's existing defense-in-depth
         // gate authoritative; the bridge credential cannot authorize a principal.
-        const denied = req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys', '/api/projects', '/api/prompt-library'].includes(url.pathname) || match.route.path === '/api/projects/[id]' || match.route.path === '/api/prompt-library/[id]'
+        // Diff comments have only the mobile middleware gate, including paired
+        // devices. Do not add the unrelated remote operator-only panel gate.
+        const denied = !diffCommentRoute && (req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys', '/api/projects', '/api/prompt-library'].includes(url.pathname) || match.route.path === '/api/projects/[id]' || match.route.path === '/api/prompt-library/[id]')
           ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
         let projectDenied: Response | null = null;
         if (url.pathname === '/api/panel/repo-icon') {
@@ -173,6 +176,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         const directivesScope = url.pathname === '/api/cortex/directives' && !denied && !projectDenied
           ? await (await import('./native-directives-context')).nativeDirectivesScope(url) : undefined;
         const defaultsContext = {
+          ...(diffCommentRoute ? { diffCommentAuthority: apiFrontDoorEnabled() } : {}),
           composerQueue, threadList, laneDiffTarget, directivesScope,
           fileContentScope, fileReadTarget, fileAssetTarget, repoSpecTarget,
           gitRefsCommitRoot: viewerRoute && match.route.path === '/api/panel/commits/[hash]'
