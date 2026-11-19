@@ -22,7 +22,6 @@ for (const [key, value] of Object.entries({ O8_DATA_DIR: root, CORTEX_IDE_DATA_D
 const subscribers = new Set<WebSocket>();
 const attempts: RealtimeMutationPublishRequest[] = [];
 let unavailable = false;
-let origin: string;
 const { matchNativeHttpRoute } = await import('@/lib/ws-server/native-http-registry');
 const server = createServer(async (request, response) => {
   try {
@@ -59,7 +58,7 @@ sockets.on('connection', peer => {
 });
 server.listen(0, '127.0.0.1'); await once(server, 'listening');
 const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing fixture port.');
-origin = `http://127.0.0.1:${address.port}`;
+const origin = `http://127.0.0.1:${address.port}`;
 vi.stubEnv('CORTEX_REALTIME_INTERNAL_ORIGIN', origin);
 const { createProject } = await import('@/lib/projects/store');
 const { addRepo } = await import('@/lib/repos/registry');
