@@ -114,6 +114,65 @@ afterEach(() => {
 });
 
 describe('shared team lifecycle through delegate and persisted owned receipts', () => {
+  it.each(['invalid receipt', 'detached branch', 'changed branch'] as const)(
+    'preserves the specific %s diagnostic through finish and status', async fault => {
+      await reserveSharedCheckoutMember({ repoPath, parentThreadId: owner, runtime: 'codex',
+        taskName: 'Existing fixture', clientMutationId: mutation('diagnostic'), paths: ['worker.txt'] });
+      const receipt = team()!;
+      const receiptFile = join(data, 'shared-checkout-teams', `${receipt.id}.json`);
+      let diagnostic: string;
+      if (fault === 'invalid receipt') {
+        writeFileSync(receiptFile, JSON.stringify({ ...receipt, members: null }));
+        diagnostic = 'Shared checkout ownership receipt is invalid.';
+      } else if (fault === 'detached branch') {
+        git('checkout', '--detach', '-q', 'HEAD');
+        diagnostic = 'Shared checkout branch changed or is detached; refusing launch.';
+      } else {
+        git('checkout', '-q', '-b', 'changed-fixture');
+        diagnostic = 'Shared checkout branch changed; refusing launch.';
+      }
+      const before = { checkout: snapshot(), receipt: readFileSync(receiptFile, 'utf8') };
+      const handlers = mcp();
+      for (const [operation, result] of [
+        ['cortex_finish_shared_team', await handlers.handleFinishSharedTeam({ reviewSummary: 'Reviewed.', verification: 'Verified.' })],
+        ['cortex_shared_team_status', await handlers.handleSharedTeamStatus()],
+      ] as const) {
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain(`${operation} failed:`);
+        expect(result.content[0].text).toContain(diagnostic);
+        expect(result.content[0].text).not.toContain('cause of this checkout failure is unknown');
+      }
+      expect({ checkout: snapshot(), receipt: readFileSync(receiptFile, 'utf8') }).toEqual(before);
+      expect(archives()).toEqual([]);
+      expect(launchRuntimeSurface).not.toHaveBeenCalled();
+    });
+
+  it('preserves every combined worker blocker through the finish handler', async () => {
+    // Missing receipts surround the active worker so the completion mapper's
+    // broad pattern would otherwise swallow the whole combined diagnostic.
+    for (const [id, taskName] of [['missing-first', 'Missing first'], ['active', 'Active'], ['missing-last', 'Missing last']]) {
+      const member = { repoPath, parentThreadId: owner, runtime: 'codex', taskName, clientMutationId: mutation(id) };
+      await reserveSharedCheckoutMember({ ...member, paths: [`${id}.txt`] });
+      await recordSharedCheckoutMember({ ...member, surfaceId: `codex-owned:${mutation(id)}` });
+      session(id, id === 'active' ? 'running' : 'finished');
+      if (id !== 'active') {
+        const file = join(data, 'owned-codex', mutation(id), 'session.json');
+        writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), cwd: root }));
+      }
+    }
+    const diagnostic = 'Worker Missing first has no matching owned runtime completion receipt. '
+      + 'live worker Active is still active. Wait for it to finish or interrupt it first. '
+      + 'Worker Missing last has no matching owned runtime completion receipt.';
+    const before = { checkout: snapshot(), team: team() };
+    const result = await mcp().handleFinishSharedTeam({ reviewSummary: 'Reviewed.', verification: 'Verified.' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('cortex_finish_shared_team failed:');
+    expect(result.content[0].text).toContain(diagnostic);
+    expect({ checkout: snapshot(), team: team() }).toEqual(before);
+    expect(archives()).toEqual([]);
+    expect(launchRuntimeSurface).not.toHaveBeenCalled();
+  });
+
   it('names held finish then status after a completed return, retaining ownership until normal repair succeeds', async () => {
     const id = mutation('completed');
     const surfaceId = `codex-owned:${id}`;

@@ -1,4 +1,5 @@
 import { safeErrorText } from '@/lib/mcp/api-error';
+import { SharedCheckoutError } from '@/lib/orchestrator/shared-checkout-team';
 
 type ControlCall = 'cortex_reconcile_shared_team' | 'cortex_finish_shared_team' | 'cortex_shared_team_status';
 const REVIEW = 'Run cortex_shared_team_status, review the current diff, then retry with its exact review ID, HEAD and paths.';
@@ -25,9 +26,10 @@ const HOLDS: Array<{ matches: RegExp; reason: string; next: string }> = [
     reason: 'The acknowledged paths do not match the exact checkout review.', next: REVIEW },
   { matches: /^Nested repositories or special files need separate review:/,
     reason: 'Nested repositories or special files need separate review.', next: 'Run cortex_shared_team_status and review those files separately before retrying.' },
-  { matches: /^Worker .+ is still active\. Wait for it to finish or interrupt it first\.$/,
+  // Do not let a worker name pattern span multiple joined blocker sentences.
+  { matches: /^Worker [^.]+ is still active\. Wait for it to finish or interrupt it first\.$/,
     reason: 'A Shared worker is still active.', next: 'Wait for it to settle or interrupt it, then run cortex_shared_team_status before retrying.' },
-  { matches: /^Worker .+ has no (?:settled launch|matching owned runtime completion) receipt\.$/,
+  { matches: /^Worker [^.]+ has no (?:settled launch|matching owned runtime completion) receipt\.$/,
     reason: 'A Shared worker has no verified completion receipt.', next: 'Run cortex_shared_team_status and inspect the worker outcome before retrying. Keep its edits in place.' },
   { matches: /^Shared checkout is busy; retry after its current operation\.$/,
     reason: 'Another checkout operation is still running.', next: 'Wait for it to finish, then retry the same control.' },
@@ -48,6 +50,9 @@ const HOLDS: Array<{ matches: RegExp; reason: string; next: string }> = [
 export function sharedCheckoutControlFailure(call: ControlCall, error: unknown): string {
   const hold = error instanceof Error ? HOLDS.find(entry => entry.matches.test(error.message)) : undefined;
   if (hold) return `${call} failed: ${hold.reason} ${hold.next}`;
+  // Checkout authority writes these diagnostics for its caller, including every
+  // joined worker blocker. Keep that detail when no complete hold matches.
+  if (error instanceof SharedCheckoutError) return `${call} failed: ${error.message}`;
   const detail = safeErrorText(error);
   const reason = detail === 'o8 operation failed' ? 'The cause of this checkout failure is unknown' : detail;
   return `${call} failed: ${reason}. Run cortex_shared_team_status and inspect the current outcome before deciding whether to retry; the control may already have completed.`;
