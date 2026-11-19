@@ -1,13 +1,16 @@
 import { safeErrorText } from '@/lib/mcp/api-error';
 
-type ControlCall = 'cortex_reconcile_shared_team' | 'cortex_finish_shared_team';
+type ControlCall = 'cortex_reconcile_shared_team' | 'cortex_finish_shared_team' | 'cortex_shared_team_status';
 const REVIEW = 'Run cortex_shared_team_status, review the current diff, then retry with its exact review ID, HEAD and paths.';
 const RECONCILE = 'Run cortex_shared_team_status, review and explicitly reconcile the preserved edits, then retry cortex_finish_shared_team.';
 
 // These are fixed descriptions of known pre-write checkout holds. Do not echo
 // arbitrary exceptions, path suffixes or subprocess output into a tool reply.
 const HOLDS: Array<{ matches: RegExp; reason: string; next: string }> = [
-  { matches: /^This checkout is owned by another orchestrator\./,
+  { matches: /^Owned session liveness unavailable: unreadable metadata\.$/,
+    reason: 'Shared-checkout membership repair is held: owned-session liveness cannot be verified because of unreadable metadata.',
+    next: 'Keep checkout ownership and preserved edits in place. Inspect the owned runtime metadata, then retry this control after liveness can be verified.' },
+  { matches: /^This checkout is owned by (?:another orchestrator\.|orchestrator .+\. Return to its owner\.$)/,
     reason: 'Another orchestrator thread owns this checkout.', next: 'Continue in the owning thread, or use a separate checkout.' },
   { matches: /^Checkout review is stale\./, reason: 'Checkout review is stale.', next: REVIEW },
   { matches: /^Pre-existing operator edits changed during this team:/,

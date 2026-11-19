@@ -3,6 +3,7 @@ import { DEFAULT_WS_PORT } from '@/lib/panel/api-port';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
 import { SharedCheckoutError, SHARED_CHECKOUT_LAUNCH_FAILURE, finishSharedCheckoutTeam, inspectSharedCheckoutTeam, reconcileSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
 import { findOwnedLaunchByMutationId, lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
+import { sharedCheckoutControlFailure } from '@/lib/mcp/shared-checkout-control-error';
 
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
 
@@ -188,7 +189,8 @@ export function createCortexDelegationHandlers(config: {
       }));
       return jsonResult({ ...status, memberOutcomes });
     } catch (error) {
-      return sharedCheckoutFailure(error);
+      console.warn('[mcp] Shared team status failed:', error);
+      return textResult(sharedCheckoutControlFailure('cortex_shared_team_status', error), true);
     }
   };
 
@@ -208,7 +210,8 @@ export function createCortexDelegationHandlers(config: {
       return jsonResult({ ok: true, teamId: result.team.id, reviewedHead: result.reviewedHead,
         committedPaths: result.committedPaths, note: 'Shared team review was archived and checkout ownership was released.' });
     } catch (error) {
-      return sharedCheckoutFailure(error);
+      console.warn('[mcp] Shared team finish failed:', error);
+      return textResult(sharedCheckoutControlFailure('cortex_finish_shared_team', error), true);
     }
   };
 

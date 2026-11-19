@@ -21,7 +21,11 @@ vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: async () =>
 import { POST } from '@/app/api/orchestrator/delegate/route';
 import { closeDb, getSqlite } from '@/lib/db';
 import { fastDelegationCapability } from '@/lib/orchestrator/fast-delegation-auth';
-import { finishSharedCheckoutTeam, readSharedCheckoutTeam, settleSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
+import { finishSharedCheckoutTeam, readSharedCheckoutTeam, recordSharedCheckoutMember, reserveSharedCheckoutMember, settleSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
+import { recoverSharedWorkerParentBindings, settleSharedCheckoutTeams } from '@/lib/orchestrator/shared-worker-recovery';
+import { listSharedWorkerReturns, reconcileSharedWorkerReturns } from '@/lib/orchestrator/shared-worker-returns';
+import { updateOperatorDefaults } from '@/lib/operator/defaults';
+import { writePersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { readSharedTeamsForThread } from '@/lib/orchestrator/shared-team-history';
 import { createCortexDelegationHandlers } from '@/lib/mcp/cortex-delegation-handlers';
 import { createSharedWorkerHeartbeat } from '@/lib/ws-server/shared-worker-heartbeat';
@@ -110,6 +114,89 @@ afterEach(() => {
 });
 
 describe('shared team lifecycle through delegate and persisted owned receipts', () => {
+  it('names held finish then status after a completed return, retaining ownership until normal repair succeeds', async () => {
+    const id = mutation('completed');
+    const surfaceId = `codex-owned:${id}`;
+    const target = { repoPath, parentThreadId: owner };
+    const member = { ...target, runtime: 'codex', taskName: 'Completed fixture', clientMutationId: id };
+    await reserveSharedCheckoutMember({ ...member, paths: ['worker.txt'] });
+    await recordSharedCheckoutMember({ ...member, surfaceId, parentTurnId: 'assistant' });
+    writePersistedLlmChat(owner, { repoPath, backend: 'codex', messages: [
+      { id: 'assistant', role: 'assistant', content: 'Existing inspection.', backend: 'codex', model: 'fixture-model', timestamp: 1,
+        receipt: { leadModel: 'fixture-model', effort: 'low', mode: 'solo', permissionMode: 'plan' } },
+    ] });
+    session(id, 'finished');
+    const liveDirectory = join(data, 'owned-codex', id);
+    const sessionFile = join(liveDirectory, 'session.json');
+    const completed = { ...JSON.parse(readFileSync(sessionFile, 'utf8')),
+      recentRuns: [{ id: 'completed-run', outcome: 'finished' }] };
+    writeFileSync(sessionFile, JSON.stringify(completed));
+    await updateOperatorDefaults({ reviewContinuation: true });
+    vi.stubEnv('O8_REVIEW_MODE', 'automatic');
+    recoverSharedWorkerParentBindings();
+    const returned = vi.fn(async () => {});
+    await reconcileSharedWorkerReturns({ isBusy: () => false, run: returned,
+      readTranscript: async () => [{ id: 'completed-run:answer', role: 'assistant', text: 'Inspection complete.' }] });
+    expect(returned).toHaveBeenCalledOnce();
+    expect(listSharedWorkerReturns(owner)).toMatchObject([{ surface_id: surfaceId, run_id: 'completed-run',
+      summary: 'Inspection complete.', status: 'delivered' }]);
+    await settleSharedCheckoutTeams();
+    expect(team()?.members[0]).toMatchObject({ state: 'settled', settledOutcome: 'finished' });
+
+    // A returned archived worker is known, but unreadable live metadata cannot
+    // prove its identity is absent from the live fleet. Keep the existing hold.
+    const archivedDirectory = join(data, 'owned-codex-archive', id);
+    mkdirSync(join(data, 'owned-codex-archive'));
+    renameSync(liveDirectory, archivedDirectory);
+    const unreadable = join(data, 'owned-codex', 'unreadable');
+    mkdirSync(unreadable); writeFileSync(join(unreadable, 'session.json'), '{');
+    const before = { checkout: snapshot(), team: team(), returns: listSharedWorkerReturns(owner) };
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(settleSharedCheckoutTeam(target)).rejects.toThrow('Owned session liveness unavailable: unreadable metadata.');
+      await settleSharedCheckoutTeams();
+      expect(warning).toHaveBeenCalledWith('[shared-checkout] Membership repair held:', `${team()!.id}.json`);
+      const handlers = mcp();
+      const finish = await handlers.handleFinishSharedTeam({ reviewSummary: 'Reviewed fixture.', verification: 'Clean checkout verified.' });
+      const status = await handlers.handleSharedTeamStatus();
+      for (const [result, operation] of [[finish, 'cortex_finish_shared_team'], [status, 'cortex_shared_team_status']] as const) {
+        expect(result.isError).toBe(true);
+        const message = result.content[0].text;
+        expect(message).toContain(`${operation} failed:`);
+        expect(message).toMatch(/membership repair is held/i);
+        expect(message).toMatch(/liveness.*unreadable metadata/i);
+        expect(message).toMatch(/keep.*ownership/i);
+        expect(message).not.toMatch(/could not start|Delegation failed/);
+        expect(message).not.toContain(data);
+      }
+      expect({ checkout: snapshot(), team: team(), returns: listSharedWorkerReturns(owner) }).toEqual(before);
+      expect(archives()).toEqual([]);
+      const foreign = createCortexDelegationHandlers({ apiFetch: vi.fn(), apiBase: 'http://localhost', repoPath,
+        parentThreadId: next, fastCapability: '', wsToken: 'fixture' });
+      for (const result of [await foreign.handleFinishSharedTeam({ reviewSummary: 'Reviewed.', verification: 'Verified.' }),
+        await foreign.handleSharedTeamStatus()]) {
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain('Another orchestrator thread owns this checkout.');
+        expect(result.content[0].text).toContain('Continue in the owning thread');
+        expect(result.content[0].text).not.toContain(owner);
+      }
+      expect(team()).toEqual(before.team);
+
+      // Repair only the test-created unreadable receipt, then use the same
+      // membership repair and finish/status path. Completion alone never releases.
+      writeFileSync(join(unreadable, 'session.json'), JSON.stringify({ surfaceId: 'codex-owned:other', recentRuns: [] }));
+      await settleSharedCheckoutTeams();
+      expect((await handlers.handleFinishSharedTeam({ reviewSummary: 'Reviewed fixture.', verification: 'Clean checkout verified.' })).isError).not.toBe(true);
+      expect(JSON.parse((await handlers.handleSharedTeamStatus()).content[0].text).team).toBeNull();
+      expect(archives()[0]).toMatchObject({ reason: 'finished', releasedBy: owner,
+        members: [{ surfaceId, state: 'settled', settledOutcome: 'finished' }] });
+      expect(snapshot()).toEqual(before.checkout);
+      expect(listSharedWorkerReturns(owner)).toEqual(before.returns);
+      expect(JSON.parse(readFileSync(join(archivedDirectory, 'session.json'), 'utf8'))).toEqual(completed);
+      expect(launchRuntimeSurface).not.toHaveBeenCalled();
+    } finally { warning.mockRestore(); }
+  });
+
   it('takes over two lost codex members and releases both claims', async () => {
     expect((await dispatch('failed')).status).toBe(200);
     expect((await dispatch('old', owner, 'src/second.ts')).status).toBe(200);
