@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
@@ -32,6 +32,40 @@ const read = async () => {
   return response.json();
 };
 const post = (body: Record<string, unknown>) => fetch(origin + path, { method: 'POST', headers, body: JSON.stringify(body) });
+it.each(['fresh', 'legacy-high', 'legacy-max', 'toml-high', 'toml-max'] as const)(
+  'saves displayed native editor text as stored intent for a %s profile', async profile => {
+    const explicit = profile === 'fresh' ? undefined : profile.endsWith('high') ? 'high' : 'max';
+    expect(existsSync(join(directory, 'settings.toml'))).toBe(false);
+    expect(existsSync(join(directory, 'operator-defaults.json'))).toBe(false);
+    if (profile.startsWith('legacy')) writeFileSync(join(directory, 'operator-defaults.json'), JSON.stringify({ thinkingEffort: explicit }));
+    if (profile.startsWith('toml')) writeFileSync(join(directory, 'settings.toml'), `[models]\nthinking_effort = "${explicit}"\n`);
+    const before = await read();
+    const originalIntent = explicit ? { thinkingEffort: explicit } : {};
+    const classicResponse = await fetch(origin + '/api/panel/operator-defaults?include=values', { headers });
+    expect(classicResponse.status).toBe(200);
+    const classic = await classicResponse.json();
+    expect(classic.settingsToml.revision).toBe(before.settingsToml.revision);
+    if (!profile.startsWith('toml')) {
+      expect(Object.keys(parseOperatorDefaultsToml(classic.settingsToml.text)).length).toBeGreaterThan(1);
+    }
+    // Edit exactly the returned editor text. Resolved values remain read-only.
+    const displayed = before.settingsToml.text as string;
+    const edited = /^parallel_cap\s*=/m.test(displayed)
+      ? displayed.replace(/^parallel_cap\s*=.*$/m, 'parallel_cap = 9')
+      : `${displayed}\n[operator]\nparallel_cap = 9\n`;
+    expect((await post({ settingsToml: edited, settingsTomlRevision: before.settingsToml.revision })).status).toBe(200);
+    const after = await save({ parallelCap: 7 });
+    expect(after.values.thinkingEffort).toBe(explicit ?? before.values.thinkingEffort);
+    expect(after.sources.thinkingEffort).toBe(explicit ? 'file' : 'default');
+    for (const key of ['codexWorkerEffort', 'claudeWorkerEffort']) {
+      expect(after.values[key]).toBe(before.values[key]);
+      expect(after.sources[key]).toBe('default');
+    }
+    expect(parseOperatorDefaultsToml(displayed)).toEqual(originalIntent);
+    expect(Object.keys(before.values).length).toBeGreaterThan(Object.keys(originalIntent).length);
+    expect(before.sources.thinkingEffort).toBe(explicit ? 'file' : 'default');
+    expect(parseOperatorDefaultsToml(readFileSync(join(directory, 'settings.toml'), 'utf8'))).toEqual({ ...originalIntent, parallelCap: 7 });
+  });
 it.each(['triage', 'action'] as const)('preserves hidden %s keys when native editor text omits the tier', async tier => {
   const other = tier === 'triage' ? 'action' : 'triage';
   writeFileSync(join(directory, 'settings.toml'), '[accepted_table]\nopaque = "keep-me"\n'
