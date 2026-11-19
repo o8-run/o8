@@ -7,6 +7,7 @@ import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 export type SharedWorkerHeartbeatHooks = Pick<SharedWorkerReturnHooks, 'readTranscript' | 'isBusy'> & {
   registerAbort: BoundChatContinuationHooks['registerAbort'];
   publish: (threadId: string, sessionName: string, event: string, data: Record<string, unknown>) => void;
+  publishThread?: BoundChatContinuationHooks['publishThread'];
 };
 export function createSharedWorkerHeartbeat(input: SharedWorkerHeartbeatHooks): () => void {
   recoverSharedWorkerParentBindings();
@@ -25,6 +26,7 @@ export function createSharedWorkerHeartbeat(input: SharedWorkerHeartbeatHooks): 
     }, run: batch => runSharedWorkerChatReturn(batch, {
       registerAbort: input.registerAbort,
       publish: (sessionName, event, data) => input.publish(batch.origin.threadId, sessionName, event, data),
+      publishThread: input.publishThread,
     }) }).catch(error => console.warn('[worker-return] Reconciliation failed:', error));
   };
 }
