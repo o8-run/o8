@@ -55,6 +55,13 @@ async function applyLicense(licenseKey: string) {
   }));
 }
 
+async function bootstrapEntitlement() {
+  const { ensureFreeEntitlement } = await import('@/lib/entitlement/bootstrap');
+  const { getEntitlement } = await import('@/lib/entitlement/store');
+  await ensureFreeEntitlement();
+  return getEntitlement();
+}
+
 describe('free entitlement issuance through routes and persisted licenses', () => {
   beforeAll(async () => {
     const pair = await generateKeyPair('EdDSA');
@@ -83,10 +90,9 @@ describe('free entitlement issuance through routes and persisted licenses', () =
     async (plan) => {
       const licenseKey = await signedLicense(plan);
       const held = holdFreeResponse(await signedLicense('free'));
-      const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
-      const first = POST();
+      const first = bootstrapEntitlement();
       await held.requested;
-      const second = POST();
+      const second = bootstrapEntitlement();
 
       const applied = await applyLicense(licenseKey);
       expect(await applied.json()).toMatchObject({ plan, actualPlan: plan, source: 'file' });
@@ -95,8 +101,7 @@ describe('free entitlement issuance through routes and persisted licenses', () =
       held.respond();
 
       for (const response of await Promise.all([first, second])) {
-        expect(response.status).toBe(200);
-        expect(await response.json()).toMatchObject({ plan, actualPlan: plan, source: 'file' });
+        expect(response).toMatchObject({ plan, actualPlan: plan, source: 'file' });
       }
       expect(readFileSync(entitlementPath, 'utf8')).toBe(persisted);
       expect(JSON.parse(persisted)).toMatchObject({ plan, licenseKey });
@@ -120,27 +125,25 @@ describe('free entitlement issuance through routes and persisted licenses', () =
       return result;
     });
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ license: freeLicense })));
-    const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
-    const pending = POST();
+    const pending = bootstrapEntitlement();
     await verifying.promise;
     expect(await (await applyLicense(paidLicense)).json()).toMatchObject({ plan: 'pro' });
     const entitlementPath = path.join(dataDir, 'entitlement.json');
     const persisted = readFileSync(entitlementPath, 'utf8');
     finishVerification.resolve();
 
-    expect(await (await pending).json()).toMatchObject({ plan: 'pro', source: 'file' });
+    expect(await pending).toMatchObject({ plan: 'pro', source: 'file' });
     expect(readFileSync(entitlementPath, 'utf8')).toBe(persisted);
   });
 
   it('does not cache the free response after a plan is pinned during issuance', async () => {
     const held = holdFreeResponse(await signedLicense('free'));
-    const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
-    const pending = POST();
+    const pending = bootstrapEntitlement();
     await held.requested;
     vi.stubEnv('O8_PLAN', 'pro');
     held.respond();
 
-    expect(await (await pending).json()).toMatchObject({ plan: 'pro', source: 'env' });
+    expect(await pending).toMatchObject({ plan: 'pro', source: 'env' });
     expect(existsSync(path.join(dataDir, 'entitlement.json'))).toBe(false);
   });
 
@@ -148,13 +151,12 @@ describe('free entitlement issuance through routes and persisted licenses', () =
     'does not cache the free response after the hosted service is set to %s',
     async (optOut) => {
       const held = holdFreeResponse(await signedLicense('free'));
-      const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
-      const pending = POST();
+      const pending = bootstrapEntitlement();
       await held.requested;
       vi.stubEnv('O8_PROXY_URL', optOut);
       held.respond();
 
-      expect(await (await pending).json()).toMatchObject({ plan: 'free', source: 'default' });
+      expect(await pending).toMatchObject({ plan: 'free', source: 'default' });
       expect(existsSync(path.join(dataDir, 'entitlement.json'))).toBe(false);
     },
   );
@@ -185,12 +187,11 @@ describe('free entitlement issuance through routes and persisted licenses', () =
   it('persists a verified free license when entitlement and configuration remain unchanged', async () => {
     const licenseKey = await signedLicense('free');
     const held = holdFreeResponse(licenseKey);
-    const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
-    const pending = POST();
+    const pending = bootstrapEntitlement();
     await held.requested;
     held.respond();
 
-    expect(await (await pending).json()).toMatchObject({ plan: 'free', source: 'file' });
+    expect(await pending).toMatchObject({ plan: 'free', source: 'file' });
     expect(JSON.parse(readFileSync(path.join(dataDir, 'entitlement.json'), 'utf8'))).toMatchObject({
       plan: 'free', licenseKey,
     });

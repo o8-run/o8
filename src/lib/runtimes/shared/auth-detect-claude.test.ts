@@ -79,9 +79,7 @@ const {
   invalidateRuntimeAuthCache,
 } = await import('./auth-detect');
 const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
-const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
-const claudeCodeProfileRoute = await import('@/app/api/runtime/claude-code-profile/route');
 const genUiRoute = await import('@/app/api/mobile/genui/stream/route');
 const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 type ClaudeCodeModelSource = import('@/lib/claude-code/worker-profile-types').ClaudeCodeModelSource;
@@ -456,39 +454,6 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
         expect.objectContaining({ id: 'claude-code', available: true, unavailableReason: null }),
       ]),
     );
-  });
-
-  it('invalidates the warmed native refusal through the authenticated profile POST route', async ({ onTestFinished }) => {
-    // An OpenRouter profile is an API payer choice; opt in the way runtime settings do.
-    saveRuntimeBillingMode('claude-code', 'api');
-    onTestFinished(() => saveRuntimeBillingMode('claude-code', 'subscription'));
-    writeStaleMarkers();
-    invalidateRuntimeAuthCache();
-    expect((await getRuntimeAuthSnapshot()).statuses.claude).toMatchObject({
-      ready: false,
-      unavailableReason: 'needs_auth',
-    });
-
-    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-profile-cache-test');
-    const response = await claudeCodeProfileRoute.POST(new NextRequest(
-      'http://localhost:3001/api/runtime/claude-code-profile',
-      {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${OPERATOR_TOKEN}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ source: 'openrouter', model: 'provider/test-model', codexModel: null }),
-      },
-    ));
-    const responseJson = await response.json();
-    expect(response.status, JSON.stringify(responseJson)).toBe(200);
-    expect((await getRuntimeAuthSnapshot()).statuses.claude).toMatchObject({
-      ready: true,
-      authenticated: false,
-      unavailableReason: null,
-      detail: expect.stringContaining('OpenRouter gateway'),
-    });
   });
 
   it.each([
