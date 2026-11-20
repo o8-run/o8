@@ -6028,6 +6028,14 @@
       ]
     },
     {
+      "path": "tests/o8d-rust-lane-live-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-rust-mobile-inbox-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -9073,12 +9081,6 @@
       "path": "tests/viewer-session-redaction-real-path.test.ts",
       "reasons": [
         "network-listener",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/visual-inspection-real-path.test.ts",
-      "reasons": [
         "real-path"
       ]
     },

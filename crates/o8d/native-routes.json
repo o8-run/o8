@@ -491,5 +491,15 @@
     "state": "rust-with-fallback",
     "reason": "Rust owns durable ordinary composer admission and guarded mutations through the fresh native operator gate. Other principals retain Node admission; network sends, visual receipts, grants and execution remain Node. No post-commit fallback.",
     "test": "tests/o8d-composer-admission-real-path.test.ts"
+  },
+  {
+    "path": "/api/lanes",
+    "methods": [
+      "GET"
+    ],
+    "fallback": true,
+    "reason": "Only live occupancy reads with the original principal predicate are native; ordinary reconciliation and every writer remain TypeScript-owned.",
+    "state": "rust-with-fallback",
+    "test": "tests/o8d-rust-lane-live-real-path.test.ts"
   }
 ]

@@ -1,5 +1,7 @@
 //! Delivery for stamped producer envelopes and daemon-owned global events.
-#[cfg(all(unix, any(feature = "experimental-supervisor", feature = "experimental-ws")))]
+#[cfg(unix)]
+pub mod codex;
+#[cfg(unix)]
 pub mod child_spawn;
 
 use serde_json::{json, Value};

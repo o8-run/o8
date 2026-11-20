@@ -532,3 +532,7 @@ content, and preserves all JSON fields. Clock and owned image mtime are seeded
 inputs. A separate creation case verifies the TS fallback creates missing
 projects and persists returned IDs. See evidence/projects for exact counts,
 consumer-parser proof and release-only timing.
+
+### Live lane occupancy
+
+GET /api/lanes admits only the existing view=live occupancy projection. The handler and private admission use the same operator or packet-bound non-readonly worker predicate, including persisted revocation. Rust reads four saved lane fields in createdAt order. Ordinary reconciliation, transcript, archive, diff and storage reads retain their TypeScript owner. Missing/unsupported/oversized saved state defers. No new caller authority, WS registration or Rust writer is introduced. evidence/lane-live contains the frozen oracle, CLI consumer proof and release-only timings.

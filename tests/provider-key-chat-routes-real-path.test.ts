@@ -13,7 +13,7 @@ vi.mock('child_process', async original => ({ ...await original<typeof import('c
 state.dir = mkdtempSync(join(tmpdir(), 'o8-key-chat-routes-'));
 const { mutateProviderKey } = await import('@/lib/providers/key-store');
 const keys = await import('@/app/api/v2/keys/route');
-const billing = await import('@/app/api/runtime/billing/route');
+const billing = await import('@/lib/providers/runtime-billing');
 const codexSend = await import('@/app/api/codex/send/route');
 const proxy = await import('@/app/api/v2/proxy/cli/route');
 const request = (path: string, body: unknown, method = 'POST') => new NextRequest(`http://localhost/api/${path}`, { method, headers: { host: 'localhost' }, body: JSON.stringify(body) });
@@ -54,13 +54,13 @@ it('preserves deferred save-to-ambient behavior while the real ordinary chat sta
   await chat('workspace-codex', 'codex');
   expect(state.envs.at(-1)?.OPENAI_API_KEY || null).toBeNull();
 });
-it.each(targets.flatMap(target => ['subscription', 'api'].map(mode => [...target, mode] as const)))('%s (%s, %s, %s) applies %s billing at the real chat spawn', async (target, runtime, provider, canonical, mode) => {
-  expect((await billing.POST(request('runtime/billing', { runtimeId: runtime, mode }))).status).toBe(runtime === 'codex' && mode === 'api' ? 409 : 200);
+it.each(targets.flatMap(target => (['subscription', 'api'] as const).map(mode => [...target, mode] as const)))('%s (%s, %s, %s) applies %s billing at the real chat spawn', async (target, runtime, provider, canonical, mode) => {
+  if (runtime === 'codex' && mode === 'api') expect(() => billing.saveRuntimeBillingMode(runtime, mode)).toThrow(); else expect(() => billing.saveRuntimeBillingMode(runtime, mode)).not.toThrow();
   await save(provider); await chat(target, runtime);
   expect(state.envs.at(-1)?.[canonical] || null).toBe(runtime !== 'codex' && mode === 'api' ? 'fixture-saved-chat-key' : null);
 });
 it.each(targets.flatMap(target => ['disable', 'remove'].map(action => [...target, action] as const)))('%s (%s, %s, %s) strips keys after API %s', async (target, runtime, provider, _canonical, action) => {
-  expect((await billing.POST(request('runtime/billing', { runtimeId: runtime, mode: 'api' }))).status).toBe(runtime === 'codex' ? 409 : 200);
+  if (runtime === 'codex') expect(() => billing.saveRuntimeBillingMode(runtime, 'api')).toThrow(); else expect(() => billing.saveRuntimeBillingMode(runtime, 'api')).not.toThrow();
   await save(provider);
   for (const name of names) vi.stubEnv(name, 'fixture-stale-alias');
   if (provider === 'gemini') mutateProviderKey('GEMINI_API_KEY', action === 'disable' ? { enabled: false } : { key: null });
