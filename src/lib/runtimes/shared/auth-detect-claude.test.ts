@@ -79,7 +79,6 @@ const {
   invalidateRuntimeAuthCache,
 } = await import('./auth-detect');
 const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
-const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
 const genUiRoute = await import('@/app/api/mobile/genui/stream/route');
 const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
