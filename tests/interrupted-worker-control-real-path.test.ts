@@ -43,7 +43,8 @@ chmodSync(bin, 0o755);
 const { POST: delegate } = await import('@/app/api/orchestrator/delegate/route');
 const { POST: control } = await import('@/app/api/agent-control/action/route');
 const { GET: membership } = await import('@/app/api/orchestrator/shared-team/active/route');
-const { GET: sessionSummary } = await import('@/app/api/runtime/session-summary/route');
+const { readOwnedSessionDisplay } = await import('@/lib/runtimes/shared/owned-session-index');
+const { readWorkerRecovery } = await import('@/lib/agent-control/worker-recovery');
 const { fastDelegationCapability } = await import('@/lib/orchestrator/fast-delegation-auth');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const owned = await import('@/lib/codex/owned');
@@ -90,10 +91,8 @@ async function interrupted(id: string, noThread = false) {
     expect(record(surface).recentRuns[0].outcome).toBe('interrupted');
   });
   expect((await card(repo, thread))[0]).toMatchObject({ sessionKey: surface, status: 'interrupted' });
-  const summary = await sessionSummary(new NextRequest(`http://localhost/api/runtime/session-summary?sessionKey=${encodeURIComponent(surface)}`,
-    { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } }));
-  expect(summary.status).toBe(200);
-  expect(await summary.json()).toMatchObject({ session: { status: 'interrupted' }, recovery: { actions: ['resume', 'retire'], worktreePath: repo } });
+  expect(await readOwnedSessionDisplay(surface)).toMatchObject({ status: 'interrupted' });
+  expect(await readWorkerRecovery(surface)).toMatchObject({ actions: ['resume', 'retire'], worktreePath: repo });
   return { base, repo, thread, surface, branch: launched.branch as string };
 }
 beforeAll(async () => {

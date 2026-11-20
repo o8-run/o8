@@ -1,10 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getOrCreateWsToken } from '@/lib/ws-auth';
-import { GET } from './route';
+import { readOwnedSessionDisplay } from '@/lib/runtimes/shared/owned-session-index';
 
 const roots: string[] = [];
 
@@ -28,25 +26,16 @@ describe('owned session summary', () => {
       recentRuns: [{ outcome: 'finished', startedAt: '2026-09-26T00:00:00Z' }],
     }));
 
-    const response = await GET(new NextRequest(
-      'http://example.com/api/runtime/session-summary?sessionKey=codex-owned%3Aproof-c',
-      { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } },
-    ));
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ session: {
+    expect(await readOwnedSessionDisplay('codex-owned:proof-c')).toEqual({
       sessionKey: 'codex-owned:proof-c',
       name: 'Proof C',
       model: 'gpt-5.6-terra',
       runtime: 'codex',
       status: 'completed',
-    }, recovery: null });
+    });
   });
 
   it('refuses a path-like session identifier', async () => {
-    const response = await GET(new NextRequest(
-      'http://example.com/api/runtime/session-summary?sessionKey=codex-owned%3A..%2Fsecret',
-      { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } },
-    ));
-    expect(response.status).toBe(404);
+    expect(await readOwnedSessionDisplay('codex-owned:../secret')).toBeNull();
   });
 });

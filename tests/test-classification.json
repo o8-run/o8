@@ -8869,6 +8869,13 @@
       ]
     },
     {
+      "path": "tests/unused-status-wrappers-retirement-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-apply-failure-real-path.test.ts",
       "reasons": [
         "real-path"
