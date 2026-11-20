@@ -459,3 +459,18 @@ The generated `linux-downloads.json` records each build's exact sizes and versio
   excerpts in `native/o8-next/src/prompt_navigator.rs`, implemented with
   o8's native list, focus controls and theme.
 - Unmodified license text: [T3 Code](licenses/t3code-MIT.txt)
+
+## Codex driver
+
+The Codex stdio driver adapts `crates/monocode-core/src/provider.rs` and
+`provider/lifecycle.rs` from hardbeat920/monocode, commit `09d04436b`,
+Copyright (c) 2026 Nick, MIT. Each adapted file retains the MIT notice.
+The complete upstream [NOTICE](licenses/monocode-NOTICE.txt) is retained,
+including its Apache-2.0 Zed attribution; no GPL crates are included.
+[MIT license](licenses/monocode-MIT.txt).
+
+Transport types are generated from openai/codex `rust-v0.170.0`,
+`codex-rs/app-server-protocol/schema/json`, Apache-2.0, without linking
+app-server-protocol. [License](licenses/codex-Apache-2.0.txt) and
+[NOTICE](licenses/codex-NOTICE.txt) are retained. Source schemas and the
+reproducible generator are included.
