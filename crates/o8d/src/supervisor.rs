@@ -542,6 +542,7 @@ pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>>
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn spawned_child_clears_executor_signal_mask() {
         std::thread::spawn(|| {
