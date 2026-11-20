@@ -518,7 +518,10 @@ fn wheel_steps_smaller_than_a_line_add_up() {
     let mut carry = 0.;
     let moved: i32 = (0..13).map(|_| wheel_lines(&mut carry, 3.)).sum();
     assert_eq!(moved, 2, "39px passes two 18px lines");
-    assert!(carry > 0. && carry < 1., "the rest waits for the next step: {carry}");
+    assert!(
+        carry > 0. && carry < 1.,
+        "the rest waits for the next step: {carry}"
+    );
     // A wheel notch is several lines at once, in either direction.
     assert_eq!(wheel_lines(&mut 0., 54.), 3);
     assert_eq!(wheel_lines(&mut 0., -54.), -3);
@@ -535,7 +538,10 @@ fn wheel_follows_the_terminal_mode() {
     assert_eq!(wheel_action(none, -2, 4, 2), Wheel::Display(-2));
     // A full-screen program has no scrollback, so it gets arrow keys.
     let full = TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL;
-    assert_eq!(wheel_action(full, 2, 4, 2), Wheel::Send("\x1b[A\x1b[A".into()));
+    assert_eq!(
+        wheel_action(full, 2, 4, 2),
+        Wheel::Send("\x1b[A\x1b[A".into())
+    );
     assert_eq!(wheel_action(full, -1, 4, 2), Wheel::Send("\x1b[B".into()));
     assert_eq!(
         wheel_action(full | TermMode::APP_CURSOR, 1, 4, 2),
@@ -548,8 +554,14 @@ fn wheel_follows_the_terminal_mode() {
     );
     // A program that asked for the mouse gets wheel reports at the cell.
     let mouse = TermMode::MOUSE_REPORT_CLICK | TermMode::SGR_MOUSE;
-    assert_eq!(wheel_action(full | mouse, 1, 4, 2), Wheel::Send("\x1b[<64;5;3M".into()));
-    assert_eq!(wheel_action(mouse, -1, 0, 0), Wheel::Send("\x1b[<65;1;1M".into()));
+    assert_eq!(
+        wheel_action(full | mouse, 1, 4, 2),
+        Wheel::Send("\x1b[<64;5;3M".into())
+    );
+    assert_eq!(
+        wheel_action(mouse, -1, 0, 0),
+        Wheel::Send("\x1b[<65;1;1M".into())
+    );
     assert_eq!(
         wheel_action(TermMode::MOUSE_REPORT_CLICK, 1, 4, 2),
         Wheel::Send("\x1b[M`%#".into()),
@@ -615,13 +627,19 @@ fn a_tmux_screen_switch_keeps_the_scrollback() {
     plain.feed(b"\x1b[?1049h", false);
     assert!(plain.term.mode().contains(TermMode::ALT_SCREEN));
     let mut tail = vec![];
-    assert_eq!(keep_one_screen(&mut tail, b"a\x1b[31mb\x1b[?1049"), b"a\x1b[31mb");
+    assert_eq!(
+        keep_one_screen(&mut tail, b"a\x1b[31mb\x1b[?1049"),
+        b"a\x1b[31mb"
+    );
     assert_eq!(keep_one_screen(&mut tail, b"7h\x1b"), b"\x1b[?10497h");
     assert_eq!(keep_one_screen(&mut tail, b"[?25l"), b"\x1b[?25l");
     // tmux's whole-screen clear before a redraw clears in place, also when
     // it is cut across feeds; a clear that only looks like it passes through.
     assert_eq!(keep_one_screen(&mut tail, b"x\x1b[2"), b"x");
-    assert_eq!(keep_one_screen(&mut tail, b"Jy\x1b[2K"), b"\x1b[1J\x1b[Jy\x1b[2K");
+    assert_eq!(
+        keep_one_screen(&mut tail, b"Jy\x1b[2K"),
+        b"\x1b[1J\x1b[Jy\x1b[2K"
+    );
     assert!(tail.is_empty());
     // A redraw over a full screen must not copy that screen into the history.
     let mut redrawn = Grid::new(Size(20, 5));

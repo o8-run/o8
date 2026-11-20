@@ -67,7 +67,11 @@ fn native_context_help_follows_hover_and_a_click_puts_it_away(cx: &mut TestAppCo
     surface.update_in(cx, |s, window, cx| {
         assert!(!s.composer.read(cx).controls.focus["composer-context"].is_focused(window))
     });
-    cx.simulate_mouse_move(gpui::point(px(4.), px(4.)), None, gpui::Modifiers::default());
+    cx.simulate_mouse_move(
+        gpui::point(px(4.), px(4.)),
+        None,
+        gpui::Modifiers::default(),
+    );
     draw(cx);
     cx.simulate_mouse_move(ring, None, gpui::Modifiers::default());
     draw(cx);
@@ -86,7 +90,8 @@ fn native_compact_chip_shows_only_when_the_context_is_nearly_full(cx: &mut TestA
     assert!(wide);
     assert!(cx.debug_bounds("composer-compact").is_none());
     surface.update(cx, |s, cx| {
-        s.composer.update(cx, |i, _| i.controls.context.reported = 950_000.);
+        s.composer
+            .update(cx, |i, _| i.controls.context.reported = 950_000.);
         cx.notify();
     });
     draw(cx);

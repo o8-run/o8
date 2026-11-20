@@ -80,6 +80,9 @@ function readinessLabel(state: RepoReadiness['state']) {
 // the same window only schedules one underlying recompute per repo.
 const inFlightRefreshes = new Map<string, Promise<RepoReadiness>>();
 
+/** Private admission floor until the native reader owns this process cache. */
+export function hasCachedRepoReadiness(): boolean { return readinessCache.size > 0; }
+
 export function invalidateRepoReadiness(...repoPaths: string[]) {
   for (const repoPath of repoPaths) {
     readinessCache.delete(repoPath);

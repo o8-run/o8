@@ -1,4 +1,7 @@
-//! Delivery-only prototype: TypeScript remains the authority for stamped envelopes.
+//! Delivery for stamped producer envelopes and daemon-owned global events.
+#[cfg(all(unix, any(feature = "experimental-supervisor", feature = "experimental-ws")))]
+pub mod child_spawn;
+
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use tokio::sync::{broadcast, Mutex};
@@ -64,7 +67,7 @@ impl EventBus {
         self.state.lock().await.latest
     }
 
-    /// Atomic producer batch. Never stamps payloads, reads accounts, or executes commands.
+    /// Atomic stamped batch. Never reads accounts or executes commands.
     pub async fn publish(&self, events: Vec<Value>) -> Result<(), &'static str> {
         let mut state = self.state.lock().await;
         let mut previous = state.latest;

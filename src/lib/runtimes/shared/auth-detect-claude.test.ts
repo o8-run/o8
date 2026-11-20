@@ -12,9 +12,6 @@ const authFixture = vi.hoisted(() => ({
   installed: true,
   dedicatedTokenRequired: false,
 }));
-const symonBridgeFixture = vi.hoisted(() => ({
-  selections: [] as Array<{ engine: string; model: string; effort: string } | undefined>,
-}));
 vi.mock('@/lib/runtimes/shared/antigravity-login-probe', () => ({
   probeAntigravityLogin: vi.fn(async () => ({ installed: false, authenticated: false, detail: 'Fixture absent', fix: 'Sign in' })),
 }));
@@ -37,19 +34,6 @@ vi.mock('./cli-locate', async (importOriginal) => ({
   scanAndLink: vi.fn((binaryName: string) => (
     binaryName === 'claude' && authFixture.installed ? authFixture.claudeBinary : null
   )),
-}));
-
-vi.mock('@/lib/mobile/symon-text-bridge-client', () => ({
-  readSymonTextPlannerInfo: vi.fn(async (selection?: { engine: string; model: string; effort: string }) => {
-    symonBridgeFixture.selections.push(selection);
-    return {
-      available: true,
-      engine: 'codex',
-      model: 'gpt-5.6-sol',
-      effort: 'xhigh',
-      tools: [],
-    };
-  }),
 }));
 
 authFixture.home = mkdtempSync(path.join(os.tmpdir(), 'o8-claude-auth-'));
@@ -95,11 +79,8 @@ const {
   invalidateRuntimeAuthCache,
 } = await import('./auth-detect');
 const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
-const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
-const claudeCodeProfileRoute = await import('@/app/api/runtime/claude-code-profile/route');
 const genUiRoute = await import('@/app/api/mobile/genui/stream/route');
-const symonTextSessionRoute = await import('@/app/api/mobile/symon/text-session/route');
 const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 type ClaudeCodeModelSource = import('@/lib/claude-code/worker-profile-types').ClaudeCodeModelSource;
 
@@ -156,7 +137,6 @@ beforeEach(async () => {
   await writeClaudeCodeWorkerProfile({
     source: 'native', model: null, codexModel: null, repoSkillAllowlist: [],
   });
-  symonBridgeFixture.selections.length = 0;
 });
 
 afterEach(() => {
@@ -476,39 +456,6 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
     );
   });
 
-  it('invalidates the warmed native refusal through the authenticated profile POST route', async ({ onTestFinished }) => {
-    // An OpenRouter profile is an API payer choice; opt in the way runtime settings do.
-    saveRuntimeBillingMode('claude-code', 'api');
-    onTestFinished(() => saveRuntimeBillingMode('claude-code', 'subscription'));
-    writeStaleMarkers();
-    invalidateRuntimeAuthCache();
-    expect((await getRuntimeAuthSnapshot()).statuses.claude).toMatchObject({
-      ready: false,
-      unavailableReason: 'needs_auth',
-    });
-
-    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-profile-cache-test');
-    const response = await claudeCodeProfileRoute.POST(new NextRequest(
-      'http://localhost:3001/api/runtime/claude-code-profile',
-      {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${OPERATOR_TOKEN}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ source: 'openrouter', model: 'provider/test-model', codexModel: null }),
-      },
-    ));
-    const responseJson = await response.json();
-    expect(response.status, JSON.stringify(responseJson)).toBe(200);
-    expect((await getRuntimeAuthSnapshot()).statuses.claude).toMatchObject({
-      ready: true,
-      authenticated: false,
-      unavailableReason: null,
-      detail: expect.stringContaining('OpenRouter gateway'),
-    });
-  });
-
   it.each([
     { source: 'openrouter' as const, issueNumber: 91_762_011 },
     { source: 'codex-subscription' as const, issueNumber: 91_762_012 },
@@ -558,26 +505,6 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
         expect.objectContaining({ id: 'claude-opus', available: false }),
       ]),
     );
-
-    const symonResponse = await symonTextSessionRoute.POST(new NextRequest(
-      'http://localhost:3001/api/mobile/symon/text-session',
-      {
-        method: 'POST',
-        headers: {
-          host: 'localhost:3001',
-          authorization: `Bearer ${OPERATOR_TOKEN}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ workspaceMode: 'o8', currentRoute: '/mobile/ask', model: 'claude-opus' }),
-      },
-    ));
-    expect(symonResponse.status).toBe(503);
-    await expect(symonResponse.json()).resolves.toEqual({
-      ok: false,
-      error: 'desktop_unavailable',
-      detail: 'The selected native planner is unavailable. Choose another model explicitly.',
-    });
-    expect(symonBridgeFixture.selections).toEqual([]);
   }, 20_000);
 
   it('restarts a cold detection after invalidation instead of publishing stale carrier state', async () => {

@@ -197,6 +197,7 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
     .with_assets(crate::icon::Assets)
     .run(move |cx: &mut App| {
         crate::zoom::install(false, cx);
+        crate::parent_quit::install(cx);
         let (sender, receiver) = async_channel::bounded(1);
         let client = client.with_wakeup(sender);
         let handle = open_window(client, file, state, offscreen, cx);

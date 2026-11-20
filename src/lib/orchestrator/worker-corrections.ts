@@ -1,3 +1,5 @@
+import { apiFrontDoorEnabled } from '@/lib/ws-server/api-front-door-config';
+import { commitNativeCorrectionHold } from './session-rule-native-client';
 import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
 import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { callSteerOwner } from '@/lib/orchestrator/operator-mission-service/steer-owner-client';
@@ -116,7 +118,15 @@ export async function correctWorkers(input: ComposerQueueTarget & { id: string; 
     if (!run.owned || !run.operatorCorrectionAllowed || run.runId !== selected.runId || run.interrupted
       || !/^(codex-owned:|claude-code-owned:)/.test(selected.surfaceId)) throw new Error('A selected worker changed, stopped, or cannot accept a correction. Refresh its state.');
   }
-  const created = await withSessionRuleMutation(target.threadId, () => {
+  if (apiFrontDoorEnabled() && correction.holdMerges && admissionChecks) throw new Error('Merge-hold corrections cannot carry reviewed-author callbacks.');
+  const created = apiFrontDoorEnabled() && correction.holdMerges
+    ? await commitNativeCorrectionHold({ ...target, id: input.id, payload: correction, fences }).then(receipt => {
+      const stored = readWorkerCorrection(input.id);
+      if (!stored || stored.ruleId !== receipt.ruleId || stored.repoPath !== target.repoPath || stored.threadId !== target.threadId
+        || JSON.stringify(stored.payload) !== serialized) throw new Error('Native correction hold receipt is unconfirmed. No delivery was attempted.');
+      return true;
+    })
+    : await withSessionRuleMutation(target.threadId, () => {
     // Git may take seconds. Check it before opening the SQLite write transaction.
     admissionChecks?.code();
     return getSqlite().transaction(() => {

@@ -104,11 +104,12 @@ fn spec_target_no_repo_typed_file_and_preferences_persist(cx: &mut TestAppContex
     draw(&mut cx);
     let saved = saved_state(&f, |saved| saved["notes"]["target_override"] == f.repo);
     assert_eq!(saved["notes"]["target_override"], f.repo);
-    assert!(f
-        .requests()
-        .iter()
-        .filter(|r| r.contains("/api/repo-spec?"))
-        .all(|r| r.contains("repoPath=%2F") && !r.contains("repoPath=&")));
+    assert!(
+        f.requests()
+            .iter()
+            .filter(|r| r.contains("/api/repo-spec?"))
+            .all(|r| r.contains("repoPath=%2F") && !r.contains("repoPath=&"))
+    );
     click(&mut cx, "spec-settings");
     click(&mut cx, "spec-color-2");
     cx.simulate_keystrokes("escape");
@@ -155,10 +156,11 @@ fn spec_target_six_recents_file_folder_and_follow_active_repo(cx: &mut TestAppCo
     menu_click(&mut cx, "spec-choose-folder");
     draw(&mut cx);
     assert!(f.requests().iter().any(|r| r == "POST /api/panel/file-io"));
-    assert!(f
-        .requests()
-        .iter()
-        .any(|r| r == "POST /api/panel/browse-folder"));
+    assert!(
+        f.requests()
+            .iter()
+            .any(|r| r == "POST /api/panel/browse-folder")
+    );
 }
 #[gpui::test]
 fn spec_saved_override_loads_before_active_repo_and_poll_stops_when_hidden(
@@ -173,11 +175,12 @@ fn spec_saved_override_loads_before_active_repo_and_poll_stops_when_hidden(
     let mut cx = shell(&f, state, cx);
     wait(&mut cx, "spec-editor");
     until(&mut cx, |cx| content(cx) == "Override notes\n");
-    assert!(f
-        .requests()
-        .iter()
-        .filter(|r| r.contains("/api/repo-spec?"))
-        .all(|r| r.contains("alternate")));
+    assert!(
+        f.requests()
+            .iter()
+            .filter(|r| r.contains("/api/repo-spec?"))
+            .all(|r| r.contains("alternate"))
+    );
     click(&mut cx, "header-right-panel");
     settle_closed(&mut cx);
     let count = f

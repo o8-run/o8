@@ -1,5 +1,7 @@
 # Symon durable brain
 
+Historical reference: the Symon WS implementation and its dedicated tests were removed. Paths below describe the former implementation.
+
 Symon can answer text on the built-in Pi agent and the o8 managed model, with
 every conversation kept in a durable store. An install with no agent CLI, and a
 desktop whose bridge is not running, can still answer.

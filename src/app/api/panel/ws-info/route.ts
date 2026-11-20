@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 
+import { apiFrontDoorEnabled } from '@/lib/ws-server/api-front-door-config';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -58,7 +59,9 @@ function portAlive(port: number): Promise<boolean> {
 
 export async function GET(): Promise<Response> {
   const resolved = resolvePortInfo().wsPort;
-  const filePort = portFromFile();
+  // Takeover has one advertised listener. A still-live stale port file must
+  // not override that listener during the launcher's metadata handoff.
+  const filePort = apiFrontDoorEnabled() ? null : portFromFile();
   const candidates = [...new Set([filePort, resolved].filter((p): p is number => p != null))];
 
   let wsPort = resolved;

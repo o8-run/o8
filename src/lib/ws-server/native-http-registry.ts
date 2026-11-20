@@ -34,21 +34,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   session: [
     route('/api/worktrees/conflicts', 'GET', () => import('@/app/api/worktrees/conflicts/route')),
     route('/api/orchestrator/workspace/maintenance', 'GET POST', () => import('@/app/api/orchestrator/workspace/maintenance/route')),
+    // Documented operator API: recorded SQLite inventory only, through the DB
+    // already shared by the WS maintenance handler; no disposition execution.
+    route('/api/orchestrator/workspace/output-disposition', 'GET', () => import('@/app/api/orchestrator/workspace/output-disposition/route')),
     route('/api/orchestrator/workspace/preservation', 'GET POST', () => import('@/app/api/orchestrator/workspace/preservation/route')),
     route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
     route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
     route('/api/harness', 'POST', () => import('@/lib/harness/route')),
-    route('/api/mobile/symon/text-turn', 'POST DELETE', () => import('@/lib/symon/http/text-turn')),
-    route('/api/panel/symon/conversations', 'GET', () => import('@/lib/symon/http/conversations')),
-    route('/api/panel/symon/conversations/continue', 'POST', () => import('@/lib/symon/http/continue')),
-    route('/api/panel/symon/conversations/transcript', 'GET', () => import('@/lib/symon/http/transcript')),
-    route('/api/panel/symon/conversations/record', 'POST', () => import('@/lib/symon/http/record')),
-    route('/api/symon/managed-messages/inbound', 'POST', () => import('@/lib/symon/http/managed-inbound')),
 
-    route('/api/mobile/symon', 'GET POST', () => import('@/lib/mobile/symon-relay-route')),
-    route('/api/mobile/symon/confirm', 'POST', () => import('@/lib/mobile/symon-confirm-route')),
-    route('/api/mobile/symon/tool', 'POST DELETE', () => import('@/lib/mobile/symon-tool-route')),
-    route('/api/panel/symon/messages-receiver', 'GET POST', () => import('@/lib/symon/messages-receiver/control-route')),
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
     // WS process already writes for its own lane and mission work. (#5243)
@@ -59,6 +52,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/tasks/[taskId]', 'GET', () => import('@/lib/tasks/detail-route')),
     route('/api/panel/artifacts', 'GET POST', () => import('@/lib/artifacts/ingest-route'), ARTIFACT_REQUEST_MAX_BYTES),
     route('/api/panel/artifacts/mirror', 'POST', () => import('@/lib/artifacts/mirror-route')),
+    route('/api/panel/link-preview', 'GET', () => import('@/app/api/panel/link-preview/route')),
     route('/api/panel/managed-runs', 'GET POST', () => import('@/lib/runtimes/managed-runs/http-route')),
     route('/api/tasks/dispatch-owner', 'POST', () => import('@/lib/tasks/dispatch-owner-route')),
     route('/api/runtime/owner', 'GET', () => import('@/lib/runtime/owner-status-route')),
@@ -70,11 +64,13 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/branches', 'POST', () => import('@/app/api/panel/branches/route')),
     route('/api/panel/files', 'GET', () => import('@/app/api/panel/files/route')),
     route('/api/panel/file-asset', 'GET', () => import('@/app/api/panel/file-asset/route')),
-    route('/api/v2/files', 'GET', () => import('@/app/api/v2/files/route')),
+    route('/api/v2/files', 'GET POST', () => import('@/app/api/v2/files/route')),
     route('/api/v2/files/quick-docs', 'GET', () => import('@/app/api/v2/files/quick-docs/route')),
     route('/api/panel/file-diff', 'GET', () => import('@/app/api/panel/file-diff/route')),
+    route('/api/panel/search', 'GET', () => import('@/app/api/panel/search/route')),
     route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
-    route('/api/panel/resource-usage', 'GET', () => import('@/app/api/panel/resource-usage/route')),
+    // POST reuses the same resource inventory and keeps its current-row/core-pid guards.
+    route('/api/panel/resource-usage', 'GET POST', () => import('@/app/api/panel/resource-usage/route')),
     route('/api/panel/serve-image', 'GET', () => import('@/app/api/panel/serve-image/route')),
     route('/api/visualizations/[id]', 'GET', () => import('@/app/api/visualizations/[id]/route')),
     route('/api/visualizations', 'POST', async () => {
@@ -115,8 +111,9 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/lead', 'GET POST', () => import('@/lib/orchestrator/http/lead')),
     route('/api/orchestrator/status', 'GET', () => import('@/app/api/orchestrator/status/route')),
     route('/api/orchestrator/archive', 'GET', () => import('@/app/api/orchestrator/archive/route')),
+    route('/api/task-artifacts/[id]/actions', 'GET', () => import('@/app/api/task-artifacts/[id]/actions/route')),
     route('/api/task-artifacts/[id]/decision', 'GET POST', () => import('@/app/api/task-artifacts/[id]/decision/route')),
-    route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
+    route('/api/mobile/orchestrator/threads', 'GET POST', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET PATCH', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/shared-team/active', 'GET', () => import('@/app/api/orchestrator/shared-team/active/route')),
     route('/api/runtime/inventory', 'GET', () => import('@/app/api/runtime/inventory/route')),
@@ -124,14 +121,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
     route('/api/v2/chat-history/terminal-turns', 'POST', () => import('@/app/api/v2/chat-history/terminal-turns/route')),
     route('/api/orchestrator/composer-queue', 'GET POST PATCH DELETE', () => import('@/app/api/orchestrator/composer-queue/route')),
+    route('/api/panel/workspaces', 'GET', () => import('@/app/api/panel/workspaces/route')),
     route('/api/panel/ws-info', 'GET', () => import('@/app/api/panel/ws-info/route')),
     route('/api/panel/ports', 'GET', () => import('@/app/api/panel/ports/route')),
     route('/api/orchestrator/handoff', 'POST', () => import('@/app/api/orchestrator/handoff/route')),
     route('/api/orchestrator/reset-session', 'POST', () => import('@/app/api/orchestrator/reset-session/route')),
     route('/api/orchestrator/compact', 'POST', () => import('@/app/api/orchestrator/compact/route')),
     route('/api/orchestrator/session-rules', 'GET POST DELETE', () => import('@/app/api/orchestrator/session-rules/route')),
-    route('/api/orchestrator/delegate', 'POST', () => import('@/app/api/orchestrator/delegate/route')),
-    route('/api/next/voice-host', 'GET POST', () => import('@/app/api/next/voice-host/route')),
+    route('/api/orchestrator/delegate', 'GET POST', () => import('@/app/api/orchestrator/delegate/route')),
     route('/api/orchestrator/stop-packet', 'POST', () => import('@/app/api/orchestrator/stop-packet/route')),
     // Operator-only (requirePanelAuth, then the bearer principal); like stop-packet
     // they run the dispatch tick here. The agent supervisor's watch map is still
@@ -146,14 +143,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/devices/owner', 'POST', () => import('@/lib/devices/owner-route')),
     // Native mode keeps preview servers in the WS process.
     route('/api/tasks/[taskId]/preview', 'POST DELETE', () => import('@/lib/cloud/task-preview-route')),
-    // Loads the handler, not the Next route: Next forwards here while this
-    // transport is on, so the edge-tts installer has one owner (#5422).
-    route('/api/tts', 'POST', () => import('@/lib/tts/route')),
-    // Symon's connected MCP tools: the handlers, not the Next routes, so the MCP
-    // sessions and their child processes have one owner while this transport is
-    // on (#5422). Operator only (the handler refuses a worker with 403).
-    route('/api/symon/mcp/tools', 'GET', () => import('@/lib/mcp/symon-mcp-tools-route')),
-    route('/api/symon/mcp/call', 'POST', () => import('@/lib/mcp/symon-mcp-call-route')),
     // Symon Agent-Mode tool relay (an already-confirmed SSH-transported tool invoked on the
     // remote webview). POST only, operator-ws-token-only TWICE over: the handler's
     // transportAuthorized does a constant-time timingSafeEqual(bearer, getOrCreateWsToken())
@@ -163,7 +152,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // from the body reach the webview eval (buildTransportedToolEval) ONLY through JSON.stringify
     // -> they are JS data literals, never interpolated as code, so a ws-token holder cannot inject
     // JS. The response is the tool result, no credential. (#5243)
-    route('/api/symon/transport/tool', 'POST', () => import('@/app/api/symon/transport/tool/route')),
   ],
   brain: [
     route('/api/cortex/ask', 'POST', () => import('@/app/api/cortex/ask/route')),
@@ -236,6 +224,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // elevation (x-o8-device-worker/conversation/pid) is honored ONLY when the principal is already
     // operator (route.ts: resolveRequestPrincipalContext(request).role === 'operator'), so a device
     // or worker bearer cannot forge it. Responses are operator-visible MCP tool results. (#5243)
+    route('/api/mcp', 'GET', () => import('@/lib/mcp/operator-mcp-get')),
     route('/api/mcp', 'POST DELETE', () => import('@/app/api/mcp/route')),
   ],
   grid: [],
@@ -285,6 +274,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // review, then moves the lane to reviewing or recovery. The WS process already runs the same
     // reaper on its own interval. (#5243)
     route('/api/lanes/reap', 'POST', () => import('@/app/api/lanes/reap/route')),
+    route('/api/lanes/touches', 'GET', () => import('@/app/api/lanes/touches/route')),
     route('/api/lanes/[id]', 'GET', () => import('@/app/api/lanes/[id]/route')),
     // A packet worker's o8 CLI heartbeats, reports progress, tails its events and reads or widens
     // its scope here. The gate grants workers these paths; each handler then binds the bearer to
@@ -338,11 +328,16 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // bearer gets 403; no/wrong bearer gets 401. The write marks
     // the device revoked + rewrites the active-token-hash file; the response carries no token. (#5243)
     route('/api/mobile/devices/revoke', 'POST', () => import('@/app/api/mobile/devices/revoke/route')),
+    // CLI code-based sign-in uses the existing local-operator handler.
+    route('/api/panel/auth/device/link', 'POST', () => import('@/app/api/panel/auth/device/link/route')),
     // Connect-attach toggle (Settings > Paired devices). GET reads the setting, POST writes it
     // (env-override locked). No handler-level auth — same panelGateMiddleware operator gate as the
     // rest of /api/panel/* (not allowlisted), so both the read and the write are
     // operator-ws-token-only, whatever the caller's address, as on Next. The POST body carries only a boolean; no credential in the response. (#5243)
     route('/api/panel/connect/attach', 'GET POST', () => import('@/app/api/panel/connect/attach/route')),
+    // Pairing settings reuse the saved file and the WS-owned port resolver.
+    // The handler keeps its packaged, attested-loopback operator check.
+    route('/api/panel/mobile-network', 'GET POST', () => import('@/app/api/panel/mobile-network/route')),
     // Mobile pairing config (Settings > Paired devices QR). GET only. No handler-level auth beyond the
     // panelGateMiddleware operator gate PLUS a device-GET capability (DEVICE_CAPABILITIES), so over
     // native an operator OR an enrolled-device bearer passes; everything else 401. The handler is
@@ -414,12 +409,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/broadcast/post', 'POST', () => import('@/lib/broadcast/post-route')),
     route('/api/broadcast/tokens', 'POST', () => import('@/lib/broadcast/tokens-route')),
     route('/api/broadcast/say', 'POST', () => import('@/app/api/broadcast/say/route')),
-    // Symon watches (src-tauri symon_watch.rs). No device/worker/spectator grant in panelGateMiddleware, so only the
-    // operator bearer passes, and the handlers add no loopback or principal check of their own. Watches are rows
-    // in SQLite: the automation scheduler in the WS process fires them from the same rows, and a plan claim is decided by an
-    // UPDATE, so either process may register, claim, settle or cancel. (#5422)
-    route('/api/symon/watches', 'GET POST', () => import('@/app/api/symon/watches/route')),
-    route('/api/symon/watches/[id]', 'GET PATCH DELETE', () => import('@/app/api/symon/watches/[id]/route')),
     // o8 team presence, messages and tell for Symon: operator-only through the
     // middleware (none is on a device, worker or loopback list), principal from the
     // bearer. They read and append the files under each registered repo's
@@ -439,6 +428,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // (tests/o8d-backend-models-native-real-path.test.ts). The OpenRouter metadata cache is per process and
     // the probe cache is on disk, so neither needs a single owner. (#5243)
     route('/api/orchestrator/backend-models', 'GET', () => import('@/app/api/orchestrator/backend-models/route')),
+    route('/api/plugins/audit', 'GET', () => import('@/app/api/plugins/audit/route')),
+    route('/api/plugins/mcp', 'POST', () => import('@/app/api/plugins/mcp/route')),
     // Existing local operator review; account, epoch and single-attempt admission stay in the handlers.
     route('/api/plugins/task-drafts', 'GET', () => import('@/app/api/plugins/task-drafts/route')),
     route('/api/plugins/task-drafts/control', 'POST', () => import('@/app/api/plugins/task-drafts/control/route')),
@@ -487,8 +478,12 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/worktrees/retention-usage', 'GET', () => import('@/app/api/worktrees/retention-usage/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
     route('/api/cortex/sources', 'GET POST', () => import('@/lib/cortex/knowledge/sources-route')),
+    // Move the plan controls and inference together: OAuth attempts (including
+    // their loopback listeners) and in-flight cancellation share one WS service.
+    route('/api/panel/models/chatgpt', 'GET POST DELETE', () => import('@/app/api/panel/models/chatgpt/route')),
     route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/handler')),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('@/app/api/v2/keys/route')),
+    route('/api/v2/proxy/llm', 'POST', () => import('@/app/api/v2/proxy/llm/route')),
     route('/api/cortex/reingest', 'POST', () => import('@/app/api/cortex/reingest/route')),
   ],
   setup: [
@@ -510,6 +505,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/setup/detect', 'GET', () => import('@/app/api/setup/detect/route')),
   ],
   projects: [
+    // Reserve the remaining live literal route before [id]. Context and
+    // dismissed-suggestions imports are retired by #6402 and #6376.
+    route('/api/projects/locks', 'GET', () => import('@/app/api/projects/locks/route')),
+    // Original operator/worker principal guard, middleware and rooted image reader stay authoritative.
+    route('/api/panel/repo-icon', 'GET', () => import('@/app/api/panel/repo-icon/route')),
     // POST is the MCP server's project create (o8_create_project). No device or worker grant in
     // panelGateMiddleware, so over native only the operator bearer passes; the handler has no auth of its
     // own and never reads x-o8-client-addr or loopback. It writes the SQLite project and the projects ledger,
@@ -521,7 +521,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/repos/init', 'POST', () => import('@/app/api/panel/repos/init/route')),
     route('/api/panel/repos/scaffold', 'POST', () => import('@/app/api/panel/repos/scaffold/route')),
     route('/api/projects', 'GET POST', () => import('@/app/api/projects/route')),
-    route('/api/projects/[id]', 'PATCH DELETE', () => import('@/app/api/projects/[id]/route')),
+    // GET retains requirePanelAuth, with no device/worker grant added.
+    route('/api/projects/[id]', 'GET PATCH DELETE', () => import('@/app/api/projects/[id]/route')),
     route('/api/projects/[id]/repos', 'POST', () => import('@/app/api/projects/[id]/repos/route')),
     route('/api/projects/[id]/repos/[repoId]', 'PATCH DELETE', () => import('@/app/api/projects/[id]/repos/[repoId]/route')),
   ],
@@ -532,7 +533,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/panel/issues/[number]', 'GET', () => import('@/app/api/panel/issues/[number]/route')),
   ],
   inbox: [
-    route('/api/panel/supervisor-inbox', 'GET', () => import('@/app/api/panel/supervisor-inbox/route')),
+    route('/api/panel/supervisor-inbox', 'GET POST', () => import('@/app/api/panel/supervisor-inbox/route')),
     route('/api/panel/approvals', 'GET POST', () => import('@/lib/approvals/route')),
   ],
   diff: [
@@ -545,6 +546,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/lanes/discard-orphaned', 'POST', () => import('@/app/api/lanes/discard-orphaned/route')),
     route('/api/lanes/[id]/diff', 'GET', () => import('@/app/api/lanes/[id]/diff/route')),
     route('/api/worktrees/diff', 'GET', () => import('@/app/api/worktrees/diff/route')),
+    route('/api/worktrees/diff-summary', 'GET', () => import('@/app/api/worktrees/diff-summary/route')),
     route('/api/review/last-turn', 'GET', () => import('@/app/api/review/last-turn/route')),
     route('/api/review/push', 'POST', () => import('@/lib/review/push-route')),
     route('/api/review/commit', 'POST', () => import('@/app/api/review/commit/route')),
@@ -555,6 +557,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/cortex/directives', 'GET POST', () => import('@/app/api/cortex/directives/route')),
     route('/api/setup/mcp-servers', 'GET POST PATCH DELETE', () => import('@/lib/mcp/setup-mcp-servers-route')),
     route('/api/prompt-library', 'GET POST', () => import('@/app/api/prompt-library/route')),
+    route('/api/prompt-library/import', 'GET POST', () => import('@/app/api/prompt-library/import/route')),
+    route('/api/prompt-library/[id]/use', 'POST', () => import('@/app/api/prompt-library/[id]/use/route')),
     route('/api/prompt-library/[id]', 'GET PATCH DELETE', () => import('@/app/api/prompt-library/[id]/route')),
   ],
 };
@@ -570,10 +574,44 @@ const producers = [
   route('/api/devices/agent', 'POST', () => import('@/lib/devices/agent-route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
+  route('/api/setup/orchestrator-backends', 'GET', () => import('@/app/api/setup/orchestrator-backends/route')),
   // Worker-dispatch readiness: dispatch-readiness.ts probes it on the API base with the operator
   // ws-token before every worker launch, so with Next stopped every dispatch was held. No device,
   // worker or spectator grant; the handler reads nothing and answers a fixed body. (#5243)
   route('/api/setup/status', 'GET', () => import('@/app/api/setup/status/route')),
+  // Phone calls reuse the existing TypeScript handlers in the WS owner.
+  route('/api/mobile/action', 'POST', () => import('@/app/api/mobile/action/route')),
+  route('/api/mobile/activity', 'GET', () => import('@/app/api/mobile/activity/route')),
+  route('/api/mobile/automations', 'GET', () => import('@/app/api/mobile/automations/route')),
+  route('/api/mobile/automations/[id]/enabled', 'POST', () => import('@/app/api/mobile/automations/[id]/enabled/route')),
+  route('/api/mobile/automations/[id]/run', 'POST', () => import('@/app/api/mobile/automations/[id]/run/route')),
+  route('/api/mobile/diff-comment', 'POST', () => import('@/app/api/mobile/diff-comment/route')),
+  route('/api/mobile/diff-comments', 'GET', () => import('@/app/api/mobile/diff-comments/route')),
+  route('/api/mobile/enroll', 'POST', () => import('@/app/api/mobile/enroll/route')),
+  route('/api/mobile/files/content', 'GET', () => import('@/app/api/mobile/files/content/route')),
+  route('/api/mobile/files/list', 'GET', () => import('@/app/api/mobile/files/list/route')),
+  route('/api/mobile/genui/stream', 'GET POST', () => import('@/app/api/mobile/genui/stream/route')),
+  route('/api/mobile/live-activity/register', 'POST DELETE', () => import('@/app/api/mobile/live-activity/register/route')),
+  route('/api/mobile/live-activity/sync', 'POST', () => import('@/app/api/mobile/live-activity/sync/route')),
+  // Phone catalogues read current configuration without owning sessions or stores.
+  route('/api/mobile/orchestrator/models', 'GET', () => import('@/app/api/mobile/orchestrator/models/route')),
+  route('/api/mobile/orchestrator/openclaw-agents', 'GET', () => import('@/app/api/mobile/orchestrator/openclaw-agents/route')),
+  route('/api/mobile/orchestrator/openclaw-availability', 'GET', () => import('@/app/api/mobile/orchestrator/openclaw-availability/route')),
+  route('/api/mobile/orchestrator/packets', 'GET', () => import('@/app/api/mobile/orchestrator/packets/route')),
+  route('/api/mobile/pairing-discovery', 'GET', () => import('@/app/api/mobile/pairing-discovery/route')),
+  route('/api/mobile/pull-requests', 'GET', () => import('@/app/api/mobile/pull-requests/route')),
+  route('/api/mobile/ripple/resolve', 'POST', () => import('@/app/api/mobile/ripple/resolve/route')),
+  route('/api/mobile/search', 'GET', () => import('@/app/api/mobile/search/route')),
+  route('/api/mobile/terminal-input', 'POST', () => import('@/app/api/mobile/terminal-input/route')),
+  route('/api/mobile/usage', 'GET', () => import('@/app/api/mobile/usage/route')),
+  route('/api/mobile/usage/history', 'GET', () => import('@/app/api/mobile/usage/history/route')),
+  // Phone source-control actions share the same handlers and device gate on both listeners.
+  route('/api/mobile/source-control/status', 'GET', () => import('@/app/api/mobile/source-control/status/route')),
+  route('/api/mobile/source-control/stage', 'POST', () => import('@/app/api/mobile/source-control/stage/route')),
+  route('/api/mobile/source-control/unstage', 'POST', () => import('@/app/api/mobile/source-control/unstage/route')),
+  route('/api/mobile/source-control/commit', 'POST', () => import('@/app/api/mobile/source-control/commit/route')),
+  route('/api/mobile/source-control/pull', 'POST', () => import('@/app/api/mobile/source-control/pull/route')),
+  route('/api/mobile/source-control/push', 'POST', () => import('@/app/api/mobile/source-control/push/route')),
   route('/api/mobile/sync', 'POST', () => import('@/app/api/mobile/sync/route')),
   route('/api/mobile/inbox', 'GET', () => import('@/app/api/mobile/inbox/route')),
   route('/api/command-center/snapshot', 'GET', () => import('@/app/api/command-center/snapshot/route')),
@@ -586,6 +624,7 @@ const producers = [
   // against the fixed VERBS set and args are JSON-encoded into the webview eval,
   // so a scoped caller cannot inject JS. Same gate over native as on Next.
   route('/api/browser/agent', 'POST', () => import('@/app/api/browser/agent/route')),
+  route('/api/browser/engine/capture', 'POST', () => import('@/app/api/browser/engine/capture/route')),
   route('/api/runtime/transcript', 'GET', () => import('@/app/api/runtime/transcript/route')),
   route('/api/runtime/launch', 'POST', () => import('@/app/api/runtime/launch/route')),
   route('/api/orchestrator/headless-tick', 'POST', () => import('@/app/api/orchestrator/headless-tick/route')),

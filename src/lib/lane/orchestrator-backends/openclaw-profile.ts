@@ -8,7 +8,8 @@ import { sanitizeRuntimeConfigText, copyRuntimeConfigFile } from '@/lib/provider
 import { assertRuntimeProfilesAvailable } from '@/lib/providers/legacy-runtime-config';
 export const OPENCLAW_PROFILE = 'o8';
 const OPENCLAW_SOURCE_HOME = join(homedir(), '.openclaw');
-export const OPENCLAW_SOURCE_CONFIG = join(OPENCLAW_SOURCE_HOME, 'openclaw.json');
+import { OPENCLAW_SOURCE_CONFIG } from './openclaw-catalog';
+export { OPENCLAW_SOURCE_CONFIG } from './openclaw-catalog';
 const OPENCLAW_O8_HOME = join(homedir(), `.openclaw-${OPENCLAW_PROFILE}`);
 export const OPENCLAW_O8_CONFIG = join(OPENCLAW_O8_HOME, 'openclaw.json');
 

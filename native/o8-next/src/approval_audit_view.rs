@@ -1,9 +1,9 @@
 #[path = "approval_audit_row.rs"]
 mod row;
-use row::audit_row;
 use super::*;
 use crate::theme::current as palette;
 use gpui::{IntoElement, div, prelude::*, px};
+use row::audit_row;
 
 fn timestamp(ms: f64) -> String {
     // Gregorian civil date from Unix days, displayed explicitly in UTC.
@@ -43,7 +43,11 @@ impl Inbox {
             .text_size(px(11.))
             .max_w(px(180.))
             .truncate()
-            .text_color(if enabled { palette().text } else { palette().text_muted })
+            .text_color(if enabled {
+                palette().text
+            } else {
+                palette().text_muted
+            })
             .when(enabled, |v| {
                 v.track_focus(&self.audit.focus[control])
                     .tab_index(control as isize)
@@ -89,9 +93,14 @@ impl Inbox {
                             cx,
                         )
                     }))
-                    .when(self.audit.has_filters(), |v| v.child(
-                        self.audit_button("approval-audit-clear", "Clear filters".into(), 3, cx)
-                    ))
+                    .when(self.audit.has_filters(), |v| {
+                        v.child(self.audit_button(
+                            "approval-audit-clear",
+                            "Clear filters".into(),
+                            3,
+                            cx,
+                        ))
+                    })
                     .child(
                         self.audit_button(
                             "approval-audit-refresh",
@@ -199,14 +208,19 @@ impl Inbox {
                         .flex()
                         .items_center()
                         .gap(px(8.))
-                        .child(div().text_color(palette().warning)
-                            .child(format!("Unable to refresh the audit log. {error}")))
+                        .child(
+                            div()
+                                .text_color(palette().warning)
+                                .child(format!("Unable to refresh the audit log. {error}")),
+                        )
                         .child(self.audit_button("approval-audit-retry", "Retry".into(), 5, cx)),
                 )
             })
             .when(
-                self.audit.loaded && !self.audit.loading
-                    && self.audit.error.is_none() && rows.is_empty(),
+                self.audit.loaded
+                    && !self.audit.loading
+                    && self.audit.error.is_none()
+                    && rows.is_empty(),
                 |v| {
                     v.child(
                         div()
@@ -229,6 +243,8 @@ impl Inbox {
                     .enumerate()
                     .map(|(index, row)| audit_row(row, index)),
             )
-            .when(more, |view| view.child(self.audit_button("approval-audit-more", "Show 50 more".into(), 6, cx)))
+            .when(more, |view| {
+                view.child(self.audit_button("approval-audit-more", "Show 50 more".into(), 6, cx))
+            })
     }
 }

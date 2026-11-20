@@ -1,3 +1,4 @@
+import { apiFrontDoorEnabled } from '@/lib/ws-server/api-front-door-config';
 // API port resolver — picks free port from sidecar handshake.
 /**
  * Shared port resolver — answers "where is the o8 backend?"
@@ -88,6 +89,11 @@ function portFromDevFrontendUrl(): number | null {
 }
 
 export function resolvePortInfo(): PortInfo {
+  const info = resolveOriginalPortInfo();
+  return apiFrontDoorEnabled() ? { ...info, wsPort: info.apiPort } : info;
+}
+
+function resolveOriginalPortInfo(): PortInfo {
   // 1) Env var wins. `PORT` comes from the Next.js process itself (bundled
   // server.js sets it). `O8_API_PORT` is set explicitly by the Rust sidecar
   // for child processes.

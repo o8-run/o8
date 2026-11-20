@@ -280,80 +280,6 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
-  it('gates /api/voice/realtime/session (mints OpenAI realtime tokens on the operator key) against LAN', () => {
-    const res = panelGateMiddleware(
-      gatedRequest('http://192.168.1.50:3001/api/voice/realtime/session', {
-        method: 'POST',
-        headers: { host: '192.168.1.50:3001' },
-      }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it('gates the Codex app-server realtime lifecycle and event poll against LAN', () => {
-    for (const method of ['GET', 'POST']) {
-      const res = panelGateMiddleware(
-        gatedRequest('http://192.168.1.50:3001/api/voice/realtime/codex', {
-          method,
-          headers: { host: '192.168.1.50:3001' },
-        }),
-      );
-      expect(res.status).toBe(401);
-    }
-  });
-
-  it('gates /api/mobile/symon/session (Agent-mode ephemeral-token mint) against LAN without a token', () => {
-    // The phone reaches this with the paired Bearer ws-token; a bare LAN request
-    // is denied (mint runs on the operator's BYOK OpenAI key).
-    const res = panelGateMiddleware(
-      gatedRequest('http://192.168.1.50:3001/api/mobile/symon/session', {
-        method: 'POST',
-        headers: { host: '192.168.1.50:3001' },
-      }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it('passes /api/mobile/symon/session with the paired Bearer ws-token (the phone path)', () => {
-    const res = panelGateMiddleware(
-      gatedRequest('http://192.168.1.50:3001/api/mobile/symon/session', {
-        method: 'POST',
-        headers: { host: '192.168.1.50:3001', authorization: `Bearer ${TEST_TOKEN}` },
-      }),
-    );
-    expect(res.status).toBe(200);
-  });
-
-  it('passes the Symon text-session mint with the operator bearer', () => {
-    expect(panelGateMiddleware(
-      gatedRequest('http://192.168.1.50:3001/api/mobile/symon/text-session', {
-        method: 'POST',
-        headers: { host: '192.168.1.50:3001', authorization: `Bearer ${TEST_TOKEN}` },
-      }),
-    ).status).toBe(200);
-  });
-
-  it('gates /api/mobile/symon/tool (internal ws-server → Next tool relay) against LAN', () => {
-    // Not phone-facing; the ws-server reaches it over loopback with the ws-token.
-    const res = panelGateMiddleware(
-      gatedRequest('http://192.168.1.50:3001/api/mobile/symon/tool', {
-        method: 'POST',
-        headers: { host: '192.168.1.50:3001' },
-      }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it('requires the operator bearer for the loopback ws-server relay', () => {
-    const res = panelGateMiddleware(
-      gatedRequest('http://localhost:3001/api/mobile/symon/tool', {
-        method: 'POST',
-        headers: { host: 'localhost:3001', authorization: `Bearer ${TEST_TOKEN}` },
-      }),
-    );
-    expect(res.status).toBe(200);
-  });
-
   it('gates /api/telemetry/crash (renderer crash sink) against LAN', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/telemetry/crash', {
@@ -538,34 +464,10 @@ describe('panelGateMiddleware — per-device capability scope', () => {
 
   it('allows the mobile API family', () => {
     expect(deviceRequest('/api/mobile/inbox').status).toBe(200);
-    expect(deviceRequest('/api/mobile/symon/text-session', 'POST').status).toBe(200);
   });
 
   it('allows the explicit mobile approval capability', () => {
     expect(deviceRequest('/api/panel/approvals', 'POST').status).toBe(200);
-  });
-
-  it('allows a paired phone to read and cancel its Symon watches, and nothing else', () => {
-    // Read + cancel only. Registering a watch stays inside a voice turn, where
-    // it cards, so no method beyond these two reaches the phone's watch surface.
-    expect(deviceRequest('/api/mobile/symon/watches', 'GET').status).toBe(200);
-    expect(deviceRequest('/api/mobile/symon/watches/watch_abc123', 'DELETE').status).toBe(200);
-    expect(deviceRequest('/api/mobile/symon/watches', 'POST').status).toBe(403);
-    expect(deviceRequest('/api/mobile/symon/watches', 'DELETE').status).toBe(403);
-    expect(deviceRequest('/api/mobile/symon/watches/watch_abc123', 'POST').status).toBe(403);
-    expect(deviceRequest('/api/mobile/symon/watches/watch_abc123', 'GET').status).toBe(403);
-  });
-
-  it('refuses an unauthenticated caller on both Symon watch paths', () => {
-    for (const [pathname, method] of [
-      ['/api/mobile/symon/watches', 'GET'],
-      ['/api/mobile/symon/watches/watch_abc123', 'DELETE'],
-    ] as const) {
-      expect(panelGateMiddleware(gatedRequest(`http://192.168.1.50:3001${pathname}`, {
-        method,
-        headers: { host: '192.168.1.50:3001' },
-      })).status).toBe(401);
-    }
   });
 
   it.each([
@@ -576,13 +478,6 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     // Managed remote access: the phone lists/types into live PTYs and steers a
     // packet over the encrypted relay, which forwards the per-device bearer.
     expect(deviceRequest(pathname, method).status).toBe(200);
-  });
-
-  it.each([
-    ['/api/symon/mcp/tools', 'GET'],
-    ['/api/symon/mcp/call', 'POST'],
-  ])('refuses paired devices direct access to Symon MCP tools: %s', (pathname, method) => {
-    expect(deviceRequest(pathname, method).status).toBe(403);
   });
 
   it('allows the Ask generative-surface stream to enrolled devices', () => {
@@ -599,14 +494,12 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     ['/api/runtime/inventory', 'GET'],
     ['/api/worktrees/diff', 'GET'],
     ['/api/worktrees/diff-summary', 'GET'],
-    ['/api/dictation/transcribe', 'POST'],
-    ['/api/tts', 'POST'],
     ['/api/panel/projects', 'GET'],
     ['/api/panel/search', 'GET'],
   ])(
     'allows the phone-facing surfaces reached outside /api/mobile/*: %s %s',
     (pathname, method) => {
-      // Repo o8.md notes, fleet inventory, review diffs, dictation/TTS, projects
+      // Repo o8.md notes, fleet inventory, review diffs, projects
       // + search — each previously 403'd the phone at the middleware.
       expect(deviceRequest(pathname, method).status).toBe(200);
     },
@@ -628,8 +521,6 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     ['/api/mobile/devices', 'GET'],
     ['/api/mobile/devices/revoke', 'POST'],
     ['/api/mobile/push-url', 'POST'],
-    ['/api/mobile/symon/tool', 'POST'],
-    ['/api/mobile/symon/text-turn', 'POST'],
     ['/api/mobile/ws-token', 'GET'],
     ['/api/mobile/some-future-route', 'POST'],
   ])('denies operator/internal mobile routes to a paired device: %s', (pathname, method) => {
@@ -685,15 +576,6 @@ describe('panelGateMiddleware — allowlists and bypasses', () => {
       }),
     );
     expect(res.status).toBe(401);
-  });
-
-  it('allows the mobile push public key (needed before any pairing)', () => {
-    const res = panelGateMiddleware(
-      gatedRequest('http://192.168.1.50:3001/api/mobile/push/public-key', {
-        headers: { host: '192.168.1.50:3001' },
-      }),
-    );
-    expect(res.status).toBe(200);
   });
 
   it('allows the nonce-signed mobile pairing discovery probe without a bearer', () => {

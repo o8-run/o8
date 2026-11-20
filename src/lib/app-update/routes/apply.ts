@@ -1,3 +1,4 @@
+import { launcherOwnsUpdates, launcherSnapshot, launcherUnavailable, launcherApply } from '../launcher';
 import { recordForcedRestart } from '@/lib/app-update/forced-restart-receipt';
 import { checkFreshness, ensureFreshUpdateCheck, UPDATE_RETRY } from '@/lib/app-update/fresh-check';
 import { getNativeApplyRequestTime, requestNativeApply } from '@/lib/app-update/auto-apply';
@@ -40,6 +41,10 @@ async function readIdleWindow(): Promise<UpdateIdleWindow> {
 }
 
 export async function GET() {
+  if (launcherOwnsUpdates()) {
+    try { return NextResponse.json(await launcherSnapshot(), { headers: NO_STORE_HEADERS }); }
+    catch { return launcherUnavailable(); }
+  }
   const idle = await readIdleWindow();
   // The state carries the last install attempt, so a caller can read a failed apply back (#3588).
   // currentVersion names the running server, so the o8 next Update pill can show it (#5069).
@@ -68,6 +73,8 @@ export async function POST(request: Request) {
       error: { code: 'invalid_force', message: 'force must be boolean.' },
     }, 400);
   }
+
+  if (launcherOwnsUpdates()) return launcherApply(body);
 
   const force = body.force === true;
   if (!await ensureFreshUpdateCheck(body.checkNow === true || body.checkOnly === true)) return response({ ok: false, requested: false,

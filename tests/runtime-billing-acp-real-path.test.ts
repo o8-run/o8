@@ -6,7 +6,7 @@ vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(asyn
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => { throw new Error('No attached MCP fixture'); } }));
 const { makeAcpBackend } = await import('@/lib/lane/orchestrator-backends/acp');
 const keys = await import('@/app/api/v2/keys/route');
-const billing = await import('@/app/api/runtime/billing/route');
+const billing = await import('@/lib/providers/runtime-billing');
 const request = (path: string, body: unknown, method = 'POST') => new NextRequest(`http://localhost/api/${path}`, { method, headers: { host: 'localhost' }, body: JSON.stringify(body) });
 const peer = `let buffer='';const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');process.stdin.on('end',()=>process.exit(0));process.stdin.on('data',chunk=>{buffer+=chunk;let index;while((index=buffer.indexOf('\\n'))>=0){const m=JSON.parse(buffer.slice(0,index));buffer=buffer.slice(index+1);if(m.method==='initialize')send({jsonrpc:'2.0',id:m.id,result:{protocolVersion:1}});else if(m.method==='session/new')send({jsonrpc:'2.0',id:m.id,result:{sessionId:'fixture-session'}});else if(m.method==='session/prompt'){send({jsonrpc:'2.0',method:'session/update',params:{sessionId:'fixture-session',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:JSON.stringify({pid:process.pid,key:process.env.OPENAI_API_KEY||null,keyDigest:process.env.OPENAI_API_KEY?require('node:crypto').createHash('sha256').update(process.env.OPENAI_API_KEY).digest('hex'):null,alias:process.env.CODEX_API_KEY||null})}}}});send({jsonrpc:'2.0',id:m.id,result:{stopReason:'end_turn'}});}else if(m.id)send({jsonrpc:'2.0',id:m.id,result:{}});}});`;
 vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 72).toString('base64url'));
@@ -15,7 +15,7 @@ const children = new Set<number>();
 afterAll(() => { for (const pid of children) try { process.kill(pid, 'SIGTERM'); } catch { /* Already retired. */ } vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 it.each(['muse', 'opencode'] as const)('%s established processes recycle after saved billing changes and real API revocation', async (runtimeId) => {
   const backend = makeAcpBackend({ id: runtimeId, label: 'Billing fixture', resolveLaunch: () => ({ command: process.execPath, args: ['-e', peer] }) });
-  const mode = async (mode: string) => expect((await billing.POST(request('runtime/billing', { runtimeId, mode }))).status).toBe(200);
+  const mode = async (mode: 'subscription' | 'api') => billing.saveRuntimeBillingMode(runtimeId, mode);
   const save = async () => expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-acp-key' }))).status).toBe(200);
   const turn = async () => {
     const events: OrchestratorEvent[] = [];

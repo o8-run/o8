@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { refuseNodePromptWrite } from '@/lib/prompt-library/write-owner';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import {
   PromptLibraryDuplicateError,
@@ -59,6 +60,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+  const ownerRefusal = refuseNodePromptWrite();
+  if (ownerRefusal) return ownerRefusal;
 
   const payload: unknown = await request.json().catch(() => null);
   if (!isRecord(payload)) {
@@ -107,6 +110,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+  const ownerRefusal = refuseNodePromptWrite();
+  if (ownerRefusal) return ownerRefusal;
 
   const { id } = await context.params;
   const revision = request.nextUrl.searchParams.get('expectedUpdatedAt');

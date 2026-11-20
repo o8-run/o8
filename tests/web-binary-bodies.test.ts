@@ -1,34 +1,20 @@
-import { NextRequest } from 'next/server';
 import { afterEach, expect, it, vi } from 'vitest';
 
 const binary = vi.hoisted(() => ({
   // A view with surrounding bytes catches accidental use of the backing pool.
   bytes: Buffer.from([99, 0, 255, 128, 13, 10, 42]).subarray(1, 6),
 }));
-vi.mock('@/lib/tts/edge-neural', () => ({ synthesizeEdgeNeural: async () => binary.bytes }));
-vi.mock('@/lib/tts/ensure-edge-tts', () => ({ ensureEdgeTtsInstalled: async () => {} }));
 vi.mock('@/lib/push/encrypt', () => ({ encryptPayload: () => binary.bytes }));
 vi.mock('@/lib/push/vapid', () => ({
   buildVapidJwt: () => 'fixture', getVapidKeys: () => ({ publicKeyBase64Url: 'fixture' }),
 }));
 vi.mock('@/lib/push/store', () => ({ recordDeliverySuccess: vi.fn(), recordDeliveryFailure: vi.fn() }));
 
-import { POST as tts } from '@/app/api/tts/route';
 import { replayRelayHttpRequest } from '@/lib/mobile/relay-http-replay';
 import { RelayHttpRequestRegistry } from '@/lib/mobile/relay-connector-protocol';
 import { sendPushToSubscription } from '@/lib/push/send';
 
 afterEach(() => vi.unstubAllGlobals());
-
-it('returns exact MP3 bytes through the TTS route', async () => {
-  const response = await tts(new NextRequest('http://localhost/api/tts', {
-    method: 'POST', body: JSON.stringify({ text: 'Fixture' }),
-  }));
-  expect(response.status).toBe(200);
-  expect(response.headers.get('Content-Type')).toBe('audio/mpeg');
-  expect(response.headers.get('Content-Length')).toBe('5');
-  expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(binary.bytes));
-});
 
 it('passes a bounded ArrayBuffer-backed encrypted payload to the push transport', async () => {
   const transport = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

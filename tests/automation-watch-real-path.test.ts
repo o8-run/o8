@@ -91,6 +91,24 @@ afterAll(() => {
 });
 
 describe('event-driven automation watches through durable production seams', () => {
+  it.each(['symon_report', 'symon_plan'])('refuses a retained %s watch without dispatching or asking for approval', async action => {
+    const watch = await createWatch({ name: 'retired voice watch', sourceKind: 'repository' });
+    const sqlite = getSqlite();
+    sqlite.prepare('UPDATE automations SET watch_action_kind = ? WHERE id = ?').run(action, watch.id);
+    const approvalsBefore = sqlite.prepare('SELECT count(*) AS count FROM approvals').get();
+    recordAutomationSourceEvent({
+      sourceKind: 'repository', sourceId: 'owner/repo', repoPath,
+      eventType: 'check_completed', fingerprint: `retired-watch:${action}`,
+      occurredAt: 10_000, persistedAt: 10_000,
+    });
+    const tick = await runAutomationSchedulerTick({ nowMs: 11_000, workerId: 'retired-watch-test' });
+    expect(tick.completed).toEqual([expect.objectContaining({
+      automationId: watch.id, status: 'retrying', resultNote: 'Voice watch actions are no longer supported.',
+    })]);
+    expect(runAutomation).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT count(*) AS count FROM approvals').get()).toEqual(approvalsBefore);
+  });
+
   it('dedupes a repeated event, dispatches once, and resumes from its checkpoint after restart', async () => {
     const managedRunId = 'watchroute1';
     recordAutomationSourceEvent({

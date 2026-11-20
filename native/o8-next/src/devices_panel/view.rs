@@ -22,8 +22,16 @@ fn button(
     let id = id.into();
     let action = std::rc::Rc::new(action);
     let key_action = action.clone();
-    let background = if primary { theme().accent } else { theme().hover };
-    let feedback = if primary { theme().accent } else { theme().selection };
+    let background = if primary {
+        theme().accent
+    } else {
+        theme().hover
+    };
+    let feedback = if primary {
+        theme().accent
+    } else {
+        theme().selection
+    };
     div()
         .id(id.clone())
         .debug_selector(move || id.to_string())
@@ -519,19 +527,26 @@ impl Render for DevicesPanel {
                             .items_start()
                             .gap(px(10.))
                             .child(
-                                button("devices-open", label, busy, true, cx, move |this, window, cx| {
-                                    if installed {
-                                        this.focus.focus(window);
-                                    }
-                                    this.read(
-                                        Some(if installed {
-                                            json!({"action":"start"})
-                                        } else {
-                                            json!({"action":"install","tool":"hub"})
-                                        }),
-                                        cx,
-                                    )
-                                })
+                                button(
+                                    "devices-open",
+                                    label,
+                                    busy,
+                                    true,
+                                    cx,
+                                    move |this, window, cx| {
+                                        if installed {
+                                            this.focus.focus(window);
+                                        }
+                                        this.read(
+                                            Some(if installed {
+                                                json!({"action":"start"})
+                                            } else {
+                                                json!({"action":"install","tool":"hub"})
+                                            }),
+                                            cx,
+                                        )
+                                    },
+                                )
                                 .text_color(theme().background),
                             )
                             .child(

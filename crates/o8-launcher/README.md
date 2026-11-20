@@ -25,6 +25,13 @@ authenticated server-owned GPUI request. Node continues to create its credential
 files and owns the window arguments and optional o8d bridge. Server logs rotate
 once per boot at `logs/next-server.log` and `logs/ws-server.log`.
 
+With Next off (`next_off` behind the front door), the launcher starts the window
+itself and holds its stdin lifeline, so a WS restart never closes it; the window
+reconnects through o8d (#6529). WS attaches to the window's browser control over
+the private `window-control.sock` (owner-only, same user, launcher key), and each
+WS generation attaches again. Show focuses the window as the launcher's child and
+starts it again if it was closed. Quit drops the lifeline before stopping servers.
+
 A private instance lock and Unix socket serialize launches. Reopen requests are
 coalesced even while preflight is pending. AppKit supplies Dock reopen and quit
 events without a web view. The launcher finishes launching right after the

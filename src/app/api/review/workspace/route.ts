@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import { WorkspaceReviewError } from '@/lib/review/workspace-status';
+import { isReviewWorkspaceUnselected } from '@/lib/review/workspace-selection';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     // process.cwd(). The client is expected to pass an absolute workspace
     // path; when the user has no repo selected the panel should render an
     // empty state, not whichever repo the Node server is sitting in.
-    if (!workspacePath && !process.env.CORTEX_IDE_REVIEW_REPO_ROOT) {
+    if (isReviewWorkspaceUnselected(workspacePath)) {
       return NextResponse.json(
         { ...EMPTY_SNAPSHOT, generatedAt: new Date().toISOString() },
         { headers: { 'Cache-Control': 'no-store, max-age=0' } },

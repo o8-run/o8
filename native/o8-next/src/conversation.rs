@@ -29,19 +29,19 @@ mod shell_run;
 #[cfg(test)]
 #[path = "composer/card_tests.rs"]
 mod card_tests;
+#[path = "composer/changes_pill.rs"]
+mod changes_pill;
 #[cfg(test)]
 #[path = "composer/network_tests.rs"]
 mod network_tests;
-#[path = "composer/changes_pill.rs"]
-mod changes_pill;
-pub(crate) use changes_pill::PILL_INSET;
 pub(crate) use changes_pill::ChangesPill;
-#[path = "composer/working_strip.rs"]
-mod working_strip;
-#[path = "composer/project_bar.rs"]
-mod project_bar;
+pub(crate) use changes_pill::PILL_INSET;
 #[path = "composer/empty_overview.rs"]
 pub(crate) mod empty_overview;
+#[path = "composer/project_bar.rs"]
+mod project_bar;
+#[path = "composer/working_strip.rs"]
+mod working_strip;
 pub(crate) use project_bar::ProjectBar;
 #[path = "composer/queue_tail.rs"]
 mod queue_rows;
@@ -878,3 +878,7 @@ mod receipt_tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "composer/session_rule_product_tests.rs"]
+mod session_rule_product_tests;

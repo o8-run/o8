@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 mod control;
 mod documents;
 mod native;
+mod owner;
 mod prepare;
 mod shutdown;
+mod window;
 use control::{Instance, Request};
 use prepare::{kill_group, prepare};
 use shutdown::{Shutdown, SHUTDOWN_BOUND};
@@ -44,6 +46,40 @@ struct Config {
     native_lifecycle: bool,
     /// Updater settings; see `UPDATER.md`.
     update: Option<update::UpdateConfig>,
+    /// The API front door (`docs/internals/api-front-door.md`): WS owns the
+    /// public API port and Next binds a private loopback port. Off by default.
+    #[serde(default)]
+    api_front_door: bool,
+    /// With the front door, Next is not started; requests no WS handler
+    /// serves answer 502 from the front door.
+    #[serde(default)]
+    next_off: bool,
+    /// Next's private port in front-door mode, chosen at startup.
+    #[serde(skip)]
+    next_port: u16,
+    #[serde(skip)]
+    producer_key: String,
+    #[serde(skip)]
+    producer_socket: PathBuf,
+    #[serde(skip)]
+    window_socket: PathBuf,
+    #[serde(skip)]
+    window_key: String,
+}
+impl Config {
+    /// The server that answers the public API port.
+    fn public_script(&self) -> &'static str {
+        if self.api_front_door {
+            "ws-server.mjs"
+        } else {
+            "server.js"
+        }
+    }
+    /// With Next off, the launcher holds the window's lifeline (#6529), so a
+    /// WS restart never closes it. Otherwise the public server owns it.
+    fn owns_window(&self) -> bool {
+        self.api_front_door && self.next_off
+    }
 }
 struct Server {
     child: Child,
@@ -88,15 +124,23 @@ impl Drop for Server {
     }
 }
 struct Servers {
+    o8d: Option<Server>,
     api: Option<Server>,
     ws: Option<Server>,
+    window: Option<window::Window>,
 }
 impl Servers {
-    /// API before WS, both within one shared deadline.
+    /// Drain the public owner before API and WS, within one shared deadline.
     fn stop(&mut self, deadline: Instant) -> Result<(), String> {
+        // The window exits first, as it did when its owning server drained.
+        let window = self
+            .window
+            .as_mut()
+            .map_or(Ok(()), |window| window.stop(deadline));
+        let o8d = self.o8d.as_mut().map_or(Ok(()), |o8d| o8d.stop(deadline));
         let api = self.api.as_mut().map_or(Ok(()), |api| api.stop(deadline));
         let ws = self.ws.as_mut().map_or(Ok(()), |ws| ws.stop(deadline));
-        api.and(ws)
+        window.and(o8d).and(api).and(ws)
     }
 }
 impl Drop for Servers {
@@ -122,16 +166,27 @@ fn spawn(
         .append(true)
         .open(config.data_dir.join("logs").join(if script == "server.js" {
             "next-server.log"
+        } else if script == "o8d" {
+            "o8d.log"
         } else {
             "ws-server.log"
         }))
         .map_err(|_| "Server log unavailable")?;
-    let mut command = Command::new(&config.node);
+    let mut command = if script == "o8d" {
+        owner::command(config, boot, instance)?
+    } else {
+        let mut command = Command::new(&config.node);
+        command.arg(config.server_dir.join(script));
+        command
+    };
     command
-        .arg(config.server_dir.join(script))
         .current_dir(&config.server_dir)
         .process_group(0)
-        .stdin(Stdio::null())
+        .stdin(if script == "o8d" {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(log.try_clone().map_err(|_| "Server log unavailable")?)
         .stderr(log);
     let executable = std::env::current_exe().map_err(|_| "Install unavailable")?;
@@ -152,7 +207,8 @@ fn spawn(
             .into_owned(),
         pi_write: pi_write.is_file().then_some(pi_write),
         mcp: mcp.is_file().then_some(mcp),
-        window: Some(config.window.clone()),
+        // A launcher-owned window is never given to a server to start.
+        window: (!config.owns_window()).then(|| config.window.clone()),
         codebase_memory: std::env::var("O8_CODEBASE_MEMORY_BIN")
             .ok()
             .filter(|value| !value.is_empty()),
@@ -161,18 +217,47 @@ fn spawn(
             std::env::var("O8_VOICE_ONLY").ok().as_deref(),
         ),
         version: config.version.clone(),
-        next_origin: format!("http://127.0.0.1:{}", config.api_port),
+        private_next_port: config.api_front_door.then_some(config.next_port),
+        next_off: config.api_front_door && config.next_off,
+        next_origin: format!(
+            "http://127.0.0.1:{}",
+            if config.api_front_door {
+                config.next_port
+            } else {
+                config.api_port
+            }
+        ),
         ..Default::default()
     };
-    if script == "server.js" {
+    command.env("O8_LAUNCHER_SOCKET", config.data_dir.join("launcher.sock"));
+    if script == "o8d" {
+        // The owner uses the explicit credential-free environment in owner.rs.
+    } else if script == "server.js" {
         environment.api(&mut command);
     } else {
         environment.ws(&mut command);
+        if config.api_front_door {
+            command
+                .env("O8D_PRODUCER_SOCKET", &config.producer_socket)
+                .env("O8D_BRIDGE_KEY", &config.producer_key)
+                .env("O8D_PRODUCER_UPSTREAM_PORT", config.ws_port.to_string())
+                .env("O8_WS_O8D", "1");
+        }
+        if config.owns_window() {
+            command
+                .env("O8_NEXT_WINDOW_CONTROL", &config.window_socket)
+                .env("O8_NEXT_WINDOW_CONTROL_KEY", &config.window_key);
+        }
     }
-    let port = if script == "server.js" {
+    let port = if script == "o8d" {
         config.api_port
     } else {
-        config.ws_port
+        match (script == "server.js", config.api_front_door) {
+            (true, false) => config.api_port,
+            (true, true) => config.next_port,
+            (false, false) => config.ws_port,
+            (false, true) => config.ws_port,
+        }
     };
     let receipt_path = config.data_dir.join(receipt_name);
     let pending_path = ownership::pending_path(&receipt_path);
@@ -183,7 +268,8 @@ fn spawn(
     let token = uuid::Uuid::new_v4().simple().to_string();
     let (hold_file, hold) =
         ownership::create_hold(&hold_path, &token).map_err(|_| "Ownership unavailable")?;
-    let runtime = ownership::file_id(&config.node).ok_or("Server runtime unavailable")?;
+    let runtime = ownership::file_id(std::path::Path::new(command.get_program()))
+        .ok_or("Server runtime unavailable")?;
     // The record's spawn time opens a two-second proof window, so it must be
     // read after the hold file and the record itself are flushed, right before
     // the fork. A reading is written, then confirmed against a fresh one; a
@@ -288,11 +374,21 @@ fn spawn(
 /// Records a failure against the restart budget and sets the next attempt time.
 fn schedule_restart(config: &Config, server: &mut Server) -> Result<(), String> {
     let (attempt, delay) = match server.tracker.record_failure(Instant::now()) {
+        RestartDecision::Exhausted { .. }
+            if config.api_front_door && server.script == "ws-server.mjs" =>
+        {
+            server.retry_at = None;
+            o8_launcher::note!("Producer restart budget exhausted; native owner remains available");
+            present_async(config, "The app server could not restart. Native features remain available; chat and other server features are unavailable until you restart o8.");
+            return Ok(());
+        }
         RestartDecision::Exhausted { .. } => return Err("Server restart budget exhausted".into()),
         RestartDecision::Restart { attempt, delay } => (attempt, delay),
     };
     let log_name = if server.script == "server.js" {
         "next-server.log"
+    } else if server.script == "o8d" {
+        "o8d.log"
     } else {
         "ws-server.log"
     };
@@ -304,6 +400,17 @@ fn schedule_restart(config: &Config, server: &mut Server) -> Result<(), String> 
     }
     server.retry_at = Some(Instant::now() + delay);
     Ok(())
+}
+/// How often a start that passed its health window is probed again.
+const LATE_PROBE_INTERVAL: Duration = Duration::from_secs(1);
+/// How long a start may take before the launcher reports it. Debug builds let
+/// the late-readiness test shorten it.
+fn health_window() -> Duration {
+    let fixture = cfg!(debug_assertions)
+        .then(|| std::env::var("O8_LAUNCHER_HEALTH_WINDOW_MS").ok())
+        .flatten()
+        .and_then(|ms| ms.parse().ok());
+    Duration::from_millis(fixture.unwrap_or(90_000))
 }
 /// Debug-build crash injection for the real-entry recovery tests.
 fn fault(point: &str, script: &str) {
@@ -511,8 +618,10 @@ fn run(config: &mut Config, relaunch: &update::Relaunch) -> Result<(), Option<St
     )
     .map_err(Some)?;
     let servers = Arc::new(Mutex::new(Some(Servers {
+        o8d: None,
         api: None,
         ws: None,
+        window: None,
     })));
     let preparing: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let control = Arc::new(Mutex::new(Some(instance_lock)));
@@ -615,9 +724,19 @@ fn serve(
     if config.ws_port == 0 {
         config.ws_port = ports::bind_ephemeral_port(Some(config.api_port));
     }
+    if config.api_front_door {
+        config.next_port = ports::bind_ephemeral_port(Some(config.api_port));
+        if config.next_port == config.ws_port {
+            config.next_port = ports::bind_ephemeral_port(Some(config.ws_port));
+        }
+    }
     if config.api_port == 0
         || config.ws_port == 0
         || config.api_port == config.ws_port
+        || (config.api_front_door
+            && (config.next_port == 0
+                || config.next_port == config.api_port
+                || config.next_port == config.ws_port))
         || !ports::bundled_sidecar_port_available(config.api_port)
         || !ports::bundled_sidecar_port_available(config.ws_port)
     {
@@ -647,11 +766,33 @@ fn serve(
     {
         return Err("Boot identity could not be published".into());
     }
-    for (name, port) in [("api-port", config.api_port), ("ws-port", config.ws_port)] {
+    if config.api_front_door {
+        std::env::set_var("O8_API_FRONT_DOOR", "1");
+        config.producer_key = uuid::Uuid::new_v4().to_string();
+        config.producer_socket = owner::producer_socket(&config.data_dir)?;
+    }
+    if config.owns_window() {
+        // Bound before WS starts, so its first generation can attach.
+        let window = window::Window::bind(config)?;
+        config.window_socket = window.socket().to_path_buf();
+        config.window_key = window.key().to_owned();
+        match lock(servers).as_mut() {
+            Some(servers) => servers.window = Some(window),
+            None => return Ok(()),
+        }
+    }
+    // With the front door, WS listens on the public API port, so clients that
+    // read the WS port file connect there.
+    let ws_published = if config.api_front_door {
+        config.api_port
+    } else {
+        config.ws_port
+    };
+    for (name, port) in [("api-port", config.api_port), ("ws-port", ws_published)] {
         o8_launch_core::identity::write_port_file(&data_dir, name, port)
             .map_err(|_| "Port publication failed")?;
     }
-    for name in ["next-server.log", "ws-server.log"] {
+    for name in ["next-server.log", "ws-server.log", "o8d.log"] {
         let path = config.data_dir.join("logs").join(name);
         let _ = fs::rename(&path, path.with_file_name(format!("{name}.prev")));
     }
@@ -661,39 +802,43 @@ fn serve(
     if stop_requested(native, stopped) {
         return Ok(());
     }
-    let api = spawn(config, "server.js", &boot, &instance, "launcher-api.json")?;
-    // The shutdown already took the slot: stop the server here, unlocked.
-    let unrecorded = match lock(servers).as_mut() {
-        Some(servers) => {
-            servers.api = Some(api);
-            None
+    // The front door starts WS before Next (api-front-door.md).
+    let mut order = vec![
+        ("server.js", "launcher-api.json"),
+        ("ws-server.mjs", "launcher-ws.json"),
+    ];
+    if config.api_front_door {
+        order.reverse();
+        if config.next_off {
+            order.retain(|(script, _)| *script != "server.js");
         }
-        None => Some(api),
-    };
-    if let Some(mut api) = unrecorded {
-        api.stop(Instant::now() + SHUTDOWN_BOUND)?;
-        return Ok(());
     }
-    if stop_requested(native, stopped) {
-        return Ok(());
+    if config.api_front_door {
+        order.insert(0, ("o8d", "launcher-o8d.json"));
     }
-    let ws = spawn(
-        config,
-        "ws-server.mjs",
-        &boot,
-        &instance,
-        "launcher-ws.json",
-    )?;
-    let unrecorded = match lock(servers).as_mut() {
-        Some(servers) => {
-            servers.ws = Some(ws);
-            None
+    for (index, (script, receipt)) in order.into_iter().enumerate() {
+        if index > 0 && stop_requested(native, stopped) {
+            return Ok(());
         }
-        None => Some(ws),
-    };
-    if let Some(mut ws) = unrecorded {
-        ws.stop(Instant::now() + SHUTDOWN_BOUND)?;
-        return Ok(());
+        let server = spawn(config, script, &boot, &instance, receipt)?;
+        // The shutdown already took the slot: stop the server here, unlocked.
+        let unrecorded = match lock(servers).as_mut() {
+            Some(servers) => {
+                if script == "o8d" {
+                    servers.o8d = Some(server);
+                } else if script == "server.js" {
+                    servers.api = Some(server);
+                } else {
+                    servers.ws = Some(server);
+                }
+                None
+            }
+            None => Some(server),
+        };
+        if let Some(mut server) = unrecorded {
+            server.stop(Instant::now() + SHUTDOWN_BOUND)?;
+            return Ok(());
+        }
     }
     let restart_stop = stopped.clone();
     let restart = o8_launch_core::restart_job_drain::guard(
@@ -708,12 +853,14 @@ fn serve(
         .timeout(Duration::from_millis(500))
         .build()
         .map_err(|_| "Health client unavailable")?;
-    let mut deadline = Instant::now() + Duration::from_secs(90);
+    let mut deadline = Instant::now() + health_window();
     let mut voice_only =
         o8_launch_core::server_env::voice_only(std::env::var("O8_VOICE_ONLY").ok().as_deref());
     let mut opened = false;
     let mut pending_show = false;
     let mut window_failed = false;
+    let mut late = false;
+    let mut next_probe: Option<Instant> = None;
     let mut credential_deadline: Option<Instant> = None;
     let mut launch: Option<std::sync::mpsc::Receiver<Result<(), String>>> = None;
     let outcome = (|| -> Result<(), String> {
@@ -789,16 +936,44 @@ fn serve(
             }
             let mut guard = lock(servers);
             let Some(Servers {
-                api: Some(api),
-                ws: Some(ws),
+                api,
+                ws,
+                o8d,
+                window,
             }) = guard.as_mut()
             else {
                 break;
             };
-            for (server, receipt) in [
-                (&mut *api, "launcher-api.json"),
-                (&mut *ws, "launcher-ws.json"),
-            ] {
+            // Reap a launcher-owned window that exited, as Node's exit handler did.
+            if let Some(window) = window.as_mut() {
+                window.running();
+                // ⌘Q in the window quits o8 (#6532): the same stop as a signal,
+                // through the same bounded shutdown that follows this loop.
+                if window.quit_requested() {
+                    stopped.store(true, Ordering::SeqCst);
+                    break;
+                }
+            }
+            #[cfg(debug_assertions)]
+            if let Some(owner) = o8d.as_mut() { owner::fixture_commit(config, &mut owner.child); }
+            // Next is expected unless the front door runs without it.
+            if ws.is_none() || (api.is_none() && !(config.api_front_door && config.next_off)) {
+                break;
+            }
+            let mut running: Vec<(&mut Server, &str)> = Vec::new();
+            if let Some(o8d) = o8d.as_mut() {
+                running.push((o8d, "launcher-o8d.json"));
+            }
+            if let Some(api) = api.as_mut() {
+                running.push((api, "launcher-api.json"));
+            }
+            if let Some(ws) = ws.as_mut() {
+                running.push((ws, "launcher-ws.json"));
+            }
+            for (server, receipt) in running {
+                if server.stopped && server.retry_at.is_none() {
+                    continue;
+                }
                 if let Some(at) = server.retry_at {
                     if Instant::now() < at || stopped.load(Ordering::SeqCst) {
                         continue;
@@ -811,11 +986,14 @@ fn serve(
                             );
                             *server = next;
                             server.tracker = tracker;
-                            if server.script == "server.js" {
+                            // A launcher-owned window stays open and reconnects.
+                            if server.script == config.public_script() && !config.owns_window() {
                                 opened = false;
                                 window_failed = false;
                                 launch = None;
-                                deadline = Instant::now() + Duration::from_secs(90);
+                                deadline = Instant::now() + health_window();
+                                late = false;
+                                next_probe = None;
                             }
                         }
                         Err(_) => schedule_restart(config, server)?,
@@ -858,22 +1036,32 @@ fn serve(
             }
             if pending_show && window_failed {
                 window_failed = false;
-                deadline = Instant::now() + Duration::from_secs(90);
+                deadline = Instant::now() + health_window();
+                late = false;
+                next_probe = None;
             }
             if voice_only {
                 pending_show = false;
             }
             if !voice_only && launch.is_none() && !window_failed {
                 if !opened {
-                    let healthy = client
-                        .get(format!(
-                            "http://127.0.0.1:{}/api/setup/identity",
-                            config.api_port
-                        ))
-                        .send()
-                        .ok()
-                        .and_then(|r| r.json::<serde_json::Value>().ok())
-                        .is_some_and(|v| v["bootId"].as_str() == Some(&boot));
+                    // After a reported slow start, probe once a second so a fast
+                    // foreign-boot or error reply does not loop at the 25 ms tick.
+                    let now = Instant::now();
+                    let probe = !late || next_probe.is_none_or(|at| now >= at);
+                    if late && probe {
+                        next_probe = Some(now + LATE_PROBE_INTERVAL);
+                    }
+                    let healthy = probe
+                        && client
+                            .get(format!(
+                                "http://127.0.0.1:{}/api/setup/identity",
+                                config.api_port
+                            ))
+                            .send()
+                            .ok()
+                            .and_then(|r| r.json::<serde_json::Value>().ok())
+                            .is_some_and(|v| v["bootId"].as_str() == Some(&boot));
                     // On a first start the API answers before the WS server has
                     // written the window credential. Give it a few seconds, then
                     // fail the start as before.
@@ -888,7 +1076,11 @@ fn serve(
                             return Err("Window credential unavailable".into());
                         }
                     }
-                    if let Some(token) = token {
+                    if let (Some(token), Some(window)) = (&token, window.as_mut()) {
+                        credential_deadline = None;
+                        launch = Some(window.open(config, token.trim()));
+                        pending_show = false;
+                    } else if let Some(token) = token {
                         credential_deadline = None;
                         let port = config.api_port;
                         let (send, receive) = std::sync::mpsc::channel();
@@ -898,23 +1090,42 @@ fn serve(
                         });
                         launch = Some(receive);
                         pending_show = false;
-                    } else if Instant::now() >= deadline {
+                    } else if Instant::now() >= deadline && !late {
+                        // Report a slow start once and keep waiting: a server that
+                        // is still starting (a populated profile) opens its window
+                        // when it becomes healthy, without a second Show.
                         present_async(config, "Server did not become healthy");
-                        window_failed = true;
+                        late = true;
                         pending_show = false;
                     }
                 } else if pending_show {
-                    let focused = if let Some(focus) = &config.focus {
+                    // The server on the public port started the window, or
+                    // this launcher did when it owns the window.
+                    let owner = match window.as_ref() {
+                        Some(_) => std::process::id(),
+                        None => if config.api_front_door {
+                            ws.as_ref()
+                        } else {
+                            api.as_ref()
+                        }
+                        .map_or(0, |server| server.child.id()),
+                    };
+                    // A launcher-owned window that was closed is started again.
+                    let focused = if window.as_mut().is_some_and(|window| !window.running()) {
+                        false
+                    } else if let Some(focus) = &config.focus {
                         Command::new(focus)
-                            .arg(api.child.id().to_string())
+                            .arg(owner.to_string())
                             .status()
                             .is_ok_and(|s| s.success())
                     } else {
-                        native.focus(api.child.id(), &config.window)
+                        native.focus(owner, &config.window)
                     };
                     if !focused {
                         opened = false;
-                        deadline = Instant::now() + Duration::from_secs(90);
+                        deadline = Instant::now() + health_window();
+                        late = false;
+                        next_probe = None;
                     }
                     pending_show = false;
                 }
@@ -938,12 +1149,12 @@ fn main() {
     };
     // With no arguments the launcher is the app bundle's main program and
     // reads its paths from the bundle it runs in.
-    let loaded: Option<Config> = if args.len() == 1
+    let bundled = args.len() == 1
         || args
             .iter()
             .skip(1)
-            .all(|arg| !arg.to_string_lossy().starts_with('-'))
-    {
+            .all(|arg| !arg.to_string_lossy().starts_with('-'));
+    let loaded: Option<Config> = if bundled {
         std::env::current_exe().ok().and_then(|exe| {
             o8_launcher::bundle::configuration(
                 &exe,
@@ -965,6 +1176,30 @@ fn main() {
         o8_launcher::note!("Invalid launch configuration");
         std::process::exit(2);
     };
+    if std::env::var("O8_API_FRONT_DOOR").as_deref() == Ok("1") {
+        config.api_front_door = true;
+    }
+    if std::env::var("O8_NEXT_OFF").as_deref() == Ok("1") {
+        config.next_off = true;
+    }
+    if config.next_off && !config.api_front_door {
+        o8_launcher::note!("O8_NEXT_OFF needs the API front door; starting Next");
+        config.next_off = false;
+    }
+    // Only the installed app puts its CLI on PATH; a --config fixture never
+    // touches the real bin folders. The servers inherit the outcome.
+    #[cfg(target_os = "macos")]
+    if bundled {
+        if let Some(home) = std::env::var_os("HOME") {
+            let targets = o8_launch_core::cli_link::default_targets(std::path::Path::new(&home));
+            let outcome =
+                o8_launch_core::cli_link::link(&config.server_dir.join("bin").join("o8"), &targets);
+            o8_launcher::note!("CLI: {}", outcome.status);
+            for (name, value) in outcome.env() {
+                std::env::set_var(name, value);
+            }
+        }
+    }
     match run(&mut config, &relaunch) {
         Ok(()) => {}
         Err(Some(reason)) => {
@@ -985,5 +1220,12 @@ mod configuration_tests {
             o8_launch_core::ports::PROD_API_DEFAULT_PORT
         );
         assert_eq!(config.ws_port, o8_launch_core::ports::PROD_WS_DEFAULT_PORT);
+        assert!(!config.api_front_door && !config.next_off);
+    }
+
+    #[test]
+    fn a_bundles_server_mode_marks_reach_the_configuration() {
+        let config: super::Config = serde_json::from_value(serde_json::json!({"data_dir":"/fixture/data","server_dir":"/fixture/server","node":"","window":"/fixture/window","version":"fixture","api_front_door":true,"next_off":true})).unwrap();
+        assert!(config.api_front_door && config.next_off);
     }
 }

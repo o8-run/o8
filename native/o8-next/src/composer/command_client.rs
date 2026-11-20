@@ -170,7 +170,9 @@ pub(super) fn fork(
     };
     persist(client, &fork, &routing["model"], entries, false)?;
     // New threads drop a saved title for the auto-titler; a rename keeps it.
-    let url = client.url("/api/v2/chat-history").map_err(|e| e.to_string())?;
+    let url = client
+        .url("/api/v2/chat-history")
+        .map_err(|e| e.to_string())?;
     client
         .request("PATCH", &url)
         .send_json(json!({"tabId":id,"title":fork.title}))

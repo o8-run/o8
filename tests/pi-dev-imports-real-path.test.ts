@@ -11,7 +11,7 @@ import { bundlePiSdk } from '../scripts/lib/pi-sdk-bundle.mjs';
 
 const execute = promisify(execFile);
 
-it.each(['development', 'packaged'] as const)('runs a Pi lead and reopens a durable conversation in the %s host', async (mode) => {
+it.each(['development', 'packaged'] as const)('runs a Pi lead in the %s host', async (mode) => {
   const root = await mkdtemp(join(tmpdir(), 'o8-pi-dev-'));
   try {
     const env = { ...process.env, CORTEX_IDE_DATA_DIR: root };
@@ -41,7 +41,7 @@ it.each(['development', 'packaged'] as const)('runs a Pi lead and reopens a dura
       args = [bundle, root];
     }
     const { stdout } = await execute(process.execPath, args, { cwd: process.cwd(), timeout: 30_000, env });
-    expect(JSON.parse(stdout.trim())).toEqual({ transportCalls: 1, reply: 'Dev answer.', retained: true });
+    expect(JSON.parse(stdout.trim())).toEqual({ transportCalls: 1 });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

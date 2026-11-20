@@ -3,9 +3,9 @@ import 'server-only';
 import { RepoFolderError } from './folder-error';
 
 import { execFile } from '@/lib/providers/child-process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { access, mkdir, realpath, stat } from 'node:fs/promises';
+import { access, mkdir, readFile, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -545,6 +545,27 @@ export async function repairRepoRemotes() {
     if (changed) await writeStore({ version: 1, repos });
     return repos;
   });
+}
+
+/** Private native-read admission: attest bytes only when the existing TS cache
+ * sees the same normalized registry. A stale cache never licenses fresh Rust data. */
+export async function nativeRepoRegistryFingerprint(): Promise<string | null> {
+  try {
+    const store = await readStore();
+    let bytes: Buffer;
+    try { bytes = await readFile(REGISTRY_PATH); }
+    catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT' && store.repos.length === 0 ? 'missing' : null;
+    }
+    if (bytes.length > 8 * 1024 * 1024) return null;
+    const parsed = JSON.parse(bytes.toString('utf8')) as Partial<RepoRegistryStore> | null;
+    if (!parsed || !Array.isArray(parsed.repos)) return null;
+    // Keep malformed saved branch types with the original JS coercion path.
+    if (parsed.repos.some(repo => repo.defaultBranch != null && typeof repo.defaultBranch !== 'string')) return null;
+    const projected = sortRepos(parsed.repos.map(normalizeRepoEntry));
+    if (JSON.stringify(projected) !== JSON.stringify(store.repos)) return null;
+    return createHash('sha256').update(bytes).digest('hex');
+  } catch { return null; }
 }
 
 /** Disk-fresh read for destructive policy decisions made under the registry mutation lock. */

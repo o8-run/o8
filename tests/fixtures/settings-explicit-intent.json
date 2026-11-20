@@ -1,0 +1,6 @@
+{
+  "unrelatedUpdate": { "parallelCap": 7 },
+  "effortKeys": ["thinkingEffort", "codexWorkerEffort", "claudeWorkerEffort"],
+  "existingExplicit": { "thinkingEffort": "max", "codexWorkerEffort": "max", "claudeWorkerEffort": "max" },
+  "unknownToml": "# Direct editor comment\n[accepted_table]\nopaque = \"fixture-preserved\"\n"
+}

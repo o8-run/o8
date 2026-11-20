@@ -7,9 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
-  pythonSpawn: vi.fn(),
   warmupOpenRouter: vi.fn(),
-  ensureEdgeTtsInstalled: vi.fn(),
   ensureReviewQueueDrainStarted: vi.fn(),
 }));
 
@@ -39,12 +37,6 @@ vi.mock('@/lib/cortex/qa/llm/openrouter-adapter', () => ({
     await mocks.fetch('https://openrouter.ai/api/v1/models');
   }),
 }));
-vi.mock('@/lib/tts/ensure-edge-tts', () => ({
-  ensureEdgeTtsInstalled: mocks.ensureEdgeTtsInstalled.mockImplementation(async () => {
-    mocks.pythonSpawn('python3', ['-m', 'pip', 'install', 'edge-tts']);
-  }),
-}));
-
 const priorNextRuntime = process.env.NEXT_RUNTIME;
 const priorO8DataDir = process.env.O8_DATA_DIR;
 const priorCortexDataDir = process.env.CORTEX_IDE_DATA_DIR;
@@ -93,7 +85,7 @@ afterAll(() => {
 });
 
 describe('cold-start instrumentation', () => {
-  it('checks the Edge voice in the background at boot without outbound model warm-up', async () => {
+  it('boots without outbound model warm-up', async () => {
     vi.stubGlobal('fetch', mocks.fetch);
     const { register } = await import('@/instrumentation');
 
@@ -103,16 +95,7 @@ describe('cold-start instrumentation', () => {
 
     expect(mocks.warmupOpenRouter).not.toHaveBeenCalled();
     expect(mocks.fetch.mock.calls.every(([url]) => new URL(String(url)).hostname === '127.0.0.1')).toBe(true);
-    expect(mocks.ensureEdgeTtsInstalled).toHaveBeenCalledTimes(1);
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
-  });
-
-  it('does not await Python preparation before completing registration', async () => {
-    mocks.ensureEdgeTtsInstalled.mockImplementationOnce(() => new Promise<void>(() => {}));
-    const { register } = await import('@/instrumentation');
-    await register();
-    await vi.dynamicImportSettled();
-    expect(mocks.ensureEdgeTtsInstalled).toHaveBeenCalledTimes(1);
   });
 
   it('starts packaged server queues without a sibling request', async () => {
@@ -139,6 +122,5 @@ describe('cold-start instrumentation', () => {
     await vi.advanceTimersByTimeAsync(2_000);
     await vi.dynamicImportSettled();
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
-    expect(mocks.ensureEdgeTtsInstalled).not.toHaveBeenCalled();
   });
 });

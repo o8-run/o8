@@ -11,8 +11,6 @@ import {
 } from './fire-store';
 import { runClaimedAutomationFire } from './fire-runner';
 import { materializeWatchAutomationFires } from './watch-store';
-import { drainParkedSymonWatches, expireSymonWatches } from './symon-watch';
-import { evaluateFuzzyWatches } from './fuzzy-watch';
 
 const TICK_MS = 30_000;
 const DEFAULT_LEASE_MS = 60 * 60 * 1000;
@@ -56,15 +54,6 @@ export async function runAutomationSchedulerTick(input: {
   ));
   const leaseMs = input.leaseMs ?? positiveEnv('O8_AUTOMATION_LEASE_MS', DEFAULT_LEASE_MS);
   const maxClaims = Math.max(concurrencyCap, Math.floor(input.maxClaims ?? concurrencyCap * 4));
-  // Deadlines first, and only deadlines: the shared materializer also disables
-  // an expired row, but only this pass can write the matching Symon ledger
-  // entry. It touches no network, so running it first costs a tick nothing.
-  let symonExpired: string[] = [];
-  try {
-    symonExpired = expireSymonWatches(nowMs);
-  } catch (error) {
-    console.warn('[automations-scheduler] Symon watch expiry failed:', error);
-  }
   const materialized = [
     ...materializeDueAutomationFires(nowMs),
     ...materializeWatchAutomationFires(nowMs),
@@ -90,31 +79,9 @@ export async function runAutomationSchedulerTick(input: {
     completed.push(...settled.filter((fire): fire is AutomationFire => Boolean(fire)));
   }
 
-  // Announcing parked watches makes bounded network calls, so it runs LAST and
-  // inside its own guard: a failure here must never cost the ordinary
-  // automations their tick.
-  let symonDrained = 0;
-  try {
-    symonDrained = (await drainParkedSymonWatches(input.nowMs)).length;
-  } catch (error) {
-    console.warn('[automations-scheduler] Symon watch drain failed:', error);
-  }
-
-  // Fuzzy watches (#2443) ask the judgment referee, a bounded network call, so
-  // they also run LAST and inside their own guard. A fire this pass persists is
-  // claimed from the queue on the following tick: for a watch that is a 30 s
-  // delay and costs nothing. With the referee off this returns before any read.
-  try {
-    await evaluateFuzzyWatches(nowMs);
-  } catch (error) {
-    console.warn('[automations-scheduler] fuzzy watch evaluation failed:', error);
-  }
-
   writeHeartbeat(Date.now(), {
     materialized: materialized.length,
     completed: completed.length,
-    symonWatchesExpired: symonExpired.length,
-    symonWatchesDrained: symonDrained,
   });
   return { materialized, completed };
 }

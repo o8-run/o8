@@ -106,7 +106,7 @@ const boundaries: unknown[] = [];
 try {
   for (const enabled of [false, true]) {
     invalidateInboxCache(); invalidateRuntimeInventoryCache();
-    server = await startReadParityBridge(binary, port, enabled);
+    server = await startReadParityBridge(binary, port, enabled, true);
     const cold = await read(path + '?workspaceReview=0');
     assert.equal(cold.native, false, 'An absent cache must execute the original handler');
     let previous: boolean | undefined;

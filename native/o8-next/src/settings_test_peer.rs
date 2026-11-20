@@ -13,7 +13,7 @@ use std::{
 };
 
 type Call = (String, String, Value);
-pub(super) struct Peer {
+pub(crate) struct Peer {
     pub client: Client,
     replies: Arc<Mutex<BTreeMap<String, (u16, Value)>>>,
     calls: Arc<Mutex<Vec<Call>>>,

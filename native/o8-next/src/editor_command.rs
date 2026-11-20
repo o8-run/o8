@@ -215,11 +215,8 @@ pub(crate) mod fake_code {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(
-                        &script,
-                        std::fs::Permissions::from_mode(0o755),
-                    )
-                    .unwrap();
+                    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+                        .unwrap();
                 }
             }
             let path = std::env::var_os("PATH").unwrap_or_default();

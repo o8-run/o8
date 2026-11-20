@@ -185,6 +185,13 @@ remaining domains on TypeScript.
 
 ## Flagged native repository reads
 
+Owned `GET /api/panel/branches` reads use the app transport's per-request admission
+and `O8D_NATIVE_OWNED` selection, independently of the legacy repository flag. Its
+Rust snapshot cache is independent of the TypeScript snapshot cache.
+
+The standalone compatibility client still uses the separate flag below, so that
+flag remains supported for existing callers.
+
 `O8D_NATIVE_REPOSITORY_READS=1` enables `GET /api/panel/branches` through the
 native registry, independently of the session flag. It defaults off. Use the
 same `O8_NEXT_O8D=1 O8_WS_O8D=1` transport and an `O8D_BINARY` built with
@@ -403,8 +410,9 @@ bounded method label, status and duration bucket. It includes native answers
 and proxied refusals. Dynamic path values, queries, headers and bodies are never
 written. Templates are checked against API source by Test Classification, along
 with every native table entry's test mapping. The TypeScript route count must
-equal `maxTypeScriptRoutes` in `crates/o8d/route-budget.json`. Move the budget
-down with removals in the same pull request; raise it only as an explicit
+not exceed `maxTypeScriptRoutes` in `crates/o8d/route-budget.json`. A removal may
+leave the budget above the count, so parallel removals do not conflict on that
+file; lower it in any later change. Raise it only as an explicit
 reviewed change when the Rust daemon cannot host a route yet. This check does
 not require an `origin/main` ref.
 Two segments of approximately 8 MiB bound disk use. Recording has a 100 ms
@@ -468,6 +476,62 @@ response. No Next listener runs in that fixture.
 GET /api/mobile/inbox admits only the existing unexpired empty inbox cache, through private canonical TypeScript metadata. Both full and sessions-only cache lanes retain their eight-second lifetime and cross-process generation invalidation. Empty finalization remains with the existing advisory setting owner. Rust reconstructs the empty response shape and applies the original cache/Server-Timing headers; it never invents a fleet from missing files.
 
 Fresh requests, a missing/expired/invalidated cache, nonempty sessions/approvals/review/items and unknown shape defer to the original handler. Live discovery, orphan cleanup, approval expiration, review discovery and urgency work remain TypeScript-owned. No Rust writer or caller permission is introduced. The admission context contains only version/generatedAt/mode/sourceLabel/optional note, not a serialized response or credential.
+
+### Unselected review workspace
+
+GET /api/review/workspace returns its original empty snapshot only when the canonical selection predicate confirms both the workspace query and CORTEX_IDE_REVIEW_REPO_ROOT are empty. The route and private admission use the same live predicate. Selected or configured workspaces stay with their original TS Git,GitHub and review-cache owner. No new listener registration,caller grant or Rust writer is introduced; the private context is one boolean and the idle reader does not open SQLite.
+
+## Flagged native startup reads
+
+The app bridge supplies a read-only snapshot of the TypeScript port resolver,
+its file-cache fingerprints and the server version. Saved startup GETs preserve
+ws-info's file-first liveness probes and identity's cached-port behavior. A
+changed resolver cache key or missing credential/ID defers to TypeScript, which
+retains creation and failed-write fallback ownership. Identity preserves its
+CORS and no-store headers. These readers do not create credentials or IDs.
+
+The standalone ws-info file reader retains its prior behavior outside native
+app session mode. Full startup parity requires the bridge resolver snapshot;
+unsupported snapshot or saved state defers rather than guessing. The public
+socket test records TypeScript responses with Next stopped and checks native
+responses, cache/liveness boundaries, missing-file fallback and refusals.
+Object-key wire order is outside semantic JSON parity; missing/null, scalar
+values and array order remain strict. Queryless startup routes repeat shared
+seeded requests; file/env/liveness fixtures supply the input variation.
+
+## Native request-body plumbing
+
+Native dispatch carries the original method and admitted Content-Length body,
+bounded at 16 MiB. An admitted body above that limit receives 413. Admission
+precedes body consumption; a deferred consumed body is replayed exactly once
+through the original TypeScript writer. Transfer-Encoding, Expect and ambiguous
+length framing retain streaming fallback. Production route methods remain
+GET-only in this change; no Rust store writer is added. The write-path corpus
+and exported byte-handler fixture verify the seam through the real public
+socket with Next stopped. Generic write admission requires security review.
+
+## Saved repository and project reads
+
+The shared table admits five GETs at rust-with-fallback: panel/repos,
+panel/projects, projects, projects/[id] and panel/repo-icon. TypeScript retains
+registry/readiness/icon process-cache authority, GitHub discovery, selected
+readiness/restore probes, sidecar/SQL repair and all store writes. Native
+repo-icon replies cover missing repositories and proven missing icons; rooted
+image discovery/verification stays with the original handler.
+
+Dynamic project admission matches the registry's selected route pattern.
+The live locks literal and retired context/dismissed-suggestions names receive409
+at admission without executing a GET; normal fallback performs the canonical dispatch.
+Retired names have no registry imports and retain the detail handler404. Every
+existing bearer/principal floor remains authoritative. No SSH peer/local-only
+admission or workspace lifecycle route is included in this group.
+
+The public-socket fixture launches separate flag-off/on children, captures100
+seeded requests per route, checks the frozen oracle and durable native-store
+content, and preserves all JSON fields. Clock and owned image mtime are seeded
+inputs. A separate creation case verifies the TS fallback creates missing
+projects and persists returned IDs. See evidence/projects for exact counts,
+consumer-parser proof and release-only timing.
 
 ### Live lane occupancy
 

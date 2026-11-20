@@ -20,14 +20,6 @@
     "tokensSha256": "e5131fa215bf23f107a8004e2f32afa3746160fef4ceb7c27fa9fe1d94d8ecde"
   },
   {
-    "file": "src/lib/dictation/polish-prompt.ts",
-    "tokensSha256": "5f304bfe95ff9088628fbac5427a7d0b02bcf5fa8939615bc8e26b16a3eae819"
-  },
-  {
-    "file": "src/lib/voice/realtime-session-config.ts",
-    "tokensSha256": "d60d254f5e9ee2545a2e8f1bbf42973e782e54812776cf1185ef45533b13bfdb"
-  },
-  {
     "file": "src/lib/prompts/v1/approval-adjudication.mjs",
     "tokensSha256": "14d9b281b23ea1de438e24f10d96270be0a01179bc40a2db8ccc62f16750f075"
   },

@@ -23,6 +23,12 @@ async function freePort(): Promise<number> {
 
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
+  /** Reuse owned ephemeral ports for flag-off/on startup body parity. */
+  fixedPorts?: { api: number; ws: number };
+  /** Shipped API front door: no O8_NEXT_O8D or session-read override. */
+  productFrontDoor?: boolean;
+  startupFilePorts?: boolean;
+  identityEnv?: { O8_INSTANCE_ID?: string; O8_BOOT_ID?: string };
   logLimit?: number; o8d?: boolean | 'default'; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string; preload?: string; startupTimeoutMs?: number; directory?: string; nativeSessionReads?: boolean | 'default'; nativeRepositoryReads?: boolean; ttsPython?: string;
   /** WS_TOKEN for the WS process when it should differ from the stored ws-token. */
   envToken?: string;
@@ -70,12 +76,12 @@ export async function startParityReference(options: {
     }
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(result));
   });
-  api.listen(0, '127.0.0.1');
+  api.listen(options.fixedPorts?.api ?? 0, '127.0.0.1');
   await once(api, 'listening');
   const address = api.address();
   if (!address || typeof address === 'string') throw new Error('missing fixture API port');
   const apiUrl = `http://127.0.0.1:${address.port}`;
-  const port = await freePort();
+  const port = options.fixedPorts?.ws ?? await freePort();
   const child = spawn(process.execPath, [
     ...(options.preload ? ['--require', options.preload] : []),
     ...(options.stallFixture ? ['--import=./tests/fixtures/ws-stall-preload.mjs'] : []),
@@ -90,11 +96,19 @@ export async function startParityReference(options: {
       // Never reach pip from a fixture, even from a shell that sets a real one.
       O8_TTS_PYTHON: options.ttsPython ?? join(directory, 'no-python'),
       // PORT outranks O8_API_PORT in getApiBase(), so it moves with it.
-      O8_API_PORT: String(options.apiOnListener ? port : address.port), O8_WS_PORT: String(port),
-      ...(options.apiOnListener ? { PORT: String(port) } : {}),
+      O8_API_PORT: String(options.apiOnListener || options.productFrontDoor ? port : address.port), O8_WS_PORT: String(port),
+      ...(options.apiOnListener || options.productFrontDoor ? { PORT: String(port) } : {}),
+      // Startup tests own these files and ports; ambient host identity and
+      // resolver overrides must never alter their oracle.
+      O8_INSTANCE_ID: options.identityEnv?.O8_INSTANCE_ID,
+      O8_BOOT_ID: options.identityEnv?.O8_BOOT_ID,
+      ...(options.startupFilePorts ? { O8_API_PORT: undefined, PORT: undefined,
+        CORTEX_IDE_PORT: undefined, O8_DEV_FRONTEND_URL: undefined,
+        O8_WS_PORT: undefined, WS_PORT: undefined } : {}),
       CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${port}`,
       O8_WS_O8D: options.o8d === 'default' ? undefined : (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
-      O8_NEXT_O8D: options.nativeHttp ? '1' : '0',
+      O8_API_FRONT_DOOR: options.productFrontDoor ? '1' : undefined,
+      O8_NEXT_O8D: options.productFrontDoor ? undefined : options.nativeHttp ? '1' : '0',
       // 'default' leaves the flag unset, so the shipped default applies.
       O8D_NATIVE_SESSION_READS: options.nativeSessionReads === 'default' ? undefined : options.nativeSessionReads ? '1' : '0',
       O8D_NATIVE_REPOSITORY_READS: options.nativeRepositoryReads ? '1' : '0',

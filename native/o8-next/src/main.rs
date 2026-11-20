@@ -1,66 +1,71 @@
+#[cfg(test)]
+mod launcher_owner_tests;
 mod render_region;
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
 mod app_parent;
-#[cfg(unix)]
-mod document_transport;
-#[cfg(unix)]
-mod document_validation;
-mod child_command;
-mod external_open;
 mod brain;
 mod browser_panel;
 mod change_map;
+mod child_command;
 #[path = "shell_features/connection/client.rs"]
 mod client;
 mod clock;
 mod composer;
 mod devices_panel;
 mod diff;
-#[cfg(any(test, feature = "driver"))]
-mod driver;
 #[cfg(test)]
 mod diff_tests;
 mod diff_ui;
-mod request_changes;
-#[cfg(test)]
-mod request_changes_revision_tests;
+#[cfg(unix)]
+mod document_transport;
+#[cfg(unix)]
+mod document_validation;
+#[cfg(any(test, feature = "driver"))]
+mod driver;
 mod editor_command;
+mod external_open;
 mod files_panel;
 mod glance;
 mod grid_sessions;
 mod icon;
 mod inbox;
-mod lineage;
 #[cfg(test)]
 mod input_reuse_tests;
-#[cfg(test)]
-mod native_anchor_tests;
 mod issues;
+mod lineage;
+mod login_item;
 mod merge;
 mod mission_card;
 mod model;
 mod motion;
+#[cfg(test)]
+mod native_anchor_tests;
 mod pane;
-mod pane_tree;
 mod pane_grid;
 mod pane_layout;
+mod pane_tree;
+mod parent_quit;
 mod project_icon;
 mod projects;
 mod projects_model;
 mod prompt_navigator;
+mod request_changes;
+#[cfg(test)]
+mod request_changes_revision_tests;
 mod retained;
-mod ring;
 mod rich;
+mod ring;
 mod settings;
 mod settings_fields;
 mod settings_secret;
 mod shell;
 mod shell_state;
 mod sidebar;
-mod speech;
 mod snapshot_hotkey;
+mod speech;
 mod stream;
+mod subagents;
 mod switch_receipt;
 mod terminal;
 mod terminal_grid;
@@ -68,30 +73,29 @@ mod terminal_transport;
 mod text;
 #[cfg(test)]
 mod text_ellipsis_tests;
-mod thread_messages;
 mod theme;
-mod theme_import;
 #[cfg(test)]
 mod theme_font_tests;
+mod theme_import;
 #[cfg(test)]
 mod theme_tests;
+mod thread_messages;
 mod trace;
-mod subagents;
 mod transcript_actions;
 mod transcript_diagram;
 mod transcript_peek;
 mod transcript_view;
-mod turn_files;
 mod transport;
+mod turn_files;
 mod ui;
 mod visualizations;
 mod wake;
+mod window_lights;
+mod worker_backfill;
 #[cfg(test)]
 mod worker_transcript_tests;
 #[cfg(test)]
 mod worker_transport_tests;
-mod worker_backfill;
-mod window_lights;
 mod zoom;
 use crate::{
     client::Client,

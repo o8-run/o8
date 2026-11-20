@@ -5,7 +5,8 @@ import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registr
 import { sendOrchestratorBackendTurn, resolveTurnReceiptMode } from '@/lib/lane/orchestrator-send-entry';
 import type { OrchestratorTurnOptions } from '@/lib/lane/orchestrator-backends/types';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
-import { appendMobileOrchestratorUserMessage, upsertMobileOrchestratorAssistantMessage, writeOrchestratorBackendSessionId } from '@/lib/mobile/orchestrator-thread-history';
+import { appendMobileOrchestratorUserMessage, markMobileOrchestratorThreadFailed, upsertMobileOrchestratorAssistantMessage, writeOrchestratorBackendSessionId } from '@/lib/mobile/orchestrator-thread-history';
+import type { MobileOrchestratorThread } from '@/lib/mobile/types';
 import type { MobileTurnReceipt } from '@/lib/mobile/types';
 import { terminalReceipt } from '@/lib/mobile/turn-receipt';
 import { prepareBackendSwitchHandoff, recordBackendSwitchHandoffAudit } from '@/lib/orchestrator/backend-switch-carry';
@@ -22,6 +23,8 @@ import type { OrchestratorPermissionMode } from '@/lib/orchestrator/permission-m
 export interface BoundChatContinuationHooks {
   registerAbort(repoPath: string, origin: ReviewChatOrigin, controller: AbortController): () => void;
   publish(sessionName: string, event: string, data: Record<string, unknown>): void;
+  /** Announces a changed thread listing row, as the direct turn path does. */
+  publishThread?(thread: MobileOrchestratorThread): void;
 }
 
 /** Execute a continuation through the same threaded backend and canonical transcript. */
@@ -58,6 +61,8 @@ export async function runBoundChatContinuation(
   const trailingPersist = createTrailingPersist();
   let completed = false;
   let turnError: string | null = null;
+  // Set once this turn's user message and assistant placeholder are saved.
+  let saved = false;
   let receipt: MobileTurnReceipt = { leadModel: expected.model, effort: thinkingEffort ?? 'adaptive',
     ...(unmapped && thinkingEffort === undefined ? { effortSource: 'runtime-default' as const } : {}),
     mode: resolveTurnReceiptMode(expected.backend, expected.mode, expected.pickedMode),
@@ -100,6 +105,7 @@ export async function runBoundChatContinuation(
       messageId: `review-user-${assistantMessageId}`, backend: backend.id, timestampMs: startedAt, mentions: input.mentions });
     if (handoff) recordBackendSwitchHandoffAudit(handoff);
     persist(null);
+    saved = true;
     hooks.publish(session.sessionName, 'turn-start', { ...data, userMessageId: `review-user-${assistantMessageId}`,
       message: input.displayMessage ?? message, timestamp: startedAt, media });
     hooks.publish(session.sessionName, 'status', { ...data, status: 'busy' });
@@ -146,6 +152,18 @@ export async function runBoundChatContinuation(
     if (!completed) throw new Error('Parent continuation ended without a completion receipt.');
   } catch (error) {
     savePartial();
+    // A refused or failed turn must not read as still working (#6533). With no
+    // runtime turn record, the listing derives status from this transcript,
+    // whose empty placeholder otherwise stays busy.
+    if (saved && !controller.signal.aborted) {
+      try {
+        const thread = markMobileOrchestratorThreadFailed({ tabId: expected.threadId, repoPath: input.repoPath, assistantMessageId,
+          error: turnError ?? (error instanceof Error ? error.message : String(error)), backend: backend.id });
+        if (thread) hooks.publishThread?.(thread);
+      } catch (markError) {
+        console.warn('[bound-chat-continuation] failed to mark the turn failed', markError);
+      }
+    }
     hooks.publish(backend.peekSession(input.repoPath, undefined, expected.threadId)?.sessionName ?? '', controller.signal.aborted ? 'status' : 'error', controller.signal.aborted
       ? { ...data, status: 'stopped' } : { ...data, error: 'The continuation failed. Inspect the originating chat before retrying.' });
     throw error;

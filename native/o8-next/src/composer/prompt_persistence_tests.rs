@@ -191,7 +191,9 @@ fn native_composer_draft_survives_reopen_and_clears_on_send(app: &mut TestAppCon
         })
     });
     // The draft is written once typing pauses.
-    visual.executor().advance_clock(std::time::Duration::from_millis(500));
+    visual
+        .executor()
+        .advance_clock(std::time::Duration::from_millis(500));
     visual.run_until_parked();
     let path = surface.read_with(visual, |s, cx| {
         s.composer.read(cx).controls.prompt.store.clone().unwrap()
@@ -217,7 +219,10 @@ fn native_composer_draft_survives_reopen_and_clears_on_send(app: &mut TestAppCon
     let (again, visual) = open(app, &fixture);
     again.read_with(visual, |s, cx| {
         assert!(s.composer.read(cx).text.is_empty());
-        assert!(s.composer.read(cx).controls.files.is_empty(), "sent files stay sent");
+        assert!(
+            s.composer.read(cx).controls.files.is_empty(),
+            "sent files stay sent"
+        );
     });
     let _ = std::fs::remove_dir_all(root);
 }

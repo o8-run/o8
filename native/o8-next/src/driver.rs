@@ -15,10 +15,39 @@ use serde_json::{Value, json};
 
 /// Words in a control's name that mark it as changing real state.
 const GUARDED: [&str; 33] = [
-    "accept", "approve", "archive", "close", "confirm", "delete", "discard", "dismiss", "kill",
-    "logout", "merge", "off", "pick", "publish", "ready", "reject", "release", "remove", "reply",
-    "regenerate", "reset", "respond", "revoke", "send", "settle", "ship", "sign", "snooze", "steer",
-    "stop", "submit", "suppress", "unmerged",
+    "accept",
+    "approve",
+    "archive",
+    "close",
+    "confirm",
+    "delete",
+    "discard",
+    "dismiss",
+    "kill",
+    "logout",
+    "merge",
+    "off",
+    "pick",
+    "publish",
+    "ready",
+    "reject",
+    "release",
+    "remove",
+    "reply",
+    "regenerate",
+    "reset",
+    "respond",
+    "revoke",
+    "send",
+    "settle",
+    "ship",
+    "sign",
+    "snooze",
+    "steer",
+    "stop",
+    "submit",
+    "suppress",
+    "unmerged",
 ];
 
 /// True when a control's name says it changes real state.
@@ -381,19 +410,20 @@ mod socket {
                 return Err(std::io::Error::other("the path exists and is not a socket"));
             }
             if UnixStream::connect(path).is_ok() {
-                return Err(std::io::Error::other("another window already answers there"));
+                return Err(std::io::Error::other(
+                    "another window already answers there",
+                ));
             }
             std::fs::remove_file(path)?;
         }
         let private = path.with_extension(format!("{}.d", std::process::id()));
         std::fs::DirBuilder::new().mode(0o700).create(&private)?;
         let made = private.join("s");
-        let listener = UnixListener::bind(&made)
-            .and_then(|listener| {
-                std::fs::set_permissions(&made, std::fs::Permissions::from_mode(0o600))?;
-                std::fs::rename(&made, path)?;
-                Ok(listener)
-            });
+        let listener = UnixListener::bind(&made).and_then(|listener| {
+            std::fs::set_permissions(&made, std::fs::Permissions::from_mode(0o600))?;
+            std::fs::rename(&made, path)?;
+            Ok(listener)
+        });
         let _ = std::fs::remove_file(&made);
         let _ = std::fs::remove_dir(&private);
         listener
@@ -411,7 +441,11 @@ mod socket {
                 Ok(_) => {}
             }
             if !line.ends_with('\n') && line.len() as u64 >= LONGEST_LINE {
-                let _ = writeln!(writer, "{}", json!({"ok": false, "error": "the request is too long"}));
+                let _ = writeln!(
+                    writer,
+                    "{}",
+                    json!({"ok": false, "error": "the request is too long"})
+                );
                 return;
             }
             if line.trim().is_empty() {
@@ -473,7 +507,11 @@ mod socket {
         let mine = file
             .metadata()
             .is_ok_and(|meta| meta.uid() == unsafe { libc::geteuid() });
-        if mine && file.set_permissions(std::fs::Permissions::from_mode(0o600)).is_ok() {
+        if mine
+            && file
+                .set_permissions(std::fs::Permissions::from_mode(0o600))
+                .is_ok()
+        {
             let _ = writeln!(file, "{line}");
         }
     }

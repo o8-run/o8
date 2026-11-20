@@ -18,9 +18,6 @@ const receipt = join(root, 'receipt.json');
 const { managedCommandLaunch } = await import('@/lib/terminal/managed-command-launch');
 const { sanitizePtyEnv } = await import('@/lib/ws-server/pty-support');
 const { testMcpConnection } = await import('@/lib/mcp/test-connection');
-const { insertExternalMcpServer, removeExternalMcpServer } = await import('@/lib/mcp/external-servers');
-const { getSymonMcpCatalog } = await import('@/lib/mcp/symon-tools');
-const { invalidateSymonMcpToolCache: invalidateSymonMcpCache } = await import('@/lib/mcp/symon-tools-cache');
 const { callCodebaseMemoryTool } = await import('@/lib/codebase-memory/mcp-client');
 const processBoundary = await import('@/lib/providers/child-process');
 const { childEnvironment } = await import('@/lib/providers/spawn-environment');
@@ -50,7 +47,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
 });
 `, { mode: 0o700 });
 });
-afterAll(() => { invalidateSymonMcpCache(); closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 async function completed(child: import('node:child_process').ChildProcess): Promise<void> {
   const status = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
@@ -73,30 +70,15 @@ describe('shared process environment boundary', () => {
     expect(observed().service).toBe(true);
     expect(observed().leaked, 'parent canaries must not reach Check connection').toBe(false);
   });
-  it('registered MCP discovery keeps explicit service credentials and excludes parent canaries', async () => {
-    const id = insertExternalMcpServer({ name: 'fixture', transport: 'stdio', command: process.execPath, args: [peer],
-      symonInjection: true, env: { FIXTURE_SERVICE_TOKEN: 'explicit-service' } }).id;
-    try {
-      const catalog = await getSymonMcpCatalog({ refresh: true });
-      expect(catalog.tools.length).toBe(1);
-      expect(observed().service).toBe(true);
-      expect(observed().leaked, 'parent canaries must not reach registered MCP').toBe(false);
-    } finally { removeExternalMcpServer(id); invalidateSymonMcpCache(); }
-  });
   it('codebase-memory MCP uses the same ambient boundary', async () => {
     const result = await callCodebaseMemoryTool({ binPath: peer, cwd: root, toolName: 'fixture', timeoutMs: 3000 });
     expect(result.ok).toBe(true);
     expect(observed().leaked, 'parent canaries must not reach memory MCP').toBe(false);
   });
-  it.each(['check', 'registered'])('%s MCP keeps service auth but does not authorize explicit provider slots without a runtime owner', async surface => {
+  it('MCP connection checks keep service auth without authorizing provider slots', async () => {
     const input = { transport: 'stdio' as const, command: process.execPath, args: [peer, '--provider-capture'],
       env: { FIXTURE_SERVICE_TOKEN: 'explicit-service', OPENAI_API_KEY: 'fixture-explicit-provider' } };
-    if (surface === 'check') expect((await testMcpConnection(input, 3000)).ok).toBe(true);
-    else {
-      const id = insertExternalMcpServer({ ...input, name: 'fixture-provider', symonInjection: true }).id;
-      try { expect((await getSymonMcpCatalog({ refresh: true })).tools.length).toBe(1); }
-      finally { removeExternalMcpServer(id); invalidateSymonMcpCache(); }
-    }
+    expect((await testMcpConnection(input, 3000)).ok).toBe(true);
     expect(observed().service).toBe(true);
     expect(observed().provider, 'a provider slot needs runtime billing authority').toBe(false);
     expect(observed().leaked).toBe(false);
@@ -114,6 +96,17 @@ describe('shared process environment boundary', () => {
       else processBoundary.exec(`${JSON.stringify(process.execPath)} ${JSON.stringify(peer)} --capture`, done);
     });
     expect(observed().leaked, 'parent canaries must not reach any process API').toBe(false);
+  });
+  it.each(['O8D_BRIDGE_KEY', 'O8_NEXT_WINDOW_CONTROL_KEY'].flatMap(key => ['inherit', 'allow'].map(setting => [key, setting])))('the private launcher key %s never reaches a child with %s extensions', async (key, setting) => {
+    vi.stubEnv(key, randomBytes(32).toString('base64url'));
+    vi.stubEnv('O8_WORKER_ENV_INHERIT', setting === 'inherit' ? '1' : '0');
+    vi.stubEnv('O8_WORKER_ENV_ALLOW', setting === 'allow' ? key : '');
+    const capture = join(root, 'producer-key.cjs');
+    writeFileSync(capture, `require('node:fs').writeFileSync(${JSON.stringify(receipt)},JSON.stringify({leaked:Boolean(process.env[${JSON.stringify(key)}])}));`);
+    try {
+      await completed(processBoundary.spawn(process.execPath, [capture], { stdio: 'ignore' }));
+      expect(observed().leaked).toBe(false);
+    } finally { vi.stubEnv('O8_WORKER_ENV_INHERIT', '0'); vi.stubEnv('O8_WORKER_ENV_ALLOW', ''); }
   });
   it('explicit task inputs survive the shared boundary', async () => {
     await completed(processBoundary.spawn(process.execPath, [peer, '--capture'], {

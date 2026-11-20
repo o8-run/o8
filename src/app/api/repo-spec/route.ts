@@ -1,11 +1,10 @@
 import { isMaskedViewerReplay } from '@/lib/viewers/copy-safety';
 import { viewerJson } from '@/lib/viewers/response';
 import { type NextRequest } from 'next/server';
-import { existsSync, statSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
+import { dirname, basename } from 'node:path';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 import { isWorkspaceFileError, readWorkspaceFile, writeWorkspaceFile } from '@/lib/fs/workspace-file';
-import { specCallerScope, WORKER_SPEC_SCOPE_REFUSAL } from '@/lib/o8md/worker-scope';
+import { scopedRepoPath, resolveSpecPath } from '@/lib/o8md/read-scope';
 import {
   extractRoughdraftReviewIndex,
   validateRoughdraftMarkdown,
@@ -33,18 +32,6 @@ const OPERATOR_ONLY_REFUSAL = {
   message: 'Workers may comment, reply, suggest and resolve; other edits are the operator\'s.',
 } as const;
 
-/**
- * The repoPath this request acts on: a worker's is its lane directory's real path (null when it
- * asked for another directory), anyone else's is the one it sent.
- */
-function scopedRepoPath(request: NextRequest): { repoPath: string; worker: boolean } | Response {
-  const requested = request.nextUrl.searchParams.get('repoPath') ?? '';
-  const caller = specCallerScope(request, requested);
-  if (!caller.worker) return { repoPath: requested, worker: false };
-  if (!caller.repoPath) return viewerJson({ ok: false, error: WORKER_SPEC_SCOPE_REFUSAL }, { status: 403 });
-  return { repoPath: caller.repoPath, worker: true };
-}
-
 /** o8.md's text, or null when there is none. Like the writes, it refuses a symlinked or non-regular file. */
 async function readSpec(specPath: string): Promise<string | null> {
   try {
@@ -58,16 +45,6 @@ async function readSpec(specPath: string): Promise<string | null> {
 function workspaceFileErrorResponse(error: unknown): Response {
   if (!isWorkspaceFileError(error)) throw error;
   return viewerJson({ ok: false, error: error.message, code: error.code }, { status: error.status });
-}
-
-function resolveSpecPath(repoPath: string): string | null {
-  if (!repoPath || typeof repoPath !== 'string') return null;
-  if (!existsSync(repoPath)) return null;
-  try {
-    const s = statSync(repoPath);
-    if (!s.isDirectory()) return null;
-  } catch { return null; }
-  return join(repoPath, 'o8.md');
 }
 
 const DEFAULT_TEMPLATE = `# o8 Spec

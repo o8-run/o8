@@ -2,7 +2,6 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import os from 'node:os';
 import path from 'node:path';
 
-import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const root = mkdtempSync(path.join(os.homedir(), '.o8-threecode-pins-'));
@@ -31,18 +30,10 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => ({
 }));
 
 let defaultsRoute: typeof import('@/app/api/panel/operator-defaults/route');
-let modelsRoute: typeof import('@/app/api/runtime/threecode-models/route');
-let getOrCreateWsToken: typeof import('@/lib/ws-auth').getOrCreateWsToken;
 let getOperatorDefaultsTomlState: typeof import('@/lib/operator/defaults').getOperatorDefaultsTomlState;
 let runtime: import('@/lib/runtimes/types').AgentRuntime;
 let assertRuntimeDispatchable: typeof import('@/lib/runtimes/shared/auth-detect').assertRuntimeDispatchable;
 let parseThreecodeConfiguredProviders: typeof import('@/lib/runtimes/threecode-model-catalogue').parseThreecodeConfiguredProviders;
-
-function authorizedRequest(pathname: string): NextRequest {
-  return new NextRequest(`http://localhost:3001${pathname}`, {
-    headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
-  });
-}
 
 function post(body: unknown): Request {
   return new Request('http://localhost:3001/api/panel/operator-defaults', {
@@ -87,10 +78,8 @@ else console.log(JSON.stringify({ args }));
   writeFileSync(path.join(root, '.gitkeep'), '');
   const { execFileSync } = await import('node:child_process');
   execFileSync('git', ['init', '-q', repoPath]);
-  ({ getOrCreateWsToken } = await import('@/lib/ws-auth'));
   ({ getOperatorDefaultsTomlState } = await import('@/lib/operator/defaults'));
   defaultsRoute = await import('@/app/api/panel/operator-defaults/route');
-  modelsRoute = await import('@/app/api/runtime/threecode-models/route');
   ({ assertRuntimeDispatchable } = await import('@/lib/runtimes/shared/auth-detect'));
   ({ parseThreecodeConfiguredProviders } = await import('@/lib/runtimes/threecode-model-catalogue'));
   const { declarativeWorkerRuntimes } = await import('@/lib/runtimes/declarative-workers');
@@ -106,23 +95,6 @@ afterAll(() => {
 });
 
 describe.sequential('3code configured worker pins', () => {
-  it('serves only configured known-good ids from an authenticated catalogue route', async () => {
-    expect((await modelsRoute.GET(new NextRequest('http://localhost:3001/api/runtime/threecode-models'))).status).toBe(401);
-    const response = await modelsRoute.GET(authorizedRequest('/api/runtime/threecode-models?refresh=1'));
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      available: true,
-      total: 2,
-      groups: [expect.objectContaining({
-        provider: 'openrouter',
-        models: [
-          expect.objectContaining({ id: 'openrouter.deepseek/deepseek-v4-flash' }),
-          expect.objectContaining({ id: 'openrouter.thinkingmachines/inkling:free' }),
-        ],
-      })],
-    });
-  });
-
   it('persists only a configured 3code worker pin through the Settings route', async () => {
     const accepted = await defaultsRoute.POST(post({ threecodeWorkerModel: 'openrouter.deepseek/deepseek-v4-flash' }));
     expect(accepted.status).toBe(200);
@@ -165,7 +137,7 @@ describe.sequential('3code configured worker pins', () => {
     expect(defaultTranscript).not.toContain('--model');
   }, 20_000);
 
-  it('never returns CLI stderr from catalogue or defaults validation failures', async () => {
+  it('never returns CLI stderr from defaults validation failures', async () => {
     const secretMarker = 'never-return-this-config-token';
     writeFileSync(fixture, `#!${process.execPath}
 const args = process.argv.slice(2);
@@ -174,12 +146,6 @@ else if (args[0] === 'good') { console.error('${secretMarker}'); process.exit(1)
 else console.log(JSON.stringify({ args }));
 `, 'utf8');
     chmodSync(fixture, 0o755);
-
-    const catalogue = await modelsRoute.GET(authorizedRequest('/api/runtime/threecode-models?refresh=1'));
-    expect(catalogue.status).toBe(503);
-    const catalogueBody = JSON.stringify(await catalogue.json());
-    expect(catalogueBody).toContain('"available":true');
-    expect(catalogueBody).not.toContain(secretMarker);
 
     const defaults = await defaultsRoute.POST(post({ threecodeWorkerModel: 'openrouter.deepseek/deepseek-v4-flash' }));
     expect(defaults.status).toBe(400);

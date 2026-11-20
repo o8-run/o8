@@ -1,0 +1,374 @@
+{
+  "seed": 6327,
+  "auth": [
+    {
+      "case": 0,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      }
+    },
+    {
+      "case": 1,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      }
+    },
+    {
+      "case": 2,
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      }
+    },
+    {
+      "case": 3,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      }
+    },
+    {
+      "case": 4,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      }
+    },
+    {
+      "case": 5,
+      "expected": {
+        "body": {
+          "error": "Origin is not allowed"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      }
+    }
+  ],
+  "timings": [
+    {
+      "path": "/api/review/workspace",
+      "native": false,
+      "p50Ms": 4.349916000000121,
+      "p95Ms": 5.266575999999986,
+      "samplesMs": [
+        4.190103000000136,
+        4.392055999999911,
+        4.938891999999896,
+        5.4218929999999546,
+        5.103125000000091,
+        5.295351999999866,
+        4.952964999999949,
+        5.252340000000004,
+        5.266575999999986,
+        4.470755999999938,
+        4.484480000000076,
+        4.3565920000000915,
+        4.180090000000064,
+        4.532449999999926,
+        4.056720999999925,
+        4.211755999999923,
+        4.151693000000023,
+        4.3812460000001465,
+        4.613906000000043,
+        4.400926999999683,
+        4.434326999999939,
+        4.862366999999722,
+        4.306126000000404,
+        4.098862000000281,
+        3.8069259999997485,
+        4.3925649999996494,
+        4.025740999999925,
+        4.127363000000059,
+        4.349916000000121,
+        6.528217999999924,
+        4.365322000000106,
+        4.4224779999999555,
+        4.240208999999595,
+        4.396383000000242,
+        4.278581999999915,
+        4.026242000000366,
+        4.237064999999802,
+        4.031192999999803,
+        4.055645999999797,
+        4.081641000000218,
+        4.143802000000051,
+        4.192774999999983,
+        4.107784999999694,
+        4.395461999999952,
+        4.558551999999963,
+        4.4660939999998845,
+        4.225425000000087,
+        3.9865529999997307,
+        4.431320000000142,
+        4.410449999999855,
+        4.379797000000053,
+        4.284890999999789,
+        4.035730000000058,
+        4.13704800000005,
+        4.1530290000000605,
+        4.130865000000085,
+        4.403227999999672,
+        4.148697999999968,
+        4.085027000000082,
+        4.0096199999998134,
+        4.471144999999979,
+        4.423179999999775,
+        4.749927000000298,
+        4.249953999999889,
+        4.213659000000007,
+        4.17109100000016,
+        3.8084250000001703,
+        5.591378999999961,
+        4.269942999999785,
+        4.216226000000006,
+        3.9141990000002806,
+        4.226904999999988,
+        4.099835999999868,
+        4.295888999999988,
+        4.115229999999883,
+        4.799899000000096,
+        5.3691280000002735,
+        4.473729000000276,
+        4.042343999999957,
+        4.888194999999996,
+        4.964125999999851,
+        5.237221999999747,
+        4.650485000000117,
+        4.25453299999981,
+        4.210324000000128,
+        3.860389999999825,
+        4.424457999999959,
+        4.389250000000175,
+        4.278082999999697,
+        4.329503999999815,
+        4.816439000000173,
+        4.8001100000001315,
+        4.432959999999639,
+        4.41178600000012,
+        4.1679189999999835,
+        4.2196969999999965,
+        4.364057999999659,
+        4.678505000000314,
+        5.189056000000164,
+        4.701492000000144
+      ]
+    },
+    {
+      "path": "/api/review/workspace",
+      "native": true,
+      "p50Ms": 4.175984999999855,
+      "p95Ms": 4.966722000000118,
+      "samplesMs": [
+        5.032329000000118,
+        4.281779999999799,
+        4.966722000000118,
+        4.462078999999903,
+        4.266073000000233,
+        3.880315000000337,
+        4.831771000000117,
+        4.361765999999989,
+        4.897475000000213,
+        4.580879999999979,
+        4.354021999999986,
+        4.106477000000268,
+        3.9581459999999424,
+        4.158991999999671,
+        5.0263759999998,
+        6.54028100000005,
+        4.641176000000087,
+        4.6262799999999515,
+        4.174547000000075,
+        4.602031999999781,
+        4.325018,
+        4.748591000000033,
+        4.179697000000033,
+        4.090367999999671,
+        4.026888000000326,
+        3.958161999999902,
+        6.033007999999882,
+        4.28056400000014,
+        3.9234450000003562,
+        3.7323670000000675,
+        4.379566000000068,
+        4.323477999999795,
+        4.074851999999737,
+        4.14742299999989,
+        4.094443999999839,
+        4.173522999999932,
+        4.231944999999996,
+        3.7463800000000447,
+        3.6950190000002294,
+        3.756336999999803,
+        3.3934080000003632,
+        3.7232500000000073,
+        3.580315000000155,
+        3.957706000000144,
+        4.010189000000082,
+        3.844985000000179,
+        4.04435199999989,
+        4.439246999999796,
+        3.8722200000001976,
+        3.8742669999996906,
+        3.7367099999996753,
+        4.218340999999782,
+        3.794702000000143,
+        3.816447000000153,
+        3.8054169999995793,
+        3.7510339999998905,
+        4.431806999999935,
+        3.922016999999869,
+        3.903805999999804,
+        3.956828000000314,
+        4.345690000000104,
+        4.343521999999666,
+        4.144732999999633,
+        4.076959999999872,
+        4.706198999999742,
+        4.570892000000185,
+        4.606962000000294,
+        4.175984999999855,
+        4.597915999999714,
+        4.52757500000007,
+        4.095478000000185,
+        6.6618170000001555,
+        4.292536999999811,
+        4.028736000000208,
+        4.094981000000189,
+        4.431167000000187,
+        4.298799999999574,
+        4.27559599999995,
+        4.0960690000001705,
+        4.390190999999959,
+        4.407439999999951,
+        4.719597000000249,
+        4.434120999999777,
+        4.248501999999917,
+        4.438372999999956,
+        4.171779000000242,
+        3.9697330000003603,
+        4.399323999999979,
+        3.929765999999745,
+        4.163012999999864,
+        4.274149999999736,
+        3.950065999999879,
+        4.0767000000000735,
+        3.8634430000001885,
+        4.614771000000019,
+        3.9691200000002027,
+        4.132622999999967,
+        4.370613999999932,
+        4.891845999999987,
+        4.191819000000123
+      ]
+    }
+  ],
+  "mutationPointer": "$/body/dirty: expected false, received true",
+  "configuredRootNative": false,
+  "forgedContextNative": false,
+  "separateChildLaunchFlags": [
+    false,
+    true
+  ],
+  "referenceAdmissionProbes": 0,
+  "summary": [
+    {
+      "route": "/api/review/workspace",
+      "attempted": 100,
+      "native": 85,
+      "fallback": 15,
+      "differences": 0
+    }
+  ],
+  "kind": "synthetic-public-socket-release-unselected-workspace",
+  "build": {
+    "profile": "release",
+    "binarySha256": "8467b54b268685819ab016da8cc3ef5a7a16c6a31d5b70a087c325c5a77d26df",
+    "command": "RUSTC_WRAPPER= cargo build --locked --offline --release --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d"
+  },
+  "warmups": 10,
+  "samplesPerTransport": 100,
+  "failThenPass": {
+    "testFirstCommit": "f1a8cc7c5",
+    "redExit": 1,
+    "failure": "Native route was not reached: /api/review/workspace seed=6327 case=0",
+    "greenExit": 0,
+    "frozenExit": 0
+  },
+  "checks": {
+    "cargoAllFeatures": 0,
+    "typecheck": 0,
+    "lint": 0
+  },
+  "limitations": [
+    "Native only when no query workspace or configured default root selects a workspace. Selected Git/GitHub/cache behavior remains in TypeScript.",
+    "Synthetic Linux fixture with real owned Git repository and account-free gh executable, not installed desktop or phone proof.",
+    "No local full verifier/hermetic/native suite under the current speed rule; hosted CI is the gate."
+  ],
+  "sourceSha256": {
+    "src/lib/review/workspace-selection.ts": "50c22f6cf91dbf94c4064e573b42c6f70e294d59c10961496be7c757a894db06",
+    "src/app/api/review/workspace/route.ts": "a1f95e10146c251acaf1183c07ab497b56af0e159c143a0826604d345af57a0b",
+    "src/lib/ws-server/native-http-routes.ts": "8c7511c3b9ec69f8b72bd0b3256b19fbc664c0508165e691d098b865a0975753",
+    "crates/o8d/src/http/review_workspace.rs": "1ee8aeefbd59c2bbbb74b8fddc9ce930bf7600d3aae463cad1a30b4a960582bf",
+    "crates/o8d/src/http/mod.rs": "f9f6001d3229a38a769a62329c601601e0f7830e1549b8d6b20f9ce3b1ee851d",
+    "crates/o8d/src/app/session_reads.rs": "a0a1fd51e0a66e21cb9a0a94fd16e6ad2967802439dce2c8eaefd58931cf32ef"
+  },
+  "packagingRebase": {
+    "base": "dc855e3a8",
+    "routeModule": 0,
+    "typecheckFast": 0,
+    "touchedLint": 0,
+    "cargoReceiptReused": {
+      "exit": 0,
+      "tests": 30,
+      "rustSourcesAndManifestsUnchanged": true
+    },
+    "preserved": "Packaged helper discovery, settings/mobile admission contexts, existing auth paths and settings window-owner fallback.",
+    "note": "Functional frozen replay on the packaged-daemon base; release samples above are historical and were not remeasured."
+  }
+}

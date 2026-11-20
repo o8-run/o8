@@ -120,12 +120,9 @@ it.skipIf(!runnable)('boots o8 next against the WS process with Next stopped', a
     // Next is gone, so every route the window used must be native and answered: no 404
     // fall-through, no 405 for an unported method, no refusal of the operator, no 5xx and no
     // relay failure.
-    // One designed refusal: with no voice host heartbeat the realtime broker answers 503
-    // VOICE_HOST_UNAVAILABLE, as it does behind Next. Its body says `available: false`; the
-    // route's own relay failure gives the same code without it, so read the body to tell them apart.
-    const voice = await fetch(`http://127.0.0.1:${target}/api/next/voice-host`, { headers: { authorization: `Bearer ${server.token}` } });
-    expect([voice.status, await voice.json()]).toEqual([503, { ok: false, available: false, code: 'VOICE_HOST_UNAVAILABLE' }]);
-    const designed = new Set(['GET /api/next/voice-host 503']);
+    // One designed refusal: the voice host route left with Symon (#6414), but the window still asks
+    // for it at startup until its native voice entry points are removed, so that read answers 404.
+    const designed = new Set(['GET /api/next/voice-host 404']);
     // A read open now and still open 6 s later is a stuck route, even if the window keeps working
     // around it (its own read timeout is 45 s).
     const open = new Map(inflight);

@@ -127,3 +127,43 @@ impl Client {
 #[cfg(test)]
 #[path = "customize/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod prompt_writer_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "driven by the owned saved-prompt product transport fixture"]
+    fn saved_prompt_writes_without_node() {
+        let root = std::path::PathBuf::from(std::env::var_os("O8_PROMPT_CLIENT_DATA").unwrap());
+        assert_eq!(std::fs::read_to_string(root.join("fixture-owner")).unwrap(), "o8d-native-read/v1");
+        assert_eq!(std::fs::read_to_string(root.join("node-stopped")).unwrap(), "stopped");
+        let token = std::fs::read_to_string(root.join("ws-token")).unwrap();
+        let client = Client::authenticated(&std::env::var("O8_PROMPT_CLIENT_ORIGIN").unwrap(), Some(token.trim().to_owned())).unwrap();
+        let state = root.join("prompt-client-write-state.json");
+        if !state.exists() {
+            let created = client.customize_request("POST", "/api/prompt-library", &serde_json::json!({"title":"fixture native workflow", "body":"created by the actual window Client", "tags":["fixture"]})).unwrap();
+            assert_eq!(created["created"], true);
+            let id = created["prompt"]["id"].as_str().unwrap();
+            let path = format!("/api/prompt-library/{id}");
+            let edited = client.customize_request("PATCH", &path, &serde_json::json!({"title":"fixture native edited", "expectedUpdatedAt":created["prompt"]["updatedAt"]})).unwrap();
+            assert_eq!(edited["prompt"]["title"], "fixture native edited");
+            let used = client.customize_request("POST", &format!("{path}/use"), &serde_json::json!({})).unwrap();
+            assert_eq!(used["prompt"]["useCount"], 1);
+            assert!(used["prompt"]["lastUsedAt"].as_i64().unwrap() > 0);
+            std::fs::write(&state, serde_json::to_vec(&used["prompt"]).unwrap()).unwrap();
+        } else {
+            // This phase is run after the fixture restarts o8d with Node still stopped.
+            let saved: Value = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+            let id = saved["id"].as_str().unwrap();
+            let path = format!("/api/prompt-library/{id}");
+            let opened = client.customize_request("GET", &path, &Value::Null).unwrap();
+            assert_eq!(opened["prompt"], saved);
+            let listed: Value = client.get("/api/prompt-library", &[("scope", "all")]).unwrap();
+            assert_eq!(listed["prompts"][0], saved);
+            let deleted = client.customize_request("DELETE", &format!("{path}?expectedUpdatedAt={}", saved["updatedAt"]), &Value::Null).unwrap();
+            assert_eq!(deleted["deletedId"], id);
+            assert!(client.customize_request("GET", &path, &Value::Null).unwrap_err().contains("HTTP 404"));
+        }
+    }
+}

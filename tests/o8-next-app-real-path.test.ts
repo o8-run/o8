@@ -28,7 +28,6 @@ vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({ repairFlippedOrches
 vi.mock('@/lib/lane/review-drain-bootstrap', () => ({ ensureReviewQueueDrainStarted: () => {} }));
 vi.mock('@/lib/panel/status-boot', () => ({ startStatusBootHooks: () => {} }));
 vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: async () => {} }));
-vi.mock('@/lib/symon/messages-receiver/loop', () => ({ startMessagesReceiver: () => {} }));
 vi.mock('@/lib/tauri/bridge', () => ({ storeSet: vi.fn(), isTauri: () => false }));
 
 const route = await import('@/app/api/panel/operator-defaults/route');

@@ -42,7 +42,6 @@ const objectRoutes = [
   ['POST /api/panel/repos', () => import('@/app/api/panel/repos/route').then(route => route.POST)],
   ['DELETE /api/panel/repos', () => import('@/app/api/panel/repos/route').then(route => route.DELETE)],
   ['POST /api/panel/ssh-machines', () => import('@/app/api/panel/ssh-machines/route').then(route => route.POST)],
-  ['POST /api/panel/targets/dispatch', () => import('@/app/api/panel/targets/dispatch/route').then(route => route.POST)],
 ] as const;
 it.each(objectRoutes)('%s refuses null and non-object bodies before side effects', async (_name, load) => {
   const handler = await load();

@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getWsBase } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -18,7 +19,7 @@ export function withToolRuntimeOwner<T>(run: () => Promise<T>): Promise<T> {
   return stdioTool.getStore() === true ? withLiveRuntimeOwner(run) : run();
 }
 export function runtimeOwnerRequired(): boolean {
-  return process.env.O8_NEXT_O8D === '1' || owner.getStore() === true;
+  return nativeHttpTransportEnabled() || owner.getStore() === true;
 }
 export function runtimeOwnerOrigin(): string { return getWsBase().replace(/^ws:/, 'http:'); }
 export function operatorSteerOrigin(): string | undefined {
@@ -28,7 +29,7 @@ export function operatorSteerOrigin(): string | undefined {
 /** Discover the running owner without weakening an explicit native requirement. */
 export async function withLiveRuntimeOwner<T>(run: () => Promise<T>): Promise<T> {
   const absentOwner = () => {
-    if (process.env.O8_NEXT_O8D === '1') {
+    if (nativeHttpTransportEnabled()) {
       throw new RuntimeOwnerUnconfirmedError();
     }
     return owner.run(false, run);

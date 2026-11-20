@@ -186,7 +186,8 @@ impl Surface {
         let button = self
             .composer_button("composer-context", "", true, cx, |s, w, cx| {
                 // Classic's handleToggle: a click puts the hover card away.
-                s.composer.update(cx, |i, _| i.controls.context.help = false);
+                s.composer
+                    .update(cx, |i, _| i.controls.context.help = false);
                 if s.composer.read(cx).controls.open == Some("context") {
                     // Back to the input, so the ring isn't left tinted as focused.
                     s.close_composer_picker(w, cx);

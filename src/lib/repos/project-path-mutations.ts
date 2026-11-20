@@ -1,9 +1,10 @@
 import 'server-only';
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { serializeProjectsLedgerMutation, writeProjectsLedgerAtomically } from './projects-ledger-writer';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 const PROJECTS_PATH = path.join(getDataDir(), 'projects.json');
@@ -23,37 +24,39 @@ function normalizeRepoPath(inputPath: string) {
 }
 
 async function mutateProjectPaths(transform: (repoPath: string) => string | null) {
-  let ledger: StoredProjectsLedger;
-  try {
-    ledger = JSON.parse(await readFile(PROJECTS_PATH, 'utf8')) as StoredProjectsLedger;
-  } catch {
-    return;
-  }
-  if (!Array.isArray(ledger.projects)) return;
-
-  let changed = false;
-  const projects = ledger.projects.map((project) => {
-    if (!project || typeof project !== 'object' || !Array.isArray((project as StoredProject).repoPaths)) return project;
-    let projectChanged = false;
-    const stored = project as StoredProject;
-    const current = stored.repoPaths as unknown[];
-    const repoPaths = current.flatMap((candidate) => {
-      if (typeof candidate !== 'string') return [candidate];
-      const next = transform(candidate);
-      if (next === candidate) return [candidate];
-      changed = true;
-      projectChanged = true;
-      return next ? [next] : [];
-    });
-    const deduplicated = Array.from(new Set(repoPaths));
-    if (deduplicated.length !== repoPaths.length) {
-      changed = true;
-      projectChanged = true;
+  return serializeProjectsLedgerMutation(async () => {
+    let ledger: StoredProjectsLedger;
+    try {
+      ledger = JSON.parse(await readFile(PROJECTS_PATH, 'utf8')) as StoredProjectsLedger;
+    } catch {
+      return;
     }
-    return projectChanged ? { ...stored, repoPaths: deduplicated } : project;
-  });
+    if (!Array.isArray(ledger.projects)) return;
 
-  if (changed) await writeFile(PROJECTS_PATH, JSON.stringify({ ...ledger, projects }, null, 2), 'utf8');
+    let changed = false;
+    const projects = ledger.projects.map((project) => {
+      if (!project || typeof project !== 'object' || !Array.isArray((project as StoredProject).repoPaths)) return project;
+      let projectChanged = false;
+      const stored = project as StoredProject;
+      const current = stored.repoPaths as unknown[];
+      const repoPaths = current.flatMap((candidate) => {
+        if (typeof candidate !== 'string') return [candidate];
+        const next = transform(candidate);
+        if (next === candidate) return [candidate];
+        changed = true;
+        projectChanged = true;
+        return next ? [next] : [];
+      });
+      const deduplicated = Array.from(new Set(repoPaths));
+      if (deduplicated.length !== repoPaths.length) {
+        changed = true;
+        projectChanged = true;
+      }
+      return projectChanged ? { ...stored, repoPaths: deduplicated } : project;
+    });
+
+    if (changed) await writeProjectsLedgerAtomically(JSON.stringify({ ...ledger, projects }, null, 2));
+  });
 }
 
 export async function removeRepoPathFromProjects(repoPath: string): Promise<void> {

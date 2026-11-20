@@ -254,9 +254,6 @@ const PUBLIC_ANY = [
 ];
 const PUBLIC_READ = [
   /^\/api\/panel\/status(\/|$)/,
-  /^\/api\/v2\/auth\/session\/?$/,
-  /^\/api\/mobile\/orchestrator\/backend-availability(\/|$)/,
-  /^\/api\/mobile\/push\/public-key(\/|$)/,
   // #1529 — a paired phone whose saved API port moved probes this to find the
   // new one. Credential-free by design: it returns port metadata plus a
   // signature over a domain-separated transcript
@@ -281,13 +278,9 @@ const EXPLICIT_GATED = [
   /^\/api\/mcp\/?$/,
   /^\/api\/leases\/?$/,
   /^\/api\/orchestrator\/receipts\/?$/,
-  /^\/api\/orchestrator\/ui-loop(?:\/steer)?\/?$/,
   /^\/api\/broadcast\/tokens\/?$/,
   /^\/api\/broadcast\/post\/?$/,
   /^\/api\/broadcast\/say\/?$/,
-  // #1619: local Codex app-server lifecycle + streamed audio/transcript events.
-  // Operator-only because it can start a local Codex thread and reads OAuth state.
-  /^\/api\/voice\/realtime\/codex\/?$/,
 ];
 const SPECTATOR_READ = [
   /^\/api\/broadcast\/events\/?$/,

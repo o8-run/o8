@@ -1,9 +1,13 @@
+import { apiFrontDoorEnabled, nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { isIP } from 'node:net';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { access, constants } from 'node:fs/promises';
+import { statSync } from 'node:fs';
+import packageJson from '../../../package.json';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
@@ -11,12 +15,34 @@ import type { RealtimeEventEnvelope } from '@/lib/realtime/types';
 import { localMachineName } from '@/lib/mobile/machine-name';
 import { nativeSessionReadsEnabled } from './native-session-reads';
 import { o8dBinaryPath } from './o8d-binary';
+import { O8dProducer } from './o8d-producer';
 
 const PIPE_LIMIT = 1024 * 1024;
 
+/** Read-only authority snapshot; changed resolver cache keys defer to TS. */
+function startupPortInfo(): string | undefined {
+  try {
+    const stamp = (name: string): string | null => {
+      try { return statSync(join(getDataDir(), name), { bigint: true }).mtimeNs.toString(); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+    };
+    const apiMtimeNs = stamp('api-port');
+    const wsMtimeNs = stamp('ws-port');
+    // Reuse the actual TS cache, including its intentional ws-port asymmetry.
+    const info = resolvePortInfo();
+    if (stamp('api-port') !== apiMtimeNs || stamp('ws-port') !== wsMtimeNs) return undefined;
+    return JSON.stringify({ ...info, serverVersion: packageJson.version, apiMtimeNs, wsMtimeNs, apiFrontDoor: apiFrontDoorEnabled() });
+  } catch { return undefined; }
+}
+
 /** TS owns authentication, checkpoints and commands; Rust owns the public socket. */
 export class O8dBridge {
-  private readonly key = randomUUID();
+  private readonly key: string;
+  private readonly producerSocket: string | undefined;
+  private producer: O8dProducer | null = null;
   private child: ChildProcess | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -34,22 +60,34 @@ export class O8dBridge {
     private readonly epoch: string,
     /** Public bind host — loopback unless the operator opted in via O8_LAN_ACCESS. */
     private readonly host: string = '127.0.0.1',
+    /** A takeover must never recover by evicting an existing API listener. */
+    private readonly rejectPortConflicts = false,
   ) {
+    this.producerSocket = apiFrontDoorEnabled() ? process.env.O8D_PRODUCER_SOCKET : undefined;
+    if (this.producerSocket && !process.env.O8D_BRIDGE_KEY) throw new Error('Launcher producer credential unavailable');
+    this.key = this.producerSocket ? process.env.O8D_BRIDGE_KEY! : randomUUID();
     this.fallback = createServer((req, res) => server.emit('request', req, res));
     this.fallback.on('upgrade', (req, socket, head) => server.emit('upgrade', req, socket, head));
     // A transient bind conflict must leave recovery enabled.
-    this.fallback.on('error', () => this.scheduleRetry());
+    this.fallback.on('error', (error: NodeJS.ErrnoException) => {
+      if (this.rejectPortConflicts && error.code === 'EADDRINUSE') {
+        this.stop(); this.server.emit('error', error); return;
+      }
+      this.scheduleRetry();
+    });
   }
 
   get status() {
+    if (this.producer) return this.producer.status;
     return { transport: this.transport, pid: this.child?.pid ?? null, generation: this.generation };
   }
 
   /** True when o8d sent this request: only Rust holds the per-process key. */
   bridged(req: IncomingMessage): boolean {
     const supplied = req.headers['x-o8d-bridge'];
-    if (typeof supplied !== 'string' || Buffer.byteLength(supplied) !== Buffer.byteLength(this.key)) return false;
-    return timingSafeEqual(Buffer.from(supplied), Buffer.from(this.key));
+    const expected = this.producerSocket ? `${this.key}:${this.epoch}` : this.key;
+    if (typeof supplied !== 'string' || Buffer.byteLength(supplied) !== Buffer.byteLength(expected)) return false;
+    return timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
   }
 
   /** Headers from the public client are replaced by Rust, never trusted verbatim. */
@@ -79,15 +117,21 @@ export class O8dBridge {
   }
 
   async start() {
-    this.binary = o8dBinaryPath();
-    await new Promise<void>((resolve) => this.server.listen(0, '127.0.0.1', resolve));
+    if (!this.producerSocket) this.binary = o8dBinaryPath();
+    const producerPort = this.producerSocket ? Number(process.env.O8D_PRODUCER_UPSTREAM_PORT) : 0;
+    if (this.producerSocket && (!Number.isInteger(producerPort) || producerPort <= 0 || producerPort > 65535 || producerPort === this.port)) throw new Error('Private producer port unavailable');
+    await new Promise<void>((resolve) => this.server.listen(producerPort, '127.0.0.1', resolve));
     const address = this.server.address();
     if (!address || typeof address === 'string') throw new Error('o8d upstream unavailable');
     this.upstream = `127.0.0.1:${address.port}`;
-    await this.launch();
+    if (this.producerSocket) {
+      this.producer = new O8dProducer(this.producerSocket, this.key, this.upstream, this.epoch, startupPortInfo);
+      await this.producer.start();
+    } else await this.launch();
   }
 
   publish(events: RealtimeEventEnvelope[]) {
+    if (this.producer) { this.producer.publish(events); return; }
     const child = this.child;
     if (this.transport !== 'o8d' || !child?.stdin?.writable) return;
     const line = `${JSON.stringify(events)}\n`;
@@ -130,7 +174,11 @@ export class O8dBridge {
         '--app-upstream', this.upstream], {
         env: childEnvironment({ inherit: false, env: {
           O8D_BRIDGE_KEY: this.key, O8D_EPOCH: this.epoch,
-          O8D_NATIVE_SESSION_READS: process.env.O8_NEXT_O8D === '1' && nativeSessionReadsEnabled() ? '1' : undefined,
+          O8_API_FRONT_DOOR: apiFrontDoorEnabled() ? '1' : undefined,
+          O8D_SERVER_VERSION: packageJson.version, O8D_STARTUP_PORT_INFO: startupPortInfo(),
+          O8_INSTANCE_ID: process.env.O8_INSTANCE_ID, O8_BOOT_ID: process.env.O8_BOOT_ID,
+          O8D_NATIVE_OWNED: nativeHttpTransportEnabled() ? '1' : undefined,
+          O8D_NATIVE_SESSION_READS: nativeHttpTransportEnabled() && nativeSessionReadsEnabled() ? '1' : undefined,
           O8D_REQUEST_COUNTS_PATH: join(getDataDir(), 'o8d-request-counts.jsonl'),
           O8D_MACHINE_DISPLAY_NAME: nativeSessionReadsEnabled() ? localMachineName() : undefined,
           O8D_SESSION_DATA_DIR: getDataDir(), O8D_SESSION_DB_PATH: process.env.CORTEX_IDE_DB_PATH, TZ: process.env.TZ,
@@ -184,6 +232,7 @@ export class O8dBridge {
     this.stopped = true;
     if (this.retry) clearTimeout(this.retry);
     this.retry = null;
+    this.producer?.stop();
     this.child?.stdin?.end();
     if (this.fallback.listening) this.fallback.close();
   }

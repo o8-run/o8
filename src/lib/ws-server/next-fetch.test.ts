@@ -34,6 +34,11 @@ const observedLaunchStatuses: number[] = [];
 beforeAll(async () => {
   server = createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', origin);
+    const supported = ['/api/runtime/action', '/api/runtime/launch'].includes(url.pathname);
+    if (!supported || request.method !== 'POST') {
+      request.resume(); response.writeHead(supported ? 405 : 404, { 'Content-Type': 'application/json', ...(supported ? { Allow: 'POST' } : {}) });
+      response.end(JSON.stringify({ error: 'Fixture route unavailable' })); return;
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = Buffer.concat(chunks).toString('utf8');
@@ -83,7 +88,7 @@ afterAll(async () => {
 });
 
 describe('ws-server runtime action transport', () => {
-  it('keeps conflict reads and Symon turns on Next while registered native producers use WS', async () => {
+  it('keeps reads on Next with native transport off and registered producers on WS', async () => {
     const seen: Array<{ path: string; method: string; body: string; authorization: string }> = [];
     const next = createServer(async (request, response) => {
       let body = '';
@@ -99,23 +104,25 @@ describe('ws-server runtime action transport', () => {
     await new Promise<void>(resolve => native.listen(0, '127.0.0.1', resolve));
     const nextPort = (next.address() as { port: number }).port;
     const nativePort = (native.address() as { port: number }).port;
-    vi.stubEnv('O8_NEXT_O8D', '1');
+    vi.stubEnv('O8_NEXT_O8D', '0');
     vi.stubEnv('O8_WS_PORT', String(nativePort));
     vi.stubEnv('NEXT_ORIGIN', `http://127.0.0.1:${nextPort}`);
     try {
       const { fetchNextJson } = await import('./next-fetch');
       await expect(fetchNextJson('/api/worktrees/conflicts', { searchParams: new URLSearchParams({ repoPath: dataDir }) })).resolves.toEqual({ owner: 'next' });
-      const turn = { sessionId: 'fixture-turn', text: 'Fixture request', requestId: 'fixture-request' };
-      await expect(fetchNextJson('/api/mobile/symon/text-turn', { method: 'POST', body: turn })).resolves.toEqual({ owner: 'next' });
       expect(seen).toEqual([
         { path: `/api/worktrees/conflicts?${new URLSearchParams({ repoPath: dataDir })}`, method: 'GET', body: '', authorization: `Bearer ${token}` },
-        { path: '/api/mobile/symon/text-turn', method: 'POST', body: JSON.stringify(turn), authorization: `Bearer ${token}` },
       ]);
+      vi.stubEnv('O8_NEXT_O8D', '1');
       await expect(fetchNextJson('/api/setup/identity')).resolves.not.toEqual({ owner: 'next' });
       // A method the native registration does not serve still belongs to Next.
       await expect(fetchNextJson('/api/setup/identity', { method: 'POST', body: {} })).resolves.toEqual({ owner: 'next' });
       vi.stubEnv('O8_NEXT_O8D', '0');
       await expect(fetchNextJson('/api/setup/identity')).resolves.toEqual({ owner: 'next' });
+      vi.stubEnv('O8_API_FRONT_DOOR', '1');
+      vi.stubEnv('O8_API_PORT', String(nativePort));
+      await expect(fetchNextJson('/api/setup/identity')).resolves.not.toEqual({ owner: 'next' });
+      await expect(fetchNextJson('/api/setup/identity', { method: 'POST', body: {} })).resolves.toEqual({ owner: 'next' });
     } finally {
       vi.unstubAllEnvs();
       next.closeAllConnections();

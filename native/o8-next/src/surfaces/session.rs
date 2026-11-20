@@ -359,16 +359,34 @@ impl Client {
             .get("/api/panel/operator-defaults", &[("include", "values")])
             .unwrap_or(Value::Null);
         let mut routing = json!({"backend":backend,"model":model,"effort":"medium","permissionMode":permission,"mode":"fleet","pickedMode":"fast","collide":false});
-        if let Some(effort) = receipt
-            .and_then(|r| r["effort"].as_str())
-            .or(defaults["values"]["thinkingEffort"].as_str())
-        {
+        let effort = match receipt.and_then(|r| r["effort"].as_str()) {
+            Some(effort) => Some(effort.to_owned()),
+            None => defaults["values"]["thinkingEffort"]
+                .as_str()
+                .map(|effort| self.default_effort(&defaults, backend, model, effort)),
+        };
+        if let Some(effort) = effort {
             routing["effort"] = json!(effort);
         }
         if let Some(project) = record["projectId"].as_str() {
             routing["projectId"] = json!(project);
         }
         Ok(routing)
+    }
+    /// The effort a turn sends when nothing chose one (#6533). Only the
+    /// built-in default (`source: default`) is fitted to the selected model,
+    /// with the server catalogue's own default-effort policy, for this turn
+    /// only. An operator's saved value, and any value when the catalogue has
+    /// no entry for this model, go unchanged, so the route refuses an
+    /// unsupported choice in its own words instead of it being lowered here.
+    fn default_effort(&self, defaults: &Value, backend: &str, model: &str, saved: &str) -> String {
+        if defaults["sources"]["thinkingEffort"] != "default" {
+            return saved.to_owned();
+        }
+        let catalogue: Value = self
+            .get("/api/mobile/orchestrator/models", &[])
+            .unwrap_or(Value::Null);
+        catalogue_effort(&catalogue, backend, model, saved).unwrap_or_else(|| saved.to_owned())
     }
     pub fn queue(&self, session: &Session) -> Result<Value, String> {
         // A chat with no project omits its repository; the server resolves its scratch folder.
@@ -481,6 +499,32 @@ impl Client {
     }
 }
 
+/// The catalogue's effort for an unset default on this model: the default
+/// itself when the model lists it, else the catalogue's `defaultEffort`;
+/// `adaptive` (the runtime's own default) for a model with no effort tiers.
+/// None when the catalogue does not list this model.
+fn catalogue_effort(catalogue: &Value, backend: &str, model: &str, saved: &str) -> Option<String> {
+    let entry = catalogue["agents"]
+        .as_array()?
+        .iter()
+        .find(|agent| agent["id"] == backend)?["models"]
+        .as_array()?
+        .iter()
+        .find(|entry| entry["id"] == model)?;
+    let efforts = entry["efforts"].as_array()?;
+    if efforts.iter().any(|effort| effort == saved) {
+        return Some(saved.to_owned());
+    }
+    Some(match entry["defaultEffort"].as_str() {
+        Some(effort) if efforts.iter().any(|listed| listed == effort) => effort.to_owned(),
+        _ if efforts.is_empty() => "adaptive".to_owned(),
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+#[path = "session_effort_tests.rs"]
+mod effort_tests;
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;

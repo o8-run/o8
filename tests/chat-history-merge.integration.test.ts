@@ -6,11 +6,6 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { NextRequest } from 'next/server';
 import { POST, GET, DELETE, PATCH } from '@/app/api/v2/chat-history/route';
 import { getDataDir } from '@/lib/data-dir-migration';
-import { LiveCaptions } from '@/lib/voice/managed-live/captions';
-import { serializeTranscriptForStorage, deserializeStoredTranscript } from '@/lib/transcripts/history-serde';
-import { visibleVoiceTranscript } from '@/lib/transcripts/voice-captions';
-import { dedupeDisplayMessages } from '@/components/desktop/thoughts/chat-panel/dedupe-display-messages';
-import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { persistRuntimeSessionHandoff, readRuntimeSessionHandoff } from '@/lib/lane/runtime-session-handoff';
 import { writePersistedLlmChat } from '@/lib/llm/chat-history-store';
 
@@ -75,25 +70,6 @@ describe('chat-history route merge (#1282)', () => {
     } finally {
       await DELETE(new NextRequest(`http://localhost/api/v2/chat-history?tabId=${id}`));
     }
-  });
-  it('persists streamed voice, its exact send link and separate spoken replies across stale writes and reload', async () => {
-    let captions: MobileTranscriptEntry[] = [];
-    const projection = new LiveCaptions('voice-session', updates => { captions = dedupeDisplayMessages([...captions, ...updates]); });
-    projection.observe({ type: 'session.input_transcript.delta', event_id: 'a', delta: 'Read this', start_ms: 0, end_ms: 100 });
-    const stale = serializeTranscriptForStorage(captions);
-    expect((await post({ tabId, replace: true, messages: stale })).ok).toBe(true);
-    projection.observe({ type: 'session.input_transcript.delta', event_id: 'b', delta: ' file', start_ms: 100, end_ms: 200 });
-    projection.submitted(['a', 'b'], 'orch-user-caption-test');
-    projection.observe({ type: 'session.output_transcript.delta', event_id: 'c', delta: 'I will check.', start_ms: 200, end_ms: 300 });
-    const sent: MobileTranscriptEntry = { id: 'orch-user-caption-test', role: 'user', text: 'Read this file' };
-    expect((await post({ tabId, messages: serializeTranscriptForStorage([...captions, sent]) })).ok).toBe(true);
-    expect((await post({ tabId, messages: stale })).ok).toBe(true);
-    const restored = deserializeStoredTranscript(await storedMessages());
-    expect(restored.find(entry => entry.voice?.direction === 'input')).toMatchObject({ text: 'Read this file', voice: { delegatedUserMessageId: sent.id } });
-    const visible = visibleVoiceTranscript(restored);
-    expect(visible.filter(entry => entry.role === 'user')).toEqual([expect.objectContaining({ id: sent.id, text: sent.text })]);
-    expect(visible.find(entry => entry.voice?.direction === 'output')).toMatchObject({ text: 'I will check.' });
-    expect(visible.every(entry => !entry.receipt)).toBe(true);
   });
   it('a partial [user]-only POST does NOT drop the stored assistant reply', async () => {
     await post({ tabId, replace: true, messages: [user, assistant] }); // seed full turn

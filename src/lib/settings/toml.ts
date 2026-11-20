@@ -45,6 +45,8 @@ type TomlRecord = Record<string, unknown>;
 interface TomlField<T> {
   path: readonly [string, ...string[]];
   parse: (value: unknown, key: string) => T;
+  /** Record sub-keys exposed by the editor; other stored keys stay opaque. */
+  declaredKeys?: readonly string[];
   /**
    * How the value is written back to TOML, when that differs from `parse`.
    * TOML has no null, so a nullable field whose value is null would be dropped
@@ -253,6 +255,7 @@ function branchPrefixField(section: string, key: string): TomlField<string> {
 function targetingTierField(section: string, key: string): TomlField<OperatorDefaults['targetingTriage']> {
   return {
     path: [section, key],
+    declaredKeys: ['runtime', 'model', 'effort'],
     parse: (value, tomlKey) => isTargetingTier(value)
       ? value
       : invalid(tomlKey, 'a table with dispatchable runtime, string model, and valid thinking effort'),
@@ -476,6 +479,8 @@ export function parseOperatorDefaultsToml(raw: string): Partial<OperatorDefaults
     const field = OPERATOR_DEFAULTS_TOML_MAPPING[operatorKey] as unknown as TomlField<unknown>;
     const rawValue = readPath(document, field);
     if (rawValue === undefined) continue;
+    if (isRecord(rawValue) && field.declaredKeys
+      && !field.declaredKeys.some(key => Object.hasOwn(rawValue, key))) continue;
     const tomlKey = field.path.join('.');
     (values as Record<string, unknown>)[operatorKey] = field.parse(rawValue, tomlKey);
   }
@@ -491,11 +496,29 @@ export function parseOperatorDefaultsToml(raw: string): Partial<OperatorDefaults
 export function serializeOperatorDefaultsToml(
   values: Partial<OperatorDefaults>,
   existingRaw?: string,
+  replaceDeclared = false,
 ): string {
   const document = existingRaw === undefined ? {} : parseDocument(existingRaw);
   for (const operatorKey of OPERATOR_DEFAULTS_TOML_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(values, operatorKey)) continue;
     const field = OPERATOR_DEFAULTS_TOML_MAPPING[operatorKey] as unknown as TomlField<unknown>;
+    if (!Object.prototype.hasOwnProperty.call(values, operatorKey)) {
+      if (replaceDeclared) {
+        let table = document;
+        for (const segment of field.path.slice(0, -1)) {
+          if (!isRecord(table[segment])) { table = {}; break; }
+          table = table[segment] as TomlRecord;
+        }
+        const key = field.path[field.path.length - 1];
+        const stored = table[key];
+        if (isRecord(stored) && field.declaredKeys) {
+          for (const declaredKey of field.declaredKeys) delete stored[declaredKey];
+          if (!Object.keys(stored).length) delete table[key];
+        } else {
+          delete table[key];
+        }
+      }
+      continue;
+    }
     const tomlKey = field.path.join('.');
     const parsed = field.parse(values[operatorKey], tomlKey);
     writePath(document, field, field.serialize ? field.serialize(parsed) : parsed);
@@ -513,8 +536,9 @@ export function projectOperatorDefaultsToml(raw: string): { text: string; additi
   const text = serializeOperatorDefaultsToml(values);
   const hasAdditional = (stored: unknown, declared: unknown): boolean => {
     if (!isRecord(stored)) return false;
-    return Object.entries(stored).some(([key, value]) => !isRecord(declared)
-      || !Object.hasOwn(declared, key) || hasAdditional(value, declared[key]));
+    return Object.entries(stored).some(([key, value]) => isRecord(value)
+      ? hasAdditional(value, isRecord(declared) ? declared[key] : undefined)
+      : !isRecord(declared) || !Object.hasOwn(declared, key));
   };
   return { text, additionalSettingsSet: hasAdditional(parseDocument(raw), parseDocument(text)) };
 }

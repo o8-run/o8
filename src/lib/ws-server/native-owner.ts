@@ -1,3 +1,4 @@
+import { nativeHttpTransportEnabled } from '@/lib/ws-server/api-front-door-config';
 import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { O8_RELAY_FORWARD_HEADER } from '@/lib/connect/web-machine-surface';
 import { getWsBase } from '@/lib/panel/api-port';
@@ -39,7 +40,7 @@ export function ownedByNativeTransport(handler: Handler, unavailable: () => Resp
     if (options.pageOrigin && request.headers.has(O8_PAGE_ORIGIN_HEADER)) {
       return Response.json({ error: { code: 'page_origin_refused', message: 'Open this from the app.' } }, { status: 400 });
     }
-    if (!options.alwaysForward && process.env.O8_NEXT_O8D !== '1') return handler(request);
+    if (!options.alwaysForward && !nativeHttpTransportEnabled()) return handler(request);
     const url = new URL(request.url);
     const headers = new Headers();
     if (options.pageOrigin) {

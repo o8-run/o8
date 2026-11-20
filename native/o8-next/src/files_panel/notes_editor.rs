@@ -87,230 +87,219 @@ impl Editor {
                             .pl(px(4.))
                             .pr(px(8.))
                             .child(
-                                div()
-                                    .flex()
-                                    .items_start()
-                                    .child(
-                                        canvas(
-                                            |_, _, _| (),
-                                            move |bounds, _, window, cx| {
-                                                let (
-                                                    text,
-                                                    selection,
-                                                    marked,
-                                                    cursor,
-                                                    focus,
-                                                    color,
-                                                    heights,
-                                                ) = {
-                                                    let i = input.read(cx);
-                                                    (
-                                                        i.text.clone(),
-                                                        i.selection.clone(),
-                                                        i.marked.clone(),
-                                                        i.cursor(),
-                                                        i.focus.clone(),
-                                                        i.note_color,
-                                                        i.rail.heights.clone(),
+                                div().flex().items_start().child(
+                                    canvas(
+                                        |_, _, _| (),
+                                        move |bounds, _, window, cx| {
+                                            let (
+                                                text,
+                                                selection,
+                                                marked,
+                                                cursor,
+                                                focus,
+                                                color,
+                                                heights,
+                                            ) = {
+                                                let i = input.read(cx);
+                                                (
+                                                    i.text.clone(),
+                                                    i.selection.clone(),
+                                                    i.marked.clone(),
+                                                    i.cursor(),
+                                                    i.focus.clone(),
+                                                    i.note_color,
+                                                    i.rail.heights.clone(),
+                                                )
+                                            };
+                                            window.handle_input(
+                                                &focus,
+                                                ElementInputHandler::new(bounds, input.clone()),
+                                                cx,
+                                            );
+                                            let rows = super::super::spec_document::lines(
+                                                &text,
+                                                &selection,
+                                                marked.as_ref(),
+                                                color,
+                                            );
+                                            let review = super::super::spec_rfm::parse(&text);
+                                            let refs = assets::references(&text);
+                                            let mut y = bounds.top();
+                                            let mut positions = std::collections::HashMap::new();
+                                            let mut image_positions = vec![];
+                                            let mut layout = vec![];
+                                            #[cfg(test)]
+                                            let mut painted = vec![];
+                                            #[cfg(test)]
+                                            let mut prose_lines = vec![];
+                                            for row in rows {
+                                                let mut shaped = rich_layout::RichLine::shape(
+                                                    &row,
+                                                    bounds.size.width.max(px(10.)),
+                                                    window,
+                                                );
+                                                let image =
+                                                    refs.iter().find(|(at, _)| *at == row.start);
+                                                if let Some((_, path)) = image {
+                                                    // spec-image-widget's stable 120px thumbnails.
+                                                    let ratio = assets::ratio(
+                                                        &text[row.start..row.start + row.len],
                                                     )
-                                                };
-                                                window.handle_input(
-                                                    &focus,
-                                                    ElementInputHandler::new(bounds, input.clone()),
-                                                    cx,
-                                                );
-                                                let rows = super::super::spec_document::lines(
-                                                    &text,
-                                                    &selection,
-                                                    marked.as_ref(),
-                                                    color,
-                                                );
-                                                let review = super::super::spec_rfm::parse(&text);
-                                                let refs = assets::references(&text);
-                                                let mut y = bounds.top();
-                                                let mut positions =
-                                                    std::collections::HashMap::new();
-                                                let mut image_positions = vec![];
-                                                let mut layout = vec![];
-                                                #[cfg(test)]
-                                                let mut painted = vec![];
-                                                #[cfg(test)]
-                                                let mut prose_lines = vec![];
-                                                for row in rows {
-                                                    let mut shaped = rich_layout::RichLine::shape(
-                                                        &row,
-                                                        bounds.size.width.max(px(10.)),
-                                                        window,
-                                                    );
-                                                    let image = refs
-                                                        .iter()
-                                                        .find(|(at, _)| *at == row.start);
-                                                    if let Some((_, path)) = image {
-                                                        // spec-image-widget's stable 120px thumbnails.
-                                                        let ratio = assets::ratio(
-                                                            &text[row.start..row.start + row.len],
-                                                        )
-                                                        .unwrap_or(1.5);
-                                                        let image_width =
-                                                            px((120. * ratio).clamp(60., 280.))
-                                                                .min(bounds.size.width);
-                                                        image_positions.push((
-                                                            path.clone(),
-                                                            y - bounds.top() + px(6.),
-                                                            image_width,
-                                                            px(120.),
-                                                        ));
-                                                        shaped.height = px(132.);
-                                                    } else {
-                                                        shaped.paint(
-                                                            point(bounds.left(), y),
-                                                            window,
-                                                            cx,
-                                                        );
-                                                    }
-                                                    #[cfg(test)]
-                                                    {
-                                                        painted.push((
-                                                            row.display.to_string(),
-                                                            row.size,
-                                                            row.runs
-                                                                .first()
-                                                                .map(|r| r.font.weight.0)
-                                                                .unwrap_or(300.),
-                                                        ));
-                                                        painted.extend(
-                                                            shaped.fragments.iter().map(|f| {
-                                                                (
-                                                                    f.line.text.to_string(),
-                                                                    f.size,
-                                                                    row.runs
-                                                                        .first()
-                                                                        .map(|r| r.font.weight.0)
-                                                                        .unwrap_or(300.),
-                                                                )
-                                                            }),
-                                                        );
-                                                    }
-                                                    #[cfg(test)]
-                                                    prose_lines.push((
-                                                        row.start,
-                                                        row.len,
-                                                        point(bounds.left(), y),
+                                                    .unwrap_or(1.5);
+                                                    let image_width =
+                                                        px((120. * ratio).clamp(60., 280.))
+                                                            .min(bounds.size.width);
+                                                    image_positions.push((
+                                                        path.clone(),
+                                                        y - bounds.top() + px(6.),
+                                                        image_width,
+                                                        px(120.),
                                                     ));
-                                                    let h = shaped.height;
-                                                    let mapped = EditorLine {
-                                                        start: row.start,
-                                                        len: row.len,
-                                                        tabs: vec![],
-                                                        map: Some(row.map),
-                                                        line_height: px(row.height),
-                                                        line: WrappedLine::default(),
-                                                        rich: Some(shaped),
-                                                        origin: point(bounds.left(), y),
-                                                    };
-                                                    if image.is_none()
-                                                        && focus.is_focused(window)
-                                                        && cursor >= row.start
-                                                        && cursor <= row.start + row.len
-                                                    {
-                                                        if let Some(p) =
-                                                            mapped.position(cursor - row.start)
-                                                        {
-                                                            window.paint_quad(fill(
-                                                                Bounds::new(
-                                                                    mapped.origin + p,
-                                                                    size(px(1.5), px(row.height)),
-                                                                ),
-                                                                color,
-                                                            ));
-                                                        }
-                                                    }
-                                                    y += h;
-                                                    // A note reads as the reply to its paragraph.
-                                                    for note in review.notes.iter().filter(|n| {
-                                                        !n.resolved
-                                                            && n.offset >= row.start
-                                                            && n.offset <= row.start + row.len
-                                                    }) {
-                                                        y += px(2.);
-                                                        positions.insert(
-                                                            note.id.clone(),
-                                                            y - bounds.top(),
-                                                        );
-                                                        y += heights
-                                                            .get(&note.id)
-                                                            .copied()
-                                                            .unwrap_or(px(24.))
-                                                            + px(6.);
-                                                    }
-                                                    layout.push(mapped);
+                                                    shaped.height = px(132.);
+                                                } else {
+                                                    shaped.paint(
+                                                        point(bounds.left(), y),
+                                                        window,
+                                                        cx,
+                                                    );
                                                 }
                                                 #[cfg(test)]
-                                                cx.set_global(
-                                                    super::super::tests::spec_tests::Painted(
-                                                        painted,
-                                                    ),
-                                                );
+                                                {
+                                                    painted.push((
+                                                        row.display.to_string(),
+                                                        row.size,
+                                                        row.runs
+                                                            .first()
+                                                            .map(|r| r.font.weight.0)
+                                                            .unwrap_or(300.),
+                                                    ));
+                                                    painted.extend(shaped.fragments.iter().map(
+                                                        |f| {
+                                                            (
+                                                                f.line.text.to_string(),
+                                                                f.size,
+                                                                row.runs
+                                                                    .first()
+                                                                    .map(|r| r.font.weight.0)
+                                                                    .unwrap_or(300.),
+                                                            )
+                                                        },
+                                                    ));
+                                                }
                                                 #[cfg(test)]
-                                                cx.set_global(
-                                                    super::super::tests::spec_tests::ProseLines(
-                                                        prose_lines,
-                                                    ),
-                                                );
-                                                input.update(cx, |i, cx| {
-                                                    let h = (y - bounds.top()).max(px(20.925));
-                                                    if i.height != h
-                                                        || i.rail.positions != positions
-                                                        || i.assets.positions != image_positions
+                                                prose_lines.push((
+                                                    row.start,
+                                                    row.len,
+                                                    point(bounds.left(), y),
+                                                ));
+                                                let h = shaped.height;
+                                                let mapped = EditorLine {
+                                                    start: row.start,
+                                                    len: row.len,
+                                                    tabs: vec![],
+                                                    map: Some(row.map),
+                                                    line_height: px(row.height),
+                                                    line: WrappedLine::default(),
+                                                    rich: Some(shaped),
+                                                    origin: point(bounds.left(), y),
+                                                };
+                                                if image.is_none()
+                                                    && focus.is_focused(window)
+                                                    && cursor >= row.start
+                                                    && cursor <= row.start + row.len
+                                                {
+                                                    if let Some(p) =
+                                                        mapped.position(cursor - row.start)
                                                     {
-                                                        i.height = h;
-                                                        i.rail.positions = positions;
-                                                        i.assets.positions = image_positions;
-                                                        cx.notify();
+                                                        window.paint_quad(fill(
+                                                            Bounds::new(
+                                                                mapped.origin + p,
+                                                                size(px(1.5), px(row.height)),
+                                                            ),
+                                                            color,
+                                                        ));
                                                     }
-                                                    if i.reveal_cursor {
-                                                        if let Some(p) =
-                                                            layout.iter().find_map(|r| {
-                                                                (cursor >= r.start
-                                                                    && cursor <= r.start + r.len)
-                                                                    .then(|| {
-                                                                        r.position(cursor - r.start)
-                                                                            .map(|p| r.origin + p)
-                                                                    })
-                                                                    .flatten()
+                                                }
+                                                y += h;
+                                                // A note reads as the reply to its paragraph.
+                                                for note in review.notes.iter().filter(|n| {
+                                                    !n.resolved
+                                                        && n.offset >= row.start
+                                                        && n.offset <= row.start + row.len
+                                                }) {
+                                                    y += px(2.);
+                                                    positions
+                                                        .insert(note.id.clone(), y - bounds.top());
+                                                    y += heights
+                                                        .get(&note.id)
+                                                        .copied()
+                                                        .unwrap_or(px(24.))
+                                                        + px(6.);
+                                                }
+                                                layout.push(mapped);
+                                            }
+                                            #[cfg(test)]
+                                            cx.set_global(
+                                                super::super::tests::spec_tests::Painted(painted),
+                                            );
+                                            #[cfg(test)]
+                                            cx.set_global(
+                                                super::super::tests::spec_tests::ProseLines(
+                                                    prose_lines,
+                                                ),
+                                            );
+                                            input.update(cx, |i, cx| {
+                                                let h = (y - bounds.top()).max(px(20.925));
+                                                if i.height != h
+                                                    || i.rail.positions != positions
+                                                    || i.assets.positions != image_positions
+                                                {
+                                                    i.height = h;
+                                                    i.rail.positions = positions;
+                                                    i.assets.positions = image_positions;
+                                                    cx.notify();
+                                                }
+                                                if i.reveal_cursor {
+                                                    if let Some(p) = layout.iter().find_map(|r| {
+                                                        (cursor >= r.start
+                                                            && cursor <= r.start + r.len)
+                                                            .then(|| {
+                                                                r.position(cursor - r.start)
+                                                                    .map(|p| r.origin + p)
                                                             })
-                                                        {
-                                                            let offset = i.scroll.offset();
-                                                            let top = -offset.y;
-                                                            let visible =
-                                                                (i.scroll.bounds().size.height
-                                                                    - px(48.))
-                                                                .max(px(20.925));
-                                                            let at = p.y - bounds.top();
-                                                            i.scroll.set_offset(point(
-                                                                px(0.),
-                                                                if at < top {
-                                                                    -at
-                                                                } else if at + px(20.925)
-                                                                    > top + visible
-                                                                {
-                                                                    visible - at - px(20.925)
-                                                                } else {
-                                                                    offset.y
-                                                                },
-                                                            ));
-                                                        }
-                                                        i.reveal_cursor = false;
+                                                            .flatten()
+                                                    }) {
+                                                        let offset = i.scroll.offset();
+                                                        let top = -offset.y;
+                                                        let visible =
+                                                            (i.scroll.bounds().size.height
+                                                                - px(48.))
+                                                            .max(px(20.925));
+                                                        let at = p.y - bounds.top();
+                                                        i.scroll.set_offset(point(
+                                                            px(0.),
+                                                            if at < top {
+                                                                -at
+                                                            } else if at + px(20.925)
+                                                                > top + visible
+                                                            {
+                                                                visible - at - px(20.925)
+                                                            } else {
+                                                                offset.y
+                                                            },
+                                                        ));
                                                     }
-                                                    i.layout = layout;
-                                                });
-                                            },
-                                        )
-                                        .flex_1()
-                                        .min_w_0()
-                                        .h(height)
-                                        .flex_shrink_0(),
+                                                    i.reveal_cursor = false;
+                                                }
+                                                i.layout = layout;
+                                            });
+                                        },
                                     )
+                                    .flex_1()
+                                    .min_w_0()
+                                    .h(height)
+                                    .flex_shrink_0(),
+                                ),
                             )
                             .child(images)
                             .child(rail),

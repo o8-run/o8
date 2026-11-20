@@ -270,8 +270,8 @@ fn mismatched_birth_identity_removes_receipt_and_starts_without_signalling() {
     f.start();
     until(|| f.starts("api-starts").len() == 2);
     assert!(TcpStream::connect(("127.0.0.1", port)).is_ok());
-    let next = fs::read_to_string(path).unwrap();
-    assert_ne!(next, bytes);
+    // The new receipt is written after the server starts.
+    until(|| fs::read_to_string(&path).is_ok_and(|next| next != bytes));
 }
 #[test]
 fn unproven_moved_install_removes_receipt_without_signalling() {

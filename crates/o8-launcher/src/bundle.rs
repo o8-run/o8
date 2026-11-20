@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 /// `Contents/Resources/server`, the window beside this program, and the same
 /// data directory rule as the classic shell (`O8_DATA_DIR`, then
 /// `CORTEX_IDE_DATA_DIR`, then `~/.o8`). The runtime is left empty for the
-/// startup checks to find. `None` outside a bundle or when a part is missing.
+/// startup checks to find. The `O8APIFrontDoor` and `O8NextOff` marks (written
+/// by a `native-app-build.mjs --candidate --front-door | --next-off` build)
+/// select the server mode, since an app opened from Finder gets no
+/// environment. `None` outside a bundle or when a part is missing.
 pub fn configuration(
     executable: &Path,
     primary: Option<PathBuf>,
@@ -36,6 +39,8 @@ pub fn configuration(
         "node": "",
         "window": window,
         "version": crate::update::bundle_version(app)?,
+        "api_front_door": crate::update::bundle_flag(app, "O8APIFrontDoor"),
+        "next_off": crate::update::bundle_flag(app, "O8NextOff"),
     }))
 }
 
@@ -88,6 +93,8 @@ mod tests {
                 "node": "",
                 "window": contents.join("MacOS/o8-next"),
                 "version": "9.8.7",
+                "api_front_door": false,
+                "next_off": false,
             })
         );
         // The explicit override wins, then the legacy one; a relative value is skipped.
@@ -109,6 +116,11 @@ mod tests {
             pick(Some("relative"), Some("/fixture/b")),
             serde_json::json!("/fixture/b")
         );
+        // The candidate build's marks select the server mode.
+        write(contents.join("Info.plist"), "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>CFBundleShortVersionString</key><string>9.8.7</string><key>O8APIFrontDoor</key><true/><key>O8NextOff</key><false/></dict></plist>\n");
+        let marked = super::configuration(&executable, None, None, home.clone()).unwrap();
+        assert_eq!(marked["api_front_door"], true);
+        assert_eq!(marked["next_off"], false);
         // Outside a bundle there is nothing to read.
         assert!(super::configuration(&root.join("bin/o8"), None, None, home).is_none());
         fs::remove_dir_all(&root).unwrap();

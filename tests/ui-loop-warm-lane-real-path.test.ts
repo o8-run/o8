@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
-import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -21,8 +20,7 @@ const otherRepoPath = mkdtempSync(join(os.tmpdir(), 'o8-ui-loop-other-repo-'));
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
-const lookupRoute = await import('@/app/api/orchestrator/ui-loop/route');
-const steerRoute = await import('@/app/api/orchestrator/ui-loop/steer/route');
+const { findWarmUiLoopPacket, steerWarmUiLoop } = await import('@/lib/orchestrator/ui-loop');
 const { closeDb } = await import('@/lib/db');
 const {
   createLane,
@@ -93,18 +91,6 @@ function createWarmLane(packet: OrchestratorPacket) {
   return lane;
 }
 
-function getRequest(targetRepoPath: string) {
-  return new NextRequest(`http://localhost:3001/api/orchestrator/ui-loop?repo=${encodeURIComponent(targetRepoPath)}`);
-}
-
-function postRequest(targetRepoPath: string, text: string, previewImageDataUri?: string) {
-  return new NextRequest('http://localhost:3001/api/orchestrator/ui-loop/steer', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ repo: targetRepoPath, text, previewImageDataUri }),
-  });
-}
-
 beforeEach(() => {
   h.perform.mockReset();
   h.perform.mockImplementation(async (input: { surfaceId: string }) => ({
@@ -137,26 +123,13 @@ describe('Design Mode warm packet lane real path', () => {
     const lane = createWarmLane(packet);
     const editText = 'Edit the selected browser element.\nElement: <button.primary>\nSelector: #save';
 
-    const lookup = await lookupRoute.GET(getRequest(repoPath));
-    expect(lookup.status).toBe(200);
-    await expect(lookup.json()).resolves.toMatchObject({
-      ok: true,
-      result: { packetId: packet.id, laneId: lane.id, label: '#1905' },
-    });
+    expect(findWarmUiLoopPacket(repoPath)).toMatchObject({ packetId: packet.id, laneId: lane.id, label: '#1905' });
 
-    const response = await steerRoute.POST(postRequest(
-      repoPath,
-      editText,
-      'data:image/png;base64,element-crop',
-    ));
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      ok: true,
-      result: {
-        kind: 'steered',
-        packet: { packetId: packet.id, laneId: lane.id },
-        imageForwarded: false,
-      },
+    const result = await steerWarmUiLoop({ repoPath, text: editText, previewImageDataUri: 'data:image/png;base64,element-crop' });
+    expect(result).toMatchObject({
+      kind: 'steered',
+      packet: { packetId: packet.id, laneId: lane.id },
+      imageForwarded: false,
     });
     expect(h.perform).toHaveBeenCalledWith(expect.objectContaining({
       action: 'steer',
@@ -180,15 +153,9 @@ describe('Design Mode warm packet lane real path', () => {
     persistPackets([packet]);
     createWarmLane(packet);
 
-    await expect((await lookupRoute.GET(getRequest(repoPath))).json()).resolves.toMatchObject({
-      ok: true,
-      result: null,
-    });
-    await expect((await steerRoute.POST(postRequest(repoPath, 'Edit the terminal packet.'))).json())
-      .resolves.toMatchObject({
-        ok: true,
-        result: { kind: 'fallback', reason: 'NO_WARM_UI_LOOP_PACKET' },
-      });
+    expect(findWarmUiLoopPacket(repoPath)).toBeNull();
+    await expect(steerWarmUiLoop({ repoPath, text: 'Edit the terminal packet.' }))
+      .resolves.toMatchObject({ kind: 'fallback', reason: 'NO_WARM_UI_LOOP_PACKET' });
     expect(h.perform).not.toHaveBeenCalled();
   });
 
@@ -197,10 +164,7 @@ describe('Design Mode warm packet lane real path', () => {
     persistPackets([packet]);
     createWarmLane(packet);
 
-    await expect((await lookupRoute.GET(getRequest(repoPath))).json()).resolves.toMatchObject({
-      ok: true,
-      result: null,
-    });
+    expect(findWarmUiLoopPacket(repoPath)).toBeNull();
   });
 
   it('never chooses an untagged packet even when its lane is warm', async () => {
@@ -208,10 +172,7 @@ describe('Design Mode warm packet lane real path', () => {
     persistPackets([packet]);
     createWarmLane(packet);
 
-    await expect((await lookupRoute.GET(getRequest(repoPath))).json()).resolves.toMatchObject({
-      ok: true,
-      result: null,
-    });
+    expect(findWarmUiLoopPacket(repoPath)).toBeNull();
   });
 
   it('round-trips the Design Mode origin through packet normalization and persistence', () => {

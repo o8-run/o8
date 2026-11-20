@@ -64,8 +64,20 @@ export const config = {
 let _cachedToken: { path: string; value: string | null; mtimeMs: number; size: number } | null = null;
 
 /** The operator token by the rule handlers and the WS upgrade share (wsTokenFor). */
-function loadPanelToken(): string | null {
+function loadPanelToken(freshPrompt = false): string | null {
+  if (freshPrompt) {
+    // Saved prompts use the current credential, without mutating the cache
+    // retained by unrelated routes. Missing/invalid files retain provisioning's
+    // existing WS_TOKEN fallback; read failures never establish authority.
+    try { return wsTokenFor(validWsToken(readFileSync(join(getDataDir(), 'ws-token'), 'utf8'))); }
+    catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? wsTokenFor(null) : null; }
+  }
   return wsTokenFor(loadStoredPanelToken());
+}
+function isSavedPromptOperatorPath(path: string): boolean {
+  return /^\/api\/prompt-library\/[^/]+\/use\/?$/.test(path)
+    || /^\/api\/prompt-library\/?$/.test(path)
+    || /^\/api\/prompt-library\/[^/]+\/?$/.test(path);
 }
 
 function loadStoredPanelToken(): string | null {
@@ -101,17 +113,10 @@ function loadStoredPanelToken(): string | null {
 const ALLOWLIST_READ_ONLY: RegExp[] = [
   // Health check for the Tauri shell to know the bundled server is up.
   /^\/api\/panel\/status(\/|$)/,
-  // Session inspection authenticates with the o8-token cookie in its handler.
-  /^\/api\/v2\/auth\/session\/?$/,
-  // VAPID public key — public by definition; the mobile client needs it
-  // to call pushManager.subscribe before any token handshake.
-  /^\/api\/mobile\/push\/public-key(\/|$)/,
   // A paired phone's bounded stale-port probe. The response is public port
   // metadata signed with the already pinned E2EE server identity; it exposes
   // no bearer, enrollment code, or other operator capability.
   /^\/api\/mobile\/pairing-discovery\/?$/,
-  // Backend availability is non-sensitive setup state for mobile runtime tabs.
-  /^\/api\/mobile\/orchestrator\/backend-availability(\/|$)/,
 ];
 
 const ALLOWLIST_ANY_METHOD: RegExp[] = [
@@ -145,14 +150,9 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET']), path: /^\/api\/mobile\/orchestrator\/models\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
   // Phone-facing routes only. Keep internal desktop/ws-server routes out of
-  // this list: devices*, push-url, symon/tool, and ws-token all require the
+  // this list: devices*, push-url, and ws-token all require the
   // operator credential. New mobile routes fail closed until named here.
-  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat(?:\/send)?|diff-comment(?:s|\/resolve)?|enhance|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:backend-availability|openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|push\/(?:public-key|subscribe|test)|review-file|search|session-media|symon(?:\/session|\/text-session)?|sync|terminal-input|terminal-sessions)\/?$/ },
-  // A paired phone reads its own standing intents and clears one. Read + cancel
-  // ONLY: registering a watch stays inside a Symon turn, where it raises a card,
-  // and the tools' own surface (/api/symon/watches) keeps the operator bearer.
-  { methods: new Set(['GET']), path: /^\/api\/mobile\/symon\/watches\/?$/ },
-  { methods: new Set(['DELETE']), path: /^\/api\/mobile\/symon\/watches\/[^/]+\/?$/ },
+  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat\/send|diff-comments?|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|review-file|search|sync|terminal-input|terminal-sessions)\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/panel\/approvals\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|github-status|repos|operator-defaults|projects|search)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/panel\/(?:operator-defaults|pr\/review)\/?$/ },
@@ -170,15 +170,13 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET']), path: /^\/api\/orchestrator\/merge-preview\/?$/ },
   // Phone-facing surfaces reached OUTSIDE /api/mobile/* (the app grew into these
   // and each failed closed until named). All device-safe: repo o8.md notes (read
-  // + autosave write), fleet runtime inventory, review diffs, dictation + TTS.
+  // + autosave write), fleet runtime inventory, review diffs.
   // The repo-spec/asset srcPath (local-file) branch is separately blocked to
   // devices in its handler.
   { methods: new Set(['GET', 'PUT', 'POST']), path: /^\/api\/repo-spec\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/repo-spec\/asset\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/runtime\/inventory\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/worktrees\/(?:diff|diff-summary)\/?$/ },
-  { methods: new Set(['POST']), path: /^\/api\/dictation\/(?:polish|transcribe)\/?$/ },
-  { methods: new Set(['POST']), path: /^\/api\/tts\/?$/ },
   // Display-only documents an agent attached to a thread. Read only: the
   // handlers refuse a device that asks for a packet transcript, and a device
   // cannot publish or preview.
@@ -512,7 +510,7 @@ export function panelGateMiddleware(req: NextRequest, options: { rebuildMissing?
 
   // An operator bearer is valid on every API route. The retained shell layout
   // installs it on same-origin fetches before hydration for local desktop pages.
-  const panelToken = loadPanelToken();
+  const panelToken = loadPanelToken(isSavedPromptOperatorPath(pathname));
   if (panelToken) {
     if (bearer && tokenMatches(bearer, panelToken)) {
       return NextResponse.next();

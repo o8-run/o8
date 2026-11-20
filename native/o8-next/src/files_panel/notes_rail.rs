@@ -102,7 +102,11 @@ impl Editor {
                 let top = self.rail.positions.get(&id).copied().unwrap_or(px(0.));
                 let busy = self.rail.busy.as_ref().is_some_and(|(n, _)| n == &id);
                 let actions: &[(&'static str, &'static str)] = if note.kind == "suggestion" {
-                    &[("apply", "Apply"), ("reply", "Reply"), ("dismiss", "Dismiss")]
+                    &[
+                        ("apply", "Apply"),
+                        ("reply", "Reply"),
+                        ("dismiss", "Dismiss"),
+                    ]
                 } else {
                     &[("reply", "Reply"), ("act", "Do it"), ("resolve", "Done")]
                 };
@@ -189,15 +193,15 @@ impl Editor {
                     .when_some(
                         self.rail.feedback.get(&id).filter(|(ok, _)| !*ok),
                         |d, (_, message)| {
-                        d.child(
-                            div()
-                                .font_family(theme().font_ui)
-                                .text_size(px(9.5))
-                                .line_height(px(12.35))
-                                .text_color(theme().danger)
-                                .child(message.clone()),
-                        )
-                    },
+                            d.child(
+                                div()
+                                    .font_family(theme().font_ui)
+                                    .text_size(px(9.5))
+                                    .line_height(px(12.35))
+                                    .text_color(theme().danger)
+                                    .child(message.clone()),
+                            )
+                        },
                     )
                     .when_some(
                         self.rail.reply.as_ref().filter(|(n, _, _)| n == &id),

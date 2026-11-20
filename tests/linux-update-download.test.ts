@@ -2,8 +2,8 @@
  * Real-path seam for #2059: the update card's action is decided by what the
  * RUNNING install can do, not by what the card assumes.
  *
- * Seam A drives the real `/api/panel/app/install-info` route handler with the
- * platform stubbed, feeds its JSON through the same normalizer the card uses,
+ * Seam A drives the surviving running-install reader with the
+ * platform stubbed, feeds its result through the same normalizer the card uses,
  * and asserts which action the card would render.
  * Seam B drives the real `installUpdateAndRestart` chokepoint every surface
  * (button, idle auto-apply, remote apply mutation) funnels into, and asserts a
@@ -31,7 +31,7 @@ vi.mock('@tauri-apps/plugin-updater', () => ({ check: updaterCheck }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch }));
 
-const { GET } = await import('@/app/api/panel/app/install-info/route');
+const { getRunningInstallInfo } = await import('@/lib/app-update/install-info');
 const { installUpdateAndRestart } = await import('@/lib/app-update/client-restart');
 
 const realPlatform = process.platform;
@@ -46,14 +46,12 @@ function stubInstall(platform: NodeJS.Platform, arch: string, appImage: string |
 }
 
 async function actionForRunningInstall(version: string) {
-  const response = await GET();
-  expect(response.status).toBe(200);
-  const info = normalizeInstallInfo(await response.json());
+  const info = normalizeInstallInfo(await getRunningInstallInfo());
   expect(info).not.toBeNull();
   return resolveUpdateAction(info, version);
 }
 
-describe('install-info route decides the update action (seam A)', () => {
+describe('running-install reader decides the update action (seam A)', () => {
   beforeEach(() => {
     openExternalUrl.mockClear();
     updaterCheck.mockClear();

@@ -1,19 +1,11 @@
 import { viewerImageBytes } from '@/lib/viewers/image-bytes';
-import { readFile, realpath, stat } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { NextRequest } from 'next/server';
-import { getDataDir } from '@/lib/data-dir-migration';
+import { resolveAllowedMediaTarget } from '@/lib/files/media-scope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const WORKSPACE_ROOT = process.env.CORTEX_IDE_WORKSPACE_ROOT || require('os').homedir();
-const MEDIA_ROOT = process.env.CORTEX_IDE_MEDIA_ROOT || join(getDataDir(), 'media');
-const EXTRA_MEDIA_ROOTS = [
-  `${WORKSPACE_ROOT}/inbox`,
-  `${WORKSPACE_ROOT}/archive/artifacts`,
-];
-const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.pdf']);
 
 function contentTypeForExtension(path: string) {
   switch (extname(path).toLowerCase()) {
@@ -35,25 +27,6 @@ function contentTypeForExtension(path: string) {
   }
 }
 
-async function resolveAllowedMediaPath(rawPath: string) {
-  const extension = extname(rawPath).toLowerCase();
-  if (!ALLOWED_EXTENSIONS.has(extension)) {
-    throw new Error('Requested media type is not allowed.');
-  }
-
-  const resolvedPath = await realpath(rawPath);
-  const candidateRoots = [MEDIA_ROOT, ...EXTRA_MEDIA_ROOTS];
-  const resolvedRoots = (await Promise.allSettled(candidateRoots.map((root) => realpath(root))))
-    .flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
-
-  const allowed = resolvedRoots.some((resolvedRoot) => resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}/`));
-  if (!allowed) {
-    throw new Error('Requested media path is outside the allowed media roots.');
-  }
-
-  return resolvedPath;
-}
-
 export async function GET(request: NextRequest) {
   const rawPath = request.nextUrl.searchParams.get('path')?.trim();
 
@@ -62,7 +35,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const filePath = await resolveAllowedMediaPath(rawPath);
+    const { path: filePath } = await resolveAllowedMediaTarget(rawPath);
     const fileInfo = await stat(filePath);
     if (!fileInfo.isFile()) {
       return new Response('Not found', { status: 404 });

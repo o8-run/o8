@@ -140,6 +140,7 @@ export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks):
       active.add(key); publishComposerQueueChange(item.threadId);
       void runQueuedComposerSend(item, { registerAbort: input.registerAbort,
         publish: (session, event, data) => input.publish(item.threadId, session, event, data),
+        publishThread: input.publishThread,
       }).then(() => { settleComposerSend(item.id, { status: 'applied' }); })
         .catch(error => { settleComposerSend(item.id, { status: 'held', reason: error instanceof Error ? error.message : 'Queued message failed.' }); })
         .finally(() => { active.delete(key); publishComposerQueueChange(item.threadId); });

@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Agent, get } from 'node:http';
+import { Agent, request } from 'node:http';
 import { promisify } from 'node:util';
 import { beforeAll, expect, it } from 'vitest';
 import { firstDifference, normalize, runSessionParity, seedSessionFixture, send, SESSION_READ_PATHS, sessionCorpus, startSessionServer } from '../scripts/o8d/parity';
@@ -49,13 +49,25 @@ it('preserves auth refusals, TS writes, other routes and flag-off behavior throu
   let server: Awaited<ReturnType<typeof startSessionServer>> | undefined;
   try {
     await seedSessionFixture(directory);
+    const expectedAuth = new Map<string, { status: number; body: unknown }>();
     for (const enabled of [false, true]) {
       server = await startSessionServer(directory, enabled, binary);
       for (const path of SESSION_READ_PATHS) {
         for (const credential of ['', 'wrong', 'o8ro_fixture']) {
           const response = await send(server, path, { authorization: credential ? `Bearer ${credential}` : '',
             'x-o8d-session-read': 'authorize', 'x-o8d-bridge': 'spoofed', 'x-o8d-peer': '127.0.0.1' });
-          expect(response.status).toBe(credential.startsWith('o8ro_') ? 403 : 401);
+          const key = `${path}:${credential.startsWith('o8ro_') ? 'readonly' : credential ? 'invalid' : 'absent'}`;
+          const wire = { status: response.status, body: normalize(response.body) };
+          if (!enabled) {
+            expect(response.native, `Reference route was native: ${path}`).toBe(false);
+            expectedAuth.set(key, wire);
+          } else {
+            const expected = expectedAuth.get(key)!;
+            expect(response.status, `TS auth outcome changed: ${key}`).toBe(expected.status);
+            // Public responses include launch-specific ports. Their complete
+            // bodies/headers are checked by each route's own parity fixture.
+            if (expected.status >= 400) expect(firstDifference(expected, wire)).toBeNull();
+          }
         }
       }
       const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
@@ -72,9 +84,9 @@ it('preserves auth refusals, TS writes, other routes and flag-off behavior throu
       const unsupported = await send(server, '/api/mobile/history?sessionKey=unsupported');
       expect(unsupported.status).toBe(400);
       expect(unsupported.native).toBe(false);
-      const other = await send(server, '/api/panel/projects');
-      expect(other.status).toBe(200);
-      expect(other.native).toBe(false);
+      const other = await fetch(`${server.origin}/api/v2/chat-history`, { method: 'HEAD', headers });
+      expect(other.status).toBe(405);
+      expect(other.headers.get('x-o8d-native-session-read')).toBe(null);
       await server.stop(); server = undefined;
     }
   } finally { await server?.stop(); rmSync(directory, { recursive: true, force: true }); }
@@ -88,16 +100,18 @@ it.each([true, 'default'] as const)('reclassifies native reads after a TS reques
   try {
     await seedSessionFixture(directory);
     server = await startSessionServer(directory, flag, binary);
-    const read = (path: string) => new Promise<{ status: number | undefined; native: boolean }>((resolve, reject) => {
-      const request = get(server!.origin + path, { agent, headers: { authorization: `Bearer ${server!.token}` } }, response => {
+    const read = (path: string, method = 'GET') => new Promise<{ status: number | undefined; native: boolean }>((resolve, reject) => {
+      const pending = request(server!.origin + path, { method, agent, headers: { authorization: `Bearer ${server!.token}` } }, response => {
         response.resume();
         response.once('end', () => resolve({ status: response.statusCode, native: response.headers['x-o8d-native-session-read'] === '1' }));
         response.once('error', reject);
       });
-      request.once('error', reject);
+      pending.once('error', reject);
+      pending.end();
     });
-    // A registered TS route (native-http-routes close mark), then a path outside the registry (ws-server close mark).
-    expect(await read('/api/panel/projects')).toEqual({ status: 200, native: false });
+    // A registered method refusal stays in TS even as more GET routes become native.
+    // Then a path outside the registry exercises the ws-server close mark.
+    expect(await read('/api/v2/chat-history', 'HEAD')).toEqual({ status: 405, native: false });
     expect(await read('/api/v2/chat-history?tabId=thoughts-review')).toEqual({ status: 200, native: true });
     expect((await read('/api/o8d-parity-unregistered')).native).toBe(false);
     expect(await read('/api/v2/chat-history?tabId=thoughts-review')).toEqual({ status: 200, native: true });

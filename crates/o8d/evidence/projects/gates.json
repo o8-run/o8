@@ -1,0 +1,2178 @@
+{
+  "kind": "synthetic-public-socket-release",
+  "build": {
+    "profile": "release",
+    "binarySha256": "f54e7bc8062ef7280083a325eb4580ea5efc2a77a11eaaaaff811ae8a81787e2",
+    "command": "cargo build --locked --offline --release --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d",
+    "rebaseNote": "Release samples above are the historical optimized receipt. Current functional replay is recorded separately under latestRebase; no new latency claim is made."
+  },
+  "summary": [
+    {
+      "route": "/api/panel/repos",
+      "attempted": 100,
+      "native": 38,
+      "fallback": 62,
+      "differences": 0
+    },
+    {
+      "route": "/api/panel/projects",
+      "attempted": 100,
+      "native": 80,
+      "fallback": 20,
+      "differences": 0
+    },
+    {
+      "route": "/api/projects",
+      "attempted": 100,
+      "native": 60,
+      "fallback": 40,
+      "differences": 0
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "attempted": 100,
+      "native": 80,
+      "fallback": 20,
+      "differences": 0
+    },
+    {
+      "route": "/api/projects/[id]",
+      "attempted": 100,
+      "native": 48,
+      "fallback": 52,
+      "differences": 0
+    }
+  ],
+  "auth": [
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "repos": [],
+          "validatedRestorePaths": []
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "repos": [],
+          "validatedRestorePaths": []
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "repos": [],
+          "validatedRestorePaths": []
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repos",
+      "expected": {
+        "body": {
+          "repos": [],
+          "validatedRestorePaths": []
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "activeProjectId": "legacy-alpha",
+          "projects": [
+            {
+              "createdAt": "2026-01-02T00:00:00.000Z",
+              "id": "proj-12345678-90a",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "\u96ea project",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-12345678-90a"
+            },
+            {
+              "color": "#7fa68f",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "id": "legacy-alpha",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "Alpha",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-01234567-89a"
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "activeProjectId": "legacy-alpha",
+          "projects": [
+            {
+              "createdAt": "2026-01-02T00:00:00.000Z",
+              "id": "proj-12345678-90a",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "\u96ea project",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-12345678-90a"
+            },
+            {
+              "color": "#7fa68f",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "id": "legacy-alpha",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "Alpha",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-01234567-89a"
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "activeProjectId": "legacy-alpha",
+          "projects": [
+            {
+              "createdAt": "2026-01-02T00:00:00.000Z",
+              "id": "proj-12345678-90a",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "\u96ea project",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-12345678-90a"
+            },
+            {
+              "color": "#7fa68f",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "id": "legacy-alpha",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "Alpha",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-01234567-89a"
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/projects",
+      "expected": {
+        "body": {
+          "activeProjectId": "legacy-alpha",
+          "projects": [
+            {
+              "createdAt": "2026-01-02T00:00:00.000Z",
+              "id": "proj-12345678-90a",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "\u96ea project",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-12345678-90a"
+            },
+            {
+              "color": "#7fa68f",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "id": "legacy-alpha",
+              "mergePolicy": {
+                "mode": "pr_only",
+                "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+              },
+              "name": "Alpha",
+              "repoPaths": [],
+              "sqliteProjectId": "proj-01234567-89a"
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "projects": [
+            {
+              "createdAt": 30,
+              "description": " Fixture description ",
+              "id": "proj-12345678-90a",
+              "mainRepoId": null,
+              "name": "\u96ea project",
+              "repos": [],
+              "slug": "snow",
+              "updatedAt": 40
+            },
+            {
+              "createdAt": 10,
+              "description": null,
+              "id": "proj-01234567-89a",
+              "mainRepoId": "repo-a",
+              "name": "Alpha",
+              "repos": [],
+              "slug": "alpha",
+              "updatedAt": 20
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "projects": [
+            {
+              "createdAt": 30,
+              "description": " Fixture description ",
+              "id": "proj-12345678-90a",
+              "mainRepoId": null,
+              "name": "\u96ea project",
+              "repos": [],
+              "slug": "snow",
+              "updatedAt": 40
+            },
+            {
+              "createdAt": 10,
+              "description": null,
+              "id": "proj-01234567-89a",
+              "mainRepoId": "repo-a",
+              "name": "Alpha",
+              "repos": [],
+              "slug": "alpha",
+              "updatedAt": 20
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "projects": [
+            {
+              "createdAt": 30,
+              "description": " Fixture description ",
+              "id": "proj-12345678-90a",
+              "mainRepoId": null,
+              "name": "\u96ea project",
+              "repos": [],
+              "slug": "snow",
+              "updatedAt": 40
+            },
+            {
+              "createdAt": 10,
+              "description": null,
+              "id": "proj-01234567-89a",
+              "mainRepoId": "repo-a",
+              "name": "Alpha",
+              "repos": [],
+              "slug": "alpha",
+              "updatedAt": 20
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects",
+      "expected": {
+        "body": {
+          "projects": [
+            {
+              "createdAt": 30,
+              "description": " Fixture description ",
+              "id": "proj-12345678-90a",
+              "mainRepoId": null,
+              "name": "\u96ea project",
+              "repos": [],
+              "slug": "snow",
+              "updatedAt": 40
+            },
+            {
+              "createdAt": 10,
+              "description": null,
+              "id": "proj-01234567-89a",
+              "mainRepoId": "repo-a",
+              "name": "Alpha",
+              "repos": [],
+              "slug": "alpha",
+              "updatedAt": 20
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Registered repository not found."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 404
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Registered repository not found."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 404
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Registered repository not found."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 404
+      },
+      "native": true
+    },
+    {
+      "route": "/api/panel/repo-icon",
+      "expected": {
+        "body": {
+          "error": "Registered repository not found."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 404
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "mergePolicy": {
+            "mode": "pr_only",
+            "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+          },
+          "project": {
+            "createdAt": 10,
+            "description": null,
+            "id": "proj-01234567-89a",
+            "mainRepoId": "repo-a",
+            "name": "Alpha",
+            "repos": [],
+            "slug": "alpha",
+            "updatedAt": 20
+          },
+          "savedMergeMode": null
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "mergePolicy": {
+            "mode": "pr_only",
+            "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+          },
+          "project": {
+            "createdAt": 10,
+            "description": null,
+            "id": "proj-01234567-89a",
+            "mainRepoId": "repo-a",
+            "name": "Alpha",
+            "repos": [],
+            "slug": "alpha",
+            "updatedAt": 20
+          },
+          "savedMergeMode": null
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "mergePolicy": {
+            "mode": "pr_only",
+            "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+          },
+          "project": {
+            "createdAt": 10,
+            "description": null,
+            "id": "proj-01234567-89a",
+            "mainRepoId": "repo-a",
+            "name": "Alpha",
+            "repos": [],
+            "slug": "alpha",
+            "updatedAt": 20
+          },
+          "savedMergeMode": null
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "route": "/api/projects/[id]",
+      "expected": {
+        "body": {
+          "mergePolicy": {
+            "mode": "pr_only",
+            "note": "PR-only dogfood mode is active \u2014 merge to main is blocked. Open a PR; a human merges."
+          },
+          "project": {
+            "createdAt": 10,
+            "description": null,
+            "id": "proj-01234567-89a",
+            "mainRepoId": "repo-a",
+            "name": "Alpha",
+            "repos": [],
+            "slug": "alpha",
+            "updatedAt": 20
+          },
+          "savedMergeMode": null
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    }
+  ],
+  "reservedPathRefusals": [
+    {
+      "path": "/api/projects/context",
+      "admissionStatus": 409,
+      "native": false
+    },
+    {
+      "path": "/api/projects/locks",
+      "admissionStatus": 409,
+      "native": false
+    },
+    {
+      "path": "/api/projects/dismissed-suggestions",
+      "admissionStatus": 409,
+      "native": false
+    }
+  ],
+  "creationFallback": {
+    "native": false,
+    "addedProjects": 2,
+    "responseIdsPersisted": true
+  },
+  "referenceAdmissionProbes": 0,
+  "separateChildLaunchFlags": [
+    false,
+    true
+  ],
+  "mutationPointer": "$/body/repos: expected [], received null",
+  "clientParser": {
+    "method": "Exact serde project/icon/ledger/machine declarations; workspace uses its Value consumer; repo-icon has no active o8-next consumer and is byte-checked by the socket harness; not GPUI suite",
+    "parsed": {
+      "panel-projects": 100,
+      "project-detail": 39,
+      "projects": 90,
+      "repo-icon": 0,
+      "repos": 81,
+      "ssh-machines": 0,
+      "workspaces": 0
+    }
+  },
+  "clientParserSources": [
+    {
+      "path": "native/o8-next/src/projects_model.rs",
+      "sha256": "3ec300d8d8a0c25707b41341efaf41c7643ae73c095a71d686fb96928b85126f"
+    },
+    {
+      "path": "native/o8-next/src/project_icon.rs",
+      "sha256": "ec0b90bf40bdb0b21e787abb5128bc209fcc2f2f5672430558ac27ec865c0d80"
+    },
+    {
+      "path": "native/o8-next/src/surfaces/setup/new_project.rs",
+      "sha256": "0d46ac40357f95f06139fb3f4683d5177d4d6b42f13bdef145add3a2465099a7"
+    },
+    {
+      "path": "native/o8-next/src/surfaces/settings/machines.rs",
+      "sha256": "c15797d7be956bedf883212e29d72cc9af26cc862078fd90ea1fa2372264fa8e"
+    }
+  ],
+  "latency": {
+    "profile": "release",
+    "warmupsPerShape": 10,
+    "samplesPerShape": 100,
+    "unit": "ms",
+    "measurements": [
+      {
+        "path": "/api/panel/repos",
+        "status": 200,
+        "native": false,
+        "p50Ms": 3.076227999999901,
+        "p95Ms": 4.193782000000283,
+        "samplesMs": [
+          3.5277059999989433,
+          3.6617459999997664,
+          3.4486399999987043,
+          3.723829000000478,
+          3.6861429999989923,
+          3.315816000000268,
+          3.798706999999922,
+          3.4769800000012765,
+          3.071541999999681,
+          2.9788230000012845,
+          2.9666720000004716,
+          2.8862150000004476,
+          2.8949249999986932,
+          3.0516890000017156,
+          2.925842000000557,
+          2.901132000000871,
+          3.187062999999398,
+          2.8571439999996073,
+          3.0605260000011185,
+          4.67357500000071,
+          3.0730139999996027,
+          3.0549360000004526,
+          3.3467390000005253,
+          3.0895930000006047,
+          3.188880000001518,
+          3.0174070000011852,
+          3.292626000000382,
+          3.4548809999996593,
+          3.177238000000216,
+          2.915646999999808,
+          2.762408000000505,
+          2.987977000000683,
+          2.955041999999594,
+          2.932733999999982,
+          3.0433169999996608,
+          3.0163850000008097,
+          2.867011000000275,
+          3.076227999999901,
+          3.0907290000013745,
+          3.092501999999513,
+          3.1655269999992015,
+          3.1491660000010597,
+          3.1223289999998087,
+          3.026116999999431,
+          2.97869399999945,
+          2.947239000000991,
+          2.838722999998936,
+          2.9272209999999177,
+          2.982904000000417,
+          3.1253880000003846,
+          3.017092000000048,
+          2.81467800000064,
+          2.7574359999998705,
+          3.33802199999991,
+          3.3901939999996102,
+          3.0843170000007376,
+          3.0220079999999143,
+          2.9822409999997035,
+          4.774575999999797,
+          3.10912400000052,
+          3.0987130000012257,
+          3.174872999999934,
+          3.065968000000794,
+          3.202491000000009,
+          3.0839649999998073,
+          2.8047029999997903,
+          2.840436000000409,
+          3.022983999999269,
+          3.098590999999942,
+          2.934667999999874,
+          2.975379999999859,
+          2.913058000000092,
+          2.970439000000624,
+          3.187568999999712,
+          3.5387190000001283,
+          3.3924129999995785,
+          3.0727419999984704,
+          3.1869770000012068,
+          2.930003999999826,
+          2.845558000000892,
+          2.7782349999997678,
+          3.0912529999986873,
+          3.09516000000076,
+          3.1470990000016172,
+          2.955372999998872,
+          3.158460999999079,
+          3.150428999999349,
+          2.9794789999996283,
+          2.8732839999993303,
+          2.9195010000003094,
+          2.9234010000000126,
+          3.8363699999990786,
+          4.308420999999726,
+          3.632335999998759,
+          3.9140449999995326,
+          4.17334800000026,
+          4.402570999998716,
+          4.193782000000283,
+          5.388844000000972,
+          3.6153749999994034
+        ]
+      },
+      {
+        "path": "/api/panel/projects",
+        "status": 200,
+        "native": false,
+        "p50Ms": 6.5167509999992035,
+        "p95Ms": 8.091337000001658,
+        "samplesMs": [
+          5.75776599999881,
+          5.8430870000011055,
+          5.861735999998928,
+          5.934793000000354,
+          5.513363000000027,
+          5.696662000000288,
+          5.706511000000319,
+          5.464367999999013,
+          6.749836000000869,
+          9.361147000001438,
+          6.946576000000277,
+          6.8234209999991435,
+          7.295337000001382,
+          6.396950999998808,
+          7.010865000000194,
+          6.552759000000151,
+          7.1180260000001,
+          6.166979999999967,
+          6.176217000000179,
+          5.941044999999576,
+          5.515615999996953,
+          5.6785930000005465,
+          5.947647999997571,
+          11.369873999999982,
+          6.886733000003005,
+          6.541305999999167,
+          7.262667999999394,
+          6.346454999998969,
+          6.9052970000011555,
+          6.603613999999652,
+          6.211669000000256,
+          7.208973999997397,
+          6.39514699999927,
+          6.710500000001048,
+          7.278474000002461,
+          6.75762400000167,
+          6.875677999996697,
+          6.33502099999896,
+          6.490695000000414,
+          6.6408769999979995,
+          7.404105000001437,
+          6.711561000000074,
+          7.011484999999084,
+          6.688033000002179,
+          7.015959000000294,
+          6.859368999997969,
+          8.161004000001412,
+          6.795397999998386,
+          7.202461000000767,
+          7.410049000001891,
+          6.665139999997336,
+          6.481401000000915,
+          5.9929769999980635,
+          6.000422000000981,
+          5.892218999997567,
+          6.087908999998035,
+          6.495806000002631,
+          7.042002999998658,
+          6.161577999999281,
+          9.251223999999638,
+          7.066545999998198,
+          7.426262999997562,
+          6.992534000000887,
+          7.493688000002294,
+          8.091337000001658,
+          6.569761999999173,
+          6.275374000000738,
+          6.746111000000383,
+          6.494516999999178,
+          6.713841000000684,
+          6.198781999999483,
+          7.082134000000224,
+          7.953056000002107,
+          6.741978999998537,
+          7.038728999999876,
+          7.123566999998729,
+          6.464073999999528,
+          7.10719600000084,
+          7.4308729999975185,
+          6.5167509999992035,
+          7.105464000000211,
+          5.573014000001422,
+          5.307021999997232,
+          5.249432000000525,
+          5.2664330000006885,
+          5.330275000000256,
+          5.356233999998949,
+          5.399428999997326,
+          5.6385559999980615,
+          5.316996000001382,
+          5.763022999999521,
+          5.600169000001188,
+          5.55023699999947,
+          5.759023000002344,
+          9.218325999998342,
+          6.0764409999974305,
+          5.643887000001996,
+          5.4222740000004706,
+          5.663845999999467,
+          5.948123000001942
+        ]
+      },
+      {
+        "path": "/api/projects",
+        "status": 200,
+        "native": false,
+        "p50Ms": 4.033249000000069,
+        "p95Ms": 4.878043000000616,
+        "samplesMs": [
+          4.333475999999791,
+          4.8636679999981425,
+          4.5162749999981315,
+          4.424971999997069,
+          4.69503899999836,
+          4.949727999999595,
+          4.456154999999853,
+          4.389299000002211,
+          4.675783999999112,
+          4.377747999998974,
+          4.715675999999803,
+          4.5775420000027225,
+          4.523013000001811,
+          4.13821100000132,
+          4.597378000002209,
+          4.368596000000252,
+          4.605998999999429,
+          4.878043000000616,
+          5.323265999999421,
+          4.849949000003107,
+          4.574158999999781,
+          4.7567850000014005,
+          4.439364999998361,
+          4.6503109999976004,
+          4.4219690000027185,
+          4.186593000002176,
+          6.933980999998312,
+          4.2578319999993255,
+          4.295103999997082,
+          3.7971199999992677,
+          4.810309999997116,
+          4.527899000000616,
+          4.348154999999679,
+          4.904660000000149,
+          4.716372999999294,
+          3.9987120000005234,
+          4.055728999999701,
+          4.02977699999974,
+          3.907256000002235,
+          4.095567000000301,
+          3.8790050000025076,
+          3.828800000002957,
+          3.767993999997998,
+          3.943812000001344,
+          4.284767000001011,
+          4.270463999997446,
+          4.122310999999172,
+          4.113982000002579,
+          4.242275000000518,
+          3.959485000003042,
+          4.0985299999993,
+          3.967823999999382,
+          3.8662729999996372,
+          3.9732230000008713,
+          3.889560999999958,
+          3.846036999999342,
+          4.1612979999990785,
+          3.6502939999991213,
+          4.034184999996796,
+          3.7313369999974384,
+          3.895884000001388,
+          3.979285000001255,
+          3.93127000000095,
+          3.7622260000025562,
+          4.0288239999972575,
+          3.9765369999986433,
+          3.790754999998171,
+          3.950676000000385,
+          3.8259429999998247,
+          7.004402999999002,
+          4.15721300000223,
+          3.735697000000073,
+          3.87236699999994,
+          3.978730999999243,
+          3.8859169999996084,
+          3.8178740000003017,
+          3.816746000000421,
+          4.035521999998309,
+          3.815121999999974,
+          3.9260140000005777,
+          4.081073000001197,
+          4.133663000000524,
+          3.9166690000020026,
+          3.961198000000877,
+          3.8140090000015334,
+          3.6992580000005546,
+          4.047782000001462,
+          3.8145389999990584,
+          3.7867069999992964,
+          3.6146130000015546,
+          3.7000950000001467,
+          4.033249000000069,
+          3.721921000000293,
+          3.6888920000019425,
+          3.776772000001074,
+          3.890514999999141,
+          3.9088950000004843,
+          3.9733309999974153,
+          3.808379000001878,
+          3.684410999998363
+        ]
+      },
+      {
+        "path": "/api/panel/repo-icon?id=unknown",
+        "status": 404,
+        "native": false,
+        "p50Ms": 3.764874000000418,
+        "p95Ms": 8.255618000002869,
+        "samplesMs": [
+          2.992009000001417,
+          5.589789000001474,
+          3.626382000002195,
+          3.0321619999995164,
+          2.9680050000024494,
+          2.824749999999767,
+          2.896541000001889,
+          2.9025929999988875,
+          2.8909759999987727,
+          3.151786999998876,
+          2.8628799999969488,
+          3.764874000000418,
+          3.4631140000019514,
+          3.3652509999992617,
+          3.740756999999576,
+          3.423757000000478,
+          3.253204000000551,
+          3.7721480000000156,
+          3.1921579999980167,
+          3.2729419999996026,
+          3.193479000001389,
+          3.166886999999406,
+          3.1888859999999113,
+          3.2162910000006377,
+          3.208924999998999,
+          3.2920720000001893,
+          3.830547999998089,
+          4.063451000001805,
+          4.165957999997772,
+          3.706106000001455,
+          3.5149970000020403,
+          3.5169459999997343,
+          3.6626019999966957,
+          3.96675999999934,
+          3.4843239999972866,
+          3.3242859999991197,
+          4.069307999998273,
+          3.610452000000805,
+          3.9711419999985083,
+          3.643175000001065,
+          4.021616999998514,
+          3.547592999999324,
+          5.129554000002827,
+          3.4591680000012275,
+          3.6768040000024484,
+          3.2895969999990484,
+          3.2301950000000943,
+          3.366791000000376,
+          3.2737230000020645,
+          3.290067000001727,
+          3.51253799999904,
+          3.31858099999954,
+          2.9207769999993616,
+          3.0860240000001795,
+          3.558109000001423,
+          3.538326000001689,
+          3.248201999998855,
+          4.067791999998008,
+          5.684511999999813,
+          5.395002999997814,
+          6.327994999999646,
+          5.296740000001591,
+          5.273901000000478,
+          4.6323019999981625,
+          5.205443999999261,
+          5.199547999996867,
+          4.520349999998871,
+          4.714681000001292,
+          3.9302849999985483,
+          4.045382000000245,
+          3.8626230000008945,
+          4.423211000001174,
+          3.8662850000000617,
+          4.464198000001488,
+          4.074891000000207,
+          3.609125999999378,
+          3.729144000000815,
+          4.2463559999996505,
+          5.192410999999993,
+          6.093810999998823,
+          6.353187999997317,
+          7.119289999998728,
+          5.511441999999079,
+          8.255618000002869,
+          8.791725999999471,
+          7.070756999997684,
+          8.144443999997748,
+          8.610915999997815,
+          11.802404999998544,
+          8.363712999998825,
+          7.155103000000963,
+          7.1955589999997756,
+          8.951712000001862,
+          6.984769999999116,
+          5.400706000000355,
+          4.094671000002563,
+          4.05462599999737,
+          3.861630999999761,
+          3.7506020000000717,
+          4.054921999999351
+        ]
+      },
+      {
+        "path": "/api/projects/proj-01234567-89a",
+        "status": 200,
+        "native": false,
+        "p50Ms": 3.2230969999982335,
+        "p95Ms": 4.568136000001687,
+        "samplesMs": [
+          3.6117940000003728,
+          3.6716359999991255,
+          3.0639070000033826,
+          3.2972070000032545,
+          3.5948309999985213,
+          4.127158999999665,
+          3.5252479999981006,
+          3.5684240000009595,
+          3.7929350000013073,
+          3.312185999999201,
+          3.4535800000012387,
+          3.9335160000009637,
+          3.3937169999990147,
+          5.418745000002673,
+          3.5330060000014782,
+          3.2411339999998745,
+          3.384557000001223,
+          3.5107739999984915,
+          3.735445999998774,
+          3.4884039999997185,
+          3.4351410000017495,
+          3.5114250000005995,
+          3.3755869999986317,
+          3.8338870000006864,
+          3.5355950000011944,
+          3.3934789999984787,
+          3.829287000000477,
+          3.716910999999527,
+          3.335620999998355,
+          3.8501649999998335,
+          3.6396290000011504,
+          3.8670769999989716,
+          4.097901999997703,
+          4.568136000001687,
+          4.62369100000069,
+          4.501930000002176,
+          4.268470999999408,
+          5.220917000002373,
+          4.121624999999767,
+          3.1954179999993357,
+          3.4882890000008047,
+          3.8893039999966277,
+          3.359425000002375,
+          3.199762999996892,
+          3.013310000002093,
+          2.931083999999828,
+          3.777027000000089,
+          3.580911000000924,
+          3.3107960000015737,
+          3.105963999998494,
+          3.005366999997932,
+          2.96508299999914,
+          3.01818799999819,
+          5.215996000002633,
+          3.0467739999985497,
+          2.9704210000018065,
+          2.947790000001987,
+          3.162836999999854,
+          3.0485569999982545,
+          3.04334899999958,
+          2.981896000001143,
+          2.8479929999994056,
+          2.9862880000000587,
+          3.147304999998596,
+          3.043259999998554,
+          2.8989070000025094,
+          3.0201710000001185,
+          3.0573530000001483,
+          2.92222799999945,
+          2.8860899999999674,
+          2.989951999999903,
+          2.996208000000479,
+          3.0066460000016377,
+          3.024486000002071,
+          3.1730009999992035,
+          3.0411820000008447,
+          2.9601550000006682,
+          3.023594000002049,
+          3.4087499999986903,
+          2.9937900000004447,
+          3.0485069999995176,
+          3.0595109999994747,
+          3.1274430000012217,
+          2.853127999998833,
+          2.9914580000004207,
+          2.9963429999988875,
+          3.1247129999974277,
+          3.2230969999982335,
+          3.8277970000017376,
+          3.0830879999994067,
+          2.887589999998454,
+          2.8784750000013446,
+          2.946488000001409,
+          5.140856999998505,
+          3.3364680000013323,
+          3.4365079999988666,
+          3.1352740000002086,
+          2.9675919999972393,
+          3.14603999999963,
+          3.10796499999924
+        ]
+      },
+      {
+        "path": "/api/panel/repos",
+        "status": 200,
+        "native": true,
+        "p50Ms": 9.773105000000214,
+        "p95Ms": 11.807270000004792,
+        "samplesMs": [
+          11.510029000004579,
+          12.670366999998805,
+          14.566069000000425,
+          10.97368099999585,
+          12.239133000002766,
+          11.160602999996627,
+          10.880548000001,
+          11.23634999999922,
+          13.23543200000131,
+          10.174940999997489,
+          8.79524500000116,
+          10.169138999997813,
+          10.136717000001227,
+          9.419866999996884,
+          9.423791000001074,
+          12.439150999998674,
+          9.211255000001984,
+          9.535962999994808,
+          9.204549000001862,
+          8.729562000000442,
+          7.800394000005326,
+          8.116069999996398,
+          7.974228999999468,
+          8.240977999994357,
+          8.155585000000428,
+          8.198132999998052,
+          7.896944000000076,
+          8.170486000002711,
+          7.802479999998468,
+          7.644026000001759,
+          7.790836000000127,
+          8.478495999996085,
+          11.288728999999876,
+          9.841482999996515,
+          9.185894000002008,
+          9.490757999999914,
+          8.118468999993638,
+          7.598881999998412,
+          7.789628000005905,
+          7.756508999998914,
+          7.612482999997155,
+          7.684637999998813,
+          7.533725000001141,
+          7.445642999999109,
+          7.643882999997004,
+          7.719256999997015,
+          7.55426499999885,
+          7.6228140000021085,
+          8.284028000001854,
+          8.258872999998857,
+          8.814045999999507,
+          9.397384999996575,
+          9.877248999997391,
+          9.633656999998493,
+          10.285383000002184,
+          11.753870000000461,
+          10.103588999998465,
+          9.721755000005942,
+          9.901738000000478,
+          9.885006000004068,
+          10.118076000006113,
+          9.897948000005272,
+          10.008286999996926,
+          9.770542999998725,
+          9.587579999999434,
+          10.003490999995847,
+          9.773105000000214,
+          9.84442599999602,
+          10.041030000000319,
+          9.926613000003272,
+          9.591166000005614,
+          10.107124000001932,
+          9.995206999999937,
+          9.87032100000215,
+          10.16979100000026,
+          10.724590000005264,
+          10.529928999996628,
+          10.49033000000054,
+          10.109642000003078,
+          9.83400999999867,
+          10.11113800000021,
+          10.065872999999556,
+          9.760586000003968,
+          10.029508999999962,
+          9.339670000001206,
+          9.628341999996337,
+          10.230307999998331,
+          9.755847000000358,
+          9.969615999994858,
+          9.985429000000295,
+          9.689450000005309,
+          9.894647000000987,
+          10.460457000001043,
+          10.695458000001963,
+          10.313004999996338,
+          10.020957999993698,
+          11.807270000004792,
+          10.463704999994661,
+          9.751115000006394,
+          9.567212000001746
+        ]
+      },
+      {
+        "path": "/api/panel/projects",
+        "status": 200,
+        "native": true,
+        "p50Ms": 8.372934999999416,
+        "p95Ms": 9.715280000003986,
+        "samplesMs": [
+          9.170391999999993,
+          9.351357999999891,
+          11.564062000004924,
+          9.17456300000049,
+          8.951924000000872,
+          9.178485999997065,
+          8.725194999999076,
+          8.603789000000688,
+          9.662615000001097,
+          9.02028099999734,
+          8.346364999997604,
+          7.968810999998823,
+          8.124783999999636,
+          9.018944000003103,
+          8.699120999997831,
+          8.821938000000955,
+          8.107060999995156,
+          7.949235000000044,
+          7.819843999997829,
+          7.947037000005366,
+          8.473480000000563,
+          8.813371999996889,
+          8.555539000000863,
+          8.876312000000325,
+          8.083269000002474,
+          7.638268999995489,
+          8.070355000003474,
+          9.452966999997443,
+          10.457615000006626,
+          9.043861999998626,
+          8.497998999999254,
+          9.046878000001016,
+          9.245229000000108,
+          9.032153000000108,
+          8.816619999997783,
+          8.942942000001494,
+          8.727409999999509,
+          9.021394000003056,
+          8.839084999999614,
+          8.712520999994013,
+          8.31269500000053,
+          7.956513999997696,
+          7.917875999999524,
+          7.760533000000578,
+          7.030171000005794,
+          7.031208000000333,
+          7.288605000001553,
+          7.72563000000082,
+          6.9081569999980275,
+          6.719653000000108,
+          6.866712000002735,
+          6.794119999998657,
+          6.817038000001048,
+          6.966725999998744,
+          7.579039999996894,
+          7.189402999996673,
+          6.997964000001957,
+          6.7137000000002445,
+          6.721206999995047,
+          6.601136000004772,
+          6.404243999997561,
+          6.342214999996941,
+          6.625791000005847,
+          6.8602890000038315,
+          6.641917000000831,
+          7.146686000000045,
+          7.4358030000003055,
+          6.991996000004292,
+          6.877874999998312,
+          6.696349999998347,
+          6.871396999995341,
+          8.372934999999416,
+          7.41489300000103,
+          6.966359999998531,
+          6.816000999999233,
+          6.763083999998344,
+          6.878065000004426,
+          7.23066299999482,
+          7.135393999997177,
+          7.7604429999992135,
+          8.443257999999332,
+          8.92272299999604,
+          8.721432999998797,
+          8.630649000006088,
+          9.033246999999392,
+          9.029765999999654,
+          10.02255100000184,
+          10.153875000003609,
+          8.897522999999637,
+          9.572410000000673,
+          9.420716000000539,
+          9.071468000001914,
+          8.839611999996123,
+          8.890077000003657,
+          9.037724000001617,
+          9.031066000003193,
+          9.266416000005847,
+          10.170333000001847,
+          9.715280000003986,
+          8.87255699999514
+        ]
+      },
+      {
+        "path": "/api/projects",
+        "status": 200,
+        "native": true,
+        "p50Ms": 9.009080999996513,
+        "p95Ms": 13.474984000000404,
+        "samplesMs": [
+          9.66406399999687,
+          9.628286999999546,
+          9.568927000000258,
+          9.806555999995908,
+          9.894676000003528,
+          12.389141999999993,
+          10.273084000000381,
+          10.39103199999954,
+          11.011808999995992,
+          12.649841999998898,
+          10.563412999996217,
+          10.980712999997195,
+          11.24001099999441,
+          16.576377000004868,
+          12.532391000000644,
+          15.279685999994399,
+          16.26565199999459,
+          13.474984000000404,
+          13.833380000003672,
+          15.14316400000098,
+          11.826639999999315,
+          11.231294999997772,
+          10.258002000002307,
+          10.353235000002314,
+          10.070752999999968,
+          9.83552800000325,
+          9.643017000002146,
+          9.702296999996179,
+          9.424573999996937,
+          10.428767000004882,
+          9.923679999999877,
+          10.333926999999676,
+          10.130044999998063,
+          10.35218700000405,
+          9.90893700000015,
+          9.720998000004329,
+          9.91174399999727,
+          9.811225999997987,
+          9.009080999996513,
+          9.53260500000033,
+          10.515654000002542,
+          10.221371999999974,
+          10.323600000003353,
+          9.563164999999572,
+          9.869360000004235,
+          10.149285999999847,
+          9.67098999999871,
+          9.124874000001,
+          9.014556000001903,
+          8.703251999999338,
+          8.835994000000937,
+          9.668589000000793,
+          8.427558000003046,
+          9.169882000001962,
+          8.66906900000322,
+          8.517768999998225,
+          7.743726000000606,
+          7.420577000004414,
+          7.267755000000761,
+          7.430650999995123,
+          7.382892000001448,
+          7.247611999999208,
+          7.980941000001621,
+          7.758418999997957,
+          7.618195000002743,
+          7.418615000002319,
+          7.0457230000029085,
+          7.3524429999961285,
+          7.397100999995018,
+          7.175991999996768,
+          7.343997999996645,
+          7.610424999998941,
+          7.349475999995775,
+          7.484557000003406,
+          7.401459000000614,
+          7.277855000000272,
+          7.503170999996655,
+          7.243049999997311,
+          7.568182000002707,
+          7.291277999996964,
+          7.445978999996441,
+          7.553886000001512,
+          7.35574899999483,
+          7.598895999995875,
+          7.3250909999987925,
+          7.520343000003777,
+          7.842174999997951,
+          8.370944999995118,
+          7.929213000003074,
+          7.386617999996815,
+          7.417837000000873,
+          7.414842999998655,
+          7.260285999996995,
+          7.22652399999788,
+          7.194425999994564,
+          7.229206999996677,
+          7.574971000001824,
+          7.516366999996535,
+          7.5050499999997555,
+          7.49601999999868
+        ]
+      },
+      {
+        "path": "/api/panel/repo-icon?id=unknown",
+        "status": 404,
+        "native": true,
+        "p50Ms": 7.837536999999429,
+        "p95Ms": 8.791526999993948,
+        "samplesMs": [
+          7.909654999995837,
+          7.8151359999974375,
+          7.837536999999429,
+          7.668955999994068,
+          7.849153000002843,
+          7.85000299999956,
+          7.589161999996577,
+          7.866302999995241,
+          8.153380999996443,
+          7.936579000001075,
+          7.949979999997595,
+          8.036298999999417,
+          7.832090000003518,
+          8.404001999995671,
+          7.770339000002423,
+          8.131622000000789,
+          8.447132000001147,
+          8.814876999997068,
+          8.32655700000032,
+          8.002998999996635,
+          7.722658999999112,
+          8.156891999999061,
+          7.810539999998582,
+          7.892033999996784,
+          8.067230000000563,
+          7.922556000004988,
+          8.448247000000265,
+          7.9125170000043,
+          7.808414999999513,
+          7.650237000001653,
+          9.597460000004503,
+          8.339616999997816,
+          7.87374699999782,
+          7.871165999997174,
+          7.675661000001128,
+          7.744219000000157,
+          7.593362999999954,
+          7.711093000005349,
+          7.942379000000074,
+          7.631040000000212,
+          7.6304329999984475,
+          7.541104000003543,
+          7.688560000002326,
+          7.935728999997082,
+          7.851011999999173,
+          8.214120999997249,
+          7.980000000003201,
+          7.623326000000816,
+          7.646818000001076,
+          7.646977000003972,
+          7.428308999995352,
+          7.774825000000419,
+          7.838683000001765,
+          7.953706000000238,
+          7.840540999997756,
+          8.21629500000563,
+          8.303956999996444,
+          8.022815999996965,
+          8.213371000005282,
+          7.803359999998065,
+          7.75899400000344,
+          7.81229500000336,
+          7.681278999996721,
+          7.712628000001132,
+          7.872881999996025,
+          7.69689500000095,
+          8.191463000002841,
+          7.911295999998401,
+          9.106952000001911,
+          8.929927000004682,
+          8.791526999993948,
+          8.085289999995439,
+          7.692174000003433,
+          7.547812000004342,
+          7.538232999999309,
+          7.388012000003073,
+          7.432565000002796,
+          7.581147999997484,
+          7.71297400000185,
+          7.454447000003711,
+          7.511603999999352,
+          7.541875000002619,
+          7.837537999999768,
+          7.9287790000016685,
+          7.824024000001373,
+          7.6388759999972535,
+          7.499134000005142,
+          7.436356999998679,
+          7.627559000000474,
+          8.355051000005915,
+          7.860053999997035,
+          7.750179999995453,
+          7.418125999996846,
+          7.581318000004103,
+          7.312112999999954,
+          7.937855000003765,
+          8.04888999999821,
+          7.640900999998848,
+          9.072110000000976,
+          7.772759999999835
+        ]
+      },
+      {
+        "path": "/api/projects/proj-01234567-89a",
+        "status": 200,
+        "native": true,
+        "p50Ms": 6.033375999999407,
+        "p95Ms": 7.5647249999965425,
+        "samplesMs": [
+          6.910309999999299,
+          6.90645900000527,
+          6.968661999999313,
+          6.677064000003156,
+          6.007429999997839,
+          6.073906999998144,
+          6.1454220000014175,
+          6.403618000003917,
+          6.42589500000031,
+          6.261794000005466,
+          6.099033999998937,
+          5.938104000000749,
+          5.923550999999861,
+          5.7828149999986636,
+          5.83112699999765,
+          5.794158000004245,
+          5.8394310000003316,
+          5.750996000002488,
+          5.814803999994183,
+          5.7515780000030645,
+          5.816928000000189,
+          5.927143000000797,
+          5.862374999996973,
+          6.106259000000136,
+          6.154403000000457,
+          6.226192000001902,
+          5.921937000006437,
+          5.933787000001757,
+          5.926433000000543,
+          5.915394000003289,
+          6.258352000004379,
+          6.603744000000006,
+          6.0404340000022785,
+          5.9983859999993,
+          5.977424000004248,
+          6.00315799999953,
+          5.9521979999990435,
+          6.098202000001038,
+          6.091977999996743,
+          6.203196000002208,
+          5.856998999995994,
+          5.99356500000431,
+          7.619147000004887,
+          6.046308000004501,
+          5.911726000005729,
+          5.7366560000009486,
+          6.172565000000759,
+          6.288571999997657,
+          5.959576000001107,
+          5.94871399999829,
+          6.272489000002679,
+          5.863713999999163,
+          6.06390200000169,
+          5.8984960000016144,
+          5.957919000000402,
+          5.9842680000001565,
+          5.962346000000252,
+          6.05845699999918,
+          6.033375999999407,
+          6.170287000000826,
+          6.728853000000527,
+          7.5647249999965425,
+          7.945533999998588,
+          7.629940999999235,
+          7.12951100000646,
+          7.1331629999986035,
+          7.031735000004119,
+          7.794236000001547,
+          7.28074000000197,
+          7.615818999998737,
+          7.345639999999548,
+          7.283160999999382,
+          7.1401079999996,
+          6.977760000001581,
+          6.626066000004357,
+          5.92949999999837,
+          5.923997999998392,
+          6.080645000001823,
+          6.306205000000773,
+          6.054336000001058,
+          5.98406700000487,
+          5.73081600000296,
+          5.817519000003813,
+          5.913123999998788,
+          5.822233999999298,
+          7.270683000002464,
+          6.019430000000284,
+          5.988838000004762,
+          6.069770999994944,
+          5.927623999996285,
+          5.765361999998277,
+          5.95741000000271,
+          5.90020600000571,
+          5.992048000000068,
+          6.021040999999968,
+          5.972163999998884,
+          6.051966999999422,
+          6.090885000005073,
+          6.291715999999724,
+          5.989503000004333
+        ]
+      }
+    ],
+    "interpretation": "Synthetic Linux public-socket end-to-end timings. Native is slower in these fixtures; admission, metadata reads and transport remain in the path. No installed performance claim."
+  },
+  "failThenPass": {
+    "testFirstCommit": "0e44eff93",
+    "exit": 1,
+    "failure": "Native route was not reached: /api/panel/repos"
+  },
+  "scope": [
+    "/api/panel/repos",
+    "/api/panel/projects",
+    "/api/projects",
+    "/api/panel/repo-icon",
+    "/api/projects/[id]"
+  ],
+  "limitations": [
+    "Synthetic Linux fixture, not installed performance or a GPUI launch.",
+    "SSH peer/local-only admission remains excluded and master-security-owned.",
+    "Workspace GET stays TypeScript-owned because it always writes lifecycle state."
+  ],
+  "checks": {
+    "focused": {
+      "exit": 0
+    },
+    "frozen": {
+      "exit": 0
+    },
+    "typecheck": {
+      "exit": 0
+    },
+    "lint": {
+      "exit": 0
+    },
+    "rules": {
+      "exit": 0
+    },
+    "classification": {
+      "exit": 0
+    },
+    "cargoAllFeatures": {
+      "exit": 0
+    },
+    "routeInventory": {
+      "exit": 0
+    },
+    "hermetic": {
+      "exit": 1,
+      "passedFiles": 919,
+      "passedTests": 7514,
+      "failedFiles": 3,
+      "failedTests": 5,
+      "failures": [
+        "mobile-model-catalog baseline",
+        "providers/instances baseline #5839",
+        "acp/output-redaction.generated performance #4989"
+      ],
+      "isolatedRedactionRerun": {
+        "exit": 0,
+        "passedTests": 247
+      },
+      "note": "The full suite is not green. Focused route and frozen tests pass."
+    },
+    "sharedIntegration": {
+      "exit": 0,
+      "passedTests": 7
+    },
+    "latestMainFocused": {
+      "exit": 0,
+      "passedTests": 2,
+      "base": "6713fba4878c4d4549d9a6479fa24490633b201b"
+    }
+  },
+  "reservedProof": [
+    {
+      "path": "/api/projects/locks",
+      "admissionStatus": 409,
+      "native": false
+    }
+  ],
+  "retiredProof": [
+    {
+      "path": "/api/projects/context",
+      "admissionStatus": 409,
+      "status": 404,
+      "native": false
+    },
+    {
+      "path": "/api/projects/dismissed-suggestions",
+      "admissionStatus": 409,
+      "status": 404,
+      "native": false
+    }
+  ],
+  "latestRebase": {
+    "base": "44f65df81bd01cd3b5712e124fab621ba10cc2c5",
+    "checks": {
+      "cargoAllFeatures": 0,
+      "cargoTests": 30,
+      "typecheckFast": 0,
+      "touchedLint": 0,
+      "wholeTouchedModules": 0
+    },
+    "modules": {
+      "tests/o8d-rust-projects-real-path.test.ts": 1,
+      "tests/o8d-native-route-table-real-path.test.ts": 1,
+      "tests/o8d-parity-real-path.test.ts": 7
+    },
+    "summary": [
+      {
+        "route": "/api/panel/repos",
+        "attempted": 100,
+        "native": 38,
+        "fallback": 62,
+        "differences": 0
+      },
+      {
+        "route": "/api/panel/projects",
+        "attempted": 100,
+        "native": 80,
+        "fallback": 20,
+        "differences": 0
+      },
+      {
+        "route": "/api/projects",
+        "attempted": 100,
+        "native": 60,
+        "fallback": 40,
+        "differences": 0
+      },
+      {
+        "route": "/api/panel/repo-icon",
+        "attempted": 100,
+        "native": 80,
+        "fallback": 20,
+        "differences": 0
+      },
+      {
+        "route": "/api/projects/[id]",
+        "attempted": 100,
+        "native": 48,
+        "fallback": 52,
+        "differences": 0
+      }
+    ],
+    "authCases": 35,
+    "functionalBinarySha256": "5dd53c161de5b72cbd4ac4f2bc816a53b26abb89e41d7ae597ee048fd0a26187",
+    "preserved": "Settings and mobile contexts, settings auth paths, window-owner fallback and project principal checks."
+  },
+  "retiredRegistryRegression": {
+    "redExit": 1,
+    "redBase": "592cdd8d3112bb679578ae14d4d8a1176b0c99c8",
+    "redSetup": "Remove context/dismissed registry imports and add retired-name socket assertions before the explicit admission refusal.",
+    "failure": "Expected native false; received true for the retired path via the dynamic detail route.",
+    "greenExit": 0,
+    "outcomes": [
+      {
+        "path": "/api/projects/context",
+        "admissionStatus": 409,
+        "status": 404,
+        "native": false
+      },
+      {
+        "path": "/api/projects/dismissed-suggestions",
+        "admissionStatus": 409,
+        "status": 404,
+        "native": false
+      }
+    ]
+  },
+  "packagingRebase": {
+    "base": "dc855e3a8",
+    "routeModule": 0,
+    "typecheckFast": 0,
+    "touchedLint": 0,
+    "cargoReceiptReused": {
+      "exit": 0,
+      "tests": 30,
+      "rustSourcesAndManifestsUnchanged": true
+    },
+    "preserved": "Packaged helper discovery, settings/mobile admission contexts, existing auth paths and settings window-owner fallback.",
+    "note": "Functional frozen replay on the packaged-daemon base; release samples above are historical and were not remeasured.",
+    "fixtureBudget": "Five-minute child budget for the500-request batch; production readiness and latency are unchanged. Prior180-second timeout receipt retained."
+  },
+  "startupMergeRebase": {
+    "base": "88763944bbf93286e2bb90f5da720e0723f18c07",
+    "checks": {
+      "cargo": 0,
+      "build": 0,
+      "ownRealPath": 0,
+      "typecheckFast": 0,
+      "touchedLint": 0
+    },
+    "comparisons": 500,
+    "differences": 0,
+    "authOutcomes": 35,
+    "preserved": "All startup/settings/mobile/workspace/project contexts and table entries; approved WS registrations unchanged; retired imports remain absent."
+  }
+}

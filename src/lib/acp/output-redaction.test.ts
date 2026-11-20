@@ -8,6 +8,16 @@ describe('viewer output redaction bounds and byte contract', () => {
     const text = 'π 🔒 src/-utils.ts --unified=3';
     expect(redactOutputText(text)).toEqual({ text, spans: [] });
   });
+  it('reports UTF-8 byte spans after BMP and astral prefixes', () => {
+    for (const [prefix, start] of [['雪 ', 4], ['𐐀 ', 5], ['雪 𐐀 ', 9]] as const) {
+      const result = redactOutputText(prefix + 'fixture-value tail fixture-value', { normalizedValues: ['fixture-value'] });
+      expect(result).toEqual({ text: prefix + '[redacted] tail [redacted]', spans: [
+        { start, end: start + 10, kind: 'credential' },
+        { start: start + 16, end: start + 26, kind: 'credential' },
+      ] });
+      for (const span of result.spans) expect(Buffer.from(result.text).subarray(span.start, span.end).toString()).toBe('[redacted]');
+    }
+  });
   it('bounds scanning of long benign identifiers', () => {
     const text = 'a'.repeat(20_000);
     const start = performance.now();

@@ -1,5 +1,7 @@
 # Symon Messages receiver
 
+Historical reference: the Symon WS implementation and its dedicated tests were removed. Paths below describe the former implementation.
+
 On macOS, o8 can receive iMessages for Symon itself and answer them, with no
 external connector. Source: `src/lib/symon/messages-receiver/`.
 

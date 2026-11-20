@@ -115,7 +115,9 @@ function post(body: Record<string, unknown>) {
 }
 
 afterAll(() => {
-  closeDb();
+  // closeDb logs as the worker tears down; an unflushed log fails the shard.
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try { closeDb(); } finally { log.mockRestore(); }
   rmSync(dataDir, { recursive: true, force: true });
 });
 

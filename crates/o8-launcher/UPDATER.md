@@ -174,3 +174,46 @@ window running. This does not establish terminal survival, flush the separate
 composer draft debounce, apply on normal quit, or recover swap failures in the
 old window. Those remain the next lossless-relaunch part of #6397. No terminal
 preservation promise appears until the live-session acceptance test passes.
+
+## Local classic-to-launcher chain
+
+On macOS, build the isolated installer in the existing classic updater fixture,
+then run the opt-in chain test. Use a worktree-local target directory; debug
+symbols and incremental compilation are disabled to bound disk use. Check free
+space before each build and stop below the operator's free-space floor.
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+export CARGO_TARGET_DIR="$PWD/target/update-chain"
+export CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0
+
+df -h /
+cp src-tauri/Cargo.lock tests/fixtures/update-ping-native/Cargo.lock
+cargo build --manifest-path tests/fixtures/update-ping-native/Cargo.toml --bin update-chain-classic
+
+df -h /
+O8_CLASSIC_UPDATER_FIXTURE="$CARGO_TARGET_DIR/debug/update-chain-classic" \
+  cargo test --manifest-path crates/o8-launcher/Cargo.toml --test update \
+  classic_to_launcher_release_chain -- --ignored --exact --nocapture
+```
+
+The test generates its own minisign key and loopback feed. In each scenario the
+fixture's pinned classic updater installs a signed archive containing the real
+launcher built by this test run. The test starts that installed executable with
+the existing server fixture configuration. That launcher then checks and applies
+NEXT from the same feed. Assertions cover installed executable bytes, version,
+relaunch arguments, the previous launcher bundle, and the persisted outcome.
+Companion scenarios refuse another key's signature, restore and start NEW when
+NEXT's interpreter does not exist, and recover interrupted swaps on startup.
+
+This is plugin-level classic compatibility: a mock application runtime supplies
+the installed path, current version, generated public key and loopback endpoint.
+The test starts NEW explicitly after the classic installer returns; it does not
+exercise the shipped classic shell's restart call, UI, enrollment, admission or
+cleanup. The helper uses the desktop lockfile, as the fixture runner does. It
+does not run a built release executable. NEW uses debug update overrides and
+stub servers; NEXT is a stub executable. After a post-swap interruption, the real launcher entry
+point settles the journal using its debug installed-bundle override, since the
+installed NEXT is a stub. No release key, Developer ID signing, notarization,
+Gatekeeper assessment of a quarantined download, or real server lifecycle is
+proven here. The manual release proofs above remain required.

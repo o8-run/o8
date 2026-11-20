@@ -1,15 +1,14 @@
+import { serveBroadcastPage } from './lib/ws-server/broadcast-page';
+import { apiFrontDoorEnabled } from './lib/ws-server/api-front-door-config';
 import { initiateE2eeHandshake } from './lib/ws-server/device-e2ee-handshake';
 import { handleTokenProjectionRequest } from './lib/mobile/token-projection-http';
-import { symonOwnerPaths } from './lib/symon/http/owner-paths';
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
-import { VoiceHostBroker, handleVoiceHostHttp } from '@/lib/ws-server/voice-host';
 import { mobileModelError } from './lib/mobile/model-catalog';
 import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { compactionThreadEvent } from '@/lib/realtime/compaction-thread-event';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
-import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
 import { orchestratorErrorMessage, orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 /**
  * Unified WebSocket server for o8 mobile.
@@ -88,59 +87,10 @@ import { ownsDataDirRelayIdentity, resolvePortInfo } from '@/lib/panel/api-port'
 import { getInstanceIdentity } from '@/lib/panel/instance-identity';
 import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
-import {
-  startAgentSession,
-  updateAgentStatus,
-  touchAgentSession,
-  updateAgentMachine,
-  stopAgentSession,
-  sweepStaleAgentSession,
-  getAgentSession,
-  persistAgentSession,
-  loadSymonScopeGrant,
-  clearSymonScopeGrant,
-  scopeGrantMatchesClient,
-  scopeSymonToolArgs,
-  type AgentSessionStatus,
-  type SymonScopeGrant,
-} from '@/lib/mobile/symon-agent-registry';
-import { endSymonMachineSession as endMachineSessionInWebview } from '@/lib/mobile/symon-machine-session';
-import {
-  SymonAsyncActionTracker,
-  SymonConfirmationTracker,
-  ToolCallTracker,
-  confirmationOutcomeFromResolution,
-  parseSymonPendingConfirmation,
-  symonToolTimeoutMs,
-  type CompletedToolCall,
-  type PendingToolCall,
-  type SymonActionComplete,
-  type SymonConfirmationOutcome,
-  type SymonConfirmationResolution,
-  type SymonPendingConfirmation,
-  type SymonProtocolVersion,
-  type SymonToolRelayResult,
-} from '@/lib/mobile/symon-tool-relay';
-import {
-  appendSymonTextTranscript,
-  dropSymonTextSession,
-  formatSymonTextPlannerPrompt,
-  loadSymonTextSession,
-  touchSymonTextAttachment,
-  updateSymonTextMachine,
-  type SymonTextSessionRecord,
-} from '@/lib/mobile/symon-text-session-store';
-import {
-  DEFAULT_SYMON_MACHINE,
-  parseSymonMachineIdentity,
-  type SymonMachineIdentity,
-} from '@/lib/symon/machine-registry';
-import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getOrCreateWsToken, wsTokenSource } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { resolveAppVersion } from '@/lib/telemetry/crash-store';
-import { findRepoByLocalPath } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -301,7 +251,6 @@ import {
 import { isLoopbackAddress } from './lib/auth/loopback-request';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import { bootAutomationsScheduler } from './lib/automations/scheduler';
-import { drainParkedSymonWatches } from './lib/automations/symon-watch';
 import { startBroadcastDirectorLoop } from './lib/broadcast/director';
 import { startBroadcastSpeakerLoop } from './lib/broadcast/speaker';
 import type {
@@ -463,7 +412,11 @@ const terminalHostReady = import('node-pty')
 
 // ── Config ──
 
+const API_FRONT_DOOR = apiFrontDoorEnabled();
+let frontDoor: typeof import('./lib/ws-server/api-front-door') | null = null;
+let nextPrivateOrigin: URL | undefined;
 const INSTANCE_IDENTITY = getInstanceIdentity();
+
 const { wsPort: WS_PORT } = INSTANCE_IDENTITY;
 const PING_INTERVAL_MS = 25_000;
 // Event-loop lag watchdog (#1498 structural follow-up). ws-server pumps every
@@ -921,7 +874,7 @@ interface ClientState {
   flushTimer: ReturnType<typeof setInterval> | null;
   /** Per-device id (#5) — set for per-device-token connections; drives revoke-disconnect. */
   deviceId?: string | null;
-  /** Credential class proven during the WS upgrade; Symon scope grants bind to it. */
+  /** Credential class proven during the WS upgrade. */
   authKind: 'operator' | 'device';
   /** Authenticated local operator backhaul; device/E2EE frames stay TS-owned. */
   o8d?: boolean;
@@ -1407,11 +1360,6 @@ interface OrchestratorAutoMessage {
   message: string;
   createdAt: number;
   reviewChat?: { lane: ReviewContinuationLane; origin: ReviewChatOrigin };
-  symon?: {
-    sessionId: string;
-    callId: string;
-    taskId: string;
-  };
 }
 
 const orchestratorAutoQueue: OrchestratorAutoMessage[] = [];
@@ -1421,13 +1369,12 @@ function enqueueOrchestratorAutoMessage(
   repoPath: string,
   message: string,
   label: string,
-  symon?: OrchestratorAutoMessage['symon'],
 ): void {
   if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) {
     orchestratorAutoQueue.shift(); // Drop oldest
     console.warn('[supervisor] Auto-message queue overflow — dropped oldest');
   }
-  orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now(), ...(symon ? { symon } : {}) });
+  orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now() });
   console.log(`[supervisor] Queued ${label} for ${repoPath} (${orchestratorAutoQueue.length} in queue)`);
   void drainOrchestratorAutoQueue();
 }
@@ -1486,22 +1433,6 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
   orchestratorAutoQueue.shift();
   console.log(`[supervisor] Draining auto-message for ${next.repoPath}`);
 
-  let symonTerminalSent = false;
-  const finishSymonDelegate = (status: 'done' | 'failed') => {
-    if (!next.symon || symonTerminalSent) return;
-    symonTerminalSent = true;
-    const owner = currentSymonOwner(next.symon.sessionId);
-    if (!owner) return;
-    pushSymonActionComplete(owner.route.clientId, {
-      sessionId: next.symon.sessionId,
-      callId: next.symon.callId,
-      tool: 'o8_delegate',
-      status,
-      taskId: next.symon.taskId,
-      ts: new Date().toISOString(),
-    });
-  };
-
   try {
     await backend.sendTurn(next.repoPath, next.message, (event) => {
       const sessionName = session!.sessionName;
@@ -1546,18 +1477,15 @@ async function drainOrchestratorAutoQueue(): Promise<void> {
           break;
         case 'done':
           wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'status', data: { status: 'ready', repoPath: next.repoPath, backend: backend.id } });
-          finishSymonDelegate('done');
           break;
         case 'error':
           wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'error', data: { error: event.error, repoPath: next.repoPath, backend: backend.id } });
-          finishSymonDelegate('failed');
           break;
       }
       if (wsMsg) broadcastToOrchestratorSession(sessionName, wsMsg);
     });
   } catch (err) {
     console.error('[supervisor] Auto-message failed:', err);
-    finishSymonDelegate('failed');
   }
 
   // Continue draining
@@ -2346,13 +2274,6 @@ function recordTerminalBenchDrop(preStringified: string) {
     // Bench diagnostics never affect delivery.
   }
 }
-
-const voiceHostBroker = new VoiceHostBroker(frame => broadcast(frame));
-// Settlement may follow the last stream event, or happen in another HTTP worker.
-const voiceQueueTimer = setInterval(() => {
-  try { voiceHostBroker.refreshQueuedTerminals(); } catch (error) { console.warn('[voice-host] Queue receipt read failed:', error); }
-}, 250);
-voiceQueueTimer.unref();
 
 function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => boolean) {
   const json = JSON.stringify(msg);
@@ -3843,1101 +3764,8 @@ async function handleClientMessage(client: ClientState, raw: string) {
       handleOrchestratorUndoSend(client, msg);
       break;
 
-    // ── Symon Agent Mode channel (phone-hosted voice, Mac-executed tools) ──
-    case 'symon-tool-call':
-      void handleSymonToolCall(client, msg);
-      break;
-    case 'symon-text-attach':
-      handleSymonTextAttach(client, msg);
-      break;
-    case 'symon-text-turn':
-      handleSymonTextTurn(client, msg);
-      break;
-    case 'symon-text-interrupt':
-      void handleSymonTextInterrupt(client, msg);
-      break;
-    case 'symon-confirm-decision':
-      void handleSymonConfirmDecision(client, msg);
-      break;
-    case 'symon-tool-interrupt':
-      void handleSymonToolInterrupt(client, msg);
-      break;
-    case 'symon-agent-status':
-      handleSymonAgentStatus(client, msg);
-      break;
-    case 'symon-stop':
-      handleSymonStop(client, msg);
-      break;
   }
 }
-
-// ── Symon Agent Mode channel handlers (docs/internals/symon-agent-mode.md) ──
-//
-// The PHONE hosts the WebRTC voice session; every tool STILL executes here on the
-// Mac. This process owns the socket pushes + the one activeAgentSession registry
-// (src/lib/mobile/symon-agent-registry.ts), mirrored to disk for the Next GET.
-// DURABLE channel: `symon` messages fall through isLossyMessage() → queued under
-// backpressure (never dropped), like agent-lifecycle.
-
-type SymonSessionRoute = {
-  clientId: string;
-  scope: SymonScopeGrant;
-  protocolVersion: SymonProtocolVersion;
-  activeMachine: SymonMachineIdentity;
-};
-
-type SymonConfirmationRoute = Pick<SymonSessionRoute, 'clientId' | 'protocolVersion'>;
-type SymonTextTurnState = {
-  clientId: string;
-  sessionId: string;
-  turnId: string;
-  terminal: boolean;
-  interruptRequested?: boolean;
-  resultStatus?: string; resultText?: string;
-};
-
-/** sessionId → socket, immutable scope, and negotiated additive protocol. */
-const symonSessions = new Map<string, SymonSessionRoute>();
-const symonTextOwners = new Map<string, string>();
-const symonTextTurns = new Map<string, SymonTextTurnState>();
-const symonTextChains = new Map<string, Promise<unknown>>();
-/** In-flight + replayable tool calls, correlated by sessionId + callId. */
-const symonToolTracker = new ToolCallTracker();
-/** Confirmation decisions/tombstones, keyed by sessionId + callId + confirmationId. */
-const symonConfirmationTracker = new SymonConfirmationTracker();
-/** Accepted Code actions waiting for the correlated lane's terminal transition. */
-const symonAsyncActionTracker = new SymonAsyncActionTracker();
-
-function endSymonMachineSession(sessionId: string): void {
-  // The webview bridge is reachable from this process, so the cleanup no longer goes through Next.
-  void endMachineSessionInWebview(sessionId).then(({ body }) => {
-    if (!body.ok) console.warn(`[symon-machine] failed to end ${sessionId}: ${body.error}: ${body.detail}`);
-  });
-}
-
-function symonProtocolVersion(msg: Record<string, unknown>): SymonProtocolVersion {
-  return msg.protocolVersion === 2 ? 2 : 1;
-}
-
-const AGENT_STATUSES = new Set<AgentSessionStatus>(['connecting', 'live', 'acting', 'idle', 'error']);
-function isAgentSessionStatus(v: string): v is AgentSessionStatus {
-  return AGENT_STATUSES.has(v as AgentSessionStatus);
-}
-
-function persistAgentRegistry(): void {
-  persistAgentSession(getAgentSession());
-}
-
-function activeSymonGrant(client: ClientState, sessionId: string): SymonScopeGrant | null {
-  const grant = loadSymonScopeGrant();
-  if (!grant) return null;
-  return scopeGrantMatchesClient(grant, sessionId, {
-    subject: client.authKind,
-    deviceId: client.deviceId ?? null,
-  }) ? grant : null;
-}
-
-function isSameSymonGrant(left: SymonScopeGrant, right: SymonScopeGrant): boolean {
-  return left.sessionId === right.sessionId
-    && left.scopeVersion === right.scopeVersion
-    && left.issuedAt === right.issuedAt
-    && left.subject === right.subject
-    && left.deviceId === right.deviceId;
-}
-
-function pushSymonStatus(clientId: string, sessionId: string, status: AgentSessionStatus, detail?: string): void {
-  const client = clients.get(clientId);
-  if (!client) return;
-  const activeMachine = symonSessions.get(sessionId)?.activeMachine
-    ?? getAgentSession()?.activeMachine
-    ?? DEFAULT_SYMON_MACHINE;
-  send(client, { channel: 'symon', type: 'symon-agent-status', sessionId, status, activeMachine, ...(detail ? { detail } : {}) });
-}
-
-function pushSymonToolResult(
-  clientId: string,
-  sessionId: string,
-  callId: string,
-  ok: boolean,
-  result: unknown,
-): void {
-  const client = clients.get(clientId);
-  if (!client) return;
-  send(client, { channel: 'symon', type: 'symon-tool-result', sessionId, callId, ok, result });
-}
-
-function pushSymonConfirmRequired(clientId: string, confirmation: SymonPendingConfirmation): void {
-  const client = clients.get(clientId);
-  if (!client) return;
-  send(client, { channel: 'symon', type: 'symon-confirm-required', ...confirmation });
-}
-
-function pushSymonConfirmSettled(
-  clientId: string,
-  confirmation: SymonPendingConfirmation,
-  outcome: SymonConfirmationOutcome,
-  firstOutcome?: Exclude<SymonConfirmationOutcome, 'duplicate'>,
-): void {
-  const client = clients.get(clientId);
-  if (!client) return;
-  send(client, {
-    channel: 'symon',
-    type: 'symon-confirm-settled',
-    sessionId: confirmation.sessionId,
-    callId: confirmation.callId,
-    confirmationId: confirmation.confirmationId,
-    outcome,
-    ...(firstOutcome ? { firstOutcome } : {}),
-  });
-}
-
-function pushSymonActionComplete(clientId: string, action: SymonActionComplete): void {
-  const client = clients.get(clientId);
-  if (!client) return;
-  send(client, { channel: 'symon', type: 'symon-action-complete', ...action });
-}
-
-function symonTextClientMatches(record: SymonTextSessionRecord, client: ClientState): boolean {
-  return record.subject === client.authKind
-    && (record.subject === 'operator' || record.deviceId === client.deviceId);
-}
-
-function textTurnKey(sessionId: string, turnId: string): string {
-  return JSON.stringify([sessionId, turnId]);
-}
-
-function pushSymonTextDone(
-  turn: SymonTextTurnState,
-  status: 'done' | 'failed' | 'interrupted' | 'unconfirmed',
-  detail?: string,
-  activeMachine?: SymonMachineIdentity,
-  selectionPending: boolean = false,
-): void {
-  if (turn.terminal) return;
-  turn.terminal = status !== 'unconfirmed'; turn.resultStatus = status;
-  if (turn.terminal && symonTextTurns.get(textTurnKey(turn.sessionId, turn.turnId)) === turn) touchSymonTextAttachment(turn.sessionId, turn.turnId, true, Date.now(), { status, text: turn.resultText ?? '' });
-  const client = clients.get(turn.clientId);
-  if (client) {
-    send(client, {
-      channel: 'symon',
-      type: 'symon-text-done',
-      sessionId: turn.sessionId,
-      turnId: turn.turnId,
-      status,
-      activeMachine: activeMachine ?? loadSymonTextSession(turn.sessionId)?.activeMachine ?? DEFAULT_SYMON_MACHINE,
-      ...(!selectionPending ? {
-        model: loadSymonTextSession(turn.sessionId)?.model,
-        effort: loadSymonTextSession(turn.sessionId)?.effort,
-      } : {}),
-      ...(detail ? { detail } : {}),
-    });
-  }
-  if (turn.terminal) setTimeout(() => { const key = textTurnKey(turn.sessionId, turn.turnId); if (symonTextTurns.get(key) === turn) symonTextTurns.delete(key); }, 5 * 60_000).unref();
-}
-
-async function interruptSymonTextNative(sessionId: string, turnId: string): Promise<boolean> {
-  try {
-    const response = await fetchNextJson<{ ok?: boolean; active?: boolean }>('/api/mobile/symon/text-turn', {
-      method: 'DELETE',
-      body: { sessionId, turnId },
-      timeoutMs: 8_000,
-    });
-    return response.ok === true;
-  } catch {
-    return false;
-  }
-}
-
-type SymonTextRelayResult = {
-  state?: 'pending' | 'done' | 'needs_confirmation' | 'error' | 'call_mismatch';
-  result?: { status?: 'done' | 'interrupted'; text?: string; activeMachine?: unknown };
-  confirmation?: unknown;
-  detail?: string;
-  error?: string;
-};
-
-async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise<void> {
-  const initial = loadSymonTextSession(turn.sessionId);
-  if (!initial || turn.terminal) {
-    pushSymonTextDone(turn, 'failed', 'Text session expired.');
-    return;
-  }
-  // A queued turn can be stopped before it ever reaches the native planner.
-  if (turn.interruptRequested) {
-    pushSymonTextDone(turn, 'interrupted');
-    return;
-  }
-  const prompt = formatSymonTextPlannerPrompt(initial, text);
-  if (!appendSymonTextTranscript(turn.sessionId, [{ role: 'user', text }])) {
-    pushSymonTextDone(turn, 'failed', 'Text session expired.');
-    return;
-  }
-  const client = clients.get(turn.clientId);
-  if (client) {
-    send(client, {
-      channel: 'symon',
-      type: 'symon-text-status',
-      sessionId: turn.sessionId,
-      turnId: turn.turnId,
-      status: 'thinking',
-      activeMachine: initial.activeMachine,
-    });
-  }
-  const deadline = Date.now() + 5 * 60_000;
-  const pollNative = (reconcileOnly = false) => fetchNextJson<SymonTextRelayResult>('/api/mobile/symon/text-turn', {
-    method: 'POST',
-    body: {
-      sessionId: turn.sessionId,
-      turnId: turn.turnId,
-      prompt,
-      // The built-in Pi brain keeps its own history and takes the newest message only.
-      text,
-      planner: { engine: initial.engine, model: initial.model, effort: initial.effort },
-      reconcileOnly,
-    },
-    timeoutMs: 8_000,
-  });
-  const reconcileSelection = async () => {
-    // Keep the serialized owner until the first native result consumes retry
-    // eligibility, or the session expires. Lookup-only polling cannot replay a
-    // call lost during webview teardown; a Stop delivery is not its result.
-    while (loadSymonTextSession(turn.sessionId)?.allowDefaultFallback === true) {
-      try {
-        await pollNative(true);
-      } catch {
-        // Transport failure does not establish the effective native selection.
-      }
-      await new Promise<void>((resolve) => setTimeout(resolve, 500));
-    }
-  };
-  const mirroredConfirmations = new Set<string>();
-  try {
-    while (!turn.terminal && Date.now() < deadline) {
-      let outcome: SymonTextRelayResult;
-      try {
-        outcome = await pollNative();
-      } catch (error) {
-        pushSymonTextDone(turn, 'unconfirmed', error instanceof Error ? error.message : 'Planner bridge failed.');
-        return;
-      }
-      if (outcome.state === 'pending') continue;
-      if (outcome.state === 'needs_confirmation') {
-        const rawTool = outcome.confirmation && typeof outcome.confirmation === 'object'
-          ? (outcome.confirmation as Record<string, unknown>).tool
-          : null;
-        const confirmation = typeof rawTool === 'string'
-          ? parseSymonPendingConfirmation(outcome.confirmation, {
-            sessionId: turn.sessionId,
-            callId: turn.turnId,
-            tool: rawTool,
-          })
-          : null;
-        if (!confirmation) {
-          pushSymonTextDone(turn, 'unconfirmed', 'The desktop returned an uncorrelated confirmation; native work remains unresolved.');
-          return;
-        }
-        if (!mirroredConfirmations.has(confirmation.confirmationId)) {
-          if (!symonConfirmationTracker.register(confirmation, Date.now())) {
-            pushSymonTextDone(turn, 'unconfirmed', 'Confirmation identity collision; native work remains unresolved.');
-            return;
-          }
-          mirroredConfirmations.add(confirmation.confirmationId);
-          pushSymonConfirmRequired(turn.clientId, confirmation);
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 150));
-        continue;
-      }
-      if (outcome.state === 'done' && outcome.result?.status === 'interrupted') {
-        pushSymonTextDone(turn, 'interrupted');
-        return;
-      }
-      if (outcome.state === 'done' && typeof outcome.result?.text === 'string') {
-        const activeMachine = parseSymonMachineIdentity(outcome.result.activeMachine);
-        if (activeMachine) updateSymonTextMachine(turn.sessionId, activeMachine);
-        const answer = outcome.result.text; turn.resultText = answer;
-        appendSymonTextTranscript(turn.sessionId, [{ role: 'assistant', text: answer }]);
-        const owner = clients.get(turn.clientId);
-        if (owner && answer) {
-          send(owner, {
-            channel: 'symon',
-            type: 'symon-text-delta',
-            sessionId: turn.sessionId,
-            turnId: turn.turnId,
-            delta: answer,
-          });
-        }
-        pushSymonTextDone(turn, 'done', undefined, activeMachine ?? initial.activeMachine);
-        return;
-      }
-      pushSymonTextDone(turn, outcome.state === 'done' ? 'failed' : 'unconfirmed', outcome.detail || outcome.error || 'Planner turn outcome is unconfirmed.');
-      return;
-    }
-    if (!turn.terminal) {
-      if (!turn.interruptRequested) {
-        turn.interruptRequested = true;
-        await interruptSymonTextNative(turn.sessionId, turn.turnId);
-      }
-      pushSymonTextDone(turn, 'unconfirmed', 'Planner turn timed out; its final result is still being reconciled.', undefined,
-        loadSymonTextSession(turn.sessionId)?.allowDefaultFallback === true);
-    }
-  } finally {
-    await reconcileSelection();
-  }
-}
-
-function handleSymonTextAttach(client: ClientState, msg: Record<string, unknown>): void {
-  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
-  const result = attachSymonTextSession({ sessionId, client, record: loadSymonTextSession(sessionId),
-    owners: symonTextOwners, turns: symonTextTurns, connected: id => clients.has(id) });
-  if (result.ok) touchSymonTextAttachment(sessionId);
-  send(client, { channel: 'symon', type: 'symon-text-attached', sessionId, ...result });
-  if (result.ok) for (const confirmation of symonConfirmationTracker.pendingForSession(sessionId, Date.now())) pushSymonConfirmRequired(client.id, confirmation);
-}
-
-function handleSymonTextTurn(client: ClientState, msg: Record<string, unknown>): void {
-  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
-  const turnId = typeof msg.turnId === 'string' ? msg.turnId : '';
-  const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 8_000) : '';
-  if (!sessionId || !turnId || !text || sessionId.length > 160 || turnId.length > 160) return;
-  const record = loadSymonTextSession(sessionId);
-  if (!record || !symonTextClientMatches(record, client) || (record.reattachable && symonTextOwners.get(sessionId) !== client.id)) {
-    send(client, { channel: 'symon', type: 'symon-text-done', sessionId, turnId, status: 'failed', detail: 'Text session is missing, stale, or belongs to another client.' });
-    return;
-  }
-  if (record.reattachable && record.pendingTurnIds?.some(id => id !== turnId)) {
-    send(client, { channel: 'symon', type: 'symon-text-done', sessionId, turnId, status: 'failed', detail: 'Existing task is still active or unconfirmed; no new task was started.' }); return;
-  }
-  const key = textTurnKey(sessionId, turnId);
-  if (symonTextTurns.has(key) || record.completedTurns?.some(turn => turn.turnId === turnId)) return;
-  const turn: SymonTextTurnState = { clientId: client.id, sessionId, turnId, terminal: false };
-  touchSymonTextAttachment(sessionId, turnId);
-  symonTextTurns.set(key, turn);
-  symonTextOwners.set(sessionId, client.id);
-  void chainOnKey(symonTextChains, sessionId, () => runSymonTextTurn(turn, text));
-}
-
-async function handleSymonTextInterrupt(client: ClientState, msg: Record<string, unknown>): Promise<void> {
-  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
-  const turnId = typeof msg.turnId === 'string' ? msg.turnId : '';
-  const record = loadSymonTextSession(sessionId);
-  if (!record || !symonTextClientMatches(record, client)) return;
-  const turn = symonTextTurns.get(textTurnKey(sessionId, turnId));
-  if (!turn || turn.clientId !== client.id || turn.terminal || turn.interruptRequested) return;
-  turn.interruptRequested = true;
-  // Delivery is only an acknowledgement. Keep the existing polling/queue owner
-  // alive until the native terminal result persists the effective selection.
-  await interruptSymonTextNative(sessionId, turnId);
-}
-
-async function interruptSymonTool(call: PendingToolCall): Promise<boolean> {
-  try {
-    const result = await fetchNextJson<{ ok?: boolean; delivered?: boolean }>('/api/mobile/symon/tool', {
-      method: 'DELETE',
-      body: { sessionId: call.sessionId, callId: call.callId },
-      timeoutMs: 5_000,
-    });
-    return result.ok === true && result.delivered === true;
-  } catch (error) {
-    console.warn(`[symon-agent] native interrupt failed callId=${call.callId}: ${String(error)}`);
-    return false;
-  }
-}
-
-async function abortSymonSessionCalls(
-  sessionId: string,
-  route: SymonSessionRoute,
-  error: 'session_stopped' | 'session_preempted',
-): Promise<void> {
-  symonAsyncActionTracker.removeSession(sessionId);
-  const calls = symonToolTracker.callsForSession(sessionId);
-  const deliveries = await Promise.all(calls.map((call) => interruptSymonTool(call)));
-  for (const [index, call] of calls.entries()) {
-    const outcome = deliveries[index]
-      ? { ok: false, result: { error } }
-      : {
-        ok: false,
-        result: {
-          error: 'interrupt_delivery_failed',
-          detail: 'Native cancellation could not be delivered; the action outcome is unknown.',
-        },
-      };
-    const completed = symonToolTracker.complete(sessionId, call.callId, outcome, Date.now());
-    if (!completed) continue;
-    pushSymonToolResult(
-      route.clientId,
-      sessionId,
-      call.callId,
-      outcome.ok,
-      outcome.result,
-    );
-    if (route.protocolVersion === 2) pushSymonActionComplete(route.clientId, completed.action);
-  }
-}
-
-type SymonTaskCompletePayload = {
-  taskId: string;
-  status: 'done' | 'failed';
-  intentText: string;
-  resultText: string;
-  truncated: boolean;
-};
-
-function pushSymonTaskComplete(payload: SymonTaskCompletePayload): number {
-  const clientIds = new Set([...symonSessions.values()].map((route) => route.clientId));
-  for (const clientId of clientIds) {
-    const client = clients.get(clientId);
-    if (client) send(client, { channel: 'symon', type: 'symon-task-complete', ...payload });
-  }
-  return clientIds.size;
-}
-
-/** Last-start-wins: idle-push + drop every symon session EXCEPT the one to keep. */
-function preemptOtherSymonSessions(keepSessionId: string, detail: string): void {
-  for (const [sid, route] of Array.from(symonSessions.entries())) {
-    if (sid === keepSessionId) continue;
-    void denySymonSessionConfirmations(sid, route, 'preempted');
-    void abortSymonSessionCalls(sid, route, 'session_preempted');
-    pushSymonStatus(route.clientId, sid, 'idle', detail);
-    symonSessions.delete(sid);
-    clearSymonScopeGrant(sid);
-  }
-}
-
-function handleSymonAgentStatus(client: ClientState, msg: Record<string, unknown>): void {
-  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
-  const status = typeof msg.status === 'string' ? msg.status : '';
-  if (!sessionId || !isAgentSessionStatus(status)) return;
-  const grant = activeSymonGrant(client, sessionId);
-  if (!grant) {
-    console.warn(`[symon-agent] rejected ungranted status for ${sessionId}`);
-    return;
-  }
-  const existingOwner = symonSessions.get(sessionId);
-  if (existingOwner && existingOwner.clientId !== client.id && (status === 'idle' || status === 'error')) return;
-
-  if (status === 'idle' || status === 'error') {
-    // Phone tore the session down (user tap / background / WebRTC close).
-    const owner = symonSessions.get(sessionId);
-    if (owner?.clientId === client.id) {
-      void denySymonSessionConfirmations(sessionId, owner, 'preempted');
-      void abortSymonSessionCalls(sessionId, owner, 'session_stopped');
-      symonSessions.delete(sessionId);
-    }
-    stopAgentSession(sessionId);
-    clearSymonScopeGrant(sessionId);
-    persistAgentRegistry();
-    return;
-  }
-
-  // connecting / live / acting → register + preempt any OTHER live session
-  // (last-start-wins; makes phone-app restarts self-healing).
-  if (existingOwner && (existingOwner.clientId !== client.id || !isSameSymonGrant(existingOwner.scope, grant))) {
-    void denySymonSessionConfirmations(sessionId, existingOwner, 'preempted');
-    void abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
-    pushSymonStatus(existingOwner.clientId, sessionId, 'idle', 'preempted');
-  }
-  // Only a NEW owner is a registration. A phone sends connecting/live/acting
-  // repeatedly through one session, and re-draining on each of those would make
-  // Symon repeat a parked watch every few seconds.
-  const isNewRegistration = !existingOwner || existingOwner.clientId !== client.id;
-  startAgentSession(sessionId);
-  symonSessions.set(sessionId, {
-    clientId: client.id,
-    scope: grant,
-    protocolVersion: existingOwner?.protocolVersion === 2 ? 2 : symonProtocolVersion(msg),
-    activeMachine: existingOwner?.activeMachine ?? DEFAULT_SYMON_MACHINE,
-  });
-  preemptOtherSymonSessions(sessionId, 'preempted');
-  // A watch that fired while the phone was away is owed its report the moment a
-  // session is live again. Best effort: registration never waits on delivery.
-  if (isNewRegistration) {
-    void drainParkedSymonWatches().catch((error) => {
-      console.warn('[symon-watch] drain on registration failed:', error);
-    });
-  }
-  updateAgentStatus(sessionId, status);
-  persistAgentRegistry();
-}
-
-function handleSymonStop(client: ClientState, msg: Record<string, unknown>): void {
-  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
-  if (!sessionId) return;
-  const textSession = loadSymonTextSession(sessionId);
-  if (textSession && symonTextClientMatches(textSession, client) && (!textSession.reattachable || symonTextOwners.get(sessionId) === client.id)) {
-    for (const turn of symonTextTurns.values()) {
-      if (turn.sessionId !== sessionId || turn.terminal) continue;
-      void interruptSymonTextNative(turn.sessionId, turn.turnId);
-      pushSymonTextDone(turn, textSession.reattachable ? 'unconfirmed' : 'interrupted');
-    }
-    if (textSession.reattachable && textSession.pendingTurnIds?.length) return;
-    symonTextOwners.delete(sessionId);
-    dropSymonTextSession(sessionId);
-    endSymonMachineSession(sessionId);
-    return;
-  }
-  const grant = activeSymonGrant(client, sessionId);
-  if (!grant) {
-    console.warn(`[symon-agent] rejected ungranted stop for ${sessionId}`);
-    return;
-  }
-  const owner = symonSessions.get(sessionId);
-  if (owner && owner.clientId !== client.id) return;
-  if (owner) void denySymonSessionConfirmations(sessionId, owner, 'preempted');
-  symonSessions.delete(sessionId);
-  if (owner) void abortSymonSessionCalls(sessionId, owner, 'session_stopped');
-  stopAgentSession(sessionId);
-  clearSymonScopeGrant(sessionId);
-  persistAgentRegistry();
-}
-
-function currentSymonOwner(sessionId: string): { route: SymonSessionRoute; client: ClientState } | null {
-  const route = symonSessions.get(sessionId);
-  if (!route) return null;
-  const client = clients.get(route.clientId);
-  if (!client) return null;
-  const grant = activeSymonGrant(client, sessionId);
-  return grant && isSameSymonGrant(route.scope, grant) ? { route, client } : null;
-}
-
-async function invokeSymonTool(call: PendingToolCall): Promise<SymonToolRelayResult> {
-  try {
-    return await fetchNextJson<SymonToolRelayResult>('/api/mobile/symon/tool', {
-      method: 'POST',
-      body: {
-        sessionId: call.sessionId,
-        callId: call.callId,
-        tool: call.tool,
-        // These are the original server-scoped arguments. A confirmation frame
-        // carries no args and therefore cannot widen or replace repo scope.
-        args: call.args ?? {},
-        utterance: call.utterance,
-      },
-      timeoutMs: symonToolTimeoutMs(call.tool) + 5_000,
-    });
-  } catch {
-    const delivered = await interruptSymonTool(call);
-    return delivered
-      ? { ok: false, result: { error: 'tool_timeout' } }
-      : {
-        ok: false,
-        result: {
-          error: 'interrupt_delivery_failed',
-          detail: 'Native cancellation could not be delivered; the action outcome is unknown.',
-        },
-      };
-  }
-}
-
-async function resolveSymonConfirmation(
-  confirmation: SymonPendingConfirmation,
-  allow: boolean,
-  terminal?: 'expired' | 'preempted',
-): Promise<{ ok: boolean; resolution?: SymonConfirmationResolution }> {
-  try {
-    return await fetchNextJson('/api/mobile/symon/confirm', {
-      method: 'POST',
-      body: {
-        sessionId: confirmation.sessionId,
-        callId: confirmation.callId,
-        confirmationId: confirmation.confirmationId,
-        allow,
-        terminal,
-      },
-      timeoutMs: 15_000,
-    });
-  } catch {
-    return { ok: false };
-  }
-}
-
-function publishCompletedSymonToolCall(completed: CompletedToolCall): void {
-  const { call, outcome } = completed;
-  const resultRecord = outcome.result && typeof outcome.result === 'object'
-    ? outcome.result as Record<string, unknown>
-    : null;
-  const activeMachine = parseSymonMachineIdentity(resultRecord?.activeMachine);
-  const currentRoute = symonSessions.get(call.sessionId);
-  if (activeMachine && currentRoute) {
-    currentRoute.activeMachine = activeMachine;
-    updateAgentMachine(call.sessionId, activeMachine);
-  }
-  if (completed.action.status === 'accepted') {
-    const repoPath = typeof call.args?.repoPath === 'string' ? call.args.repoPath : '';
-    symonAsyncActionTracker.register(completed.action, repoPath, completed.completedAt);
-  }
-  touchAgentSession(call.sessionId);
-  persistAgentRegistry();
-  const owner = currentSymonOwner(call.sessionId);
-  if (!owner) return;
-  pushSymonToolResult(owner.route.clientId, call.sessionId, call.callId, outcome.ok, outcome.result);
-  if (owner.route.protocolVersion === 2) {
-    pushSymonActionComplete(owner.route.clientId, completed.action);
-  }
-  if (symonToolTracker.inFlightForSession(call.sessionId) === 0) {
-    pushSymonStatus(owner.route.clientId, call.sessionId, 'live');
-    if (getAgentSession()?.sessionId === call.sessionId) {
-      updateAgentStatus(call.sessionId, 'live');
-      persistAgentRegistry();
-    }
-  }
-}
-
-function finishSymonToolCall(call: PendingToolCall, outcome: SymonToolRelayResult): void {
-  const completed = symonToolTracker.complete(call.sessionId, call.callId, outcome, Date.now());
-  if (completed) publishCompletedSymonToolCall(completed);
-}
-
-async function timeoutSymonToolCall(call: PendingToolCall): Promise<void> {
-  if (!symonToolTracker.markInterrupting(call.sessionId, call.callId)) return;
-  const delivered = await interruptSymonTool(call);
-  const completed = symonToolTracker.complete(
-    call.sessionId,
-    call.callId,
-    delivered
-      ? { ok: false, result: { error: 'tool_timeout' } }
-      : {
-        ok: false,
-        result: {
-          error: 'interrupt_delivery_failed',
-          detail: 'Native cancellation could not be delivered; the action outcome is unknown.',
-        },
-      },
-    Date.now(),
-  );
-  if (!completed) return;
-  publishCompletedSymonToolCall(completed);
-}
-
-async function resumeSymonToolAfterConfirmation(confirmation: SymonPendingConfirmation): Promise<void> {
-  const call = symonToolTracker.markExecuting(confirmation.sessionId, confirmation.callId, Date.now());
-  if (!call || !currentSymonOwner(call.sessionId)) return;
-  touchAgentSession(call.sessionId);
-  persistAgentRegistry();
-  const outcome = await invokeSymonTool(call);
-  await handleSymonToolOutcome(call, outcome);
-}
-
-async function handleSymonToolOutcome(
-  call: PendingToolCall,
-  outcome: SymonToolRelayResult,
-): Promise<void> {
-  if (!outcome.confirmation) {
-    finishSymonToolCall(call, outcome);
-    return;
-  }
-  const confirmation = outcome.confirmation;
-  if (!symonToolTracker.markAwaitingConfirmation(
-    call.sessionId,
-    call.callId,
-    confirmation.confirmationId,
-  ) || !symonConfirmationTracker.register(confirmation, Date.now())) {
-    finishSymonToolCall(call, {
-      ok: false,
-      result: { error: 'confirmation_mismatch', detail: 'Confirmation identity collision.' },
-    });
-    return;
-  }
-
-  touchAgentSession(call.sessionId);
-  persistAgentRegistry();
-
-  const owner = currentSymonOwner(call.sessionId);
-  if (!owner) return;
-  pushSymonStatus(owner.route.clientId, call.sessionId, 'acting', 'awaiting approval');
-  if (Date.now() >= confirmation.expiresAt) {
-    symonConfirmationTracker.claim({
-      sessionId: call.sessionId,
-      callId: call.callId,
-      confirmationId: confirmation.confirmationId,
-      allow: false,
-      clientMutationId: `expired-deny:${confirmation.confirmationId}`,
-      now: Date.now(),
-    });
-    await settleSymonConfirmationWithRetry({
-      confirmation,
-      allow: false,
-      forcedOutcome: 'expired',
-      resume: true,
-    });
-    return;
-  }
-  if (call.protocolVersion === 2) {
-    pushSymonConfirmRequired(owner.route.clientId, confirmation);
-    return;
-  }
-
-  // Legacy clients cannot approve on-phone. Every card in a serial chain is
-  // denied immediately, including a destructive step that follows an approved
-  // aggregate plan card.
-  const claim = symonConfirmationTracker.claim({
-    sessionId: call.sessionId,
-    callId: call.callId,
-    confirmationId: confirmation.confirmationId,
-    allow: false,
-    clientMutationId: `legacy-deny:${confirmation.confirmationId}`,
-    now: Date.now(),
-  });
-  if (claim.kind === 'claimed') {
-    await settleSymonConfirmationWithRetry({
-      confirmation,
-      allow: false,
-      forcedOutcome: claim.forcedOutcome,
-      resume: true,
-    });
-  }
-}
-
-async function settleSymonConfirmation(input: {
-  confirmation: SymonPendingConfirmation;
-  allow: boolean;
-  forcedOutcome?: 'expired' | 'preempted';
-  resume: boolean;
-  settleRoute?: SymonConfirmationRoute;
-}): Promise<boolean> {
-  const response = await resolveSymonConfirmation(
-    input.confirmation,
-    input.allow,
-    input.forcedOutcome,
-  );
-  const resolvedOutcome = response.ok && response.resolution
-    ? confirmationOutcomeFromResolution(response.resolution)
-    : null;
-  const outcome = resolvedOutcome;
-  if (!outcome) {
-    symonConfirmationTracker.release(
-      input.confirmation.sessionId,
-      input.confirmation.callId,
-      input.confirmation.confirmationId,
-    );
-    return false;
-  }
-  symonConfirmationTracker.settle(
-    input.confirmation.sessionId,
-    input.confirmation.callId,
-    input.confirmation.confirmationId,
-    outcome,
-    Date.now(),
-  );
-  const route = input.settleRoute ?? currentSymonOwner(input.confirmation.sessionId)?.route;
-  if (route?.protocolVersion === 2) {
-    pushSymonConfirmSettled(route.clientId, input.confirmation, outcome);
-  }
-  if (input.resume) await resumeSymonToolAfterConfirmation(input.confirmation);
-  return true;
-}
-
-async function settleSymonConfirmationWithRetry(
-  input: Parameters<typeof settleSymonConfirmation>[0],
-  attempts = 3,
-): Promise<boolean> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (await settleSymonConfirmation(input)) return true;
-    if (attempt + 1 < attempts) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 150));
-    }
-  }
-  return false;
-}
-
-async function denySymonSessionConfirmations(
-  sessionId: string,
-  route: SymonSessionRoute,
-  outcome: 'preempted',
-): Promise<void> {
-  const confirmations = symonConfirmationTracker.preemptSession(sessionId);
-  for (const confirmation of confirmations) {
-    // Best-effort immediate denial; the Rust TTL remains the final fail-closed
-    // backstop if the webview disappears during teardown.
-    await settleSymonConfirmationWithRetry({
-      confirmation,
-      allow: false,
-      forcedOutcome: outcome,
-      resume: false,
-      settleRoute: route,
-    });
-  }
-}
-
-async function handleSymonConfirmDecision(client: ClientState, msg: Record<string, unknown>): Promise<void> {
-  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
-  const callId = typeof msg.callId === 'string' ? msg.callId : '';
-  const confirmationId = typeof msg.confirmationId === 'string' ? msg.confirmationId : '';
-  const clientMutationId = typeof msg.clientMutationId === 'string' ? msg.clientMutationId : '';
-  const allow = typeof msg.allow === 'boolean' ? msg.allow : null;
-  if (!sessionId || !callId || !confirmationId || !clientMutationId || allow === null) return;
-
-  const textSession = loadSymonTextSession(sessionId);
-  const textOwner = symonTextOwners.get(sessionId);
-  if (textSession && textOwner === client.id && symonTextClientMatches(textSession, client)) {
-    const claim = symonConfirmationTracker.claim({
-      sessionId,
-      callId,
-      confirmationId,
-      allow,
-      clientMutationId,
-      now: Date.now(),
-    });
-    if (claim.kind === 'missing') return;
-    if (claim.kind === 'in_flight') {
-      pushSymonConfirmSettled(client.id, claim.confirmation, 'duplicate');
-      return;
-    }
-    if (claim.kind === 'replay') {
-      pushSymonConfirmSettled(client.id, claim.confirmation, 'duplicate', claim.outcome);
-      return;
-    }
-    await settleSymonConfirmationWithRetry({
-      confirmation: claim.confirmation,
-      allow: claim.allow,
-      forcedOutcome: claim.forcedOutcome,
-      resume: false,
-      settleRoute: { clientId: client.id, protocolVersion: 2 },
-    });
-    return;
-  }
-
-  const route = symonSessions.get(sessionId);
-  const grant = activeSymonGrant(client, sessionId);
-  if (!route || route.protocolVersion !== 2 || route.clientId !== client.id
-    || !grant || !isSameSymonGrant(route.scope, grant)) return;
-  touchAgentSession(sessionId);
-  persistAgentRegistry();
-
-  const claim = symonConfirmationTracker.claim({
-    sessionId,
-    callId,
-    confirmationId,
-    allow,
-    clientMutationId,
-    now: Date.now(),
-  });
-  if (claim.kind === 'missing') return;
-  if (claim.kind === 'in_flight') {
-    pushSymonConfirmSettled(route.clientId, claim.confirmation, 'duplicate');
-    return;
-  }
-  if (claim.kind === 'replay') {
-    pushSymonConfirmSettled(route.clientId, claim.confirmation, 'duplicate', claim.outcome);
-    const replay = symonToolTracker.replay(sessionId, callId, Date.now());
-    if (replay) {
-      pushSymonToolResult(route.clientId, sessionId, callId, replay.outcome.ok, replay.outcome.result);
-      pushSymonActionComplete(route.clientId, replay.action);
-    }
-    return;
-  }
-
-  await settleSymonConfirmationWithRetry({
-    confirmation: claim.confirmation,
-    allow: claim.allow,
-    forcedOutcome: claim.forcedOutcome,
-    resume: true,
-  });
-}
-
-async function handleSymonToolInterrupt(client: ClientState, msg: Record<string, unknown>): Promise<void> {
-  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
-  const callId = typeof msg.callId === 'string' ? msg.callId : '';
-  if (!sessionId || !callId) return;
-  const route = symonSessions.get(sessionId);
-  const grant = activeSymonGrant(client, sessionId);
-  if (!route || route.protocolVersion !== 2 || route.clientId !== client.id
-    || !grant || !isSameSymonGrant(route.scope, grant)) return;
-  const call = symonToolTracker.get(sessionId, callId);
-  if (!call) return;
-  touchAgentSession(sessionId);
-  persistAgentRegistry();
-  const delivered = await interruptSymonTool(call);
-  if (!delivered) {
-    finishSymonToolCall(call, {
-      ok: false,
-      result: {
-        error: 'interrupt_delivery_failed',
-        detail: 'Native cancellation could not be delivered; the action outcome is unknown.',
-      },
-    });
-    return;
-  }
-  const preemptedConfirmations = symonConfirmationTracker.preemptCall(sessionId, callId);
-  for (const confirmation of preemptedConfirmations) {
-    symonConfirmationTracker.settle(
-      sessionId,
-      callId,
-      confirmation.confirmationId,
-      'preempted',
-      Date.now(),
-    );
-    pushSymonConfirmSettled(route.clientId, confirmation, 'preempted');
-  }
-  // Complete every authenticated exact interrupt, even if it beat the
-  // confirmation mirror registration. A late route outcome is then an
-  // idempotent no-op against this replayable tombstone.
-  finishSymonToolCall(call, { ok: false, result: { error: 'session_preempted' } });
-}
-
-async function handleSymonToolCall(client: ClientState, msg: Record<string, unknown>): Promise<void> {
-  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
-  const callId = typeof msg.callId === 'string' ? msg.callId : '';
-  const tool = typeof msg.tool === 'string' ? msg.tool : '';
-  const args = msg.args && typeof msg.args === 'object' ? (msg.args as Record<string, unknown>) : {};
-  const utterance = typeof msg.utterance === 'string'
-    ? msg.utterance.trim().slice(0, 8_000)
-    : '';
-  if (!sessionId || !callId || !tool) return;
-  const grant = activeSymonGrant(client, sessionId);
-  if (!grant) {
-    pushSymonToolResult(client.id, sessionId, callId, false, {
-      error: 'session_scope_invalid',
-      detail: 'This Symon session does not have an active scope grant for this phone.',
-    });
-    return;
-  }
-  const scoped = scopeSymonToolArgs(grant, tool, args);
-  if (!scoped.ok) {
-    pushSymonToolResult(client.id, sessionId, callId, false, {
-      error: scoped.error,
-      detail: scoped.detail,
-    });
-    return;
-  }
-
-  const requestedProtocol = symonProtocolVersion(msg);
-  const existingOwner = symonSessions.get(sessionId);
-  const protocolVersion = existingOwner?.protocolVersion === 2 ? 2 : requestedProtocol;
-  if (!existingOwner) {
-    symonSessions.set(sessionId, {
-      clientId: client.id,
-      scope: grant,
-      protocolVersion,
-      activeMachine: DEFAULT_SYMON_MACHINE,
-    });
-    startAgentSession(sessionId);
-    preemptOtherSymonSessions(sessionId, 'preempted');
-  } else if (existingOwner.clientId !== client.id || !isSameSymonGrant(existingOwner.scope, grant)
-    || existingOwner.protocolVersion !== protocolVersion) {
-    if (existingOwner.clientId !== client.id || !isSameSymonGrant(existingOwner.scope, grant)) {
-      void denySymonSessionConfirmations(sessionId, existingOwner, 'preempted');
-      void abortSymonSessionCalls(sessionId, existingOwner, 'session_preempted');
-      pushSymonStatus(existingOwner.clientId, sessionId, 'idle', 'preempted');
-    }
-    symonSessions.set(sessionId, {
-      clientId: client.id,
-      scope: grant,
-      protocolVersion,
-      activeMachine: existingOwner.activeMachine,
-    });
-  }
-  touchAgentSession(sessionId);
-  persistAgentRegistry();
-
-  const replay = symonToolTracker.replay(sessionId, callId, Date.now());
-  if (replay) {
-    if (replay.call.tool !== tool) {
-      pushSymonToolResult(client.id, sessionId, callId, false, {
-        error: 'call_mismatch',
-        detail: 'This sessionId and callId are already bound to another tool.',
-      });
-      return;
-    }
-    pushSymonToolResult(client.id, sessionId, callId, replay.outcome.ok, replay.outcome.result);
-    if (protocolVersion === 2) pushSymonActionComplete(client.id, replay.action);
-    return;
-  }
-  const activeCall = symonToolTracker.get(sessionId, callId);
-  if (activeCall) {
-    if (activeCall.tool !== tool) {
-      pushSymonToolResult(client.id, sessionId, callId, false, {
-        error: 'call_mismatch',
-        detail: 'This sessionId and callId are already bound to another tool.',
-      });
-      return;
-    }
-    if (protocolVersion === 2 && activeCall.confirmationId) {
-      const pending = symonConfirmationTracker.get(sessionId, callId, activeCall.confirmationId);
-      if (pending) pushSymonConfirmRequired(client.id, pending);
-    }
-    return;
-  }
-  const call: PendingToolCall = {
-    sessionId,
-    callId,
-    tool,
-    // Correlation stays on the server-owned call record. The native execution
-    // seam injects it only into o8_delegate's final dispatch args, after any
-    // immutable plan has been validated and approved.
-    args: scoped.args,
-    utterance: utterance || undefined,
-    protocolVersion,
-    startedAt: Date.now(),
-  };
-  if (!symonToolTracker.add(call)) return;
-  pushSymonStatus(client.id, sessionId, 'acting');
-
-  const outcome = await invokeSymonTool(call);
-  await handleSymonToolOutcome(call, outcome);
-}
-
-/** Disconnect cleanup — drop any symon sessions this socket owned. */
-function cleanupSymonForClient(clientId: string): void {
-  for (const [sessionId, ownerId] of Array.from(symonTextOwners.entries())) {
-    if (ownerId !== clientId) continue;
-    symonTextOwners.delete(sessionId);
-    if (loadSymonTextSession(sessionId)?.reattachable) continue;
-    for (const turn of symonTextTurns.values()) {
-      if (turn.sessionId !== sessionId || turn.terminal) continue;
-      void interruptSymonTextNative(turn.sessionId, turn.turnId);
-      pushSymonTextDone(turn, 'interrupted');
-    }
-    dropSymonTextSession(sessionId);
-    endSymonMachineSession(sessionId);
-  }
-  let changed = false;
-  for (const [sid, route] of Array.from(symonSessions.entries())) {
-    if (route.clientId !== clientId) continue;
-    void denySymonSessionConfirmations(sid, route, 'preempted');
-    symonSessions.delete(sid);
-    void abortSymonSessionCalls(sid, route, 'session_stopped');
-    stopAgentSession(sid);
-    clearSymonScopeGrant(sid);
-    changed = true;
-  }
-  if (changed) persistAgentRegistry();
-}
-
-/**
- * Stale sweep — an agent session with no status event or tool call for 10 min is
- * marked idle + dropped (contract §"Session registry"). Also interrupts and
- * reaps any tool call that outlived its tool-aware execution budget.
- */
-function sweepStaleSymon(): void {
-  symonAsyncActionTracker.prune(Date.now());
-  const dropped = sweepStaleAgentSession();
-  if (dropped) {
-    const route = symonSessions.get(dropped.sessionId);
-    if (route) {
-      void denySymonSessionConfirmations(dropped.sessionId, route, 'preempted');
-      void abortSymonSessionCalls(dropped.sessionId, route, 'session_stopped');
-      pushSymonStatus(route.clientId, dropped.sessionId, 'idle', 'stale');
-    }
-    symonSessions.delete(dropped.sessionId);
-    clearSymonScopeGrant(dropped.sessionId);
-    persistAgentRegistry();
-  }
-  for (const call of symonToolTracker.timedOut(Date.now())) {
-    void timeoutSymonToolCall(call);
-  }
-  for (const confirmation of symonConfirmationTracker.expire(Date.now())) {
-    const textOwner = symonTextOwners.get(confirmation.sessionId);
-    void settleSymonConfirmationWithRetry({
-      confirmation,
-      allow: false,
-      forcedOutcome: 'expired',
-      resume: currentSymonOwner(confirmation.sessionId) !== null,
-      ...(textOwner ? { settleRoute: { clientId: textOwner, protocolVersion: 2 as const } } : {}),
-    });
-  }
-}
-
-setInterval(sweepStaleSymon, 30_000);
 
 // ── Orchestrator channel handlers ──
 
@@ -7717,8 +6545,7 @@ const httpServer = createServer(async (req, res) => {
   if (handleTokenProjectionRequest(req, res, isAuthorizedInternalRequest)) return;
   // Rust classifies and stamps only the first request on a connection. End each
   // relayed response so the next request is classified and stamped on a fresh socket.
-  const symonOwnerRequest = symonOwnerPaths.has(req.url?.split('?')[0] ?? '');
-  if (o8dBridge && (process.env.O8_NEXT_O8D === '1' || symonOwnerRequest)) res.setHeader('Connection', 'close');
+  if (o8dBridge && (API_FRONT_DOOR || process.env.O8_NEXT_O8D === '1')) res.setHeader('Connection', 'close');
   // Transport health is independent of Next and recovery. Stateful requests
   // retain the original recovery-before-use ordering.
   if (req.url !== '/health') await wsStartupReady;
@@ -7729,8 +6556,15 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
-  if ((process.env.O8_NEXT_O8D === '1' || symonOwnerRequest) && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
+  if (API_FRONT_DOOR && serveBroadcastPage(req, res)) return;
+  const frontRegistered = frontDoor && req.url?.startsWith('/api/')
+    ? frontDoor.registeredFrontDoorRoute(new URL(req.url, `http://127.0.0.1:${WS_PORT}`).pathname, req.method ?? 'GET') : false;
+  if ((API_FRONT_DOOR ? frontRegistered : process.env.O8_NEXT_O8D === '1') && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res, WS_PORT, Boolean(o8dBridge?.bridged(req)),
     o8dBridge ? o8dBridge.clientAddress(req) : req.socket.localPort === WS_PORT ? req.socket.remoteAddress ?? null : null)) return;
+  if (frontDoor && nextPrivateOrigin && req.url?.startsWith('/api/')) {
+    frontDoor.forwardToNext(req, res, nextPrivateOrigin, WS_PORT, o8dBridge ? o8dBridge.clientAddress(req) : req.socket.remoteAddress ?? null); return;
+  }
+  if (frontDoor?.serveFrontDoorNotice(req, res, WS_PORT)) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([
@@ -7751,7 +6585,7 @@ const httpServer = createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
+  if (!API_FRONT_DOOR && req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
     return;
@@ -7939,9 +6773,8 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  // Native Symon tools use this o8-internal-only inventory rather than
-  // automating Terminal.app/iTerm. Keep `/terminal-sessions` unchanged for
-  // existing dashboard restore clients.
+  // Mobile terminal routes and the update idle-window probe use this inventory.
+  // Keep `/terminal-sessions` unchanged for existing dashboard restore clients.
   if (req.url === '/terminal-voice-sessions' && req.method === 'GET') {
     if (!isAuthorizedInternalRequest(req)) {
       res.writeHead(401);
@@ -8004,117 +6837,6 @@ const httpServer = createServer(async (req, res) => {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to write to terminal' }));
       }
-    });
-    return;
-  }
-
-  // Rust's repo-scoped `o8_delegate` tool calls this host instead of driving a
-  // canvas. Correlation and repo authority were injected by the Symon relay;
-  // the endpoint rechecks both before queuing the orchestrator turn.
-  if (req.url === '/symon-orchestrator-turn' && req.method === 'POST') {
-    if (!isAuthorizedInternalRequest(req)) {
-      res.writeHead(401);
-      res.end('unauthorized');
-      return;
-    }
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on('end', () => {
-      void (async () => {
-        let payload: Record<string, unknown>;
-        try {
-          payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as Record<string, unknown>;
-        } catch {
-          res.writeHead(400);
-          res.end('invalid json');
-          return;
-        }
-        const repoId = typeof payload.repoId === 'string' ? payload.repoId.trim() : '';
-        const repoPath = typeof payload.repoPath === 'string' ? payload.repoPath.trim() : '';
-        const task = typeof payload.task === 'string' ? payload.task.trim() : '';
-        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
-        const callId = typeof payload.callId === 'string' ? payload.callId.trim() : '';
-        if (!repoId || !repoPath || !task || task.length > 4_000 || !sessionId || !callId) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ accepted: false, error: 'repoId, repoPath, task, sessionId, and callId are required' }));
-          return;
-        }
-
-        const owner = currentSymonOwner(sessionId);
-        const call = symonToolTracker.get(sessionId, callId);
-        const callRepoId = call?.args?.repoId;
-        const callRepoPath = call?.args?.repoPath;
-        if (!owner || !call || call.tool !== 'o8_delegate'
-          || callRepoId !== repoId || callRepoPath !== repoPath
-          || owner.route.scope.repoId !== repoId || owner.route.scope.repoPath !== repoPath) {
-          res.writeHead(409, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ accepted: false, error: 'stale or mismatched Symon delegate scope' }));
-          return;
-        }
-
-        const repo = await findRepoByLocalPath(repoPath);
-        if (!repo || repo.id !== repoId || resolve(repo.localPath) !== resolve(repoPath)) {
-          res.writeHead(409, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ accepted: false, error: 'repository registration changed' }));
-          return;
-        }
-
-        const taskId = `symon-delegate-${randomUUID()}`;
-        enqueueOrchestratorAutoMessage(repoPath, task, 'Symon delegate', {
-          sessionId,
-          callId,
-          taskId,
-        });
-        const orchestratorSession = getActiveOrchestratorBackend().peekSession(repoPath);
-        res.writeHead(202, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          accepted: true,
-          taskId,
-          requestId: taskId,
-          sessionId: orchestratorSession?.sessionName ?? null,
-          note: orchestratorSession?.status === 'busy' ? 'queued behind the active repo turn' : 'queued',
-        }));
-      })().catch((error) => {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ accepted: false, error: error instanceof Error ? error.message : 'delegate enqueue failed' }));
-      });
-    });
-    return;
-  }
-
-  // Background Claude tasks call this loopback-only bridge after their existing
-  // dock event and task-ledger write. No active phone session means no-op fanout.
-  if (req.url === '/symon-task-complete' && req.method === 'POST') {
-    if (!isAuthorizedInternalRequest(req)) {
-      res.writeHead(401);
-      res.end('unauthorized');
-      return;
-    }
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on('end', () => {
-      let payload: Partial<SymonTaskCompletePayload>;
-      try {
-        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as Partial<SymonTaskCompletePayload>;
-      } catch {
-        res.writeHead(400);
-        res.end('invalid json');
-        return;
-      }
-      if (
-        typeof payload.taskId !== 'string' ||
-        (payload.status !== 'done' && payload.status !== 'failed') ||
-        typeof payload.intentText !== 'string' ||
-        typeof payload.resultText !== 'string' ||
-        typeof payload.truncated !== 'boolean'
-      ) {
-        res.writeHead(400);
-        res.end('invalid task completion payload');
-        return;
-      }
-      const delivered = pushSymonTaskComplete(payload as SymonTaskCompletePayload);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, delivered }));
     });
     return;
   }
@@ -8634,10 +7356,6 @@ const httpServer = createServer(async (req, res) => {
         const laneLifecyclePayload = mutationToLaneLifecyclePayload(payload.mutation);
         if (laneLifecyclePayload) {
           broadcast({ channel: 'lane-lifecycle', event: 'update', data: laneLifecyclePayload });
-          for (const action of symonAsyncActionTracker.settleLane(laneLifecyclePayload, Date.now())) {
-            const owner = currentSymonOwner(action.sessionId);
-            if (owner) pushSymonActionComplete(owner.route.clientId, action);
-          }
           console.log(`[lane-lifecycle] Broadcast ${laneLifecyclePayload.laneId} ${laneLifecyclePayload.previousStatus ?? 'new'} -> ${laneLifecyclePayload.status}`);
         }
 
@@ -8814,12 +7532,6 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  if (req.url === '/internal/next/voice-host') {
-    if (!isAuthorizedInternalRequest(req)) { res.writeHead(401).end('unauthorized'); return; }
-    await handleVoiceHostHttp(req, res, voiceHostBroker);
-    return;
-  }
-
   // ── Mobile dev-host URL push ──
   // Invoked by /api/mobile/push-url after a desktop user long-presses a port
   // chip and clicks "Send to mobile". Fans out a one-shot `mobile-dev-host`
@@ -8885,6 +7597,9 @@ const httpServer = createServer(async (req, res) => {
     }), ...(o8dBridge ? { delivery: o8dBridge.status } : {}) }));
     return;
   }
+  if (frontDoor && nextPrivateOrigin) {
+    frontDoor.forwardToNext(req, res, nextPrivateOrigin, WS_PORT, o8dBridge ? o8dBridge.clientAddress(req) : req.socket.remoteAddress ?? null); return;
+  }
   res.writeHead(404);
   res.end();
 });
@@ -8893,14 +7608,14 @@ const httpServer = createServer(async (req, res) => {
 const WS_LISTEN_HOST = resolveListenHost();
 const o8dBridge = process.env.O8_WS_O8D !== '0'
   && (process.env.O8_WS_O8D === '1' || o8dStartsByDefault())
-  ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
+  ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST, API_FRONT_DOOR) : null;
 
 try { syncTokenFile(); } catch { console.error('[mobile-e2ee] Auth projection unavailable; device HTTP requests will retry.'); }
 const WS_TOKEN = getOrCreateWsToken();
 console.log(`[ws-auth] WS token loaded (source: ${wsTokenSource()})`);
 
 const wss = new WebSocketServer({
-  server: httpServer,
+  ...(API_FRONT_DOOR ? { noServer: true } : { server: httpServer }),
   path: '/ws',
   perMessageDeflate: {
     zlibDeflateOptions: { level: 1 }, // fast compression — good enough for JSON
@@ -8961,6 +7676,12 @@ const wss = new WebSocketServer({
 // The httpServer has its own 'error' handler (stale-port recovery below), but the
 // WebSocketServer can emit 'error' independently (e.g. during upgrade handling).
 // Without a listener that's an uncaughtException that kills every connected client.
+if (API_FRONT_DOOR) httpServer.on('upgrade', (req, socket, head) => {
+  if (!frontDoor || !nextPrivateOrigin) { socket.destroy(); return; }
+  if (req.url?.split('?')[0] === '/ws') wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+  else frontDoor.forwardNextUpgrade(req, socket, head, nextPrivateOrigin, WS_PORT, o8dBridge ? o8dBridge.clientAddress(req) : req.socket.remoteAddress ?? null);
+});
+
 wss.on('error', (err) => {
   console.error('[ws-server] WebSocketServer error (non-fatal):', err);
 });
@@ -9061,8 +7782,6 @@ wss.on('connection', (ws, req) => {
     for (const key of orchestratorSubscriptions.keys()) {
       if (key.startsWith(`${client.id}::`)) orchestratorSubscriptions.delete(key);
     }
-    // Drop any Symon Agent Mode session this socket hosted.
-    cleanupSymonForClient(client.id);
     clients.delete(client.id);
     console.log(`[ws-server] Client disconnected: ${client.id} (${clients.size} total)`);
   });
@@ -9622,6 +8341,10 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
   // A second WS uses the same receiver lock path; on this port it dies with
   // EADDRINUSE before receiver startup. A different port still cannot steal the claim.
   if (err.code === 'EADDRINUSE') {
+    if (API_FRONT_DOOR) {
+      console.error('[ws-server] Advertised API port is occupied; refusing takeover without launcher handoff.');
+      process.exit(1);
+    }
     void recoverFromPortInUse();
   } else {
     throw err;
@@ -9635,6 +8358,10 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 async function bootstrapWsServer() {
+  if (API_FRONT_DOOR) {
+    frontDoor = await import('./lib/ws-server/api-front-door');
+    nextPrivateOrigin = frontDoor.nextUpstream(INSTANCE_IDENTITY.apiPort, INSTANCE_IDENTITY.wsPort);
+  }
   // Persist the default project ledger once; project GETs only read it. A
   // failed write must not stop the server: the GETs still project the default.
   try {
@@ -9662,46 +8389,20 @@ async function bootstrapWsServer() {
     });
   }
 
-  // Bind the listener before resuming turns so their tools can reach it. Stateful
-  // requests await this bootstrap; resume schedules work without awaiting a turn.
-  // An older Next holding the store claim refuses this open before any resume.
-  let receiverBlocked = false;
-  try {
-    const { getSymonBrain } = await import('./lib/symon/durable/brain');
-    await getSymonBrain();
-  } catch (error) {
-    console.warn('[symon] Brain startup refused:', error instanceof Error ? error.message : 'unavailable');
-    // If the owner module cannot load, the receiver could not claim either.
-    receiverBlocked = await import('./lib/symon/messages-receiver/owner')
-      .then(({ brainRefusalBlocksReceiver }) => brainRefusalBlocksReceiver(error))
-      .catch(() => true);
-  }
-  // A competing brain owner also keeps this receiver stopped. Restart after
-  // retiring the old process; never run its Messages loop alongside a new one.
-  // Other brain failures leave the receiver running on the native planner.
-  if (!receiverBlocked && process.platform === 'darwin') {
-    try {
-      const { startMessagesReceiver } = await import('./lib/symon/messages-receiver/loop');
-      if (!startMessagesReceiver()) console.warn('[symon] Messages receiver claim refused; another owner is active');
-    } catch {
-      console.warn('[symon] Messages receiver failed to start');
-    }
-  }
-
   // Native producers use this listener. Its stateful requests await this
   // bootstrap, so probing them here waits on ourselves until the timeout.
-  if (process.env.O8_NEXT_O8D !== '1') await waitForNextReady();
-  // With the native transport on, this process owns the edge-tts installer
-  // (#5422). Never wait on pip; the voice route also prepares on demand.
-  if (process.env.O8_NEXT_O8D === '1') void import('./lib/tts/ensure-edge-tts')
-    .then(({ ensureEdgeTtsInstalled }) => ensureEdgeTtsInstalled())
-    .catch(() => { console.warn('[startup] Optional voice preparation failed.'); });
+  if (!API_FRONT_DOOR && process.env.O8_NEXT_O8D !== '1') await waitForNextReady();
   // One process opens the o8 next window at startup (#5709). Next does, unless the shell names
   // this process with O8_NEXT_WINDOW_OWNER=ws, as once it serves the API port with Next stopped.
   // Both children inherit the same value, so a launcher that gives both the window environment
   // (the Linux desktop) never has two claim the startup marker. Next checks the same variable.
   if (process.env.O8_PACKAGED_APP === '1' && process.env.O8_NEXT_WINDOW_OWNER === 'ws') void import('./lib/next/app-window')
     .then(({ restoreNextWindow }) => restoreNextWindow())
+    .catch(() => {});
+  // With Next off (launcher O8_NEXT_OFF), Next's startup hook never runs. This
+  // process schedules the same startup work against its own public API port.
+  if (API_FRONT_DOOR && process.env.O8_NEXT_OFF === '1') void import('./lib/startup/schedule')
+    .then(({ scheduleNextServerStartup }) => scheduleNextServerStartup())
     .catch(() => {});
   if (shuttingDown) return;
   await terminalHostReady;
@@ -9981,6 +8682,8 @@ async function bootstrapWsServer() {
         },
         publish: (threadId, sessionName, event, data) => broadcastToOrchestratorSession(
           orchestratorRouteSessionName(sessionName, threadId), JSON.stringify({ channel: 'orchestrator', event, data })),
+     
+        publishThread: thread => broadcast({ channel: 'orchestrator-threads', event: 'upsert', data: { thread } }),
       }),
       async fetchFleetStatus() {
         // #476 — Use cached inventory (15s TTL) instead of forcing fresh discovery every 5s.
@@ -10211,7 +8914,6 @@ async function shutdown(signal: string, exitCode = 0) {
   if (browserDiscoveryTimer) clearInterval(browserDiscoveryTimer);
   if (attachedBrowserRefreshTimer) clearInterval(attachedBrowserRefreshTimer);
 
-  clearInterval(voiceQueueTimer);
   // Destroy all terminal PTY handles (tmux sessions persist independently)
   for (const [, att] of terminalAttachments) {
     if (att.batchTimer) clearTimeout(att.batchTimer);

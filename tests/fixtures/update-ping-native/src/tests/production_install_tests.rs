@@ -20,6 +20,7 @@ struct Service {
     events: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
     admission: Arc<AtomicBool>,
+    manual: Arc<AtomicBool>,
 }
 impl Drop for Service {
     fn drop(&mut self) {
@@ -27,8 +28,18 @@ impl Drop for Service {
     }
 }
 fn service(valid: bool, pulled: bool, admission: bool) -> Service {
+    service_options(valid, pulled, admission, false)
+}
+fn service_options(
+    valid: bool,
+    pulled: bool,
+    admission: bool,
+    signature_mismatch: bool,
+) -> Service {
     let admission = Arc::new(AtomicBool::new(admission));
     let allowed_install = admission.clone();
+    let manual = Arc::new(AtomicBool::new(false));
+    let clicked = manual.clone();
     let socket = TcpListener::bind("127.0.0.1:0").unwrap();
     socket.set_nonblocking(true).unwrap();
     let base = format!("http://{}", socket.local_addr().unwrap());
@@ -77,13 +88,18 @@ fn service(valid: bool, pulled: bool, admission: bool) -> Service {
                 .unwrap()
                 .to_string();
             observed.lock().unwrap().push(path.clone());
-            let reply = if path == "/manifest" || path.ends_with("/latest.json") {
+            let reply = if headers.starts_with("get ") && path == "/api/panel/app/update-state" {
+                serde_json::json!({"state":{"check":{}},"applyRequestedAt":null})
+                    .to_string()
+                    .into_bytes()
+            } else if path == "/manifest" || path.ends_with("/latest.json") {
                 serde_json::json!({"channel":"stable", "version":"0.2.0", "url": format!("{origin}/artifact"), "signature":
                     if valid { include_str!("../../artifacts/valid.signature.b64").trim() }
                     else { include_str!("../../artifacts/invalid.signature.b64").trim() }}).to_string().into_bytes()
             } else if path == "/artifact" {
                 base64::engine::general_purpose::STANDARD
-                    .decode(if valid {
+                    // A mismatched test signature must fail before archive installation.
+                    .decode(if valid || signature_mismatch {
                         include_str!("../../artifacts/valid.artifact.b64").trim()
                     } else {
                         include_str!("../../artifacts/invalid.artifact.b64").trim()
@@ -97,14 +113,24 @@ fn service(valid: bool, pulled: bool, admission: bool) -> Service {
                 b"{\"ok\":true}".to_vec()
             } else {
                 let body: serde_json::Value = serde_json::from_slice(&bytes[split..]).unwrap();
+                if let Some(action) = body["autoApply"]["action"].as_str() {
+                    observed.lock().unwrap().push(format!("action:{action}"));
+                }
+                if body["autoApply"]["action"] == "held" {
+                    observed.lock().unwrap().push(format!(
+                        "held:{}",
+                        body["autoApply"]["status"]["phase"].as_str().unwrap_or("")
+                    ));
+                }
                 let allowed = if body["autoApply"]["action"] == "inspect-restart" {
                     true
                 } else {
                     allowed_install.load(Ordering::SeqCst)
                 };
-                serde_json::json!({"allowed": allowed})
-                    .to_string()
-                    .into_bytes()
+                serde_json::json!({"allowed": allowed, "manual": clicked.load(Ordering::SeqCst),
+                    "attemptId":body["autoApply"]["attemptId"], "version":"0.2.0"})
+                .to_string()
+                .into_bytes()
             };
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", reply.len()).unwrap();
             stream.write_all(&reply).unwrap();
@@ -115,6 +141,7 @@ fn service(valid: bool, pulled: bool, admission: bool) -> Service {
         events,
         stop,
         admission,
+        manual,
     }
 }
 
@@ -357,4 +384,182 @@ fn webview_ipc_download_and_install_stage_signed_bytes_without_restarting() {
         serde_json::json!({"rid":downloaded,"force":false})
     )
     .is_err());
+}
+
+#[test]
+fn scheduler_downloads_signed_update_without_install_admission() {
+    // O8_API_PORT is process-wide; other scheduler tests read it too.
+    let _serial = super::scheduler_tests::SCHEDULER_ENV
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    for valid in [true, false] {
+        let service = service_options(valid, false, false, true);
+        let app = super::build_app_with_key(
+            &service.base,
+            &service.base,
+            "0.1.0",
+            include_str!("../../artifacts/public-key.b64").trim(),
+        );
+        let previous = std::env::var_os("O8_API_PORT");
+        std::env::set_var(
+            "O8_API_PORT",
+            reqwest::Url::parse(&service.base)
+                .unwrap()
+                .port()
+                .unwrap()
+                .to_string(),
+        );
+        let handle =
+            tauri::async_runtime::spawn(crate::launch_updater::scheduler::run_with_effects(
+                app.handle().clone(),
+                |app, client, base, token| NativeEffects {
+                    app,
+                    client,
+                    base,
+                    token,
+                },
+                Duration::from_millis(30),
+            ));
+        let expected = if valid { "held:ready" } else { "held:failed" };
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        while !service.events.lock().unwrap().iter().any(|e| e == expected)
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        handle.abort();
+        let _ = tauri::async_runtime::block_on(handle);
+        if let Some(previous) = previous {
+            std::env::set_var("O8_API_PORT", previous);
+        } else {
+            std::env::remove_var("O8_API_PORT");
+        }
+        let events = service.events.lock().unwrap();
+        assert!(
+            events.iter().any(|e| e == expected),
+            "signed artifact must be held independently of install admission: {events:?}"
+        );
+        assert!(events.iter().any(|e| e == "held:downloading"));
+        assert_eq!(events.iter().filter(|e| *e == "/artifact").count(), 1);
+        assert!(
+            !events
+                .iter()
+                .any(|e| e.starts_with("/api/panel/release-health")),
+            "no install before admission"
+        );
+    }
+}
+
+#[test]
+fn native_apply_retries_failed_swap_only_after_manual_admission() {
+    use crate::launch_updater::scheduler::auto_apply::{
+        install_journal::InstallJournal, AutoApply,
+    };
+    struct ApplyEffects(NativeEffects<tauri::test::MockRuntime>);
+    impl Effects for ApplyEffects {
+        fn retry_failed(&self, version: &str) -> Result<(), String> {
+            self.0.retry_failed(version)
+        }
+        async fn install(&self, version: &str, attempt: &str) -> Result<bool, String> {
+            self.0.install(version, attempt).await
+        }
+        fn restart(&self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    let service = service(true, false, true);
+    let directory = tempfile::tempdir().unwrap();
+    let app = super::build_app_with_key(
+        &service.base,
+        &service.base,
+        "0.1.0",
+        include_str!("../../artifacts/public-key.b64").trim(),
+    );
+    app.manage(o8_restart_safety::RestartSafety::new(
+        directory.path().to_path_buf(),
+        || {},
+    ));
+    app.manage(crate::install_race_edge::Hooks {
+        installer: Mutex::new(Some(Box::new(|| {
+            Err(std::io::Error::other("fixture swap failed").into())
+        }))),
+        ..Default::default()
+    });
+    let effects = ApplyEffects(NativeEffects {
+        app: app.handle().clone(),
+        client: reqwest::Client::builder().no_proxy().build().unwrap(),
+        base: service.base.clone(),
+        token: "fixture".into(),
+    });
+    tauri::async_runtime::block_on(async {
+        let report = crate::launch_updater::run_check(app.handle()).await;
+        assert_eq!(report["checkOutcome"], "available");
+        crate::launch_updater::scheduler::auto_apply::stage(app.handle(), false).await;
+    });
+    let mut auto = AutoApply::new(Duration::ZERO);
+    let url = format!("{}/api/panel/app/update-state", service.base);
+    let tick = |auto: &mut AutoApply| {
+        tauri::async_runtime::block_on(auto.tick(&effects.0.client, &url, "fixture", &effects))
+    };
+    tick(&mut auto);
+    let calls = || {
+        app.state::<crate::install_race_edge::Hooks>()
+            .calls
+            .load(Ordering::SeqCst)
+    };
+    assert_eq!(calls(), 1);
+    let journal = InstallJournal::new(directory.path().to_path_buf());
+    assert!(journal.check("0.2.0").is_err());
+    tick(&mut auto);
+    assert_eq!(
+        calls(),
+        1,
+        "automatic admission cannot repeat a failed swap"
+    );
+    service.manual.store(true, Ordering::SeqCst);
+    tick(&mut auto);
+    assert_eq!(
+        calls(),
+        2,
+        "an explicit Retry admits one new install attempt"
+    );
+    assert_eq!(
+        service
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| *e == "/artifact")
+            .count(),
+        1,
+        "install and explicit retry must reuse the held verified bytes"
+    );
+    assert!(
+        journal.retry_failed("0.2.0").is_err(),
+        "successful attempts stay protected"
+    );
+    // An interrupted swap stays protected, and refusal must settle as a failure
+    // rather than leave the server's install claim running indefinitely.
+    std::fs::write(
+        directory
+            .path()
+            .join("automatic-install-attempts/0.2.0.json"),
+        br#"{"outcome":"attempting"}"#,
+    )
+    .unwrap();
+    let failures = || {
+        service
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| *e == "action:failed")
+            .count()
+    };
+    let before = failures();
+    let mut recovery = AutoApply::new(Duration::ZERO);
+    tick(&mut recovery);
+    assert_eq!(calls(), 2);
+    assert_eq!(failures(), before + 1);
+    assert!(journal.check("0.2.0").is_err());
 }

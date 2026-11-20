@@ -276,9 +276,7 @@ impl Client {
     pub(crate) fn read<T: DeserializeOwned>(response: ureq::Response) -> Result<T, String> {
         Self::read_counted(response).map(|(value, _)| value)
     }
-    fn read_counted<T: DeserializeOwned>(
-        response: ureq::Response,
-    ) -> Result<(T, usize), String> {
+    fn read_counted<T: DeserializeOwned>(response: ureq::Response) -> Result<(T, usize), String> {
         let mut bytes = Vec::new();
         response
             .into_reader()
@@ -332,6 +330,42 @@ impl Client {
 #[cfg(test)]
 mod tests {
     #[test]
+    #[ignore = "driven by the owned product-front-door saved-prompt fixture"]
+    fn saved_prompts_product_transport_without_node() {
+        let directory = std::path::PathBuf::from(
+            std::env::var_os("O8_PROMPT_CLIENT_DATA").expect("owned fixture data"),
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.join("fixture-owner")).unwrap(),
+            "o8d-native-read/v1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.join("node-stopped")).unwrap(),
+            "stopped"
+        );
+        let token = std::fs::read_to_string(directory.join("ws-token")).unwrap();
+        let client = Client::authenticated(
+            &std::env::var("O8_PROMPT_CLIENT_ORIGIN").unwrap(),
+            Some(token.trim().to_owned()),
+        )
+        .unwrap();
+        let list: serde_json::Value = client
+            .get(
+                "/api/prompt-library",
+                &[
+                    ("scope", "available"),
+                    ("query", "fixture"),
+                    ("limit", "100"),
+                ],
+            )
+            .unwrap();
+        let id = list["prompts"][0]["id"].as_str().expect("saved prompt");
+        let single: serde_json::Value = client
+            .get(&format!("/api/prompt-library/{id}"), &[])
+            .unwrap();
+        assert_eq!(single["prompt"], list["prompts"][0]);
+    }
+    #[test]
     fn a_tunneled_client_names_the_far_server_as_host() {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -374,8 +408,12 @@ mod tests {
     #[test]
     fn transient_errors_are_stale_not_fatal() {
         assert!(super::transient("/api/panel/repos: Request timed out"));
-        assert!(super::transient("/api/panel/repos: Server returned HTTP 503"));
-        assert!(!super::transient("/api/panel/repos: Server returned HTTP 401"));
+        assert!(super::transient(
+            "/api/panel/repos: Server returned HTTP 503"
+        ));
+        assert!(!super::transient(
+            "/api/panel/repos: Server returned HTTP 401"
+        ));
         assert_eq!(
             super::stale_notice("/api/panel/repos: Request timed out"),
             "Showing last loaded data · stale (Request timed out)"
@@ -392,8 +430,10 @@ mod tests {
             // the third a 503 that must not be retried.
             let (first, _) = listener.accept().unwrap();
             drop(first);
-            for body in ["HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}",
-                         "HTTP/1.1 503 Busy\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"] {
+            for body in [
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}",
+                "HTTP/1.1 503 Busy\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            ] {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut buf = [0u8; 4096];
                 let _ = stream.read(&mut buf);
@@ -406,7 +446,12 @@ mod tests {
         let client = super::Client::new(&format!("http://127.0.0.1:{port}")).unwrap();
         let ok: serde_json::Value = client.get("/api/panel/repos", &[]).unwrap();
         assert_eq!(ok["ok"], true);
-        assert!(client.get::<serde_json::Value>("/api/panel/repos", &[]).unwrap_err().contains("HTTP 503"));
+        assert!(
+            client
+                .get::<serde_json::Value>("/api/panel/repos", &[])
+                .unwrap_err()
+                .contains("HTTP 503")
+        );
         assert!(server.join().unwrap(), "a status answer was retried");
     }
 

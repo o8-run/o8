@@ -1,0 +1,101 @@
+{
+  "issue": 6417,
+  "base": "47ea3e678bc4b819d97642a954911c9ac487efea",
+  "scope": "Flagged packaged API listener and streaming Next fallback; no new handler registrations or route states.",
+  "failThenPass": {
+    "redCommit": "898030a2c",
+    "redExit": 1,
+    "redTest": "tests/api-front-door-real-path.test.ts",
+    "redMessage": "Advertised API port was not taken over with O8_API_FRONT_DOOR=1 and O8_NEXT_O8D=0",
+    "green": {
+      "tests/api-front-door-real-path.test.ts": {
+        "passed": 2,
+        "modes": [
+          "Node",
+          "o8d"
+        ],
+        "nextFlag": "0",
+        "nativeReads": "default; require native marker on operator identity and ws-info"
+      },
+      "tests/api-front-door-packaged-boundary-real-path.test.ts": {
+        "passed": 1,
+        "modes": [
+          "flag off",
+          "flag on"
+        ]
+      },
+      "tests/api-front-door-routing.test.ts": {
+        "passed": 2
+      },
+      "src/lib/ws-server/next-fetch.test.ts": {
+        "passed": 13
+      }
+    },
+    "receiptRecordedBeforeRebase": true
+  },
+  "checks": {
+    "cargoBuild": "passed: experimental-session-reads",
+    "cargoTest": "12 passed: experimental-session-reads --lib",
+    "typecheckFast": "passed",
+    "touchedFileLint": "passed",
+    "ruleCheck": "passed: zero violations",
+    "testClassification": "passed"
+  },
+  "covered": [
+    "advertised API/WS metadata and real /ws handshake",
+    "registered identity with private Next stopped",
+    "unregistered methods and more-specific static Next paths",
+    "binary request bytes and repeated Unicode query values",
+    "HEAD, OPTIONS, redirect and repeated Set-Cookie",
+    "SSE response and caller-abort cancellation",
+    "raw upgrade, failed upgrade response body and non-app WebSocket frame echo",
+    "spoofed peer/bridge removal and restrictive relay stamp",
+    "operator, absent/wrong bearer, invalid Host and browser-write refusal",
+    "packaged Next public authority and direct loopback private-owner authority"
+  ],
+  "authRegression": {
+    "pullRequest": 6386,
+    "test": "tests/o8d-rust-projects-real-path.test.ts",
+    "outcomes": 35,
+    "note": "Existing projects auth matrix is retained and replayed on the separately rebased projects branch. This is separate from the new takeover socket tests.",
+    "status": "Frozen 35-outcome projects evidence retained; replay after final independent rebase is pending."
+  },
+  "o8dFixtureSha256": "5b3483aa2e83e26e217e43b1c95605cf1518fa1063695b8735fdd03ee0c3355e",
+  "sourceSha256": {
+    "crates/o8d/src/app.rs": "b3ca82eb5ea874a908e119ddc59beacc18caf1d41a226722074e07603d609059",
+    "crates/o8d/src/http/settings.rs": "d3f969b3d3b8b2c1b85d50a4ba526da912d8a12d8334acb820199008b7c00acc",
+    "scripts/tauri-export.mjs": "097177ccfdf16423c220bcc0f033cdc31523b64e2f6b63cecb3a8823d817eeaf",
+    "src/app/api/panel/approvals/route.ts": "2d8454b761c6205db67a43e14feb7485d146ac467b1fbdf0210f29f1445e4c86",
+    "src/app/api/panel/ws-info/route.ts": "ef23ceac79dc13222408b3e389a21843c5b40cafac89c8f4b012059621485be5",
+    "src/lib/approvals/route.ts": "90a8809f991c21215cc1323459e3b2c82bd96bea8d23234d0eab95c20371269d",
+    "src/lib/cortex/knowledge/reconcile.ts": "3240e3f93efa1878455237474ee20d88d7231560b581f59c3634c8cc4ea9a69a",
+    "src/lib/mcp/operator-handlers/devices.ts": "8291eeb1a377ae15d4ee90e9634e0a8de1b16163faeab82b62fd0432ba330402",
+    "src/lib/operator/settings-window-owner.ts": "5aba8a6a07cb194238f8cee6b000ed0a53791191feefc534b815bbccd5738953",
+    "src/lib/orchestrator/operator-mission-service/steer-owner-route.ts": "13f8c0e1154acd1273782a5e3c78bdafcae2624d94c0391ccd5472d9be0c959a",
+    "src/lib/panel/api-port.ts": "b700a079ddde1cfda9b963686f6cf49a64d3ababf0bb02d1397bd0944a69b725",
+    "src/lib/runtime/owner-context.ts": "07ec1e4bf8fd46104dcb407db9d8f5562b320b245ac70888d984811b253d6045",
+    "src/lib/runtime/owner-status-route.ts": "eebce0d0a1b63265adf2403012ee04f8a522c8e250e675c3f4ef48ef11835731",
+    "src/lib/tasks/dispatch-owner-route.ts": "8fd91f6b7e0c1f8c9c31cbb346dbdbcb1c15b99b0bd1b223562aa1efd62269e8",
+    "src/lib/ws-server/api-front-door-config.ts": "56f75251fca9c7f94f53294d04c0659df8365b7ddf75af8cbc0f66f08f0652c5",
+    "src/lib/ws-server/api-front-door-routes.ts": "53a2f6f2c45d666d95bad86c6960d329dc1d28bbd02ece65d25f47de51e242a8",
+    "src/lib/ws-server/api-front-door.ts": "ff22f0895801cdafd8531ad07e49f3ce479bec4b83e174ed953f1eb7724c2848",
+    "src/lib/ws-server/native-http-routes.ts": "f0b72a6a18d0da973de117be176c832a3d330bd828a91a4183e1af1197482f1e",
+    "src/lib/ws-server/native-owner.ts": "5dade1319fecd0a27f707ee5df62785341ed1b3e2066aafb140ceee4f711513f",
+    "src/lib/ws-server/native-session-reads.ts": "4f8556da235456d8c9c7732253858fdcf367a5e55baa38f7f4d5dfebecc52fbe",
+    "src/lib/ws-server/next-fetch.test.ts": "afc08f2168a9008ad2d5cf4998b19378ea5bef5208faf733f03eb831d5c6ef56",
+    "src/lib/ws-server/next-fetch.ts": "1c7b11f60e030f7ab7132a3af79c53b1a57bb95156c719880c728a11bdb08b70",
+    "src/lib/ws-server/o8d-bridge.ts": "21bedcde171ff4d7f92979e52c10e07022b7566564387b329da29a36c487b819",
+    "src/ws-server.ts": "59d9f2a948ca4b00bcb38f55995a1767f0b1187b0d77fdc5cad3eadaee03cc2b",
+    "tests/api-front-door-packaged-boundary-real-path.test.ts": "c08c21f4c55ca58965bc920a645bf5e7df0ce354251d2d68b2dd3e9847a717eb",
+    "tests/api-front-door-real-path.test.ts": "10839b3841468390e3c3c6f9e2dfcfaa0695b3d72ba93f7f05043fb5039dc7c6",
+    "tests/api-front-door-routing.test.ts": "ec1b84d65ab90995491c2b51f701256a873a8293f4488d4e1afe5bb90a9ef95b"
+  },
+  "limitations": [
+    "No latency or installed-build measurement is claimed; fixture binary is unoptimized protocol-test input.",
+    "Launcher start order, private Next binding, port-file publication and dev-build default are owned by the launcher change.",
+    "Release default remains off; master review is required before arming.",
+    "Broadcast uses transitional Next forwarding until its static build and remaining data-handler registrations land.",
+    "No new registrations, route deletion, Rust-only promotion or state-owner migration."
+  ],
+  "verificationNote": "Targeted assertions passed across focused runs. The earlier combined run had an unhandled fixture GET/body error; the corrected internal-fetch module passed, and the final admitted-native socket module passed separately. No failed combined invocation is labeled green."
+}

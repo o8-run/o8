@@ -43,7 +43,10 @@ fn diff_request_changes_follows_current_verdict(cx: &mut TestAppContext) {
         visual.run_until_parked();
         view.read_with(visual, |view, _| assert!(view.ready));
         if verdict == "rejected" {
-            assert!(visual.debug_bounds("request-changes-open").is_some(), "Review must retain Request changes after constructor extraction");
+            assert!(
+                visual.debug_bounds("request-changes-open").is_some(),
+                "Review must retain Request changes after constructor extraction"
+            );
             continue;
         }
         assert!(

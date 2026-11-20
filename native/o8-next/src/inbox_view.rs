@@ -242,49 +242,62 @@ impl Render for Inbox {
                             .flex_wrap()
                             .items_center()
                             .gap(px(8.))
-                            .child(div()
-                                .when(self.lane != approval_audit::LANE, |v| v.flex_1())
-                                .when(self.lane == approval_audit::LANE, |v| v.flex_shrink_0())
-                                .text_size(px(15.)).child("Inbox"))
-                            .when(self.lane == approval_audit::LANE, |v| v.child(self.audit_controls(cx)))
-                            .when(self.lane != approval_audit::LANE, |v| v.child(
+                            .child(
                                 div()
-                                    .id("inbox-scope")
-                                    .debug_selector(|| "inbox-scope".into())
-                                    .p(px(6.))
-                                    .rounded(px(7.))
-                                    .text_size(px(11.))
-                                    .child(if self.lane == 2 {
-                                        "All workspaces"
-                                    } else if self.all {
-                                        "All repositories"
-                                    } else {
-                                        "This workspace"
-                                    })
-                                    .when(self.lane != 2 && !self.workspace.is_empty(), |v| {
-                                        v.cursor_pointer()
-                                            .hover(|s| s.bg(palette().hover))
-                                            .on_click(cx.listener(|this, _, _, cx| this.scope(cx)))
-                                    }),
-                            ))
-                            .when(self.lane != approval_audit::LANE, |v| v.child(
-                                div()
-                                    .id("inbox-refresh")
-                                    .debug_selector(|| "inbox-refresh".into())
-                                    .p(px(6.))
-                                    .rounded(px(7.))
-                                    .text_size(px(11.))
-                                    .child(if self.view_loading() {
-                                        "Refreshing…"
-                                    } else {
-                                        "Refresh"
-                                    })
-                                    .when(!self.view_loading(), |v| {
-                                        v.cursor_pointer()
-                                            .hover(|s| s.bg(palette().hover))
-                                            .on_click(cx.listener(|this, _, _, cx| this.load(cx)))
-                                    }),
-                            )),
+                                    .when(self.lane != approval_audit::LANE, |v| v.flex_1())
+                                    .when(self.lane == approval_audit::LANE, |v| v.flex_shrink_0())
+                                    .text_size(px(15.))
+                                    .child("Inbox"),
+                            )
+                            .when(self.lane == approval_audit::LANE, |v| {
+                                v.child(self.audit_controls(cx))
+                            })
+                            .when(self.lane != approval_audit::LANE, |v| {
+                                v.child(
+                                    div()
+                                        .id("inbox-scope")
+                                        .debug_selector(|| "inbox-scope".into())
+                                        .p(px(6.))
+                                        .rounded(px(7.))
+                                        .text_size(px(11.))
+                                        .child(if self.lane == 2 {
+                                            "All workspaces"
+                                        } else if self.all {
+                                            "All repositories"
+                                        } else {
+                                            "This workspace"
+                                        })
+                                        .when(self.lane != 2 && !self.workspace.is_empty(), |v| {
+                                            v.cursor_pointer()
+                                                .hover(|s| s.bg(palette().hover))
+                                                .on_click(
+                                                    cx.listener(|this, _, _, cx| this.scope(cx)),
+                                                )
+                                        }),
+                                )
+                            })
+                            .when(self.lane != approval_audit::LANE, |v| {
+                                v.child(
+                                    div()
+                                        .id("inbox-refresh")
+                                        .debug_selector(|| "inbox-refresh".into())
+                                        .p(px(6.))
+                                        .rounded(px(7.))
+                                        .text_size(px(11.))
+                                        .child(if self.view_loading() {
+                                            "Refreshing…"
+                                        } else {
+                                            "Refresh"
+                                        })
+                                        .when(!self.view_loading(), |v| {
+                                            v.cursor_pointer()
+                                                .hover(|s| s.bg(palette().hover))
+                                                .on_click(
+                                                    cx.listener(|this, _, _, cx| this.load(cx)),
+                                                )
+                                        }),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -345,7 +358,9 @@ impl Render for Inbox {
                         .child("Approvals across all workspaces"),
                 )
             })
-            .when(self.lane == approval_audit::LANE, |v| v.child(self.audit_body(cx)))
+            .when(self.lane == approval_audit::LANE, |v| {
+                v.child(self.audit_body(cx))
+            })
             .when(self.lane != approval_audit::LANE && !self.loaded, |v| {
                 v.child(div().p(px(12.)).child(if self.loading {
                     "Loading inbox…"
@@ -363,15 +378,18 @@ impl Render for Inbox {
                         .child(error),
                 )
             })
-            .when(self.lane != approval_audit::LANE && !self.notice.is_empty(), |v| {
-                v.child(
-                    div()
-                        .debug_selector(|| "inbox-notice".into())
-                        .px(px(12.))
-                        .text_size(px(11.))
-                        .child(self.notice.clone()),
-                )
-            })
+            .when(
+                self.lane != approval_audit::LANE && !self.notice.is_empty(),
+                |v| {
+                    v.child(
+                        div()
+                            .debug_selector(|| "inbox-notice".into())
+                            .px(px(12.))
+                            .text_size(px(11.))
+                            .child(self.notice.clone()),
+                    )
+                },
+            )
             .when(self.truncated(), |v| {
                 v.child(
                     div()
@@ -404,22 +422,24 @@ impl Render for Inbox {
                         }),
                 )
             })
-            .when(self.lane != approval_audit::LANE, |v| v.child(
-                div()
-                    .id("inbox-cards")
-                    .debug_selector(|| "inbox-cards".into())
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .p(px(12.))
-                    .children(
-                        self.cards[self.lane]
-                            .clone()
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, card)| self.card(card, i, window, cx)),
-                    ),
-            ))
+            .when(self.lane != approval_audit::LANE, |v| {
+                v.child(
+                    div()
+                        .id("inbox-cards")
+                        .debug_selector(|| "inbox-cards".into())
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll)
+                        .p(px(12.))
+                        .children(
+                            self.cards[self.lane]
+                                .clone()
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, card)| self.card(card, i, window, cx)),
+                        ),
+                )
+            })
     }
 }

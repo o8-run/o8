@@ -110,58 +110,6 @@ describe('entitlement sync route', () => {
     vi.unstubAllEnvs();
   });
 
-  it('keeps persisted voice controls through same-account license and managed credential refresh, but not fresh sign-in', async () => {
-    vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '1');
-    vi.stubEnv('O8_DATA_DIR', tempDataDir!);
-    vi.stubEnv('WS_TOKEN', 'voice-sync-operator-fixture');
-    let license = 'license.one';
-    const id = '22222222-2222-4222-8222-222222222222';
-    const calls: Array<{ url: string; authorization: string | null }> = [];
-    globalThis.fetch = vi.fn(async (input, init) => {
-      const url = String(input);
-      if (url.endsWith('/account/link-install')) return Response.json({});
-      if (url.endsWith('/account/license')) return Response.json({ license });
-      if (url.endsWith('/github/app/token')) return Response.json({ installed: true,
-        token: `fixture-${license}`, expiresAt: new Date(Date.now() + 60_000).toISOString(),
-        installationId: 88, ownerClerkUserId: 'user_founder' });
-      calls.push({ url, authorization: new Headers(init?.headers).get('authorization') });
-      return Response.json(url.endsWith('/v1/live/sessions') ? { id, sdp: 'answer' } : { events: [] });
-    });
-    const { readAccountState } = await import('@/lib/auth/account-state');
-    const { readManagedGithubState } = await import('@/lib/github-broker/managed');
-    const sync = async () => {
-      expect((await post({ clerkUserId: 'user_founder' })).status).toBe(200);
-      await vi.waitFor(() => expect(readManagedGithubState()?.token).toBe(`fixture-${license}`));
-      await vi.waitFor(() => expect(readAccountState()?.status).toBe('ready'));
-    };
-    await sync();
-    const before = readAccountState()!;
-    const voiceRequest = (action: string) => new Request('http://localhost/api/voice/live', {
-      method: 'POST', headers: { authorization: 'Bearer voice-sync-operator-fixture' },
-      body: JSON.stringify({ action, id, binding: 'same-chat', after: 0, context: '', sdp: 'offer' }),
-    });
-    const voice = await import('@/app/api/voice/live/route');
-    expect((await voice.POST(voiceRequest('start'))).status).toBe(200);
-    const receipt = path.join(tempDataDir!, 'managed-voice-relay', `${id}.json`);
-    const stored = readFileSync(receipt, 'utf8');
-    expect(JSON.parse(stored).version).toBe(2);
-    license = 'license.two';
-    await sync();
-    expect(readAccountState()).toMatchObject({ accountId: before.accountId, epoch: before.epoch });
-    expect(readAccountState()?.generation).not.toBe(before.generation);
-    vi.resetModules();
-    const reloaded = await import('@/app/api/voice/live/route');
-    expect((await reloaded.POST(voiceRequest('poll'))).status).toBe(200);
-    expect((await reloaded.POST(voiceRequest('close'))).status).toBe(200);
-    expect(calls.map(call => call.authorization)).toEqual(['Bearer license.one', 'Bearer license.two', 'Bearer license.two']);
-    expect(readFileSync(receipt, 'utf8')).toBe(stored);
-    expect((await post({ clearSignInMarker: true })).status).toBe(200);
-    await sync();
-    expect((await reloaded.POST(voiceRequest('poll'))).status).toBe(404);
-    expect(calls).toHaveLength(3);
-    expect(readFileSync(receipt, 'utf8')).toBe(stored);
-  });
-
   it('clears entitlement and founder state on signed-out sync', async () => {
     const response = await post({ signedOut: true });
     const data = await response.json();

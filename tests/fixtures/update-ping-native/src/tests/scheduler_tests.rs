@@ -282,10 +282,80 @@ fn slow_local_state_transport_does_not_repeat_remote_checks_as_false_wakes() {
         stop,
     );
     thread::sleep(Duration::from_secs(13));
+    // Count update checks only: a held update downloads its artifact from the
+    // same server, and that request is not a check.
+    let checks = primary
+        .requests
+        .try_iter()
+        .filter(|request| request.starts_with("GET /v1/update/"))
+        .count();
     assert_eq!(
-        primary.requests.try_iter().count(),
+        checks,
         1,
         "local timeouts must not trigger remote checks every five seconds"
     );
     assert!(fallback.requests.try_recv().is_err());
+}
+
+#[test]
+fn idle_scheduler_reads_state_every_few_seconds_and_posts_held_state_only_on_change() {
+    let _serial = SCHEDULER_ENV.lock().unwrap_or_else(|error| error.into_inner());
+    // The feed fails, so nothing is held and the scheduler stays idle.
+    let primary = server("failure");
+    let fallback = server("failure");
+    let settings = tempfile::tempdir().unwrap();
+    let app = app(&primary.url, &fallback.url, &settings.path().join("settings.json"));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let gets = Arc::new(AtomicUsize::new(0));
+    let held_posts = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (done, counted_gets, counted_held) = (stop.clone(), gets.clone(), held_posts.clone());
+    thread::spawn(move || {
+        while !done.load(Ordering::Acquire) {
+            let Ok((mut socket, _)) = listener.accept() else {
+                thread::sleep(Duration::from_millis(5));
+                continue;
+            };
+            socket.set_nonblocking(false).unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 4096];
+            while let Ok(count) = socket.read(&mut buffer) {
+                if count == 0 { break; }
+                request.extend_from_slice(&buffer[..count]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(split) = text.find("\r\n\r\n") {
+                    let length = text[..split].lines()
+                        .find_map(|line| line.to_lowercase().strip_prefix("content-length: ").map(str::to_owned))
+                        .and_then(|value| value.parse::<usize>().ok()).unwrap_or(0);
+                    if request.len() >= split + 4 + length { break; }
+                }
+            }
+            let text = String::from_utf8_lossy(&request);
+            if text.starts_with("GET ") {
+                counted_gets.fetch_add(1, Ordering::SeqCst);
+            } else if text.contains("\"held\"") {
+                counted_held.fetch_add(1, Ordering::SeqCst);
+            }
+            let body = r#"{"state":{"check":{"checkedAt":null}},"allowed":false}"#;
+            let _ = write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        }
+    });
+    let previous = std::env::var_os("O8_API_PORT");
+    std::env::set_var("O8_API_PORT", port.to_string());
+    let _running = Running(
+        tauri::async_runtime::spawn(crate::launch_updater::scheduler::run_with_effects(
+            app.handle().clone(),
+            |app, _, _, _| FixtureEffects { app, installs: Arc::new(AtomicUsize::new(0)) },
+            Duration::from_secs(3600),
+        )),
+        previous,
+        stop,
+    );
+    thread::sleep(Duration::from_secs(11));
+    let gets = gets.load(Ordering::SeqCst);
+    assert!((2..=4).contains(&gets), "idle state reads in 11 s: {gets}");
+    assert!(held_posts.load(Ordering::SeqCst) <= 1, "an unchanged held state must not be posted again");
 }

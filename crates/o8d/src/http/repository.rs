@@ -13,9 +13,9 @@ const MAX_BRANCHES: usize = 512;
 thread_local! {
     static DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
 }
-struct Deadline(Option<Instant>);
+pub(super) struct Deadline(Option<Instant>);
 impl Deadline {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         Self(DEADLINE.replace(Some(Instant::now() + PROJECTION_TIMEOUT)))
     }
 }
@@ -71,7 +71,13 @@ pub(super) fn response(status: StatusCode, body: Value) -> Response {
 
 /// Drain output while the process runs, bounding both bytes and elapsed time.
 /// This runs on the HTTP dispatcher's blocking worker, never a Tokio reactor.
-fn command(program: &str, args: &[&str], timeout_ms: u64, limit: usize) -> Result<String, ()> {
+fn command(
+    program: &str,
+    args: &[&str],
+    timeout_ms: u64,
+    limit: usize,
+    binding: Option<&GitEnvironment<'_>>,
+) -> Result<String, ()> {
     let remaining = DEADLINE
         .get()
         .map(|deadline| deadline.saturating_duration_since(Instant::now()))
@@ -85,16 +91,35 @@ fn command(program: &str, args: &[&str], timeout_ms: u64, limit: usize) -> Resul
         if *shutdown.borrow() {
             return Err(());
         }
-        let mut child = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .args(args)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_NO_LAZY_FETCH", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|_| ())?;
+            .kill_on_drop(true);
+        if let Some(binding) = binding {
+            command
+                .env("GIT_DIR", binding.admin)
+                .env("GIT_COMMON_DIR", binding.common)
+                .env("GIT_WORK_TREE", binding.worktree)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_NO_REPLACE_OBJECTS", "1")
+                .env("GIT_TERMINAL_PROMPT", "0");
+            for (name, value) in [
+                ("HOME", binding.home),
+                ("XDG_CONFIG_HOME", binding.config_home),
+            ] {
+                if let Some(value) = value {
+                    command.env(name, value);
+                } else {
+                    command.env_remove(name);
+                }
+            }
+        }
+        let mut child = command.spawn().map_err(|_| ())?;
         let stdout = child.stdout.take().ok_or(())?;
         let operation = async {
             let mut bytes = Vec::new();
@@ -106,7 +131,8 @@ fn command(program: &str, args: &[&str], timeout_ms: u64, limit: usize) -> Resul
             if bytes.len() > limit {
                 return Err(());
             }
-            if !child.wait().await.map_err(|_| ())?.success() {
+            let status = child.wait().await.map_err(|_| ())?;
+            if !status.success() && !(args.contains(&"--no-index") && status.code() == Some(1)) {
                 return Err(());
             }
             Ok(String::from_utf8_lossy(&bytes).into_owned())
@@ -125,7 +151,27 @@ fn command(program: &str, args: &[&str], timeout_ms: u64, limit: usize) -> Resul
 pub(super) fn git(repo: &str, args: &[&str], timeout_ms: u64, limit: usize) -> Result<String, ()> {
     let mut arguments = vec!["-C", repo];
     arguments.extend_from_slice(args);
-    command("git", &arguments, timeout_ms, limit)
+    command("git", &arguments, timeout_ms, limit, None)
+}
+
+/// Only canonical directory/config-home bindings; never credential environment.
+pub(super) struct GitEnvironment<'a> {
+    pub admin: &'a str,
+    pub common: &'a str,
+    pub worktree: &'a str,
+    pub home: Option<&'a str>,
+    pub config_home: Option<&'a str>,
+}
+pub(super) fn git_bound(
+    repo: &str,
+    args: &[&str],
+    timeout_ms: u64,
+    limit: usize,
+    binding: &GitEnvironment<'_>,
+) -> Result<String, ()> {
+    let mut arguments = vec!["-C", repo];
+    arguments.extend_from_slice(args);
+    command("git", &arguments, timeout_ms, limit, Some(binding))
 }
 
 fn branch_git(repo: &str, args: &[&str], timeout_ms: u64) -> Result<String, ()> {
@@ -161,7 +207,7 @@ fn generation(repo: &str) -> Option<String> {
     Some(format!("{head}\n{refs}"))
 }
 
-fn supports_native_projection(repo: &str) -> bool {
+pub(super) fn supports_native_projection(repo: &str) -> bool {
     if std::env::var_os("GIT_EXTERNAL_DIFF").is_some() {
         return false;
     }
@@ -329,7 +375,7 @@ fn compute_branches(repo: &str, has_generation: bool) -> ReadResult {
         }
         if let Some(path) = worktree {
             branch["worktreePath"] = json!(path);
-            if let Ok(size) = command("du", &["-sh", path], 3000, 1024 * 1024) {
+            if let Ok(size) = command("du", &["-sh", path], 3000, 1024 * 1024, None) {
                 if let Some(size) = size
                     .trim()
                     .split('\t')
