@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { normalizeInstallInfo, resolveUpdateAction } from '@/lib/app-update/install-target';
+import { isSelfUpdatableInstall, normalizeInstallInfo, resolveUpdateAction } from '@/lib/app-update/install-target';
 
 const { readlink, execFile } = vi.hoisted(() => ({ readlink: vi.fn(), execFile: vi.fn() }));
 vi.mock('node:fs/promises', () => ({ readlink }));
 vi.mock('@/lib/providers/child-process', () => ({ execFile }));
-const { GET } = await import('./route');
+const { getRunningInstallInfo } = await import('./install-info');
 const platform = process.platform;
 
 beforeEach(() => {
@@ -18,7 +18,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 async function runningAction() {
-  const payload = await (await GET()).json();
+  const payload = await getRunningInstallInfo();
   return { payload, action: resolveUpdateAction(normalizeInstallInfo(payload), '0.1.811') };
 }
 
@@ -34,7 +34,7 @@ describe('running shell package ownership', () => {
       });
       const { payload, action } = await runningAction();
       expect(payload.packageManager).toBe(packageManager);
-      expect(payload.selfUpdatable).toBe(false);
+      expect(isSelfUpdatableInstall(payload)).toBe(false);
       expect(action).toEqual({ kind: 'download', url: 'https://github.com/o8-run/o8/releases/tag/v0.1.811', packageManager: true });
       expect(readlink).toHaveBeenCalledWith(`/proc/${process.ppid}/exe`);
   });
