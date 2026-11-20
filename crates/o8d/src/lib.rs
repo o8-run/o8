@@ -1,4 +1,7 @@
 //! Delivery for stamped producer envelopes and daemon-owned global events.
+#[cfg(all(unix, any(feature = "experimental-supervisor", feature = "experimental-ws")))]
+pub mod child_spawn;
+
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use tokio::sync::{broadcast, Mutex};
