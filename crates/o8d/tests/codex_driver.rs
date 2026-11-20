@@ -113,6 +113,39 @@ async fn real_codex_turn_events_warm_process_and_tree_cancellation() {
         .trim()
         .parse()
         .unwrap();
+    #[cfg(target_os = "linux")]
+    let child = {
+        // The sandbox's PID is namespaced. Resolve the host PID while the
+        // process is alive, bound to this fixture cwd and exact command.
+        let matches = std::fs::read_dir("/proc")
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|e| {
+                let pid = e.file_name().to_str()?.parse::<i32>().ok()?;
+                if std::fs::read_link(e.path().join("cwd")).ok()? != root {
+                    return None;
+                }
+                if std::fs::read(e.path().join("cmdline")).ok()? != b"sleep\0300\0" {
+                    return None;
+                }
+                let status = std::fs::read_to_string(e.path().join("status")).ok()?;
+                let ns = status
+                    .lines()
+                    .find_map(|l| l.strip_prefix("NSpid:"))?
+                    .split_whitespace()
+                    .last()?
+                    .parse::<i32>()
+                    .ok()?;
+                (ns == child).then_some(pid)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matches.len(),
+            1,
+            "fixture child must resolve to exactly one host process"
+        );
+        matches[0]
+    };
     driver.cancel().await.unwrap();
     assert!(driver.pid().is_none());
     // A killed child can briefly remain a zombie awaiting its system reaper.
