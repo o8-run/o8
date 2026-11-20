@@ -1,0 +1,52 @@
+[
+  {
+    "serialized": "{\"text\":\"fixture\",\"wireMessage\":\"fixture\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false}}",
+    "hash": "7e2fe2554e8f54eb125abb7319a66397f668668e8cfea4cc6725123928e69a75",
+    "bytes": 199,
+    "compactNext": "{\"text\":\"\",\"wireMessage\":\"\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false}}",
+    "compactSteer": "{\"text\":\"fixture\",\"wireMessage\":\"\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false}}",
+    "mediaFiles": [],
+    "mediaJson": null
+  },
+  {
+    "serialized": "{\"text\":\"雪 𝒳\\nfixture\",\"wireMessage\":\"wire\\tfixture\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false,\"serviceTier\":\"fast\",\"projectId\":\"fixture-project\"}}",
+    "hash": "c4370e12629c4c59bf8caeedf19051764c5aa418818f10d6a657fa45fb18cf56",
+    "bytes": 266,
+    "compactNext": "{\"text\":\"\",\"wireMessage\":\"\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false,\"serviceTier\":\"fast\",\"projectId\":\"fixture-project\"}}",
+    "compactSteer": "{\"text\":\"雪 𝒳\\nfixture\",\"wireMessage\":\"\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false,\"serviceTier\":\"fast\",\"projectId\":\"fixture-project\"}}",
+    "mediaFiles": [],
+    "mediaJson": null
+  },
+  {
+    "serialized": "{\"text\":\"follow up\",\"wireMessage\":\"follow up\",\"afterTaskId\":\"fixture-task\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"pinBackend\":true,\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false}}",
+    "hash": "4aa1a89885575b652e86f4016d6db25ec2e2ea81a0a60cb93ae0b22b6892e299",
+    "bytes": 250,
+    "compactNext": "{\"text\":\"\",\"wireMessage\":\"\",\"afterTaskId\":\"fixture-task\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"pinBackend\":true,\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false}}",
+    "compactSteer": "{\"text\":\"follow up\",\"wireMessage\":\"\",\"afterTaskId\":\"fixture-task\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"pinBackend\":true,\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false}}",
+    "mediaFiles": [],
+    "mediaJson": null
+  },
+  {
+    "serialized": "{\"text\":\"image fixture\",\"wireMessage\":\"image fixture\",\"images\":[{\"name\":\"雪 fixture\",\"dataUri\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\"}],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false}}",
+    "hash": "d26557c878087d7b5e2ee99f24ce005cf0f9e8ffd3914a7e67cbfdc087d52e7e",
+    "bytes": 364,
+    "compactNext": "{\"text\":\"\",\"wireMessage\":\"\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false}}",
+    "compactSteer": "{\"text\":\"image fixture\",\"wireMessage\":\"\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false},\"deliveredMedia\":[{\"kind\":\"image\",\"path\":\"<fixture-root>/media/orchestrator-images/6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0.png\",\"name\":\"雪 fixture\",\"mimeType\":\"image/png\"}]}",
+    "mediaFiles": [
+      {
+        "path": "<fixture-root>/media/orchestrator-images/6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0.png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      }
+    ],
+    "mediaJson": "[{\"kind\":\"image\",\"path\":\"<fixture-root>/media/orchestrator-images/6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0.png\",\"name\":\"雪 fixture\",\"mimeType\":\"image/png\"}]"
+  },
+  {
+    "serialized": "{\"text\":\"recorded selection\",\"wireMessage\":\"recorded selection\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false},\"wsSelection\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"thinkingEffort\":\"low\",\"permissionMode\":\"full\",\"orchestrationMode\":\"fast\",\"pickedMode\":\"fast\",\"serviceTier\":\"default\",\"projectId\":\"fixture-project\",\"handoffMode\":\"handoff\",\"pinBackend\":true,\"collideBaseBackend\":\"codex\"}}",
+    "hash": "facd98536f62e66ee47e0fd0e759e7b1eea7c6254dff05ca27ed64e2e0c0025a",
+    "bytes": 498,
+    "compactNext": "{\"text\":\"\",\"wireMessage\":\"\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false},\"wsSelection\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"thinkingEffort\":\"low\",\"permissionMode\":\"full\",\"orchestrationMode\":\"fast\",\"pickedMode\":\"fast\",\"serviceTier\":\"default\",\"projectId\":\"fixture-project\",\"handoffMode\":\"handoff\",\"pinBackend\":true,\"collideBaseBackend\":\"codex\"}}",
+    "compactSteer": "{\"text\":\"recorded selection\",\"wireMessage\":\"\",\"images\":[],\"routing\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"effort\":\"low\",\"permissionMode\":\"full\",\"mode\":\"single\",\"pickedMode\":\"fast\",\"collide\":false},\"wsSelection\":{\"backend\":\"codex\",\"model\":\"fixture-model\",\"thinkingEffort\":\"low\",\"permissionMode\":\"full\",\"orchestrationMode\":\"fast\",\"pickedMode\":\"fast\",\"serviceTier\":\"default\",\"projectId\":\"fixture-project\",\"handoffMode\":\"handoff\",\"pinBackend\":true,\"collideBaseBackend\":\"codex\"}}",
+    "mediaFiles": [],
+    "mediaJson": null
+  }
+]
