@@ -9030,12 +9030,6 @@
       ]
     },
     {
-      "path": "tests/visual-inspection-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/visualization-browser-real-path.test.ts",
       "reasons": [
         "browser",

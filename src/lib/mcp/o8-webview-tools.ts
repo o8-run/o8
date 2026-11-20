@@ -403,34 +403,6 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
 ];
 
 /**
- * Build the eval that runs ONE `__o8BrowserAgent` verb in the NATIVE browser-view
- * page and POSTs the result back to o8's secure cid-only sink. The untrusted page
- * has no Tauri IPC bridge, so it can't use `mcp_result` — it does a cross-origin
- * no-cors `text/plain` POST (a "simple request": no CORS preflight, full body) to
- * `resultUrl` (o8's loopback /api/browser/native-result), which can ONLY resolve
- * a pending eval by `cid`. See `native_browser_view_security`.
- */
-export function buildNativeVerbEval(
-  verb: 'read' | 'localize' | 'rect' | 'click' | 'type' | 'probe' | 'grab',
-  args: Record<string, unknown>,
-  cid: string,
-  resultUrl: string,
-): string {
-  return `(function(){
-    var __cid = ${JSON.stringify(cid)};
-    var __url = ${JSON.stringify(resultUrl)};
-    function __post(p){ try { fetch(__url, { method: 'POST', mode: 'no-cors', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ cid: __cid, payload: p }) }).catch(function(){}); } catch(e){} }
-    var r;
-    try {
-      var agent = window.__o8BrowserAgent;
-      if (!agent) { __post({ ok: false, error: 'native browser agent not installed yet' }); return; }
-      r = agent.${verb}(${JSON.stringify(args)});
-    } catch (e) { r = { ok: false, error: String((e && e.message) || e) }; }
-    __post(r);
-  })()`;
-}
-
-/**
  * Eval snippet calling one in-page browser-agent verb and RETURNING the result
  * OBJECT (not JSON-stringified). The native browser-view tier evals this via
  * `browser_view_eval_result`, which NSJSON-encodes the WKWebView return value — so
