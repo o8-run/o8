@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { parse, stringify } from 'yaml';
-import { createVerifierCoverageFixture, mutateNativeSetupFixture, registerClassificationCoverageTests, writeListingCheckFixture } from './helpers/verify-ci-coverage.fixture';
+import { createVerifierCoverageFixture, registerNodeCacheCoverageTests, mutateNativeSetupFixture, registerClassificationCoverageTests, writeListingCheckFixture } from './helpers/verify-ci-coverage.fixture';
 
 const repo = process.cwd();
 const root = mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-'));
@@ -122,7 +122,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
-    '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs', 'scripts/ci/native-test-weights.json',
+    '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', '.github/actions/node-modules-cache/action.yml', 'scripts/ci/native-test-shard.mjs', 'scripts/ci/native-test-weights.json',
     'scripts/ci/native-test-cache.mjs', 'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs',
     'scripts/lib/browser-prerequisites.mjs', '.github/actions/linux-package-prerequisites/action.yml',
     'scripts/ci/prepare-integration-policy.mjs', '.github/workflows/next-surface-boundary.yml',
@@ -170,6 +170,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   // The verifier's scheduler is under test. Keep unrelated bundle building and
   // Vitest discovery bounded, while retaining the real plan, selector and audit.
   writeFileSync(path.join(directory, 'scripts/check-server-bundle-size.mjs'), 'process.exit(0);\n');
+  writeFileSync(path.join(directory, 'scripts/ci/check-native-modules.cjs'), '// Dependency prerequisite fixture.\n');
   writeListingCheckFixture(directory);
   writeFileSync(path.join(directory, 'scripts/ci/check-hermetic-shards.mjs'), `
     import { appendFileSync } from 'node:fs';
@@ -865,3 +866,5 @@ describe('local CI verification through its command entry point', () => {
     expect(ci.stdout.trim()).toBe(files[0]);
   });
 });
+
+registerNodeCacheCoverageTests(workflowPath, coverageRoot, guard, reuseGate);
