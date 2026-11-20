@@ -602,7 +602,7 @@ describe('local CI verification through its command entry point', () => {
   });
 
   it.each(['test-shards', 'test', 'integration-changed', 'governance-smoke',
-    'rust-check-windows', 'rust-check-linux', 'o8-next-tests', 'server-bundle-size'])(
+    'rust-check-windows', 'rust-check-linux', 'server-bundle-size'])(
     'rejects restoring slow PR work in %s without a local parity update', id => {
       const workflow = parse(readFileSync(workflowPath, 'utf8'));
       workflow.jobs[id].if = workflow.jobs[id].if.replace(" && github.event_name != 'pull_request'", '');

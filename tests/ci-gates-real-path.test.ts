@@ -400,6 +400,11 @@ function selectNext(eventName: string, event: object, script = fixtureNativeScri
 }
 
 describe('native next CI through persisted fixtures', () => {
+  it('admits native shards on pull requests without changing the queue gate', () => {
+    expect(workflow.jobs['o8-next-tests'].if).not.toContain("&& github.event_name != 'pull_request'");
+    expect(workflow.jobs['o8-next-tests'].if).toContain("needs.reuse.result == 'success'");
+  });
+
   it('discovers new native literals, transitive imports, aliases and dynamic fixture directories without a maintained list', () => {
     const files = {
       'native/o8-next/src/dependency_probe.rs': 'const CONTRACT: &str = include_str!("../../../fixtures/native-contract.json"); const HOST: &str = "scripts/next/dependency-probe.mjs"; const PARITY: &str = "../../scripts/parity/surfaces.json"; const PLAN: &str = "scripts/next/inbox-plan-fixture.ts"; fn family() { std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/native-family").join(format!("{name}.json"))); } const FOLDER: &str = "src/"; const TYPED: &str = "src/ma";',
@@ -516,6 +521,13 @@ describe('native next CI through persisted fixtures', () => {
     expect(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }))
       .toBe('changed=true');
     expect(selectNext('merge_group', { merge_group: { base_sha: before, head_sha: after } }))
+      .toBe('changed=true');
+  });
+
+  it('selects pull requests touching native code outside o8-next', () => {
+    const before = git('rev-parse', 'HEAD');
+    const after = commit('native/other/src/main.rs');
+    expect(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }))
       .toBe('changed=true');
   });
 
