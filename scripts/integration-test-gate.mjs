@@ -55,7 +55,7 @@ if (files.length === 0) {
 // In CI, build it once when a selected file needs it; locally those files skip
 // unless O8D_TEST_BINARY names an already-built daemon.
 if (process.env.CI === 'true' && !process.env.O8D_TEST_BINARY
-  && files.some((file) => /O8D_TEST_BINARY|installComposerOwnerFixture/.test(readFileSync(join(root, file), 'utf8')))) {
+  && files.some((file) => /O8D_TEST_BINARY|installComposerOwnerFixture|scripts\/next\/(?:dev|worker)-server/.test(readFileSync(join(root, file), 'utf8')))) {
   const manifest = join(root, 'crates/o8d/Cargo.toml');
   console.log('[integration-gate] building o8d for native composer owner tests');
   // opt-level 1 keeps the cold build near a debug build's time; an unoptimized

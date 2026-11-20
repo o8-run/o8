@@ -49,7 +49,8 @@ async function main() {
   const { getSqlite } = await import('../../src/lib/db');
   ensureV71ComposerQueueSchema(getSqlite());
   // o8d owns the composer queue; every surface reads it through this owner.
-  const owner = await startComposerOwner(composerOwnerBinary());
+  const ownerBinary = composerOwnerBinary(process.argv.includes('--composer'));
+  const owner = ownerBinary ? await startComposerOwner(ownerBinary) : undefined;
   // Complete one-time legacy boot repairs against the empty owned store before
   // adding post-boot recordings (their deliberately tight timestamps are valid).
   const { listMobileOrchestratorThreads } = await import('../../src/lib/mobile/orchestrator-thread-history');
@@ -175,7 +176,7 @@ async function main() {
     closing = true;
     for (const surface of surfaces) await surface.close?.();
     await closeTerminal();
-    await owner.close();
+    await owner?.close();
     closeSockets();
     server.closeAllConnections(); server.close();
     realtime.closeAllConnections(); realtime.close();

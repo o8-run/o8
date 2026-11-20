@@ -23,13 +23,15 @@ export interface ComposerOwner {
   close(): Promise<void>;
 }
 
-/** The o8d that owns the queue: an explicit test binary, else the workspace build. */
-export function composerOwnerBinary(): string {
+/** The o8d that owns the queue: an explicit test binary, else the workspace build.
+ * Without one, callers that need the queue fail loudly; others run without it. */
+export function composerOwnerBinary(required: boolean): string | undefined {
   const binary = process.env.O8D_TEST_BINARY ?? resolve('crates/o8d/target/debug/o8d');
-  if (!existsSync(binary)) {
-    throw Error(`Composer queue owner missing at ${binary}. Build it with: cargo build --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d`);
-  }
-  return binary;
+  if (existsSync(binary)) return binary;
+  const build = 'cargo build --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d';
+  if (required) throw Error(`Composer queue owner missing at ${binary}. Build it with: ${build}`);
+  console.error(`[o8-next] No o8d at ${binary}; composer queue routes are unavailable. Build it with: ${build}`);
+  return undefined;
 }
 
 export async function startComposerOwner(binary: string): Promise<ComposerOwner> {

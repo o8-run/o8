@@ -40,7 +40,8 @@ export async function startWorkerServer() {
   const { ensureV71ComposerQueueSchema } = await import('../../src/lib/db/v71-composer-queue-migration');
   ensureV71ComposerQueueSchema(getSqlite());
   // o8d owns the composer queue the worker route reads.
-  const owner = await startComposerOwner(composerOwnerBinary());
+  const ownerBinary = composerOwnerBinary(false);
+  const owner = ownerBinary ? await startComposerOwner(ownerBinary) : undefined;
   // The adjacent transcript surface also requests the existing inventory GET.
   // Fence discovery to this owned store before exposing its production handler.
   const { getAllRuntimes } = await import('../../src/lib/runtimes');
@@ -134,7 +135,7 @@ export async function startWorkerServer() {
       const timer = setTimeout(() => worker.kill('SIGKILL'), 3000);
       await exited; clearTimeout(timer);
     }
-    await owner.close();
+    await owner?.close();
     server.closeAllConnections(); server.close();
     if (process.env.O8_NEXT_REQUEST_LOG) writeFileSync(process.env.O8_NEXT_REQUEST_LOG, JSON.stringify(requests));
     rmSync(root, { recursive: true, force: true }); process.exit(0);
