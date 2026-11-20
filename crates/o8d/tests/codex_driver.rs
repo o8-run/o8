@@ -121,11 +121,12 @@ async fn real_codex_turn_events_warm_process_and_tree_cancellation() {
         );
     }
     // A real CLI-managed shell child; killing the driver must kill the group.
-    // This fixed local command performs no network I/O. Inherit the runner's
-    // network namespace: hosted Linux denies bwrap's loopback setup. Keep the
-    // filesystem sandbox scoped to this disposable root.
+    // Only this fixed sleep/PID-marker command runs directly on the runner.
+    // It executes no model-selected code and writes only the disposable marker.
+    // Hosted Linux denies bwrap UID/network namespace setup; this is a driver
+    // lifecycle test, not a kernel-sandbox test. Model turns remain read-only.
     let marker = root.join("child.pid");
-    let command_id = driver.start_request("command/exec",json!({"command":["sh","-c",format!("sleep 300 >/dev/null 2>&1 & echo $! > {}; wait",marker.display())],"cwd":root,"disableTimeout":true,"sandboxPolicy":{"type":"workspaceWrite","writableRoots":[root],"networkAccess":true,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true}})).await.unwrap();
+    let command_id = driver.start_request("command/exec",json!({"command":["sh","-c",format!("sleep 300 >/dev/null 2>&1 & echo $! > {}; wait",marker.display())],"cwd":root,"disableTimeout":true,"sandboxPolicy":{"type":"dangerFullAccess"}})).await.unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
         while !marker.exists() {
             tokio::select! {
