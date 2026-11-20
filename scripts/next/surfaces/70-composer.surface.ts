@@ -25,8 +25,8 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
   if (composer) {
     const { getOrchestratorBackend } = await import('../../../src/lib/lane/orchestrator-backends/registry');
     Object.defineProperty(getOrchestratorBackend('pi'), 'liveSteer', { value:
-      async (_repo: string, text: string, options: { beforeAdmit: () => void }) => {
-        options.beforeAdmit(); steers.push(text); return { accepted: true };
+      async (_repo: string, text: string, options: { beforeAdmit: () => void | Promise<void> }) => {
+        await options.beforeAdmit(); steers.push(text); return { accepted: true };
       }, configurable: true });
   }
   let responseLost = false;
