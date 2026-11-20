@@ -71,6 +71,28 @@ async fn real_codex_turn_events_warm_process_and_tree_cancellation() {
     .unwrap();
     let pid = driver.pid().unwrap();
     driver.initialize().await.unwrap();
+    let cli_children = || {
+        let output = std::process::Command::new("/bin/ps")
+            .args(["-axo", "pid=,ppid="])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let mut children = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.split_whitespace();
+                let child = fields.next()?.parse::<u32>().ok()?;
+                let parent = fields.next()?.parse::<u32>().ok()?;
+                (parent == pid).then_some(child)
+            })
+            .collect::<Vec<_>>();
+        children.sort_unstable();
+        children
+    };
+    let warm_cli = cli_children();
+    assert_eq!(warm_cli.len(), 1, "daemon owns one real Codex CLI process");
+
     let started=driver.request("thread/start",json!({"cwd":root,"approvalPolicy":"never","sandbox":"read-only","model":"fixture","ephemeral":true})).await.unwrap();
     let thread = started["thread"]["id"].as_str().unwrap();
     for _ in 0..2 {
@@ -92,6 +114,11 @@ async fn real_codex_turn_events_warm_process_and_tree_cancellation() {
         .unwrap();
         assert_eq!(text, "Fixture turn complete.");
         assert_eq!(driver.pid(), Some(pid));
+        assert_eq!(
+            cli_children(),
+            warm_cli,
+            "the real CLI stays warm across turns"
+        );
     }
     // A real CLI-managed shell child; killing the driver must kill the group.
     let marker = root.join("child.pid");
