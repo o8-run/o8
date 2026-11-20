@@ -188,7 +188,16 @@ impl Owner {
                 let normalized =
                     composer_queue_validate::normalize(&payload, params.get("ingress").is_some())
                         .map_err(|m| QueueError::invalid(&m))?;
-                if raw != normalized {
+                // WS retries can carry the first selection read from a JSON
+                // response with different object-key order. Ingress identity
+                // is the original wire hash, not serialized selection bytes.
+                // Validate the same normalized structure, retaining raw bytes.
+                let matches = if params.get("ingress").is_some() {
+                    serde_json::from_str::<Value>(&normalized).ok().as_ref() == Some(&payload)
+                } else {
+                    raw == normalized
+                };
+                if !matches {
                     return Err(QueueError::invalid(
                         "The queued message needs a complete routing snapshot.",
                     ));

@@ -189,6 +189,10 @@ fn retry_keeps_unsaved_target_after_history_appears_and_rejects_changed_wire() {
             .unwrap();
         }
         input["target"]["threadId"] = json!(thread);
+        // Model the TS client sending the first payload back after a native
+        // response: serde's parsed object order differs from JSON.stringify's
+        // normalization order. Wire identity and first target still win.
+        input["payloadJson"] = json!(serde_json::from_str::<Value>(&f.raw).unwrap().to_string());
         let retry = f.owner.execute("enqueue", &input).unwrap();
         assert_eq!(retry.result["disposition"], "existing");
         assert_eq!(retry.result["item"], first.result["item"]);
