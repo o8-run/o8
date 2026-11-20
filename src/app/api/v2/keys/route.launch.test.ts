@@ -2,11 +2,16 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vite
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { listDeclarativeRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+
+vi.mock('@/lib/runtimes/shared/owned-session/worker-o8-cli', async load => ({
+  ...await load<typeof import('@/lib/runtimes/shared/owned-session/worker-o8-cli')>(),
+  prepareWorkerO8Cli: async () => null,
+}));
 
 const state = vi.hoisted(() => ({ dir: '', runtime: '', envs: [] as NodeJS.ProcessEnv[], children: [] as EventEmitter[], args: [] as string[][], bridges: 0, mcp: false, mcpKey: 'fixture-stale-mcp', prepareGate: async () => {} }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir, migrateDataDirOnce: () => {} }));
@@ -44,7 +49,7 @@ vi.mock('node:child_process', async original => ({ ...await original<typeof impo
   } });
   state.children.push(child); return child;
 } }));
-state.dir = mkdtempSync(join(tmpdir(), 'o8-launch-keys-'));
+state.dir = realpathSync(mkdtempSync(join(tmpdir(), 'o8-launch-keys-')));
 const repo = join(state.dir, 'repo'); mkdirSync(repo); execFileSync('git', ['init', '-q', repo]);
 const { mutateProviderKey } = await import('@/lib/providers/key-store');
 const { clearMasterKeyCache } = await import('@/lib/db/master-key');
@@ -111,8 +116,8 @@ afterAll(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); clearMasterKeyCache(
 const cases = [...[...generic, ...declarative].flatMap(runtime => ['direct', 'bridge'].map(mode => [runtime, mode])), ...acp.map(runtime => [runtime, 'acp']), ['pi', 'rpc'], ['pi-builtin', 'sdk']];
 it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(action => [runtime, mode, action])))('%s %s launch obeys persisted %s for all provider families', async (runtime, mode, action) => {
   state.runtime = runtime;
-  const billing = await import('@/app/api/runtime/billing/route');
-  expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(['codex', 'hermes'].includes(runtime) ? 409 : 200);
+  const billing = await import('@/lib/providers/runtime-billing');
+  if (['codex', 'hermes'].includes(runtime)) expect(() => billing.saveRuntimeBillingMode(runtime, 'api')).toThrow(); else expect(() => billing.saveRuntimeBillingMode(runtime, 'api')).not.toThrow();
   vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', mode === 'bridge' ? '0' : '1');
   for (const provider of providers) {
     await changeProvider(provider, { key: `fixture-saved-${provider}` });
@@ -130,7 +135,8 @@ it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(
       const provider = key === 'CODEX_API_KEY' ? 'openai' : key === 'ANTHROPIC_AUTH_TOKEN' ? 'anthropic' : 'gemini';
       expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(!['codex', 'hermes'].includes(runtime) && action === 'enabled' && mode !== 'sdk' ? `fixture-saved-${provider}` : null);
     }
-    if (mode !== 'sdk') { expect(env.XAI_API_KEY).toBe('fixture-unmanaged-xai'); expect(env.NOUS_API_KEY).toBe('fixture-unmanaged-nous'); }
+    expect(env.XAI_API_KEY).toBeUndefined();
+    expect(env.NOUS_API_KEY).toBeUndefined();
   }
 });
 
@@ -160,8 +166,8 @@ it.each(['codex', 'claude-code'])('%s subscription default never changes payer t
 });
 it.each(['disable', 'remove'])('generic aliases obey real API %s in owned spawn', async action => {
   state.runtime = 'goose';
-  const billing = await import('@/app/api/runtime/billing/route');
-  expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: 'goose', mode: 'api' }) }))).status).toBe(200);
+  const billing = await import('@/lib/providers/runtime-billing');
+  expect(() => billing.saveRuntimeBillingMode('goose', 'api')).not.toThrow();
   for (const name of ['LLM_PROVIDER', 'GOOSE_PROVIDER', 'COPILOT_PROVIDER_TYPE']) vi.stubEnv(name, 'openai');
   for (const alias of ['LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN']) vi.stubEnv(alias, 'fixture-stale-alias');
   expect((await routes.POST(request('POST', 'openai', { key: 'fixture-openai' }))).status).toBe(200);
@@ -172,10 +178,9 @@ it.each(['disable', 'remove'])('generic aliases obey real API %s in owned spawn'
 
 it.each(['codex', 'claude-code'])('%s API billing requests preserve the supported mode across a fresh read', async runtime => {
   state.runtime = runtime;
-  const billing = await import('@/app/api/runtime/billing/route');
-  const url = 'http://localhost/api/runtime/billing';
-  expect((await billing.POST(new NextRequest(url, { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(['codex', 'hermes'].includes(runtime) ? 409 : 200);
-  expect(await (await billing.GET(new NextRequest(`${url}?runtimeId=${runtime}`, { headers: { host: 'localhost' } }))).json()).toMatchObject({ mode: runtime === 'codex' ? 'subscription' : 'api' });
+  const billing = await import('@/lib/providers/runtime-billing');
+  if (['codex', 'hermes'].includes(runtime)) expect(() => billing.saveRuntimeBillingMode(runtime, 'api')).toThrow(); else expect(() => billing.saveRuntimeBillingMode(runtime, 'api')).not.toThrow();
+  expect(billing.runtimeBillingMode(runtime)).toBe(runtime === 'codex' ? 'subscription' : 'api');
   expect((await routes.POST(request('POST', runtime === 'codex' ? 'openai' : 'anthropic', { key: 'fixture-billed-api' }))).status).toBe(200);
   expect(await modules[runtime].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
   expect(state.envs.at(-1)?.[runtime === 'codex' ? 'CODEX_API_KEY' : 'ANTHROPIC_API_KEY'] || null).toBe(runtime === 'codex' ? null : 'fixture-billed-api');

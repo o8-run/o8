@@ -57,12 +57,6 @@ export async function writeClaudeCodeWorkerProfile(
   return enqueueProfileMutation(() => persistProfile(profile));
 }
 
-export async function updateClaudeCodeWorkerProfile(
-  update: (profile: ClaudeCodeWorkerProfile) => ClaudeCodeWorkerProfile,
-): Promise<ClaudeCodeWorkerProfile> {
-  return enqueueProfileMutation(() => persistProfile(update(readClaudeCodeWorkerProfileSync())));
-}
-
 function enqueueProfileMutation<T>(mutation: () => Promise<T>): Promise<T> {
   const pending = profileMutationQueue.then(mutation, mutation);
   profileMutationQueue = pending.then(() => undefined, () => undefined);

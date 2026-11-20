@@ -9,6 +9,13 @@ let originalDataDir: string | undefined;
 let originalPlan: string | undefined;
 let originalProxyUrl: string | undefined;
 
+async function bootstrapEntitlement() {
+  const { ensureFreeEntitlement } = await import('@/lib/entitlement/bootstrap');
+  const { getEntitlement } = await import('@/lib/entitlement/store');
+  await ensureFreeEntitlement();
+  return getEntitlement();
+}
+
 describe('entitlement bootstrap default-free path', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -44,11 +51,8 @@ describe('entitlement bootstrap default-free path', () => {
     vi.spyOn(console, 'debug').mockImplementation(() => {});
     vi.stubGlobal('fetch', fetchMock);
 
-    const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
-    const response = await POST();
-    const state = await response.json();
+    const state = await bootstrapEntitlement();
 
-    expect(response.status).toBe(200);
     expect(state).toMatchObject({
       plan: 'free',
       actualPlan: 'free',
@@ -76,11 +80,8 @@ describe('entitlement bootstrap default-free path', () => {
     vi.spyOn(console, 'debug').mockImplementation(() => {});
     vi.stubGlobal('fetch', fetchMock);
 
-    const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
-    const response = await POST();
-    const state = await response.json();
+    const state = await bootstrapEntitlement();
 
-    expect(response.status).toBe(200);
     expect(state.plan).toBe('free');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
@@ -96,11 +97,8 @@ describe('entitlement bootstrap default-free path', () => {
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
     vi.stubGlobal('fetch', fetchMock);
 
-    const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
-    const firstResponse = await POST();
-    const secondResponse = await POST();
-    const firstState = await firstResponse.json();
-    const secondState = await secondResponse.json();
+    const firstState = await bootstrapEntitlement();
+    const secondState = await bootstrapEntitlement();
 
     expect(firstState.plan).toBe('free');
     expect(secondState.plan).toBe('free');

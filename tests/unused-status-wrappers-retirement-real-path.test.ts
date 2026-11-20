@@ -11,6 +11,12 @@ it.each([
   ['GET', '/api/runtime/threecode-models'],
   ['POST', '/api/panel/prs/7/repair'],
   ['POST', '/api/setup/gemini'],
+  ['POST', '/api/panel/entitlement/bootstrap'],
+  ['GET', '/api/runtime/billing'],
+  ['POST', '/api/runtime/billing'],
+  ['GET', '/api/runtime/claude-code-profile'],
+  ['POST', '/api/runtime/claude-code-profile'],
+  ['PATCH', '/api/runtime/claude-code-profile'],
   ['GET', '/api/runtime/session-summary?sessionKey=codex-owned%3Aretired-fixture'],
 ])('retires %s %s while preserving its unmatched Next-off response', async (method, path) => {
   const absent = createServer();
