@@ -166,14 +166,14 @@ describe('required CI gates through workflow commands', () => {
     }
   });
 
-  it('skips every slow job on pull requests while retaining quick work', () => {
+  it('admits quick work and conditional native checks on pull requests', () => {
     for (const id of ['test-shards', 'test', 'integration-changed', 'governance-smoke',
-      'rust-check-linux', 'rust-check-windows', 'o8-next-tests', 'server-bundle-size']) {
+      'rust-check-linux', 'rust-check-windows', 'server-bundle-size']) {
       expect(condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
         { reuse: { result: 'skipped' } }), id).toBe(false);
       expect(condition(workflow.jobs[id].if, { event_name: 'merge_group', event: {} }), id).toBe(true);
     }
-    for (const id of ['typecheck', 'lint', 'classification', 'security']) {
+    for (const id of ['typecheck', 'lint', 'classification', 'security', 'o8-next-tests']) {
       expect(condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
         { reuse: { result: 'skipped' } }), id).toBe(true);
     }
@@ -400,6 +400,12 @@ function selectNext(eventName: string, event: object, script = fixtureNativeScri
 }
 
 describe('native next CI through persisted fixtures', () => {
+  it('admits native shards on pull requests without changing the queue gate', () => {
+    expect(workflow.jobs['o8-next-tests'].if).toBe(
+      workflow.jobs['test-shards'].if.replace(/ && github.event_name != 'pull_request'$/, ''),
+    );
+  });
+
   it('discovers new native literals, transitive imports, aliases and dynamic fixture directories without a maintained list', () => {
     const files = {
       'native/o8-next/src/dependency_probe.rs': 'const CONTRACT: &str = include_str!("../../../fixtures/native-contract.json"); const HOST: &str = "scripts/next/dependency-probe.mjs"; const PARITY: &str = "../../scripts/parity/surfaces.json"; const PLAN: &str = "scripts/next/inbox-plan-fixture.ts"; fn family() { std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/native-family").join(format!("{name}.json"))); } const FOLDER: &str = "src/"; const TYPED: &str = "src/ma";',
@@ -519,6 +525,13 @@ describe('native next CI through persisted fixtures', () => {
       .toBe('changed=true');
   });
 
+  it('selects pull requests touching native code outside o8-next', () => {
+    const before = git('rev-parse', 'HEAD');
+    const after = commit('native/other/src/main.rs');
+    expect(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }))
+      .toBe('changed=true');
+  });
+
   it('skips unrelated changes, includes removed inputs and fails safe on missing history', () => {
     const before = git('rev-parse', 'HEAD');
     const after = commit('src/unrelated.ts');
@@ -543,7 +556,6 @@ describe('native next CI through persisted fixtures', () => {
     expect(job['runs-on']).toBe('ubuntu-24.04');
     expect(job['timeout-minutes']).toBe(30);
     expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] } });
-    expect(job.if).toBe(workflow.jobs['test-shards'].if);
     const step = job.steps.find((entry: { run?: string }) => entry.run?.includes('native-test-shard.mjs'));
     expect(step.if).toBe("needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'");
     expect(step['continue-on-error']).toBeUndefined();

@@ -186,7 +186,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   // Hosted PR admission skips slow jobs; local verification always runs them.
   // Validate the exact exclusion before normalizing it away for the full plan.
   for (const id of ['test-shards', 'test', 'integration-changed', 'governance-smoke',
-    'rust-check-windows', 'rust-check-linux', 'o8-next-tests', 'server-bundle-size']) {
+    'rust-check-windows', 'rust-check-linux', 'server-bundle-size']) {
     const suffix = " && github.event_name != 'pull_request'";
     requireCondition(typeof jobs[id]?.if === 'string' && jobs[id].if.endsWith(suffix),
       `${id} must skip slow work on pull requests`);
