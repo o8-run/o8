@@ -1,0 +1,127 @@
+{
+  "version": "v1.8",
+  "locked": "2026-11-19",
+  "rules": {
+    "encoding": "enc(fields) = concat over fields: null -> 0x00; string -> 0x01 + u32 big-endian UTF-8 byte length + UTF-8 bytes. Strings must be well-formed UTF-8 (reject lone surrogates as invalid).",
+    "repoKey": "composerQueueRepoKey(resolveOrchestratorMessageRepoPath(msg)) on main: realpath, else path.resolve. Vectors take repoKey as given.",
+    "resolvedThreadId": "legacy resolveMsgThreadId: trim; keep only if it starts with \"thoughts-\", else null. So null, \"\", whitespace and non-thoughts ids all resolve to null, as legacy execution does.",
+    "wsId": "'ws-' + base64url_nopad(sha256(enc(['o8.cq.ws-id.v1', repoKey, resolvedThreadId, clientMutationId]))). The digest is exactly 43 chars; the full id is 46 chars. No truncation.",
+    "wsiTarget": "'wsi:' + base64url_nopad(sha256(enc(['o8.cq.wsi-target.v1', repoKey, resolvedThreadId, clientMutationId]))). The full id is 47 chars. No truncation. Used when resolvedThreadId is null or is not a saved thoughts thread; otherwise the real (repoKey, threadId) target.",
+    "ingressHash": "lowercase hex sha256 of the UTF-8 bytes of params.wireJson exactly as sent by the TS client (TS sends JSON.stringify of the parsed message). Rust never re-serializes before hashing. Same format as composerPayloadHash.",
+    "placeholders": "ingress_json = wire with each attachments[i].dataUri replaced by {\"payloadImageIndex\": i}; every other field is kept. attachments[i] maps positionally to payload.images[i]. Rebuild restores dataUri from payload.images[i].dataUri. Compare ingress_json by parsed JSON value, not by bytes."
+  },
+  "idVectors": [
+    {
+      "name": "saved-thoughts",
+      "input": {
+        "repoKey": "/Users/demo/Projects/todo-demo",
+        "wireThreadId": "thoughts-abc123",
+        "clientMutationId": "cm-0001"
+      },
+      "resolvedThreadId": "thoughts-abc123",
+      "encodedIdInputHex": "010000000e6f382e63712e77732d69642e7631010000001e2f55736572732f64656d6f2f50726f6a656374732f746f646f2d64656d6f010000000f74686f75676874732d6162633132330100000007636d2d30303031",
+      "wsId": "ws-x2tX-XYsoi0zxwb7ZB2Y7HWzv9jqLlxqMuMo9HVoOw0",
+      "wsiTarget": "wsi:dx8xrOOJqVnavLY6g-PA26qwR4tIV3feuLbimX-YjDA"
+    },
+    {
+      "name": "null",
+      "input": {
+        "repoKey": "/Users/demo/Projects/todo-demo",
+        "wireThreadId": null,
+        "clientMutationId": "cm-0001"
+      },
+      "resolvedThreadId": null,
+      "encodedIdInputHex": "010000000e6f382e63712e77732d69642e7631010000001e2f55736572732f64656d6f2f50726f6a656374732f746f646f2d64656d6f000100000007636d2d30303031",
+      "wsId": "ws-ZyGUaryHM5RlauO1Nq0KsE0QrZBz1br-mlPTPeTr968",
+      "wsiTarget": "wsi:iUPrRJiyKAP_-xJxtsR8xb1YAxS14y55Wc9zTUeDZRw"
+    },
+    {
+      "name": "empty",
+      "input": {
+        "repoKey": "/Users/demo/Projects/todo-demo",
+        "wireThreadId": "",
+        "clientMutationId": "cm-0001"
+      },
+      "resolvedThreadId": null,
+      "encodedIdInputHex": "010000000e6f382e63712e77732d69642e7631010000001e2f55736572732f64656d6f2f50726f6a656374732f746f646f2d64656d6f000100000007636d2d30303031",
+      "wsId": "ws-ZyGUaryHM5RlauO1Nq0KsE0QrZBz1br-mlPTPeTr968",
+      "wsiTarget": "wsi:iUPrRJiyKAP_-xJxtsR8xb1YAxS14y55Wc9zTUeDZRw"
+    },
+    {
+      "name": "whitespace",
+      "input": {
+        "repoKey": "/Users/demo/Projects/todo-demo",
+        "wireThreadId": "   ",
+        "clientMutationId": "cm-0001"
+      },
+      "resolvedThreadId": null,
+      "encodedIdInputHex": "010000000e6f382e63712e77732d69642e7631010000001e2f55736572732f64656d6f2f50726f6a656374732f746f646f2d64656d6f000100000007636d2d30303031",
+      "wsId": "ws-ZyGUaryHM5RlauO1Nq0KsE0QrZBz1br-mlPTPeTr968",
+      "wsiTarget": "wsi:iUPrRJiyKAP_-xJxtsR8xb1YAxS14y55Wc9zTUeDZRw"
+    },
+    {
+      "name": "non-thoughts",
+      "input": {
+        "repoKey": "/Users/demo/Projects/todo-demo",
+        "wireThreadId": "chat-42",
+        "clientMutationId": "cm-0001"
+      },
+      "resolvedThreadId": null,
+      "encodedIdInputHex": "010000000e6f382e63712e77732d69642e7631010000001e2f55736572732f64656d6f2f50726f6a656374732f746f646f2d64656d6f000100000007636d2d30303031",
+      "wsId": "ws-ZyGUaryHM5RlauO1Nq0KsE0QrZBz1br-mlPTPeTr968",
+      "wsiTarget": "wsi:iUPrRJiyKAP_-xJxtsR8xb1YAxS14y55Wc9zTUeDZRw"
+    },
+    {
+      "name": "padded-thoughts",
+      "input": {
+        "repoKey": "/Users/demo/Projects/todo-demo",
+        "wireThreadId": "  thoughts-abc123  ",
+        "clientMutationId": "cm-0001"
+      },
+      "resolvedThreadId": "thoughts-abc123",
+      "encodedIdInputHex": "010000000e6f382e63712e77732d69642e7631010000001e2f55736572732f64656d6f2f50726f6a656374732f746f646f2d64656d6f010000000f74686f75676874732d6162633132330100000007636d2d30303031",
+      "wsId": "ws-x2tX-XYsoi0zxwb7ZB2Y7HWzv9jqLlxqMuMo9HVoOw0",
+      "wsiTarget": "wsi:dx8xrOOJqVnavLY6g-PA26qwR4tIV3feuLbimX-YjDA"
+    },
+    {
+      "name": "unicode-repo",
+      "input": {
+        "repoKey": "/Users/démo/プロジェクト",
+        "wireThreadId": "thoughts-abc123",
+        "clientMutationId": "cm-0001"
+      },
+      "resolvedThreadId": "thoughts-abc123",
+      "encodedIdInputHex": "010000000e6f382e63712e77732d69642e7631010000001f2f55736572732f64c3a96d6f2fe38397e383ade382b8e382a7e382afe38388010000000f74686f75676874732d6162633132330100000007636d2d30303031",
+      "wsId": "ws-c60Ucjk1UwuMKY2_glGK60TuT9UR0DbUSGsikJvGjPA",
+      "wsiTarget": "wsi:yHJCsccWz_TYXN_iji8FWe45FBQ6P3pLOV_z5ZiFCsY"
+    }
+  ],
+  "ingress": {
+    "wireJson": "{\"type\":\"orchestrator-send\",\"repoPath\":\"/Users/demo/Projects/todo-demo\",\"threadId\":\"chat-42\",\"message\":\"Count the files.\",\"surface\":\"mobile\",\"clientMutationId\":\"cm-0001\",\"attachments\":[{\"name\":\"a.png\",\"dataUri\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\",\"mimeType\":\"image/png\"},{\"name\":\"b.png\",\"dataUri\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\"}]}",
+    "wireJsonUtf8Bytes": 505,
+    "ingressHash": "d92e2f2ee40d7b8a10dd258dbe881c5c75af9ee78fa37f44432d50845289364b",
+    "ingressJsonValue": {
+      "type": "orchestrator-send",
+      "repoPath": "/Users/demo/Projects/todo-demo",
+      "threadId": "chat-42",
+      "message": "Count the files.",
+      "surface": "mobile",
+      "clientMutationId": "cm-0001",
+      "attachments": [
+        {
+          "name": "a.png",
+          "dataUri": {
+            "payloadImageIndex": 0
+          },
+          "mimeType": "image/png"
+        },
+        {
+          "name": "b.png",
+          "dataUri": {
+            "payloadImageIndex": 1
+          }
+        }
+      ]
+    }
+  }
+}
