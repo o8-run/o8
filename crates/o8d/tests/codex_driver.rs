@@ -94,7 +94,7 @@ async fn real_codex_turn_events_warm_process_and_tree_cancellation() {
     }
     // A real CLI-managed shell child; killing the driver must kill the group.
     let marker = root.join("child.pid");
-    let command_id = driver.start_request("command/exec",json!({"command":["sh","-c",format!("sleep 300 >/dev/null 2>&1 & echo $! > {}; wait",marker.display())],"cwd":root,"disableTimeout":true})).await.unwrap();
+    let command_id = driver.start_request("command/exec",json!({"command":["sh","-c",format!("sleep 300 >/dev/null 2>&1 & echo $! > {}; wait",marker.display())],"cwd":root,"timeoutMs":100})).await.unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
         while !marker.exists() {
             tokio::select! {
