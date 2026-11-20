@@ -21,8 +21,8 @@ const lanes = ['running', 'reviewing', 'paused', 'failed', 'completed', 'archive
     label: 'Private task description', sessionKey: `private-session-${index}`,
     packetId: index === 0 ? packetId : `pkt-live-status-${index}`,
   });
-  getSqlite().prepare('UPDATE lanes SET status = ?, worktree_path = ?, writer_token = ? WHERE id = ?')
-    .run(status, `/tmp/live-status-checkout-${index}`, `fixture-private-writer-${index}`, lane.id);
+  getSqlite().prepare('UPDATE lanes SET status = ?, worktree_path = ?, writer_token = ?, created_at = ? WHERE id = ?')
+    .run(status, `/tmp/live-status-checkout-${index}`, `fixture-private-writer-${index}`, `2026-01-01T00:00:0${index}.000Z`, lane.id);
   return getLane(lane.id)!;
 });
 const expectedLanes = lanes.slice(0, 4).map(({ id, packetId, status, worktreePath }) => (
