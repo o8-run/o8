@@ -36,7 +36,7 @@ const FRAME_LIMIT: usize = 16 * 1024 * 1024;
 /// The caller supplies cwd, model, policy and isolated/real credentials explicitly.
 pub struct Driver {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     frame: Vec<u8>,
     next_id: i64,
@@ -59,7 +59,7 @@ impl Driver {
         command.kill_on_drop(true);
         let mut child = command.spawn()?;
         Ok(Self {
-            stdin: child.stdin.take().unwrap(),
+            stdin: child.stdin.take(),
             stdout: BufReader::new(child.stdout.take().unwrap()),
             child,
             frame: Vec::new(),
@@ -77,8 +77,12 @@ impl Driver {
             return Err(io::Error::other("Codex frame exceeds limit"));
         }
         bytes.push(b'\n');
-        self.stdin.write_all(&bytes).await?;
-        self.stdin.flush().await
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "Codex input is closed"))?;
+        stdin.write_all(&bytes).await?;
+        stdin.flush().await
     }
     async fn read(&mut self) -> io::Result<Value> {
         loop {
@@ -160,11 +164,19 @@ impl Driver {
     }
     pub async fn cancel(&mut self) -> io::Result<()> {
         if let Some(pid) = self.child.id() {
-            unsafe {
-                libc::kill(-(pid as i32), libc::SIGTERM);
+            // EOF invokes Codex's connection teardown, which owns command
+            // sessions in their own process groups. Killing only our group
+            // cannot reach those tool groups.
+            self.stdin.take();
+            if tokio::time::timeout(Duration::from_secs(2), self.child.wait())
+                .await
+                .is_err()
+            {
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGTERM);
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            // Kill the group even if its leader exits first: tools can ignore TERM.
-            tokio::time::sleep(Duration::from_millis(100)).await;
             unsafe {
                 libc::kill(-(pid as i32), libc::SIGKILL);
             }
