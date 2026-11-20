@@ -121,8 +121,11 @@ async fn real_codex_turn_events_warm_process_and_tree_cancellation() {
         );
     }
     // A real CLI-managed shell child; killing the driver must kill the group.
+    // This fixed local command performs no network I/O. Inherit the runner's
+    // network namespace: hosted Linux denies bwrap's loopback setup. Keep the
+    // filesystem sandbox scoped to this disposable root.
     let marker = root.join("child.pid");
-    let command_id = driver.start_request("command/exec",json!({"command":["sh","-c",format!("sleep 300 >/dev/null 2>&1 & echo $! > {}; wait",marker.display())],"cwd":root,"disableTimeout":true,"sandboxPolicy":{"type":"workspaceWrite","writableRoots":[root],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true}})).await.unwrap();
+    let command_id = driver.start_request("command/exec",json!({"command":["sh","-c",format!("sleep 300 >/dev/null 2>&1 & echo $! > {}; wait",marker.display())],"cwd":root,"disableTimeout":true,"sandboxPolicy":{"type":"workspaceWrite","writableRoots":[root],"networkAccess":true,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true}})).await.unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
         while !marker.exists() {
             tokio::select! {
