@@ -68,7 +68,9 @@ pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str)
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
     });
-    if !(if path == "/api/orchestrator/session-rules" {
+    if !(if path == "/api/orchestrator/composer-queue" {
+        matches!(method,"GET"|"POST"|"PATCH"|"DELETE")
+    } else if path == "/api/orchestrator/session-rules" {
         matches!(method, "GET" | "POST" | "DELETE")
     } else if use_route {
         single.is_some() && method == "POST"
@@ -80,6 +82,10 @@ pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str)
         return false;
     }
     operator_token(socket, header, None).is_some()
+}
+
+pub(super) fn internal_queue(socket:&tokio::net::TcpStream,header:&str)->bool {
+    operator_token(socket,header,None).is_some()
 }
 
 fn operator_token(

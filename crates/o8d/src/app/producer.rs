@@ -57,12 +57,13 @@ impl Listener {
             identity: (meta.dev(), meta.ino()),
         })
     }
-    pub async fn run(
+    pub(super) async fn run(
         &self,
         key: String,
         public_port: u16,
         mut shutdown: watch::Receiver<bool>,
         selected: watch::Sender<Option<Arc<Producer>>>,
+        global: Arc<super::native_global::NativeGlobal>,
     ) -> io::Result<()> {
         let authority = Arc::new(Mutex::new(selected));
         let mut tasks = tokio::task::JoinSet::new();
@@ -80,8 +81,8 @@ impl Listener {
                     // Bound unauthenticated local handshakes as well as frames.
                     if tasks.len() >= 16 { continue; }
                     generation += 1;
-                    let authority = authority.clone(); let key = key.clone();
-                    tasks.spawn(async move { let _ = attach(stream, &key, public_port, generation, authority).await; });
+                    let authority = authority.clone(); let key = key.clone(); let global=global.clone();
+                    tasks.spawn(async move { let _ = attach(stream, &key, public_port, generation, authority, global).await; });
                 }
             }
         }
@@ -146,6 +147,15 @@ fn target(value: &Value, key: &str, port: u16, generation: u64) -> Result<Arc<Pr
         bus: Arc::new(EventBus::new(epoch.into(), 400)),
         startup_port_info,
         generation,
+        composer_queue_epoch: match value.get("composerQueueBootId") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(boot))
+                if !boot.is_empty() && boot.len() <= 128 && !boot.chars().any(char::is_control) =>
+            {
+                Some(format!("{boot}:{generation}:{}", uuid::Uuid::new_v4()))
+            }
+            _ => return Err(()),
+        },
         notices: None,
     }))
 }
@@ -155,6 +165,7 @@ async fn attach(
     port: u16,
     generation: u64,
     authority: Arc<Mutex<watch::Sender<Option<Arc<Producer>>>>>,
+    global: Arc<super::native_global::NativeGlobal>,
 ) -> Result<(), ()> {
     let (input, mut output) = stream.into_split();
     let mut input = BufReader::new(input);
@@ -170,16 +181,31 @@ async fn attach(
         if selected.borrow().is_some() {
             return Err(());
         }
+        #[cfg(feature = "experimental-session-reads")]
+        if let (Some(owner), Some(boot)) = (
+            global.composer_queue.clone(),
+            value["composerQueueBootId"].as_str(),
+        ) {
+            let boot = boot.to_owned();
+            tokio::task::spawn_blocking(move || owner.attach(&boot))
+                .await
+                .map_err(|_| ())?
+                .map_err(|_| ())?;
+        }
         // ACK completes before publication. A peer that cannot read it never
         // becomes authority, and the key is never echoed.
-        timeout(Duration::from_secs(5), output.write_all(format!("{}\n", json!({"version":1,"pid":std::process::id(),"generation":generation,"epoch":producer.bus.epoch()})).as_bytes())).await.map_err(|_| ())?.map_err(|_| ())?;
+        timeout(Duration::from_secs(5), output.write_all(format!("{}\n", json!({"version":1,"pid":std::process::id(),"generation":generation,"epoch":producer.bus.epoch(),"composerQueueEpoch":producer.composer_queue_epoch})).as_bytes())).await.map_err(|_| ())?.map_err(|_| ())?;
         selected.send_replace(Some(producer.clone()));
     }
     let result = async {
         loop {
             // Keep the bounded read future alive across notices: cancelling a
             // partially consumed line would corrupt the producer's event stream.
-            let frame = line(&mut input, FRAME_LIMIT);
+            #[cfg(feature = "experimental-session-reads")]
+            let frame_limit=super::composer_queue::RPC_LIMIT;
+            #[cfg(not(feature = "experimental-session-reads"))]
+            let frame_limit=FRAME_LIMIT;
+            let frame = line(&mut input, frame_limit);
             tokio::pin!(frame);
             loop { tokio::select! {
                 notice = pending.recv() => {
@@ -187,8 +213,32 @@ async fn attach(
                     timeout(Duration::from_millis(250), output.write_all(notice.as_bytes())).await.map_err(|_| ())?.map_err(|_| ())?;
                 }
                 bytes = &mut frame => {
-                    let events: Vec<Value> = serde_json::from_slice(&bytes?).map_err(|_| ())?;
-                    producer.bus.publish(events).await.map_err(|_| ())?;
+                    let bytes=bytes?;
+                    let value:Value=serde_json::from_slice(&bytes).map_err(|_|())?;
+                    if let Some(events)=value.as_array() {
+                        if bytes.len()>FRAME_LIMIT {return Err(());}
+                        producer.bus.publish(events.clone()).await.map_err(|_|())?;
+                    }else{
+                        #[cfg(feature = "experimental-session-reads")]
+                        {
+                            // Serialize attach/recovery against every command. An old
+                            // executor cannot commit a late command after a new attach.
+                            let selected=authority.lock().await;
+                            if !selected.borrow().as_ref().is_some_and(|p|Arc::ptr_eq(p,&producer)) {return Err(());}
+                            let (reply,notice)=super::composer_queue::execute(global.composer_queue.clone(),producer.composer_queue_epoch.as_deref().unwrap_or(""),&value).await;
+                            let reply=format!("{reply}\n");
+                            if reply.len()>super::composer_queue::RPC_LIMIT {return Err(());}
+                            if let Some(notice)=notice {
+                                let wire=format!("{}\n",json!({"version":1,"kind":"native-commit","epoch":producer.bus.epoch(),"request":notice.0}));
+                                // COMMIT is terminal even when the receiver is gone.
+                                if wire.len()>16*1024 {eprintln!("[o8d] committed notification unavailable");}
+                                else {timeout(Duration::from_millis(250),output.write_all(wire.as_bytes())).await.map_err(|_|())?.map_err(|_|())?;}
+                            }
+                            timeout(Duration::from_secs(5),output.write_all(reply.as_bytes())).await.map_err(|_|())?.map_err(|_|())?;
+                        }
+                        #[cfg(not(feature = "experimental-session-reads"))]
+                        return Err(());
+                    }
                     break;
                 }
             } }
@@ -239,10 +289,17 @@ mod tests {
         let open = |epoch: &str| {
             let (peer, daemon) = UnixStream::pair().unwrap();
             let authority = authority.clone();
-            let task =
-                tokio::spawn(
-                    async move { attach(daemon, "fixture-key", 18001, 1, authority).await },
-                );
+            let task = tokio::spawn(async move {
+                attach(
+                    daemon,
+                    "fixture-key",
+                    18001,
+                    1,
+                    authority,
+                    super::super::native_global::NativeGlobal::new(),
+                )
+                .await
+            });
             (
                 peer,
                 task,
@@ -367,12 +424,17 @@ pub async fn run_owner(address: std::net::SocketAddr, path: &Path, key: String) 
     let public_port = listener.local_addr()?.port();
     let (selected, selection) = watch::channel(None);
     let (shutdown, receiver) = watch::channel(false);
+    let global = super::native_global::NativeGlobal::new();
     let mut producer = tokio::spawn({
         let receiver = receiver.clone();
         let key = key.clone();
-        async move { socket.run(key, public_port, receiver, selected).await }
+        let global = global.clone();
+        async move {
+            socket
+                .run(key, public_port, receiver, selected, global)
+                .await
+        }
     });
-    let global = super::native_global::NativeGlobal::new();
     #[cfg(all(debug_assertions, feature = "experimental-session-reads"))]
     let fixture = {
         let root = std::env::var_os("O8D_SESSION_DATA_DIR").map(PathBuf::from);
@@ -431,3 +493,7 @@ pub async fn run_owner(address: std::net::SocketAddr, path: &Path, key: String) 
     }
     result
 }
+
+#[cfg(all(test, feature = "experimental-session-reads"))]
+#[path = "producer_composer_tests.rs"]
+mod composer_tests;

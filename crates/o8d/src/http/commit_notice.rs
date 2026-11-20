@@ -3,6 +3,24 @@ use super::*;
 #[derive(Clone)]
 pub(crate) struct CommitNotice(pub Value);
 impl CommitNotice {
+    /// Composer's legacy mutation contract has a desktop source and a repo
+    /// target. Keep it separate from the six-key server notices above.
+    pub(crate) fn composer(id: &str, thread: &str, repo: &str, now: i64) -> Option<Self> {
+        if thread.starts_with("wsi:") {
+            return None;
+        }
+        let created = chrono::DateTime::from_timestamp_millis(now)?;
+        let value = json!({"kind":"mutation","refreshTargets":["global"],"mutation":{
+            "mutationId":format!("composer-queue-{id}-{now}"),"source":"desktop",
+            "action":"composer-queue","status":"completed","surfaceId":thread,
+            "repoPath":repo,"createdAt":created.to_rfc3339_opts(chrono::SecondsFormat::Millis,true)}});
+        // Leave room for the private native-commit envelope and realtime epoch.
+        if !std::path::Path::new(repo).is_absolute() || value.to_string().len() > 15 * 1024 {
+            eprintln!("[o8d] committed notification exceeds bounds");
+            return None;
+        }
+        Some(Self(value))
+    }
     pub(super) fn new(action: &str, surface: &str) -> Option<Self> {
         if surface.is_empty() || surface.len() > 4096 {
             eprintln!("[o8d] committed notification exceeds bounds");
@@ -23,6 +41,25 @@ pub(super) fn committed(response: &mut Response, action: &str, surface: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn composer_notice_matches_the_locked_seven_key_desktop_variant() {
+        let notice = CommitNotice::composer("fixture-id", "thoughts-fixture", "/fixture", 1234)
+            .unwrap()
+            .0;
+        assert_eq!(
+            notice,
+            json!({"kind":"mutation","refreshTargets":["global"],"mutation":{
+            "mutationId":"composer-queue-fixture-id-1234","source":"desktop","action":"composer-queue",
+            "status":"completed","surfaceId":"thoughts-fixture","repoPath":"/fixture",
+            "createdAt":"1970-01-01T00:00:01.234Z"}})
+        );
+        assert_eq!(notice.as_object().unwrap().len(), 3);
+        assert_eq!(notice["mutation"].as_object().unwrap().len(), 7);
+        assert!(CommitNotice::composer("fixture-id", "wsi:fixture", "/fixture", 1234).is_none());
+        assert!(
+            CommitNotice::composer("fixture-id", "thoughts-fixture", "relative", 1234).is_none()
+        );
+    }
     #[test]
     fn receipt_is_private_metadata_and_bounds_never_change_the_response() {
         let mut response = reply(StatusCode::CREATED, json!({"ok":true}));

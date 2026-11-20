@@ -104,6 +104,7 @@ pub(super) async fn serve(
     }
     let native_operator = std::env::var("O8_API_FRONT_DOOR").as_deref() == Ok("1")
         && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1")
+        && !(path == "/api/orchestrator/composer-queue" && method == "GET")
         && super::prompt_operator::eligible(socket, header, path);
     // This read's non-operator principals retain the original Node handler,
     // including its packet-to-thread check. Never accept an operator-read
@@ -435,7 +436,8 @@ pub(super) async fn write_response(
         if name == axum::http::header::CONTENT_LENGTH || name.as_str() == "x-o8d-directives-timing" { continue; }
         output.push_str(&format!("{name}: {}\r\n", value.to_str().map_err(|_| ())?));
     }
-    let body = to_bytes(response.into_body(), 16 * 1024 * 1024)
+    let response_limit=if response.extensions().get::<super::composer_queue::ResponseLimit>().is_some() {super::composer_queue::RPC_LIMIT}else{16*1024*1024};
+    let body = to_bytes(response.into_body(), response_limit)
         .await
         .map_err(|_| ())?;
     output.push_str(&format!("Content-Length: {}\r\n\r\n", body.len()));
