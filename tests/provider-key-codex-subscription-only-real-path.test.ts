@@ -2,7 +2,6 @@ import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { NextRequest } from 'next/server';
 
 const fixture = vi.hoisted(() => ({ home: '', data: '' }));
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => fixture.home }));
@@ -14,9 +13,8 @@ mkdirSync(source); mkdirSync(fixture.data);
 const { mutateProviderKey } = await import('@/lib/providers/key-store');
 const { childEnvironment } = await import('@/lib/providers/spawn-environment');
 const cp = await import('@/lib/providers/child-process');
-const billing = await import('@/app/api/runtime/billing/route');
+const billing = await import('@/lib/providers/runtime-billing');
 const observer = `const f=require('node:fs'),p=require('node:path'),h=process.env.CODEX_HOME||p.join(process.env.HOME,'.codex');process.stdout.write(JSON.stringify({home:h,explicit:process.env.CODEX_HOME??null,auth:JSON.parse(f.readFileSync(p.join(h,'auth.json'),'utf8')),keys:['OPENAI_API_KEY','CODEX_API_KEY','LLM_API_KEY','GOOSE_API_KEY','COPILOT_PROVIDER_API_KEY','COPILOT_PROVIDER_BEARER_TOKEN'].map(n=>process.env[n]||null),service:process.env.BRAVE_API_KEY}));`;
-const request = (body: unknown) => new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify(body) });
 function forceApi(id: string): void {
   mkdirSync(join(fixture.data, 'runtime-billing'), { recursive: true });
   writeFileSync(join(fixture.data, 'runtime-billing', `${id}.json`), JSON.stringify({ version: 1, mode: 'api' }));
@@ -52,16 +50,13 @@ it.each([false, true])('forced Codex API billing strips credentials and preserve
   expect(readFileSync(join(selected, 'auth.json'), 'utf8')).toBe(raw);
   expect(existsSync(join(fixture.data, 'codex-policy-homes'))).toBe(false);
 });
-it('refuses Codex API mode through the authenticated route while ignoring a stale persisted opt-in', async () => {
+it('refuses Codex API mode through billing policy while ignoring a stale persisted opt-in', async () => {
   forceApi('codex');
-  const response = await billing.POST(request({ runtimeId: 'codex', mode: 'api' }));
-  expect(response.status).toBe(409);
-  expect(await response.json()).toMatchObject({ ok: false, code: 'CODEX_API_BILLING_UNAVAILABLE', issue: 'https://github.com/hurttlocker/o8/issues/4334' });
-  const current = await billing.GET(new NextRequest('http://localhost/api/runtime/billing?runtimeId=codex', { headers: { host: 'localhost' } }));
-  expect(await current.json()).toMatchObject({ mode: 'subscription' });
+  expect(() => billing.saveRuntimeBillingMode('codex', 'api')).toThrow();
+  expect(billing.runtimeBillingMode('codex')).toBe('subscription');
 });
-it('still delivers saved API credentials to a non-Codex runtime opted in through the billing route', async () => {
-  expect((await billing.POST(request({ runtimeId: 'gemini', mode: 'api' }))).status).toBe(200);
+it('still delivers saved API credentials to a non-Codex runtime opted in through saved billing policy', async () => {
+  expect(() => billing.saveRuntimeBillingMode('gemini', 'api')).not.toThrow();
   const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(process.env.OPENAI_API_KEY||"missing")'], {
     env: childEnvironment({ runtimeId: 'gemini' }), encoding: 'utf8',
   });

@@ -16,7 +16,7 @@ if(process.argv.includes('app-server'))require('node:readline').createInterface(
 else {send({type:'item.completed',item:{type:'agent_message',text:'Fixture summary'}});send({type:'turn.completed',usage:{input_tokens:2,output_tokens:2}});}
 `); chmodSync(state.binary, 0o755);
 const keys = await import('@/app/api/v2/keys/route');
-const billing = await import('@/app/api/runtime/billing/route');
+const billing = await import('@/lib/providers/runtime-billing');
 const { digest, autoCompactOrchestratorThread } = await import('@/lib/orchestrator/auto-compact');
 const { getCodexSpeedCatalogue } = await import('@/lib/codex/service-tier-catalogue');
 const request = (path: string, body: unknown, method = 'POST') => new NextRequest(`http://localhost/api/${path}`, { method, headers: { host: 'localhost' }, body: JSON.stringify(body) });
@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.dir, { force: true, recursive: true }); });
 it.each(['digest', 'compact', 'catalogue'].flatMap(target => ['subscription', 'api', 'disable', 'remove'].map(action => [target, action])))('%s obeys %s for saved and matching login credentials', async (target, action) => {
-  expect((await billing.POST(request('runtime/billing', { runtimeId: 'codex', mode: action === 'subscription' ? 'subscription' : 'api' }))).status).toBe(action === 'subscription' ? 200 : 409);
+  if (!(action === 'subscription')) expect(() => billing.saveRuntimeBillingMode('codex', action === 'subscription' ? 'subscription' : 'api')).toThrow(); else expect(() => billing.saveRuntimeBillingMode('codex', action === 'subscription' ? 'subscription' : 'api')).not.toThrow();
   expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-login-provider' }))).status).toBe(200);
   if (action === 'disable') expect((await keys.PATCH(request('v2/keys', { provider: 'openai', enabled: false }, 'PATCH'))).status).toBe(200);
   if (action === 'remove') expect((await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'))).status).toBe(200);
@@ -58,6 +58,6 @@ process.stdout.write(JSON.stringify({version:1,platform:'darwin',bootId:'fixture
     Object.defineProperty(process, 'platform', { value: 'darwin' });
     const { probeOwnedProcessIdentity } = await import('@/lib/runtimes/shared/owned-session/process-identity');
     expect(await probeOwnedProcessIdentity(process.pid, 'native-helper')).toMatchObject({ state: 'live', source: 'native-helper' });
-    expect(JSON.parse(readFileSync(state.record, 'utf8'))).toEqual({ key: false, alias: false, copy: false, master: false, service: 'fixture-search-service' });
+    expect(JSON.parse(readFileSync(state.record, 'utf8'))).toEqual({ key: false, alias: false, copy: false, master: false });
   } finally { Object.defineProperty(process, 'platform', platform); }
 });

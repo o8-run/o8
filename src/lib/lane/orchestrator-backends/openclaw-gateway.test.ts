@@ -31,9 +31,9 @@ beforeEach(() => {
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.dir, { recursive: true, force: true }); });
 it.each(['disable', 'remove'])('refuses a gateway whose launch policy changes to %s during readiness', async action => {
-  const keys = await import('@/app/api/v2/keys/route'); const billing = await import('@/app/api/runtime/billing/route');
+  const keys = await import('@/app/api/v2/keys/route'); const billing = await import('@/lib/providers/runtime-billing');
   expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-gateway-key' }))).status).toBe(200);
-  expect((await billing.POST(request('runtime/billing', { runtimeId: 'openclaw', mode: 'api' }))).status).toBe(409);
+  expect(() => billing.saveRuntimeBillingMode('openclaw', 'api')).toThrow();
   state.hook = async () => {
     const response = action === 'disable' ? await keys.PATCH(request('v2/keys', { provider: 'openai', enabled: false }, 'PATCH')) : await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'));
     expect(response.status).toBe(200);

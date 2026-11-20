@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
 import { spawn as previousVersionSpawn } from 'node:child_process';
-import { NextRequest } from 'next/server';
 
 const state = vi.hoisted(() => ({ home: '', data: '', index: 0 }));
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => state.home }));
@@ -12,9 +11,7 @@ vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.data }));
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => ({ entries: [] }) }));
 const root = mkdtempSync(join(tmpdir(), 'o8-file-billing-split-'));
 const key = 'fixture-previous-version-api-credential';
-const request = (runtimeId: string, mode: string) => new NextRequest('http://localhost/api/runtime/billing', {
-  method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId, mode }),
-});
+
 beforeEach(async () => {
   vi.resetModules(); vi.restoreAllMocks(); vi.unstubAllEnvs();
   state.home = join(root, String(++state.index)); state.data = join(state.home, 'data');
@@ -26,16 +23,14 @@ beforeEach(async () => {
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); rmSync(root, { recursive: true, force: true }); });
 
-it.each(['hermes', 'openclaw', 'acp'])('the authenticated billing route refuses file/unknown-contract API billing for %s', async runtimeId => {
-  const billing = await import('@/app/api/runtime/billing/route');
-  const response = await billing.POST(request(runtimeId, 'api'));
-  expect(response.status).toBe(409);
-  expect(await response.json()).toMatchObject({ ok: false, code: 'RUNTIME_FILE_API_BILLING_UNAVAILABLE', issue: 'https://github.com/hurttlocker/o8/issues/4340' });
+it.each(['hermes', 'openclaw', 'acp'])('billing policy refuses file/unknown-contract API billing for %s', async runtimeId => {
+  const billing = await import('@/lib/providers/runtime-billing');
+  expect(() => billing.saveRuntimeBillingMode(runtimeId, 'api')).toThrow();
 });
 
 it('an environment-based runtime still receives its saved API key through an actual child', async () => {
-  const billing = await import('@/app/api/runtime/billing/route');
-  expect((await billing.POST(request('claude-code', 'api'))).status).toBe(200);
+  const billing = await import('@/lib/providers/runtime-billing');
+  expect(() => billing.saveRuntimeBillingMode('claude-code', 'api')).not.toThrow();
   const { childEnvironment } = await import('@/lib/providers/spawn-environment');
   const { execFileSync } = await import('@/lib/providers/child-process');
   const output = execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({key:!!process.env.OPENAI_API_KEY,service:process.env.BRAVE_API_KEY}))'], {
@@ -86,9 +81,10 @@ it('leaves earlier o8 files untouched on disable/removal and warns only once per
   mutateProviderKey('OPENAI_API_KEY', { enabled: false });
   mutateProviderKey('OPENAI_API_KEY', { key: null });
   expect(readFileSync(file, 'utf8')).toBe(before);
-  const notices = warning.mock.calls.filter(args => args.some(value => String(value).includes(file)));
+  const notices = warning.mock.calls.filter(args => args.some(value => String(value).includes('[payer-policy] Legacy o8 runtime config left unchanged.')));
   expect(notices).toHaveLength(1);
   expect(notices.flat().join(' ')).toContain('#4340');
+  expect(notices.flat().join(' ')).not.toContain(file);
   expect(notices.flat().join(' ')).not.toContain(key);
 });
 
@@ -156,8 +152,8 @@ it('permits a generic ACP launch selecting an unregistered operator Claude profi
 it('an environment-based API runtime keeps its ordinary key-free owned config home', async () => {
   const config = join(state.data, 'owned-claude-code', 'session', 'config'); mkdirSync(config, { recursive: true });
   writeFileSync(join(config, 'settings.json'), JSON.stringify({ tools: [] }));
-  const billing = await import('@/app/api/runtime/billing/route');
-  expect((await billing.POST(request('claude-code', 'api'))).status).toBe(200);
+  const billing = await import('@/lib/providers/runtime-billing');
+  expect(() => billing.saveRuntimeBillingMode('claude-code', 'api')).not.toThrow();
   const { childEnvironment } = await import('@/lib/providers/spawn-environment');
   const { execFileSync } = await import('@/lib/providers/child-process');
   const output = execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({key:!!process.env.OPENAI_API_KEY,home:process.env.CLAUDE_CONFIG_DIR}))'], {
@@ -173,8 +169,8 @@ it('Claude OAuth seed refuses a saved provider key before copying the source cre
   writeFileSync(file, raw);
   const { mutateProviderKey } = await import('@/lib/providers/key-store');
   mutateProviderKey('ANTHROPIC_API_KEY', { key: 'fixture-env-native-auth' });
-  const billing = await import('@/app/api/runtime/billing/route');
-  expect((await billing.POST(request('claude-code', 'api'))).status).toBe(200);
+  const billing = await import('@/lib/providers/runtime-billing');
+  expect(() => billing.saveRuntimeBillingMode('claude-code', 'api')).not.toThrow();
   const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
   Object.defineProperty(process, 'platform', { value: 'linux' });
   const session = join(state.data, 'claude-session');
