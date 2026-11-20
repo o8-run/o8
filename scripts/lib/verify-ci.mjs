@@ -258,7 +258,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       'registration-cache': '${{ matrix.shard == 1 }}',
     }),
   'native selection or setup needs a verify:ci equivalent');
-  const build = 'cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d';
+  const build = 'cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d';
   const test = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native tests wall=%3R s'\ntime node scripts/ci/native-test-shard.mjs --cargo --phase=regular";
   const probes = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native probes wall=%3R s'\ntime node scripts/ci/native-test-shard.mjs --cargo --phase=timed";
   requireCondition(nativeRunSteps[1].run === build && nativeRunSteps[2].run.trim() === test

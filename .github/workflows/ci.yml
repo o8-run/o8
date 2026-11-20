@@ -766,9 +766,9 @@ jobs:
         with:
           headless-tests: 'true'
           registration-cache: ${{ matrix.shard == 1 }}
-      - name: Build the persisted-history fixture daemon
+      - name: Build the persisted-history and composer queue fixture daemon
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
-        run: cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d
+        run: cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d
       - name: Headless native tests
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
         run: |

@@ -8,6 +8,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
+import { composerOwnerBinary, startComposerOwner } from './composer-owner';
 
 async function freePort() {
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
@@ -38,6 +39,8 @@ export async function startWorkerServer() {
   const { getSqlite } = await import('../../src/lib/db');
   const { ensureV71ComposerQueueSchema } = await import('../../src/lib/db/v71-composer-queue-migration');
   ensureV71ComposerQueueSchema(getSqlite());
+  // o8d owns the composer queue the worker route reads.
+  const owner = await startComposerOwner(composerOwnerBinary());
   // The adjacent transcript surface also requests the existing inventory GET.
   // Fence discovery to this owned store before exposing its production handler.
   const { getAllRuntimes } = await import('../../src/lib/runtimes');
@@ -131,6 +134,7 @@ export async function startWorkerServer() {
       const timer = setTimeout(() => worker.kill('SIGKILL'), 3000);
       await exited; clearTimeout(timer);
     }
+    await owner.close();
     server.closeAllConnections(); server.close();
     if (process.env.O8_NEXT_REQUEST_LOG) writeFileSync(process.env.O8_NEXT_REQUEST_LOG, JSON.stringify(requests));
     rmSync(root, { recursive: true, force: true }); process.exit(0);
