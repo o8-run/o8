@@ -65,7 +65,6 @@ for (const name of Object.keys(process.env)) if (providerCredentialName(name)) v
 const { createCortexDelegationHandlers } = await import('@/lib/mcp/cortex-delegation-handlers');
 const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
 const { POST } = await import('@/app/api/orchestrator/delegate/route');
-const repairPreparation = await import('@/app/api/panel/prs/[number]/repair/route');
 const laneCommands = await import('@/lib/lane/commands');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -121,11 +120,6 @@ async function fixture(label: string, github = false) {
   await updateOperatorDefaults({ workerRuntimes: ['claude-code'] });
   return { repo, origin, base, head };
 }
-// Registry reads adopt the checkout's effective origin (#4754), which insteadOf rewrites. Redirect
-// GitHub fetches to the bare origin only once repair preparation has found the registered slug.
-function redirectGitHubFetches(f: { repo: string; origin: string }) {
-  git(f.repo, 'config', `url.${f.origin}.insteadOf`, `https://github.com/${githubFixture.repo}.git`);
-}
 function request(repoPath: string, extra: Record<string, unknown> = {}) {
   return new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` }, body: JSON.stringify({
     clientMutationId: `review-pr-${crypto.randomUUID()}`, repoPath, runtime: 'claude-code',
@@ -135,32 +129,6 @@ function request(repoPath: string, extra: Record<string, unknown> = {}) {
 }
 
 describe('reviewer PR checkout through delegate dispatch', () => {
-  it('runs selected failing job evidence through preparation, normal dispatch, real Git and persisted state', async () => {
-    process.env.O8_APFS_COW_WORKSPACES = '0';
-    const f = await fixture('repair-selected-entry', true);
-    const response = await repairPreparation.POST(new NextRequest('http://localhost/api/panel/prs/7/repair?repo=fixture%2Frepair', {
-      method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
-      body: JSON.stringify({ expectedHeadSha: f.head, checks: ['1'], clientMutationId: 'selected-repair' }),
-    }), { params: Promise.resolve({ number: '7' }) });
-    expect(response.status, await response.clone().text()).toBe(200);
-    const prepared = await response.json();
-    expect(prepared.delegation.prompt).toContain('fixture failing assertion');
-    expect(prepared.delegation.prompt).toContain('Source repository: fixture/fork');
-    expect(prepared.delegation.baseBranch).toBe('main');
-    redirectGitHubFetches(f);
-    const launchedResponse = await POST(request(f.repo, { reviewPullRequest: undefined, ...prepared.delegation }));
-    const result = await launchedResponse.json();
-    expect(launchedResponse.status, JSON.stringify(result)).toBe(200);
-    expect(git(launches.at(-1)!.cwd!, 'rev-parse', 'HEAD')).toBe(f.head);
-    expect(readOrchestratorControlPlaneState().packets.find(p => p.id === result.packetId)?.repairSource)
-      .toEqual({ pullRequest: 7, headSha: f.head });
-    // The ordinary completion contract compares only the repair against its immutable source.
-    expect(launches.at(-1)!.prompt).toContain(`git diff ${f.head}...HEAD`);
-    const replay = await POST(request(f.repo, { reviewPullRequest: undefined, ...prepared.delegation }));
-    expect((await replay.json()).laneId).toBe(result.laneId);
-    expect(getLane(result.laneId)?.prNumber).toBeNull();
-  }, 90_000);
-
   it('refuses repair dispatch without operator authority before creating any state', async () => {
     const count = launches.length;
     const response = await POST(new NextRequest('http://localhost/api/orchestrator/delegate', { method: 'POST', body: JSON.stringify({

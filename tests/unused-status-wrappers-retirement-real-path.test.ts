@@ -6,6 +6,11 @@ import { handleNativeHttp } from '@/lib/ws-server/native-http-routes';
 
 it.each([
   ['GET', '/api/panel/app/install-info'],
+  ['POST', '/api/panel/targets/dispatch'],
+  ['POST', '/api/setup/pi/cache-warming'],
+  ['GET', '/api/runtime/threecode-models'],
+  ['POST', '/api/panel/prs/7/repair'],
+  ['POST', '/api/setup/gemini'],
   ['GET', '/api/runtime/session-summary?sessionKey=codex-owned%3Aretired-fixture'],
 ])('retires %s %s while preserving its unmatched Next-off response', async (method, path) => {
   const absent = createServer();
@@ -26,7 +31,7 @@ it.each([
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: 'Next upstream unavailable' });
     expect(registeredFrontDoorRoute(path, method)).toBe(false);
-    expect(templates).not.toContain(new URL(path, 'http://fixture.invalid').pathname);
+    expect(templates).not.toContain(new URL(path, 'http://fixture.invalid').pathname.replace('/prs/7/', '/prs/[number]/'));
   } finally {
     listener.closeAllConnections(); await new Promise<void>(resolve => listener.close(() => resolve()));
     vi.unstubAllEnvs();
