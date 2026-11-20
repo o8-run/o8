@@ -72,6 +72,8 @@ describe('durable composer queue API and persisted state', () => {
     const heartbeat = createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} });
     try {
       heartbeat();
+      // A refused steer returns to its starting status, so first wait for the attempt.
+      await vi.waitFor(() => expect(native).toHaveBeenCalledOnce());
       await vi.waitFor(async () => expect((await queue.readComposerSend('queue-native-steer'))?.status).toBe(outcome === true ? 'applied' : outcome === false ? 'queued' : 'held'));
       const item = (await queue.readComposerSend('queue-native-steer'))!;
       expect(native).toHaveBeenCalledOnce();
