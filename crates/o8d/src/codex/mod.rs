@@ -41,6 +41,7 @@ pub struct Driver {
     frame: Vec<u8>,
     next_id: i64,
     events: VecDeque<Value>,
+    event_bytes: usize,
 }
 impl Driver {
     pub async fn spawn(
@@ -64,6 +65,7 @@ impl Driver {
             frame: Vec::new(),
             next_id: 1,
             events: VecDeque::new(),
+            event_bytes: 0,
         })
     }
     pub fn pid(&self) -> Option<u32> {
@@ -126,9 +128,11 @@ impl Driver {
                     }
                     return Ok(value["result"].clone());
                 }
-                if self.events.len() >= 4096 {
+                let size = serde_json::to_vec(&value)?.len();
+                if self.events.len() >= 4096 || self.event_bytes + size > FRAME_LIMIT {
                     return Err(io::Error::other("Codex event backlog exceeds limit"));
                 }
+                self.event_bytes += size;
                 self.events.push_back(value);
             }
         })
@@ -142,6 +146,7 @@ impl Driver {
     }
     pub async fn next_event(&mut self) -> io::Result<Value> {
         if let Some(value) = self.events.pop_front() {
+            self.event_bytes -= serde_json::to_vec(&value)?.len();
             return Ok(value);
         }
         self.read().await
