@@ -478,18 +478,5 @@
     "state": "rust-with-fallback",
     "reason": "Rust owns product diff-comment create/list against the existing SQLite table with fresh operator/device file authorization. Workers are refused. Unsupported credential forms retain request-scoped Node admission; product Node comment writers refuse. Classic handlers and Node schema/enrollment ownership remain. No comment cache or post-commit fallback.",
     "test": "tests/o8d-diff-comments-real-path.test.ts"
-  },
-  {
-    "path": "/api/orchestrator/composer-queue",
-    "methods": [
-      "POST",
-      "PATCH",
-      "DELETE"
-    ],
-    "owned": true,
-    "fallback": true,
-    "state": "rust-with-fallback",
-    "reason": "Rust owns durable ordinary composer admission and guarded mutations through the fresh native operator gate. Other principals retain Node admission; network sends, visual receipts, grants and execution remain Node. No post-commit fallback.",
-    "test": "tests/o8d-composer-admission-real-path.test.ts"
   }
 ]
