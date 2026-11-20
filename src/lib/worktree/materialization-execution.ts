@@ -67,6 +67,30 @@ export function guardedWorkspaceScriptInvocation(
 }
 ${script}
 `;
+  // Windows CreateProcess caps the whole command line at 32,767 chars. The
+  // pinned-leaf IO script is ~20k chars, so embedding it as a `node -e`
+  // argument makes every spawn fail with ENAMETOOLONG on win32 (Linux/macOS
+  // tolerate megabyte argvs). Above a safe threshold, stage the script in a
+  // content-addressed temp file and run `node <file>` instead. The first
+  // line restores `-e` argv semantics: with a script file, argv[1] is the
+  // script path, while the guard below expects argv[1] to be the identity.
+  if (process.platform === 'win32' && guardedScript.length > 8_000) {
+    const nodeFs = require('node:fs') as typeof import('node:fs');
+    const nodeOs = require('node:os') as typeof import('node:os');
+    const nodePath = require('node:path') as typeof import('node:path');
+    const nodeCrypto = require('node:crypto') as typeof import('node:crypto');
+    const dir = nodePath.join(nodeOs.tmpdir(), 'o8-pinned-scripts');
+    nodeFs.mkdirSync(dir, { recursive: true });
+    const digest = nodeCrypto.createHash('sha256').update(guardedScript).digest('hex').slice(0, 24);
+    const file = nodePath.join(dir, `leaf-${digest}.cjs`);
+    if (!nodeFs.existsSync(file)) {
+      nodeFs.writeFileSync(file, 'process.argv.splice(1, 1);\n' + guardedScript, 'utf8');
+    }
+    return {
+      command: process.execPath,
+      args: [file, JSON.stringify(identity), ...args],
+    };
+  }
   return {
     command: process.execPath,
     args: ['-e', guardedScript, JSON.stringify(identity), ...args],
