@@ -11,6 +11,8 @@ it.each([
   ['GET', '/api/runtime/threecode-models'],
   ['POST', '/api/panel/prs/7/repair'],
   ['POST', '/api/setup/gemini'],
+  ['POST', '/api/browser/native-result'],
+  ['POST', '/api/orchestrator/visual-inspection'],
   ['POST', '/api/panel/entitlement/bootstrap'],
   ['GET', '/api/runtime/billing'],
   ['POST', '/api/runtime/billing'],
