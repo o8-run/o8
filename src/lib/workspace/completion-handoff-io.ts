@@ -26,7 +26,7 @@ function directory() {
   const named = fs.lstatSync(identity.canonicalPath);
   for (const entry of [cwd, pinned, named]) {
     if (!entry.isDirectory() || entry.isSymbolicLink() || entry.dev !== identity.device
-      || entry.ino !== identity.inode || entry.mode & 0o077
+      || entry.ino !== identity.inode || (process.platform !== 'win32' && (entry.mode & 0o077) !== 0)
       || (process.getuid && entry.uid !== process.getuid())) throw new Error('Completion handoff directory changed before publication.');
   }
   if (fs.realpathSync('.') !== identity.canonicalPath
@@ -47,7 +47,7 @@ function read(name) {
   try {
     const before = fs.fstatSync(fd);
     if (!before.isFile() || before.nlink !== 1 || before.size < 1 || before.size > input.maxBytes
-      || before.mode & 0o077 || (process.getuid && before.uid !== process.getuid())) throw new Error('Completion handoff file has unsafe ownership or exceeds its bound.');
+      || (process.platform !== 'win32' && (before.mode & 0o077) !== 0) || (process.getuid && before.uid !== process.getuid())) throw new Error('Completion handoff file has unsafe ownership or exceeds its bound.');
     const content = Buffer.alloc(before.size);
     let offset = 0;
     while (offset < content.length) {

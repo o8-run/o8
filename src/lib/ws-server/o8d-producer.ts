@@ -21,7 +21,7 @@ export class O8dProducer {
     if (this.stopped || this.socket) return;
     try {
       const stat = await lstat(this.path);
-      if (!stat.isSocket() || stat.isSymbolicLink() || stat.mode & 0o077 || stat.uid !== process.geteuid?.()) throw Error('Private producer socket unavailable');
+      if (!stat.isSocket() || stat.isSymbolicLink() || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) || (process.platform !== 'win32' && stat.uid !== process.geteuid?.())) throw Error('Private producer socket unavailable');
     } catch { this.schedule(); return; }
     if (this.stopped) return;
     await new Promise<void>(resolve => {

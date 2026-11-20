@@ -32,7 +32,7 @@ export function describeActionState(owner: Owner): ActionState {
 function directory(at: string, privateMode: boolean) {
   const stat = lstatSync(at);
   if (!stat.isDirectory() || stat.isSymbolicLink()
-    || (privateMode && ((stat.mode & 0o077) !== 0 || (process.getuid && stat.uid !== process.getuid())))) {
+    || (privateMode && ((process.platform !== 'win32' && (stat.mode & 0o077) !== 0) || (process.getuid && stat.uid !== process.getuid())))) {
     throw new ActionPluginError('unsafe_state', 'Plugin state storage must be an owned private directory without links.');
   }
 }
@@ -55,7 +55,7 @@ function verify(owner: Owner, state: ActionState) {
   catch { throw new ActionPluginError('unsafe_state', 'Plugin state ownership metadata is unavailable or linked.'); }
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size > 16 * 1024 || (stat.mode & 0o077) !== 0
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size > 16 * 1024 || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
       || (process.getuid && stat.uid !== process.getuid()) || readFileSync(fd, 'utf8') !== JSON.stringify(binding(owner))) {
       throw new ActionPluginError('unsafe_state', 'Plugin state ownership metadata changed.');
     }
