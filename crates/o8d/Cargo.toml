@@ -6,6 +6,7 @@ publish = false
 
 [features]
 default = []
+experimental-codex = ["dep:libc", "dep:serde"]
 experimental-mcp = ["dep:libc", "dep:axum", "dep:reqwest", "dep:rusqlite", "dep:sha2", "dep:chrono", "dep:unicode-normalization", "dep:uuid"]
 experimental-ws = ["dep:libc", "dep:tokio-tungstenite", "dep:futures-util", "dep:form_urlencoded", "dep:subtle", "dep:uuid"]
 experimental-supervisor = ["dep:libc", "dep:base64", "dep:subtle", "dep:uuid"]
@@ -17,6 +18,7 @@ experimental-http = ["dep:libc", "dep:ryu-js", "dep:axum", "dep:form_urlencoded"
 experimental-session-reads = ["experimental-ws", "experimental-http", "dep:reqwest"]
 
 [dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
 axum = { version = "0.8", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json"], optional = true }
 rusqlite = { version = "0.41", features = ["bundled", "hooks"], optional = true }
@@ -45,3 +47,8 @@ path = "src/main.rs"
 name = "o8d-mcp"
 path = "src/mcp_main.rs"
 required-features = ["experimental-mcp"]
+
+[[test]]
+name = "codex_driver"
+path = "tests/codex_driver.rs"
+required-features = ["experimental-codex"]

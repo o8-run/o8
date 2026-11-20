@@ -715,7 +715,9 @@ jobs:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
       - name: Experimental o8d delivery bus
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
-        run: cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
+        run: |
+          npm install --prefix "$RUNNER_TEMP/o8-codex-cli" --no-audit --no-fund @openai/codex@0.170.0
+          O8_CODEX_TEST_BINARY="$RUNNER_TEMP/o8-codex-cli/node_modules/.bin/codex" cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
       - name: Shared launch mechanics
         if: needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'
         run: cargo test --locked --manifest-path crates/o8-launch-core/Cargo.toml
