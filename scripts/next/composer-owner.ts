@@ -17,17 +17,22 @@ const spawnOwner = childProcess.spawn;
 export interface ComposerOwner {
   /** Environment for a child process that acts as the executor. */
   childEnvironment: Record<string, string>;
+  /** Only the producer attachment keys, for a child that keeps its own ports. */
+  producerEnvironment: Record<string, string>;
+  /** The o8d front door, which serves the internal queue endpoint. */
+  httpOrigin: string;
   suspend(): void;
   resume(): Promise<void>;
   restart(): Promise<void>;
   close(): Promise<void>;
 }
 
-/** The o8d that owns the queue: an explicit test binary, else the workspace build.
+/** The o8d that owns the queue: an explicit test binary (native CI names its
+ * build O8D_HTTP_TEST_BINARY), else the workspace build.
  * Without one the fixture still serves every other surface; queue routes answer
  * as unavailable, as they do in the app while o8d is down. */
 export function composerOwnerBinary(): string | undefined {
-  const binary = process.env.O8D_TEST_BINARY ?? resolve('crates/o8d/target/debug/o8d');
+  const binary = process.env.O8D_TEST_BINARY ?? process.env.O8D_HTTP_TEST_BINARY ?? resolve('crates/o8d/target/debug/o8d');
   if (existsSync(binary)) return binary;
   console.error(`[o8-next] No o8d at ${binary}; composer queue routes are unavailable. Build it with: cargo build --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d`);
   return undefined;
@@ -83,10 +88,12 @@ export async function startComposerOwner(binary: string): Promise<ComposerOwner>
     await producer.start();
     unbind = bindComposerOwnerProducer((method, params) => producer!.composerRequest(method, params));
   };
+  const producerEnvironment = { O8D_PRODUCER_SOCKET: socket, O8D_BRIDGE_KEY: key,
+    O8D_PRODUCER_UPSTREAM_PORT: String(upstreamPort), O8_COMPOSER_FIXTURE_EPOCH: epoch };
   await launch(); await resume();
   return {
-    childEnvironment: { O8_WS_PORT: String(publicPort), O8_API_PORT: String(publicPort),
-      O8D_PRODUCER_SOCKET: socket, O8D_BRIDGE_KEY: key, O8D_PRODUCER_UPSTREAM_PORT: String(upstreamPort), O8_COMPOSER_FIXTURE_EPOCH: epoch },
+    childEnvironment: { O8_WS_PORT: String(publicPort), O8_API_PORT: String(publicPort), ...producerEnvironment },
+    producerEnvironment, httpOrigin: `http://127.0.0.1:${publicPort}`,
     suspend, resume,
     restart: async () => { suspend(); await stopDaemon(); await launch(); await resume(); },
     close: async () => {

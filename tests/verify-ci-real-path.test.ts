@@ -509,7 +509,7 @@ describe('local CI verification through its command entry point', () => {
       expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
       const calls = result.calls.filter(call => call.tool === 'cargo');
-      const build = ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-http', '--bin', 'o8d'];
+      const build = ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-session-reads', '--bin', 'o8d'];
       const test = ['--config', `target.x86_64-unknown-linux-gnu.runner=${JSON.stringify([process.execPath, path.join(result.directory, 'scripts/ci/native-test-shard.mjs')])}`,
         'test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--', '--test-threads=4'];
       const probes = [...test.slice(0, -1), '--test-threads=1'];

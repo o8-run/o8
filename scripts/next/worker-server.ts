@@ -42,6 +42,14 @@ export async function startWorkerServer() {
   // o8d owns the composer queue the worker route reads.
   const ownerBinary = composerOwnerBinary();
   const owner = ownerBinary ? await startComposerOwner(ownerBinary) : undefined;
+  // As in the app, the worker's WS process is the attached executor and these
+  // Next routes reach the owner over its internal endpoint.
+  let unbindRoutes: (() => void) | undefined;
+  if (owner) {
+    owner.suspend();
+    const { bindComposerOwnerProducer, composerOwnerHttpTransport } = await import('../../src/lib/orchestrator/composer-owner-client');
+    unbindRoutes = bindComposerOwnerProducer(composerOwnerHttpTransport(() => owner.httpOrigin));
+  }
   // The adjacent transcript surface also requests the existing inventory GET.
   // Fence discovery to this owned store before exposing its production handler.
   const { getAllRuntimes } = await import('../../src/lib/runtimes');
@@ -111,7 +119,8 @@ export async function startWorkerServer() {
       O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'fixture.db'),
       O8_NEXT_WORKER_ROOT: root, O8_API_PORT: String(address.port), O8_WS_PORT: String(wsPort), WS_PORT: String(wsPort),
       NEXT_ORIGIN: origin, CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${wsPort}`,
-      ...(process.env.O8_TEST_FILE_MARKER ? { O8_TEST_FILE_MARKER: process.env.O8_TEST_FILE_MARKER } : {}) },
+      ...(process.env.O8_TEST_FILE_MARKER ? { O8_TEST_FILE_MARKER: process.env.O8_TEST_FILE_MARKER } : {}),
+      ...owner?.producerEnvironment },
   });
   // Keep worker output in owned storage, addressed only by the private test receipt.
   const log = join(root, 'runtime.log');
@@ -135,7 +144,7 @@ export async function startWorkerServer() {
       const timer = setTimeout(() => worker.kill('SIGKILL'), 3000);
       await exited; clearTimeout(timer);
     }
-    await owner?.close();
+    unbindRoutes?.(); await owner?.close();
     server.closeAllConnections(); server.close();
     if (process.env.O8_NEXT_REQUEST_LOG) writeFileSync(process.env.O8_NEXT_REQUEST_LOG, JSON.stringify(requests));
     rmSync(root, { recursive: true, force: true }); process.exit(0);

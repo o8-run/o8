@@ -15,11 +15,16 @@ export function bindComposerOwnerProducer(transport: ComposerOwnerTransport): ()
 }
 const INTERNAL_METHODS = new Set<ComposerOwnerMethod>(['enqueue', 'get', 'list', 'listTargets', 'listTranscript', 'promote', 'cancel']);
 
-async function internalRequest<M extends ComposerOwnerMethod>(method: M, params: ComposerOwnerParams[M]): Promise<ComposerOwnerResults[M]> {
+/** Next's transport: the owner's operator-authenticated internal endpoint. A
+ * fixture whose WS port is not the o8d front door passes the owner's origin. */
+export function composerOwnerHttpTransport(origin?: () => string): ComposerOwnerTransport {
+  return (method, params) => internalRequest(method, params, origin?.() ?? getWsBase().replace(/^ws:/, 'http:').replace(/^wss:/, 'https:'));
+}
+
+async function internalRequest<M extends ComposerOwnerMethod>(method: M, params: ComposerOwnerParams[M], base: string): Promise<ComposerOwnerResults[M]> {
   if (!INTERNAL_METHODS.has(method)) throw new ComposerOwnerUnavailable('The composer executor requires its attached owner.');
   const body = JSON.stringify({ v: 1, method, params });
   if (Buffer.byteLength(body) > COMPOSER_RPC_FRAME_LIMIT) throw new ComposerOwnerReplyError('limit', 'The composer owner request exceeds its frame limit.');
-  const base = getWsBase().replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
   const headers = { Authorization: `Bearer ${getOrCreateWsToken()}`, 'Content-Type': 'application/json' };
   let response: Response;
   try {
@@ -58,7 +63,8 @@ async function internalRequest<M extends ComposerOwnerMethod>(method: M, params:
 }
 
 /** Choose once per call. A sent request never falls back or automatically replays. */
+const nextTransport = composerOwnerHttpTransport();
 export const composerOwnerRequest: ComposerOwnerTransport = (method, params) => {
-  const transport = producer ?? internalRequest;
+  const transport = producer ?? nextTransport;
   return transport(method, params);
 };
