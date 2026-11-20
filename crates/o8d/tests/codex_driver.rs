@@ -1,4 +1,4 @@
-#![cfg(all(unix, feature = "experimental-codex"))]
+#![cfg(unix)]
 use o8d::codex::Driver;
 use serde_json::json;
 use std::{path::PathBuf, time::Duration};
@@ -94,7 +94,14 @@ async fn real_codex_turn_events_warm_process_and_tree_cancellation() {
     }
     // A real CLI-managed shell child; killing the driver must kill the group.
     let marker = root.join("child.pid");
-    driver.request("command/exec",json!({"command":["sh","-c",format!("sleep 300 >/dev/null 2>&1 & echo $! > {}; wait",marker.display())],"cwd":root,"timeoutMs":100})).await.unwrap();
+    driver.start_request("command/exec",json!({"command":["sh","-c",format!("sleep 300 >/dev/null 2>&1 & echo $! > {}; wait",marker.display())],"cwd":root,"disableTimeout":true})).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !marker.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     let child: i32 = std::fs::read_to_string(&marker)
         .unwrap()
         .trim()

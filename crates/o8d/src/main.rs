@@ -26,6 +26,10 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
+    #[cfg(unix)]
+    if arguments.first().map(String::as_str) == Some("codex") {
+        return Ok(o8d::codex::serve_stdio(&arguments[1..]).await?);
+    }
     if arguments
         .iter()
         .any(|argument| argument == "--experimental-mcp")

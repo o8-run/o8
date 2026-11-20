@@ -38,6 +38,7 @@ pub struct Driver {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    frame: Vec<u8>,
     next_id: i64,
     events: VecDeque<Value>,
 }
@@ -60,6 +61,7 @@ impl Driver {
             stdin: child.stdin.take().unwrap(),
             stdout: BufReader::new(child.stdout.take().unwrap()),
             child,
+            frame: Vec::new(),
             next_id: 1,
             events: VecDeque::new(),
         })
@@ -77,26 +79,31 @@ impl Driver {
         self.stdin.flush().await
     }
     async fn read(&mut self) -> io::Result<Value> {
-        use tokio::io::AsyncReadExt;
-        let mut bytes = Vec::new();
-        let count = (&mut self.stdout)
-            .take((FRAME_LIMIT + 1) as u64)
-            .read_until(b'\n', &mut bytes)
-            .await?;
-        if count == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "Codex closed stdout",
-            ));
+        loop {
+            let available = self.stdout.fill_buf().await?;
+            if available.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Codex closed stdout",
+                ));
+            }
+            let newline = available.iter().position(|b| *b == b'\n');
+            let count = newline.map(|n| n + 1).unwrap_or(available.len());
+            if self.frame.len() + count > FRAME_LIMIT {
+                return Err(io::Error::other("Codex frame exceeds limit"));
+            }
+            self.frame.extend_from_slice(&available[..count]);
+            self.stdout.consume(count);
+            if newline.is_some() {
+                let value = serde_json::from_slice(&self.frame);
+                self.frame.clear();
+                return Ok(value?);
+            }
         }
-        if count > FRAME_LIMIT || bytes.last() != Some(&b'\n') {
-            return Err(io::Error::other("Codex frame exceeds limit"));
-        }
-        Ok(serde_json::from_slice(&bytes)?)
     }
     /// Server requests, including approvals, remain events for the caller. They
     /// are never implicitly approved. No bounded channel may silently drop them.
-    pub async fn request(&mut self, method: &str, params: Value) -> io::Result<Value> {
+    pub async fn start_request(&mut self, method: &str, params: Value) -> io::Result<i64> {
         let id = self.next_id;
         self.next_id += 1;
         let wire = JSONRPCRequest {
@@ -106,6 +113,10 @@ impl Driver {
             trace: None,
         };
         self.write(&serde_json::to_value(wire)?).await?;
+        Ok(id)
+    }
+    pub async fn request(&mut self, method: &str, params: Value) -> io::Result<Value> {
+        let id = self.start_request(method, params).await?;
         tokio::time::timeout(Duration::from_secs(30), async {
             loop {
                 let value = self.read().await?;
@@ -165,4 +176,59 @@ impl Drop for Driver {
             }
         }
     }
+}
+
+/// The default-build `o8d codex` entry owns the CLI and its stdio lifecycle.
+/// Protocol identities, approvals, model and effort are passed through unchanged.
+pub async fn serve_stdio(arguments: &[String]) -> io::Result<()> {
+    let binary = std::env::var_os("O8_CODEX_BINARY").unwrap_or_else(|| "codex".into());
+    let mut driver = Driver::spawn(binary, |command| {
+        command.args(arguments);
+    })
+    .await?;
+    let (send, mut input) = tokio::sync::mpsc::channel(8);
+    let input_task = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut reader = BufReader::new(tokio::io::stdin());
+        loop {
+            let mut bytes = Vec::new();
+            let answer = match (&mut reader)
+                .take((FRAME_LIMIT + 1) as u64)
+                .read_until(b'\n', &mut bytes)
+                .await
+            {
+                Ok(0) => break,
+                Ok(_) if bytes.len() > FRAME_LIMIT => {
+                    Err(io::Error::other("Codex frame exceeds limit"))
+                }
+                Ok(_) => serde_json::from_slice::<Value>(&bytes).map_err(io::Error::from),
+                Err(error) => Err(error),
+            };
+            let failed = answer.is_err();
+            if send.send(answer).await.is_err() || failed {
+                break;
+            }
+        }
+    });
+    let mut output = tokio::io::stdout();
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    loop {
+        tokio::select! {
+            _ = terminate.recv() => break,
+            _ = tokio::signal::ctrl_c() => break,
+            event = driver.next_event() => {
+                match event {
+                    Ok(value) => { let mut bytes=serde_json::to_vec(&value)?; bytes.push(b'\n'); output.write_all(&bytes).await?; output.flush().await?; },
+                    Err(error) if error.kind()==io::ErrorKind::UnexpectedEof => break,
+                    Err(error) => return Err(error),
+                }
+            },
+            read = input.recv() => {
+                let Some(value) = read else {break;};
+                driver.write(&value?).await?;
+            },
+        }
+    }
+    input_task.abort();
+    driver.cancel().await
 }
