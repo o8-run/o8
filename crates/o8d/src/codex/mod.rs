@@ -289,6 +289,7 @@ pub async fn serve_stdio(arguments: &[String]) -> io::Result<()> {
     });
     let mut output = tokio::io::stdout();
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let outcome: io::Result<()> = async {
     loop {
         tokio::select! {
             _ = terminate.recv() => break,
@@ -306,6 +307,9 @@ pub async fn serve_stdio(arguments: &[String]) -> io::Result<()> {
             },
         }
     }
+    Ok(())
+    }.await;
     input_task.abort();
-    driver.cancel().await
+    let cleanup = driver.cancel().await;
+    outcome.and(cleanup)
 }
