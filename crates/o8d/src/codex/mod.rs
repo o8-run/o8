@@ -58,8 +58,8 @@ impl Driver {
         configure: impl FnOnce(&mut std::process::Command),
     ) -> io::Result<Self> {
         let mut command = crate::child_spawn::provider_command(binary);
-        configure(&mut command);
         command.arg("app-server").arg("--stdio");
+        configure(&mut command);
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -260,7 +260,7 @@ impl Drop for Driver {
 pub async fn serve_stdio(arguments: &[String]) -> io::Result<()> {
     let binary = std::env::var_os("O8_CODEX_BINARY").unwrap_or_else(|| "codex".into());
     let mut driver = Driver::spawn(binary, |command| {
-        command.args(arguments);
+        command.args(arguments.iter().filter(|arg| arg.as_str() != "--stdio"));
     })
     .await?;
     let (send, mut input) = tokio::sync::mpsc::channel(8);

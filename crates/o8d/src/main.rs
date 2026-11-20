@@ -27,7 +27,7 @@ async fn main() {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     #[cfg(unix)]
-    if arguments.first().map(String::as_str) == Some("codex") {
+    if matches!(arguments.first().map(String::as_str), Some("codex" | "app-server")) {
         return Ok(o8d::codex::serve_stdio(&arguments[1..]).await?);
     }
     if arguments

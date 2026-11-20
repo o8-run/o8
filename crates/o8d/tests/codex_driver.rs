@@ -60,7 +60,8 @@ async fn real_codex_turn_events_warm_process_and_tree_cancellation() {
         }
     });
     std::fs::write(root.join("config.toml"),format!("model = \"fixture\"\nmodel_provider = \"fixture\"\n[model_providers.fixture]\nname = \"Fixture\"\nbase_url = \"http://{address}/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n")).unwrap();
-    let mut driver = Driver::spawn(binary, |c| {
+    let mut driver = Driver::spawn(env!("CARGO_BIN_EXE_o8d"), |c| {
+        c.env("O8_CODEX_BINARY", &binary);
         c.current_dir(&root)
             .env("CODEX_HOME", &root)
             .env_remove("OPENAI_API_KEY")
