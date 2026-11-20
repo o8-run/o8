@@ -220,9 +220,10 @@ impl Supervisor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false);
-        // This code runs between fork and exec: only the async-signal-safe syscall.
+        // Between fork and exec, use only async-signal-safe signal/session operations.
         unsafe {
             launch.pre_exec(|| {
+                crate::child_spawn::reset_signal_mask()?;
                 if libc::setsid() == -1 {
                     return Err(io::Error::last_os_error());
                 }
@@ -540,6 +541,39 @@ pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawned_child_clears_executor_signal_mask() {
+        std::thread::spawn(|| {
+            unsafe {
+                let mut blocked=std::mem::zeroed();
+                assert_eq!(libc::sigemptyset(&mut blocked),0);
+                assert_eq!(libc::sigaddset(&mut blocked,libc::SIGCHLD),0);
+                assert_eq!(libc::sigaddset(&mut blocked,libc::SIGTERM),0);
+                assert_eq!(libc::pthread_sigmask(libc::SIG_BLOCK,&blocked,std::ptr::null_mut()),0);
+            }
+            let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            runtime.block_on(async {
+                let root=std::env::temp_dir().join(format!("o8d-signal-mask-{}",Uuid::new_v4()));
+                private_directory(&root).unwrap();
+                let supervisor=Supervisor {token:"fixture-signal-token".into(),epoch:"fixture-epoch".into(),directory:root.clone(),processes:tokio::sync::Mutex::new(HashMap::new())};
+                let result=supervisor.dispatch(json!({"version":1,"token":"fixture-signal-token","op":"spawn","id":"mask-fixture","owner":"fixture","command":"/bin/cat","args":["/proc/self/status"],"env":{},"cwd":root,"stdoutPath":root.join("stdout"),"stderrPath":root.join("stderr")})).await.unwrap();
+                assert_eq!(result["ok"],true);
+                tokio::time::timeout(Duration::from_secs(5),async {
+                    loop {
+                        let process=supervisor.processes.lock().await.get("mask-fixture").cloned().unwrap();
+                        if process.lock().unwrap().phase=="exited" {break;}
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                }).await.unwrap();
+                let output=fs::read_to_string(root.join("stdout")).unwrap();
+                let mask=output.lines().find_map(|l|l.strip_prefix("SigBlk:")).unwrap();
+                let mask=u64::from_str_radix(mask.trim(),16).unwrap();
+                fs::remove_dir_all(root).unwrap();
+                assert_eq!(mask,0,"child inherited the executor's blocked signals");
+            });
+        }).join().unwrap();
+    }
 
     #[tokio::test]
     async fn short_reads_bound_serialized_replay_as_well_as_payload() {
