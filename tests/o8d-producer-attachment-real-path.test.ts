@@ -34,7 +34,7 @@ it('attaches over the private socket, replaces a disconnected owner and bounds t
   try {
     await new Promise<void>(resolve => server.listen(path, resolve)); chmodSync(path, 0o600);
     await producer.start(); expect(producer.status).toEqual({ transport: 'o8d', pid: process.pid, generation: 1 });
-    expect(grants).toEqual([{ version: 1, key: 'isolated-bridge-fixture', upstream: '127.0.0.1:18002', epoch: 'node-epoch', startupPortInfo: { apiPort: 18001 } }]);
+    expect(grants).toEqual([{ version: 1, key: 'isolated-bridge-fixture', upstream: '127.0.0.1:18002', epoch: 'node-epoch', composerQueueBootId: expect.any(String), startupPortInfo: { apiPort: 18001 } }]);
     producer.publish([{ seq: 1 }]); await until(() => batches.length === 1);
     for (const peer of peers) peer.destroy(); await until(() => producer.status.generation === 2);
     expect(grants).toHaveLength(2); expect(grants[1]).toEqual(grants[0]);

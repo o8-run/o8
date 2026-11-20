@@ -88,6 +88,15 @@ async function main() {
       yield { type: 'done', reason: 'stop', message };
     } });
   Object.assign(getOrchestratorBackend('pi'), withOrchestrationMode(fixture));
+  // The fixture host passes the queue owner's producer socket: attach as the executor.
+  const { O8D_PRODUCER_SOCKET: socket, O8D_BRIDGE_KEY: key, O8D_PRODUCER_UPSTREAM_PORT: upstream, O8_COMPOSER_FIXTURE_EPOCH: epoch } = process.env;
+  if (socket && key && upstream && epoch) {
+    const { O8dProducer } = await import('../../src/lib/ws-server/o8d-producer');
+    const { bindComposerOwnerProducer } = await import('../../src/lib/orchestrator/composer-owner-client');
+    const producer = new O8dProducer(socket, key, `127.0.0.1:${upstream}`, epoch, () => undefined);
+    await producer.start();
+    bindComposerOwnerProducer((method, params) => producer.composerRequest(method, params));
+  }
   await import('../../src/ws-server');
 }
 void main().catch(error => { console.error('[o8-next-worker] Fixture runtime failed', error); process.exitCode = 1; });

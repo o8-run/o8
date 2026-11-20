@@ -14,10 +14,7 @@ pub(super) struct NativeGlobal {
 impl NativeGlobal {
     pub(super) fn new() -> Arc<Self> {
         #[cfg(feature = "experimental-session-reads")]
-        // The TS queue stays the single writer until its client opts in; an
-        // unclaimed owner must not open or migrate the shared queue tables.
-        let composer_queue=if std::env::var_os("O8D_SESSION_DATA_DIR").is_some()
-            && std::env::var("O8D_COMPOSER_OWNER").as_deref()==Ok("1") {
+        let composer_queue=if std::env::var_os("O8D_SESSION_DATA_DIR").is_some() {
             match crate::http::composer_queue_owner::Owner::configured() {
                 Ok(owner)=>Some(Arc::new(owner)),
                 Err(_)=>{eprintln!("[o8d] composer queue initialization unavailable");None},

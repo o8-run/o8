@@ -1,3 +1,5 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
+import { fixtureComposerClaim, fixtureComposerToken } from './fixtures/composer-queue-attempt';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -79,17 +81,17 @@ it('settles a compaction whose terminal event is lost and delivers a queued foll
     const response = await queueRoute.POST(new NextRequest('http://localhost/api/orchestrator/composer-queue', { method: 'POST',
       headers: { host: 'localhost', 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, id: 'follow-up', intent: 'send-next', payload }) }));
     expect(response.status).toBe(200);
-    expect(queue.listComposerTranscriptSends(scope).filter(item => item.id === 'follow-up')).toHaveLength(1);
+    expect((await queue.listComposerTranscriptSends(scope)).filter(item => item.id === 'follow-up')).toHaveLength(1);
     operation.release(); await operation.job;
     expect(await phase()).toBe('complete');
-    const claimed = queue.claimNextComposerSend(scope)!; expect(claimed.id).toBe('follow-up');
-    expect(queue.admitComposerSend(claimed.id)).toBe(true);
+    const claimed = (await fixtureComposerClaim(queue.claimNextComposerSend(scope)))!; expect(claimed.id).toBe('follow-up');
+    expect((await queue.admitComposerSend(claimed.id, fixtureComposerToken(claimed.id)))).toBe(true);
     const record = readPersistedLlmChat(threadId)!.history;
     persistCanonicalChatHistoryRecord(threadId, { ...record, messages: [...record.messages,
       { id: 'composer-queued-follow-up', role: 'user', content: payload.text, timestamp: Date.now() }] });
-    queue.settleComposerSend(claimed.id, { status: 'applied' });
+    (await queue.settleComposerSend(claimed.id, { status: 'applied' }, fixtureComposerToken(claimed.id)));
     expect((await loadHistory()).filter(entry => entry.text === payload.text)).toHaveLength(1);
-    expect(queue.claimNextComposerSend(scope)).toBeNull();
+    expect((await fixtureComposerClaim(queue.claimNextComposerSend(scope)))).toBeNull();
   } finally { operation.release(); await operation.job; }
 });
 
@@ -159,3 +161,5 @@ it('refreshes a long-running operation receipt while its runtime still works', a
     expect(refreshed.phase).toBe('compacting');
   } finally { operation.release(); await operation.job; }
 });
+
+installComposerOwnerFixture();

@@ -480,6 +480,19 @@
     "test": "tests/o8d-diff-comments-real-path.test.ts"
   },
   {
+    "path": "/api/orchestrator/composer-queue",
+    "methods": [
+      "POST",
+      "PATCH",
+      "DELETE"
+    ],
+    "owned": true,
+    "fallback": true,
+    "state": "rust-with-fallback",
+    "reason": "Rust owns durable ordinary composer admission and guarded mutations through the fresh native operator gate. Other principals retain Node admission; network sends, visual receipts, grants and execution remain Node. No post-commit fallback.",
+    "test": "tests/o8d-composer-admission-real-path.test.ts"
+  },
+  {
     "path": "/api/lanes",
     "methods": [
       "GET"

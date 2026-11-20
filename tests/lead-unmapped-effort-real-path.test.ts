@@ -1,3 +1,4 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -121,7 +122,7 @@ it.each(['pi', 'o8'] as const)('admits a queued high steer on an active %s lead 
   queuedBackend.current = backend;
   const { writePersistedLlmChat, readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
   const queue = await import('@/lib/orchestrator/composer-queue');
-  const { createComposerQueueHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
+  const { createComposerQueueHeartbeat } = await import('./fixtures/composer-queue-executor');
   const threadId = `thoughts-queued-effort-${kind}`;
   writePersistedLlmChat(threadId, { repoPath: repo, messages: [] });
   let release!: () => void;
@@ -131,14 +132,15 @@ it.each(['pi', 'o8'] as const)('admits a queued high steer on an active %s lead 
   try {
     await vi.waitFor(() => expect(requests).toHaveLength(1), { timeout: 30_000 });
     const id = `queued-high-${kind}`;
-    queue.enqueueComposerSend({ repoPath: repo, threadId, id, intent: 'steer-now', payload: {
+    (await queue.enqueueComposerSend({ repoPath: repo, threadId, id, intent: 'steer-now', payload: {
       text: 'Do this with high effort', wireMessage: 'Do this with high effort', images: [],
       routing: { backend: kind, model: kind, effort: 'high', permissionMode: 'full', mode: 'single', pickedMode: 'solo', collide: false },
-    } });
+    } }));
     createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [],
       registerAbort: () => () => {}, publish: () => {} })();
-    await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).not.toBe('dispatching'), { timeout: 10_000 });
-    expect(queue.readComposerSend(id)).toMatchObject({ status: 'applied', admittedAt: expect.any(Number), reason: null });
+    // The owner claim is asynchronous, so wait for settlement, not just "not dispatching".
+    await vi.waitFor(async () => expect(['queued', 'dispatching']).not.toContain((await queue.readComposerSend(id))?.status), { timeout: 10_000 });
+    expect((await queue.readComposerSend(id))).toMatchObject({ status: 'applied', admittedAt: expect.any(Number), reason: null });
     expect(readPersistedLlmChat(threadId)?.history.messages).toContainEqual(expect.objectContaining({
       id: `composer-steer-${id}`, role: 'user', content: 'Do this with high effort',
     }));
@@ -279,21 +281,23 @@ it('admits a queued user send with a leftover medium pin on Pi at the runtime de
   queuedBackend.current = pi();
   const { writePersistedLlmChat, readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
   const queue = await import('@/lib/orchestrator/composer-queue');
-  const { createComposerQueueHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
+  const { createComposerQueueHeartbeat } = await import('./fixtures/composer-queue-executor');
   const threadId = 'thoughts-explicit-medium-user';
   writePersistedLlmChat(threadId, { repoPath: repo, messages: [] });
-  queue.enqueueComposerSend({ repoPath: repo, threadId, id: 'explicit-medium-user', intent: 'send-next', payload: {
+  (await queue.enqueueComposerSend({ repoPath: repo, threadId, id: 'explicit-medium-user', intent: 'send-next', payload: {
     text: 'Use medium effort', wireMessage: 'Use medium effort', images: [], routing: {
       backend: 'pi', model: 'pi', effort: 'medium', permissionMode: 'full', mode: 'single', pickedMode: 'solo', collide: false,
     },
-  } });
+  } }));
   createComposerQueueHeartbeat({ isBusy: () => false, readTranscript: async () => [],
     registerAbort: () => () => {}, publish: () => {} })();
-  await vi.waitFor(() => expect(queue.readComposerSend('explicit-medium-user')?.status).toBe('applied'), { timeout: 30_000 });
-  expect(queue.readComposerSend('explicit-medium-user')).toMatchObject({ admittedAt: expect.any(Number), reason: null });
+  await vi.waitFor(async () => expect((await queue.readComposerSend('explicit-medium-user'))?.status).toBe('applied'), { timeout: 30_000 });
+  expect((await queue.readComposerSend('explicit-medium-user'))).toMatchObject({ admittedAt: expect.any(Number), reason: null });
   expect(readPersistedLlmChat(threadId)?.history.messages.at(-1)).toMatchObject({
     receipt: { effort: 'adaptive', effortSource: 'runtime-default' },
   });
   expect(requests).toHaveLength(1);
   expect(requests[0]).not.toHaveProperty('reasoning_effort'); expect(requests[0]).not.toHaveProperty('reasoning');
 }, 90_000);
+
+installComposerOwnerFixture();

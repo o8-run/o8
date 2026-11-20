@@ -1,8 +1,8 @@
 import { readSteerTranscriptAnchor } from './steer-transcript-anchor';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { backendSwitchRequiresExplicitHandoff } from '@/lib/orchestrator/backend-switch-carry';
-import { assertComposerSendClaim, admitComposerSend, claimNextComposerSend, listComposerQueueTargets, peekNextComposerSend,
-  listQueuedComposerSends, recoverComposerSends, settleComposerSend, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
+import { claimNextComposerSend, listComposerQueueTargets, nextComposerSend,
+  listQueuedComposerSends, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
 import type { QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
 import type { ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-origin';
 import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection';
@@ -17,9 +17,11 @@ import { sendLeadTerminalStatus } from './lead-terminal-status';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import { checkComposerQueuePrecondition } from '@/lib/orchestrator/composer-queue-precondition';
 import { permissionModeRank } from '@/lib/orchestrator/permission-mode';
-import { claimComposerSteer, deferComposerSteer } from '@/lib/orchestrator/composer-queue';
+import { claimComposerSteer } from '@/lib/orchestrator/composer-queue';
 import { appendMobileOrchestratorUserMessage } from '@/lib/mobile/orchestrator-thread-history';
+import { ComposerExecutorAttempt, ComposerAttemptUncertain } from './composer-executor-attempt';
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
+import { ComposerOwnerReplyError, ComposerOwnerUnknownOutcome } from './composer-owner-rpc';
 import { persistComposerImages } from '@/lib/mobile/orchestrator-image-media';
 
 export function publishComposerQueueChange(threadId: string) {
@@ -36,8 +38,12 @@ function originFor(item: QueuedComposerSendRecord): ReviewChatOrigin {
     mode: collide ? 'fleet' : route.mode, threadId: item.threadId, turnId: `assistant-queued-${item.id}` };
 }
 
-export function checkComposerQueueBinding(item: QueuedComposerSendRecord): void {
-  assertComposerSendClaim(item.id);
+export async function checkComposerQueueBinding(item: QueuedComposerSendRecord, attempt: ComposerExecutorAttempt): Promise<void> {
+  await attempt.assertLive();
+  checkComposerQueueContext(item);
+}
+/** Cross-process steer still checks the same current destination and authority. */
+export function checkComposerQueueContext(item: QueuedComposerSendRecord): void {
   validateComposerQueueTarget(item);
   checkComposerQueuePrecondition(item);
   const history = readPersistedLlmChat(item.threadId)?.history as { archivedAt?: unknown; projectId?: string;
@@ -57,31 +63,33 @@ export function checkComposerQueueBinding(item: QueuedComposerSendRecord): void 
 }
 
 /** Native input is acknowledged before its transcript label can claim delivery. */
-export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Promise<void> {
-  checkComposerQueueBinding(item);
-  if (item.payload.afterTaskId) { deferComposerSteer(item.id, 'Queued for the original task to finish.'); return; }
+export async function runQueuedComposerSteer(item: QueuedComposerSendRecord, attempt: ComposerExecutorAttempt, claimToken: string): Promise<void> {
+  await checkComposerQueueBinding(item, attempt);
+  if (item.payload.afterTaskId) { await attempt.defer('Queued for the original task to finish.'); return; }
   const backend = getOrchestratorBackend(originFor(item).backend, targetFor(item));
-  if (!backend.liveSteer) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
+  if (!backend.liveSteer) { await attempt.defer('Steer declined; queued for the next turn.'); return; }
   let steerAnchor: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor | undefined;
   let admittedAt: number | undefined;
   const result = await backend.liveSteer(item.repoPath, item.payload.wireMessage, {
     ...item.payload.routing, threadId: item.threadId, clientUserMessageId: item.id, attachments: item.payload.images, orchestrationMode: item.payload.routing.mode,
     thinkingEffort: dropsStaleEffortPin(backend.id) ? undefined : item.payload.routing.effort,
-    beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Message admission was cancelled.');
+    composerClaimToken: claimToken,
+    beforeAdmit: async () => { await checkComposerQueueBinding(item, attempt); if (!(await attempt.admit())) throw new Error('Message admission was cancelled.');
+      await checkComposerQueueBinding(item, attempt);
       steerAnchor = readSteerTranscriptAnchor(item.repoPath, item.threadId); admittedAt = Date.now(); },
   });
-  if (result.accepted !== true) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
+  if (result.accepted !== true) { await attempt.defer('Steer declined; queued for the next turn.'); return; }
   // A relay owner may already have saved its exact boundary before replying.
   if (item.payload.images.length || !readPersistedLlmChat(item.threadId)?.history.messages.some(message => message.id === `composer-steer-${item.id}`)) appendMobileOrchestratorUserMessage({ tabId: item.threadId, repoPath: item.repoPath, message: item.payload.text,
     ...(item.payload.images.length ? { media: persistComposerImages(item.payload.images) } : {}),
     messageId: `composer-steer-${item.id}`, backend: item.payload.routing.backend, timestampMs: admittedAt ?? item.createdAt, steerAnchor,
     mentions: item.payload.mentions });
-  settleComposerSend(item.id, { status: 'applied' });
+  await attempt.settle('applied');
 }
 
 /** User-requested next turns use saved routing, never whichever composer is currently open. */
-export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hooks: BoundChatContinuationHooks): Promise<void> {
-  checkComposerQueueBinding(item);
+export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hooks: BoundChatContinuationHooks, attempt: ComposerExecutorAttempt): Promise<void> {
+  await checkComposerQueueBinding(item, attempt);
   // A chat with no project has no saved repository; its validated target is its scratch folder.
   const repoPath = readPersistedLlmChat(item.threadId)!.history.repoPath || item.repoPath;
   if (findLeadThreadBinding(item.threadId)) {
@@ -91,7 +99,8 @@ export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hook
       message: item.payload.wireMessage, displayMessage: item.payload.text, projectId: origin.projectId,
       backend: origin.backend, model: origin.model, effort: origin.effort, permissionMode: origin.permissionMode,
       attachments: validateLeadAttachments(item.payload.images), idempotencyKey: `composer-queue:${item.id}`,
-      beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Queued message admission was cancelled.'); } });
+      beforeAdmit: async () => { await checkComposerQueueBinding(item, attempt); if (!(await attempt.admit())) throw new Error('Queued message admission was cancelled.');
+        await checkComposerQueueBinding(item, attempt); } });
     if (!result) throw new Error('Persistent chat binding disappeared.');
     const sessionName = getOrchestratorBackend(origin.backend).ensureSession(repoPath, undefined, item.threadId).sessionName;
     hooks.publish(sessionName, 'status', { ...targetFor(item), backend: result.lead.routing.backend,
@@ -107,52 +116,76 @@ export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hook
     serviceTier: item.payload.routing.serviceTier,
     handoff: item.payload.routing.handoffMode === 'handoff',
     collideBaseBackend: originFor(item).backend === 'collide' ? item.payload.routing.backend : undefined,
-    check: () => checkComposerQueueBinding(item), admit: () => admitComposerSend(item.id) }, hooks);
+    check: () => checkComposerQueueBinding(item, attempt), admit: () => attempt.admit() }, hooks);
 }
 
 function targetFor(item: QueuedComposerSendRecord) { return { repoPath: item.repoPath, threadId: item.threadId }; }
 
 export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks): () => void {
-  recoverComposerSends();
+  // Recovery belongs to the daemon's producer attach, never a heartbeat object.
   const active = new Set<string>();
   const steering = new Set<string>();
-  return () => {
-    for (const target of listComposerQueueTargets()) {
-      try {
-      const key = `${target.repoPath}\0${target.threadId}`;
-      const steer = listQueuedComposerSends(target).find(item => item.intent === 'steer-now' && item.status === 'queued');
-      if (steer && !steering.has(key)) {
-        const claimed = claimComposerSteer(steer.id);
-        if (claimed) {
-          steering.add(key); publishComposerQueueChange(target.threadId);
-          void runQueuedComposerSteer(claimed).catch(error => {
-            settleComposerSend(claimed.id, { status: 'held', reason: error instanceof EffortPinRejectionError
-              ? error.message : `Steer unconfirmed; queued for inspection. ${error instanceof Error ? error.message : ''}` });
-          }).finally(() => { steering.delete(key); publishComposerQueueChange(target.threadId); });
-        }
-        continue;
-      }
-      if (steering.has(key)) continue;
-      const next = peekNextComposerSend(target);
-      if (!next || next.status !== 'queued' || active.has(key) || input.isBusy(target.repoPath, originFor(next))) continue;
-      const item = claimNextComposerSend(target);
-      if (!item) continue;
-      active.add(key); publishComposerQueueChange(item.threadId);
-      void runQueuedComposerSend(item, { registerAbort: input.registerAbort,
-        publish: (session, event, data) => input.publish(item.threadId, session, event, data),
-        publishThread: input.publishThread,
-      }).then(() => { settleComposerSend(item.id, { status: 'applied' }); })
-        .catch(error => { settleComposerSend(item.id, { status: 'held', reason: error instanceof Error ? error.message : 'Queued message failed.' }); })
-        .finally(() => { active.delete(key); publishComposerQueueChange(item.threadId); });
-      } catch (error) {
-        const item = claimNextComposerSend(target);
-        if (item) {
-          settleComposerSend(item.id, { status: 'held', reason: error instanceof Error ? error.message : 'Queued chat is unavailable.' });
-          publishComposerQueueChange(item.threadId);
-        }
-      }
-    }
+  let ticking = false;
+  const failed = async (item: QueuedComposerSendRecord, attempt: ComposerExecutorAttempt, error: unknown) => {
+    if (error instanceof ComposerAttemptUncertain || error instanceof ComposerOwnerUnknownOutcome) return;
+    const reason = error instanceof Error ? error.message : 'Queued message failed.';
+    if (item.intent === 'steer-now' && !attempt.admitted && error instanceof ComposerOwnerReplyError) await attempt.defer(reason);
+    else await attempt.settle('held', error instanceof EffortPinRejectionError ? reason
+      : item.intent === 'steer-now' ? `Steer unconfirmed; queued for inspection. ${reason}` : reason);
   };
+  const tick = async () => {
+    if (ticking) return;
+    ticking = true;
+    try {
+      for (const target of await listComposerQueueTargets()) {
+        const key = `${target.repoPath}\0${target.threadId}`;
+        let attempt: ComposerExecutorAttempt | undefined;
+        let item: QueuedComposerSendRecord | undefined;
+        try {
+          // One image-free owner read per target per tick: queued rows can carry
+          // 20 large screenshots, and a claim returns the full item.
+          const rows = await listQueuedComposerSends(target, { withoutImages: true });
+          const steer = rows.find(row => row.intent === 'steer-now' && row.status === 'queued');
+          if (steer && !steering.has(key)) {
+            const claimed = await claimComposerSteer(steer.id);
+            if (claimed.item && claimed.claimToken) {
+              if (claimed.item.id !== steer.id || claimed.item.repoPath !== target.repoPath || claimed.item.threadId !== target.threadId) throw new ComposerAttemptUncertain();
+              item = claimed.item;
+              attempt = new ComposerExecutorAttempt(item.id, claimed.claimToken);
+              steering.add(key);
+              const running = attempt;
+              void runQueuedComposerSteer(item, running, claimed.claimToken)
+                .catch(error => failed(claimed.item!, running, error))
+                .catch(() => { /* Failed owner response: leave the attempt for recovery. */ })
+                .finally(() => steering.delete(key));
+            }
+            continue;
+          }
+          if (steering.has(key)) continue;
+          const next = nextComposerSend(rows);
+          if (!next || next.status !== 'queued' || active.has(key) || input.isBusy(target.repoPath, originFor(next))) continue;
+          const claimed = await claimNextComposerSend(target);
+          if (!claimed.item || !claimed.claimToken) continue;
+          if (claimed.item.repoPath !== target.repoPath || claimed.item.threadId !== target.threadId) throw new ComposerAttemptUncertain();
+          item = claimed.item;
+          attempt = new ComposerExecutorAttempt(item.id, claimed.claimToken);
+          active.add(key);
+          const running = attempt;
+          void runQueuedComposerSend(item, { registerAbort: input.registerAbort,
+            publish: (session, event, data) => input.publish(claimed.item!.threadId, session, event, data),
+            publishThread: input.publishThread,
+          }, running).then(() => running.settle('applied'))
+            .catch(error => failed(claimed.item!, running, error))
+            .catch(() => { /* Unknown settlement never starts another provider turn. */ })
+            .finally(() => active.delete(key));
+        } catch (error) {
+          if (item && attempt) await failed(item, attempt, error).catch(() => {});
+          // An unavailable list or claim is never replaced with a local row write.
+        }
+      }
+    } finally { ticking = false; }
+  };
+  return () => { void tick().catch(() => { /* Owner unavailable; retry discovery on the next tick only. */ }); };
 }
 
 /** Reuse the supervisor timer and give explicit queued user messages admission first. */

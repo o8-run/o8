@@ -1,3 +1,4 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,7 +38,7 @@ const { getSqlite, closeDb } = await import('@/lib/db');
 const { ensureV71ComposerQueueSchema } = await import('@/lib/db/v71-composer-queue-migration');
 ensureV71ComposerQueueSchema(getSqlite());
 const queue = await import('@/lib/orchestrator/composer-queue');
-const { createComposerQueueHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
+const { createComposerQueueHeartbeat } = await import('./fixtures/composer-queue-executor');
 const { readProjectedThread } = await import('@/lib/mobile/orchestrator-thread-history');
 const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
 
@@ -47,20 +48,20 @@ it('records a route refusal as the turn failure, with its reason, and starts not
   const events: Array<{ event: string; data: Record<string, unknown> }> = [];
   const threads: Array<{ id: string; status: string }> = [];
   const id = 'queued-max-on-gpt-5-5';
-  queue.enqueueComposerSend({ repoPath: repo, threadId: refused, id, intent: 'send-next', payload: {
+  (await queue.enqueueComposerSend({ repoPath: repo, threadId: refused, id, intent: 'send-next', payload: {
     text: 'Count the files', wireMessage: 'Count the files', images: [],
     routing: { backend: 'codex', model: 'gpt-5.5', effort: 'max', permissionMode: 'full', mode: 'single', pickedMode: 'solo', collide: false },
-  } });
+  } }));
   createComposerQueueHeartbeat({ isBusy: () => false, readTranscript: async () => [], registerAbort: () => () => {},
     publish: (_thread, _session, event, payload) => events.push({ event, data: payload }),
     publishThread: thread => threads.push(thread) })();
-  await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).toBe('held'), { timeout: 20_000 });
+  await vi.waitFor(async () => expect((await queue.readComposerSend(id))?.status).toBe('held'), { timeout: 20_000 });
 
   // The reason surfaces as the route's own answer, not as a binary failure.
   const reason = /cannot honor effort "max" for runtime "codex" model "gpt-5\.5"/;
   expect(events).toContainEqual(expect.objectContaining({ event: 'error', data: expect.objectContaining({ error: expect.stringMatching(reason) }) }));
   expect(JSON.stringify(events)).not.toContain('Failed to resolve Codex binary');
-  expect(queue.readComposerSend(id)?.reason).toMatch(reason);
+  expect((await queue.readComposerSend(id))?.reason).toMatch(reason);
 
   // Only the refused turn settles: failed, earlier turns intact, no empty placeholder left behind.
   const projected = readProjectedThread(refused)!;
@@ -78,3 +79,5 @@ it('records a route refusal as the turn failure, with its reason, and starts not
   expect(invoked.filter(args => !args.includes('--version'))).toEqual([]);
   expect(existsSync(join(data, 'owned-codex')) ? readdirSync(join(data, 'owned-codex')) : []).toEqual([]);
 });
+
+installComposerOwnerFixture();

@@ -14,18 +14,30 @@ const REALTIME_INTERNAL_ORIGIN = normalizeRealtimeInternalOrigin(
   process.env.CORTEX_REALTIME_INTERNAL_ORIGIN ?? getWsBase(),
 );
 const REALTIME_INTERNAL_TIMEOUT_MS = 2_500;
+// o8d answers 503 with Retry-After while its producer is being replaced. The
+// request was not forwarded, so one bounded retry cannot duplicate a notice.
+const REALTIME_UNAVAILABLE_RETRY_MAX_MS = 1_000;
 
 async function postInternalRealtimeRequest(payload: RealtimeInternalRequest) {
   try {
-    const response = await fetch(`${REALTIME_INTERNAL_ORIGIN}/internal/realtime`, {
+    const deadline = AbortSignal.timeout(REALTIME_INTERNAL_TIMEOUT_MS);
+    const post = () => fetch(`${REALTIME_INTERNAL_ORIGIN}/internal/realtime`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${getOrCreateWsToken()}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(REALTIME_INTERNAL_TIMEOUT_MS),
+      signal: deadline,
     });
+    let response = await post();
+    if (response.status === 503 && response.headers.has('retry-after')) {
+      await response.body?.cancel();
+      const seconds = Number(response.headers.get('retry-after'));
+      const delay = Number.isFinite(seconds) ? Math.min(Math.max(seconds * 1_000, 0), REALTIME_UNAVAILABLE_RETRY_MAX_MS) : REALTIME_UNAVAILABLE_RETRY_MAX_MS;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      response = await post();
+    }
     return response.ok;
   } catch {
     // Best-effort: the app must remain correct even if the local WS bridge

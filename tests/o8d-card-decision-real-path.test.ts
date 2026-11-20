@@ -1,3 +1,4 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -62,9 +63,11 @@ it('decides a lead card through the registered handlers and queues it for the le
   expect(decided.status).toBe(200);
   const body = await decided.json() as { result: { deliverVia: string; action: { id: string } } };
   expect(body.result.deliverVia).toBe('queue');
-  expect(listQueuedComposerSends({ repoPath: repo, threadId })).toEqual([
+  expect((await listQueuedComposerSends({ repoPath: repo, threadId }))).toEqual([
     expect.objectContaining({ id: body.result.action.id, intent: 'send-next' }),
   ]);
   const read = await handlers.GET(request(url), { params: Promise.resolve({ id }) });
   expect(await read.json()).toMatchObject({ result: { card: { id, state: 'decided' } } });
 });
+
+installComposerOwnerFixture();

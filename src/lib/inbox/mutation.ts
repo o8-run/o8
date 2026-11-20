@@ -14,6 +14,7 @@ import { isInboxPreferenceAction, legacyInboxPin, validInboxOrderKey, type Inbox
 import { inboxProjection, inboxSubject, mutateInboxPreferences, mutateInboxSettlement, readInboxState } from './store';
 import { startSettledWorkspaceParking } from './workspace-parking';
 import type { InboxSubject } from './settlement-state';
+import { assertInboxComposerQueueEmpty, recheckInboxComposerQueueAfterCommit, withInboxComposerQueueGuard } from './composer-queue-guard';
 
 export async function patchInboxSettlement(request: NextRequest, body: Record<string, unknown>) {
   const action = body.inboxAction;
@@ -51,13 +52,17 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
             throw new InboxMutationError('Runtime subject changed. Reload before organizing it.', 409);
           }
         });
-      } else mutateInboxSettlement(identity.inboxSubject, action as 'settle' | 'unsettle', () => {
-        const current = runtimeInboxIdentity(agent);
-        if (current.parentInboxSubject || JSON.stringify(current.inboxSubject) !== JSON.stringify(identity.inboxSubject)) {
-          throw new InboxMutationError('Runtime subject changed. Reload before organizing it.', 409);
-        }
-        if (action === 'settle') assertInboxCanSettle(identity.inboxSubject, inventory.agents, activity);
-      });
+      } else {
+        const commit = () => mutateInboxSettlement(identity.inboxSubject, action as 'settle' | 'unsettle', () => {
+          const current = runtimeInboxIdentity(agent);
+          if (current.parentInboxSubject || JSON.stringify(current.inboxSubject) !== JSON.stringify(identity.inboxSubject)) {
+            throw new InboxMutationError('Runtime subject changed. Reload before organizing it.', 409);
+          }
+          if (action === 'settle') assertInboxCanSettle(identity.inboxSubject, inventory.agents, activity);
+        });
+        if (action === 'settle') await withInboxComposerQueueGuard(identity.inboxSubject, commit);
+        else commit();
+      }
       if (action === 'settle' && readInboxState(identity.inboxSubject).settledAt !== beforeSettlement.settledAt) {
         startSettledWorkspaceParking(identity.inboxSubject);
       }
@@ -71,12 +76,26 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
     const needsInventory = action === 'settle' && (!preflight
       || inboxSettleInventoryKeys(inboxSubject('conversation', tabId, preflight.repoPath, preflight.projectId)).length > 0);
     const inventory = needsInventory ? await getRuntimeInventorySnapshot({ fresh: true }) : { agents: [] };
+    const queueRecord = action === 'settle' ? readPersistedLlmChat(tabId)?.history : undefined;
+    const queueSubject = queueRecord ? inboxSubject('conversation', tabId, queueRecord.repoPath,
+      (queueRecord as { projectId?: string }).projectId) : undefined;
+    if (queueSubject) {
+      if (!matchesMutationWorkspace(workspace, queueRecord?.repoPath)) throw new InboxMutationError('History was not found.', 404);
+      await assertInboxComposerQueueEmpty(queueSubject);
+    }
     let settledSubject: InboxSubject | undefined;
-    const response = await withCanonicalChatHistoryLock(tabId, () => {
+    let committedSubject: InboxSubject | undefined;
+    let committedAt: string | null | undefined;
+    let committedRevision: number | undefined;
+    let shouldUnpin = false;
+    const response = withCanonicalChatHistoryLock(tabId, () => {
       const saved = readPersistedLlmChat(tabId);
       const record = saved?.history as (NonNullable<typeof saved>['history'] & { projectId?: string; pinned?: boolean; archivedAt?: string | null }) | undefined;
       if (!record || !matchesMutationWorkspace(workspace, record.repoPath)) throw new InboxMutationError('History was not found.', 404);
       const subject = inboxSubject('conversation', tabId, record.repoPath, record.projectId);
+      if (action === 'settle' && (!queueSubject || queueSubject.workspace !== subject.workspace)) {
+        throw new InboxMutationError('Thread workspace changed. Try settling again.', 409);
+      }
       const beforeSettlement = readInboxState(subject);
       if (preference) {
         mutateInboxPreferences(subject, { action, orderKey: body.orderKey, enabled: body.enabled } as InboxPreferenceCommand, state => {
@@ -86,23 +105,46 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
             persistCanonicalChatHistoryRecord(tabId, { ...record, pinned: action === 'pin' });
           }
         }, legacyInboxPin(record));
-      } else mutateInboxSettlement(subject, action as 'settle' | 'unsettle', () => {
-        if (action === 'settle') {
-          // A runtime session bound after the preflight was not scanned: refuse rather than guess.
-          if (!needsInventory && inboxSettleInventoryKeys(subject).length > 0) {
-            throw new InboxMutationError('Thread started a runtime session. Try settling again.', 409);
+      } else {
+        mutateInboxSettlement(subject, action as 'settle' | 'unsettle', () => {
+          if (action === 'settle') {
+            // A runtime session bound after the preflight was not scanned: refuse rather than guess.
+            if (!needsInventory && inboxSettleInventoryKeys(subject).length > 0) {
+              throw new InboxMutationError('Thread started a runtime session. Try settling again.', 409);
+            }
+            assertInboxCanSettle(subject, inventory.agents);
           }
-          assertInboxCanSettle(subject, inventory.agents);
-          if (record.pinned) persistCanonicalChatHistoryRecord(tabId, { ...record, pinned: false });
+        }, record.pinned === true);
+        if (action === 'settle') {
+          committedSubject = subject;
+          const committed = readInboxState(subject);
+          committedAt = committed.settledAt; committedRevision = committed.inboxRevision;
+          shouldUnpin = record.pinned === true;
         }
-      }, record.pinned === true);
+      }
       if (action === 'settle' && readInboxState(subject).settledAt !== beforeSettlement.settledAt) settledSubject = subject;
-      return NextResponse.json({ ok: true, ...inboxProjection(subject, null, undefined, legacyInboxPin(record)) });
+      // Plain data: a settle commit answers with a fresh projection below.
+      return { ok: true, ...inboxProjection(subject, null, undefined, legacyInboxPin(record)) };
     });
-    if (settledSubject) startSettledWorkspaceParking(settledSubject);
-    return response;
+    if (committedSubject) {
+      await recheckInboxComposerQueueAfterCommit(committedSubject);
+      // Never hold a synchronous history lock over RPC, or write the pre-RPC
+      // record back over newer messages or an explicit preference change.
+      const subject = committedSubject;
+      const currentState = readInboxState(subject);
+      if (currentState.settledOverride === 'settled' && currentState.settledAt === committedAt
+        && currentState.inboxRevision === committedRevision) {
+        if (shouldUnpin) withCanonicalChatHistoryLock(tabId, () => {
+          const latest = readPersistedLlmChat(tabId)?.history;
+          if (latest && latest.repoPath === queueRecord?.repoPath) persistCanonicalChatHistoryRecord(tabId, { ...latest, pinned: false });
+        });
+        if (settledSubject) startSettledWorkspaceParking(settledSubject);
+      }
+      return NextResponse.json({ ok: true, ...inboxProjection(subject) });
+    }
+    return NextResponse.json(response);
   } catch (error) {
-    if (error instanceof InboxMutationError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof InboxMutationError) return NextResponse.json({ error: error.message }, { status: error.status, ...(error.status === 503 ? { headers: { 'Retry-After': '1' } } : {}) });
     console.error('[inbox] Mutation failed', error);
     return NextResponse.json({ error: 'Unable to update inbox metadata.' }, { status: 500 });
   }

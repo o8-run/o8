@@ -27,8 +27,11 @@ export async function install({ repo, seeds }: SurfaceContext): Promise<SurfaceR
       if (response.ok && body.intent === 'steer-now') {
         const { claimComposerSteer } = await import('../../../../../src/lib/orchestrator/composer-queue');
         const { runQueuedComposerSteer } = await import('../../../../../src/lib/ws-server/composer-queue-heartbeat');
-        const item = claimComposerSteer((await response.clone().json()).item.id);
-        if (item) await runQueuedComposerSteer(item);
+        const { ComposerExecutorAttempt } = await import('../../../../../src/lib/ws-server/composer-executor-attempt');
+        const claimed = await claimComposerSteer((await response.clone().json()).item.id);
+        if (claimed.item && claimed.claimToken) {
+          await runQueuedComposerSteer(claimed.item, new ComposerExecutorAttempt(claimed.item.id, claimed.claimToken), claimed.claimToken);
+        }
       }
       return response;
     },

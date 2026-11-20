@@ -525,7 +525,8 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
     );
     // A first explicit validation rejection is definite nonacceptance. Keep the
     // draft, but allow a corrected send rather than freezing an invalid request.
-    surface.update(cx, |s, _| s.routing.as_mut().unwrap()["model"] = json!(""));
+    // An empty model means the runtime default; whitespace is invalid.
+    surface.update(cx, |s, _| s.routing.as_mut().unwrap()["model"] = json!(" "));
     cx.simulate_input("Rejected draft");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();

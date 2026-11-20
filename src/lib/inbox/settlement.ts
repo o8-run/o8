@@ -1,3 +1,4 @@
+import { withInboxComposerQueueGuard } from './composer-queue-guard';
 import { startSettledWorkspaceParking } from './workspace-parking';
 /**
  * The auto-settle sweep (rules in auto-settle-rules.ts). Server-side, so the
@@ -134,10 +135,10 @@ export async function runInboxAutoSettleSweep(options: { force?: boolean; agents
   const settled: string[] = [];
   for (const { subject, verdict, legacyPinned } of candidates) {
     try {
-      if (mutateInboxAutoSettle(subject, verdict.reason, verdict.evidenceAt, () => {
+      if (await withInboxComposerQueueGuard(subject, () => mutateInboxAutoSettle(subject, verdict.reason, verdict.evidenceAt, () => {
         assertCompletionEvidenceCurrent(subject, verdict);
         assertInboxCanSettle(subject, agents!);
-      }, legacyPinned)) {
+      }, legacyPinned))) {
         startSettledWorkspaceParking(subject);
         settled.push(subject.id);
         console.log(`[inbox] auto-settled ${subject.kind} ${subject.id} (${verdict.reason})`);

@@ -1,3 +1,4 @@
+import { assertInboxComposerQueueEmpty } from '@/lib/inbox/composer-queue-guard';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
@@ -74,6 +75,7 @@ async function parkSettledWorkspaces(subject: InboxSubject, settledAt: string): 
     let proof: ReturnType<typeof assertSettledCompletedWorkspace>;
     try {
       proof = assertSettledCompletedWorkspace(lane);
+      await assertInboxComposerQueueEmpty(proof.subject);
       if (JSON.stringify(proof.subject) !== JSON.stringify(subject) || proof.settledAt !== settledAt) continue;
     }
     catch { continue; }
@@ -93,6 +95,7 @@ async function parkSettledWorkspaces(subject: InboxSubject, settledAt: string): 
       catch { continue; }
     }
     const assertDemand = async () => {
+      await assertInboxComposerQueueEmpty(subject);
       if (!onSettle) await assertCurrentPressure(demand!.id, demand!.storageAdmission!.mutationId);
     };
     const operationId = `inbox-settle:${createHash('sha256').update(JSON.stringify([subject, settledAt, lane.packetId])).digest('hex')}`;

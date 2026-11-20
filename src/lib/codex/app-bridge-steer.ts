@@ -58,9 +58,9 @@ export function registerCodexAppBridgeSteer(session: CodexOrchestratorSession, p
     assertCodexLiveSteerEffort(options.thinkingEffort);
     const id = options.clientUserMessageId;
     if (!id || attempted.has(id)) throw new Error('Codex steer requires a unique queued message identity.');
-    // No asynchronous preparation after this cancellation/permission fence.
-    options.beforeAdmit();
-    if (!running()) return { accepted: false };
+    // Await the owner fence at the same native handoff boundary.
+    await options.beforeAdmit();
+    if (!running() || attempted.has(id)) return { accepted: false };
     attempted.add(id);
     return new Promise<{ accepted: boolean }>((resolve, reject) => {
       const timeout = setTimeout(() => {

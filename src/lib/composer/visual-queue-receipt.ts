@@ -4,9 +4,9 @@ import { findLeadTurnByKey } from '@/lib/orchestrator/lead-status';
 import type { ComposerQueueTarget } from '@/lib/orchestrator/composer-queue-types';
 
 /** Correlate the actual admitted turn; an accepted queue row is not completion. */
-export function readVisualQueueReceipt(target: ComposerQueueTarget, id: string) {
+export async function readVisualQueueReceipt(target: ComposerQueueTarget, id: string) {
   if (!/^visual-[A-Za-z0-9-]{1,96}$/.test(id)) throw new Error('Invalid visual request identity.');
-  const item = readComposerSend(id);
+  const item = await readComposerSend(id);
   if (!item || item.threadId !== target.threadId || item.repoPath !== target.repoPath) return null;
   if (!item.admittedAt) return { item, userMessageId: null };
   const lead = findLeadThreadBinding(target.threadId);

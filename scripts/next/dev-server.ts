@@ -13,6 +13,7 @@ import { attachTranscriptSocket } from './transcript-socket';
 import { startTerminalFixture } from './terminal-fixture';
 import { prepareCliShim } from './cli-shim';
 import { surfaceEntries, type SurfaceContext, type SurfaceRoutes } from './surface-routes';
+import { composerOwnerBinary, startComposerOwner } from './composer-owner';
 
 async function main() {
   if (process.argv.includes('--worker')) {
@@ -47,6 +48,9 @@ async function main() {
   const { ensureV71ComposerQueueSchema } = await import('../../src/lib/db/v71-composer-queue-migration');
   const { getSqlite } = await import('../../src/lib/db');
   ensureV71ComposerQueueSchema(getSqlite());
+  // o8d owns the composer queue; every surface reads it through this owner.
+  const ownerBinary = composerOwnerBinary();
+  const owner = ownerBinary ? await startComposerOwner(ownerBinary) : undefined;
   // Complete one-time legacy boot repairs against the empty owned store before
   // adding post-boot recordings (their deliberately tight timestamps are valid).
   const { listMobileOrchestratorThreads } = await import('../../src/lib/mobile/orchestrator-thread-history');
@@ -172,6 +176,7 @@ async function main() {
     closing = true;
     for (const surface of surfaces) await surface.close?.();
     await closeTerminal();
+    await owner?.close();
     closeSockets();
     server.closeAllConnections(); server.close();
     realtime.closeAllConnections(); realtime.close();

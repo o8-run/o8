@@ -368,7 +368,9 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     if (closing || !active.has(name) || !pi || !pi.session.running || pi.profile !== surface.profile
       || pi.readOnly !== surface.readOnly || pi.outsideWorkspace !== surface.outsideWorkspace || pi.routeId !== routeId) return { accepted: false };
     // Model lookup may await I/O. Recheck the saved claim at the last native handoff.
-    options.beforeAdmit();
+    await options.beforeAdmit();
+    if (closing || !active.has(name) || resident.get(name) !== pi || !pi.session.running || pi.profile !== surface.profile
+      || pi.readOnly !== surface.readOnly || pi.outsideWorkspace !== surface.outsideWorkspace || pi.routeId !== routeId) return { accepted: false };
     return pi.session.steer(message);
   };
 
