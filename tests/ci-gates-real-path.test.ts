@@ -401,8 +401,9 @@ function selectNext(eventName: string, event: object, script = fixtureNativeScri
 
 describe('native next CI through persisted fixtures', () => {
   it('admits native shards on pull requests without changing the queue gate', () => {
-    expect(workflow.jobs['o8-next-tests'].if).not.toContain("&& github.event_name != 'pull_request'");
-    expect(workflow.jobs['o8-next-tests'].if).toContain("needs.reuse.result == 'success'");
+    expect(workflow.jobs['o8-next-tests'].if).toBe(
+      workflow.jobs['test-shards'].if.replace(/ && github.event_name != 'pull_request'$/, ''),
+    );
   });
 
   it('discovers new native literals, transitive imports, aliases and dynamic fixture directories without a maintained list', () => {
@@ -555,7 +556,6 @@ describe('native next CI through persisted fixtures', () => {
     expect(job['runs-on']).toBe('ubuntu-24.04');
     expect(job['timeout-minutes']).toBe(30);
     expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] } });
-    expect(job.if).toBe(workflow.jobs['test-shards'].if);
     const step = job.steps.find((entry: { run?: string }) => entry.run?.includes('native-test-shard.mjs'));
     expect(step.if).toBe("needs.reuse.outputs.reuse != 'true' && steps.native.outputs.changed == 'true'");
     expect(step['continue-on-error']).toBeUndefined();
