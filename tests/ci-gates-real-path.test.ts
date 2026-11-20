@@ -166,14 +166,14 @@ describe('required CI gates through workflow commands', () => {
     }
   });
 
-  it('skips every slow job on pull requests while retaining quick work', () => {
+  it('admits quick work and conditional native checks on pull requests', () => {
     for (const id of ['test-shards', 'test', 'integration-changed', 'governance-smoke',
-      'rust-check-linux', 'rust-check-windows', 'o8-next-tests', 'server-bundle-size']) {
+      'rust-check-linux', 'rust-check-windows', 'server-bundle-size']) {
       expect(condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
         { reuse: { result: 'skipped' } }), id).toBe(false);
       expect(condition(workflow.jobs[id].if, { event_name: 'merge_group', event: {} }), id).toBe(true);
     }
-    for (const id of ['typecheck', 'lint', 'classification', 'security']) {
+    for (const id of ['typecheck', 'lint', 'classification', 'security', 'o8-next-tests']) {
       expect(condition(workflow.jobs[id].if, { event_name: 'pull_request', event: {} },
         { reuse: { result: 'skipped' } }), id).toBe(true);
     }
