@@ -33,6 +33,7 @@ use tokio::{
     process::{Child, ChildStdin, ChildStdout},
 };
 pub mod generated;
+mod process_tree;
 use generated::{JSONRPCRequest, RequestId};
 const FRAME_LIMIT: usize = 16 * 1024 * 1024;
 
@@ -206,6 +207,7 @@ impl Driver {
     }
     pub async fn cancel(&mut self) -> io::Result<()> {
         if let Some(pid) = self.child.id() {
+            let descendants = process_tree::Tree::capture(pid as i32).await?;
             // Codex gives tool commands independent groups. Its own lifecycle
             // methods must stop those groups before the provider is reaped.
             for (thread, turn) in self.turns.clone() {
@@ -221,6 +223,7 @@ impl Driver {
                 )
                 .await;
             }
+            descendants.kill().await?;
             // EOF invokes Codex's connection teardown, which owns command
             // sessions in their own process groups. Killing only our group
             // cannot reach those tool groups.
