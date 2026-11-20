@@ -22,7 +22,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 use serde_json::{json, Value};
-use std::{collections::VecDeque, io, process::Stdio, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    io,
+    process::Stdio,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout},
@@ -39,6 +44,9 @@ pub struct Driver {
     stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     frame: Vec<u8>,
+    commands: HashMap<String, String>,
+    turns: HashMap<String, String>,
+    command_sequence: u64,
     next_id: i64,
     events: VecDeque<Value>,
     event_bytes: usize,
@@ -63,6 +71,9 @@ impl Driver {
             stdout: BufReader::new(child.stdout.take().unwrap()),
             child,
             frame: Vec::new(),
+            commands: HashMap::new(),
+            turns: HashMap::new(),
+            command_sequence: 0,
             next_id: 1,
             events: VecDeque::new(),
             event_bytes: 0,
@@ -72,7 +83,23 @@ impl Driver {
         self.child.id()
     }
     async fn write(&mut self, value: &Value) -> io::Result<()> {
-        let mut bytes = serde_json::to_vec(value)?;
+        let mut value = value.clone();
+        if value["method"] == "command/exec" {
+            if self.commands.len() >= 32 {
+                return Err(io::Error::other("Too many Codex command sessions"));
+            }
+            self.command_sequence += 1;
+            if value["params"].get("processId").is_none() {
+                value["params"]["processId"] =
+                    json!(format!("o8d-command-{}", self.command_sequence));
+            }
+            if let (Some(id), Some(process)) =
+                (value.get("id"), value["params"]["processId"].as_str())
+            {
+                self.commands.insert(id.to_string(), process.to_owned());
+            }
+        }
+        let mut bytes = serde_json::to_vec(&value)?;
         if bytes.len() > FRAME_LIMIT {
             return Err(io::Error::other("Codex frame exceeds limit"));
         }
@@ -101,9 +128,24 @@ impl Driver {
             self.frame.extend_from_slice(&available[..count]);
             self.stdout.consume(count);
             if newline.is_some() {
-                let value = serde_json::from_slice(&self.frame);
+                let value = serde_json::from_slice::<Value>(&self.frame);
                 self.frame.clear();
-                return Ok(value?);
+                let value = value?;
+                if value.get("method").is_none() {
+                    if let Some(id) = value.get("id") {
+                        self.commands.remove(&id.to_string());
+                    }
+                }
+                if let Some(thread) = value["params"]["threadId"].as_str() {
+                    if value["method"] == "turn/started" {
+                        if let Some(turn) = value["params"]["turn"]["id"].as_str() {
+                            self.turns.insert(thread.into(), turn.into());
+                        }
+                    } else if value["method"] == "turn/completed" {
+                        self.turns.remove(thread);
+                    }
+                }
+                return Ok(value);
             }
         }
     }
@@ -164,6 +206,21 @@ impl Driver {
     }
     pub async fn cancel(&mut self) -> io::Result<()> {
         if let Some(pid) = self.child.id() {
+            // Codex gives tool commands independent groups. Its own lifecycle
+            // methods must stop those groups before the provider is reaped.
+            for (thread, turn) in self.turns.clone() {
+                let _ =
+                    tokio::time::timeout(Duration::from_secs(2), self.interrupt(&thread, &turn))
+                        .await;
+            }
+            let commands = self.commands.values().cloned().collect::<Vec<_>>();
+            for process in commands {
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    self.request("command/exec/terminate", json!({"processId":process})),
+                )
+                .await;
+            }
             // EOF invokes Codex's connection teardown, which owns command
             // sessions in their own process groups. Killing only our group
             // cannot reach those tool groups.
