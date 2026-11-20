@@ -1,3 +1,4 @@
+import { assertInboxComposerQueueEmpty } from '@/lib/inbox/composer-queue-guard';
 import { execFile } from '@/lib/providers/child-process';
 import { access, lstat, realpath, statfs } from 'node:fs/promises';
 import path from 'node:path';
@@ -371,9 +372,11 @@ export async function parkWorkspace(
       let pinnedSnapshot = existing;
       const completed = lane.status === 'completed'
         ? assertSettledCompletedWorkspace(lane, undefined, existing) : null;
+      if (completed) await assertInboxComposerQueueEmpty(completed.subject);
       const assertBoundaryCurrent = async () => {
         await input.assertPolicyCurrent?.();
         if (!completed) return;
+        await assertInboxComposerQueueEmpty(completed.subject);
         const current = deps.findLaneByPacket(input.packetId);
         if (!current || current.id !== lane.id || current.sessionKey !== lane.sessionKey
           || current.branch !== lane.branch || current.worktreePath !== lane.worktreePath

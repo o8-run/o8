@@ -16,6 +16,7 @@ import { localMachineName } from '@/lib/mobile/machine-name';
 import { nativeSessionReadsEnabled } from './native-session-reads';
 import { o8dBinaryPath } from './o8d-binary';
 import { O8dProducer } from './o8d-producer';
+import { bindComposerOwnerProducer } from '@/lib/orchestrator/composer-owner-client';
 
 const PIPE_LIMIT = 1024 * 1024;
 
@@ -43,6 +44,7 @@ export class O8dBridge {
   private readonly key: string;
   private readonly producerSocket: string | undefined;
   private producer: O8dProducer | null = null;
+  private unbindComposerOwner: (() => void) | undefined;
   private child: ChildProcess | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -63,7 +65,7 @@ export class O8dBridge {
     /** A takeover must never recover by evicting an existing API listener. */
     private readonly rejectPortConflicts = false,
   ) {
-    this.producerSocket = apiFrontDoorEnabled() ? process.env.O8D_PRODUCER_SOCKET : undefined;
+    this.producerSocket = process.env.O8D_PRODUCER_SOCKET;
     if (this.producerSocket && !process.env.O8D_BRIDGE_KEY) throw new Error('Launcher producer credential unavailable');
     this.key = this.producerSocket ? process.env.O8D_BRIDGE_KEY! : randomUUID();
     this.fallback = createServer((req, res) => server.emit('request', req, res));
@@ -126,6 +128,7 @@ export class O8dBridge {
     this.upstream = `127.0.0.1:${address.port}`;
     if (this.producerSocket) {
       this.producer = new O8dProducer(this.producerSocket, this.key, this.upstream, this.epoch, startupPortInfo);
+      this.unbindComposerOwner = bindComposerOwnerProducer((method, params) => this.producer!.composerRequest(method, params));
       await this.producer.start();
     } else await this.launch();
   }
@@ -233,6 +236,7 @@ export class O8dBridge {
     if (this.retry) clearTimeout(this.retry);
     this.retry = null;
     this.producer?.stop();
+    this.unbindComposerOwner?.();
     this.child?.stdin?.end();
     if (this.fallback.listening) this.fallback.close();
   }

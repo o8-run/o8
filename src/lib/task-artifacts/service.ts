@@ -539,7 +539,7 @@ export async function submitTaskArtifactAction(id: string, input: SubmitTaskArti
     // The composer queue is the existing durable path to the lead's next turn;
     // the action id is its queue identity, so a retry cannot queue it twice.
     try {
-      const queued = enqueueComposerSend({
+      const queued = await enqueueComposerSend({
         repoPath: record.target.repoPath,
         threadId: record.target.threadId,
         id: row.id,

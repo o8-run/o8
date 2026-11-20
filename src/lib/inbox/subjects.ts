@@ -19,7 +19,6 @@ import { listOrchestratorTurnsForThread, isRehydratedTurnAlive } from '@/lib/lan
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { extractApprovalContextIds } from '@/lib/approvals/context';
 import { listRecordedApprovals } from '@/lib/approvals/store';
-import { listQueuedComposerSends } from '@/lib/orchestrator/composer-queue';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import { inboxListingProjection, inboxReadStatement, inboxSubject, observeInboxRuntimeRun, readInboxState, type InboxReadContext } from './store';
@@ -204,10 +203,9 @@ export function assertInboxCanSettle(subject: InboxSubject, agents: AgentSummary
   const recordedRunAt = state.runAt ? Date.parse(state.runAt) : NaN;
   const latestKnownRunAt = Number.isFinite(recordedRunAt) ? Math.max(latestRunAt ?? -Infinity, recordedRunAt) : latestRunAt;
   const failed = runtimeActivity?.failed || (history as { orchestratorTerminalStatus?: string } | null)?.orchestratorTerminalStatus === 'failed';
-  if ((subject.kind === 'conversation' && subject.workspace && listQueuedComposerSends({ repoPath: subject.workspace, threadId: subject.id }).length > 0)
-    || (history?.source !== 'bot-network' && hasQueuedTurnStart({ latestUserMessageAt, latestRunAt: latestKnownRunAt, failed }, Date.now()))) {
+  if (history?.source !== 'bot-network' && hasQueuedTurnStart({ latestUserMessageAt, latestRunAt: latestKnownRunAt, failed }, Date.now())) {
     throw new InboxMutationError('Thread has a queued message. Send it or remove it before settling.', 409);
   }
-  // Keep the synchronous guard in the mutation's SQLite transaction so a
-  // concurrent queue/approval write cannot slip between validation and commit.
+  // Approval, liveness and transcript guards stay in the mutation's transaction.
+  // The separately owned composer queue is checked before and after commit.
 }

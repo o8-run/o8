@@ -30,11 +30,11 @@ export interface BoundChatContinuationHooks {
 /** Execute a continuation through the same threaded backend and canonical transcript. */
 export async function runBoundChatContinuation(
   input: { repoPath: string; origin: ReviewChatOrigin; message: string; assistantMessageId: string;
-    check: () => void; claim?: () => boolean; legacyPermissionMode?: 'full' | 'plan';
+    check: () => void | Promise<void>; claim?: () => boolean | Promise<boolean>; legacyPermissionMode?: 'full' | 'plan';
     permissionMode?: OrchestratorPermissionMode;
     /** Queued user sends carry explicit routing; automatic continuations inherit it. */
     source?: 'user' | 'system';
-    displayMessage?: string; images?: ComposerImageAttachment[]; admit?: () => boolean;
+    displayMessage?: string; images?: ComposerImageAttachment[]; admit?: () => boolean | Promise<boolean>;
     /** The sent message's pills, saved on its user message. */
     mentions?: import('@/lib/orchestrator/composer-queue-types').ComposerMention[];
     /** The operator changed this chat's runtime; open the turn with the handoff packet. */
@@ -45,7 +45,7 @@ export async function runBoundChatContinuation(
   const { origin: expected, message, assistantMessageId } = input;
   assertLlmThread(expected.threadId);
   const permissionMode = input.permissionMode ?? expected.permissionMode;
-  input.check();
+  await input.check();
   const unmapped = isUnmappedEffortLead(expected.backend);
   // o8 and Pi run a leftover pin at the runtime default (#5466); the other unmapped leads drop it only
   // for an automatic continuation and keep #4858's refusal for a user-sourced one.
@@ -84,7 +84,7 @@ export async function runBoundChatContinuation(
     }
   };
   try {
-    if (input.claim && !input.claim()) return;
+    if (input.claim && !(await input.claim())) return;
     const session = backend.ensureSession(input.repoPath, undefined, expected.threadId);
     const selection = await readPersistedOrchestratorProjectSelection(expected.threadId);
     // Built before this turn is saved, so the packet holds prior work only.
@@ -93,9 +93,13 @@ export async function runBoundChatContinuation(
       : null;
     const project = await prepareOrchestratorProjectTurn({ message: (handoff ? `${handoff.prelude}\n\n` : '') + withAttachmentFilePaths(modelFacingComposerMessage(message, expected.mode), input.images),
       repoPath: input.repoPath, persistedProjectId: selection?.projectId });
-    input.check();
+    await input.check();
     if (controller.signal.aborted) throw new Error('Parent continuation stopped.');
-    if (input.admit && !input.admit()) throw new Error('Queued message admission was cancelled.');
+    if (input.admit) {
+      if (!(await input.admit())) throw new Error('Queued message admission was cancelled.');
+      await input.check();
+      if (controller.signal.aborted) throw new Error('Parent continuation stopped.');
+    }
     const media = input.images?.length ? persistComposerImages(input.images) : undefined;
     appendMobileOrchestratorUserMessage({ tabId: expected.threadId, repoPath: input.repoPath, message: input.displayMessage ?? message,
       ...(media ? { media } : {}),

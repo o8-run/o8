@@ -1,0 +1,24 @@
+{
+  "version": "v1.12",
+  "wireJson": "{\"type\":\"orchestrator-send\",\"repoPath\":\"/fixture/repo\",\"threadId\":null,\"message\":\"Mixed prefix fixture.\",\"backend\":\"codex\",\"clientMutationId\":\"prefix-case\",\"attachments\":[{\"name\":\"a.png\",\"dataUri\":\"DATA:image/PNG;Base64,YQ==\",\"mimeType\":\"image/png\"}]}",
+  "ingressHash": "641457540198c755725926b730e71d565ca303107714ab7b22dd9890f6a379bf",
+  "canonicalDataUri": "data:image/png;base64,YQ==",
+  "ingressJsonValue": {
+    "type": "orchestrator-send",
+    "repoPath": "/fixture/repo",
+    "threadId": null,
+    "message": "Mixed prefix fixture.",
+    "backend": "codex",
+    "clientMutationId": "prefix-case",
+    "attachments": [
+      {
+        "name": "a.png",
+        "dataUri": {
+          "payloadImageIndex": 0,
+          "dataUriPrefix": "DATA:image/PNG;Base64,"
+        },
+        "mimeType": "image/png"
+      }
+    ]
+  }
+}

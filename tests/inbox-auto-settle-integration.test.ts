@@ -1,3 +1,4 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { POST, PATCH, DELETE } from '@/app/api/v2/chat-history/route';
@@ -143,9 +144,9 @@ describe('server auto-settle sweep', () => {
     const kids = [child(running, 'idle-running', false), child(waiting, 'idle-approval', false), child(queued, 'idle-queued', false)];
     writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'auto-settle-idle-guards', repoPath: process.cwd(), packets: kids.map(k => k.packet) });
     recordInboxConversationEvent({ event: 'status', data: { threadId: running, repoPath: process.cwd(), status: 'busy' } });
-    enqueueComposerSend({ id: `${prefix}-queue`, repoPath: process.cwd(), threadId: queued, intent: 'send-next', payload: {
+    (await enqueueComposerSend({ id: `${prefix}-queue`, repoPath: process.cwd(), threadId: queued, intent: 'send-next', payload: {
       text: 'next', wireMessage: 'next', images: [], routing: { backend: 'codex', model: 'gpt-5', effort: 'high', permissionMode: 'plan', mode: 'single', pickedMode: 'solo', collide: false },
-    } });
+    } }));
     fixture.agents = [{ sessionKey: kids[1].lane.sessionKey, workspace: process.cwd(), runtime: 'codex', status: 'waiting', approvalStatus: 'pending' }];
     try {
       const settled = await runInboxAutoSettleSweep({ force: true, idleDays: 3, now: Date.now() + 4 * 86_400_000 });
@@ -321,3 +322,5 @@ describe('server auto-settle sweep', () => {
     expect(await row(tabId)).not.toHaveProperty('settledOverride');
   }, 60_000);
 });
+
+installComposerOwnerFixture();

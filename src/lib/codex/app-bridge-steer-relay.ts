@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { isPidAlive } from '@/lib/lane/orchestrator-crash-survival';
 import { composerQueueRepoKey, readComposerSend } from '@/lib/orchestrator/composer-queue';
+import { composerOwnerRequest } from '@/lib/orchestrator/composer-owner-client';
 import type { OrchestratorBackend } from '@/lib/lane/orchestrator-backends/types';
 import { assertCodexLiveSteerEffort } from './app-bridge-steer-effort';
 
@@ -71,23 +72,25 @@ export function createCodexSteerRelay(target: Target, steer: LiveSteer, running:
           if (message.token !== token || typeof message.message !== 'string' || !message.options || !running()) {
             socket.end(`${JSON.stringify({ accepted: false })}\n`); return;
           }
-          const { checkComposerQueueBinding } = await import('@/lib/ws-server/composer-queue-heartbeat');
+          const { checkComposerQueueContext } = await import('@/lib/ws-server/composer-queue-heartbeat');
           let anchor: SteerTranscriptAnchor | undefined;
           let admittedAt = Date.now();
-          const result = await steer(target.repoPath, message.message, { ...message.options, beforeAdmit: () => {
-            const item = readComposerSend(message.options.clientUserMessageId ?? '');
-            if (!item || item.admittedAt === null || item.intent !== 'steer-now' || item.threadId !== target.threadId
+          const result = await steer(target.repoPath, message.message, { ...message.options, beforeAdmit: async () => {
+            if (!message.options.composerClaimToken) throw new Error('Codex steer has no queue attempt.');
+            const { item, attempt } = await composerOwnerRequest('get', { id: message.options.clientUserMessageId ?? '', claimToken: message.options.composerClaimToken });
+            if (!attempt?.tokenMatches || !attempt.admitted || !item || item.status !== 'dispatching' || item.admittedAt === null || item.intent !== 'steer-now' || item.threadId !== target.threadId
               || item.repoPath !== receipt.repoPath || item.payload.wireMessage !== message.message
               || item.payload.routing.mode !== (message.options.orchestrationMode ?? 'fleet') || item.payload.images.length
               || item.payload.routing.model !== message.options.model || item.payload.routing.permissionMode !== message.options.permissionMode) {
               throw new Error('Codex steer does not match its admitted queue item.');
             }
-            checkComposerQueueBinding(item);
+            checkComposerQueueContext(item);
             anchor = readSteerTranscriptAnchor(target.repoPath, target.threadId);
             admittedAt = Date.now();
           } });
           if (result.accepted && anchor) {
-            const item = readComposerSend(message.options.clientUserMessageId!)!;
+            const item = await readComposerSend(message.options.clientUserMessageId!);
+            if (!item) throw new Error('Codex steer queue item disappeared.');
             appendMobileOrchestratorUserMessage({ tabId: target.threadId, repoPath: target.repoPath,
               messageId: `composer-steer-${item.id}`, message: item.payload.text, backend: 'codex', timestampMs: admittedAt, steerAnchor: anchor,
               mentions: item.payload.mentions });
@@ -134,12 +137,15 @@ export function getRemoteCodexAppBridgeSteer(target: Target): LiveSteer | undefi
       socket.on('close', () => { if (!settled) finish(); });
       socket.setEncoding('utf8');
       socket.on('connect', () => {
-        try {
-          const { beforeAdmit, ...routing } = options;
-          const line = `${JSON.stringify({ token: receipt.token, message, options: routing })}\n`;
-          beforeAdmit();
-          socket.write(line);
-        } catch (error) { finish(undefined, error); }
+        void (async () => {
+          try {
+            const { beforeAdmit, ...routing } = options;
+            const line = `${JSON.stringify({ token: receipt.token, message, options: routing })}\n`;
+            await beforeAdmit();
+            if (settled || !socket.writable) return;
+            socket.write(line);
+          } catch (error) { finish(undefined, error); }
+        })();
       });
       socket.on('data', (chunk: string) => {
         buffer += chunk;

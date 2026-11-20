@@ -1,10 +1,14 @@
 /** Front-door producer attachment; the launcher owns the daemon and public port. */
+import { randomUUID } from 'node:crypto';
+import { ComposerOwnerRequests, ComposerOwnerUnavailable, COMPOSER_RPC_FRAME_LIMIT, type ComposerOwnerMethod, type ComposerOwnerParams, type ComposerOwnerResults } from './composer-owner-rpc';
 import { lstat } from 'node:fs/promises';
 import { connect, type Socket } from 'node:net';
 import { nativeCommitNotice } from './native-commit-notice';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 
 const LIMIT = 1024 * 1024;
+// Stable across producer-object replacement and reconnect, fresh on a WS boot.
+const COMPOSER_QUEUE_BOOT_ID = randomUUID();
 export class O8dProducer {
   private socket: Socket | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
@@ -12,6 +16,15 @@ export class O8dProducer {
   private delay = 250;
   private pid: number | null = null;
   private generation = 0;
+  private readonly composer = new ComposerOwnerRequests(frame => {
+    const socket = this.socket;
+    if (!this.pid || !socket?.writable) throw new ComposerOwnerUnavailable();
+    if (socket.writableLength + Buffer.byteLength(frame) > COMPOSER_RPC_FRAME_LIMIT) throw new ComposerOwnerUnavailable('The composer owner write buffer is full.');
+    socket.write(frame);
+  });
+  composerRequest<M extends ComposerOwnerMethod>(method: M, params: ComposerOwnerParams[M]): Promise<ComposerOwnerResults[M]> {
+    return this.composer.request(method, params);
+  }
   constructor(private readonly path: string, private readonly key: string,
     private readonly upstream: string, private readonly epoch: string,
     private readonly startupPortInfo: () => string | undefined) {}
@@ -26,10 +39,10 @@ export class O8dProducer {
     if (this.stopped) return;
     await new Promise<void>(resolve => {
       const socket = connect(this.path); this.socket = socket;
-      let reply = Buffer.alloc(0), ready = false;
+      let reply: Buffer[] = [], replyBytes = 0, ready = false;
       const failed = () => {
         socket.destroy();
-        if (this.socket === socket) { this.socket = null; this.pid = null; this.schedule(); }
+        if (this.socket === socket) { this.socket = null; this.pid = null; this.composer.disconnect(); this.schedule(); }
         resolve();
       };
       socket.setTimeout(5_000, failed);
@@ -38,7 +51,7 @@ export class O8dProducer {
         try {
           const raw = this.startupPortInfo();
           const grant = JSON.stringify({ version: 1, key: this.key, upstream: this.upstream, epoch: this.epoch,
-            ...(raw ? { startupPortInfo: JSON.parse(raw) } : {}) }) + '\n';
+            composerQueueBootId: COMPOSER_QUEUE_BOOT_ID, ...(raw ? { startupPortInfo: JSON.parse(raw) } : {}) }) + '\n';
           if (Buffer.byteLength(grant) > 16 * 1024) { failed(); return; }
           socket.write(grant);
         } catch { failed(); }
@@ -51,16 +64,20 @@ export class O8dProducer {
         for (let offset = 0; offset < chunk.length;) {
           const end = chunk.indexOf(10, offset);
           const part = chunk.subarray(offset, end < 0 ? chunk.length : end + 1);
-          if (reply.length + part.length > (ready ? 16 * 1024 : 4096)) { failed(); return; }
-          reply = Buffer.concat([reply, part]); offset += part.length;
+          if (replyBytes + part.length > (ready ? COMPOSER_RPC_FRAME_LIMIT : 4096)) { failed(); return; }
+          reply.push(part); replyBytes += part.length; offset += part.length;
           if (end < 0) return;
           try {
-            const value = JSON.parse(reply.toString()); reply = Buffer.alloc(0);
+            const frameBytes = replyBytes;
+            const value = JSON.parse(Buffer.concat(reply, replyBytes).toString()); reply = []; replyBytes = 0;
             if (!ready) {
               if (value.version !== 1 || value.epoch !== this.epoch || !Number.isSafeInteger(value.pid) || value.pid <= 0
                 || !Number.isSafeInteger(value.generation) || value.generation <= 0) throw Error('Invalid producer receipt');
+              if (value.composerQueueEpoch !== undefined && (typeof value.composerQueueEpoch !== 'string' || !value.composerQueueEpoch || value.composerQueueEpoch.length > 256)) throw Error('Invalid composer owner epoch');
+              this.composer.attach(value.composerQueueEpoch ?? null);
               ready = true; socket.setTimeout(0); this.pid = value.pid; this.generation = value.generation; this.delay = 250; resolve();
-            } else {
+            } else if (!this.composer.receive(value)) {
+              if (frameBytes > 16 * 1024) throw Error('Oversized commit notice');
               const notice = nativeCommitNotice(value, this.epoch);
               if (!notice || publishing >= 32) throw Error('Invalid commit notice');
               publishing++;
@@ -88,6 +105,6 @@ export class O8dProducer {
   stop() {
     this.stopped = true;
     if (this.retry) clearTimeout(this.retry);
-    this.retry = null; this.socket?.destroy(); this.socket = null; this.pid = null;
+    this.retry = null; this.socket?.destroy(); this.socket = null; this.pid = null; this.composer.disconnect();
   }
 }

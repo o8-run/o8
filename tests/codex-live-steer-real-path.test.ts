@@ -1,3 +1,5 @@
+import { withFixtureComposerExecutor, installComposerOwnerFixture } from './fixtures/composer-queue-owner';
+import { fixtureComposerClaim, fixtureComposerToken } from './fixtures/composer-queue-attempt';
 import { execFile, execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -76,7 +78,7 @@ const { ensureV71ComposerQueueSchema } = await import('@/lib/db/v71-composer-que
 ensureV71ComposerQueueSchema(getSqlite());
 const queue = await import('@/lib/orchestrator/composer-queue');
 const { GET, POST, PATCH } = await import('@/app/api/orchestrator/composer-queue/route');
-const { createComposerQueueHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
+const { createComposerQueueHeartbeat } = await import('./fixtures/composer-queue-executor');
 
 interface Call { cwd: string; method: string; params?: Record<string, unknown> }
 const calls = (): Call[] => existsSync(join(root, 'calls.jsonl'))
@@ -136,14 +138,14 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
     try {
       expect((await POST(fixture.request('POST', { ...fixture.target, id, intent: 'steer-now', payload }))).status).toBe(200);
       heartbeat();
-      await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).toMatch(/^(held|applied)$/));
-      const item = queue.readComposerSend(id)!;
+      await vi.waitFor(async () => expect((await queue.readComposerSend(id))?.status).toMatch(/^(held|applied)$/));
+      const item = (await queue.readComposerSend(id))!;
       expect(item.status).toBe('held');
       expect(item.admittedAt).toBeNull();
       expect(item.reason).toMatch(new RegExp(`cannot.*effort.*${effort}`, 'i'));
       expect(fixture.steers()).toEqual([]);
       closeDb(); ensureV71ComposerQueueSchema(getSqlite());
-      expect(queue.readComposerSend(id)).toMatchObject({ status: 'held', reason: item.reason });
+      expect((await queue.readComposerSend(id))).toMatchObject({ status: 'held', reason: item.reason });
     } finally { await fixture.close(); }
   }, 60_000);
 
@@ -157,14 +159,18 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       writeFileSync(script, `
         import queue from ${JSON.stringify(join(process.cwd(), 'src/lib/orchestrator/composer-queue.ts'))};
         import heartbeat from ${JSON.stringify(join(process.cwd(), 'src/lib/ws-server/composer-queue-heartbeat.ts'))};
+        import attempt from ${JSON.stringify(join(process.cwd(), 'tests/fixtures/composer-queue-attempt.ts'))};
+        import child from ${JSON.stringify(join(process.cwd(), 'tests/fixtures/composer-queue-child.ts'))};
+        const detach = await child.attachFixtureComposerExecutor();
         const tick = heartbeat.createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} });
         tick();
         const deadline = Date.now() + 15000;
-        while (queue.readComposerSend(${JSON.stringify(id)})?.status === 'dispatching' && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
-        console.log('ITEM ' + JSON.stringify(queue.readComposerSend(${JSON.stringify(id)})));
+        while (['queued', 'dispatching'].includes((await queue.readComposerSend(${JSON.stringify(id)}))?.status) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+        console.log('ITEM ' + JSON.stringify(await queue.readComposerSend(${JSON.stringify(id)})));
+        detach();
       `);
-      const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script],
-        { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 });
+      const result = await withFixtureComposerExecutor(() => promisify(execFile)(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script],
+        { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 }));
       const item = JSON.parse(result.stdout.split('\n').find(line => line.startsWith('ITEM '))!.slice(5));
       expect(item.status).toBe('held');
       expect(item.admittedAt).toBeNull();
@@ -183,15 +189,15 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       const posted = await POST(fixture.request('POST', { ...fixture.target, id, intent: 'send-next', payload: fixture.payload }));
       expect(posted.status).toBe(200);
       expect((await PATCH(fixture.request('PATCH', { ...fixture.target, id }))).status).toBe(200);
-      expect(queue.readComposerSend(id)?.payload).toEqual(fixture.payload);
+      expect((await queue.readComposerSend(id))?.payload).toEqual(fixture.payload);
       expect((await fixture.capability()).steerableIds).toContain(id);
       heartbeat();
       const status = accepted ? 'applied' : ['refused', 'mismatched'].includes(outcome) ? 'queued' : 'held';
-      await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).toBe(status), { timeout: 15_000 });
+      await vi.waitFor(async () => expect((await queue.readComposerSend(id))?.status).toBe(status), { timeout: 15_000 });
       expect(fixture.steers()).toHaveLength(1);
       expect(fixture.steers()[0].params).toEqual({ threadId: 'native-thread', expectedTurnId: 'running-turn',
         input: [{ type: 'text', text: fixture.payload.wireMessage, text_elements: [] }], clientUserMessageId: id });
-      const item = queue.readComposerSend(id)!;
+      const item = (await queue.readComposerSend(id))!;
       // Confirmed delivery compacts dispatch-only bytes (#5022). Unresolved
       // sends must retain the complete original payload for operator recovery.
       const savedPayload = accepted ? { ...fixture.payload, wireMessage: '' } : fixture.payload;
@@ -203,7 +209,7 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       expect(delivered).toEqual(accepted ? [expect.objectContaining({ role: 'user', content: fixture.payload.text })] : []);
       heartbeat(); await new Promise(resolve => setTimeout(resolve, 100)); expect(fixture.steers()).toHaveLength(1);
       closeDb(); ensureV71ComposerQueueSchema(getSqlite());
-      expect(queue.readComposerSend(id)).toMatchObject({ status, payload: savedPayload });
+      expect((await queue.readComposerSend(id))).toMatchObject({ status, payload: savedPayload });
     } finally { await fixture.close(); }
   }, 60_000);
 
@@ -217,13 +223,17 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       writeFileSync(script, `
         import queue from ${JSON.stringify(join(process.cwd(), 'src/lib/orchestrator/composer-queue.ts'))};
         import heartbeat from ${JSON.stringify(join(process.cwd(), 'src/lib/ws-server/composer-queue-heartbeat.ts'))};
-        await heartbeat.runQueuedComposerSteer(queue.claimComposerSteer(${JSON.stringify(id)})!);
+        import attempt from ${JSON.stringify(join(process.cwd(), 'tests/fixtures/composer-queue-attempt.ts'))};
+        import child from ${JSON.stringify(join(process.cwd(), 'tests/fixtures/composer-queue-child.ts'))};
+        const detach = await child.attachFixtureComposerExecutor();
+        await attempt.runQueuedComposerSteer((await attempt.fixtureComposerClaim(queue.claimComposerSteer(${JSON.stringify(id)})))!);
+        detach();
         console.log('DONE');
       `);
-      const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script],
-        { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 });
+      const result = await withFixtureComposerExecutor(() => promisify(execFile)(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script],
+        { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 }));
       expect(result.stdout).toContain('DONE');
-      expect(queue.readComposerSend(id)?.status).toBe('applied');
+      expect((await queue.readComposerSend(id))?.status).toBe('applied');
       expect(fixture.steers()).toHaveLength(1);
       const messages = (await import('@/lib/llm/chat-history-store')).readPersistedLlmChat(fixture.target.threadId)!.history.messages;
       expect(messages.filter(message => message.id === `composer-steer-${id}`))
@@ -282,8 +292,8 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
         routing: { ...fixture.payload.routing, mode: kind === 'solo' ? 'single' as const : kind === 'fusion' ? 'fusion' as const : 'fleet' as const } };
       expect((await POST(fixture.request('POST', { ...fixture.target, id, intent: 'steer-now', payload }))).status).toBe(200);
       heartbeat();
-      await vi.waitFor(() => expect(queue.readComposerSend(id)?.intent).toBe('send-next'));
-      expect(queue.readComposerSend(id)).toMatchObject({ status: 'queued', admittedAt: null, payload });
+      await vi.waitFor(async () => expect((await queue.readComposerSend(id))?.intent).toBe('send-next'));
+      expect((await queue.readComposerSend(id))).toMatchObject({ status: 'queued', admittedAt: null, payload });
       expect(fixture.steers()).toEqual([]);
     } finally { await fixture.close(); }
   }, 60_000);
@@ -296,7 +306,7 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       expect((await fixture.capability()).canSteer).toBe(true);
       expect((await POST(fixture.request('POST', { ...fixture.target, id, intent: 'steer-now', payload: fixture.payload }))).status).toBe(200);
       heartbeat();
-      await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).toBe('applied'), { timeout: 15_000 });
+      await vi.waitFor(async () => expect((await queue.readComposerSend(id))?.status).toBe('applied'), { timeout: 15_000 });
       expect(fixture.steers()).toHaveLength(1);
     } finally { await fixture.close(); }
   }, 60_000);
@@ -313,14 +323,14 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
     const id = `codex-relay-fence-${sequence}`;
     try {
       expect((await POST(fixture.request('POST', { ...fixture.target, id, intent: 'steer-now', payload: fixture.payload }))).status).toBe(200);
-      expect(queue.claimComposerSteer(id)).not.toBeNull();
+      expect((await fixtureComposerClaim(queue.claimComposerSteer(id)))).not.toBeNull();
       const { getRemoteCodexAppBridgeSteer } = await import('@/lib/codex/app-bridge-steer-relay');
       const steer = getRemoteCodexAppBridgeSteer(fixture.target)!;
       await expect(steer(fixture.target.repoPath, fixture.payload.wireMessage, {
-        threadId: fixture.target.threadId, model: fixture.payload.routing.model, permissionMode: 'full', clientUserMessageId: id,
-        beforeAdmit: () => {
-          expect(queue.admitComposerSend(id)).toBe(true);
-          if (change === 'stop') queue.holdComposerSends(fixture.target);
+        threadId: fixture.target.threadId, model: fixture.payload.routing.model, permissionMode: 'full', clientUserMessageId: id, composerClaimToken: fixtureComposerToken(id),
+        beforeAdmit: async () => {
+          expect((await queue.admitComposerSend(id, fixtureComposerToken(id)))).toBe(true);
+          if (change === 'stop') (await queue.holdComposerSends(fixture.target));
           else writeFileSync(join(getDataDir(), 'chat-history', `${fixture.target.threadId}.json`), JSON.stringify({
             repoPath: fixture.target.repoPath, backend: 'codex', messages: [{ id: 'restricted', role: 'assistant', content: 'Plan only',
               timestamp: Date.now() + 1, receipt: { permissionMode: 'plan' } }],
@@ -343,24 +353,30 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
         import route from ${JSON.stringify(join(process.cwd(), 'src/app/api/orchestrator/composer-queue/route.ts'))};
         import queue from ${JSON.stringify(join(process.cwd(), 'src/lib/orchestrator/composer-queue.ts'))};
         import heartbeat from ${JSON.stringify(join(process.cwd(), 'src/lib/ws-server/composer-queue-heartbeat.ts'))};
+        import attempt from ${JSON.stringify(join(process.cwd(), 'tests/fixtures/composer-queue-attempt.ts'))};
+        import child from ${JSON.stringify(join(process.cwd(), 'tests/fixtures/composer-queue-child.ts'))};
+        const detach = await child.attachFixtureComposerExecutor();
         const { GET } = route;
         const { claimComposerSteer } = queue;
-        const { runQueuedComposerSteer } = heartbeat;
+        const { runQueuedComposerSteer } = attempt;
         const response = await GET(new NextRequest(${JSON.stringify(`http://localhost/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(fixture.target.repoPath)}&threadId=${fixture.target.threadId}&backend=codex`)}, { headers: { host: 'localhost' } }));
         const capability = await response.json();
-        await runQueuedComposerSteer(claimComposerSteer(${JSON.stringify(id)})!);
+        await runQueuedComposerSteer((await attempt.fixtureComposerClaim(claimComposerSteer(${JSON.stringify(id)})))!);
+        detach();
         console.log('CAPABILITY ' + JSON.stringify(capability));
       `);
-      const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script],
-      { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 });
+      const result = await withFixtureComposerExecutor(() => promisify(execFile)(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script],
+      { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 }));
       const capability = JSON.parse(result.stdout.split('\n').find(line => line.startsWith('CAPABILITY '))!.slice('CAPABILITY '.length));
       expect(capability.canSteer).toBe(true);
       const messages = (await import('@/lib/llm/chat-history-store')).readPersistedLlmChat(fixture.target.threadId)!.history.messages;
       expect(messages.filter(message => message.id === `composer-steer-${id}`)).toEqual([expect.objectContaining({ steerAnchor: expect.objectContaining({ assistantMessageId: 'working', text: '' }) })]);
-      expect(queue.readComposerSend(id)?.status).toBe('applied');
+      expect((await queue.readComposerSend(id))?.status).toBe('applied');
       expect(fixture.steers()).toHaveLength(1);
       const input = fixture.steers()[0].params?.input as Array<{ text: string }>;
       expect(input[0].text === fixture.payload.wireMessage).toBe(true);
     } finally { await fixture.close(); }
   }, 60_000);
 });
+
+installComposerOwnerFixture();

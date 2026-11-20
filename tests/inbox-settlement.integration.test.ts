@@ -1,3 +1,4 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
 import { spawn } from 'node:child_process';
 import { AsyncLocalStorage, createHook } from 'node:async_hooks';
 import { once } from 'node:events';
@@ -626,9 +627,9 @@ describe('inbox settlement through operator mutation and native listings', () =>
 
   it('rejects an actual durable queued send', async () => {
     const tabId = await seed('queued');
-    enqueueComposerSend({ id: `${prefix}-queue`, repoPath: process.cwd(), threadId: tabId, intent: 'send-next', payload: {
+    (await enqueueComposerSend({ id: `${prefix}-queue`, repoPath: process.cwd(), threadId: tabId, intent: 'send-next', payload: {
       text: 'next', wireMessage: 'next', images: [], routing: { backend: 'codex', model: 'gpt-5', effort: 'high', permissionMode: 'plan', mode: 'single', pickedMode: 'solo', collide: false },
-    } });
+    } }));
     expect((await mutate(tabId, 'settle')).status).toBe(409);
   });
 
@@ -870,3 +871,5 @@ describe('inbox settlement through operator mutation and native listings', () =>
     expect((await PATCH(request({ sessionKey: 'codex:unknown', inboxAction: 'settle' }))).status).toBe(404);
   });
 });
+
+installComposerOwnerFixture();

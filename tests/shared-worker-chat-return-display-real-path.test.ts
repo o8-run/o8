@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it, vi } from 'vitest';
@@ -30,12 +30,14 @@ vi.stubEnv('O8_DATA_DIR', data);
 vi.stubEnv('CORTEX_IDE_DATA_DIR', data);
 vi.stubEnv('CORTEX_IDE_DB_PATH', join(data, 'cortex-ide.db'));
 vi.stubEnv('O8_REVIEW_MODE', 'automatic');
+vi.stubEnv('CORTEX_IDE_OWNED_CODEX_ROOT', join(data, 'owned-codex'));
 execFileSync('git', ['init', '-q', '-b', 'main', repo]);
 execFileSync('git', ['-C', repo, '-c', 'user.name=o8 test', '-c', 'user.email=test@example.invalid',
   'commit', '--allow-empty', '-qm', 'fixture']);
 
 const { runSharedWorkerChatReturn } = await import('@/lib/ws-server/shared-worker-chat-return');
-const { registerSharedWorkerParent } = await import('@/lib/orchestrator/shared-worker-returns');
+const { reconcileSharedWorkerReturns, listSharedWorkerReturns } = await import('@/lib/orchestrator/shared-worker-returns');
+const { recoverSharedWorkerParentBindings } = await import('@/lib/orchestrator/shared-worker-recovery');
 const { resolveChatTurnOrigin } = await import('@/lib/orchestrator/review-continuation-origin');
 const { reserveSharedCheckoutMember, recordSharedCheckoutMember } = await import('@/lib/orchestrator/shared-checkout-team');
 const { writePersistedLlmChat, readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
@@ -74,14 +76,30 @@ it('displays original attributed worker reports while sending quoted evidence to
       clientMutationId: row.id, runtime: 'codex', taskName: row.id };
     await reserveSharedCheckoutMember({ ...member, paths: [`src/${row.id}`] });
     await recordSharedCheckoutMember({ ...member, surfaceId: row.surface_id, parentTurnId: origin.turnId });
-    registerSharedWorkerParent({ repoPath: repo, surfaceId: row.surface_id, origin });
+    const sessionId = row.surface_id.slice('codex-owned:'.length);
+    const directory = join(data, 'owned-codex', sessionId);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'session.json'), JSON.stringify({ surfaceId: row.surface_id,
+      launchMutationId: row.id, cwd: repo, repoPath: repo,
+      recentRuns: [{ id: row.run_id, outcome: row.outcome }] }));
   }
   const events: Array<{ session: string; event: string; data: Record<string, unknown> }> = [];
   const release = vi.fn();
   const registerAbort = vi.fn(() => release);
-  await runSharedWorkerChatReturn({ repoPath: repo, origin, returns }, {
-    registerAbort, publish: (session, event, payload) => { events.push({ session, event, data: payload }); },
-  });
+  recoverSharedWorkerParentBindings();
+  const reconcile = () => reconcileSharedWorkerReturns({ isBusy: () => false,
+    readTranscript: async surface => {
+      const row = returns.find(row => row.surface_id === surface)!;
+      return [{ id: `${row.run_id}:answer`, role: 'assistant', text: row.summary }];
+    }, run: batch => runSharedWorkerChatReturn(batch, {
+      registerAbort, publish: (session, event, payload) => { events.push({ session, event, data: payload }); },
+    }) });
+  await reconcile();
+  const delivered = listSharedWorkerReturns(origin.threadId);
+  expect(delivered).toHaveLength(2);
+  expect(delivered.every(row => row.status === 'delivered')).toBe(true);
+  // A second heartbeat (including a reconnect) cannot return the completed run twice.
+  await reconcile();
   const preamble = [
     'Delegated worker results are available for this conversation.',
     'Inspect the results and continue only the work already authorized here. A worker exit is not verification, merge, or release approval.',
@@ -96,9 +114,12 @@ it('displays original attributed worker reports while sending quoted evidence to
   expect(sendTurn.mock.calls[0][1]).toBe(expectedWire);
   expect(sendTurn.mock.calls[0][3]).toMatchObject({ threadId: origin.threadId, model: origin.model,
     thinkingEffort: origin.effort, permissionMode: 'plan' });
-  const messageId = 'review-user-assistant-workers-first-return';
+  const messageId = `review-user-assistant-workers-${delivered[0].id}`;
   const saved = readPersistedLlmChat(origin.threadId)?.history.messages.find(row => row.id === messageId);
   expect(saved?.content).toBe(expectedDisplay);
+  closeDb();
+  expect(readPersistedLlmChat(origin.threadId)?.history.messages.filter(row => row.id === messageId)).toHaveLength(1);
+  expect(readPersistedLlmChat('thoughts-unrelated-reconnect')).toBeNull();
   expect(events.filter(row => row.event === 'turn-start')).toEqual([
     { session: 'fixture-parent', event: 'turn-start', data: expect.objectContaining({
       repoPath: repo, threadId: origin.threadId, backend: origin.backend, model: origin.model,

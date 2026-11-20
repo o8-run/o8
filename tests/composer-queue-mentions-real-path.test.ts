@@ -1,3 +1,5 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
+import { fixtureComposerClaim } from './fixtures/composer-queue-attempt';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -44,7 +46,7 @@ describe('composer queue mentions', () => {
     expect(response.status).toBe(200);
     expect((await response.json()).item.payload.mentions).toEqual(mentions);
     closeDb(); ensureV71ComposerQueueSchema(getSqlite());
-    expect(queue.readComposerSend('queue-mentions-saved')?.payload.mentions).toEqual(mentions);
+    expect((await queue.readComposerSend('queue-mentions-saved'))?.payload.mentions).toEqual(mentions);
     // A message without pills saves no field at all.
     const plain = await post('queue-mentions-none', { mentions: undefined });
     expect((await plain.json()).item.payload).not.toHaveProperty('mentions');
@@ -74,15 +76,15 @@ describe('composer queue mentions', () => {
       ...Array.from({ length: 21 }, (_, index) => ({ ...mentions[1], label: `tree-${index}` }))];
     const backend = (await import('@/lib/lane/orchestrator-backends/registry')).getOrchestratorBackend('pi');
     const native = vi.spyOn(backend, 'liveSteer').mockImplementation(async (_repo, _message, options) => {
-      options.beforeAdmit(); return { accepted: true };
+      await options.beforeAdmit(); return { accepted: true };
     });
     try {
       const response = await post('queue-mentions-many', { mentions: many }, 'steer-now');
       expect(response.status).toBe(200);
       const saved = (await response.json()).item.payload.mentions as ComposerMention[];
       expect(saved.map(mention => mention.label)).toEqual(Array.from({ length: 20 }, (_, index) => `tree-${index}`));
-      const { runQueuedComposerSteer } = await import('@/lib/ws-server/composer-queue-heartbeat');
-      await runQueuedComposerSteer(queue.claimComposerSteer('queue-mentions-many')!);
+      const { runQueuedComposerSteer } = await import('./fixtures/composer-queue-executor');
+      await runQueuedComposerSteer((await fixtureComposerClaim(queue.claimComposerSteer('queue-mentions-many')))!);
     } finally { native.mockRestore(); warn.mockRestore(); }
     const delivered = (await import('@/lib/llm/chat-history-store')).readPersistedLlmChat(target.threadId)!
       .history.messages.find(message => message.id === 'composer-steer-queue-mentions-many');
@@ -93,13 +95,13 @@ describe('composer queue mentions', () => {
   it('puts the pills on the delivered user message the app reads after a restart', async () => {
     const backend = (await import('@/lib/lane/orchestrator-backends/registry')).getOrchestratorBackend('pi');
     const native = vi.spyOn(backend, 'liveSteer').mockImplementation(async (_repo, _message, options) => {
-      options.beforeAdmit(); return { accepted: true };
+      await options.beforeAdmit(); return { accepted: true };
     });
     try {
       expect((await post('queue-mentions-steer', {}, 'steer-now')).status).toBe(200);
-      const { runQueuedComposerSteer } = await import('@/lib/ws-server/composer-queue-heartbeat');
-      await runQueuedComposerSteer(queue.claimComposerSteer('queue-mentions-steer')!);
-      expect(queue.readComposerSend('queue-mentions-steer')?.status).toBe('applied');
+      const { runQueuedComposerSteer } = await import('./fixtures/composer-queue-executor');
+      await runQueuedComposerSteer((await fixtureComposerClaim(queue.claimComposerSteer('queue-mentions-steer')))!);
+      expect((await queue.readComposerSend('queue-mentions-steer'))?.status).toBe('applied');
     } finally { native.mockRestore(); }
     const response = await history.GET(new NextRequest(`http://localhost/api/mobile/history?sessionKey=${encodeURIComponent(`llm-chat:${target.threadId}`)}&limit=100`));
     expect(response.status).toBe(200);
@@ -109,3 +111,5 @@ describe('composer queue mentions', () => {
     expect(transcript.find(entry => entry.id === 'assistant')).not.toHaveProperty('mentions');
   });
 });
+
+installComposerOwnerFixture();

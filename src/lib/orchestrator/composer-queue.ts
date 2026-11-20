@@ -1,6 +1,5 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { getSqlite } from '@/lib/db';
 import { isNetworkThread } from '@/lib/bots/network-store';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -11,18 +10,8 @@ import { isComposerWireMode } from './composer-wire';
 import { assertOrchestratorPermissionMode, isOrchestratorPermissionMode } from './permission-mode';
 import { type ComposerMention, type ComposerQueuePayload, type ComposerQueueTarget, type QueuedComposerSendRecord } from './composer-queue-types';
 import { ensureThreadScratch, threadScratchPath } from './thread-scratch';
-import { compactComposerPayload, composerPayloadHash, withComposerPayloadRemoval } from './composer-queue-ledger';
-
-interface Row {
-  sequence: number; id: string; repo_path: string; thread_id: string;
-  intent: QueuedComposerSendRecord['intent']; payload_json: string;
-  status: QueuedComposerSendRecord['status']; reason: string | null;
-  created_at: number; updated_at: number; admitted_at: number | null;
-}
-const view = (row: Row): QueuedComposerSendRecord => ({ sequence: row.sequence, id: row.id,
-  repoPath: row.repo_path, threadId: row.thread_id, intent: row.intent,
-  payload: JSON.parse(row.payload_json) as ComposerQueuePayload, status: row.status,
-  reason: row.reason, createdAt: row.created_at, updatedAt: row.updated_at, admittedAt: row.admitted_at });
+import { composerOwnerRequest } from './composer-owner-client';
+import type { ComposerWsIngress } from '@/lib/ws-server/composer-owner-rpc';
 
 /** Durable keys remain addressable even if a checkout is offline. */
 export function composerQueueRepoKey(repoPath: string): string {
@@ -110,151 +99,68 @@ export function validateComposerQueuePayload(input: unknown): ComposerQueuePaylo
       collide: routing.collide, ...(routing.serviceTier ? { serviceTier: routing.serviceTier } : {}), ...(routing.projectId ? { projectId: routing.projectId } : {}) } };
 }
 
-export function readComposerSend(id: string): QueuedComposerSendRecord | null {
-  const row = getSqlite().prepare('SELECT * FROM composer_send_queue WHERE id = ?').get(id) as Row | undefined;
-  return row ? view(row) : null;
+/** All queue rows are owned by o8d. Validation remains with the existing callers. */
+export async function readComposerSend(id: string): Promise<QueuedComposerSendRecord | null> {
+  return (await composerOwnerRequest('get', { id })).item;
 }
-export function listQueuedComposerSends(target?: ComposerQueueTarget): QueuedComposerSendRecord[] {
-  const rows = target ? getSqlite().prepare(`SELECT * FROM composer_send_queue WHERE repo_path = ? AND thread_id = ?
-    AND status IN ('queued','dispatching','held') ORDER BY sequence`).all(composerQueueRepoKey(target.repoPath), target.threadId)
-    : getSqlite().prepare(`SELECT * FROM composer_send_queue WHERE status IN ('queued','dispatching','held') ORDER BY sequence`).all();
-  return (rows as Row[]).map(view);
+export async function listQueuedComposerSends(target?: ComposerQueueTarget): Promise<QueuedComposerSendRecord[]> {
+  return (await composerOwnerRequest('list', { ...(target ? { target } : {}) })).items;
 }
-export function listComposerQueueTargets(): ComposerQueueTarget[] {
-  return getSqlite().prepare(`SELECT repo_path AS repoPath, thread_id AS threadId FROM composer_send_queue
-    WHERE status IN ('queued','dispatching','held') GROUP BY repo_path, thread_id ORDER BY MIN(sequence)`).all() as ComposerQueueTarget[];
+export async function listComposerQueueTargets(): Promise<ComposerQueueTarget[]> {
+  return (await composerOwnerRequest('listTargets', {})).targets;
 }
-export function enqueueComposerSend(input: ComposerQueueTarget & { id: string; intent: QueuedComposerSendRecord['intent']; payload: unknown }): QueuedComposerSendRecord {
+export async function enqueueComposerSendReceipt(input: ComposerQueueTarget & {
+  id: string; intent: QueuedComposerSendRecord['intent']; payload: unknown;
+}, ingress?: ComposerWsIngress) {
   if (!['send-next', 'steer-now'].includes(input.intent) || typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(input.id)) throw new Error('A valid queue identity is required.');
   const target = validateComposerQueueTarget(input);
   const payload = validateComposerQueuePayload(input.payload);
-  const serialized = JSON.stringify(payload);
-  const hash = composerPayloadHash(serialized);
-  return getSqlite().transaction(() => {
-    const existing = readComposerSend(input.id);
-    if (existing) {
-      const receipt = getSqlite().prepare('SELECT payload_hash, payload_bytes FROM composer_send_queue WHERE id = ?').get(input.id) as { payload_hash: string | null; payload_bytes: number | null };
-      if (existing.repoPath !== target.repoPath || existing.threadId !== target.threadId
-        || (receipt.payload_hash ?? composerPayloadHash(JSON.stringify(existing.payload))) !== hash
-        || (receipt.payload_bytes !== null && receipt.payload_bytes !== Buffer.byteLength(serialized))) throw new Error('This queue identity already belongs to another message.');
-      // Clients compare their retry receipt to the submitted payload. Echo it
-      // after matching its digest, without putting delivered bytes back on disk.
-      return { ...existing, payload };
-    }
-    if (payload.afterTaskId && listQueuedComposerSends(target).some(item => item.payload.afterTaskId)) {
-      throw new Error('A voice follow-up is already queued. Remove it before replacing it.');
-    }
-    if (listQueuedComposerSends(target).length >= 20) throw new Error('This chat already has 20 queued messages. Remove one before adding another.');
-    const now = Date.now();
-    getSqlite().prepare(`INSERT INTO composer_send_queue (id, repo_path, thread_id, intent, payload_json, payload_hash, payload_bytes, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`).run(input.id, target.repoPath, target.threadId, input.intent, serialized, hash, Buffer.byteLength(serialized), now, now);
-    return readComposerSend(input.id)!;
-  }).immediate();
+  return composerOwnerRequest('enqueue', { id: input.id, target, intent: input.intent,
+    payloadJson: JSON.stringify(payload), ...(ingress ? { ingress } : {}) });
 }
-/**
- * The next message that may start. A held message waits for the operator. A message sent
- * after that hold is the operator's answer, so it goes ahead; the held one keeps Retry and
- * Remove. Messages already waiting when the hold happened still wait behind it. The heartbeat
- * and the claim share this rule, so neither can park a message the other would start (#5433).
- */
-export function peekNextComposerSend(target: ComposerQueueTarget): QueuedComposerSendRecord | null {
+export async function enqueueComposerSend(input: ComposerQueueTarget & {
+  id: string; intent: QueuedComposerSendRecord['intent']; payload: unknown;
+}): Promise<QueuedComposerSendRecord> {
+  return (await enqueueComposerSendReceipt(input)).item;
+}
+/** Held messages fence only work that was already waiting when the hold happened. */
+export async function peekNextComposerSend(target: ComposerQueueTarget): Promise<QueuedComposerSendRecord | null> {
   let heldAt = -Infinity;
-  const first = listQueuedComposerSends(target).find(item => {
+  const first = (await listQueuedComposerSends(target)).find(item => {
     if (item.status !== 'held') return true;
     heldAt = Math.max(heldAt, item.updatedAt);
     return false;
   });
   return first && heldAt < first.createdAt ? first : null;
 }
-export function claimNextComposerSend(target: ComposerQueueTarget): QueuedComposerSendRecord | null {
-  return getSqlite().transaction(() => {
-    const first = peekNextComposerSend(target);
-    if (first?.status !== 'queued' || first.intent !== 'send-next') return null;
-    const claimed = getSqlite().prepare(`UPDATE composer_send_queue SET status = 'dispatching', updated_at = ? WHERE id = ? AND status = 'queued' AND intent = 'send-next'`).run(Date.now(), first.id);
-    return claimed.changes ? readComposerSend(first.id) : null;
-  }).immediate();
+export function claimNextComposerSend(target: ComposerQueueTarget) {
+  return composerOwnerRequest('claim', { target, intent: 'send-next' });
 }
-
-/** A promotion changes intent only; the saved destination and routing stay frozen. */
-export function promoteComposerSend(target: ComposerQueueTarget, id: string): QueuedComposerSendRecord {
-  return getSqlite().transaction(() => {
-    const item = readComposerSend(id);
-    if (!item || item.repoPath !== composerQueueRepoKey(target.repoPath) || item.threadId !== target.threadId) throw new Error('This queued message was not found in this chat.');
-    if (item.intent === 'steer-now') return item;
-    if (item.status !== 'queued' || item.admittedAt !== null || item.payload.afterTaskId) throw new Error('This message cannot be steered after delivery has started.');
-    getSqlite().prepare("UPDATE composer_send_queue SET intent = 'steer-now', updated_at = ? WHERE id = ?").run(Date.now(), id);
-    return readComposerSend(id)!;
-  }).immediate();
+export async function promoteComposerSend(target: ComposerQueueTarget, id: string): Promise<QueuedComposerSendRecord> {
+  return (await composerOwnerRequest('promote', { target, id })).item;
 }
-
-export function claimComposerSteer(id: string): QueuedComposerSendRecord | null {
-  const changed = getSqlite().prepare("UPDATE composer_send_queue SET status = 'dispatching', updated_at = ? WHERE id = ? AND status = 'queued' AND intent = 'steer-now' AND admitted_at IS NULL").run(Date.now(), id);
-  return changed.changes ? readComposerSend(id) : null;
+export function claimComposerSteer(id: string) {
+  return composerOwnerRequest('claim', { id, intent: 'steer-now' });
 }
-
-/** A definite refusal can safely become a next turn. Unknown delivery stays held. */
-export function deferComposerSteer(id: string, reason: string): void {
-  getSqlite().prepare("UPDATE composer_send_queue SET intent = 'send-next', status = 'queued', admitted_at = NULL, reason = ?, updated_at = ? WHERE id = ? AND status = 'dispatching'").run(reason, Date.now(), id);
+export async function deferComposerSteer(id: string, reason: string, claimToken: string): Promise<boolean> {
+  return (await composerOwnerRequest('deferSteer', { id, reason, claimToken })).changed;
 }
-
-export function listComposerTranscriptSends(target: ComposerQueueTarget): QueuedComposerSendRecord[] {
-  const applied = getSqlite().prepare("SELECT * FROM composer_send_queue WHERE repo_path = ? AND thread_id = ? AND intent = 'steer-now' AND status = 'applied' ORDER BY sequence DESC LIMIT 40")
-    .all(composerQueueRepoKey(target.repoPath), target.threadId) as Row[];
-  const messages = readPersistedLlmChat(target.threadId)?.history.messages ?? [];
-  return [...applied.map(view), ...listQueuedComposerSends(target)].sort((a, b) => a.sequence - b.sequence)
-    .map(item => {
-      const message = messages.find(message => message.id === `composer-steer-${item.id}`);
-      const images = item.payload.deliveredMedia?.map(media => ({ name: media.name ?? 'Image', dataUri: media.path })) ?? [];
-      return { ...item, ...(item.status === 'applied' ? { payload: { ...item.payload, text: message?.content ?? '', images } } : {}), steerAnchor: message?.steerAnchor };
-    });
+export async function listComposerTranscriptSends(target: ComposerQueueTarget): Promise<QueuedComposerSendRecord[]> {
+  return (await composerOwnerRequest('listTranscript', { target })).items;
 }
-/** Recheck after every asynchronous preparation step, immediately before provider admission. */
-export function assertComposerSendClaim(id: string): void {
-  if (readComposerSend(id)?.status !== 'dispatching') throw new Error('The queued message was cancelled or held before execution.');
+export async function assertComposerSendClaim(id: string, claimToken: string): Promise<void> {
+  if (!(await composerOwnerRequest('assertClaim', { id, claimToken })).live) throw new Error('The queued message was cancelled or held before execution.');
 }
-export function admitComposerSend(id: string): boolean {
-  return getSqlite().prepare(`UPDATE composer_send_queue SET admitted_at = ?, updated_at = ?
-    WHERE id = ? AND status = 'dispatching' AND admitted_at IS NULL`).run(Date.now(), Date.now(), id).changes > 0;
+export async function admitComposerSend(id: string, claimToken: string): Promise<boolean> {
+  return (await composerOwnerRequest('admit', { id, claimToken })).changed;
 }
-export function settleComposerSend(id: string, outcome: { status: 'applied' | 'held'; reason?: string }): boolean {
-  return getSqlite().transaction(() => {
-    const changed = getSqlite().prepare(`UPDATE composer_send_queue SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = 'dispatching' AND (? != 'applied' OR admitted_at IS NOT NULL)`)
-      .run(outcome.status, outcome.reason ?? null, Date.now(), id, outcome.status).changes > 0;
-    if (changed && outcome.status === 'applied') compactComposerSend(id);
-    return changed;
-  }).immediate();
+export async function settleComposerSend(id: string, outcome: { status: 'applied' | 'held'; reason?: string }, claimToken: string): Promise<boolean> {
+  return (await composerOwnerRequest('settle', { id, claimToken, ...outcome })).changed;
 }
-export function cancelComposerSend(target: ComposerQueueTarget, id: string): boolean {
-  return getSqlite().transaction(() => {
-    const changed = getSqlite().prepare(`UPDATE composer_send_queue SET status = 'cancelled', reason = 'Removed by operator.', updated_at = ?
-      WHERE id = ? AND repo_path = ? AND thread_id = ? AND (status IN ('queued','held') OR (status = 'dispatching' AND admitted_at IS NULL))`)
-      .run(Date.now(), id, composerQueueRepoKey(target.repoPath), target.threadId).changes > 0;
-    if (changed) compactComposerSend(id);
-    return changed;
-  }).immediate();
+export async function cancelComposerSend(target: ComposerQueueTarget, id: string): Promise<boolean> {
+  return (await composerOwnerRequest('cancel', { target, id })).changed;
 }
-function compactComposerSend(id: string): void {
-  const sqlite = getSqlite();
-  const row = sqlite.prepare('SELECT payload_json, status, intent FROM composer_send_queue WHERE id = ?').get(id) as { payload_json: string; status: string; intent: string };
-  withComposerPayloadRemoval(sqlite, () => sqlite.prepare(`UPDATE composer_send_queue SET payload_hash = COALESCE(payload_hash, ?),
-    payload_bytes = COALESCE(payload_bytes, ?), payload_json = ?, payload_compacted_at = ? WHERE id = ?`)
-    .run(composerPayloadHash(row.payload_json), Buffer.byteLength(row.payload_json),
-      compactComposerPayload(row.payload_json, row.status === 'applied' && row.intent === 'steer-now'), Date.now(), id));
-}
-/** A provider may have received an interrupted dispatch. Never replay uncertain work. */
-export function recoverComposerSends(): void {
-  getSqlite().prepare(`UPDATE composer_send_queue SET status = 'held', reason = 'Delivery interrupted. Inspect the chat before sending again.', updated_at = ? WHERE status = 'dispatching'`).run(Date.now());
-}
-/** Stop also fences a claimed item while server preparation is still awaiting. */
-/** The turn the provider already admitted was delivered; Stop ended it, so it settles instead of blocking later sends. */
-export function holdComposerSends(target: ComposerQueueTarget): void {
-  const sqlite = getSqlite();
-  const repo = composerQueueRepoKey(target.repoPath);
-  sqlite.transaction(() => {
-    const delivered = sqlite.prepare(`SELECT id FROM composer_send_queue
-      WHERE repo_path = ? AND thread_id = ? AND status = 'dispatching' AND admitted_at IS NOT NULL`).all(repo, target.threadId) as Array<{ id: string }>;
-    for (const { id } of delivered) settleComposerSend(id, { status: 'applied', reason: 'Chat stopped.' });
-    sqlite.prepare(`UPDATE composer_send_queue SET status = 'held', reason = 'Chat stopped.', updated_at = ?
-      WHERE repo_path = ? AND thread_id = ? AND status IN ('queued','dispatching')`).run(Date.now(), repo, target.threadId);
-  }).immediate();
+/** Operator Stop is intentionally target-wide; executor failures never use it. */
+export async function holdComposerSends(target: ComposerQueueTarget): Promise<void> {
+  await composerOwnerRequest('hold', { target });
 }

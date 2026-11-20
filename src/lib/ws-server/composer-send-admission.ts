@@ -12,9 +12,11 @@ export function immediateComposerSendPending(target: Target): boolean {
 export async function withImmediateComposerSend(target: Target, send: () => Promise<void>): Promise<void> {
   const key = keyFor(target);
   if (preparing.has(key)) throw new Error('This chat is preparing another message. Use Send next.');
-  if (listQueuedComposerSends(target).length) throw new Error('This chat has saved messages ahead of this one. Use Send next or remove the held message.');
   preparing.add(key);
-  try { await send(); } finally { preparing.delete(key); }
+  try {
+    if ((await listQueuedComposerSends(target)).length) throw new Error('This chat has saved messages ahead of this one. Use Send next or remove the held message.');
+    await send();
+  } finally { preparing.delete(key); }
 }
 
 export function orchestratorContinuationAbortKey(repoPath: string, backend: string, agent: string, threadId: string | null): string {

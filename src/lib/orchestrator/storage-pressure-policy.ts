@@ -1,3 +1,4 @@
+import { assertInboxComposerQueueEmpty } from '@/lib/inbox/composer-queue-guard';
 import 'server-only';
 import type { WorkspaceParkingMode } from '@/lib/operator/workspace-parking-defaults';
 
@@ -178,7 +179,9 @@ export async function parkWithFreshPolicy(
       const completed = readLane(candidate.lane.packetId!);
       if (!completed || completed.status !== 'completed') throw new Error('Automatic parking requires a completed lane.');
       const proof = assertSettledCompletedWorkspace(completed);
+      await assertInboxComposerQueueEmpty(proof.subject);
       const assertPolicyCurrent = async () => {
+        await assertInboxComposerQueueEmpty(proof.subject);
         const policy = await readPolicy();
         if (policy) throw new Error(policy);
         const volume = await candidateVolumeRefusal(candidate.volumePath, heldVolumeId, observeVolume);
@@ -250,7 +253,7 @@ async function buildCandidates(
     else if (!repo) refusal = 'repository_not_registered';
     else if (repo.storagePressureParkingDisabled) refusal = 'repository_opted_out';
     if (!refusal && selectedMode === 'pressure') {
-      try { assertSettledCompletedWorkspace(lane); }
+      try { await assertInboxComposerQueueEmpty(assertSettledCompletedWorkspace(lane).subject); }
       catch { refusal = 'completed_settled_owner_required'; }
     }
 

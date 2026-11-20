@@ -1,3 +1,5 @@
+import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
+import { fixtureComposerClaim } from './fixtures/composer-queue-attempt';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -14,8 +16,8 @@ import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-typ
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 const continuation = vi.hoisted(() => ({ calls: [] as Array<{ repoPath: string; message: string }> }));
 vi.mock('@/lib/ws-server/bound-chat-continuation', () => ({
-  runBoundChatContinuation: vi.fn(async (input: { repoPath: string; message: string; admit: () => boolean }) => {
-    input.admit();
+  runBoundChatContinuation: vi.fn(async (input: { repoPath: string; message: string; admit: () => boolean | Promise<boolean> }) => {
+    await input.admit();
     continuation.calls.push({ repoPath: input.repoPath, message: input.message });
   }),
 }));
@@ -53,8 +55,8 @@ describe('a chat with no project', () => {
 
     const { getRepoDispatchAdmission } = await import('@/lib/lane/repo-preflight');
     expect(getRepoDispatchAdmission(scratch)).toEqual({ ok: true, repoPath: scratch });
-    const { runQueuedComposerSend } = await import('@/lib/ws-server/composer-queue-heartbeat');
-    await runQueuedComposerSend(queue.claimNextComposerSend({ repoPath: scratch, threadId: thread })!, { publish: () => {}, registerAbort: () => () => {} });
+    const { runQueuedComposerSend } = await import('./fixtures/composer-queue-executor');
+    await runQueuedComposerSend((await fixtureComposerClaim(queue.claimNextComposerSend({ repoPath: scratch, threadId: thread })))!, { publish: () => {}, registerAbort: () => () => {} });
     expect(continuation.calls).toEqual([{ repoPath: scratch, message: 'Sketch a plan' }]);
 
     // The dispatcher records the user's message against the scratch folder; the chat stays unbound.
@@ -75,3 +77,5 @@ describe('a chat with no project', () => {
     expect((await response.json()).error).toContain('saved chat repository');
   });
 });
+
+installComposerOwnerFixture();
