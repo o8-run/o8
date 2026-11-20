@@ -26,7 +26,6 @@ sha2 = { version = "0.10", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
 unicode-normalization = { version = "0.1", optional = true }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-serde = "1"
 ryu-js = { version = "1.0.3", optional = true }
 toml = { version = "=0.8.23", optional = true }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "net", "io-std", "io-util", "signal", "time", "process", "fs"] }
