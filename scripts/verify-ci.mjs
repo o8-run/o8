@@ -93,6 +93,8 @@ try {
   const expectedNpm = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).packageManager.split('@')[1];
   const npm = spawnSync('npm --version', { shell: true, encoding: 'utf8', env: environment() });
   if (npm.status !== 0 || npm.stdout.trim() !== expectedNpm) throw new Error(`Use npm ${expectedNpm} from packageManager to match CI.`);
+  const native = spawnSync(process.execPath, ['scripts/ci/check-native-modules.cjs'], { cwd: root, env: environment(), stdio: 'inherit' });
+  if (native.status !== 0) throw new Error('Native dependency load check failed');
   const beforeLint = new Set(['lint']);
   for (const check of [...plan.checks].reverse()) {
     if (beforeLint.has(check.id)) check.after.forEach(id => beforeLint.add(id));

@@ -151,6 +151,47 @@ function runStep(step, job, shard, scripts) {
   const testProcess = usesTestProcess(command, scripts);
   return { command, env, timeoutMs, temporaryData, testProcess };
 }
+// Validate the composite exactly before mapping hosted restore/install to the
+// local installed-dependency prerequisite. Never accept arbitrary local actions.
+function withoutNodeModulesCache(root, jobs) {
+  const action = parse(readFileSync(path.join(root, '.github/actions/node-modules-cache/action.yml'), 'utf8'));
+  const steps = action.runs?.steps?.map(({ name, ...step }) => step);
+  const expected = [
+    { id: 'versions', shell: 'bash', run: 'echo "node=$(node --version)" >> "$GITHUB_OUTPUT"\necho "npm=$(npm --version)" >> "$GITHUB_OUTPUT"\necho "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"\n' },
+    { id: 'modules', uses: 'actions/cache@v4', with: {
+      path: 'node_modules',
+      key: "root-npm-ci-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.image }}-${{ steps.versions.outputs.node }}-${{ steps.versions.outputs.npm }}-${{ hashFiles('package-lock.json', 'package.json', '.npmrc', 'scripts/postinstall.mjs', 'patches/**', '.github/actions/node-modules-cache/action.yml') }}",
+    } },
+    { if: "steps.modules.outputs.cache-hit != 'true'", shell: 'bash', run: 'npm ci --prefer-offline' },
+    { shell: 'bash', run: 'node scripts/ci/check-native-modules.cjs' },
+  ];
+  requireCondition(action.runs?.using === 'composite' && isDeepStrictEqual(steps, expected),
+    'node_modules cache action needs a verify:ci equivalent');
+  for (const job of Object.values(jobs)) {
+    const index = job.steps.findIndex(step => step.id === 'versions');
+    if (index !== -1) {
+      const gate = job === jobs['integration-changed'] ? "steps.select.outputs.count != '0'" : null;
+      const actual = job.steps.slice(index, index + 4).map(({ name, ...step }) => {
+        if (gate) {
+          requireCondition(step.if === gate || step.if?.startsWith(`${gate} && `), 'dependency install selection gate changed');
+          if (step.if === gate) delete step.if;
+          else step.if = step.if.slice(gate.length + 4);
+        }
+        return step;
+      });
+      requireCondition(isDeepStrictEqual(actual, expected), 'node_modules inline cache needs a verify:ci equivalent');
+      job.steps.splice(index, 4, { run: 'npm ci --prefer-offline', ...(gate ? { if: gate } : {}) });
+    }
+    for (const step of job.steps) {
+      if (step.uses !== './.github/actions/node-modules-cache') continue;
+      requireCondition(Object.keys(step).every(key => ['uses', 'if'].includes(key)),
+        'node_modules cache options need a verify:ci equivalent');
+      delete step.uses;
+      step.run = 'npm ci --prefer-offline';
+    }
+  }
+}
+
 function selectedSteps(job, shard) {
   return job.steps.filter(step => {
     if (!step.run) return false;
@@ -193,6 +234,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     jobs[id].if = jobs[id].if.slice(0, -suffix.length);
   }
   withoutReuseGate(jobs);
+  withoutNodeModulesCache(root, jobs);
   withoutAuditToolCache(jobs.security);
   for (const id of Object.keys(jobs)) {
     requireCondition(localJobs.includes(id) || Object.hasOwn(hostedJobs, id), `CI job ${id} is missing from verify:ci`);
@@ -301,7 +343,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const expectedSetup = [
     { uses: 'actions/setup-node@v4', with: { 'node-version': setupNodeVersion, cache: 'npm' } },
     { shell: 'bash', run: `npm install -g "$(node -p 'require("./package.json").packageManager')"` },
-    { shell: 'bash', run: 'npm ci --prefer-offline' },
+    { uses: './.github/actions/node-modules-cache' },
     { uses: 'dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c', with: { toolchain: 'stable' } },
     { if: "inputs.headless-tests != 'true'", uses: 'Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32', with: {
       workspaces: 'native/o8-next', key: '${{ inputs.cache-key }}', 'save-if': "${{ github.ref == 'refs/heads/main' }}",
