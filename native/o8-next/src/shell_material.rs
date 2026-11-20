@@ -18,6 +18,15 @@ pub(super) fn background(offscreen: bool) -> WindowBackgroundAppearance {
 }
 
 pub(super) fn background_for(offscreen: bool, reduced: bool) -> WindowBackgroundAppearance {
+    // On Windows, All Glass previously fell through to Opaque, so the glass
+    // theme's translucent fills bled the desktop wallpaper straight under
+    // the text and the veil never rendered (apply_for only installs it for
+    // Blurred/Transparent). GPUI's Blurred backdrop gives the frosted,
+    // darkened root the veil was designed for.
+    #[cfg(target_os = "windows")]
+    if theme::glass() && !offscreen && !reduced {
+        return WindowBackgroundAppearance::Blurred;
+    }
     if cfg!(target_os = "macos") && theme::glass() && !offscreen && !reduced {
         if theme::glass_vivid() {
             // GPUI's own backdrop: blur only, with no material tint over it.
