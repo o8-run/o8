@@ -103,8 +103,8 @@ export function validateComposerQueuePayload(input: unknown): ComposerQueuePaylo
 export async function readComposerSend(id: string): Promise<QueuedComposerSendRecord | null> {
   return (await composerOwnerRequest('get', { id })).item;
 }
-export async function listQueuedComposerSends(target?: ComposerQueueTarget): Promise<QueuedComposerSendRecord[]> {
-  return (await composerOwnerRequest('list', { ...(target ? { target } : {}) })).items;
+export async function listQueuedComposerSends(target?: ComposerQueueTarget, options: { withoutImages?: boolean } = {}): Promise<QueuedComposerSendRecord[]> {
+  return (await composerOwnerRequest('list', { ...(target ? { target } : {}), ...(options.withoutImages ? { withoutImages: true } : {}) })).items;
 }
 export async function listComposerQueueTargets(): Promise<ComposerQueueTarget[]> {
   return (await composerOwnerRequest('listTargets', {})).targets;
@@ -125,8 +125,12 @@ export async function enqueueComposerSend(input: ComposerQueueTarget & {
 }
 /** Held messages fence only work that was already waiting when the hold happened. */
 export async function peekNextComposerSend(target: ComposerQueueTarget): Promise<QueuedComposerSendRecord | null> {
+  return nextComposerSend(await listQueuedComposerSends(target));
+}
+/** Next deliverable row from one listed target; held rows block older work. */
+export function nextComposerSend(items: QueuedComposerSendRecord[]): QueuedComposerSendRecord | null {
   let heldAt = -Infinity;
-  const first = (await listQueuedComposerSends(target)).find(item => {
+  const first = items.find(item => {
     if (item.status !== 'held') return true;
     heldAt = Math.max(heldAt, item.updatedAt);
     return false;

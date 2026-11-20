@@ -138,7 +138,8 @@ it.each(['pi', 'o8'] as const)('admits a queued high steer on an active %s lead 
     } }));
     createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [],
       registerAbort: () => () => {}, publish: () => {} })();
-    await vi.waitFor(async () => expect((await queue.readComposerSend(id))?.status).not.toBe('dispatching'), { timeout: 10_000 });
+    // The owner claim is asynchronous, so wait for settlement, not just "not dispatching".
+    await vi.waitFor(async () => expect(['queued', 'dispatching']).not.toContain((await queue.readComposerSend(id))?.status), { timeout: 10_000 });
     expect((await queue.readComposerSend(id))).toMatchObject({ status: 'applied', admittedAt: expect.any(Number), reason: null });
     expect(readPersistedLlmChat(threadId)?.history.messages).toContainEqual(expect.objectContaining({
       id: `composer-steer-${id}`, role: 'user', content: 'Do this with high effort',

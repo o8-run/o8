@@ -1,7 +1,7 @@
 import { readSteerTranscriptAnchor } from './steer-transcript-anchor';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { backendSwitchRequiresExplicitHandoff } from '@/lib/orchestrator/backend-switch-carry';
-import { claimNextComposerSend, listComposerQueueTargets, peekNextComposerSend,
+import { claimNextComposerSend, listComposerQueueTargets, nextComposerSend,
   listQueuedComposerSends, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
 import type { QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
 import type { ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-origin';
@@ -142,7 +142,10 @@ export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks):
         let attempt: ComposerExecutorAttempt | undefined;
         let item: QueuedComposerSendRecord | undefined;
         try {
-          const steer = (await listQueuedComposerSends(target)).find(row => row.intent === 'steer-now' && row.status === 'queued');
+          // One image-free owner read per target per tick: queued rows can carry
+          // 20 large screenshots, and a claim returns the full item.
+          const rows = await listQueuedComposerSends(target, { withoutImages: true });
+          const steer = rows.find(row => row.intent === 'steer-now' && row.status === 'queued');
           if (steer && !steering.has(key)) {
             const claimed = await claimComposerSteer(steer.id);
             if (claimed.item && claimed.claimToken) {
@@ -159,7 +162,7 @@ export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks):
             continue;
           }
           if (steering.has(key)) continue;
-          const next = await peekNextComposerSend(target);
+          const next = nextComposerSend(rows);
           if (!next || next.status !== 'queued' || active.has(key) || input.isBusy(target.repoPath, originFor(next))) continue;
           const claimed = await claimNextComposerSend(target);
           if (!claimed.item || !claimed.claimToken) continue;

@@ -338,7 +338,8 @@ jobs:
     needs: [reuse]
     # ubuntu-26.04 pulls amd64v3 package variants that the signed APT check rejects (#5140).
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # A cold o8d build for the native composer owner suites takes about 14 minutes.
+    timeout-minutes: 45
     steps:
       - if: needs.reuse.outputs.reuse != 'true'
         uses: actions/checkout@v4

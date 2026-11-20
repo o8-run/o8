@@ -19,7 +19,7 @@ export interface ComposerOwnerParams {
   hold: { target: ComposerQueueTarget };
   cancel: { target: ComposerQueueTarget; id: string };
   get: { id: string; claimToken?: string };
-  list: { target?: ComposerQueueTarget };
+  list: { target?: ComposerQueueTarget; withoutImages?: boolean };
   listTargets: Record<string, never>;
   listTranscript: { target: ComposerQueueTarget };
 }

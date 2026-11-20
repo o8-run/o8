@@ -123,7 +123,8 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
         }
       }
       if (action === 'settle' && readInboxState(subject).settledAt !== beforeSettlement.settledAt) settledSubject = subject;
-      return NextResponse.json({ ok: true, ...inboxProjection(subject, null, undefined, legacyInboxPin(record)) });
+      // Plain data: a settle commit answers with a fresh projection below.
+      return { ok: true, ...inboxProjection(subject, null, undefined, legacyInboxPin(record)) };
     });
     if (committedSubject) {
       await recheckInboxComposerQueueAfterCommit(committedSubject);
@@ -141,7 +142,7 @@ export async function patchInboxSettlement(request: NextRequest, body: Record<st
       }
       return NextResponse.json({ ok: true, ...inboxProjection(subject) });
     }
-    return response;
+    return NextResponse.json(response);
   } catch (error) {
     if (error instanceof InboxMutationError) return NextResponse.json({ error: error.message }, { status: error.status, ...(error.status === 503 ? { headers: { 'Retry-After': '1' } } : {}) });
     console.error('[inbox] Mutation failed', error);

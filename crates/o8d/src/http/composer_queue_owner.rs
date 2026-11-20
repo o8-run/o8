@@ -255,13 +255,15 @@ impl Owner {
             "list" => {
                 let items = if let Some(t) = params.get("target") {
                     let (r, t) = self.key(t)?;
-                    store::list(
-                        &db,
-                        &store::Target {
-                            repo_path: &r,
-                            thread_id: &t,
-                        },
-                    )?
+                    let target = store::Target {
+                        repo_path: &r,
+                        thread_id: &t,
+                    };
+                    if params["withoutImages"] == true {
+                        store::list_summary(&db, &target)?
+                    } else {
+                        store::list(&db, &target)?
+                    }
                 } else {
                     store::list_all(&db)?
                 };

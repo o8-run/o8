@@ -193,8 +193,13 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       expect((await fixture.capability()).steerableIds).toContain(id);
       heartbeat();
       const status = accepted ? 'applied' : ['refused', 'mismatched'].includes(outcome) ? 'queued' : 'held';
-      await vi.waitFor(async () => expect((await queue.readComposerSend(id))?.status).toBe(status), { timeout: 15_000 });
-      expect(fixture.steers()).toHaveLength(1);
+      // Refused and mismatched steers end "queued" as they began; the owner claim is
+      // asynchronous, so also wait for the native attempt and its send-next deferral.
+      const intent = ['refused', 'mismatched'].includes(outcome) ? 'send-next' : 'steer-now';
+      await vi.waitFor(async () => {
+        expect(fixture.steers()).toHaveLength(1);
+        expect(await queue.readComposerSend(id)).toMatchObject({ status, intent });
+      }, { timeout: 15_000 });
       expect(fixture.steers()[0].params).toEqual({ threadId: 'native-thread', expectedTurnId: 'running-turn',
         input: [{ type: 'text', text: fixture.payload.wireMessage, text_elements: [] }], clientUserMessageId: id });
       const item = (await queue.readComposerSend(id))!;

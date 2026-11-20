@@ -92,8 +92,9 @@ function heartbeat() {
     registerAbort: () => () => {}, publish: () => {} });
 }
 async function deliver(tick: () => void, id: string, status = 'applied') {
-  tick();
-  await vi.waitFor(async () => expect((await queue.readComposerSend(id))?.status).toBe(status), { interval: 10 });
+  // Like the production heartbeat, keep ticking: the previous attempt's settle
+  // reply can still be in flight after its row already reads as applied.
+  await vi.waitFor(async () => { tick(); expect((await queue.readComposerSend(id))?.status).toBe(status); }, { interval: 250, timeout: 30_000 });
 }
 beforeAll(async () => {
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -161,7 +162,9 @@ it.each(['current', 'legacy'])('preserves delivered steer transcript text and me
   // Older builds read delivered steer text directly from payload_json.
   // Assert before reopen too, so settlement and startup migration both retain it.
   if (source === 'current') expect((await queue.readComposerSend(id))?.payload.text).toBe(payload(0).text);
-  closeDb(); getSqlite();
+  // Startup compaction belongs to the composer owner, so the legacy row is
+  // migrated when the owner reattaches, as after an app restart.
+  closeDb(); getSqlite(); if (source === 'legacy') await restartComposerOwnerFixture();
   expect((await queue.readComposerSend(id))?.payload).toMatchObject({ text: payload(0).text, wireMessage: '', images: [] });
   const items = (await (await api('GET')).json()).items;
   expect(items[0]).toMatchObject({ id, status: 'applied', payload: { text: payload(0).text } });

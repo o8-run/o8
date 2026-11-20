@@ -73,6 +73,12 @@ pub(crate) fn list(db: &Connection, target: &Target<'_>) -> Result<Vec<Value>, E
     Ok(db.prepare(&format!("SELECT {COLUMNS} FROM composer_send_queue WHERE repo_path=?1 AND thread_id=?2 AND thread_id NOT LIKE 'wsi:%' AND status IN ('queued','dispatching','held') ORDER BY sequence"))?
         .query_map([target.repo_path,target.thread_id],item)?.collect::<Result<_,_>>()?)
 }
+/// Queue order and routing without image bytes, for the executor's per-tick scan.
+pub(crate) fn list_summary(db: &Connection, target: &Target<'_>) -> Result<Vec<Value>, Error> {
+    let columns = COLUMNS.replace("payload_json", "json_set(payload_json,'$.images',json('[]'))");
+    Ok(db.prepare(&format!("SELECT {columns} FROM composer_send_queue WHERE repo_path=?1 AND thread_id=?2 AND thread_id NOT LIKE 'wsi:%' AND status IN ('queued','dispatching','held') ORDER BY sequence"))?
+        .query_map([target.repo_path,target.thread_id],item)?.collect::<Result<_,_>>()?)
+}
 pub(crate) fn peek(db: &Connection, target: &Target<'_>) -> Result<Option<Value>, Error> {
     let mut held_at = i64::MIN;
     for item in list(db, target)? {
@@ -407,20 +413,13 @@ pub(crate) fn enqueue_resolved(
         thread_id: &resolved_thread,
         ..input
     };
-    let mut count = 0;
-    let mut followup_exists = false;
-    {
-        let mut query=tx.prepare("SELECT payload_json FROM composer_send_queue WHERE repo_path=?1 AND thread_id=?2 AND status IN ('queued','dispatching','held') ORDER BY sequence")?;
-        let mut rows = query.query([input.repo_path, input.thread_id])?;
-        while let Some(row) = rows.next()? {
-            let raw: String = row.get(0)?;
-            let saved: Value = serde_json::from_str(&raw).map_err(|_| Error::InvalidPayload)?;
-            count += 1;
-            followup_exists |= saved
-                .get("afterTaskId")
-                .is_some_and(|v| v.as_str().is_some_and(|s| !s.is_empty()));
-        }
-    }
+    // Count in SQLite: queued rows can hold 20 large payloads, and parsing
+    // every one on each admission made a full queue slow to fill.
+    let (count, followup_exists): (i64, bool) = tx.query_row(
+        "SELECT COUNT(*), COALESCE(MAX(json_type(payload_json,'$.afterTaskId')='text' AND json_extract(payload_json,'$.afterTaskId')<>''),0) FROM composer_send_queue WHERE repo_path=?1 AND thread_id=?2 AND status IN ('queued','dispatching','held')",
+        [input.repo_path, input.thread_id],
+        |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0)),
+    )?;
     if payload
         .get("afterTaskId")
         .is_some_and(|v| v.as_str().is_some_and(|s| !s.is_empty()))

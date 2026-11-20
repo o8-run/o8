@@ -1,5 +1,6 @@
 /** Owned persisted fixture only. Exits before o8d starts; opens no listener. */
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -76,12 +77,16 @@ async function main() {
     symlinkSync(repo, join(directory, 'repository-link'), 'junction');
     symlinkSync(nonRepository, join(directory, 'non-repository-link'), 'junction');
   }
-  const { enqueueComposerSend, holdComposerSends } = await import('../../src/lib/orchestrator/composer-queue');
-  enqueueComposerSend({ repoPath: repo, threadId: 'thoughts-review', id: 'fixture-queue-item', intent: 'send-next', payload: {
+  // o8d owns queue writes and is not running yet, so seed its persisted held
+  // row directly in the shape the owner reads at startup.
+  const { composerQueueRepoKey, validateComposerQueuePayload } = await import('../../src/lib/orchestrator/composer-queue');
+  const serialized = JSON.stringify(validateComposerQueuePayload({
     text: 'Fixture queued message', wireMessage: 'Fixture queued message', images: [],
     routing: { backend: 'claude', model: 'claude-code', effort: 'medium', permissionMode: 'full', mode: 'single', pickedMode: 'solo', collide: false },
-  } });
-  holdComposerSends({ repoPath: repo, threadId: 'thoughts-review' });
+  }));
+  getSqlite().prepare(`INSERT INTO composer_send_queue (id, repo_path, thread_id, intent, payload_json, payload_hash, payload_bytes, status, reason, created_at, updated_at)
+    VALUES (?, ?, 'thoughts-review', 'send-next', ?, ?, ?, 'held', 'Chat stopped.', 0, 0)`)
+    .run('fixture-queue-item', composerQueueRepoKey(repo), serialized, createHash('sha256').update(serialized).digest('hex'), Buffer.byteLength(serialized));
   // Fixed fixture times make the corpus reproducible without masking persisted fields.
   getSqlite().prepare('UPDATE composer_send_queue SET created_at = ?, updated_at = ?').run(1790812800000, 1790812800000);
   const { inboxSubject, mutateInboxPreferences, recordInboxConversationEvent } = await import('../../src/lib/inbox/store');

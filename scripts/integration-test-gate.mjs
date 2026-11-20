@@ -58,13 +58,18 @@ if (process.env.CI === 'true' && !process.env.O8D_TEST_BINARY
   && files.some((file) => /O8D_TEST_BINARY|installComposerOwnerFixture/.test(readFileSync(join(root, file), 'utf8')))) {
   const manifest = join(root, 'crates/o8d/Cargo.toml');
   console.log('[integration-gate] building o8d for native composer owner tests');
+  // opt-level 1 keeps the cold build near a debug build's time; an unoptimized
+  // daemon is too slow for the 20 x 3 MiB screenshot ledger proof.
   const build = spawnSync('cargo', ['build', '--locked', '--manifest-path', manifest,
-    '--features', 'experimental-session-reads', '--bin', 'o8d'], { cwd: root, stdio: 'inherit' });
+    '--features', 'experimental-session-reads', '--bin', 'o8d',
+    '--config', 'profile.dev.opt-level=1', '--config', 'profile.dev.debug=0'], { cwd: root, stdio: 'inherit' });
   if (build.status !== 0) {
     console.error('[integration-gate] o8d build failed; native composer owner tests cannot run');
     process.exit(1);
   }
   process.env.O8D_TEST_BINARY = join(root, 'crates/o8d/target/debug/o8d');
+  // The HTTP parity suite reuses this daemon instead of starting its own build.
+  process.env.O8D_HTTP_TEST_BINARY ??= process.env.O8D_TEST_BINARY;
 }
 
 function sleep(ms) {
