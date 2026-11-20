@@ -88,6 +88,7 @@ it.skipIf(!binary)('admits the real authenticated WS path once, preserves the fi
     // persisted transcript. Prove exactly one report landed in the original thread.
     await until(() => reconnect.frames.some(f => f.event === 'status' && f.data?.snapshot === true && f.data?.threadId === threadId), 'Original-thread snapshot missing');
     const snapshot = reconnect.frames.filter(f => f.event === 'status' && f.data?.snapshot === true && f.data?.threadId === threadId).at(-1)!;
+    expect(snapshot.data?.status).toBe('ready');
     const persisted = JSON.parse(readFileSync(historyFile, 'utf8')).messages as Array<{ id: string; role: string; content: string }>;
     const reports = persisted.filter(m => m.role === 'assistant' && m.content === 'Fixture Codex reply.');
     expect(reports).toHaveLength(1);
