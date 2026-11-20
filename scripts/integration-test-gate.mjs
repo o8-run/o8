@@ -51,6 +51,22 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+// Composer queue tests run against the real o8d owner, never a TS substitute.
+// In CI, build it once when a selected file needs it; locally those files skip
+// unless O8D_TEST_BINARY names an already-built daemon.
+if (process.env.CI === 'true' && !process.env.O8D_TEST_BINARY
+  && files.some((file) => /O8D_TEST_BINARY|installComposerOwnerFixture/.test(readFileSync(join(root, file), 'utf8')))) {
+  const manifest = join(root, 'crates/o8d/Cargo.toml');
+  console.log('[integration-gate] building o8d for native composer owner tests');
+  const build = spawnSync('cargo', ['build', '--locked', '--manifest-path', manifest,
+    '--features', 'experimental-session-reads', '--bin', 'o8d'], { cwd: root, stdio: 'inherit' });
+  if (build.status !== 0) {
+    console.error('[integration-gate] o8d build failed; native composer owner tests cannot run');
+    process.exit(1);
+  }
+  process.env.O8D_TEST_BINARY = join(root, 'crates/o8d/target/debug/o8d');
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
