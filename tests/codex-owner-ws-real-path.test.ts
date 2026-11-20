@@ -83,7 +83,15 @@ it.skipIf(!binary)('admits the real authenticated WS path once, preserves the fi
     const row = db.prepare('SELECT payload_json, ingress_json FROM composer_send_queue WHERE id=?').get(id) as { payload_json: string; ingress_json: string | null };
     expect(JSON.parse(row.payload_json).wsSelection).toMatchObject({ model: 'gpt-5.5', thinkingEffort: 'xhigh' }); expect(row.ingress_json).toBeNull();
     reconnect.ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: data, threadId, backend: 'codex', since: 0 }));
-    await until(() => reconnect.frames.some(f => f.channel === 'orchestrator' && JSON.stringify(f).includes('Fixture Codex reply.')), 'Original-thread replay missing');
+    // A settled turn's live events are cleared from the replay buffer by design;
+    // a reconnecting client reconciles from the snapshot's turn truth and the
+    // persisted transcript. Prove exactly one report landed in the original thread.
+    await until(() => reconnect.frames.some(f => f.event === 'status' && f.data?.snapshot === true && f.data?.threadId === threadId), 'Original-thread snapshot missing');
+    const snapshot = reconnect.frames.filter(f => f.event === 'status' && f.data?.snapshot === true && f.data?.threadId === threadId).at(-1)!;
+    const persisted = JSON.parse(readFileSync(historyFile, 'utf8')).messages as Array<{ id: string; role: string; content: string }>;
+    const reports = persisted.filter(m => m.role === 'assistant' && m.content === 'Fixture Codex reply.');
+    expect(reports).toHaveLength(1);
+    expect(persisted[persisted.findIndex(m => m.id === `orch-user-${wire.clientMutationId}`) + 1]?.id).toBe(reports[0].id);
     for (const originalThread of [null, 'chat-42']) {
       const legacy = { ...wire, threadId: originalThread, clientMutationId: `legacy-${originalThread}`, message: 'Legacy fixture.' };
       const before = calls().length; const client = await connect(); client.ws.send(JSON.stringify(legacy));

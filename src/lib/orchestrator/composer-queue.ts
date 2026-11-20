@@ -75,7 +75,7 @@ export function validateComposerQueuePayload(input: unknown): ComposerQueuePaylo
   const routing = payload?.routing;
   if (!payload || typeof payload.text !== 'string' || !payload.text.trim() || payload.text.length > 200_000
     || typeof payload.wireMessage !== 'string' || !payload.wireMessage.trim() || payload.wireMessage.length > 250_000
-    || !routing || !isOrchestratorBackendId(routing.backend) || typeof routing.model !== 'string' || !routing.model.trim() || routing.model.length > 500
+    || !routing || !isOrchestratorBackendId(routing.backend) || typeof routing.model !== 'string' || (routing.model !== '' && !routing.model.trim()) || routing.model.length > 500
     || !isThinkingEffort(routing.effort) || (routing.serviceTier !== undefined && !isOrchestratorServiceTier(routing.serviceTier)) || !isOrchestratorPermissionMode(routing.permissionMode)
     || !['single', 'fleet', 'fusion'].includes(routing.mode) || !isComposerWireMode(routing.pickedMode)
     || typeof routing.collide !== 'boolean' || (routing.projectId !== undefined && (typeof routing.projectId !== 'string' || routing.projectId.length > 256))) throw new Error('The queued message needs a complete routing snapshot.');

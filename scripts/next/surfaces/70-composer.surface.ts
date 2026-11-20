@@ -69,8 +69,11 @@ export default async function register({ repo, dataDir, seeds }: SurfaceContext)
       if (composer && response.ok && (input.route === queue.PATCH || (input.route === queue.POST && JSON.parse(input.body).intent === 'steer-now'))) {
         const { claimComposerSteer } = await import('../../../src/lib/orchestrator/composer-queue');
         const { runQueuedComposerSteer } = await import('../../../src/lib/ws-server/composer-queue-heartbeat');
-        const item = claimComposerSteer((await response.clone().json()).item.id);
-        if (item) await runQueuedComposerSteer(item);
+        const { ComposerExecutorAttempt } = await import('../../../src/lib/ws-server/composer-executor-attempt');
+        const claimed = await claimComposerSteer((await response.clone().json()).item.id);
+        if (claimed.item && claimed.claimToken) {
+          await runQueuedComposerSteer(claimed.item, new ComposerExecutorAttempt(claimed.item.id, claimed.claimToken), claimed.claimToken);
+        }
       }
       if (composer && input.route === queue.POST && response.ok && !responseLost && JSON.parse(input.body).payload?.text === 'Fixture lose response') {
         responseLost = true; return true;

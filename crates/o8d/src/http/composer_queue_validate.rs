@@ -151,7 +151,8 @@ pub(crate) fn normalize(payload: &Value, ingress: bool) -> Result<String> {
     if !text(&payload["text"], 200_000, false)
         || !text(&payload["wireMessage"], 250_000, false)
         || !backend(&r["backend"])
-        || !text(&r["model"], 500, false)
+        // An empty model is the agent-default choice; whitespace is not a model.
+        || !(r["model"].as_str() == Some("") || text(&r["model"], 500, false))
         || !member(
             &r["effort"],
             &[
