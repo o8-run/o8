@@ -24,13 +24,12 @@ export interface ComposerOwner {
 }
 
 /** The o8d that owns the queue: an explicit test binary, else the workspace build.
- * Without one, callers that need the queue fail loudly; others run without it. */
-export function composerOwnerBinary(required: boolean): string | undefined {
+ * Without one the fixture still serves every other surface; queue routes answer
+ * as unavailable, as they do in the app while o8d is down. */
+export function composerOwnerBinary(): string | undefined {
   const binary = process.env.O8D_TEST_BINARY ?? resolve('crates/o8d/target/debug/o8d');
   if (existsSync(binary)) return binary;
-  const build = 'cargo build --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d';
-  if (required) throw Error(`Composer queue owner missing at ${binary}. Build it with: ${build}`);
-  console.error(`[o8-next] No o8d at ${binary}; composer queue routes are unavailable. Build it with: ${build}`);
+  console.error(`[o8-next] No o8d at ${binary}; composer queue routes are unavailable. Build it with: cargo build --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d`);
   return undefined;
 }
 

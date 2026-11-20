@@ -40,7 +40,7 @@ export async function startWorkerServer() {
   const { ensureV71ComposerQueueSchema } = await import('../../src/lib/db/v71-composer-queue-migration');
   ensureV71ComposerQueueSchema(getSqlite());
   // o8d owns the composer queue the worker route reads.
-  const ownerBinary = composerOwnerBinary(false);
+  const ownerBinary = composerOwnerBinary();
   const owner = ownerBinary ? await startComposerOwner(ownerBinary) : undefined;
   // The adjacent transcript surface also requests the existing inventory GET.
   // Fence discovery to this owned store before exposing its production handler.

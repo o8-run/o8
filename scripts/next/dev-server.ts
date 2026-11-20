@@ -49,7 +49,7 @@ async function main() {
   const { getSqlite } = await import('../../src/lib/db');
   ensureV71ComposerQueueSchema(getSqlite());
   // o8d owns the composer queue; every surface reads it through this owner.
-  const ownerBinary = composerOwnerBinary(process.argv.includes('--composer'));
+  const ownerBinary = composerOwnerBinary();
   const owner = ownerBinary ? await startComposerOwner(ownerBinary) : undefined;
   // Complete one-time legacy boot repairs against the empty owned store before
   // adding post-boot recordings (their deliberately tight timestamps are valid).
