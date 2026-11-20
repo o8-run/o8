@@ -52,6 +52,9 @@ describe.skipIf(!binary)('real TS client and Rust composer owner', () => {
     const { handleNativeHttp } = await import('@/lib/ws-server/native-http-routes');
     const key = randomUUID(), epoch = randomUUID();
     upstream = createServer((request, response) => {
+      // Mirror ws-server's bridged front-door responses, which always close the
+      // connection; handleNativeHttp removes it for its pooled admission backhaul.
+      response.setHeader('Connection', 'close');
       void (async () => {
         if (request.url === '/internal/realtime') {
           expect(request.headers.authorization).toBe(`Bearer ${token}`);
