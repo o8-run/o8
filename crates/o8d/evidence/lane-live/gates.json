@@ -1,0 +1,524 @@
+{
+  "kind": "seeded-public-socket-release",
+  "build": {
+    "profile": "release",
+    "binarySha256": "4edd58b674f807487afa85ef885cb03a43319f3e621b57709736d801ef23ba1c",
+    "command": "RUSTC_WRAPPER= cargo build --locked --offline --release --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads"
+  },
+  "summary": [
+    {
+      "route": "/api/lanes",
+      "attempted": 201,
+      "native": 108,
+      "fallback": 93,
+      "differences": 0
+    }
+  ],
+  "auth": [
+    {
+      "index": 0,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "index": 1,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "index": 2,
+      "expected": {
+        "body": {
+          "error": "Read-only worker has no API capability."
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "index": 3,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "index": 4,
+      "expected": {
+        "body": {
+          "detail": "This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token.",
+          "error": "Unauthorized"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 401
+      },
+      "native": false
+    },
+    {
+      "index": 5,
+      "expected": {
+        "body": {
+          "lanes": [
+            {
+              "id": "lane-a",
+              "packetId": null,
+              "status": "paused",
+              "worktreePath": "$FIXTURE_ROOT/not-created"
+            },
+            {
+              "id": "lane-z",
+              "packetId": "packet-fixture",
+              "status": "running",
+              "worktreePath": null
+            },
+            {
+              "id": "lane-\u96ea",
+              "packetId": "packet-other",
+              "status": "failed",
+              "worktreePath": null
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "index": 6,
+      "expected": {
+        "body": {
+          "error": {
+            "code": "live_status_forbidden",
+            "message": "Live status requires an operator or packet-bound worker credential."
+          },
+          "ok": false
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "index": 7,
+      "expected": {
+        "body": {
+          "lanes": [
+            {
+              "id": "lane-a",
+              "packetId": null,
+              "status": "paused",
+              "worktreePath": "$FIXTURE_ROOT/not-created"
+            },
+            {
+              "id": "lane-z",
+              "packetId": "packet-fixture",
+              "status": "running",
+              "worktreePath": null
+            },
+            {
+              "id": "lane-\u96ea",
+              "packetId": "packet-other",
+              "status": "failed",
+              "worktreePath": null
+            }
+          ]
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": "no-store, max-age=0",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "native": true
+    },
+    {
+      "label": "cross-origin-write",
+      "expected": {
+        "body": {
+          "error": "Origin is not allowed"
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "label": "revoked-worker",
+      "expected": {
+        "body": {
+          "error": {
+            "code": "live_status_forbidden",
+            "message": "Live status requires an operator or packet-bound worker credential."
+          },
+          "ok": false
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    },
+    {
+      "label": "forged-private-context",
+      "expected": {
+        "body": {
+          "error": {
+            "code": "live_status_forbidden",
+            "message": "Live status requires an operator or packet-bound worker credential."
+          },
+          "ok": false
+        },
+        "headers": {
+          "allow": null,
+          "cache-control": null,
+          "content-type": "application/json"
+        },
+        "status": 403
+      },
+      "native": false
+    }
+  ],
+  "cliProof": [
+    {
+      "nativeLaunch": false,
+      "exit": 0,
+      "schema": "o8/cli/worker-status/v1",
+      "fields": [
+        "id",
+        "packetId",
+        "status",
+        "worktreePath"
+      ]
+    },
+    {
+      "nativeLaunch": true,
+      "exit": 0,
+      "schema": "o8/cli/worker-status/v1",
+      "fields": [
+        "id",
+        "packetId",
+        "status",
+        "worktreePath"
+      ]
+    }
+  ],
+  "mutation": "$/body/lanes/0: missing from candidate",
+  "schema": {
+    "sql": "CREATE TABLE lanes (\n      id TEXT PRIMARY KEY,\n      project_id TEXT,\n      label TEXT NOT NULL,\n      repo_path TEXT NOT NULL,\n      worktree_path TEXT,\n      branch TEXT NOT NULL,\n      base_branch TEXT NOT NULL,\n      runtime TEXT NOT NULL, model TEXT,\n      session_key TEXT,\n      packet_id TEXT, pr_number INTEGER,\n      status TEXT NOT NULL, outcome TEXT, outcome_note TEXT,\n      ownership TEXT NOT NULL,\n      writer_token TEXT,\n      last_heartbeat_at INTEGER,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      last_event_at TEXT,\n      last_event_label TEXT\n    )"
+  },
+  "timings": [
+    {
+      "native": false,
+      "p50Ms": 20.83557700000165,
+      "p95Ms": 26.61780699999872,
+      "samplesMs": [
+        18.312190999997256,
+        15.15067800000179,
+        15.07273300000088,
+        14.441257999998925,
+        15.514603999999963,
+        13.019054000000324,
+        17.587601999999606,
+        16.597709999998187,
+        16.731087000000116,
+        16.19720999999845,
+        16.237906999998813,
+        18.032061000001704,
+        17.737464999998338,
+        18.469066000001476,
+        15.127619000002596,
+        15.368795000002137,
+        14.276765999999043,
+        15.43590199999744,
+        15.857003999997687,
+        15.750189999998838,
+        19.594466999998986,
+        16.137455000000045,
+        22.77360200000112,
+        17.825604999998177,
+        18.03926599999977,
+        20.034512000001996,
+        17.345038999999815,
+        22.967422999998234,
+        25.903159999998024,
+        25.121769000001223,
+        25.09884299999976,
+        23.644852000001265,
+        24.195167000001675,
+        17.819824000001972,
+        21.875945000003412,
+        23.538766999998188,
+        25.537956000000122,
+        21.3537630000028,
+        22.64318099999946,
+        24.038308999999572,
+        19.03506700000071,
+        22.017008999999234,
+        20.83557700000165,
+        19.471942000000126,
+        19.298165000000154,
+        22.126922999999806,
+        19.359017999999196,
+        20.58524699999907,
+        23.011216999999306,
+        41.450808000001416,
+        21.053957000000082,
+        20.03963300000032,
+        21.91665799999828,
+        26.61780699999872,
+        21.338535000002594,
+        21.50620600000184,
+        24.57592900000236,
+        22.9916000000012,
+        25.754675000000134,
+        21.300638000000617,
+        23.174494999999297,
+        20.924645999999484,
+        21.10700999999972,
+        19.40887400000065,
+        19.494050000001153,
+        21.025884999999107,
+        19.896810000002006,
+        17.11791599999924,
+        22.10946200000035,
+        17.772389999998268,
+        20.011325999999826,
+        17.833776999999827,
+        18.265458000001672,
+        16.939143999999942,
+        18.879015999998956,
+        24.43349600000147,
+        17.00611900000149,
+        17.787365000000136,
+        17.182597999999416,
+        20.820770999998786,
+        31.103147999998328,
+        28.712986999998975,
+        27.042740000000776,
+        25.879673999999795,
+        31.939630999997462,
+        25.336812999998074,
+        21.728203000002395,
+        19.760088999999425,
+        21.56449900000007,
+        22.685081999999966,
+        21.2457239999967,
+        21.050349000001006,
+        23.247778999997536,
+        21.20497299999988,
+        19.54540399999678,
+        21.161525999999867,
+        21.553977000003215,
+        23.18023699999685,
+        24.827666000001045,
+        22.727107999999134
+      ]
+    },
+    {
+      "native": true,
+      "p50Ms": 32.0244789999997,
+      "p95Ms": 48.88434399999824,
+      "samplesMs": [
+        48.72982499999489,
+        75.18122200000653,
+        31.77105400000437,
+        34.83891799999401,
+        36.339044000000285,
+        35.555138999996416,
+        56.95031200000085,
+        30.555349000002025,
+        27.95645499999955,
+        31.598432999999204,
+        31.165164999998524,
+        31.846051000000443,
+        44.95317800000339,
+        38.48745200000121,
+        31.101535000001604,
+        53.58985699999903,
+        40.238165999995545,
+        35.08137799999531,
+        28.874536999996053,
+        30.019004000001587,
+        32.43389600000228,
+        31.59185499999876,
+        48.88434399999824,
+        58.47514800000499,
+        35.76564599999983,
+        34.053413000001456,
+        31.626619000002393,
+        31.768042999996396,
+        41.48384599999554,
+        36.648560999994515,
+        32.904327999996895,
+        33.87313600000198,
+        33.93799399999989,
+        35.89058400000067,
+        46.51191799999651,
+        42.19769900000392,
+        34.43645899999683,
+        35.54985899999883,
+        39.51904700000159,
+        48.66536799999449,
+        24.186655999998038,
+        26.728014000000258,
+        32.86061399999744,
+        27.369817999999213,
+        27.09506899999542,
+        28.66173400000116,
+        33.566994000000705,
+        32.251938000001246,
+        31.489501000003656,
+        27.959987999995064,
+        35.484362000002875,
+        31.886367999999493,
+        24.95081399999617,
+        26.75661800000671,
+        33.417200000003504,
+        29.966229999998177,
+        36.84838299999683,
+        29.091261000001396,
+        31.93704499999876,
+        33.83583699999872,
+        27.677099000000453,
+        30.90217799999664,
+        88.52237099999911,
+        43.859801999999036,
+        25.292827999997826,
+        24.769226000003982,
+        23.474654000005103,
+        24.766303999997035,
+        26.798233000001346,
+        23.507180000000517,
+        27.280700999996043,
+        27.999431999996887,
+        24.888200000001234,
+        25.752637000005052,
+        32.13082000000577,
+        32.277327000003424,
+        26.930288000003202,
+        30.690932000004977,
+        26.908661000001302,
+        29.122537999995984,
+        28.363446000003023,
+        32.58145499999955,
+        25.486633000000438,
+        30.13475999999355,
+        29.496179000001575,
+        29.372905999996874,
+        39.87316099999589,
+        33.01221400000213,
+        32.0244789999997,
+        32.034733000000415,
+        36.69752600000356,
+        41.243570999999065,
+        33.039247000000614,
+        33.52229400000215,
+        34.349678999999014,
+        32.57408599999326,
+        33.81992100000207,
+        28.33800799999881,
+        29.149815999997372,
+        31.203602999994473
+      ]
+    }
+  ],
+  "latency": {
+    "warmups": 10,
+    "samples": 100,
+    "profile": "release",
+    "interpretation": "Synthetic shared Linux host, untraced timing. Native end-to-end is slower; includes the existing Node admission round trip. No installed performance claim."
+  },
+  "failThenPass": {
+    "testFirstCommit": "b41dcb391",
+    "redExit": 1,
+    "failure": "Native route was not reached: /api/lanes?view=live seed=6327 case=0",
+    "greenExit": 0,
+    "frozenExit": 0
+  },
+  "checks": {
+    "cargoAllFeatures": 0,
+    "cargoTests": 30,
+    "typecheckFast": 0,
+    "touchedLint": 0,
+    "originalWorkerModule": {
+      "exit": 0,
+      "tests": 5
+    },
+    "frozen201Requests": 0
+  },
+  "limitations": [
+    "Only the existing live occupancy branch is native. Ordinary reconciliation and all writers remain TypeScript-owned.",
+    "The original caller predicate remains in Node, shared by the handler and private admission. No Rust auth gate or caller grant is introduced.",
+    "The generated request recorder and build inputs are synthetic. Installed and GPUI process evidence is not available."
+  ],
+  "packagingRebase": {
+    "base": "dc855e3a8",
+    "routeModule": 0,
+    "typecheckFast": 0,
+    "touchedLint": 0,
+    "cargoReceiptReused": {
+      "exit": 0,
+      "tests": 30,
+      "rustSourcesAndManifestsUnchanged": true
+    },
+    "preserved": "Packaged helper discovery, settings/mobile admission contexts, existing auth paths and settings window-owner fallback.",
+    "note": "Functional frozen replay on the packaged-daemon base; release samples above are historical and were not remeasured."
+  }
+}

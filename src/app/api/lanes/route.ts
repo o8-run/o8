@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
+import { canReadLiveLaneOccupancy } from '@/lib/lane/live-occupancy';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { requirePanelOrWorkerAuth } from '@/lib/auth/packet-worker-auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
@@ -43,8 +44,7 @@ export async function GET(req: NextRequest) {
   // Resolve authority here too: middleware recognition alone survives revocation.
   if (req.nextUrl.searchParams.get('view') === 'live') {
     const principal = resolveRequestPrincipalContext(req);
-    if (principal.role !== 'operator'
-      && !(principal.role === 'worker' && !principal.readOnly && principal.packetId && principal.tokenId)) {
+    if (!canReadLiveLaneOccupancy(principal)) {
       return NextResponse.json({
         ok: false,
         error: { code: 'live_status_forbidden', message: 'Live status requires an operator or packet-bound worker credential.' },

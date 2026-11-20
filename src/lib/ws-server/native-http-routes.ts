@@ -175,7 +175,13 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         }
         const directivesScope = url.pathname === '/api/cortex/directives' && !denied && !projectDenied
           ? await (await import('./native-directives-context')).nativeDirectivesScope(url) : undefined;
-        const defaultsContext = {
+        const laneLive = url.pathname === '/api/lanes'
+        ? url.searchParams.get('view') === 'live'
+          && (await import('@/lib/lane/live-occupancy')).canReadLiveLaneOccupancy(
+            (await import('@/lib/auth/principal')).resolveRequestPrincipalContext(new NextRequest(url, init)))
+        : undefined;
+      const defaultsContext = {
+        laneLive,
           ...(diffCommentRoute ? { diffCommentAuthority: apiFrontDoorEnabled() } : {}),
           composerQueue, threadList, laneDiffTarget, directivesScope,
           fileContentScope, fileReadTarget, fileAssetTarget, repoSpecTarget,
@@ -253,7 +259,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
           ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
         };
-        response = denied ?? projectDenied ?? ((laneDiffTarget === null || directivesScope === null || threadList === null || composerQueue === null || fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || mobileInbox === null || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+        response = denied ?? projectDenied ?? ((laneDiffTarget === null || directivesScope === null || threadList === null || composerQueue === null || fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || mobileInbox === null || laneLive === false || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
           'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
         } }));
         if (viewerRoute && response.status === 204) {
@@ -269,7 +275,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           response = new Response(JSON.stringify({ version: 1, defaultsContext: { threadList } }), { status: 200,
             headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
         }
-        admission = (!(viewerRoute || composerQueueRoute || threadListRoute) || response.status === 200) && composerQueue !== null && threadList !== null && laneDiffTarget !== null && directivesScope !== null && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(mobileInbox === null) && !(reviewWorkspaceUnselected === false);
+        admission = (!(viewerRoute || composerQueueRoute || threadListRoute) || response.status === 200) && composerQueue !== null && threadList !== null && laneDiffTarget !== null && directivesScope !== null && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(mobileInbox === null) && !(laneLive === false) && !(reviewWorkspaceUnselected === false);
       }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });

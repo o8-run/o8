@@ -28,6 +28,7 @@ mod chat_context_json;
 mod chat_list;
 mod mobile_inbox;
 mod review_workspace;
+mod lane_live;
 mod git_remote;
 mod projects;
 mod queue;
@@ -396,6 +397,7 @@ pub fn native_request_viewer(directory: PathBuf, database: PathBuf, path: &str, 
         return unavailable();
     }
     if diff_comments::matches(path, method) { return dispatch(&store,path,&params,method,body); }
+    if path == "/api/lanes" { return lane_live::read(&store, &params); }
     if path == "/api/mobile/inbox" { return mobile_inbox::read(&store); }
     if path == "/api/review/workspace" { return review_workspace::read(&store); }
     // A missing JSON file can still be a network thread. Its agent-bus
