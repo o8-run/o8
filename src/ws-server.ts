@@ -292,7 +292,7 @@ import {
   optionalRealtimeAudienceMatches,
 } from './lib/realtime/negotiation';
 import { MOBILE_CLOSE } from './lib/ws-server/device-e2ee-policy';
-import { isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
+import { conflictScanRequestHeaders, isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
 import { withWsHealthHandler } from './lib/ws-server/handler-activity';
 import { WsWatchdog } from './lib/ws-server/health-watchdog';
 import { coalesceSafetyNetSync, SafetyNetPoll } from './lib/ws-server/safety-net-poll';
@@ -5636,10 +5636,7 @@ function startPollingLoops() {
       const res = await fetchWithRetry(buildNextUrl('/api/worktrees/conflicts', new URLSearchParams({
         repo: process.cwd(),
       }), 'GET'), {
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Authorization': `Bearer ${WS_TOKEN}`,
-        },
+        headers: conflictScanRequestHeaders(WS_TOKEN),
         signal: AbortSignal.timeout(3000),
       });
 

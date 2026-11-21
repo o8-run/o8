@@ -1,3 +1,5 @@
+import { SELF_REQUEST_HEADERS } from '@/lib/background-work/idle-gate';
+
 /**
  * Gate for the ws-server's worktree conflict scan.
  *
@@ -61,4 +63,12 @@ export function shouldRunConflictScan(state: ConflictGateState): boolean {
   // Belt and braces. Even with watchers live, a dropped or unwatched event must
   // not strand the conflict report forever.
   return state.msSinceFullScan >= state.safetyNetMs;
+}
+
+/**
+ * Headers for the scan's request to this server. It is the server asking
+ * itself, so it is marked as background and never keeps the idle gate awake.
+ */
+export function conflictScanRequestHeaders(token: string): Record<string, string> {
+  return { 'Cache-Control': 'no-cache', Authorization: `Bearer ${token}`, ...SELF_REQUEST_HEADERS };
 }

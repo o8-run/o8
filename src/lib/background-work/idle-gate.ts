@@ -24,6 +24,9 @@ export interface IdleGateSignals {
   liveSessions: () => boolean;
 }
 
+/** Headers for a request the server sends to itself, so it never counts as client activity. */
+export const SELF_REQUEST_HEADERS = Object.freeze({ 'x-o8-background': '1' });
+
 export const IDLE_AFTER_MS = 60_000;
 export const CHECK_EVERY_MS = 5_000;
 const SESSION_CACHE_MS = 2_000;

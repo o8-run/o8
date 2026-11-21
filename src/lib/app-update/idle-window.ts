@@ -1,3 +1,4 @@
+import { SELF_REQUEST_HEADERS } from '@/lib/background-work/idle-gate';
 import { inspectCliOperationAdmission, type CliInstallerActivity } from '@/lib/setup/cli-operation-admission';
 import 'server-only';
 import { listWorkLaunches } from './work-launch-admission';
@@ -136,14 +137,15 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
   };
 }
 
-async function readTerminalInventory(): Promise<{
+/** Exported for tests. A background read: the server asking itself, not a client. */
+export async function readTerminalInventory(): Promise<{
   available: boolean;
   sessions: UpdateIdleTerminalSession[];
 }> {
   try {
     const { wsPort } = resolvePortInfo();
     const response = await fetch(`http://127.0.0.1:${wsPort}/terminal-voice-sessions`, {
-      headers: { Authorization: `Bearer ${getOrCreateWsToken()}` },
+      headers: { Authorization: `Bearer ${getOrCreateWsToken()}`, ...SELF_REQUEST_HEADERS },
       cache: 'no-store',
       signal: AbortSignal.timeout(3_000),
     });
