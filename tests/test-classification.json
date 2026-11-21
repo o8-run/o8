@@ -6430,6 +6430,14 @@
       ]
     },
     {
+      "path": "tests/orphan-reconcile-unchanged-real-git.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-git"
+      ]
+    },
+    {
       "path": "tests/outsider-waiting-inbox-real-path.test.ts",
       "reasons": [
         "child-process",
