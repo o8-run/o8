@@ -39,6 +39,19 @@ function errorMessage(response: CloseResponse | null | undefined): string {
   return 'Packet close was rejected.';
 }
 
+/**
+ * A packet that never launched has no lane to resolve through. An explicit id
+ * that matches no lane goes to the server as is; the server refuses an unknown packet.
+ */
+async function closeTargetPacketId(target: string | null): Promise<string> {
+  try {
+    return requirePacketId(await resolvePacketTarget(target), 'close');
+  } catch (error) {
+    if (target && error instanceof CliError && error.code === 'packet_target_not_found') return target;
+    throw error;
+  }
+}
+
 export async function runPacketClose(
   mode: OutputMode,
   rest: string[],
@@ -59,7 +72,7 @@ export async function runPacketClose(
     );
   }
 
-  const packetId = requirePacketId(await resolvePacketTarget(args.target), 'close');
+  const packetId = await closeTargetPacketId(args.target);
   const cfg = resolveConfig();
   const res = await fetchCorrelatedPacketMutation<CloseResponse>(
     cfg,

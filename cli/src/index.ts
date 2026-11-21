@@ -312,6 +312,7 @@ commands:
   mission dispatch     dispatch packets to workers (async; --wait blocks for launch; --watch blocks until review/terminal — the spawner's notification) [--mission <id>]
   mission status       mission + packet state [--mission <id>] [--cost]
   mission stop         interrupt and hold every packet in a mission [--mission <id>]
+  mission archive      close every open packet in a mission (--mission <id> --reason adopted_elsewhere|superseded|spec_changed|wontfix [--note text] [--acknowledge-missing-worktree])
   mission wait         block until a packet hits a review/terminal state [--timeout <milliseconds|5m|90s> --poll]
   mission tail         stream packet status transitions until terminal [--timeout <milliseconds|5m|90s> --poll]
   mcp install          install/print the o8 MCP config (--claude-code | --cursor | --opencode | --print)

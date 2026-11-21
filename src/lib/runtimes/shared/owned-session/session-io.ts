@@ -178,7 +178,7 @@ export function createOwnedSessionIo({
         invalidateFleetCache();
         return { archived: true, archivePath, note: 'Session already archived.' };
       }
-      return { archived: false, note: 'Session was not found.' };
+      return { archived: false, missing: true, note: 'Session was not found.' };
     }
 
     if (session.controlledTask && (!session.recentRuns.length

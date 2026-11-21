@@ -15,7 +15,7 @@ import {
   liveWorkerSessionLanes,
 } from '@/lib/lane/worker-session-state';
 import {
-  archiveLaneSessionsConfirmed,
+  archiveLaneSessions,
   killLaneSessionsConfirmed,
   LaneSessionArchiveUnconfirmedError,
 } from '@/lib/lane/reap-sessions';
@@ -216,8 +216,11 @@ async function markPacketClosed(
   guard: PacketLifecycleGuard,
   closedAt: string,
   worktreeCleanup: 'missing' | 'removed' | 'preserved',
+  /** Recorded on a packet that has no lane to carry its disposition. */
+  completionSummary?: string,
 ): Promise<PacketCloseFinalization> {
   const archive = (packet: OrchestratorPacket) => {
+    if (completionSummary) packet.completionSummary = completionSummary;
     packet.status = 'archived';
     packet.queueState = 'held';
     packet.operatorStopped = true;
@@ -373,6 +376,9 @@ async function closePacketUnmergedUnlocked(input: {
     persistedLanes,
   );
   const lane = lanesToClose.at(-1) ?? findLatestLaneByPacket(input.packetId) ?? null;
+  if (!lane && packetNeverLaunched(guard.previousPacket)) {
+    return closeNeverLaunchedPacket(guard, input.packetId, rawDisposition, note);
+  }
   if (!lane) {
     await restorePacketLifecycleGuard(guard);
     return {
@@ -587,7 +593,18 @@ async function closePacketUnmergedUnlocked(input: {
       }
     }
     try {
-      await archiveLaneSessionsConfirmed(lanesToClose.filter((candidate) => !survivorLaneIds.has(candidate.id) && !orphanLaneIds.has(candidate.id)));
+      // A worker whose exit is confirmed and whose session files are absent has
+      // nothing left to archive; record that and close.
+      const archive = await archiveLaneSessions(lanesToClose.filter((candidate) => !survivorLaneIds.has(candidate.id) && !orphanLaneIds.has(candidate.id)));
+      const failures = archive.failures.filter((failure) => !failure.missing);
+      if (failures.length > 0) throw new LaneSessionArchiveUnconfirmedError({ ...archive, failures });
+      for (const absent of archive.failures.filter((failure) => failure.missing)) {
+        if (persistedLanes.some((candidate) => candidate.id === absent.laneId)) {
+          recordLaneEvent(absent.laneId, 'update', 'system', {
+            code: 'session_files_absent', packetId: input.packetId, sessionKey: absent.sessionKey,
+          });
+        }
+      }
     } catch (error) {
       if (!(error instanceof LaneSessionArchiveUnconfirmedError)) throw error;
       await restoreDetachedSessions();
@@ -751,6 +768,53 @@ async function closePacketUnmergedUnlocked(input: {
       error,
     };
   }
+}
+
+/** No lane record and no binding: the packet was never launched. */
+function packetNeverLaunched(packet: OrchestratorPacket): boolean {
+  return !packet.lane?.laneId && !packet.lane?.sessionKey && !packet.lane?.worktreePath
+    && !findLatestLaneByPacket(packet.id);
+}
+
+/** A never-launched packet has no worker, checkout or branch to retire: archive it with its disposition. */
+async function closeNeverLaunchedPacket(
+  guard: PacketLifecycleGuard,
+  packetId: string,
+  disposition: CloseUnmergedDisposition,
+  note: string,
+): Promise<CloseUnmergedResult> {
+  const outcomeNote = `${closeUnmergedOutcomeNote({ disposition, note })} The packet never launched.`;
+  const finalization = await markPacketClosed(guard, new Date().toISOString(), 'preserved', outcomeNote);
+  if (!finalization.closed) {
+    await restorePacketLifecycleGuard(guard);
+    return {
+      ok: false,
+      code: 'close_failed',
+      message: `Packet ${packetId} close finalization refused by ${finalization.store} state (${finalization.reason}).`,
+      error: { store: finalization.store, reason: finalization.reason },
+      status: 409,
+    };
+  }
+  void requestRealtimeRefresh({ targets: ['global', 'mobileInbox'], fresh: true, reason: 'packet.close_unmerged' });
+  return {
+    ok: true,
+    result: {
+      closed: true,
+      alreadyClosed: false,
+      discarded: true,
+      disposition,
+      laneId: null,
+      packetId,
+      worktreeRemoved: false,
+      worktreeCleanup: 'preserved',
+      stoppedReviewTurns: 0,
+      preservedBranch: null,
+      preservedBranches: [],
+      preservationReceipts: [],
+      preservationFailure: null,
+      note: outcomeNote,
+    },
+  };
 }
 
 export function closePacketUnmerged(input: {
