@@ -200,6 +200,8 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
         crate::parent_quit::install(cx);
         let (sender, receiver) = async_channel::bounded(1);
         let client = client.with_wakeup(sender);
+        // An offscreen window is never in front.
+        crate::foreground::set(!offscreen);
         let handle = open_window(client, file, state, offscreen, cx);
         start_pump(handle, receiver, cx);
         // Development builds only: answer the driver socket, when one is named.
@@ -293,8 +295,11 @@ pub(super) fn open_window(
                 };
                 cx.observe_window_bounds(window, move |_, window, _| resync(window))
                     .detach();
-                cx.observe_window_activation(window, move |_, window, _| {
-                    crate::foreground::set(window.is_window_active());
+                cx.observe_window_activation(window, move |shell: &mut Shell, window, cx| {
+                    // Back in front: refresh once rather than wait for the next poll.
+                    if crate::foreground::set(window.is_window_active()) {
+                        shell.tick(true, window, cx);
+                    }
                     resync(window)
                 })
                 .detach();

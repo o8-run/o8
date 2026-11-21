@@ -42,7 +42,8 @@ pub(super) fn refresh(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
         return;
     }
     state.pending = true;
-    state.next = Some(std::time::Instant::now() + Duration::from_secs(15));
+    state.next =
+        Some(std::time::Instant::now() + crate::foreground::cadence(Duration::from_secs(15)));
     let client = s.client.clone();
     let rx = background(move || {
         client.get::<Value>(

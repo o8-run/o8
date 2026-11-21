@@ -207,7 +207,8 @@ pub fn connect(client: Client, session: String, initial: Size, grid: Arc<Mutex<G
                             if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
                         Err(_) => return Err(()),
                     }
-                    if ping.elapsed() >= Duration::from_secs(20) {
+                    // Behind another app, the server's own pings keep the socket open.
+                    if ping.elapsed() >= Duration::from_secs(20) && crate::foreground::active() {
                         send(&mut socket, json!({"type":"ping"}))?;
                         ping = Instant::now();
                     }

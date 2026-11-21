@@ -199,6 +199,7 @@ impl Client {
         } else {
             request
         };
+        let request = crate::foreground::mark(request, method);
         if let Some(token) = &self.token {
             request.set("Authorization", &format!("Bearer {token}"))
         } else {

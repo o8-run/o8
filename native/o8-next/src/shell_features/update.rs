@@ -682,7 +682,7 @@ fn read(state: &mut State, body: &Value) {
 }
 
 /// Reads the update state about once a minute, and every second while the
-/// native updater installs.
+/// native updater installs and the window is in front.
 fn check(s: &mut Shell, cx: &mut Context<Shell>) {
     let connected = s.connected;
     let state = s.features.get::<State>();
@@ -695,17 +695,14 @@ fn check(s: &mut Shell, cx: &mut Context<Shell>) {
         read_identity(s, cx);
     }
     let state = s.features.get::<State>();
-    let every = if state.phase.is_some() || state.applying {
-        1
-    } else {
-        60
-    };
-    if state.checking
-        || state.reading
-        || state
-            .checked
-            .is_some_and(|at| at.elapsed().as_secs() < every)
-    {
+    let every = crate::foreground::cadence(Duration::from_secs(
+        if state.phase.is_some() || state.applying {
+            1
+        } else {
+            60
+        },
+    ));
+    if state.checking || state.reading || state.checked.is_some_and(|at| at.elapsed() < every) {
         return;
     }
     state.checked = Some(Instant::now());

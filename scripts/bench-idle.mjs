@@ -13,7 +13,13 @@
 // refuses unless --allow-unsandboxed is given.
 //
 // Usage: npm run bench:idle -- [--data ~/.o8] [--settle 120] [--seconds 60]
-//          [--window /path/to/o8-next] [--keep] [--allow-unsandboxed]
+//          [--window /path/to/o8-next] [--window-settle 90] [--keep] [--allow-unsandboxed]
+//
+// The window is the app shell, offscreen, on the copy of the saved shell state
+// (next-shell.json). An offscreen window is never in front, so it marks its
+// reads `x-o8-foreground: 0`. Its startup reads and subscriptions still count
+// as activity, so the measurement starts after --window-settle seconds, past
+// the idle gate's 60 s window.
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -32,6 +38,7 @@ const flag = (name) => args.includes(`--${name}`);
 const sourceData = resolve(option('data', join(homedir(), '.o8')).replace(/^~/, homedir()));
 const settleSeconds = Number(option('settle', '120'));
 const measureSeconds = Number(option('seconds', '60'));
+const windowSettleSeconds = Number(option('window-settle', '90'));
 const windowBinary = option('window', '');
 const sandboxed = platform() === 'darwin';
 if (!sandboxed && !flag('allow-unsandboxed')) {
@@ -175,11 +182,12 @@ async function main() {
     const quiet = await measure('no clients', server.pid, dataDir);
     let windowed = null;
     if (windowBinary) {
-      window = spawn(windowBinary, ['--enable-next', '--server', `http://127.0.0.1:${apiPort}`, '--offscreen'], {
+      window = spawn(windowBinary, ['--enable-next', '--app-shell', '--shell-state', join(dataDir, 'next-shell.json'),
+        '--server', `http://127.0.0.1:${apiPort}`, '--offscreen'], {
         env: { ...process.env, O8_DATA_DIR: dataDir, O8_NEXT_API_TOKEN: readFileSync(join(dataDir, 'ws-token'), 'utf8').trim() },
         stdio: 'ignore',
       });
-      await sleep(30_000);
+      await sleep(windowSettleSeconds * 1000);
       windowed = await measure('one offscreen window', server.pid, dataDir);
     }
     const scan = scanBackgroundLoops();

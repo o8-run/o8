@@ -97,7 +97,7 @@ fn poll(s: &mut Shell, cx: &mut Context<Shell>) {
     if state.reading
         || state
             .checked
-            .is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+            .is_some_and(|at| at.elapsed() < crate::foreground::cadence(Duration::from_secs(2)))
     {
         return;
     }
