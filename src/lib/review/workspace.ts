@@ -49,6 +49,7 @@ const CHANGED_FILES_CACHE_TTL_MS = 30_000;
 
 // Full snapshot cache — prevents repeated git/gh spawns from mobile inbox and API routes
 const REVIEW_SNAPSHOT_TTL_MS = 20_000;
+const REVIEW_SNAPSHOT_MAX_ENTRIES = 16;
 const _reviewSnapshotCache = new Map<string, { snapshot: WorkflowReviewSnapshot; cachedAt: number }>();
 const _reviewSnapshotInflight = new Map<string, Promise<WorkflowReviewSnapshot>>();
 
@@ -570,13 +571,26 @@ function reviewSnapshotCacheKey(options: WorkspaceReviewSnapshotOptions) {
 
 const sharedInvalidation = snapshotCacheInvalidation('command-center');
 
+function pruneReviewSnapshots(now: number) {
+  for (const [key, entry] of _reviewSnapshotCache) {
+    if (now - entry.cachedAt >= REVIEW_SNAPSHOT_TTL_MS) _reviewSnapshotCache.delete(key);
+  }
+  while (_reviewSnapshotCache.size > REVIEW_SNAPSHOT_MAX_ENTRIES) {
+    const oldest = _reviewSnapshotCache.keys().next().value;
+    if (oldest === undefined) break;
+    _reviewSnapshotCache.delete(oldest);
+  }
+}
+
 export async function getWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOptions = {}): Promise<WorkflowReviewSnapshot> {
   const fresh = options.fresh ?? false;
   if (sharedInvalidation.changed()) invalidateReviewSnapshotCache();
   const cacheKey = reviewSnapshotCacheKey(options);
-  const now = Date.now();
+  pruneReviewSnapshots(Date.now());
   const cached = _reviewSnapshotCache.get(cacheKey);
-  if (!fresh && cached && now - cached.cachedAt < REVIEW_SNAPSHOT_TTL_MS) {
+  if (!fresh && cached) {
+    _reviewSnapshotCache.delete(cacheKey);
+    _reviewSnapshotCache.set(cacheKey, cached);
     return cached.snapshot;
   }
   if (!fresh) {
@@ -585,7 +599,10 @@ export async function getWorkspaceReviewSnapshot(options: WorkspaceReviewSnapsho
   }
 
   const request = _fetchWorkspaceReviewSnapshot(options).then((snapshot) => {
-    _reviewSnapshotCache.set(cacheKey, { snapshot, cachedAt: Date.now() });
+    const cachedAt = Date.now();
+    _reviewSnapshotCache.delete(cacheKey);
+    _reviewSnapshotCache.set(cacheKey, { snapshot, cachedAt });
+    pruneReviewSnapshots(cachedAt);
     return snapshot;
   }).finally(() => {
     _reviewSnapshotInflight.delete(cacheKey);
