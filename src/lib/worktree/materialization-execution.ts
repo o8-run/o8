@@ -27,7 +27,18 @@ if (!command.includes(path.sep)) {
   command = match;
 }
 process.env.PWD = canonicalPath;
-withO8ChildPolicy(env => process.execve(command, [command, ...args], env), { preserveStamp: expected.preserveCredentialPolicy });
+withO8ChildPolicy(env => {
+  // process.execve is Unix-only (ERR_FEATURE_UNAVAILABLE_ON_PLATFORM on
+  // Windows). Run the validated command as a synchronous child with
+  // inherited stdio and mirror its exit code, which keeps the gate's
+  // validate-then-execute contract on win32.
+  if (process.platform === 'win32') {
+    const { spawnSync } = require('node:child_process');
+    const result = spawnSync(command, args, { stdio: 'inherit', env });
+    process.exit(result.status === null ? 125 : (result.status ?? 125));
+  }
+  return process.execve(command, [command, ...args], env);
+}, { preserveStamp: expected.preserveCredentialPolicy });
 `;
 
 const MATERIALIZATION_REFUSAL_EXIT_CODE = 78;
@@ -188,7 +199,15 @@ process.once('message', async message => {
     if (input.nodeScript) {
       process.argv[1] = JSON.stringify(input.payload);
       await new (Object.getPrototypeOf(async function() {}).constructor)('require', input.nodeScript)(require);
-    } else withO8ChildPolicy(env => process.execve(input.command, [input.command, ...input.args], env), { preserveStamp: input.preserveCredentialPolicy });
+    } else withO8ChildPolicy(env => {
+  // Same Windows constraint as the sibling call above.
+  if (process.platform === 'win32') {
+    const { spawnSync } = require('node:child_process');
+    const result = spawnSync(input.command, input.args, { stdio: 'inherit', env });
+    process.exit(result.status === null ? 125 : (result.status ?? 125));
+  }
+  return process.execve(input.command, [input.command, ...input.args], env);
+}, { preserveStamp: input.preserveCredentialPolicy });
   } catch (error) { process.stderr.write(String(error.message) + '\n'); process.exitCode = 1; }
 });
 process.send({ phase: 'ready' });
