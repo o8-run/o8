@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
 import { findLaneByPacket, findLaneByRepoAndBranch } from '@/lib/lane/registry';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
-import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
+import { listDurablePacketsWithId } from '@/lib/orchestrator/mission-registry';
 import type {
   OrchestratorPacket,
   OrchestratorPacketStorageAdmission,
@@ -619,9 +619,9 @@ export async function resolveDurablePacketStorageOwner(
     }
     return { liveness: 'unknown', source: 'managed-worktree-process', evidence: probe.detail };
   }
-  const matches = (durablePackets ?? listMissionRegistryEntries({ includeArchived: true })
-    .flatMap((entry) => entry.mission.packets))
-    .filter((packet) => packet.id === reservation.ownerId);
+  const matches = durablePackets
+    ? durablePackets.filter((packet) => packet.id === reservation.ownerId)
+    : listDurablePacketsWithId(reservation.ownerId);
   if (matches.length !== 1) {
     return {
       liveness: 'unknown',

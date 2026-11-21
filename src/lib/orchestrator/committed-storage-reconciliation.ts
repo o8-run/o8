@@ -6,7 +6,7 @@ import { getSqlite } from '@/lib/db';
 import { listLanes } from '@/lib/lane/registry';
 import { isLaneTerminal } from '@/lib/lane/terminal-states';
 import type { LaneStatus } from '@/lib/lane/types';
-import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
+import { listDurablePacketsWithId } from '@/lib/orchestrator/mission-registry';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import {
@@ -33,11 +33,6 @@ export interface CommittedStorageReconciliationResult {
   held: number;
 }
 
-function durablePackets(): OrchestratorPacket[] {
-  return listMissionRegistryEntries({ includeArchived: true })
-    .flatMap((entry) => entry.mission.packets);
-}
-
 /**
  * A committed row describes storage that survived launch, so owner death alone
  * is insufficient. Release requires terminal or absent durable ownership plus
@@ -62,8 +57,9 @@ export async function resolveCommittedPacketStorageOwner(
     };
   }
 
-  const packets = (dependencies.packets ?? durablePackets())
-    .filter((packet) => packet.id === reservation.ownerId);
+  const packets = dependencies.packets
+    ? dependencies.packets.filter((packet) => packet.id === reservation.ownerId)
+    : listDurablePacketsWithId(reservation.ownerId);
   if (packets.length > 1) {
     return {
       liveness: 'unknown',
