@@ -17,6 +17,9 @@
  *      looping forever.
  */
 
+import { readFileSync, statSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
+
 import { getSqlite } from '@/lib/db';
 import { recordLaneEvent } from './events';
 import { listLanes } from './registry';
@@ -146,6 +149,61 @@ async function reconcileLane(
     requeue: requeues + 1,
   });
   result.reviewsRequeued += 1;
+}
+
+function fileStamp(path: string): string {
+  try {
+    const stat = statSync(path);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return '-';
+  }
+}
+
+/** HEAD and its reflog for a worktree, read from files: a commit, reset or checkout changes them. */
+function worktreeHeadStamp(worktree: string): string {
+  let gitDir = join(worktree, '.git');
+  try {
+    if (statSync(gitDir).isFile()) {
+      const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(gitDir, 'utf8'))?.[1]?.trim();
+      if (pointer) gitDir = isAbsolute(pointer) ? pointer : resolve(worktree, pointer);
+    }
+  } catch {
+    return '-';
+  }
+  let head = '';
+  try { head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim(); } catch { /* missing */ }
+  return `${head}:${fileStamp(join(gitDir, 'logs', 'HEAD'))}`;
+}
+
+/**
+ * Everything a stall pass reads, as one string: lanes and lane events, the
+ * review queue, approvals, and the HEAD of each reviewing lane's worktree.
+ */
+export function reviewStallInputs(): string {
+  const db = getSqlite();
+  const row = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at), '') FROM lanes) AS lanes,
+      (SELECT COALESCE(MAX(rowid), 0) FROM lane_events) AS events,
+      (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at), '') FROM review_queue) AS queue
+  `).get() as Record<string, string | number>;
+  const reviewing = db.prepare(`
+    SELECT id, worktree_path, repo_path, packet_id, session_key FROM lanes WHERE status = 'reviewing' ORDER BY id
+  `).all() as Array<{ id: string; worktree_path: string | null; repo_path: string; packet_id: string | null; session_key: string | null }>;
+  // Only the approvals a pass reads (by lane, packet or session), through their
+  // indexes: scanning the whole table reads every stored diff.
+  const approvals = reviewing.map((lane) => {
+    const found = db.prepare(`
+      SELECT COUNT(*) AS n, COALESCE(MAX(updated_at), 0) AS at FROM approvals
+      WHERE lane_id = ? OR packet_id = ? OR session_key = ?
+    `).get(lane.id, lane.packet_id ?? '', lane.session_key ?? '') as { n: number; at: number };
+    return `${found.n}:${found.at}`;
+  });
+  const heads = reviewing.map((lane, index) => (
+    `${lane.id}=${worktreeHeadStamp(lane.worktree_path || lane.repo_path)}/${approvals[index]}`
+  ));
+  return [row.lanes, row.events, row.queue, ...heads].join('|');
 }
 
 export async function reconcileReviewStalls(): Promise<ReviewStallReconcileResult> {
