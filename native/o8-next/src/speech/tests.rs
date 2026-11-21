@@ -212,7 +212,7 @@ fn speech_whisper_hearing_nothing_is_empty() {
 }
 
 #[test]
-fn speech_spoken_cancel_is_dropped() {
+fn speech_cancel_from_polish_is_dropped() {
     let fake = Fake::new("dropped");
     let stub = Arc::new(Stub {
         polished: Some(Ok(Polished {
@@ -221,10 +221,54 @@ fn speech_spoken_cancel_is_dropped() {
         })),
         ..Stub::new()
     });
-    let mut speech = Speech::new(fake.launch(&[("FAKE_FINAL", "scratch that")]), stub);
+    // The server cancels what is left after "undo" removes the last word.
+    let mut speech = Speech::new(fake.launch(&[("FAKE_FINAL", "hello undo")]), stub);
     let id = listen(&mut speech, None);
     speech.stop(id);
     assert_eq!(until_end(&speech, id).last(), Some(&Update::Dropped));
+}
+
+#[test]
+fn speech_spoken_cancel_is_dropped_when_polish_is_unreachable() {
+    let fake = Fake::new("dropped-offline");
+    let stub = Arc::new(Stub {
+        polished: Some(Err("Polish could not reach the o8 server.".into())),
+        ..Stub::new()
+    });
+    let mut speech = Speech::new(
+        fake.launch(&[("FAKE_FINAL", "Scratch that.")]),
+        stub.clone(),
+    );
+    let id = listen(&mut speech, None);
+    speech.stop(id);
+    let updates = until_end(&speech, id);
+    assert_eq!(updates.last(), Some(&Update::Dropped));
+    assert!(!updates.contains(&Update::Phase(Phase::Polishing)));
+    assert!(stub.calls().is_empty(), "{:?}", stub.calls());
+}
+
+#[test]
+fn speech_knows_the_composer_cancel_phrases() {
+    use super::engine::spoken_cancel;
+    for text in [
+        "cancel",
+        "Cancel.",
+        " never mind ",
+        "Nevermind.",
+        "Scratch that.",
+        "forget it",
+        "Forget that.",
+    ] {
+        assert!(spoken_cancel(text), "{text}");
+    }
+    for text in [
+        "please cancel",
+        "scratch that idea",
+        "never",
+        "Cancel the build.",
+    ] {
+        assert!(!spoken_cancel(text), "{text}");
+    }
 }
 
 #[test]

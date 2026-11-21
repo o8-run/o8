@@ -124,3 +124,34 @@ fn speech_tells_a_relaunched_helper_the_saved_microphone_and_locale_again() {
         )
     );
 }
+
+#[test]
+fn speech_returns_the_helper_to_its_own_locale_when_the_saved_one_is_cleared() {
+    let fake = Fake::new("locale-cleared");
+    let dir = saved(
+        &fake,
+        serde_json::json!({"dictation_locale": "en-GB"}),
+        None,
+    );
+    let log = fake.dir.join("stdin.log");
+    let mut launch = fake.launch(&[
+        ("FAKE_FINAL", "hello world"),
+        ("FAKE_LOG", log.to_str().unwrap()),
+    ]);
+    launch.data = Some(dir.clone());
+    let mut speech = Speech::new(launch, Arc::new(Stub::new()));
+    let first = listen(&mut speech, None);
+    speech.stop(first);
+    until_end(&speech, first);
+    std::fs::write(dir.join("dictation.json"), "{}").unwrap();
+    let second = listen(&mut speech, None);
+    speech.stop(second);
+    until_end(&speech, second);
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        format!(
+            "locale:en-GB\nstart:{first}\nstop:{first}\n\
+             locale:en-US\nstart:{second}\nstop:{second}\n"
+        )
+    );
+}
