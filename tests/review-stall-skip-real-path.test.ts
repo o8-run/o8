@@ -1,6 +1,7 @@
 /**
  * The review stall pass is skipped while nothing it reads has changed: lanes,
- * lane events, the review queue, a reviewing lane's approvals and its HEAD.
+ * lane events, the review queue, a reviewing lane's approvals, its HEAD and its
+ * branch and base refs.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -50,7 +51,7 @@ afterAll(() => {
   rmSync(repoDir, { recursive: true, force: true });
 });
 
-it('skips the stall pass until a lane, its approvals, the queue or its HEAD changes', async () => {
+it('skips the stall pass until a lane, its approvals, the queue, its HEAD or its refs change', async () => {
   git(['init', '-q', '-b', 'main']);
   git(['config', 'user.email', 'test@example.com']);
   git(['config', 'user.name', 'Test User']);
@@ -94,9 +95,16 @@ it('skips the stall pass until a lane, its approvals, the queue or its HEAD chan
     await tick();
     expect(passes.count).toBe(4);
 
-    // A full pass still runs every ten minutes with nothing changed.
+    // No timer: ten minutes with nothing changed is still skipped.
     vi.setSystemTime(Date.now() + 10 * 60_000);
     await runReviewRecoveryPass();
+    expect(passes.count).toBe(4);
+
+    // A fetch moves origin's copy of the base, without touching this worktree's HEAD.
+    git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+    await tick();
+    expect(passes.count).toBe(5);
+    await tick();
     expect(passes.count).toBe(5);
   } finally {
     vi.useRealTimers();

@@ -29,14 +29,11 @@ const STALL_RECONCILE_INTERVAL_MS = 30_000;
 let lastStallReconcileAt = 0;
 /**
  * A stall pass reads lanes, lane events, the review queue, approvals and each
- * reviewing lane's HEAD; with 4 reviewing lanes it cost ~300 ms CPU and 36 git
- * spawns every 30 s while nothing changed. Skip it while those inputs match the
- * ones read after the last pass, and run it in full at least this often for
- * anything the stamp cannot see (a branch moved by another worktree).
+ * reviewing lane's HEAD, branch and base refs; with 4 reviewing lanes it cost
+ * ~300 ms CPU and 36 git spawns every 30 s while nothing changed. Skip it while
+ * those inputs match the ones read after the last pass.
  */
-const STALL_FULL_PASS_MS = 10 * 60_000;
 let lastStallInputs: string | null = null;
-let lastStallFullPassAt = 0;
 
 function getDb() {
   return getSqlite();
@@ -316,8 +313,7 @@ export async function runReviewRecoveryPass(): Promise<void> {
       lastStallReconcileAt = now;
       let unchanged = false;
       try {
-        unchanged = lastStallInputs !== null && now - lastStallFullPassAt < STALL_FULL_PASS_MS
-          && reviewStallInputs() === lastStallInputs;
+        unchanged = lastStallInputs !== null && reviewStallInputs() === lastStallInputs;
       } catch {
         // Unreadable inputs: run the pass.
       }
@@ -326,7 +322,6 @@ export async function runReviewRecoveryPass(): Promise<void> {
           await reconcileReviewStalls();
           // Read after the pass so its own writes are not taken for a change.
           lastStallInputs = reviewStallInputs();
-          lastStallFullPassAt = now;
         } catch (error) {
           lastStallInputs = null;
           console.warn('[auto-review] Review stall reconciliation failed:', error);
