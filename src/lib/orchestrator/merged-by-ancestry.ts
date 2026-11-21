@@ -1,7 +1,7 @@
 import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile, spawn } from '@/lib/providers/child-process';
-import { existsSync } from 'node:fs';
-import { basename } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { appendEvent, archiveLane, getLane, getLaneEvents, listLanes, updateLane } from '@/lib/lane/registry';
@@ -118,6 +118,64 @@ async function cachedPatchId(key: string, compute: () => Promise<string | null>)
   }
   patchIdCache.set(key, patchId);
   return patchId;
+}
+
+// A not-merged answer depends only on the candidate's refs and its lane and
+// packet records. Remember what those looked like after each such answer and
+// skip the git pipeline until one of them changes, so an unchanged lane costs
+// no git process per sweep.
+const notMergedFingerprints = new Map<string, string>();
+
+/** A checkout's git directory and shared ref directory, read from disk without spawning git. */
+function gitDirectories(repoPath: string): { gitDir: string; commonDir: string } | null {
+  const dotGit = join(repoPath, '.git');
+  try {
+    if (statSync(dotGit).isDirectory()) return { gitDir: dotGit, commonDir: realpathSync(dotGit) };
+    const pointer = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, 'utf8'));
+    if (!pointer) return null;
+    const gitDir = resolve(repoPath, pointer[1]);
+    let commonDir = gitDir;
+    try {
+      commonDir = resolve(gitDir, readFileSync(join(gitDir, 'commondir'), 'utf8').trim());
+    } catch {
+      // A linked worktree always has one; without it the git dir holds the refs.
+    }
+    return { gitDir, commonDir: realpathSync(commonDir) };
+  } catch {
+    return null;
+  }
+}
+
+function fileStamp(path: string): string {
+  try {
+    const stat = statSync(path);
+    return `${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+  } catch {
+    return '-';
+  }
+}
+
+/**
+ * Everything a not-merged answer was computed from. Ref updates replace the
+ * loose ref file or rewrite packed-refs and append the reflog, so any change
+ * to the branch, the base or origin's copies of them changes a stamp here.
+ * Null when the checkout's git directory cannot be read: then detect runs.
+ */
+function candidateFingerprint(candidate: Candidate): string | null {
+  const directories = gitDirectories(candidate.repoPath);
+  if (!directories) return null;
+  const { gitDir, commonDir } = directories;
+  const refs = [
+    `heads/${candidate.branch}`, `remotes/origin/${candidate.branch}`,
+    `heads/${candidate.baseBranch}`, `remotes/origin/${candidate.baseBranch}`,
+  ];
+  const events = candidate.laneId ? getLaneEvents(candidate.laneId, 1) : [];
+  return JSON.stringify([
+    candidate.repoPath, candidate.branch, candidate.baseBranch, candidate.lane, candidate.packet,
+    events[0]?.id ?? null,
+    fileStamp(join(gitDir, 'HEAD')), fileStamp(join(commonDir, 'packed-refs')),
+    ...refs.flatMap((ref) => [fileStamp(join(commonDir, 'refs', ref)), fileStamp(join(commonDir, 'logs', 'refs', ref))]),
+  ]);
 }
 
 function candidateKey(candidate: Candidate): string {
@@ -265,11 +323,13 @@ function baseFetchIntervalMs(): number {
 async function refreshOriginBase(repoPath: string, baseBranch: string, refreshed: Set<string>): Promise<void> {
   // Worktrees share their repository's refs, so one fetch per repository and
   // base serves every candidate in the same sweep.
-  let repository = repoPath;
-  try {
-    repository = await git(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir'], { timeout: 3_000 });
-  } catch {
-    // An unreadable repository keys on its own path; the fetch below fails too.
+  let repository = gitDirectories(repoPath)?.commonDir ?? repoPath;
+  if (repository === repoPath) {
+    try {
+      repository = await git(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir'], { timeout: 3_000 });
+    } catch {
+      // An unreadable repository keys on its own path; the fetch below fails too.
+    }
   }
   const key = `${repository}\0${baseBranch}`;
   if (refreshed.has(key)) return;
@@ -768,6 +828,8 @@ async function runSweep(): Promise<MergedByAncestrySweepResult> {
   // Drop parked entries for candidates that vanished (archived/merged out) so
   // the negative cache can't grow unbounded across sweeps.
   detectBackoff.prune(candidates.map(candidateKey));
+  const liveKeys = new Set(candidates.map(candidateKey));
+  for (const key of notMergedFingerprints.keys()) if (!liveKeys.has(key)) notMergedFingerprints.delete(key);
   const now = Date.now();
 
   for (const candidate of candidates) {
@@ -794,12 +856,23 @@ async function runSweep(): Promise<MergedByAncestrySweepResult> {
     try {
       const generation = candidate.packet && candidate.laneId
         ? packetReleaseGeneration(candidate.packet, candidate.laneId) : null;
-      const evidence = await detectMergedByAncestry(candidate, refreshedBases);
-      detectBackoff.recordSuccess(key);
-      if (!evidence) {
+      // The base fetch keeps its own interval: it is how merges made outside
+      // o8 arrive, and a moved origin ref changes the fingerprint below.
+      await refreshOriginBase(candidate.repoPath, candidate.baseBranch, refreshedBases);
+      const fingerprint = candidateFingerprint(candidate);
+      if (fingerprint !== null && notMergedFingerprints.get(key) === fingerprint) {
         skipped += 1;
         continue;
       }
+      const evidence = await detectMergedByAncestry(candidate, refreshedBases);
+      detectBackoff.recordSuccess(key);
+      if (!evidence) {
+        if (fingerprint !== null) notMergedFingerprints.set(key, fingerprint);
+        else notMergedFingerprints.delete(key);
+        skipped += 1;
+        continue;
+      }
+      notMergedFingerprints.delete(key);
       if (candidate.lane) {
         const transcriptActivity = await assessOwnedTranscriptActivity(candidate.lane, {
           staleThresholdMs: AUTOMATIC_ARCHIVE_ACTIVITY_WINDOW_MS,
