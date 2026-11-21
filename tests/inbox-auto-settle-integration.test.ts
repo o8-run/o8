@@ -259,7 +259,7 @@ describe('server auto-settle sweep', () => {
 
   it('runs the timed sweep only when its inputs change or an idle settle comes due', async () => {
     const day = 86_400_000;
-    const tabId = await seed('timed-pr');
+    const tabId = await seed('timed-pr', false, Date.now());
     writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
     upsertGitHubPullRequest(pull(7, null));
     attachPullRequestContext(tabId, { host: 'github.com', repositoryId: 1, pullRequestId: 7, number: 7 });
