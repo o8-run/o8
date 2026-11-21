@@ -51,6 +51,7 @@ export function warnLegacyRuntimeConfigs(): void {
 
 /** Read only authenticated o8 destinations; operator-owned files are not inspected. */
 export function assertRuntimeProfilesAvailable(profiles: readonly string[], checkApiSurvivors = true, metadata?: ChildMetadataRedaction): void {
+  if (profiles.length === 0) return;
   if (checkApiSurvivors) assertNoRecordedApiProfileChild(profiles, metadata);
   const materials = providerCredentialMaterials();
   for (const file of records()) {
