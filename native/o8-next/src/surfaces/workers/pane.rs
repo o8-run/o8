@@ -217,11 +217,14 @@ impl Workers {
     }
     /// The desktop's bounded lane-event long poll drives snapshot refreshes.
     /// The periodic scan also discovers packets that have not created a lane yet.
+    /// Behind another app, the scan waits a minute and the long poll pauses;
+    /// back in front, the poll resumes from the last event it saw.
     pub fn tick(&mut self, refresh: bool, cx: &mut Context<Self>) {
-        if refresh || self.last_scan.elapsed() >= Duration::from_secs(5) {
+        if refresh || self.last_scan.elapsed() >= crate::foreground::cadence(Duration::from_secs(5))
+        {
             self.load(cx);
         }
-        if self.polling || self.loading {
+        if self.polling || self.loading || !crate::foreground::active() {
             return;
         }
         self.polling = true;
