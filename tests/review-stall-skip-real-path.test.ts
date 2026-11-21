@@ -88,7 +88,7 @@ it('skips the stall pass until a lane, its approvals, the queue or its HEAD chan
     expect(passes.count).toBe(3);
 
     // A lane event.
-    recordLaneEvent(lane.id, 'fixture_event', 'system', {});
+    recordLaneEvent(lane.id, 'agent_report', 'system', {});
     await tick();
     expect(passes.count).toBe(4);
     await tick();
