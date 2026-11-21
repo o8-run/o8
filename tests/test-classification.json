@@ -4815,6 +4815,12 @@
       ]
     },
     {
+      "path": "tests/mobile-inbox-chat-summary-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-inbox-referee-chips-real-path.test.ts",
       "reasons": [
         "child-process",
