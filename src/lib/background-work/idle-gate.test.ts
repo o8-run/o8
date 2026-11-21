@@ -116,3 +116,17 @@ it('runs every loop once after the last session ends before resting, even a slow
   expect(fast.mock.calls.length).toBe(fastAtRest);
   expect(pausedLoopNames()).toEqual(['fixture-fast', 'fixture-reaper']);
 });
+
+it("does not wake on the conflict scan's request to its own server", async () => {
+  const { conflictScanRequestHeaders } = await import('@/lib/ws-server/conflict-gate');
+  const run = vi.fn();
+  timers.push(recurring('fixture-scan-paused', run, 1_000));
+  vi.advanceTimersByTime(120_000);
+  expect(atRest()).toBe(true);
+  const pausedAt = run.mock.calls.length;
+  const headers = conflictScanRequestHeaders('token');
+  expect(headers['x-o8-background']).toBe('1');
+  noteRequest(headers, 'GET');
+  expect(atRest()).toBe(true);
+  expect(run.mock.calls.length).toBe(pausedAt);
+});
