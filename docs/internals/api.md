@@ -274,7 +274,6 @@ narrow read-only exception.
 | GET | `/api/mobile/automations` | List projected automation schedules and run state. |
 | POST | `/api/mobile/automations/[id]/enabled` | Set enabled with `{ enabled: boolean }`. |
 | POST | `/api/mobile/automations/[id]/run` | Run with `{ clientMutationId: string }` using desktop prechecks. |
-| GET | `/api/mobile/agents` | List coding runtime installation, known sign-in state, and default model; excludes account identifiers. |
 | GET | `/api/mobile/source-control/status` | Read branch, upstream, ahead/behind and file states for sessionKey. |
 | POST | `/api/mobile/source-control/stage` | Stage paths or all in the sessionKey checkout. |
 | POST | `/api/mobile/source-control/unstage` | Unstage paths or all in the sessionKey checkout. |
@@ -284,7 +283,6 @@ narrow read-only exception.
 | POST | `/api/mobile/action` | Execute a mobile-issued runtime action (LLM chat turn, dispatch, approval). |
 | GET | `/api/mobile/activity` | Chronological fleet activity feed (newest-first, capped ~40). |
 | GET | `/api/mobile/bootstrap?fresh=1` | First-load bootstrap snapshot (repos, sessions, layout). |
-| POST | `/api/mobile/chat/send` | Send a mobile chat turn (streams via WS, persists locally). |
 | GET | `/api/mobile/usage/history?range=30d` | Hourly (24h) or local-calendar daily (7d/30d/90d) coding-agent usage at stored list API rates; counts only, cached in memory for 60 seconds. Requires operator bearer until device allowlisted. |
 | GET | `/api/mobile/history?sessionKey=...&limit=...` | Read paginated transcript for a session (LLM chat or runtime tail). |
 | GET | `/api/mobile/inbox?fresh=1&limit=...` | Mobile inbox snapshot (pending approvals, activity items). |
@@ -294,13 +292,10 @@ narrow read-only exception.
 | GET | `/api/mobile/orchestrator/packets?repoPath=...` | List orchestrator packets per repo (mobile-shaped payload). |
 | GET | `/api/mobile/orchestrator/threads` | List recent orchestrator threads. |
 | POST | `/api/mobile/orchestrator/threads` | Create a desktop-owned o8/Claude thread mobile can attach to. |
-| POST | `/api/mobile/push-url` | Fan out a URL push to every connected mobile client over WS. |
 | GET | `/api/mobile/files/list?threadId=...&path=...` | List one checkout directory (or use sessionKey); folders first, ignored entries excluded, capped at 500 with truncated flag. |
 | GET | `/api/mobile/files/content?threadId=...&path=...&startLine=...&endLine=...` | Read checkout text (or use sessionKey); optional inclusive 1-based lines, 256 KiB cap, hidden secrets and binary metadata. |
-| GET | `/api/mobile/review-file?path=...` | Server-side cached review file content. |
 | GET | `/api/mobile/search?q=...` | Universal mobile search across chats, packets, history. |
 | POST | `/api/mobile/sync` | Reconcile mobile-side cache with server (multi-type sync envelope). |
-| GET | `/api/mobile/ws-token` | Return `~/.o8/ws-token` for mobile WS handshake. |
 
 ### `/api/mcp` — Operator MCP streamable-HTTP host (gated)
 

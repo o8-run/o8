@@ -359,28 +359,6 @@ it('resolves provider identities and refuses mixed or wrong repository addresses
   expect((await linksApi.GET(request('GET', undefined, `?repo=fixture/repo-${sequence}&number=7&resolve=1`))).status).toBe(409);
 });
 
-it('gives a paired mobile read the same links and archived thread, but no mutation capability', async () => {
-  const { GET: mobileGet } = await import('@/app/api/mobile/conversation-pr-context/route');
-  const { createHash } = await import('node:crypto');
-  const f = fixture();
-  const token = 'fixture-device-context-read';
-  const { readActiveTokenHashes, writeActiveTokenHashes } = await import('@/lib/mobile/device-token-file');
-  writeActiveTokenHashes([createHash('sha256').update(token).digest('hex')]);
-  expect(readActiveTokenHashes().has(createHash('sha256').update(token).digest('hex'))).toBe(true);
-  persistCanonicalChatHistoryRecord(f.threadId, { ...JSON.parse(readFileSync(getCanonicalChatHistoryPath(f.threadId), 'utf8')), archivedAt: '2026-01-02T00:00:00Z' });
-  await linksApi.POST(request('POST', { threadId: f.threadId, ...f.first, kind: 'import' }));
-  const mobileRequest = (bearer: string, query = `?threadId=${f.threadId}`, method = 'GET') => new NextRequest(`http://localhost/api/mobile/conversation-pr-context${query}`, { method, headers: { authorization: `Bearer ${bearer}`, host: 'localhost' } });
-  const mobile = await mobileGet(mobileRequest(token));
-  expect(mobile.status).toBe(200);
-  const body = await mobile.json();
-  expect(body.result.links).toEqual((await history(f.threadId)).pullRequestContext.links);
-  expect(body.result.thread).toMatchObject({ id: f.threadId });
-  expect(panelGateMiddleware(mobileRequest(token)).headers.get('x-middleware-next')).toBe('1');
-  expect(panelGateMiddleware(mobileRequest(token, '', 'POST')).status).toBe(403);
-  expect((await linksApi.POST(request('POST', { threadId: f.threadId, ...f.second }, '', token))).status).toBe(403);
-  for (const bearer of ['', 'invalid', getOrCreateLocalWorkerToken()]) expect((await mobileGet(mobileRequest(bearer))).status).toBe(403);
-});
-
 it('roundtrips the built CLI and registered MCP tool through the real API and persisted reverse links', async () => {
   const { createServer } = await import('node:http');
   const { spawn } = await import('node:child_process');

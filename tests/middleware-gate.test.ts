@@ -521,7 +521,6 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     ['/api/mobile/devices', 'GET'],
     ['/api/mobile/devices/revoke', 'POST'],
     ['/api/mobile/push-url', 'POST'],
-    ['/api/mobile/ws-token', 'GET'],
     ['/api/mobile/some-future-route', 'POST'],
   ])('denies operator/internal mobile routes to a paired device: %s', (pathname, method) => {
     expect(deviceRequest(pathname, method).status).toBe(403);

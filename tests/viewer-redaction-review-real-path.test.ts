@@ -33,7 +33,6 @@ const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encodi
 const directReads = [
   ['/api/v2/files', () => import('@/app/api/v2/files/route')],
   ['/api/review/file', () => import('@/app/api/review/file/route')],
-  ['/api/mobile/review-file', () => import('@/app/api/mobile/review-file/route')],
   ['/api/panel/file-content', () => import('@/app/api/panel/file-content/route')],
   ['/api/panel/file-diff', () => import('@/app/api/panel/file-diff/route')],
   ['/api/panel/commit-diff', () => import('@/app/api/panel/commit-diff/route')],
