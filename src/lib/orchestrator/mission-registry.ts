@@ -212,6 +212,33 @@ export function findMissionRegistryEntryByPacketId(
   return null;
 }
 
+/** Storage reconciliation needs every owner, including duplicates and archived owners. */
+export function listDurablePacketsWithId(packetId: string): OrchestratorPacket[] {
+  if (!packetId) return [];
+  const needle = JSON.stringify(packetId).slice(1, -1);
+  // Older JSON can encode the same ID with Unicode escapes or escaped slashes.
+  // The normalizer also supplies timestamp-based IDs when older rows omit one.
+  const mayHaveGeneratedId = /^pkt-\d+-\d+$/.test(packetId);
+  const rows = getSqlite().prepare(`
+    SELECT id, mission_state_json, created_at, updated_at, archived_at
+      FROM missions
+     WHERE ? OR instr(mission_state_json, ?) > 0
+        OR instr(mission_state_json, ?) > 0
+        OR instr(mission_state_json, ?) > 0
+     ORDER BY created_at ASC
+  `).iterate(Number(mayHaveGeneratedId), needle, '\\u', '\\/') as Iterable<MissionStateRow>;
+
+  const matches: OrchestratorPacket[] = [];
+  for (const row of rows) {
+    const entry = missionRegistryEntryFromRow(row);
+    if (!entry) continue;
+    for (const packet of entry.mission.packets) {
+      if (packet.id === packetId) matches.push(packet);
+    }
+  }
+  return matches;
+}
+
 export function hasRegistryPendingHeadlessWork(currentMissionId?: string | null) {
   return listActiveMissionRegistryEntries(currentMissionId)
     .some((entry) => missionHasPendingHeadlessWork(entry.mission));

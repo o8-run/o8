@@ -21,7 +21,7 @@ vi.mock('@/lib/orchestrator/store', async (importOriginal) => {
 });
 
 import { getSqlite } from '@/lib/db';
-import { findMissionRegistryEntryByPacketId } from './mission-registry';
+import { findMissionRegistryEntryByPacketId, listDurablePacketsWithId } from './mission-registry';
 
 let clock = 1_000;
 function insertMission(id: string, packetIds: string[], extra: { prompt?: string; archived?: boolean } = {}) {
@@ -77,5 +77,19 @@ describe('finding a mission by packet id', () => {
     expect(findMissionRegistryEntryByPacketId('say "hi" \\ 100%_done')?.id).toBe('quoted');
     expect(findMissionRegistryEntryByPacketId(' padded-id ')?.id).toBe('padded');
     expect(findMissionRegistryEntryByPacketId('100%')).toBeNull();
+  });
+
+  it('keeps ambiguous durable owners without normalizing unrelated missions', () => {
+    for (let index = 0; index < 30; index += 1) insertMission(`m-${index}`, [`unrelated-${index}`]);
+    insertMission('current-owner', ['owner/path', 'owner/path']);
+    insertMission('archived-owner', [], { archived: true });
+    getSqlite().prepare('UPDATE missions SET mission_state_json = ? WHERE id = ?').run(
+      String.raw`{"packets":[{"id":"own\u0065r\/path","title":"Archived owner"}]}`,
+      'archived-owner',
+    );
+
+    expect(listDurablePacketsWithId('owner/path').map((packet) => packet.title))
+      .toEqual(['owner/path', 'owner/path', 'Archived owner']);
+    expect(parsed.count).toBe(2);
   });
 });
