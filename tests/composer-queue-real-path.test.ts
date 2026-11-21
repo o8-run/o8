@@ -87,6 +87,48 @@ describe('durable composer queue API and persisted state', () => {
     } finally { native.mockRestore(); }
   });
 
+  it('delivers a queued steer from the owner\'s queue notice alone, with the timer poll never called', async () => {
+    const backend = (await import('@/lib/lane/orchestrator-backends/registry')).getOrchestratorBackend('pi');
+    const native = vi.spyOn(backend, 'liveSteer').mockImplementation(async (_repo, _message, options) => {
+      await options.beforeAdmit(); return { accepted: true };
+    });
+    const { createComposerQueueHeartbeat } = await import('./fixtures/composer-queue-executor');
+    const heartbeat = createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} }, { onSignal: true });
+    try {
+      const routing = { ...payload.routing, backend: 'pi' as const, model: 'pi', projectId: undefined };
+      expect((await POST(request('POST', { ...target, id: 'queue-signal-steer', intent: 'steer-now', payload: { ...payload, images: [], routing } }))).status).toBe(200);
+      // o8d commits the row and sends its notice over the producer socket; nothing calls heartbeat().
+      await vi.waitFor(() => expect(native).toHaveBeenCalledOnce(), { timeout: 5_000 });
+      await vi.waitFor(async () => expect((await queue.readComposerSend('queue-signal-steer'))?.status).toBe('applied'));
+    } finally { heartbeat.stop(); native.mockRestore(); }
+  });
+
+  it('catches a missed queue notice with the safety poll, and skips the timer call while the queue is quiet', async () => {
+    const backend = (await import('@/lib/lane/orchestrator-backends/registry')).getOrchestratorBackend('pi');
+    const native = vi.spyOn(backend, 'liveSteer').mockImplementation(async (_repo, _message, options) => {
+      await options.beforeAdmit(); return { accepted: true };
+    });
+    const { createComposerQueueHeartbeat } = await import('./fixtures/composer-queue-executor');
+    const heartbeat = createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} }, { onSignal: true, safetyPollMs: 1_000 });
+    try {
+      // One check of the empty queue, then stop listening: the next notice is missed.
+      heartbeat();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      heartbeat.stop();
+      const routing = { ...payload.routing, backend: 'pi' as const, model: 'pi', projectId: undefined };
+      expect((await POST(request('POST', { ...target, id: 'queue-missed-signal', intent: 'steer-now', payload: { ...payload, images: [], routing } }))).status).toBe(200);
+      heartbeat();
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(native).not.toHaveBeenCalled();
+      expect((await queue.readComposerSend('queue-missed-signal'))?.status).toBe('queued');
+      // The safety poll comes due and picks it up.
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      heartbeat();
+      await vi.waitFor(() => expect(native).toHaveBeenCalledOnce(), { timeout: 5_000 });
+      await vi.waitFor(async () => expect((await queue.readComposerSend('queue-missed-signal'))?.status).toBe('applied'));
+    } finally { heartbeat.stop(); native.mockRestore(); }
+  });
+
   it.each([false, true])('fences live preparation when permissions narrow or Stop arrives: %s', async stop => {
     const backend = (await import('@/lib/lane/orchestrator-backends/registry')).getOrchestratorBackend('pi');
     let release!: () => void;

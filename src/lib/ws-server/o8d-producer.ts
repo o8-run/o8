@@ -5,6 +5,7 @@ import { lstat } from 'node:fs/promises';
 import { connect, type Socket } from 'node:net';
 import { nativeCommitNotice } from './native-commit-notice';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import { signalComposerQueueChange } from './composer-queue-signal';
 
 const LIMIT = 1024 * 1024;
 // Stable across producer-object replacement and reconnect, fresh on a WS boot.
@@ -80,6 +81,8 @@ export class O8dProducer {
               if (frameBytes > 16 * 1024) throw Error('Oversized commit notice');
               const notice = nativeCommitNotice(value, this.epoch);
               if (!notice || publishing >= 32) throw Error('Invalid commit notice');
+              // o8d added, promoted, cancelled or held a queued message: check now.
+              if (notice.mutation.action === 'composer-queue') signalComposerQueueChange();
               publishing++;
               // Node assigns the canonical producer sequence through its existing
               // publisher. Failure cannot change the already committed write.

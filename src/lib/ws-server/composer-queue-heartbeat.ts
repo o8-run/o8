@@ -18,6 +18,8 @@ import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registr
 import { checkComposerQueuePrecondition } from '@/lib/orchestrator/composer-queue-precondition';
 import { permissionModeRank } from '@/lib/orchestrator/permission-mode';
 import { claimComposerSteer } from '@/lib/orchestrator/composer-queue';
+import { composerOwnerSignalsAvailable } from '@/lib/orchestrator/composer-owner-client';
+import { onComposerQueueSignal } from './composer-queue-signal';
 import { appendMobileOrchestratorUserMessage } from '@/lib/mobile/orchestrator-thread-history';
 import { ComposerExecutorAttempt, ComposerAttemptUncertain } from './composer-executor-attempt';
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
@@ -121,11 +123,31 @@ export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hook
 
 function targetFor(item: QueuedComposerSendRecord) { return { repoPath: item.repoPath, threadId: item.threadId }; }
 
-export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks): () => void {
+/** With o8d's queue notices, a quiet queue is only rechecked this often, to catch a missed notice. */
+export const COMPOSER_QUEUE_SAFETY_POLL_MS = 60_000;
+
+export interface ComposerQueueHeartbeat {
+  (): void;
+  /** Stop listening for queue notices. */
+  stop(): void;
+}
+
+/**
+ * The heartbeat's timer call checks the queue only while a message is waiting
+ * or running, or once a minute as a safety net. A queue notice from o8d (or a
+ * finished send) checks it at once, so a new message starts sooner than the
+ * old 5 s poll. Without o8d attached there are no notices: every call checks.
+ */
+export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks,
+  options: { onSignal?: boolean; safetyPollMs?: number } = {}): ComposerQueueHeartbeat {
   // Recovery belongs to the daemon's producer attach, never a heartbeat object.
   const active = new Set<string>();
   const steering = new Set<string>();
+  const safetyPollMs = options.safetyPollMs ?? COMPOSER_QUEUE_SAFETY_POLL_MS;
   let ticking = false;
+  let again = false;
+  let waiting = true;
+  let lastTickAt = 0;
   const failed = async (item: QueuedComposerSendRecord, attempt: ComposerExecutorAttempt, error: unknown) => {
     if (error instanceof ComposerAttemptUncertain || error instanceof ComposerOwnerUnknownOutcome) return;
     const reason = error instanceof Error ? error.message : 'Queued message failed.';
@@ -134,8 +156,10 @@ export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks):
       : item.intent === 'steer-now' ? `Steer unconfirmed; queued for inspection. ${reason}` : reason);
   };
   const tick = async () => {
-    if (ticking) return;
+    if (ticking) { again = true; return; }
     ticking = true;
+    lastTickAt = Date.now();
+    let queued = false;
     try {
       for (const target of await listComposerQueueTargets()) {
         const key = `${target.repoPath}\0${target.threadId}`;
@@ -145,6 +169,7 @@ export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks):
           // One image-free owner read per target per tick: queued rows can carry
           // 20 large screenshots, and a claim returns the full item.
           const rows = await listQueuedComposerSends(target, { withoutImages: true });
+          if (rows.some(row => row.status === 'queued')) queued = true;
           const steer = rows.find(row => row.intent === 'steer-now' && row.status === 'queued');
           if (steer && !steering.has(key)) {
             const claimed = await claimComposerSteer(steer.id);
@@ -157,7 +182,7 @@ export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks):
               void runQueuedComposerSteer(item, running, claimed.claimToken)
                 .catch(error => failed(claimed.item!, running, error))
                 .catch(() => { /* Failed owner response: leave the attempt for recovery. */ })
-                .finally(() => steering.delete(key));
+                .finally(() => { steering.delete(key); run(); });
             }
             continue;
           }
@@ -177,15 +202,31 @@ export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks):
           }, running).then(() => running.settle('applied'))
             .catch(error => failed(claimed.item!, running, error))
             .catch(() => { /* Unknown settlement never starts another provider turn. */ })
-            .finally(() => active.delete(key));
+            .finally(() => { active.delete(key); run(); });
         } catch (error) {
+          queued = true;
           if (item && attempt) await failed(item, attempt, error).catch(() => {});
           // An unavailable list or claim is never replaced with a local row write.
         }
       }
-    } finally { ticking = false; }
+    } catch (error) {
+      queued = true;
+      throw error;
+    } finally {
+      waiting = queued || active.size > 0 || steering.size > 0;
+      ticking = false;
+      if (again) { again = false; run(); }
+    }
   };
-  return () => { void tick().catch(() => { /* Owner unavailable; retry discovery on the next tick only. */ }); };
+  function run(): void {
+    void tick().catch(() => { /* Owner unavailable; retry discovery on the next tick only. */ });
+  }
+  const stopSignal = options.onSignal ? onComposerQueueSignal(run) : () => {};
+  const heartbeat = (() => {
+    if (!options.onSignal || !composerOwnerSignalsAvailable() || waiting || Date.now() - lastTickAt >= safetyPollMs) run();
+  }) as ComposerQueueHeartbeat;
+  heartbeat.stop = stopSignal;
+  return heartbeat;
 }
 
 /** Reuse the supervisor timer and give explicit queued user messages admission first. */
@@ -195,7 +236,7 @@ export function createChatContinuationHeartbeat(input: SharedWorkerHeartbeatHook
     return immediateComposerSendPending({ repoPath, threadId: origin.threadId })
       || Boolean(lead && ['queued', 'running', 'waiting_workers'].includes(lead.status)) || input.isBusy(readPersistedLlmChat(origin.threadId)?.history.repoPath ?? repoPath, origin);
   } };
-  const queue = createComposerQueueHeartbeat(bound);
+  const queue = createComposerQueueHeartbeat(bound, { onSignal: true });
   const workers = createSharedWorkerHeartbeat(bound);
   return () => { queue(); workers(); };
 }
