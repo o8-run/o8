@@ -1,10 +1,6 @@
 {
   "accepted": [
-    { "id": "GHSA-g3hv-75wg-m249", "package": "minimatch", "reason": "Glob patterns reach it only from the local user, the local agent and lint configuration; parent updates tracked in #6121.", "reviewBy": "2026-12-13" },
-    { "id": "GHSA-238p-pmpm-9mq7", "package": "katex", "reason": "Requires prior prototype pollution; dependency parent migration pending.", "reviewBy": "2026-11-25" },
-    { "id": "GHSA-528h-pc64-c93x", "package": "stream-json", "reason": "Optional wallet dependency; no local server or worker import.", "reviewBy": "2026-11-25" },
-    { "id": "GHSA-hqr4-qq8f-hg3x", "package": "stream-json", "reason": "Locked 1.x parser has no JSONC implementation.", "reviewBy": "2026-11-25" },
-    { "id": "GHSA-mjw6-4jj6-33hc", "package": "stream-json", "reason": "Optional wallet dependency; no local server or worker import.", "reviewBy": "2026-11-25" }
+    { "id": "GHSA-g3hv-75wg-m249", "package": "minimatch", "reason": "Glob patterns reach it only from the local user, the local agent and lint configuration; parent updates tracked in #6121.", "reviewBy": "2026-12-13" }
   ],
   "gitleaks": [
     { "file": "src-tauri/src/agent/tools/claude_sessions.rs", "startLine": 671, "endLine": 671, "rule": "generic-api-key", "sourceSha256": "63b930a46679a9ffb89556852af2fba1c8f2a35d71f3e848795eca9d28e8ce11", "reason": "Transcript redaction fixture under cfg(test); isolated test data, not an account credential.", "reviewBy": "2027-02-21" },
