@@ -122,6 +122,38 @@ export interface CodexAppSyncDeps {
 const lastSeen = new Map<string, string>();
 const recheckAt = new Map<string, number>();
 
+/** The sync's own tick; the first retry after a failure waits this long. */
+export const CODEX_APP_SYNC_RETRY_MS = 4_000;
+export const CODEX_APP_SYNC_MAX_RETRY_MS = 10 * 60_000;
+const OPEN_KEY = '\0open';
+
+/**
+ * Failures back off exponentially, capped, so a broken `codex app-server` (or a
+ * thread it cannot read) is not restarted on every tick. The key is a chat, or
+ * OPEN_KEY when the app-server itself would not start.
+ */
+const failures = new Map<string, { count: number; retryAt: number }>();
+
+function backingOff(key: string, now = Date.now()): boolean {
+  const failure = failures.get(key);
+  return failure !== undefined && now < failure.retryAt;
+}
+
+function noteFailure(key: string, now = Date.now()): void {
+  const count = (failures.get(key)?.count ?? 0) + 1;
+  const delay = Math.min(CODEX_APP_SYNC_RETRY_MS * 2 ** (count - 1), CODEX_APP_SYNC_MAX_RETRY_MS);
+  failures.set(key, { count, retryAt: now + delay });
+}
+
+class ReaderOpenError extends Error {}
+
+/** Tests only. */
+export function resetCodexAppSyncState(): void {
+  lastSeen.clear();
+  recheckAt.clear();
+  failures.clear();
+}
+
 /**
  * Read from a second app-server, a turn still running in the Codex app reports
  * `interrupted` with no reply until it ends (#3628). Such a turn is imported
@@ -138,93 +170,122 @@ export async function syncCodexAppThreads(deps: CodexAppSyncDeps): Promise<Map<s
   } catch {
     return imported;
   }
+  if (backingOff(OPEN_KEY)) return imported;
   let reader: CodexAppThreadReader | null = null;
-  const open = async () => (reader ??= await deps.openReader());
+  const open = async () => {
+    if (reader) return reader;
+    try {
+      reader = await deps.openReader();
+    } catch (error) {
+      noteFailure(OPEN_KEY);
+      throw new ReaderOpenError(error instanceof Error ? error.message : String(error));
+    }
+    failures.delete(OPEN_KEY);
+    return reader;
+  };
   try {
     for (const file of files) {
       const state = readState(join(stateDir(), file));
-      if (!state || deps.isBusy(state)) continue;
-      if (!state.rolloutPath) {
-        state.rolloutPath = await (await open()).rolloutPath(state.threadId);
-        if (!state.rolloutPath) continue;
-        writeState(state);
-      }
-      let marker: string;
-      let quiet: boolean;
+      if (!state || deps.isBusy(state) || backingOff(state.tabId)) continue;
       try {
-        const stat = statSync(state.rolloutPath);
-        marker = `${state.threadId}:${stat.mtimeMs}:${stat.size}`;
-        quiet = Date.now() - stat.mtimeMs >= UNSETTLED_TURN_QUIET_MS;
-      } catch {
-        continue;
+        const count = await syncThread(state, open, deps);
+        failures.delete(state.tabId);
+        if (count > 0) imported.set(state.tabId, count);
+      } catch (error) {
+        if (error instanceof ReaderOpenError) throw error;
+        noteFailure(state.tabId);
       }
-      const due = recheckAt.get(state.tabId);
-      if (lastSeen.get(state.tabId) === marker && (due === undefined || Date.now() < due)) continue;
-      const placeholders = new Set(state.placeholderTurnIds);
-      const known = new Set(state.turnIds.filter((id) => !placeholders.has(id)));
-      const turns = (await (await open()).recentTurns(state.threadId, known)).reverse();
-      let changed = 0;
-      let unsettled = false;
-      for (const turn of turns) {
-        const reply = turn.agentText.trim();
-        if (placeholders.has(turn.id)) {
-          if (!reply) continue;
-          upsertMobileOrchestratorAssistantMessage({
-            tabId: state.tabId,
-            repoPath: state.repoPath,
-            messageId: `codex-app-assistant-${turn.id}`,
-            content: reply,
-            backend: 'codex',
-            sessionId: state.threadId,
-            timestampMs: turn.completedAt ? turn.completedAt * 1_000 : undefined,
-          });
-          placeholders.delete(turn.id);
-          changed += 1;
-          continue;
-        }
-        if (known.has(turn.id) || !turn.userText.trim()) continue;
-        const ended = turn.status === 'completed' || turn.status === 'failed';
-        if (!reply && !ended && (turn.status === 'inProgress' || !quiet)) {
-          unsettled = true;
-          continue;
-        }
-        appendMobileOrchestratorUserMessage({
-          tabId: state.tabId,
-          repoPath: state.repoPath,
-          message: turn.userText,
-          messageId: `codex-app-user-${turn.id}`,
-          backend: 'codex',
-          timestampMs: turn.startedAt ? turn.startedAt * 1_000 : undefined,
-        });
-        upsertMobileOrchestratorAssistantMessage({
-          tabId: state.tabId,
-          repoPath: state.repoPath,
-          messageId: `codex-app-assistant-${turn.id}`,
-          content: reply || `(Codex turn ${turn.status} without a reply)`,
-          backend: 'codex',
-          sessionId: state.threadId,
-          timestampMs: turn.completedAt ? turn.completedAt * 1_000 : undefined,
-        });
-        state.turnIds.push(turn.id);
-        if (!reply && !ended) placeholders.add(turn.id);
-        changed += 1;
-      }
-      if (changed > 0) {
-        state.placeholderTurnIds = [...placeholders];
-        writeState(state);
-        imported.set(state.tabId, changed);
-        deps.onImported?.(state.tabId, changed);
-      }
-      lastSeen.set(state.tabId, marker);
-      // An unfinished turn may end without touching its rollout again; look
-      // once more when the quiet window closes.
-      if (unsettled) recheckAt.set(state.tabId, Date.now() + UNSETTLED_TURN_QUIET_MS);
-      else recheckAt.delete(state.tabId);
     }
   } finally {
     await (reader as CodexAppThreadReader | null)?.close();
   }
   return imported;
+}
+
+class ThreadUnreadableError extends Error {}
+
+/** Sync one chat; returns turns imported. Throws when its Codex thread could not be read. */
+async function syncThread(
+  state: CodexAppSyncState,
+  open: () => Promise<CodexAppThreadReader>,
+  deps: CodexAppSyncDeps,
+): Promise<number> {
+  if (!state.rolloutPath) {
+    state.rolloutPath = await (await open()).rolloutPath(state.threadId);
+    if (!state.rolloutPath) throw new ThreadUnreadableError(state.threadId);
+    writeState(state);
+  }
+  let marker: string;
+  let quiet: boolean;
+  try {
+    const stat = statSync(state.rolloutPath);
+    marker = `${state.threadId}:${stat.mtimeMs}:${stat.size}`;
+    quiet = Date.now() - stat.mtimeMs >= UNSETTLED_TURN_QUIET_MS;
+  } catch {
+    return 0;
+  }
+  const due = recheckAt.get(state.tabId);
+  if (lastSeen.get(state.tabId) === marker && (due === undefined || Date.now() < due)) return 0;
+  const placeholders = new Set(state.placeholderTurnIds);
+  const known = new Set(state.turnIds.filter((id) => !placeholders.has(id)));
+  const turns = (await (await open()).recentTurns(state.threadId, known)).reverse();
+  let changed = 0;
+  let unsettled = false;
+  for (const turn of turns) {
+    const reply = turn.agentText.trim();
+    if (placeholders.has(turn.id)) {
+      if (!reply) continue;
+      upsertMobileOrchestratorAssistantMessage({
+        tabId: state.tabId,
+        repoPath: state.repoPath,
+        messageId: `codex-app-assistant-${turn.id}`,
+        content: reply,
+        backend: 'codex',
+        sessionId: state.threadId,
+        timestampMs: turn.completedAt ? turn.completedAt * 1_000 : undefined,
+      });
+      placeholders.delete(turn.id);
+      changed += 1;
+      continue;
+    }
+    if (known.has(turn.id) || !turn.userText.trim()) continue;
+    const ended = turn.status === 'completed' || turn.status === 'failed';
+    if (!reply && !ended && (turn.status === 'inProgress' || !quiet)) {
+      unsettled = true;
+      continue;
+    }
+    appendMobileOrchestratorUserMessage({
+      tabId: state.tabId,
+      repoPath: state.repoPath,
+      message: turn.userText,
+      messageId: `codex-app-user-${turn.id}`,
+      backend: 'codex',
+      timestampMs: turn.startedAt ? turn.startedAt * 1_000 : undefined,
+    });
+    upsertMobileOrchestratorAssistantMessage({
+      tabId: state.tabId,
+      repoPath: state.repoPath,
+      messageId: `codex-app-assistant-${turn.id}`,
+      content: reply || `(Codex turn ${turn.status} without a reply)`,
+      backend: 'codex',
+      sessionId: state.threadId,
+      timestampMs: turn.completedAt ? turn.completedAt * 1_000 : undefined,
+    });
+    state.turnIds.push(turn.id);
+    if (!reply && !ended) placeholders.add(turn.id);
+    changed += 1;
+  }
+  if (changed > 0) {
+    state.placeholderTurnIds = [...placeholders];
+    writeState(state);
+    deps.onImported?.(state.tabId, changed);
+  }
+  lastSeen.set(state.tabId, marker);
+  // An unfinished turn may end without touching its rollout again; look
+  // once more when the quiet window closes.
+  if (unsettled) recheckAt.set(state.tabId, Date.now() + UNSETTLED_TURN_QUIET_MS);
+  else recheckAt.delete(state.tabId);
+  return changed;
 }
 
 function text(value: unknown): string {
