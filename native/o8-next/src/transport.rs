@@ -217,7 +217,8 @@ fn run(
                 if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
             Err(_) => return Err(()),
         }
-        if ping.elapsed() >= Duration::from_secs(20) {
+        // Behind another app, the server's own pings keep the socket open.
+        if ping.elapsed() >= Duration::from_secs(20) && crate::foreground::active() {
             socket
                 .send(Message::Text(json!({"type":"ping"}).to_string().into()))
                 .map_err(|_| ())?;
