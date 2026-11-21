@@ -118,12 +118,6 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         // to the original handler even when the public bearer gate passed.
         const deferSettingsHop = url.pathname === '/api/panel/operator-defaults'
           && headers.has('x-o8-settings-window-owner-hop');
-        const mobileInbox = url.pathname === '/api/mobile/inbox'
-          ? (await import('@/lib/mobile/inbox')).nativeEmptyInboxContext({
-            fresh: url.searchParams.get('fresh') === '1', includeWorkspaceReview: url.searchParams.get('workspaceReview') !== '0',
-          }) : undefined;
-        const reviewWorkspaceUnselected = url.pathname === '/api/review/workspace'
-          ? (await import('@/lib/review/workspace-selection')).isReviewWorkspaceUnselected(url.searchParams.get('workspace')) : undefined;
         // Scope remains the live Node registry/target resolver's authority.
         // Bind its result to this admitted request; never replicate the registry in Rust.
         const laneDiffTarget = viewerRoute && match.route.path === '/api/lanes/[id]/diff' && !denied && !projectDenied
@@ -188,8 +182,6 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           gitRefsCommitRoot: viewerRoute && match.route.path === '/api/panel/commits/[hash]'
             ? resolve((await import('@/lib/panel/git-commits')).resolveWorkspaceRoot(url.searchParams.get('workspace'))) : undefined,
           fileTreeLocale: url.pathname === '/api/panel/files' ? new Intl.Collator().resolvedOptions().locale : undefined,
-          reviewWorkspaceUnselected,
-          mobileInbox,
           projectIconCachePresent: ['/api/panel/repos', '/api/panel/repo-icon'].includes(url.pathname) && (await import('@/lib/repos/project-icon-resolver')).projectIconResolver.hasFreshEntries(),
           projectRepoDigest: projectRegistryRead ? await (await import('@/lib/repos/registry')).nativeRepoRegistryFingerprint() : null,
           projectReadinessCached: url.pathname === '/api/panel/repos' && (await import('@/lib/repos/readiness')).hasCachedRepoReadiness(),
@@ -259,7 +251,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           disableClaudeFast: process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1',
           ambientKeysPresent: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].some(name => Boolean(process.env[name]?.trim())),
         };
-        response = denied ?? projectDenied ?? ((laneDiffTarget === null || directivesScope === null || threadList === null || composerQueue === null || fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || mobileInbox === null || laneLive === false || reviewWorkspaceUnselected === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
+        response = denied ?? projectDenied ?? ((laneDiffTarget === null || directivesScope === null || threadList === null || composerQueue === null || fileScopeDenied || deferChatHistory || deferMobileHistory || deferSettingsHop || laneLive === false) ? new Response(null, { status: 409 }) : new Response(null, { status: 204, headers: {
           'x-o8d-defaults-context': Buffer.from(JSON.stringify(defaultsContext)).toString('base64'),
         } }));
         if (viewerRoute && response.status === 204) {
@@ -275,7 +267,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
           response = new Response(JSON.stringify({ version: 1, defaultsContext: { threadList } }), { status: 200,
             headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
         }
-        admission = (!(viewerRoute || composerQueueRoute || threadListRoute) || response.status === 200) && composerQueue !== null && threadList !== null && laneDiffTarget !== null && directivesScope !== null && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(mobileInbox === null) && !(laneLive === false) && !(reviewWorkspaceUnselected === false);
+        admission = (!(viewerRoute || composerQueueRoute || threadListRoute) || response.status === 200) && composerQueue !== null && threadList !== null && laneDiffTarget !== null && directivesScope !== null && !denied && !projectDenied && !fileScopeDenied && !deferChatHistory && !deferMobileHistory && !deferSettingsHop && !(laneLive === false);
       }
     } else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: nativeHttpMethods(url.pathname).join(', ') } });
