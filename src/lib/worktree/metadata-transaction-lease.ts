@@ -6,6 +6,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { ensureWorktreeMetadataLeaseSchema } from '@/lib/db/v83-runtime-tables-migration';
 import { projectMaintenanceMetadata } from './maintenance-discovery';
 import { chargeWorktreeMetadataRead, worktreeMetadataReadLimit, WorktreeMaintenanceHeldError } from './maintenance-budget';
 import {
@@ -55,29 +56,6 @@ export class MetadataTransactionLeaseUnavailableError extends Error {
 
 let currentProcessIdentityPromise: Promise<MetadataLockProcessIdentity> | null = null;
 
-function ensureSchema(sqlite: Database.Database): void {
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS worktree_metadata_leases (
-      metadata_root TEXT PRIMARY KEY,
-      reservation_id TEXT NOT NULL UNIQUE,
-      owner_pid INTEGER NOT NULL CHECK (owner_pid > 0),
-      owner_identity_json TEXT NOT NULL,
-      acquired_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS worktree_metadata_state (
-      metadata_root TEXT PRIMARY KEY,
-      payload_json TEXT NOT NULL,
-      mirror_identity_json TEXT,
-      updated_at INTEGER NOT NULL
-    );
-  `);
-  const stateColumns = sqlite.prepare('PRAGMA table_info(worktree_metadata_state)')
-    .all() as Array<{ name: string }>;
-  if (!stateColumns.some((column) => column.name === 'mirror_identity_json')) {
-    sqlite.exec('ALTER TABLE worktree_metadata_state ADD COLUMN mirror_identity_json TEXT');
-  }
-}
-
 function withLeaseDatabase<T>(operation: (sqlite: Database.Database) => T): T {
   const dataDir = getDataDir();
   const databasePath = process.env.CORTEX_IDE_DB_PATH
@@ -86,7 +64,7 @@ function withLeaseDatabase<T>(operation: (sqlite: Database.Database) => T): T {
   const sqlite = new Database(databasePath);
   try {
     sqlite.pragma('busy_timeout = 5000');
-    ensureSchema(sqlite);
+    ensureWorktreeMetadataLeaseSchema(sqlite);
     try {
       chmodSync(dataDir, 0o700);
       if (existsSync(databasePath)) chmodSync(databasePath, 0o600);

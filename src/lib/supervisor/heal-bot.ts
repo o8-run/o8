@@ -2,10 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from '@/lib/providers/child-process';
 import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
+import { ensureSupervisorInboxSchema } from '@/lib/db/v83-runtime-tables-migration';
 import { markRepoOriginConfigured } from '@/lib/repos/origin-readiness';
-import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 import { runAwaitingReviewAutoReleaseSweep } from '@/lib/supervisor/heal-bot-auto-release';
 import { runGitHubBrokerSyncSweep } from '@/lib/supervisor/github-broker-sync';
 import { enqueueInboxItem, runRetentionSweep, selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
@@ -142,94 +141,6 @@ function timestampMs(value: string): number {
 function quoteBlock(value: string | null | undefined, fallback: string): string {
   const normalized = (value ?? '').trim();
   return normalized ? normalized : fallback;
-}
-
-function ensureColumn(
-  sqlite: Database.Database,
-  tableName: string,
-  columnName: string,
-  statement: string,
-): void {
-  const columns = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
-  if (columns.some((column) => column.name === columnName)) {
-    return;
-  }
-  sqlite.exec(statement);
-}
-
-function ensureSupervisorInboxSchema(sqlite: Database.Database): void {
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS supervisor_inbox (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      incident_key TEXT,
-      repo_path TEXT NOT NULL,
-      packet_id TEXT,
-      kind TEXT NOT NULL,
-      payload TEXT NOT NULL DEFAULT '{}',
-      status TEXT NOT NULL DEFAULT 'pending',
-      heal_attempt_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      last_seen_at TEXT,
-      repeat_count INTEGER NOT NULL DEFAULT 1,
-      resolved_at TEXT,
-      resolution_lane_id TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_status_created
-      ON supervisor_inbox(status, created_at);
-    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_packet_id
-      ON supervisor_inbox(packet_id);
-    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_repo_created
-      ON supervisor_inbox(repo_path, created_at);
-  `);
-
-  ensureColumn(
-    sqlite,
-    'supervisor_inbox',
-    'project_id',
-    `ALTER TABLE supervisor_inbox ADD COLUMN project_id TEXT`,
-  );
-  sqlite.prepare(
-    "UPDATE supervisor_inbox SET project_id = ? WHERE project_id IS NULL OR project_id = ''",
-  ).run(DEFAULT_PROJECT_ID);
-  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_project_status_created ON supervisor_inbox(project_id, status, created_at)');
-  ensureColumn(
-    sqlite,
-    'supervisor_inbox',
-    'incident_key',
-    `ALTER TABLE supervisor_inbox ADD COLUMN incident_key TEXT`,
-  );
-  ensureColumn(
-    sqlite,
-    'supervisor_inbox',
-    'heal_attempt_count',
-    `ALTER TABLE supervisor_inbox ADD COLUMN heal_attempt_count INTEGER NOT NULL DEFAULT 0`,
-  );
-  ensureColumn(
-    sqlite,
-    'supervisor_inbox',
-    'last_seen_at',
-    `ALTER TABLE supervisor_inbox ADD COLUMN last_seen_at TEXT`,
-  );
-  ensureColumn(
-    sqlite,
-    'supervisor_inbox',
-    'repeat_count',
-    `ALTER TABLE supervisor_inbox ADD COLUMN repeat_count INTEGER NOT NULL DEFAULT 1`,
-  );
-  ensureColumn(
-    sqlite,
-    'supervisor_inbox',
-    'resolution_lane_id',
-    `ALTER TABLE supervisor_inbox ADD COLUMN resolution_lane_id TEXT`,
-  );
-  sqlite.prepare(
-    "UPDATE supervisor_inbox SET last_seen_at = created_at WHERE last_seen_at IS NULL OR last_seen_at = ''",
-  ).run();
-  sqlite.prepare(
-    'UPDATE supervisor_inbox SET repeat_count = 1 WHERE repeat_count IS NULL OR repeat_count < 1',
-  ).run();
-  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_incident_status ON supervisor_inbox(incident_key, status)');
 }
 
 function parseGiveUpReason(stdout: string, stderr: string): string | null {

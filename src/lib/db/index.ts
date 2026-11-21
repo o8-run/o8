@@ -1330,11 +1330,16 @@ function ensureMobileLiveActivityTokensTable(sqlite: Database.Database): void {
       last_signature TEXT,
       last_delivered_at INTEGER,
       failure_count INTEGER NOT NULL DEFAULT 0,
+      remote_notification_token TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_mobile_live_activity_tokens_updated_at ON mobile_live_activity_tokens(updated_at);
   `);
+  // The push sender added this column on first use, after the runtime was serving.
+  if (!tableColumnExists(sqlite, 'mobile_live_activity_tokens', 'remote_notification_token')) {
+    addColumnTolerant(sqlite, 'ALTER TABLE mobile_live_activity_tokens ADD COLUMN remote_notification_token TEXT');
+  }
 }
 
 /**

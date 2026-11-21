@@ -3,6 +3,7 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
+import { ensureProblemDossierSchema } from '@/lib/db/v83-runtime-tables-migration';
 import type { SupervisorInboxKind } from '@/lib/supervisor/inbox';
 import {
   isEligibleProblemSignal,
@@ -200,114 +201,10 @@ interface SupervisorProblemSignal {
 
 const initializedDatabases = new WeakSet<object>();
 
-function ensureProblemDossierSchema(): void {
+function ensureProblemDossierTables(): void {
   const sqlite = getSqlite();
   if (initializedDatabases.has(sqlite)) return;
-
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS problem_dossiers (
-      id TEXT PRIMARY KEY,
-      fingerprint TEXT NOT NULL UNIQUE,
-      project_id TEXT NOT NULL,
-      repo_path TEXT NOT NULL,
-      pain_statement TEXT NOT NULL,
-      first_observed_at TEXT NOT NULL,
-      last_observed_at TEXT NOT NULL,
-      occurrence_count INTEGER NOT NULL DEFAULT 0,
-      comparable_exposure_count INTEGER NOT NULL DEFAULT 0,
-      impact_band TEXT NOT NULL,
-      evidence_confidence TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'candidate',
-      closure_contract_json TEXT NOT NULL,
-      suppressed_at TEXT,
-      cooldown_until TEXT,
-      accepted_at TEXT,
-      linked_task_id TEXT,
-      provisional_resolved_at TEXT,
-      verified_closed_at TEXT,
-      reopened_at TEXT,
-      operator_stopped_at TEXT,
-      suppression_reason TEXT,
-      recurrence_proposal_id TEXT,
-      last_error TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS problem_evidence (
-      id TEXT PRIMARY KEY,
-      dossier_id TEXT NOT NULL,
-      source_type TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      source_kind TEXT NOT NULL,
-      packet_id TEXT NOT NULL,
-      observed_at TEXT NOT NULL,
-      FOREIGN KEY (dossier_id) REFERENCES problem_dossiers(id) ON DELETE CASCADE,
-      UNIQUE(source_type, source_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS problem_remedies (
-      id TEXT PRIMARY KEY,
-      dossier_id TEXT NOT NULL,
-      sequence INTEGER NOT NULL,
-      task_id TEXT,
-      mission_id TEXT,
-      packet_id TEXT,
-      lane_id TEXT,
-      approval_id TEXT,
-      review_id TEXT,
-      release_ref TEXT,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (dossier_id) REFERENCES problem_dossiers(id) ON DELETE CASCADE,
-      UNIQUE(dossier_id, sequence)
-    );
-
-    CREATE TABLE IF NOT EXISTS problem_events (
-      id TEXT PRIMARY KEY,
-      dossier_id TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      actor TEXT NOT NULL,
-      note TEXT,
-      from_status TEXT,
-      to_status TEXT,
-      at TEXT NOT NULL,
-      FOREIGN KEY (dossier_id) REFERENCES problem_dossiers(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_problem_dossiers_project_status
-      ON problem_dossiers(project_id, status, last_observed_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_problem_evidence_dossier_observed
-      ON problem_evidence(dossier_id, observed_at);
-    CREATE INDEX IF NOT EXISTS idx_problem_remedies_dossier_created
-      ON problem_remedies(dossier_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_problem_events_dossier_at
-      ON problem_events(dossier_id, at);
-  `);
-
-  const dossierColumns = new Set(
-    (sqlite.prepare('PRAGMA table_info(problem_dossiers)').all() as Array<{ name: string }>).map((column) => column.name),
-  );
-  const dossierAdditions: Array<[string, string]> = [
-    ['provisional_resolved_at', 'TEXT'],
-    ['verified_closed_at', 'TEXT'],
-    ['reopened_at', 'TEXT'],
-    ['operator_stopped_at', 'TEXT'],
-    ['suppression_reason', 'TEXT'],
-    ['recurrence_proposal_id', 'TEXT'],
-    ['last_error', 'TEXT'],
-  ];
-  for (const [column, definition] of dossierAdditions) {
-    if (!dossierColumns.has(column)) sqlite.exec(`ALTER TABLE problem_dossiers ADD COLUMN ${column} ${definition}`);
-  }
-  const remedyColumns = new Set(
-    (sqlite.prepare('PRAGMA table_info(problem_remedies)').all() as Array<{ name: string }>).map((column) => column.name),
-  );
-  if (!remedyColumns.has('sequence')) {
-    sqlite.exec('ALTER TABLE problem_remedies ADD COLUMN sequence INTEGER NOT NULL DEFAULT 1');
-  }
-
+  ensureProblemDossierSchema(sqlite);
   initializedDatabases.add(sqlite);
 }
 
@@ -433,7 +330,7 @@ export function appendProblemDossierEvent(input: {
   toStatus?: ProblemDossierStatus | null;
   at: string;
 }): ProblemDossierEvent {
-  ensureProblemDossierSchema();
+  ensureProblemDossierTables();
   const id = `problem-event-${stableHash([
     input.dossierId,
     input.eventType,
@@ -507,7 +404,7 @@ function mapDossier(row: ProblemDossierRow): ProblemDossier {
 }
 
 export function getProblemDossier(id: string): ProblemDossier | null {
-  ensureProblemDossierSchema();
+  ensureProblemDossierTables();
   const row = getSqlite().prepare(`
     SELECT * FROM problem_dossiers WHERE id = ?
   `).get(id) as ProblemDossierRow | undefined;
@@ -518,7 +415,7 @@ export function listProblemDossiers(options: {
   projectId?: string | null;
   includeSuppressed?: boolean;
 } = {}): ProblemDossier[] {
-  ensureProblemDossierSchema();
+  ensureProblemDossierTables();
   const where: string[] = [];
   const params: string[] = [];
   if (options.projectId) {
@@ -554,14 +451,14 @@ function mapRemedy(row: ProblemRemedyRow): ProblemRemedy {
 }
 
 export function listProblemRemedies(dossierId: string): ProblemRemedy[] {
-  ensureProblemDossierSchema();
+  ensureProblemDossierTables();
   return (getSqlite().prepare(`
     SELECT * FROM problem_remedies WHERE dossier_id = ? ORDER BY sequence
   `).all(dossierId) as ProblemRemedyRow[]).map(mapRemedy);
 }
 
 export function problemDossierIdsForSupervisorSources(sourceIds: string[]): Map<string, string> {
-  ensureProblemDossierSchema();
+  ensureProblemDossierTables();
   if (sourceIds.length === 0) return new Map();
   const placeholders = sourceIds.map(() => '?').join(', ');
   const rows = getSqlite().prepare(`
@@ -624,7 +521,7 @@ export function syncRecurringSupervisorProblems(options: {
   threshold?: number;
   now?: Date;
 } = {}): ProblemSensorResult {
-  ensureProblemDossierSchema();
+  ensureProblemDossierTables();
   const threshold = Math.max(2, Math.trunc(options.threshold ?? DEFAULT_RECURRENCE_THRESHOLD));
   const now = (options.now ?? new Date()).toISOString();
   const items = (getSqlite().prepare(`

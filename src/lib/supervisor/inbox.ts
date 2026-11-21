@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { getSqlite } from '@/lib/db';
+import { ensureSupervisorInboxSchema } from '@/lib/db/v83-runtime-tables-migration';
 import { listLanes } from '@/lib/lane/registry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import {
@@ -151,64 +152,7 @@ function ensureSupervisorInboxTable() {
     return;
   }
 
-  const sqlite = getSqlite();
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS supervisor_inbox (
-      id TEXT PRIMARY KEY,
-      project_id TEXT,
-      incident_key TEXT,
-      repo_path TEXT NOT NULL,
-      packet_id TEXT,
-      kind TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      last_seen_at TEXT,
-      repeat_count INTEGER NOT NULL DEFAULT 1,
-      status TEXT NOT NULL DEFAULT 'pending',
-      resolved_at TEXT,
-      resolution_lane_id TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_status_created
-      ON supervisor_inbox(status, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_repo_path_created
-      ON supervisor_inbox(repo_path, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_packet_id
-      ON supervisor_inbox(packet_id);
-  `);
-
-  const columns = sqlite.prepare('PRAGMA table_info(supervisor_inbox)').all() as Array<{ name: string }>;
-  if (!columns.some((column) => column.name === 'project_id')) {
-    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN project_id TEXT');
-  }
-  if (!columns.some((column) => column.name === 'incident_key')) {
-    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN incident_key TEXT');
-  }
-  if (!columns.some((column) => column.name === 'last_seen_at')) {
-    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN last_seen_at TEXT');
-  }
-  if (!columns.some((column) => column.name === 'repeat_count')) {
-    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN repeat_count INTEGER NOT NULL DEFAULT 1');
-  }
-  if (!columns.some((column) => column.name === 'resolution_lane_id')) {
-    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN resolution_lane_id TEXT');
-  }
-  sqlite.prepare(
-    "UPDATE supervisor_inbox SET project_id = ? WHERE project_id IS NULL OR project_id = ''",
-  ).run(DEFAULT_PROJECT_ID);
-  sqlite.prepare(
-    "UPDATE supervisor_inbox SET last_seen_at = created_at WHERE last_seen_at IS NULL OR last_seen_at = ''",
-  ).run();
-  sqlite.prepare(
-    'UPDATE supervisor_inbox SET repeat_count = 1 WHERE repeat_count IS NULL OR repeat_count < 1',
-  ).run();
-  sqlite.exec(`
-    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_project_status_created
-      ON supervisor_inbox(project_id, status, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_incident_status
-      ON supervisor_inbox(incident_key, status);
-  `);
-
+  ensureSupervisorInboxSchema(getSqlite());
   supervisorInboxReady = true;
 }
 
