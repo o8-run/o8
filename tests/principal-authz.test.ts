@@ -473,7 +473,18 @@ describe('principal-authz — recurring problem dossiers are worker-readable onl
   const url = 'http://localhost:3001/api/panel/problem-dossiers?includeSuppressed=true';
 
   it('WORKER GET passes the capability gate and reaches the production route', async () => {
-    const request = req(url, { principal: 'worker', method: 'GET' });
+    const { createLane } = await import('@/lib/lane/registry');
+    const packetId = 'pkt-problem-dossier-reader';
+    createLane({
+      label: 'Problem dossier reader',
+      packetId,
+      projectId: 'problem-dossier-fixture',
+      repoPath: dataDir,
+      branch: 'fixture/problem-dossier-reader',
+      baseBranch: 'main',
+      runtime: 'codex',
+    });
+    const request = req(url, { principal: 'worker', method: 'GET', workerToken: mintPacketWorkerToken(packetId) });
     expect(panelGateMiddleware(request).status).toBe(200);
 
     const response = await problemDossiers.GET(request);
