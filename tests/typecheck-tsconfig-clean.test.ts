@@ -33,7 +33,7 @@ describe('typecheck type generation', () => {
 describe('typecheck checker selection', () => {
   it.each([
     ['tsrs', 0], ['tsrs', 2], ['tsc', 0], ['tsc', 2],
-  ] as const)('runs %s for app and CLI and propagates CLI exit %i', (checker, cliStatus) => {
+  ] as const)('runs %s for the app and propagates checker exit %i', (checker, checkerStatus) => {
     const root = mkdtempSync(join(tmpdir(), 'o8-typecheck-runner-'));
     try {
       copyFileSync('scripts/typecheck.mjs', join(root, 'typecheck.mjs'));
@@ -50,7 +50,7 @@ describe('typecheck checker selection', () => {
         [checker === 'tsrs' ? 'tsrs' : 'typescript', checker, `
           const fs = require('node:fs');
           fs.appendFileSync('calls.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');
-          if (process.argv.includes('--project')) process.exit(${cliStatus});
+          process.exit(${checkerStatus});
         `],
       ]) {
         const packageRoot = join(root, 'node_modules', name);
@@ -71,20 +71,20 @@ describe('typecheck checker selection', () => {
         }
       }
       const result = spawnSync(process.execPath, ['typecheck.mjs'], { cwd: root, encoding: 'utf8' });
-      expect(result.status, result.stderr).toBe(cliStatus);
+      expect(result.status, result.stderr).toBe(checkerStatus);
       expect(readFileSync(join(root, 'tsconfig.json'), 'utf8')).toBe('{}');
       expect(readFileSync(join(root, 'calls.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line)))
-        .toEqual([['--noEmit'], ['--noEmit', '--project', 'cli/tsconfig.chat.json']]);
+        .toEqual([['--noEmit']]);
       const notice = `tsrs has no ${process.platform}-${process.arch} build; using tsc 5.8.2\n`;
       expect(result.stderr.split(notice)).toHaveLength(checker === 'tsc' ? 2 : 1);
 
       rmSync(join(root, 'calls.jsonl'));
-      const fast = spawnSync('npm', ['run', 'typecheck:fast', '--', '--project', 'cli/tsconfig.chat.json'], {
+      const fast = spawnSync('npm', ['run', 'typecheck:fast', '--', '--project', 'cli/tsconfig.json'], {
         cwd: root, encoding: 'utf8', shell: process.platform === 'win32',
       });
-      expect(fast.status, fast.stderr).toBe(cliStatus);
+      expect(fast.status, fast.stderr).toBe(checkerStatus);
       expect(readFileSync(join(root, 'calls.jsonl'), 'utf8').trim()).toBe(
-        JSON.stringify(['--noEmit', '--project', 'cli/tsconfig.chat.json']),
+        JSON.stringify(['--noEmit', '--project', 'cli/tsconfig.json']),
       );
       expect(fast.stderr).toBe(checker === 'tsc' ? notice : '');
     } finally {
@@ -115,8 +115,7 @@ describe('typecheck heap boundary', () => {
           fs.appendFileSync('heap.jsonl', JSON.stringify({
             args: process.argv.slice(2), heap: require('node:v8').getHeapStatistics().heap_size_limit / 1024 / 1024,
           }) + '\\n');
-          if (process.env.FAIL_STAGE === '${name}' &&
-              (!process.env.FAIL_CLI || process.argv.includes('--project'))) {
+          if (process.env.FAIL_STAGE === '${name}') {
             process.stderr.write('FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\\n');
             process.stderr.write(' 1: native V8 stack fixture\\n');
             process.exit(134);
@@ -134,16 +133,16 @@ describe('typecheck heap boundary', () => {
       expect(success.status, success.stderr).toBe(0);
       expect(success.stdout).toContain('[typecheck] heap limit: 8192 MiB');
       const receipts = readFileSync(join(root, 'heap.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
-      expect(receipts).toHaveLength(command === 'typecheck' ? 3 : 1);
+      expect(receipts).toHaveLength(command === 'typecheck' ? 2 : 1);
       for (const receipt of receipts) expect(receipt.heap).toBeGreaterThanOrEqual(8192);
-      for (const stage of command === 'typecheck' ? ['next', 'typescript', 'cli'] : ['typescript']) {
+      for (const stage of command === 'typecheck' ? ['next', 'typescript'] : ['typescript']) {
         rmSync(join(root, 'heap.jsonl'));
-        const failure = run({ FAIL_STAGE: stage === 'cli' ? 'typescript' : stage, FAIL_CLI: stage === 'cli' ? '1' : '' });
+        const failure = run({ FAIL_STAGE: stage });
         expect(failure.status).toBe(1);
         const lines = failure.stderr.trim().split('\n').filter(line => !line.startsWith('tsrs has no '));
         expect(lines).toEqual(['[typecheck] heap exhausted at 8192 MiB; type check failed.']);
         const count = readFileSync(join(root, 'heap.jsonl'), 'utf8').trim().split('\n').length;
-        expect(count).toBe(stage === 'next' ? 1 : stage === 'cli' ? 3 : command === 'typecheck' ? 2 : 1);
+        expect(count).toBe(stage === 'next' || command === 'typecheck:fast' ? 1 : 2);
       }
       const diagnostic = run({ TYPE_ERROR: '1' });
       expect(diagnostic.status).toBe(2);

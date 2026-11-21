@@ -29,6 +29,4 @@ try {
 if (typegenStatus !== 0) process.exit(typegenStatus);
 if (process.argv.includes('--typegen-only')) process.exit(0);
 const checkerPath = resolveTypecheckChecker().path;
-const appStatus = runNodeModule(checkerPath, ['--noEmit']);
-if (appStatus !== 0) process.exit(appStatus);
-process.exit(runNodeModule(checkerPath, ['--noEmit', '--project', 'cli/tsconfig.chat.json']));
+process.exit(runNodeModule(checkerPath, ['--noEmit']));

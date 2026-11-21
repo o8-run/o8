@@ -1,8 +1,0 @@
-{
-  "extends": "../tsconfig.json",
-  "compilerOptions": {
-    "incremental": false
-  },
-  "include": ["src/chat/**/*.ts", "src/chat/**/*.tsx", "src/commands/chat.ts"],
-  "exclude": ["node_modules", "dist"]
-}

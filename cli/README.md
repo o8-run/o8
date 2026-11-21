@@ -5,56 +5,7 @@ worktrees, CI runners, and scripts call `o8 <cmd>` instead of curling
 `http://127.0.0.1:<port>/api/...` with a bearer token.
 
 Commands default to JSON; pass `--human` for ANSI-formatted output.
-Bare `o8` in an interactive terminal opens a conversation. Piped invocations
-and `--json` stay in command mode.
-
-## Interactive conversation
-
-With o8 running, open a terminal in your repository:
-
-```sh
-o8 chat
-o8 chat --backend codex --model <model-id> --effort low
-o8 chat --resume thoughts-<conversation-id>
-```
-
-This uses the same local orchestrator, authentication, workspace, and saved
-conversation history as the app. It does not start a separate inference service
-or change saved settings. New and resumed chats start in **plan mode**; use
-`--execute` explicitly to request the backend's full execution mode. Model and
-effort overrides apply only to a new conversation. A resumed conversation keeps
-its saved backend, agent, and model routing.
-
-Enter sends, Ctrl+J inserts a newline, and pasted newlines remain in the draft.
-Use Esc to request interruption, Ctrl+O to expand tool details, and Page Up/Down
-or the mouse wheel to read earlier output; Ctrl+G returns to latest. Hold Shift
-to use your terminal's native mouse text selection. Reading earlier rows holds your
-position while new output arrives. When an answer's prompt is above the viewport,
-a single prompt row stays at the top; it yields when the full prompt is visible.
-`/help` lists controls and `/session` gives the resume
-command. `/quit` detaches; active work continues in o8. Disconnections never
-resend prompts automatically: `/reconnect` reloads saved history.
-
-Drop file paths into the terminal or use `/attach "path with spaces.png"`.
-Files are staged locally, with no shell execution or automatic send. `/attachments`
-lists them; `/remove 2` removes the second file and `/remove all` clears the list.
-Add a message and press Enter to send. PNG, JPEG, GIF, and WebP bytes use the existing
-image attachment transport, with backend support checked before sending. UTF-8
-files send their actual contents as data, not a path the remote backend might lack.
-Limits are eight attachments, 3.7 MB per image, 256 KiB per text file, and 1 MiB of
-text in total. Directories, devices, and other binary documents (including PDF)
-are rejected with a visible explanation. Raw clipboard image paste is not supported
-in this slice; save the image and drop its file path. Attachments remain local
-until send, and unsent drafts are not persisted across terminal exit.
-
-New turns stream live. When attaching to an already-running turn, chat refreshes
-the saved response until completion so a bounded event buffer cannot omit the
-beginning of a long answer. Tool details received in this terminal are expandable;
-historical tool details are not reconstructed from text-only history.
-
-Use `--no-motion` or `O8_REDUCED_MOTION=1` for a static activity indicator. Standard
-terminal color settings apply. The minimum terminal size is 36 columns by 12 rows.
-From a source checkout, run `npm run build:cli` then `node cli/dist/o8.mjs chat`.
+Bare `o8` prints command usage. Run `o8 --help` to list available commands.
 
 ## Tab status in the terminal
 
@@ -70,11 +21,6 @@ the mission as a whole: how many packets have finished, then one finished or
 failed mark once all of them have. A mission with more than 60 packets marks
 its first 60 and still counts all of them in the summary.
 
-`o8 chat` reports too: working while a turn runs, a finished mark when a reply
-to a message sent from that chat is ready to read, and a failed mark when the connection drops or the chat shows
-an error. Leaving chat removes its mark. Chat is always interactive, so it needs
-no `--human`; the terminal check and `O8_TERMINAL_STATUS` apply as above.
-
 Reports are written only with `--human`, when stdout is an interactive terminal,
 and when the terminal is known to read the sequence. Rex is detected through
 `REX_SESSION`. Set `O8_TERMINAL_STATUS=1` to send reports in any interactive
@@ -88,7 +34,6 @@ title and a fixed status phrase, and nothing else. o8 writes to its own record
 
 | Command | Purpose |
 |---|---|
-| `o8 chat [--repo <path>] [--resume <thread>]` | Interactive local orchestrator conversation |
 | `o8 version` | CLI version + connected server version |
 | `o8 doctor` | Verify port + token resolution; ping `/api/panel/status` |
 | `o8 status` | Operator snapshot: running packets, active lanes, recent merges, pending approvals. Packet workers receive only live lane/packet IDs, states, and checkout paths. |
