@@ -148,7 +148,12 @@ async function main() {
     O8_API_FRONT_DOOR: '1', O8_NEXT_OFF: '1', NEXT_ORIGIN: `http://127.0.0.1:${nextPort}/`,
     O8_BACKGROUND_LEDGER: '1', O8_BACKGROUND_LEDGER_INTERVAL_MS: '15000',
   };
-  const node = [process.execPath, '--import=./scripts/register-server-only-stub.mjs', '--import', 'tsx', 'src/ws-server.ts'];
+  // The packaged app starts the server in its bundled server folder, which is
+  // not a Git repository. Starting it in this checkout made the 5 s conflict
+  // scan (repo: process.cwd()) probe every worktree of this repository, a cost
+  // the app never pays. Run from a plain folder with absolute module paths.
+  const node = [process.execPath, `--import=${join(root, 'scripts/register-server-only-stub.mjs')}`,
+    '--import', join(root, 'node_modules/tsx/dist/loader.mjs'), join(root, 'src/ws-server.ts')];
   let command = node;
   if (sandboxed) {
     const profile = join(bench, 'server.sb');
@@ -164,7 +169,11 @@ async function main() {
     command = ['sandbox-exec', '-f', profile, ...node];
   }
   console.log(`[bench:idle] starting the WS server on ${apiPort}${sandboxed ? ' (sandboxed)' : ''}`);
-  const server = spawn(command[0], command.slice(1), { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const serverCwd = join(bench, 'server-cwd');
+  mkdirSync(serverCwd);
+  const server = spawn(command[0], command.slice(1), {
+    cwd: serverCwd, env: { ...env, TSX_TSCONFIG_PATH: join(root, 'tsconfig.json') }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
   const log = join(bench, 'server.log');
   server.stdout.on('data', (chunk) => writeFileSync(log, chunk, { flag: 'a' }));
   server.stderr.on('data', (chunk) => writeFileSync(log, chunk, { flag: 'a' }));
