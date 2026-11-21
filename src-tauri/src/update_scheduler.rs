@@ -65,6 +65,25 @@ const QUIET_POLL_TICKS: u32 = 5;
 /// How long one-second reads continue after a requested check, a click,
 /// a held-state change or a pass that did real work.
 const ATTENTIVE_MS: u64 = 10_000;
+/// While the launcher owns updates, this shell neither reports, stages nor
+/// applies. It only reads ownership again at this cadence.
+const LAUNCHER_STANDBY_MS: u64 = 10 * 60_000;
+
+/// The server marks launcher-owned state, and refuses this shell's posts with
+/// `launcher_updater_owned` (older servers only do the latter).
+fn launcher_owned(value: &serde_json::Value) -> bool {
+    value["owner"] == "launcher" || value["error"]["code"] == "launcher_updater_owned"
+}
+
+async fn refused_by_launcher(sent: Result<reqwest::Response, reqwest::Error>) -> bool {
+    match sent {
+        Ok(response) if response.status() == reqwest::StatusCode::CONFLICT => response
+            .json::<serde_json::Value>()
+            .await
+            .is_ok_and(|body| launcher_owned(&body)),
+        _ => false,
+    }
+}
 
 pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
     app: AppHandle<R>,
@@ -94,7 +113,13 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
     // A requested check, an Update click or a held-state change keeps one-second reads
     // for a short while, so follow-up requests are answered promptly.
     let mut attentive_until: u64 = 0;
+    let mut standby_until: u64 = 0;
     loop {
+        if now_ms() < standby_until {
+            schedule.awake(now_ms());
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        }
         // Only the deliberate sleep contributes to gap detection, not awaited I/O.
         let signaled = WOKE.swap(false, Ordering::AcqRel);
         let woke = schedule.due(now_ms(), false) || (signaled && schedule.wake(now_ms()));
@@ -127,6 +152,11 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
         } else {
             None
         };
+        if control.as_ref().is_some_and(launcher_owned) {
+            standby_until = now_ms() + LAUNCHER_STANDBY_MS;
+            attentive_until = 0;
+            continue;
+        }
         let request = control
             .as_ref()
             .and_then(|v| v["checkRequestedAt"].as_str())
@@ -153,12 +183,17 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
             });
             if crate::update_ping::is_current_report(&app, report) && !already_recorded {
                 // Retry the retained report after startup or server replacement, even without UI.
-                let _ = client
+                let sent = client
                     .post(url)
                     .bearer_auth(&token)
                     .json(report)
                     .send()
                     .await;
+                if refused_by_launcher(sent).await {
+                    standby_until = now_ms() + LAUNCHER_STANDBY_MS;
+                    attentive_until = 0;
+                    continue;
+                }
             }
         }
         // An Update click with o8 next as the window: try the install now, not
@@ -190,7 +225,11 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
                     .send()
             };
             if status["phase"] == "available" || (retry && status["phase"] == "failed") {
-                let _ = publish(status.clone()).await;
+                if refused_by_launcher(publish(status.clone()).await).await {
+                    standby_until = now_ms() + LAUNCHER_STANDBY_MS;
+                    attentive_until = 0;
+                    continue;
+                }
                 let mut downloading = status.clone();
                 downloading["phase"] = serde_json::json!("downloading");
                 let _ = publish(downloading.clone()).await;
@@ -204,7 +243,11 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
                 if published_held != serde_json::Value::Bool(false) {
                     attentive_until = now_ms() + ATTENTIVE_MS;
                 }
-                let _ = publish(held.clone()).await;
+                if refused_by_launcher(publish(held.clone()).await).await {
+                    standby_until = now_ms() + LAUNCHER_STANDBY_MS;
+                    attentive_until = 0;
+                    continue;
+                }
                 published_held = held;
             }
             auto_apply.tick(&client, url, &token, &effects).await;
