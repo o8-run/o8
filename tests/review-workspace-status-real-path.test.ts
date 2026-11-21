@@ -33,6 +33,27 @@ describe('workspace review status through the route', () => {
     expect(await (await read()).json()).toMatchObject({ dirty: true, changedFiles: [expect.objectContaining({ path: 'sample.txt', status: 'added', staged: true })] });
   });
 
+  it('evicts older review snapshots when distinct workspaces fill the cache', async () => {
+    git('init', '-q');
+    const readVariant = (index: number) => GET(new Request(
+      `http://localhost/api/review/workspace?workspace=${encodeURIComponent(folder)}&changesOnly=1&repo=fixture/workspace-${index}`,
+    ));
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      expect(await (await readVariant(0)).json()).toMatchObject({ dirty: false });
+      writeFileSync(join(folder, 'new.txt'), 'new\n');
+      for (let index = 1; index <= 16; index += 1) {
+        expect((await readVariant(index)).status).toBe(200);
+      }
+      expect(await (await readVariant(0)).json()).toMatchObject({
+        dirty: true,
+        changedFiles: [expect.objectContaining({ path: 'new.txt' })],
+      });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('includes intent-to-add and later unstaged edits before the first commit', async () => {
     git('init', '-q');
     writeFileSync(join(folder, 'intent.txt'), 'working content\n'); git('add', '-N', 'intent.txt');
