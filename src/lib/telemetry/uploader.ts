@@ -18,6 +18,7 @@ import {
   resolveTelemetryOptInSync,
 } from '@/lib/operator/defaults';
 import { readCrashRecords, telemetryDir, type CrashRecord } from './crash-store';
+import { recurring } from '@/lib/background-work/ledger';
 
 const UPLOAD_INTERVAL_MS = 5 * 60 * 1000;
 const INITIAL_DELAY_MS = 30 * 1000;
@@ -134,7 +135,7 @@ export function startTelemetryUploadLoop(): void {
     g.__o8TelemetryUploadLoopStarted = true;
 
     const initial = setTimeout(() => { void runTelemetryUpload(); }, INITIAL_DELAY_MS);
-    const interval = setInterval(() => { void runTelemetryUpload(); }, UPLOAD_INTERVAL_MS);
+    const interval = recurring('telemetry-upload', () => { void runTelemetryUpload(); }, UPLOAD_INTERVAL_MS);
     if (typeof initial.unref === 'function') initial.unref();
     if (typeof interval.unref === 'function') interval.unref();
   } catch {

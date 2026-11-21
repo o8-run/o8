@@ -2,6 +2,7 @@ import { Session } from 'node:inspector/promises';
 import type { Profiler } from 'node:inspector';
 import { basename, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { recurring } from '@/lib/background-work/ledger';
 
 const MODULE_FILE = fileURLToPath(import.meta.url);
 
@@ -96,7 +97,7 @@ export class WsCpuSampler {
         this.enabled = true;
       } catch { this.unavailable(); }
     });
-    this.timer = setInterval(() => { void this.rotate(false); }, 15_000);
+    this.timer = recurring('cpu-evidence', () => { void this.rotate(false); }, 15_000);
     this.timer.unref();
   }
 

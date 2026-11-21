@@ -68,6 +68,7 @@ import { dispatchSecondPassMerge } from './second-pass-merge-dispatch';
 import { drainPacketExplainerQueue, enqueuePacketExplainer, startPacketExplainerQueueDrain } from './packet-explainer-queue';
 import { resolvePacketTaskContractGate } from './task-contract-gate';
 import type { Lane } from './types';
+import { recurring } from '@/lib/background-work/ledger';
 
 const DRAIN_INTERVAL_MS = 10_000;
 const REVIEW_DIFF_LINES = {
@@ -103,7 +104,7 @@ export function startReviewQueueDrain(): () => void {
     // DB may not be ready yet — drain loop will handle it
   }
 
-  drainTimer = setInterval(() => {
+  drainTimer = recurring('auto-review-drain', () => {
     void drainReviewQueue().catch((err) => {
       console.error('[auto-review] Drain error:', err);
     });

@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { recurring } from '@/lib/background-work/ledger';
 import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
@@ -717,7 +718,7 @@ export function startBroadcastSpeakerLoop(): () => void {
       });
   };
   tick();
-  speakerTimer = setInterval(tick, SPEAKER_TICK_MS);
+  speakerTimer = recurring('broadcast-speaker', tick, SPEAKER_TICK_MS);
   speakerTimer.unref();
   return () => {
     if (speakerTimer) clearInterval(speakerTimer);

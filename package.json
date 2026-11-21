@@ -55,6 +55,7 @@
     "measure:socket": "bash scripts/measure-socket.sh",
     "measure:mcp": "bash scripts/measure-mcp.sh",
     "bench:speed": "node scripts/bench/run-speed.mjs",
+    "bench:idle": "node scripts/bench-idle.mjs",
     "bench:interactions": "node scripts/bench/run-interactions.mjs",
     "bench:interactions:full": "node scripts/bench/run-interactions.mjs --scales=50,250,1000 --samples=15 --soak-ms=60000 --boot-timeout-ms=600000",
     "bench:interactions:release": "node scripts/bench/run-interactions.mjs --target=release",

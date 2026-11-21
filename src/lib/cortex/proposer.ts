@@ -24,6 +24,7 @@
  *   5. Rank by hit count descending, then most-recent occurrence.
  */
 
+import { recurring } from '@/lib/background-work/ledger';
 import 'server-only';
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -465,7 +466,7 @@ export function ensureProposerBootTick(): void {
   bootTickFired = true;
   setImmediate(() => runTick());
   // Use unref so the interval doesn't keep the process alive in tests/CI.
-  const interval = setInterval(() => {
+  const interval = recurring('cortex-proposer', () => {
     if (Date.now() - lastTickAt < TICK_INTERVAL_MS - 5_000) return;
     runTick();
   }, TICK_INTERVAL_MS);

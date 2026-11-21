@@ -14,6 +14,7 @@ import {
   MachineRelayConnector,
   type MachineRelayConnectorConfig,
 } from './machine-attach';
+import { recurring } from '@/lib/background-work/ledger';
 
 const P = '[connect]';
 const DEFAULT_RECONCILE_INTERVAL_MS = 2_000;
@@ -60,7 +61,7 @@ export class MachineAttachSupervisor {
       this.config.reconcileIntervalMs,
       DEFAULT_RECONCILE_INTERVAL_MS,
     );
-    this.interval = setInterval(() => void this.reconcile(), intervalMs);
+    this.interval = recurring('machine-attach-reconcile', () => void this.reconcile(), intervalMs);
     this.interval.unref?.();
   }
 

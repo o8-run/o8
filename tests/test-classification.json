@@ -282,6 +282,13 @@
       ]
     },
     {
+      "path": "src/lib/background-work/ledger.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/broadcast/hourly-cap.integration.test.ts",
       "reasons": [
         "child-process",

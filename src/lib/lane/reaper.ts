@@ -27,6 +27,7 @@ import {
 import { decideRunningLaneSalvage } from './salvage';
 import { runDeadLaneSweep } from './dead-lane-archiver';
 import { assessStaleLaneLiveness } from './reaper-liveness';
+import { recurring } from '@/lib/background-work/ledger';
 
 export const LANE_ZOMBIE_REAPER_INTERVAL_MS = 5 * 60_000;
 export const LANE_HEARTBEAT_STALE_MS = 90_000;
@@ -423,7 +424,7 @@ export function startLaneZombieReaper(): void {
     });
   }, 60_000);
 
-  zombieReaperTimer = setInterval(() => {
+  zombieReaperTimer = recurring('lane-zombie-reaper', () => {
     void runLaneZombieReaperTick().catch((error) => {
       console.error('[lane-reaper] tick failed:', error);
     });

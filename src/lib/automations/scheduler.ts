@@ -11,6 +11,7 @@ import {
 } from './fire-store';
 import { runClaimedAutomationFire } from './fire-runner';
 import { materializeWatchAutomationFires } from './watch-store';
+import { recurring } from '@/lib/background-work/ledger';
 
 const TICK_MS = 30_000;
 const DEFAULT_LEASE_MS = 60 * 60 * 1000;
@@ -100,5 +101,5 @@ export function bootAutomationsScheduler(): void {
     + `heartbeat ${HEARTBEAT_PATH}`,
   );
   setTimeout(() => { void runAutomationSchedulerTick(); }, 2_000).unref();
-  setInterval(() => { void runAutomationSchedulerTick(); }, TICK_MS).unref();
+  recurring('automations-scheduler', () => { void runAutomationSchedulerTick(); }, TICK_MS).unref();
 }

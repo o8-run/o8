@@ -29,6 +29,7 @@ import {
 import { replayRelayHttpRequest } from './relay-http-replay';
 import { RelayReconnectPolicy } from './relay-reconnect';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { recurring } from '@/lib/background-work/ledger';
 
 /**
  * o8 Relay connector — the Mac-side outbound leg of the public relay contract
@@ -233,7 +234,7 @@ export class RelayConnector {
 
   private startKeepAlive(ws: WebSocket): void {
     this.clearKeepAlive();
-    this.keepAliveTimer = setInterval(() => {
+    this.keepAliveTimer = recurring('relay-keepalive', () => {
       if (this.stopped || ws !== this.ws || ws.readyState !== WebSocket.OPEN || this.pongTimer) return;
       try {
         ws.ping();
@@ -271,7 +272,7 @@ export class RelayConnector {
     this.sendControl({ t: 'relay-capabilities', heartbeat: 'app-v1' });
     const beat = () => this.sendControl({ t: 'relay-heartbeat', v: 1 });
     beat();
-    this.heartbeatTimer = setInterval(beat, RELAY_HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer = recurring('relay-heartbeat', beat, RELAY_HEARTBEAT_INTERVAL_MS);
     this.heartbeatTimer.unref?.();
   }
 

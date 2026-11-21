@@ -1,3 +1,4 @@
+import { recurring } from '@/lib/background-work/ledger';
 import 'server-only';
 
 import { WebSocket } from 'ws';
@@ -541,7 +542,7 @@ export class MachineRelayConnector {
 
   private startKeepAlive(socket: WebSocket): void {
     this.clearKeepAlive();
-    this.keepAliveTimer = setInterval(() => {
+    this.keepAliveTimer = recurring('machine-attach-keepalive', () => {
       if (
         this.stopped
         || socket !== this.activeSocket

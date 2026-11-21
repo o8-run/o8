@@ -5,6 +5,7 @@
  * Process memory is used only to wake local long-poll requests early; periodic
  * polling keeps waiters correct when another process enqueues the job.
  */
+import { recurring } from '@/lib/background-work/ledger';
 import { getSqlite } from '@/lib/db';
 import { randomUUID } from 'node:crypto';
 import type { LaunchOptions } from '@/lib/runtimes/types';
@@ -120,7 +121,7 @@ export function waitForJob(
   const promise = new Promise<CloudJob | null>((resolve) => {
     finish = resolve;
     waiters.add(check);
-    interval = setInterval(check, DURABLE_POLL_INTERVAL_MS);
+    interval = recurring('cloud-job-queue-poll', check, DURABLE_POLL_INTERVAL_MS);
     timeout = setTimeout(() => settle(null), Math.max(0, timeoutMs));
     check();
   });

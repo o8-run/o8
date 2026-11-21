@@ -1,4 +1,5 @@
 import { reconcileProblemDossiers } from './service';
+import { recurring } from '@/lib/background-work/ledger';
 
 /** The heal-bot tick period, so dossiers settle on the same cadence either way. */
 export const DOSSIER_RECONCILE_MS = 60_000;
@@ -13,7 +14,7 @@ export function startProblemDossierReconcile(options: {
   periodMs?: number;
 }): () => void {
   let inFlight = false;
-  const timer = setInterval(() => {
+  const timer = recurring('problem-dossier-reconcile', () => {
     if (inFlight || options.healBotRunning()) return;
     inFlight = true;
     reconcileProblemDossiers()

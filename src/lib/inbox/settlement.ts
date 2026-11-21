@@ -19,6 +19,7 @@ import { legacyInboxPin } from './preferences';
 import { autoSettleEligible, inboxSubject, mutateInboxAutoSettle, readInboxState } from './store';
 import { assertInboxCanSettle, inboxPackets, runtimeInboxIdentity } from './subjects';
 import type { InboxSubject } from './settlement-state';
+import { recurring } from '@/lib/background-work/ledger';
 
 export { emptySettlement, hasQueuedTurnStart, QUEUED_TURN_START_GRACE_MS, transitionSettlement } from './settlement-state';
 export type { InboxSettlement, InboxSubject } from './settlement-state';
@@ -150,7 +151,7 @@ export async function runInboxAutoSettleSweep(options: { force?: boolean; agents
 
 export function startInboxAutoSettle(): void {
   if (timer) return;
-  timer = setInterval(() => { void runInboxAutoSettleSweep().catch(err => console.warn('[inbox] auto-settle sweep failed:', err)); }, SWEEP_MS);
+  timer = recurring('inbox-auto-settle', () => { void runInboxAutoSettleSweep().catch(err => console.warn('[inbox] auto-settle sweep failed:', err)); }, SWEEP_MS);
   timer.unref?.();
 }
 export function stopInboxAutoSettle(): void {

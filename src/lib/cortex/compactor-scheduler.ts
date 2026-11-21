@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { recurring } from '@/lib/background-work/ledger';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const INITIAL_DELAY_MS = 30_000; // 30s — let server stabilize before first run
@@ -149,7 +150,7 @@ export function bootCompactorScheduler(): void {
 
   setTimeout(() => {
     void runCompactionCycle();
-    setInterval(() => {
+    recurring('cortex-compactor', () => {
       void runCompactionCycle();
     }, TWENTY_FOUR_HOURS_MS).unref();
   }, intervalMs).unref();

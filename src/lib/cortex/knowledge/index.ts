@@ -10,6 +10,7 @@ import type { KnowledgeSource } from '@/lib/operator/knowledge-source-defaults';
 import { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
 import { configuredKnowledgeSources } from './sources';
 import { readNotes, secretChunk } from './read-notes';
+import { recurring } from '@/lib/background-work/ledger';
 
 const generations = new Map<string, number>();
 const status = new Map<string, { state: 'indexing' | 'ready' | 'error'; error?: string }>();
@@ -137,7 +138,7 @@ export function startKnowledgeSourceWatcher(): () => void {
     try { const h = watch(path.dirname(settings), (_event, name) => { if (name?.toString() === path.basename(settings)) queue(); }); h.on('error', queue); h.unref(); handles.push(h); } catch { /* The add route also starts an index job. */ }
     await indexKnowledgeSources();
   };
-  const rescan = setInterval(queue, 60_000); rescan.unref();
+  const rescan = recurring('knowledge-rescan', queue, 60_000); rescan.unref();
   void synchronize();
   return () => { clearInterval(rescan); stop(); };
   function stop() { stopped = true; lifecycle += 1; if (timer) clearTimeout(timer); handles.forEach(h => h.close()); configuredKnowledgeSources().forEach(s => invalidateKnowledgeSource(s.id)); }

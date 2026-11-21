@@ -29,6 +29,7 @@ import { withAutomaticWorkspaceReconciliation, workspaceAllowsAutomaticReconcili
 import type { GitHubPullRequestSnapshot } from '@/lib/github-broker/store';
 import type { Lane } from '@/lib/lane/types';
 import { runBoundedWorktreeMaintenance } from './bounded-worktree-maintenance';
+import { recurring } from '@/lib/background-work/ledger';
 
 const execFileAsync = promisify(execFile);
 
@@ -465,7 +466,7 @@ export function startWorktreeReaper(): void {
     });
   }, 30_000);
 
-  reaperTimer = setInterval(() => {
+  reaperTimer = recurring('worktree-reaper', () => {
     void runWorktreeMaintenanceTick().catch((err) => {
       console.error('[worktree-reaper] tick failed:', err);
     });
