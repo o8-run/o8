@@ -1,5 +1,6 @@
 import { execFile } from '@/lib/providers/child-process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
@@ -8,15 +9,6 @@ const execFileAsync = promisify(execFile);
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 // o8's own machinery living inside the repo — never part of "your changes".
 const REVIEW_NOISE_PREFIXES = ['.cortex-worktrees/'];
-const REVIEW_SCAN_SKIP_DIRS = new Set([
-  '.git',
-  '.next',
-  '.cortex-worktrees',
-  'node_modules',
-  'dist',
-  'out',
-  'coverage',
-]);
 const liveReviewChangeCache = new Map<string, { token: string; changeSet: LiveReviewChangeSet }>();
 
 export interface LiveReviewChangeSet {
@@ -80,41 +72,35 @@ function headRefPath(gitDir: string, commonDir: string) {
   }
 }
 
-function workingTreeMtimeToken(workspacePath: string) {
-  let newest = 0;
-  let files = 0;
-  const stack = [workspacePath];
+async function workingTreeChangeToken(workspacePath: string) {
+  // Git's index and ignore rules limit JS filesystem work to modified and
+  // untracked files that can actually appear in the review.
+  const paths = await execFileAsync('git', [
+    '-C', workspacePath, 'ls-files', '--modified', '--others', '--exclude-standard', '-z',
+  ], {
+    windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024,
+  }).then((result) => result.stdout).catch(() => null);
+  if (paths === null) return null;
 
-  while (stack.length > 0) {
-    const dir = stack.pop() as string;
-    let entries: ReturnType<typeof readdirSync>;
+  const hash = createHash('sha256').update(paths);
+  for (const relativePath of paths.split('\0')) {
+    if (!relativePath || isReviewNoisePath(relativePath)) continue;
+    const filePath = join(workspacePath, relativePath);
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      const info = lstatSync(filePath, { throwIfNoEntry: false });
+      hash.update(info ? `:${info.mtimeMs}:${info.ctimeMs}:${info.size}:${info.ino};` : ';');
     } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (REVIEW_SCAN_SKIP_DIRS.has(entry.name)) continue;
-        stack.push(join(dir, entry.name));
-        continue;
-      }
-      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
-      const absPath = join(dir, entry.name);
-      const relativePath = absPath.slice(workspacePath.length + 1);
-      if (isReviewNoisePath(relativePath)) continue;
-      newest = Math.max(newest, safeMtimeMs(absPath));
-      files += 1;
+      hash.update(';');
     }
   }
-
-  return `${files}:${newest}`;
+  return hash.digest('hex');
 }
 
-function reviewMtimeToken(workspacePath: string) {
+async function reviewChangeToken(workspacePath: string) {
   const gitDir = resolveGitDir(workspacePath);
-  if (!gitDir) return `nogit:${workingTreeMtimeToken(workspacePath)}`;
+  if (!gitDir) return null;
+  const workingTree = await workingTreeChangeToken(workspacePath);
+  if (workingTree === null) return null;
   const headPath = join(gitDir, 'HEAD');
   const commonDir = commonGitDir(gitDir);
   const refPath = headRefPath(gitDir, commonDir);
@@ -124,7 +110,7 @@ function reviewMtimeToken(workspacePath: string) {
     safeMtimeMs(headPath),
     refPath ? safeMtimeMs(refPath) : 0,
     safeMtimeMs(packedRefsPath),
-    workingTreeMtimeToken(workspacePath),
+    workingTree,
   ].join(':');
 }
 
@@ -191,9 +177,9 @@ export async function getLiveReviewChangeSet(
   sessionKey?: string,
 ): Promise<LiveReviewChangeSet> {
   const cacheKey = resolve(workspacePath);
-  const token = reviewMtimeToken(cacheKey);
+  const token = await reviewChangeToken(cacheKey);
   const cached = liveReviewChangeCache.get(cacheKey);
-  if (cached?.token === token) {
+  if (token !== null && cached?.token === token) {
     return cached.changeSet;
   }
 
@@ -228,6 +214,7 @@ export async function getLiveReviewChangeSet(
     deletions,
     files: changedFiles.length,
   };
-  liveReviewChangeCache.set(cacheKey, { token, changeSet });
+  if (token === null) liveReviewChangeCache.delete(cacheKey);
+  else liveReviewChangeCache.set(cacheKey, { token, changeSet });
   return changeSet;
 }
