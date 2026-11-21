@@ -13,6 +13,7 @@ import {
   type GenerateExplainerParams,
   type PacketExplainerGenerationResult,
 } from './packet-explainer';
+import { recurring } from '@/lib/background-work/ledger';
 
 const DRAIN_INTERVAL_MS = 5_000;
 const MAX_EXPLAINER_ATTEMPTS = 3;
@@ -325,7 +326,7 @@ export async function drainPacketExplainerQueue(
 export function startPacketExplainerQueueDrain(): () => void {
   if (manualReviewRequested()) return () => {};
   if (drainTimer) return () => { /* already running */ };
-  drainTimer = setInterval(() => {
+  drainTimer = recurring('packet-explainer-drain', () => {
     void drainPacketExplainerQueue().catch((error) => {
       console.error('[explainer-queue] Drain error:', error);
     });

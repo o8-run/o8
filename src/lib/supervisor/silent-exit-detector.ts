@@ -63,6 +63,7 @@ import {
   type SupervisorInboxKind,
   type SupervisorInboxPayload,
 } from '@/lib/supervisor/heal-bot';
+import { recurring } from '@/lib/background-work/ledger';
 
 // Re-exported so callers/tests keep importing the dead-label policy from the
 // detector surface; the canonical definition now lives in the unified archiver
@@ -611,7 +612,7 @@ export function startSilentExitDetector(): () => void {
     };
   }
 
-  detectorTimer = setInterval(() => {
+  detectorTimer = recurring('silent-exit-detector', () => {
     void silentExitTick().catch((error) => {
       console.error('[silent-exit] Tick failed:', error);
     });

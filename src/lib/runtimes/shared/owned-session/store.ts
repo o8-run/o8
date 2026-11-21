@@ -70,6 +70,7 @@ import type {
   RebindOwnedWorkspaceInput,
   RebindOwnedWorkspaceResult,
 } from './types';
+import { recurring } from '@/lib/background-work/ledger';
 
 export function createOwnedSessionStore(
   adapter: OwnedRuntimeAdapter,
@@ -748,7 +749,7 @@ export function createOwnedSessionStore(
   const TIMER_KEY = Symbol.for(`o8.ownedSession.refreshTimer.${runtimeId}`);
   const globalStore = globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>;
   if (!globalStore[TIMER_KEY]) {
-    const timer = setInterval(() => {
+    const timer = recurring('owned-session-store', () => {
       getFleetAdditions({ fresh: true }).catch((err) => {
         console.warn(`[owned-store] ${runtimeId} refresh tick failed:`, err instanceof Error ? err.message : err);
       });

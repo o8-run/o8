@@ -38,6 +38,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { appendDirectiveTrailer } from '@/lib/cortex/directive-merges';
 import { listRepos } from '@/lib/repos/registry';
 import { readPollBranchTip } from '@/lib/git/poll-branch-tip';
+import { recurring } from '@/lib/background-work/ledger';
 
 const execFileAsync = promisify(execFile);
 
@@ -344,7 +345,7 @@ export function ensureExternalMergeBootHook(): void {
   });
 
   if (tickHandle) return;
-  tickHandle = setInterval(() => {
+  tickHandle = recurring('external-merge-watcher', () => {
     void ingestExternalMerges().catch((err: unknown) => {
       logWarn('tick sweep threw:', err);
     });

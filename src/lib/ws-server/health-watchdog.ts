@@ -19,6 +19,7 @@
 import { wsHandlersSince, wsInFlightHandlers, type WsHealthHandler } from './handler-activity';
 import { performance } from 'node:perf_hooks';
 import { WsCpuSampler, type WsCpuEvidence } from './cpu-evidence';
+import { recurring } from '@/lib/background-work/ledger';
 
 export interface WsHealthStats {
   /** Wall-clock time the watchdog started sampling (epoch ms). */
@@ -94,7 +95,7 @@ export class WsWatchdog {
     this.sustainedSamples = opts.sustainedSamples ?? 3;
     this.nowMs = opts.nowMs ?? (() => performance.now());
     this.wallClock = opts.wallClock ?? (() => Date.now());
-    this.scheduler = opts.scheduler ?? ((cb, ms) => setInterval(cb, ms));
+    this.scheduler = opts.scheduler ?? ((cb, ms) => recurring('ws-health-watchdog', cb, ms));
     this.cancelScheduler = opts.cancelScheduler ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>));
     this.log = opts.log ?? ((m) => console.log(m));
     this.cpuSampler = opts.cpuSampler ?? (process.env.O8_WS_CPU_EVIDENCE === '1' ? new WsCpuSampler() : false);

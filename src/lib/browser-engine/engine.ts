@@ -1,3 +1,4 @@
+import { recurring } from '@/lib/background-work/ledger';
 import 'server-only';
 
 // TYPE-ONLY import: erased at compile time, so it pulls nothing into the bundle.
@@ -178,7 +179,7 @@ class BrowserEngine {
     const session: EngineSession = { context, page, lastUsedAt: Date.now() };
     this.sessions.set(scope, session);
     if (!this.reaper) {
-      this.reaper = setInterval(() => void this.reapIdle(), 60_000);
+      this.reaper = recurring('browser-engine-reaper', () => void this.reapIdle(), 60_000);
       this.reaper.unref?.();
     }
     return session;

@@ -20,6 +20,7 @@ import {
   speakableText,
 } from './narration';
 import { appendBroadcastEvent } from './post';
+import { recurring } from '@/lib/background-work/ledger';
 
 const DIRECTOR_TICK_MS = 30_000;
 const FEED_SLICE_LIMIT = 100;
@@ -184,7 +185,7 @@ export function startBroadcastDirectorLoop(): () => void {
     });
   };
   tick();
-  directorTimer = setInterval(tick, DIRECTOR_TICK_MS);
+  directorTimer = recurring('broadcast-director', tick, DIRECTOR_TICK_MS);
   directorTimer.unref();
   return () => {
     if (directorTimer) clearInterval(directorTimer);

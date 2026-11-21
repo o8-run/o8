@@ -1,3 +1,4 @@
+import { recurring } from '@/lib/background-work/ledger';
 import type { BrowserInventorySnapshot } from '@/lib/browser/types';
 import type { CommandCenterSnapshot } from '@/lib/command-center/snapshot';
 import { getCommandCenterSnapshotWithOptions } from '@/lib/command-center/snapshot';
@@ -317,7 +318,7 @@ function ensureBootstrapWarmers() {
   if (renderBootstrapState.brokerWarmersStarted) return;
   renderBootstrapState.brokerWarmersStarted = true;
 
-  renderBootstrapState.commandCenterWarmerTimer = setInterval(() => {
+  renderBootstrapState.commandCenterWarmerTimer = recurring('render-command-center-warmer', () => {
     const record = getSharedBrokerRecord(commandCenterBroker, COMMAND_CENTER_BROKER_PATH);
     const isHot = record && Date.now() - record.refreshedAt <= BROKER_HOT_TTL_MS;
     if (!commandCenterBroker.wasAccessedRecently(BROKER_ACTIVE_WINDOW_MS) || isHot) return;
@@ -325,7 +326,7 @@ function ensureBootstrapWarmers() {
   }, BROKER_WARMER_INTERVAL_MS);
   unrefTimer(renderBootstrapState.commandCenterWarmerTimer);
 
-  renderBootstrapState.mobileWarmerTimer = setInterval(() => {
+  renderBootstrapState.mobileWarmerTimer = recurring('render-mobile-warmer', () => {
     const record = getSharedBrokerRecord(mobileBroker, MOBILE_BROKER_PATH);
     const isHot = record && Date.now() - record.refreshedAt <= BROKER_HOT_TTL_MS;
     if (!mobileBroker.wasAccessedRecently(BROKER_ACTIVE_WINDOW_MS) || isHot) return;

@@ -1,6 +1,7 @@
 import 'server-only';
 import { auditShippedButDarkFlags, type ShippedButDarkAudit } from './shipped-dark-audit';
 import { recordShippedDarkAudit, type ShippedDarkAuditReceipt } from './shipped-dark-receipt';
+import { recurring } from '@/lib/background-work/ledger';
 export { SHIPPED_DARK_WARNING_RELEASES, recordShippedDarkAudit, readShippedDarkAuditReceipt, currentShippedDarkAuditStatus } from './shipped-dark-receipt';
 export type { ShippedDarkAuditReceipt, ShippedDarkFlagStatus, ShippedDarkAuditStatus } from './shipped-dark-receipt';
 
@@ -37,7 +38,7 @@ export function ensureShippedDarkAuditBootHook(options: {
   const run = options.run ?? runShippedDarkAudit;
   setImmediate(() => runScheduledAudit('boot', run));
   if (tickHandle) return;
-  tickHandle = setInterval(
+  tickHandle = recurring('shipped-dark-audit', 
     () => runScheduledAudit('tick', run),
     SHIPPED_DARK_AUDIT_INTERVAL_MS,
   );

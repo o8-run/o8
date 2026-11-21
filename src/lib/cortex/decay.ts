@@ -29,6 +29,7 @@ import 'server-only';
 import { and, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
 
 import { getDb, runSessionOutcomeValidFromBackfill, sessionOutcomes } from '@/lib/db';
+import { recurring } from '@/lib/background-work/ledger';
 
 const DEFAULT_TTL_DAYS = 30;
 const DECAY_TICK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
@@ -254,7 +255,7 @@ export function ensureDecayBootHook(): void {
 
   // Recurring tick — guard against double-scheduling if Next reloads modules.
   if (tickHandle) return;
-  tickHandle = setInterval(() => {
+  tickHandle = recurring('cortex-decay', () => {
     void decayOutcomes().catch((err: unknown) => {
       logWarn('tick sweep threw:', err);
     });

@@ -39,6 +39,7 @@ import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { readOrComputeSignatures } from '@/lib/cortex/stack-signature';
 import { listProjectsByRepoId } from '@/lib/projects/store';
+import { recurring } from '@/lib/background-work/ledger';
 
 // #853 / #899 — Jaccard constants live behind the legacy gate. The empirical
 // 0.4 floor and ≥ 3-repos minimum mathematically excluded asymmetric stacks
@@ -656,7 +657,7 @@ export function ensureCrossRepoProposerBootTick(): void {
   setImmediate(() => {
     void runTick();
   });
-  const interval = setInterval(() => {
+  const interval = recurring('cross-repo-proposer', () => {
     if (Date.now() - lastTickAt < TICK_INTERVAL_MS - 5_000) return;
     void runTick();
   }, TICK_INTERVAL_MS);

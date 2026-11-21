@@ -88,6 +88,7 @@ import { ownsDataDirRelayIdentity, resolvePortInfo } from '@/lib/panel/api-port'
 import { getInstanceIdentity } from '@/lib/panel/instance-identity';
 import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
+import { recurring, startLedgerReporter } from '@/lib/background-work/ledger';
 import { getOrCreateWsToken, wsTokenSource } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -1641,7 +1642,7 @@ function reapOrphanDashSessions() {
 
 function startDashSessionGc() {
   if (dashGcTimer) return;
-  dashGcTimer = setInterval(() => {
+  dashGcTimer = recurring('dash-session-gc', () => {
     try { reapOrphanDashSessions(); } catch { /* best effort */ }
   }, DASH_GC_INTERVAL_MS);
   dashGcTimer.unref?.();
@@ -3507,7 +3508,7 @@ function startHeadlessTickBridge(intervalMs: number) {
       });
   };
 
-  const timer = setInterval(() => {
+  const timer = recurring('headless-tick', () => {
     tick();
   }, intervalMs);
 
@@ -3524,7 +3525,7 @@ function startHeadlessTickBridge(intervalMs: number) {
 
 function startBrowserDiscoveryRealtimeLoop() {
   if (browserDiscoveryTimer) return;
-  browserDiscoveryTimer = setInterval(async () => {
+  browserDiscoveryTimer = recurring('browser-discovery', async () => {
     if (clients.size === 0) return;
     try {
       const browserInventory = await fetchBrowserInventorySnapshot();
@@ -3564,7 +3565,7 @@ function attachedBrowserFingerprint(summary: BrowserAttachmentSummary | null) {
 
 function startAttachedBrowserRefreshLoop() {
   if (attachedBrowserRefreshTimer) return;
-  attachedBrowserRefreshTimer = setInterval(async () => {
+  attachedBrowserRefreshTimer = recurring('attached-browser-refresh', async () => {
     if (clients.size === 0) return;
     const attachedBrowser = getAttachedBrowserSummary();
     if (!attachedBrowser) return;
@@ -5532,7 +5533,7 @@ function markConflictsDirty() {
 
 function startPollingLoops() {
   // Safety-net inbox poll — reduced frequency since event-driven push handles most updates
-  setInterval(() => {
+  recurring('inbox-safety-net', () => {
     const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN
       && inboxSafetyNet.due(c, mobileInboxRevision || undefined));
     if (activeClients.length === 0) return;
@@ -5545,7 +5546,7 @@ function startPollingLoops() {
   // payload changed. With no Live Activity registered it has nothing to send,
   // and each tick missed the 8 s inbox cache and rebuilt the whole inbox
   // (often over a second of GitHub work), so it is skipped.
-  setInterval(() => {
+  recurring('live-activity-inbox', () => {
     void import('@/lib/mobile/live-activity-push')
       .then(({ hasMobileLiveActivityTokens }) => {
         if (hasMobileLiveActivityTokens()) void publishMobileInboxRealtimeSnapshot(false);
@@ -5554,7 +5555,7 @@ function startPollingLoops() {
   }, 30_000);
 
   // Safety-net history poll — reduced frequency since chat.done triggers immediate push
-  setInterval(() => {
+  recurring('history-safety-net', () => {
     const activeClients = [...clients.values()].filter(
       (c) => c.ws.readyState === WebSocket.OPEN && c.sessionKey
         && historySafetyNet.due(c, lastRealtimeHistoryId.get(c.sessionKey)),
@@ -5563,7 +5564,7 @@ function startPollingLoops() {
     void Promise.allSettled(activeClients.map((c) => syncClientHistory(c, fetchSafetyNetSync)));
   }, SAFETY_NET_HISTORY_MS);
 
-  realtimeSessionHistoryPollTimer = setInterval(() => {
+  realtimeSessionHistoryPollTimer = recurring('session-history-poll', () => {
     void refreshSubscribedRealtimeSessionHistories();
   }, REALTIME_SESSION_HISTORY_POLL_MS);
   realtimeSessionHistoryPollTimer.unref?.();
@@ -5572,7 +5573,7 @@ function startPollingLoops() {
   // chat-history writes; this WS bridge watches the durable records and pushes
   // thread create/update/reveal events to desktop + mobile clients.
   let orchestratorThreadSyncInFlight = false;
-  setInterval(() => {
+  recurring('orchestrator-thread-sync', () => {
     // Overlap guard: the sync is now async (fs.promises); skip a tick rather
     // than let a slow scan stack up on the event loop.
     if (orchestratorThreadSyncInFlight) return;
@@ -5586,7 +5587,7 @@ function startPollingLoops() {
   // the operator adds from the Codex app (desktop or phone) into the o8 chat,
   // then tell an open chat to reload. The history poll above pushes the update.
   let codexAppSyncInFlight = false;
-  setInterval(() => {
+  recurring('codex-app-thread-sync', () => {
     if (codexAppSyncInFlight || !resolveCodexAppThreadsSync()) return;
     codexAppSyncInFlight = true;
     void syncCodexAppThreads({
@@ -5603,7 +5604,7 @@ function startPollingLoops() {
   // Conflict scan — poll every 5s, push updates to all clients when conflicts change
   // TODO: Track repo per client session for multi-repo support (currently uses process.cwd())
   let lastConflictHash = '';
-  setInterval(async () => {
+  recurring('conflict-scan', async () => {
     const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN);
     if (activeClients.length === 0) return;
 
@@ -6450,7 +6451,7 @@ function checkForStalledAgents() {
 }
 
 // Start stall detection interval (cleaned up on shutdown)
-const stallCheckTimer = setInterval(checkForStalledAgents, STALL_CHECK_INTERVAL_MS);
+const stallCheckTimer = recurring('stall-check', checkForStalledAgents, STALL_CHECK_INTERVAL_MS);
 
 function broadcastLifecycle(sessionName: string, state: LifecycleState, exitCode?: number) {
   const entry = { state, exitCode, ts: Date.now() };
@@ -7741,7 +7742,7 @@ wss.on('connection', (ws, req) => {
 });
 
 // Keepalive ping
-setInterval(() => {
+recurring('ws-keepalive', () => {
   for (const client of clients.values()) {
     if (!client.alive) {
       stopFlushTimer(client);
@@ -7757,7 +7758,7 @@ setInterval(() => {
 // #5 — revoke-disconnect sweep. Revocation drops a device from the HTTP gate
 // immediately (the token-hash file) and refuses its next WS reconnect; this
 // closes a still-LIVE WS within ~20s so an open mobile session can't linger.
-setInterval(() => {
+recurring('device-revoke-sweep', () => {
   for (const client of clients.values()) {
     if (!client.deviceId) continue;
     try {
@@ -8236,13 +8237,13 @@ function startReviewWatchers(): void {
   // watcher yet. Re-attaching is idempotent and costs a couple of stat()s, so a
   // slow re-check closes that gap without any hot-path work — and pulls in the
   // registered-repo bases (#1484) once the repo list is readable.
-  setInterval(() => {
+  recurring('worktree-watcher-attach', () => {
     void listRepoPaths()
       .then((paths) => ensureWorktreeWatchers(paths))
       .catch(() => ensureWorktreeWatchers());
   }, 30_000).unref?.();
 
-  reviewPollTimer = setInterval(() => {
+  reviewPollTimer = recurring('review-poll', () => {
     scheduleReviewRefresh(0, false);
   }, REVIEW_POLL_INTERVAL_MS);
   if (reviewPollTimer.unref) reviewPollTimer.unref();
@@ -8410,7 +8411,7 @@ async function bootstrapWsServer() {
   if (shuttingDown) return;
   await checkLaunchAgentHealth();
   if (shuttingDown) return;
-  setInterval(() => { void checkLaunchAgentHealth(); }, 60_000).unref();
+  recurring('launch-agent-health', () => { void checkLaunchAgentHealth(); }, 60_000).unref();
 
   if (shuttingDown) return;
   try {
@@ -8552,7 +8553,7 @@ async function bootstrapWsServer() {
   // out-of-band (orchestrator bash-merge) so the UI heals within 30s even if
   // no API caller triggers the inline reconcile. Cheap: a few existsSync
   // checks on a small set of non-terminal lanes.
-  setInterval(async () => {
+  recurring('orphan-and-ancestry-sweep', async () => {
     try {
       const [
         { reconcileOrphanedWorktrees },
@@ -8576,7 +8577,7 @@ async function bootstrapWsServer() {
     }
   }, 30_000).unref();
 
-  setInterval(async () => {
+  recurring('rules-promotion', async () => {
     try {
       const { runRulesPromotionCycle } = await import('@/lib/dispatch/rules-promotion') as {
         runRulesPromotionCycle: (options?: { now?: Date }) => Promise<{
@@ -8595,6 +8596,7 @@ async function bootstrapWsServer() {
 
   if (shuttingDown) return;
   startReviewWatchers();
+  startLedgerReporter(getDataDir());
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
   startAttachedBrowserRefreshLoop();

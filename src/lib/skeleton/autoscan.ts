@@ -12,6 +12,7 @@
 import { execSync } from '@/lib/providers/child-process';
 import { scanRepo } from './index';
 import { getAllCached } from './store';
+import { recurring } from '@/lib/background-work/ledger';
 
 /** How old the cache can be before we rescan (5 minutes). */
 const STALE_THRESHOLD_MS = 5 * 60 * 1000;
@@ -130,7 +131,7 @@ export function startChangePolling(repoPath: string): void {
 
   let lastKnownDiff = '';
 
-  const interval = setInterval(() => {
+  const interval = recurring('skeleton-autoscan', () => {
     try {
       const diff = execSync(
         'git diff --name-only HEAD 2>/dev/null; git diff --name-only --cached 2>/dev/null',

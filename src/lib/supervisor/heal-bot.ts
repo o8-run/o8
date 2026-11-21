@@ -9,6 +9,7 @@ import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 import { runAwaitingReviewAutoReleaseSweep } from '@/lib/supervisor/heal-bot-auto-release';
 import { runGitHubBrokerSyncSweep } from '@/lib/supervisor/github-broker-sync';
 import { enqueueInboxItem, runRetentionSweep, selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
+import { recurring } from '@/lib/background-work/ledger';
 export { runAwaitingReviewAutoReleaseSweep } from '@/lib/supervisor/heal-bot-auto-release';
 const execFileAsync = promisify(execFile);
 
@@ -791,7 +792,7 @@ export function startHealBot(): () => void {
     };
   }
 
-  healBotTimer = setInterval(() => {
+  healBotTimer = recurring('heal-bot', () => {
     void drainHealBotQueue().catch((error) => {
       console.error('[heal-bot] Drain failed:', error);
     });

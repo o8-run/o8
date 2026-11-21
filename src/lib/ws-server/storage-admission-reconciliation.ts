@@ -6,6 +6,7 @@ import {
   reconcileExpiredPacketStorageReservations,
   type PacketStorageAdmissionReconciliationResult,
 } from '@/lib/orchestrator/storage-admission';
+import { recurring } from '@/lib/background-work/ledger';
 
 export const STORAGE_ADMISSION_RECONCILIATION_INTERVAL_MS = 5 * 60_000;
 
@@ -32,7 +33,7 @@ export function startStorageAdmissionReconciliation(input: {
   onPeriodicError?: (error: unknown) => void;
 } = {}): { initial: Promise<StorageAdmissionLedgerReconciliationResult>; timer: TimerHandle } {
   const reconcile = input.reconcile ?? reconcileStorageAdmissionLedger;
-  const schedule = input.schedule ?? ((callback, intervalMs) => setInterval(callback, intervalMs));
+  const schedule = input.schedule ?? ((callback, intervalMs) => recurring('storage-admission-reconcile', callback, intervalMs));
   const onPeriodicResult = input.onPeriodicResult ?? (() => {});
   const onPeriodicError = input.onPeriodicError ?? ((error: unknown) => {
     console.warn(

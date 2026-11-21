@@ -1,4 +1,5 @@
 import { resolveStatus, readOwnedRecoveryState, readOwnedCompletionState } from './recovery-status';
+import { trackRun } from '@/lib/background-work/ledger';
 import { sharedWorkerLaunchContext } from '@/lib/orchestrator/shared-worker-recovery';
 import { access, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -395,7 +396,7 @@ function queueNextHeartbeat(delayMs = SUPERVISOR_HEARTBEAT_MS): void {
   }
   pollTimer = setTimeout(() => {
     pollTimer = null;
-    void supervisorHeartbeat();
+    void trackRun('supervisor-heartbeat', supervisorHeartbeat);
   }, Math.max(0, delayMs));
 }
 

@@ -20,6 +20,7 @@ import { readWorktreeMetaSnapshot, withWorktreeMetaTransaction } from './metadat
 import type { WorktreeManager } from './manager';
 import type { WorktreeLaunchOptions } from './launch';
 import type { CreateWorktreeOptions, WorktreeInfo, WorktreeMetaEntry } from './types';
+import { recurring } from '@/lib/background-work/ledger';
 
 // Process-wide caps include entries currently being built. Only one installer
 // runs at a time, outside the dispatch provision queue. No packet is recycled.
@@ -40,7 +41,7 @@ let refresh: ReturnType<typeof setInterval> | null = null;
 
 function startRefresh(): void {
   if (refresh || stopped) return;
-  refresh = setInterval(() => {
+  refresh = recurring('warm-packet-pool', () => {
     if (requests.size) queueRefill(0);
   }, 30_000);
   refresh.unref();
