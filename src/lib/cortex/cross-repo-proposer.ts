@@ -39,7 +39,6 @@ import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { readOrComputeSignatures } from '@/lib/cortex/stack-signature';
 import { listProjectsByRepoId } from '@/lib/projects/store';
-import { recurring } from '@/lib/background-work/ledger';
 
 // #853 / #899 — Jaccard constants live behind the legacy gate. The empirical
 // 0.4 floor and ≥ 3-repos minimum mathematically excluded asymmetric stacks
@@ -629,54 +628,55 @@ export async function proposeAcrossRepos(
 // ── boot tick wiring ──────────────────────────────────────────────────────
 
 let bootTickFired = false;
-let lastTickAt = 0;
-// #851 — shortened from 30 min to 5 min so a directive add/edit, repo
-// add/remove, or new outcome row surfaces in the proposer within a single
-// poll cycle. The `?force=1` query param on the route covers the
-// "right now" case explicitly.
-const TICK_INTERVAL_MS = 5 * 60 * 1000;
+// #851 — a directive add/edit, repo add/remove or new outcome row should
+// surface within five minutes. Reads refresh a snapshot older than this in the
+// background instead of a timer recomputing it for nobody; registry changes
+// clear it outright, and `?force=1` recomputes inline.
+const STALE_AFTER_MS = 5 * 60 * 1000;
 
 let cachedCandidates: CrossRepoProposalCandidate[] = [];
 let cachedAt = 0;
+let inFlight: Promise<void> | null = null;
 
-async function runTick(): Promise<void> {
-  try {
-    const result = await proposeAcrossRepos();
-    cachedCandidates = result.candidates;
-    cachedAt = Date.now();
-    lastTickAt = cachedAt;
-  } catch (err) {
-    console.warn('[cross-repo-proposer] tick threw:', err instanceof Error ? err.message : err);
-  }
+function runTick(): Promise<void> {
+  inFlight ??= (async () => {
+    try {
+      const result = await proposeAcrossRepos();
+      cachedCandidates = result.candidates;
+      cachedAt = Date.now();
+    } catch (err) {
+      console.warn('[cross-repo-proposer] tick threw:', err instanceof Error ? err.message : err);
+    } finally {
+      inFlight = null;
+    }
+  })();
+  return inFlight;
 }
 
-/** Idempotent boot hook — same shape as `ensureProposerBootTick`. */
+/** Idempotent boot hook: one computation at boot so the first read is warm. */
 export function ensureCrossRepoProposerBootTick(): void {
   if (bootTickFired) return;
   bootTickFired = true;
   setImmediate(() => {
     void runTick();
   });
-  const interval = recurring('cross-repo-proposer', () => {
-    if (Date.now() - lastTickAt < TICK_INTERVAL_MS - 5_000) return;
-    void runTick();
-  }, TICK_INTERVAL_MS);
-  if (typeof interval.unref === 'function') interval.unref();
 }
 
 /**
  * #851 — `force` bypasses the cache and recomputes inline so a fresh repo
- * add, directive edit, or outcome row surfaces immediately instead of
- * waiting for the next tick.
+ * add, directive edit, or outcome row surfaces immediately. A snapshot older
+ * than five minutes is returned as is and refreshed for the next read.
  */
 export async function readCachedCrossRepoProposals(
-  options: { force?: boolean } = {},
+  options: { force?: boolean; now?: number } = {},
 ): Promise<{
   candidates: CrossRepoProposalCandidate[];
   computedAt: number;
 }> {
   if (options.force || cachedAt === 0) {
     await runTick();
+  } else if ((options.now ?? Date.now()) - cachedAt >= STALE_AFTER_MS) {
+    void runTick();
   }
   return { candidates: cachedCandidates, computedAt: cachedAt };
 }
