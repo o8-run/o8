@@ -93,7 +93,14 @@ impl Fixture {
                 data["origin"].as_str()?;
                 Some(data)
             })
-            .expect("fixture origin");
+            .unwrap_or_else(|| {
+                // The server exited before its receipt: name the cause from its own log.
+                let status = server.wait().ok();
+                let log = fs::read_to_string(root.join("fixture.log")).unwrap_or_default();
+                let lines: Vec<&str> = log.lines().collect();
+                let tail = lines[lines.len().saturating_sub(40)..].join("\n");
+                panic!("fixture origin missing (server {status:?})\n{tail}")
+            });
         // Production repository scans may log after the receipt. Keep stdout
         // drained so those writes cannot terminate the owned host with EPIPE.
         std::thread::spawn(move || for _ in output {});

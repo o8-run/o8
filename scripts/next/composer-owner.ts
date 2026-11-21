@@ -48,9 +48,10 @@ export async function startComposerOwner(binary: string): Promise<ComposerOwner>
   const data = getDataDir(); getSqlite();
   const token = getOrCreateWsToken(), key = randomUUID(), epoch = randomUUID();
   const directory = mkdtempSync('/tmp/o8-cq-suite-'); const socket = join(directory, 'p.sock');
-  const reservation = createServer(); await new Promise<void>(resolve => reservation.listen(0, '127.0.0.1', resolve));
-  const publicPort = (reservation.address() as { port: number }).port;
-  await new Promise<void>(resolve => reservation.close(() => resolve()));
+  // o8d binds its own port and reports it. Reserving a port here and releasing
+  // it for o8d raced every other listener and outgoing socket on the machine:
+  // when another took the port, o8d exited and the fixture never started.
+  let publicPort = 0;
   const upstream: Server = createServer((request, response) => {
     void (async () => {
       if (request.url === '/internal/realtime') { request.resume(); response.writeHead(request.headers.authorization === `Bearer ${token}` ? 202 : 401).end(); return; }
@@ -67,6 +68,7 @@ export async function startComposerOwner(binary: string): Promise<ComposerOwner>
       await closed; clearTimeout(timer);
     }
   };
+  // A restart rebinds the port clients already hold; the first launch takes any free port.
   const launch = async () => {
     rmSync(socket, { force: true });
     daemon = spawnOwner(binary, ['--experimental-ws', '--listen', `127.0.0.1:${publicPort}`, '--producer-socket', socket], {
@@ -75,12 +77,36 @@ export async function startComposerOwner(binary: string): Promise<ComposerOwner>
         O8D_SERVER_VERSION: 'composer-queue-suite', O8_BOOT_ID: randomUUID(), O8_INSTANCE_ID: randomUUID(), WS_TOKEN: token },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    let diagnostic = ''; daemon.stdout!.resume(); daemon.stderr!.on('data', chunk => { diagnostic = (diagnostic + chunk).slice(-8192); });
-    const end = Date.now() + 10000;
-    while (!existsSync(socket)) {
-      if (daemon.exitCode !== null || Date.now() > end) throw Error(`Composer owner preflight failed: ${diagnostic}`);
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
+    let diagnostic = ''; daemon.stderr!.on('data', chunk => { diagnostic = (diagnostic + chunk).slice(-8192); });
+    // o8d prints {"listening":"127.0.0.1:<port>"} once both its producer socket
+    // and its port are bound. Wait for that line, not a fixed time: a cold
+    // debug build on a loaded runner can take many seconds to start.
+    const started = daemon;
+    const listening = await new Promise<string>((resolve, reject) => {
+      let buffered = '';
+      const timer = setTimeout(() => fail('no listening receipt within 60 s'), 60_000);
+      function fail(reason: string) {
+        clearTimeout(timer); started.stdout!.off('data', read); started.off('exit', exited);
+        reject(Error(`Composer owner preflight failed (${reason}): ${diagnostic}`));
+      }
+      function exited(code: number | null, signal: string | null) { fail(`exited ${code ?? signal}`); }
+      function read(chunk: Buffer) {
+        buffered += chunk.toString('utf8');
+        for (let newline = buffered.indexOf('\n'); newline >= 0; newline = buffered.indexOf('\n')) {
+          const line = buffered.slice(0, newline); buffered = buffered.slice(newline + 1);
+          let address: unknown;
+          try { address = (JSON.parse(line) as { listening?: unknown }).listening; } catch { continue; }
+          if (typeof address !== 'string') continue;
+          clearTimeout(timer); started.stdout!.off('data', read); started.off('exit', exited);
+          started.stdout!.resume();
+          resolve(address);
+          return;
+        }
+      }
+      started.stdout!.on('data', read); started.once('exit', exited);
+    });
+    publicPort = Number(listening.slice(listening.lastIndexOf(':') + 1));
+    if (!existsSync(socket)) throw Error(`Composer owner preflight failed (no producer socket): ${diagnostic}`);
   };
   const suspend = () => { unbind?.(); unbind = undefined; producer?.stop(); producer = undefined; };
   const resume = async () => {
