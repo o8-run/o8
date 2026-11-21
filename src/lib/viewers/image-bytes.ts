@@ -1,3 +1,4 @@
+import { createBroadcastRedactionContext } from '@/lib/broadcast/redaction';
 import { viewerJson } from './response';
 import type { ViewerRedaction } from './route-types';
 
@@ -131,9 +132,13 @@ export function viewerImageBytes(bytes: Buffer, mimeType: string, init?: Respons
   if (!dimensions) return refuse('Preview requires a valid image');
   if (dimensions.width * dimensions.height > MAX_IMAGE_PIXELS) return refuse('Image exceeds the preview size limit');
 
-  // Confirmed raster image: serve the original bytes under the same hardened
-  // headers the text viewer uses. nosniff plus a sandboxed, source-free CSP keep
-  // the response inert even though the body is now opaque binary.
+  // A valid image can still include credential bytes in its metadata.
+  const { environmentValues, operatorToken, workerToken } = createBroadcastRedactionContext();
+  if ([...environmentValues, operatorToken, workerToken].some(value => value && bytes.includes(value))) {
+    return refuse('Image preview contains sensitive data');
+  }
+
+  // Preserve the original bytes for supported previews.
   const redaction: ViewerRedaction = { version: 1, offsetEncoding: 'utf-8', spans: [] };
   const headers = new Headers(init?.headers);
   for (const name of ['Content-Range', 'Accept-Ranges', 'Content-Encoding', 'Content-Disposition']) headers.delete(name);
