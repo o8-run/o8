@@ -48,10 +48,12 @@ function parseMissionState(json: string | null, strict = false): OrchestratorMis
 function archiveRegistryRowUnlocked(id: string) {
   const archivedAt = Date.now();
   const version = nextRegistryVersion(id);
-  getSqlite().prepare(`
+  const db = getSqlite();
+  db.prepare(`
     UPDATE missions SET archived_at = ?, updated_at = ?
      WHERE id = ? AND archived_at IS NULL
   `).run(archivedAt, version, id);
+  normalizedMissions.get(db)?.delete(id);
 }
 
 function queueArchiveRegistryRow(id: string) {
@@ -89,8 +91,8 @@ export function missionIsTerminal(state: OrchestratorMissionState) {
   return state.packets.length > 0 && state.packets.every((packet) => !packetIsActive(packet));
 }
 
-// Keep a private normalized snapshot per database and durable row version.
-// Readers receive clones because registry mutations edit packet objects in place.
+// Keep normalized snapshots only for active rows. Registry mutations edit
+// packet objects in place, so reads of cached snapshots receive clones.
 const normalizedMissions = new WeakMap<ReturnType<typeof getSqlite>, Map<string, {
   version: number;
   json: string | null;
@@ -99,8 +101,13 @@ const normalizedMissions = new WeakMap<ReturnType<typeof getSqlite>, Map<string,
 }>>();
 const NORMALIZED_MISSION_CACHE_MAX = 128;
 
-function missionRegistryEntryFromRow(row: MissionStateRow, strict = false): MissionRegistryEntry | null {
+function readRegistryMission(row: MissionStateRow, strict: boolean): OrchestratorMissionState | null {
   const db = getSqlite();
+  if (row.archived_at !== null) {
+    // Older writers can archive a row without advancing its version.
+    normalizedMissions.get(db)?.delete(row.id);
+    return parseMissionState(row.mission_state_json, strict);
+  }
   let cache = normalizedMissions.get(db);
   if (!cache) {
     cache = new Map();
@@ -118,9 +125,14 @@ function missionRegistryEntryFromRow(row: MissionStateRow, strict = false): Miss
       cache.set(row.id, { version: row.updated_at, json: row.mission_state_json, strict, mission });
     }
   }
+  return mission ? structuredClone(mission) : null;
+}
+
+function missionRegistryEntryFromRow(row: MissionStateRow, strict = false): MissionRegistryEntry | null {
+  const mission = readRegistryMission(row, strict);
   return mission ? {
     id: row.id,
-    mission: structuredClone(mission),
+    mission,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     archivedAt: row.archived_at,
@@ -274,6 +286,7 @@ function writeMissionRegistryStateUnlocked(state: OrchestratorMissionState, mirr
     const normalized = normalizeOrchestratorMissionStateForPersistence(mirror ? preserveReleasedPackets(state) : state);
     const waves = buildDependencyGraph(normalized.packets).map((node) => node.wave);
     const archivedAt = missionIsTerminal(normalized) ? Date.now() : null;
+    if (archivedAt !== null) normalizedMissions.get(getSqlite())?.delete(missionId);
     const json = JSON.stringify(normalized);
     // The headless loop rewrites every live mission each tick. An update that
     // changes nothing keeps the stored row and its version as they are.
