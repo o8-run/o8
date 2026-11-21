@@ -746,9 +746,14 @@ export function createOwnedSessionStore(
     });
   }
 
+  // Creating a store starts a refresh timer and one unawaited orphan sweep. In
+  // isolated tests neither has an owner to await or stop: they outlive the test
+  // file, scan a data directory the file already removed, and log while the
+  // worker closes (#6081). Tests refresh or sweep explicitly when they need to.
+  const startBackgroundWork = !process.env.O8_TEST_DATA_DIR_PINNED;
   const TIMER_KEY = Symbol.for(`o8.ownedSession.refreshTimer.${runtimeId}`);
   const globalStore = globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>;
-  if (!globalStore[TIMER_KEY]) {
+  if (startBackgroundWork && !globalStore[TIMER_KEY]) {
     const timer = recurring('owned-session-store', () => {
       getFleetAdditions({ fresh: true }).catch((err) => {
         console.warn(`[owned-store] ${runtimeId} refresh tick failed:`, err instanceof Error ? err.message : err);
@@ -769,7 +774,7 @@ export function createOwnedSessionStore(
     return fleetComputer.sweepOrphanedSessions(activeSurfaceIds, ACTIVE_ORPHAN_GRACE_MS, listRunningSharedCheckoutSurfaceIds());
   }
 
-  void sweepRecentlyOrphanedActiveRuns().catch(() => {});
+  if (startBackgroundWork) void sweepRecentlyOrphanedActiveRuns().catch(() => {});
 
   const store: OwnedSessionStore = {
     runtimeId,
