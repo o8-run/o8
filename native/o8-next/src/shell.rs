@@ -105,6 +105,9 @@ pub struct Shell {
     palette_scroll: gpui::ScrollHandle,
     notice: String,
     loading: bool,
+    /// The current load is the connected window's timed safety read, not a
+    /// change or a user action: it may use cached server state.
+    timed_load: bool,
     connected: bool,
     revision: u64,
     painted: Rc<Cell<u64>>,
@@ -156,6 +159,7 @@ impl Shell {
             palette_scroll: gpui::ScrollHandle::new(),
             notice: "Connecting to local o8 server…".into(),
             loading: false,
+            timed_load: false,
             connected: false,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),

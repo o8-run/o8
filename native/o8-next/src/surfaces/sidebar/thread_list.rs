@@ -58,6 +58,12 @@ pub enum Event {
 }
 /// Lifecycle events arrive many times a second while agents run. Row changes
 /// apply in place from the stream; the full catalog read waits this long.
+/// The timed worker read takes the server's cached inventory: an untouched
+/// window never asks for a process probe. A listing reload (after a change or a
+/// user action) reads a fresh one.
+const INVENTORY_EVERY: Duration = Duration::from_secs(60);
+/// The server rebuilds a stale cache about 5 s after the read that found it.
+const INVENTORY_FOLLOW_UP: Duration = Duration::from_secs(7);
 const DIRTY_RELOAD_GAP: Duration = if cfg!(test) {
     Duration::ZERO
 } else {
@@ -260,7 +266,10 @@ pub struct ThreadList {
     urgent: bool,
     generation: u64,
     last_load: Instant,
-    last_inventory: Instant,
+    /// When the next timed inventory read is due.
+    inventory_due: Instant,
+    /// The next timed read follows one that may have started a server rebuild.
+    inventory_follow_up: bool,
     last_attempt: Instant,
     catalog_loaded: bool,
     inventory_loading: bool,
@@ -287,7 +296,7 @@ impl ThreadList {
     }
     #[cfg(test)]
     pub(crate) fn expire_inventory_cadence(&mut self) {
-        self.last_inventory = Instant::now() - Duration::from_secs(10);
+        self.inventory_due = Instant::now();
     }
     pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(Composer::new);
@@ -418,7 +427,8 @@ impl ThreadList {
             last_load: Instant::now(),
             last_attempt: Instant::now(),
             catalog_loaded: false,
-            last_inventory: Instant::now(),
+            inventory_due: Instant::now() + INVENTORY_EVERY,
+            inventory_follow_up: false,
             inventory_loading: false,
             subscriptions: vec![observe, submit],
             notice: String::new(),
@@ -706,7 +716,16 @@ impl ThreadList {
             self.load(cx);
         }
     }
+    /// Reads the listing with a fresh runtime inventory: after a change or a
+    /// user action.
     pub fn load(&mut self, cx: &mut Context<Self>) {
+        self.load_with(true, cx);
+    }
+    /// The timed safety read: the server's cached inventory is enough.
+    pub fn load_cached(&mut self, cx: &mut Context<Self>) {
+        self.load_with(false, cx);
+    }
+    fn load_with(&mut self, fresh: bool, cx: &mut Context<Self>) {
         if self.loading {
             return;
         }
@@ -722,7 +741,7 @@ impl ThreadList {
         let generation = self.generation;
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
-            let (mut sessions, branches) = client.sidebar_sessions_with_branches()?;
+            let (mut sessions, branches) = client.sidebar_listing(fresh)?;
             sessions.retain(|s| !crate::shell::session::reserved_thread_id(&s.id));
             let header = match project_header::HeaderSnapshot::load(&client) {
                 Ok(header) => Some(header),
@@ -748,7 +767,9 @@ impl ThreadList {
                     return;
                 }
                 this.last_load = Instant::now();
-                this.last_inventory = Instant::now();
+                // The listing read a current inventory itself.
+                this.inventory_due = Instant::now() + crate::foreground::cadence(INVENTORY_EVERY);
+                this.inventory_follow_up = false;
                 match result {
                     Ok((mut sessions, ledger, header, branches)) => {
                         this.catalog_loaded = true;
@@ -1062,18 +1083,16 @@ impl ThreadList {
         }
         // Same broad resilience cadence as the desktop sidebar. The loop drains
         // a local event queue; it makes no 20ms HTTP requests.
-        if self
+        let changed = self
             .dirty
             .is_some_and(|time| time.elapsed() >= Duration::from_millis(300))
-            && (self.urgent || self.last_attempt.elapsed() >= DIRTY_RELOAD_GAP)
-            || self.last_load.elapsed() >= Duration::from_secs(300)
-        {
+            && (self.urgent || self.last_attempt.elapsed() >= DIRTY_RELOAD_GAP);
+        if changed {
             self.load(cx);
+        } else if self.last_load.elapsed() >= Duration::from_secs(300) {
+            self.load_cached(cx);
         }
-        if !self.loading
-            && !self.inventory_loading
-            && self.last_inventory.elapsed() >= crate::foreground::cadence(Duration::from_secs(10))
-        {
+        if !self.loading && !self.inventory_loading && Instant::now() >= self.inventory_due {
             self.inventory_loading = true;
             let generation = self.generation;
             let client = self.client.clone();
@@ -1084,11 +1103,21 @@ impl ThreadList {
                 let result = task.await;
                 let _ = this.update(cx, |this, cx| {
                     this.inventory_loading = false;
-                    this.last_inventory = Instant::now();
+                    // A cached read may have started a rebuild, and a warming
+                    // server has none to give yet: read once more shortly after.
+                    let again = (!this.inventory_follow_up && matches!(result, Ok(Some(_))))
+                        || matches!(result, Ok(None));
+                    this.inventory_follow_up = again;
+                    this.inventory_due = Instant::now()
+                        + if again {
+                            INVENTORY_FOLLOW_UP
+                        } else {
+                            crate::foreground::cadence(INVENTORY_EVERY)
+                        };
                     if this.loading || this.generation != generation {
                         return;
                     }
-                    if let Ok(mut workers) = result {
+                    if let Ok(Some(mut workers)) = result {
                         for worker in &mut workers {
                             if let Some(old) = this.sessions.iter().find(|s| s.id == worker.id) {
                                 worker.packet_header = old.packet_header.clone();

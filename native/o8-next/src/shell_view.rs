@@ -200,8 +200,11 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
         crate::parent_quit::install(cx);
         let (sender, receiver) = async_channel::bounded(1);
         let client = client.with_wakeup(sender);
-        // An offscreen window is never in front.
-        crate::foreground::set(!offscreen);
+        // An offscreen window is never in front, unless a bench asks it to
+        // stand in for a window in front (O8_NEXT_FOREGROUND=1).
+        crate::foreground::set(
+            !offscreen || std::env::var("O8_NEXT_FOREGROUND").as_deref() == Ok("1"),
+        );
         let handle = open_window(client, file, state, offscreen, cx);
         start_pump(handle, receiver, cx);
         // Development builds only: answer the driver socket, when one is named.
