@@ -138,6 +138,12 @@
       ]
     },
     {
+      "path": "src/app/api/panel/ports/route.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/app/api/panel/prs/github-panel-snapshot.test.ts",
       "reasons": [
         "child-process",
