@@ -56,8 +56,8 @@ export class O8dSupervisorClient {
         const directory = lstatSync(dirname(this.socket));
         const endpoint = lstatSync(this.socket);
         const uid = process.getuid?.();
-        if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== uid || (directory.mode & 0o077)
-          || !endpoint.isSocket() || endpoint.uid !== uid || (endpoint.mode & 0o077)) throw new SupervisorError('socket-ownership');
+        if (!directory.isDirectory() || directory.isSymbolicLink() || process.platform !== 'win32' && directory.uid !== uid || (process.platform !== 'win32' && (directory.mode & 0o077) !== 0)
+          || !endpoint.isSocket() || process.platform !== 'win32' && endpoint.uid !== uid || (process.platform !== 'win32' && (endpoint.mode & 0o077) !== 0)) throw new SupervisorError('socket-ownership');
         socket = createConnection(this.socket);
       } catch { reject(new SupervisorError('unavailable')); return; }
       let settled = false;

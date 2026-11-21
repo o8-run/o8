@@ -91,7 +91,7 @@ async function archiveDirectory(): Promise<string> {
     if (error.code !== 'EEXIST') throw error;
   });
   const stat = await lstat(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0
+  if (!stat.isDirectory() || stat.isSymbolicLink() || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
     || (process.getuid && stat.uid !== process.getuid()) || await realpath(directory) !== directory) {
     throw new Error('The private preservation directory does not have safe ownership.');
   }
@@ -111,7 +111,7 @@ async function readPayloadBytes(preservationId: string): Promise<Buffer> {
   try {
     const before = await file.stat();
     if (!before.isFile() || before.nlink !== 1 || before.size > 64 * 1024 * 1024
-      || (before.mode & 0o077) !== 0 || (process.getuid && before.uid !== process.getuid())) {
+      || (process.platform !== 'win32' && (before.mode & 0o077) !== 0) || (process.getuid && before.uid !== process.getuid())) {
       throw new Error('The preservation file has unsafe ownership or exceeds its bound.');
     }
     const content = await file.readFile();

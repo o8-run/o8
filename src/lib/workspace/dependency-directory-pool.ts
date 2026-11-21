@@ -103,7 +103,7 @@ async function refill(sourceWorkspace: string, recipe: DependencyInstallRecipe, 
   await mkdir(root, { recursive: true, mode: 0o700 });
   const rootIdentity = await captureWorktreeMaterializationIdentity(root);
   const mode = await lstat(root);
-  if ((mode.mode & 0o077) !== 0) throw new Error('Dependency pool root is not private.');
+  if ((process.platform !== 'win32' && (mode.mode & 0o077) !== 0)) throw new Error('Dependency pool root is not private.');
   const key = dependencyDirectoryPoolKey(recipe, sourceIdentity, graph.digest);
   const matches = dependencyCloneSourceMatcher(sourceWorkspace, sourceIdentity, recipe,
     recipe.lifecycleScripts === 'enabled' && recipe.cloneLifecycleInputs === undefined);
