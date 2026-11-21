@@ -134,6 +134,7 @@
     {
       "path": "src/app/api/panel/ports/route.test.ts",
       "reasons": [
+        "network-listener",
         "terminal-tool"
       ]
     },

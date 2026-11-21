@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import { get } from 'node:http';
 import { NextResponse } from 'next/server';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import { execFileReadOnly } from '@/lib/providers/child-process';
@@ -129,22 +130,29 @@ function resolveO8OwnPorts(): Set<number> {
 }
 
 /**
- * Fast loopback HTTP probe. Reads only the response headers (body is cancelled)
- * so the classify decision stays under ~400ms even for slow dev servers.
+ * Classify from the headers. A one-shot connection keeps transient ports out
+ * of the process-wide fetch pool.
  */
 async function probePort(port: number): Promise<HttpProbeResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 400);
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/`, {
-      method: 'GET',
-      redirect: 'manual',
-      signal: controller.signal,
-      headers: { 'user-agent': 'o8-port-probe' },
+    return await new Promise<HttpProbeResult>((resolve, reject) => {
+      const request = get({
+        hostname: '127.0.0.1',
+        port,
+        path: '/',
+        agent: false,
+        signal: controller.signal,
+        headers: { accept: '*/*', 'user-agent': 'o8-port-probe' },
+      }, (response) => {
+        const status = response.statusCode ?? null;
+        const contentType = response.headers['content-type'] ?? null;
+        response.destroy();
+        resolve({ reachable: true, status, contentType });
+      });
+      request.once('error', reject);
     });
-    const contentType = res.headers.get('content-type');
-    try { await res.body?.cancel(); } catch { /* body already consumed */ }
-    return { reachable: true, status: res.status, contentType };
   } catch {
     return { reachable: false, status: null, contentType: null };
   } finally {
