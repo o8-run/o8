@@ -184,10 +184,14 @@ async function main() {
     cwd: serverCwd, env: { ...env, TSX_TSCONFIG_PATH: join(root, 'tsconfig.json') }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   const log = join(bench, 'server.log');
-  server.stdout.on('data', (chunk) => writeFileSync(log, chunk, { flag: 'a' }));
-  server.stderr.on('data', (chunk) => writeFileSync(log, chunk, { flag: 'a' }));
+  // Output can arrive after stop() removes the bench folder; drop it then.
+  let stopped = false;
+  const append = (chunk) => { if (!stopped) writeFileSync(log, chunk, { flag: 'a' }); };
+  server.stdout.on('data', append);
+  server.stderr.on('data', append);
   let window = null;
   const stop = () => {
+    stopped = true;
     window?.kill();
     server.kill();
     if (!flag('keep')) rmSync(bench, { recursive: true, force: true });
