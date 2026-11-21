@@ -223,6 +223,12 @@
       ]
     },
     {
+      "path": "src/app/api/worktrees/conflicts/route.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
       "path": "src/app/api/worktrees/retention-usage/route-path-selection.test.ts",
       "reasons": [
         "worktree-api"

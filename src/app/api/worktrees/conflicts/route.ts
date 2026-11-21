@@ -28,10 +28,14 @@ export async function GET(req: NextRequest) {
   const deep = req.nextUrl.searchParams.get('deep') === 'true';
 
   try {
+    req.signal.throwIfAborted();
     // This read needs only persisted metadata, not the launch module's manager cache.
     const mgr = new WorktreeManager(repo);
     const worktrees = await mgr.list();
+    req.signal.throwIfAborted();
     const report = await generateConflictReport(worktrees, deep);
+    // The report can be large and NextResponse.json allocates it again.
+    req.signal.throwIfAborted();
 
     return NextResponse.json(report, {
       headers: {
@@ -39,6 +43,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err) {
+    if (req.signal.aborted) return new NextResponse(null, { status: 499 });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 },
