@@ -1072,7 +1072,7 @@ impl ThreadList {
         }
         if !self.loading
             && !self.inventory_loading
-            && self.last_inventory.elapsed() >= Duration::from_secs(10)
+            && self.last_inventory.elapsed() >= crate::foreground::cadence(Duration::from_secs(10))
         {
             self.inventory_loading = true;
             let generation = self.generation;

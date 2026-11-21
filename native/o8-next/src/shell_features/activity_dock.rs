@@ -248,7 +248,11 @@ fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
     let dock = s.features.get::<Dock>();
     // Hidden, the data still refreshes slowly, so the toolbar opens with
     // every tab instead of growing as the first loads return.
-    let every = if dock.shown.is_open() { 5 } else { 60 };
+    let every = if dock.shown.is_open() && crate::foreground::active() {
+        5
+    } else {
+        60
+    };
     let stale = dock.loaded.is_none_or(|at| at.elapsed().as_secs() >= every)
         || dock.scope != s.state.selected;
     if !dock.shown.is_open() {

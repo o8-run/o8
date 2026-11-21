@@ -26,6 +26,7 @@ mod driver;
 mod editor_command;
 mod external_open;
 mod files_panel;
+mod foreground;
 mod glance;
 mod grid_sessions;
 mod icon;

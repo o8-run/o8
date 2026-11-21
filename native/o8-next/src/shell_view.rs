@@ -293,8 +293,11 @@ pub(super) fn open_window(
                 };
                 cx.observe_window_bounds(window, move |_, window, _| resync(window))
                     .detach();
-                cx.observe_window_activation(window, move |_, window, _| resync(window))
-                    .detach();
+                cx.observe_window_activation(window, move |_, window, _| {
+                    crate::foreground::set(window.is_window_active());
+                    resync(window)
+                })
+                .detach();
                 let mut shell = Shell::new(client, file, state, window, cx);
                 shell.system_glass = system_glass;
                 shell.offscreen = offscreen;

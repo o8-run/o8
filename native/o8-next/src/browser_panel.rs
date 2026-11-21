@@ -192,7 +192,15 @@ impl BrowserPanel {
             self.restore(saved, cx);
         }
         cx.spawn(async move |this, cx| {
+            let mut read: Option<std::time::Instant> = None;
             loop {
+                if read.is_some_and(|at| {
+                    at.elapsed() < crate::foreground::cadence(Duration::from_secs(5))
+                }) {
+                    cx.background_executor().timer(Duration::from_secs(1)).await;
+                    continue;
+                }
+                read = Some(std::time::Instant::now());
                 let client = client.clone();
                 let result = cx
                     .background_executor()
@@ -216,7 +224,7 @@ impl BrowserPanel {
                 {
                     break;
                 }
-                cx.background_executor().timer(Duration::from_secs(5)).await;
+                cx.background_executor().timer(Duration::from_secs(1)).await;
             }
         })
         .detach();

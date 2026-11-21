@@ -80,9 +80,9 @@ impl Saved {
             }
         }
         if self.loading.is_none()
-            && self
-                .last
-                .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(5))
+            && self.last.is_none_or(|last| {
+                now.duration_since(last) >= crate::foreground::cadence(Duration::from_secs(5))
+            })
             && let Some(scope) = self.scope.clone()
         {
             self.last = Some(now);
