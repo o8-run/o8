@@ -512,6 +512,10 @@ async function runPinnedLeaf(
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
+  // A leaf that refuses its workspace exits before reading stdin; writing the
+  // content then fails with EPIPE. The exit code is the receipt, so that write
+  // error must not escape as an unhandled stream error and crash the process.
+  child.stdin.on('error', () => {});
   let stdout = '';
   let stderr = '';
   let pendingStdout = '';
