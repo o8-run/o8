@@ -636,27 +636,48 @@ const retired = [
   route('/api/canvas/intent', 'POST', () => import('@/lib/canvas/intent-unavailable-route')),
 ];
 const routes: Route[] = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...retired, ...viewerHttpRoutes];
-function parameters(pattern: string, pathname: string): Record<string, string> | null {
-  const expected = pattern.split('/');
-  const actual = pathname.split('/');
-  if (expected.length !== actual.length) return null;
+// Every request is matched against ~300 routes. Split each pattern once, not
+// per request, and only try the patterns with the request's segment count.
+// Order is preserved, so the first registered match still wins.
+type Segment = { param: string } | string;
+const routesBySegmentCount = new Map<number, Array<{ route: Route; segments: Segment[] }>>();
+for (const route of routes) {
+  const segments: Segment[] = route.path.split('/').map((part) => {
+    const key = part.match(/^\[(\w+)\]$/)?.[1];
+    return key ? { param: key } : part;
+  });
+  const bucket = routesBySegmentCount.get(segments.length) ?? [];
+  bucket.push({ route, segments });
+  routesBySegmentCount.set(segments.length, bucket);
+}
+
+function parameters(segments: Segment[], actual: string[]): Record<string, string> | null {
   const params: Record<string, string> = {};
-  for (let index = 0; index < expected.length; index++) {
-    const key = expected[index].match(/^\[(\w+)\]$/)?.[1];
-    if (key && actual[index]) params[key] = decodeURIComponent(actual[index]);
-    else if (expected[index] !== actual[index]) return null;
+  for (let index = 0; index < segments.length; index++) {
+    const expected = segments[index];
+    if (typeof expected !== 'string' && actual[index]) params[expected.param] = decodeURIComponent(actual[index]);
+    else if (typeof expected === 'string' ? expected !== actual[index] : true) return null;
   }
   return params;
 }
 
+function matchesFor(pathname: string): Array<{ route: Route; params: Record<string, string> }> {
+  const actual = pathname.split('/');
+  const matches: Array<{ route: Route; params: Record<string, string> }> = [];
+  for (const { route, segments } of routesBySegmentCount.get(actual.length) ?? []) {
+    const params = parameters(segments, actual);
+    if (params) matches.push({ route, params });
+  }
+  return matches;
+}
+
 export function matchNativeHttpRoute(pathname: string, method?: string) {
-  const matches = routes.map(route => ({ route, params: parameters(route.path, pathname) })).filter(entry => entry.params !== null);
+  const matches = matchesFor(pathname);
   // Surfaces can share a path with different methods, so match on both.
   return method === undefined ? matches[0] : matches.find(entry => entry.route.methods.includes(method));
 }
 
 /** Every verb dispatch can resolve for this concrete path, including split registrations. */
 export function nativeHttpMethods(pathname: string): string[] {
-  return [...new Set(routes.filter(route => parameters(route.path, pathname) !== null)
-    .flatMap(route => route.methods))].sort();
+  return [...new Set(matchesFor(pathname).flatMap(({ route }) => route.methods))].sort();
 }
