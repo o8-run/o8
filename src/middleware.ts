@@ -153,12 +153,11 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|diff-comments?|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|search|sync|terminal-input|terminal-sessions)\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/panel\/approvals\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|github-status|repos|operator-defaults|projects|search)\/?$/ },
-  { methods: new Set(['POST']), path: /^\/api\/panel\/(?:operator-defaults|pr\/review)\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/panel\/operator-defaults\/?$/ },
   { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/v2\/chat-history(?:\/list)?\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/v2\/repos\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/v2\/proxy\/(?:llm|cli)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/runtime\/launch\/?$/ },
-  { methods: new Set(['POST']), path: /^\/api\/worktrees\/merge\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/orchestrator\/reset-session\/?$/ },
   // Layer-3 steer from the phone. The relay connector forwards the per-device
   // bearer verbatim (stamping a NON-loopback client-addr), so the steer route is

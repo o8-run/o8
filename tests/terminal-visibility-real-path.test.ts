@@ -707,7 +707,6 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
       blockedUi.socket.close();
       for (const [path, body] of [
         ['/terminal-voice-input', { sessionName: controlSessionName, text: 'O8_VOICE_MUST_NOT_WRITE' }],
-        ['/terminal-exec', { sessionName: controlSessionName, command: 'O8_EXEC_MUST_NOT_WRITE' }],
       ] as const) {
         const response = await fetch(`http://127.0.0.1:${wsPort}${path}`, {
           method: 'POST',

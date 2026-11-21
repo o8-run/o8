@@ -14,7 +14,6 @@ vi.mock('@/lib/runtimes/shared/cli-locate', async (importOriginal) => ({
 const { askClaudeOneShot } = await import('@/lib/claude-code/one-shot-repl');
 const { askClaudeWarm, prewarmClaudeRepl, resetWarmReplPool } = await import('@/lib/claude-code/warm-repl-pool');
 const { ensureSession, sendMessage, killSession } = await import('@/lib/claude-code/interactive-session');
-const { handleClaudeCodeSend } = await import('@/app/api/claude-code/send/streaming-spawn');
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-stream-callers-'));
 let caseDir = '';
@@ -158,28 +157,5 @@ describe.skipIf(process.platform === 'win32')('terminal results through real str
     expect(await second.outcome).toEqual({ ok: true, text: `complete-${next.id}` });
     expect(second.events.filter((event) => event.type === 'done')).toHaveLength(1);
     expect(second.session?.sessionId).toBe('synthetic-session');
-  });
-
-  it.each(['success', 'failure', 'failure-trailing'])('the send route reports %s without a false successful close', async (mode) => {
-    const r = request(mode);
-    const tabId = `route-tab-${ordinal}`;
-    tabs.add(tabId);
-    const response = await handleClaudeCodeSend(new Request('http://localhost/api/claude-code/send', {
-      method: 'POST',
-      body: JSON.stringify({ tabId, cwd: caseDir, message: r.prompt, model: 'synthetic-model' }),
-    }));
-    expect(response.status).toBe(200);
-    const body = response.text();
-    await r.waitForStop();
-    r.release();
-    const events = (await body).split('\n\n').filter(Boolean)
-      .map((line) => JSON.parse(line.slice('data: '.length)) as { type: string; exitCode?: number });
-    if (mode === 'success') {
-      expect(events.filter((event) => event.type === 'done')).toHaveLength(1);
-      expect(events.at(-1)).toMatchObject({ type: 'close', exitCode: 0 });
-    } else {
-      expect(events.some((event) => event.type === 'done' || event.type === 'close')).toBe(false);
-      expect(events.at(-1)).toMatchObject({ type: 'error' });
-    }
   });
 });

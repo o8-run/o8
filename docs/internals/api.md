@@ -181,8 +181,6 @@ is refused by the global middleware even when it originates on loopback.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/claude-code/diffs?sessionKey=...&limit=...` | Extract file edit/write operations from Claude Code JSONL for live rendering. |
-| POST | `/api/claude-code/send` | Send a message to a Claude Code session (delegates to `handleClaudeCodeSend`). |
 
 ### `/api/cloud/*` — Cloud worker scaffolding (self-authenticating)
 
@@ -197,8 +195,6 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/codex/diffs` | Parse Codex `apply_patch` format into structured file edits. |
-| POST | `/api/codex/send` | Stream a message through `codex exec --json`; resumes if `threadId` provided. |
 
 ### `/api/command-center/*` — Fleet snapshot for the desktop dashboard (gated)
 
@@ -349,39 +345,27 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/analytics?hours=24` | Aggregate cost/usage across Codex, Claude Code, and IDE LLM chat. |
 | GET | `/api/panel/approvals` | List pending approvals from the shared queue. |
 | POST | `/api/panel/approvals` | Resolve a pending approval. |
-| POST | `/api/panel/assign-issue` | Assign a GitHub issue to an agent (adds comment + label). |
 | GET | `/api/panel/branches?repo=...` | List branches with diff stats. |
 | POST | `/api/panel/branches` | Create a branch. |
 | DELETE | `/api/panel/branches` | Delete a branch. |
-| POST | `/api/panel/branches/checkout` | Checkout a branch; checks for uncommitted changes first. |
 | POST | `/api/panel/browse-folder` | Open native folder picker (macOS osascript). |
 | GET | `/api/panel/ci?repo=...` | Latest CI workflow runs (60s cache). |
 | GET | `/api/panel/ci/[id]?repo=...` | Detail for a single CI workflow run. |
 | GET | `/api/panel/cli-usage` | Snapshot of CLI usage across all runtimes. |
-| GET | `/api/panel/cloud-workers` | Panel-side surface for cloud workers (#514). |
-| POST | `/api/panel/cloud-workers` | Mutate cloud worker registrations. |
-| GET | `/api/panel/commit-diff?sha=...&workspace=...` | Files changed in a single commit. |
 | GET | `/api/panel/commits?repo=...\|workspace=...&limit=...` | Recent commits (GitHub-side or local workspace). |
 | GET | `/api/panel/commits/[hash]?workspace=...` | Detail for a single commit. |
 | GET | `/api/panel/commits/[hash]/file?workspace=...&path=...` | File contents at a specific commit. |
-| GET | `/api/panel/dev-server` | List active dev server processes. |
-| POST | `/api/panel/dev-server` | Start a dev server process. |
-| DELETE | `/api/panel/dev-server` | Stop a dev server process. |
 | GET | `/api/panel/file-asset?workspace=...&path=...` | Serve registered repo file as asset (image/PDF), 50MB cap. |
 | GET | `/api/panel/file-content?path=...` | Read raw file content with path-traversal protection. |
 | GET | `/api/panel/file-diff?path=...&hideWhitespace=1` | Per-file diff (`git diff -w` when `hideWhitespace`). |
-| GET | `/api/panel/file-preview?path=...&workspace=...` | File preview (image MIME or text). |
 | GET | `/api/panel/files?workspace=...` | List files in a workspace. |
 | GET | `/api/panel/git-log?workspace=...` | Parsed git log with structured ref data. |
 | GET | `/api/panel/git/log?workspace=...&limit=...` | Compact git log for Loop Status widget (#796). |
 | GET | `/api/panel/github-status` | Parsed `gh auth status` output. |
-| GET | `/api/panel/ide-surface` | Read persisted IDE surface state (terminal repos, active repo). |
-| POST | `/api/panel/ide-surface` | Persist IDE surface state. |
 | GET | `/api/panel/issues?repo=...` | List GitHub issues for a repo. |
 | GET | `/api/panel/issues/[number]?repo=...` | Detail for a single issue. |
 | POST | `/api/panel/issues/create` | Create a GitHub issue. |
 | POST | `/api/panel/issues/enhance` | Enhance issue body via LLM, parallel-fetching repo context. |
-| POST | `/api/panel/mcp-test` | "Test connection" probe for a registered MCP server (stdio or HTTP). |
 | GET | `/api/panel/mobile-pairing` | Mobile pairing payload (Tailscale URL, ws-token, fingerprints) for QR. |
 | GET | `/api/panel/o8-update-summary` | Summarize an o8 GitHub release (release notes + recent commits) via OpenRouter free models for the UpdateCard. |
 | POST | `/api/panel/o8-mission-summary` | Summarize a completed mission's merged packets (hydrated from the session_outcomes ledger) into plain-language prose via OpenRouter free models, for the Mission-complete detail modal. |
@@ -391,7 +375,6 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/panel/operator-defaults` | Update operator defaults. |
 | GET | `/api/panel/ports?fresh=1` | Discover ports in use on the local machine (cached). |
 | GET | `/api/panel/pr?repo=...&number=...` | PR detail + computed checks rollup status. |
-| POST | `/api/panel/pr/review` | Submit a PR review (approve / comment / request_changes / merge / close). |
 | GET | `/api/panel/projects` | List projects ledger (reconciled with repo registry). |
 | POST | `/api/panel/projects` | Create a project. |
 | PATCH | `/api/panel/projects/[id]` | Update project name / repos / color. |
@@ -402,7 +385,6 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/prs/[number]?repo=...` | Detail for a single PR. |
 | POST | `/api/panel/prs/[number]` | PR mutation (close / merge / review / comment). |
 | GET | `/api/panel/prs/[number]/comments?repo=...` | List PR comments + reviews. |
-| GET | `/api/panel/readme?workspace=...` | First matching README file in a workspace. |
 | GET | `/api/panel/repos` | List registered repos. |
 | POST | `/api/panel/repos` | Add / touch / update a registered repo. |
 | DELETE | `/api/panel/repos` | Remove a registered repo (with runtime cleanup). |
@@ -414,12 +396,9 @@ device flow and every stateful panel route require the operator bearer.
 | GET | `/api/panel/status` | Stable status read for CLI / agents (allowlisted — read-only). |
 | GET | `/api/panel/supervisor-inbox?includeDismissed=1&scope=all&projectId=...` | Supervisor inbox items + summary. |
 | POST | `/api/panel/supervisor-inbox` | Dismiss / clear inbox items. |
-| POST | `/api/panel/terminal-exec` | Send a command to a dashboard terminal session (WS bridge). |
 | GET | `/api/panel/terminal-sessions` | List alive dashboard terminal sessions. |
 | GET | `/api/panel/terminal-state?scope=...` | Read persisted terminal state for a scope (per-tile JSON file). |
 | POST | `/api/panel/terminal-state` | Persist terminal state for a scope. |
-| GET | `/api/panel/workers` | Worker tokens + fleet status + remote-runtime registration. |
-| POST | `/api/panel/workers` | Mutate worker tokens. |
 | GET | `/api/panel/workspaces` | List workspaces with cached PR / branch / diff data per repo. |
 | POST | `/api/panel/workspaces` | Mutate workspace lifecycle records. |
 
@@ -457,7 +436,6 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/review/auto-review` | Start the review drain or enqueue a lane for auto-review. |
 | POST | `/api/review/commit` | Commit staged changes with a message (500 char cap). |
 | POST | `/api/review/discard` | Discard unstaged changes (path-traversal protected). |
-| GET | `/api/review/file?path=...` | File detail for the live review surface. |
 | POST | `/api/review/push` | `git push` the current branch. |
 | GET | `/api/review/workspace?workspace=...&repo=...&strictBranch=1` | Full review snapshot (ahead/behind, changed files, recent commits, worktrees, PRs, issues). |
 
@@ -568,7 +546,6 @@ Workers authenticate with `Authorization: Bearer cwk_*` per-request.
 | GET | `/api/worktrees/conflicts?repo=...&deep=true` | Conflict report (fast file-level or deep line-level). |
 | GET | `/api/worktrees/diff?sessionKey=...&worktreePath=...&baseBranch=...` | Full unified diff for an agent's worktree vs base. |
 | GET | `/api/worktrees/diff-summary?sessionKey=...&worktreePath=...&baseBranch=...` | `{ additions, deletions, fileCount }` for a worktree. |
-| POST | `/api/worktrees/merge` | Create PR, merge to main, or discard a worktree. |
 
 ### Shared pull-request check evidence
 

@@ -14,7 +14,6 @@ import {
   createWorkspaceSnapshot,
   listWorkspaceSnapshotTransitions,
   listWorkspaceSnapshotsByOriginalPath,
-  listWorkspaceSnapshotsByRepositoryUuid,
   transitionWorkspaceSnapshot,
   type WorkspaceSnapshotRecord,
 } from '@/lib/worktree/snapshot-state';
@@ -579,36 +578,4 @@ export async function confirmWorkspaceMaterializationRetirement(
     action,
     workspacePath: path.resolve(workspacePath),
   });
-}
-
-/** Read exact terminal replay truth without advancing durable or physical state. */
-export function findWorkspaceMaterializationRetirement(
-  repositoryUuid: string,
-  worktreeId: string,
-  action: WorkspaceRetirementAction,
-): WorkspaceSnapshotRecord | null {
-  const matches = listWorkspaceSnapshotsByRepositoryUuid(repositoryUuid).filter((snapshot) => (
-    path.basename(path.resolve(snapshot.originalPath)) === worktreeId
-    && (snapshot.state === 'retiring' || snapshot.state === 'retired')
-  ));
-  if (matches.length > 1) {
-    throw new Error('Workspace retirement replay found ambiguous durable worktree truth.');
-  }
-  const snapshot = matches[0];
-  if (!snapshot) return null;
-  if (recordedAction(snapshot) !== action) {
-    throw new Error('Workspace retirement replay action conflicts with durable terminal truth.');
-  }
-  return snapshot;
-}
-
-/** Resolve an exact retry after physical cleanup completed before the route response. */
-export async function replayWorkspaceMaterializationRetirement(
-  repositoryUuid: string,
-  worktreeId: string,
-  action: WorkspaceRetirementAction,
-): Promise<WorkspaceSnapshotRecord | null> {
-  const snapshot = findWorkspaceMaterializationRetirement(repositoryUuid, worktreeId, action);
-  if (!snapshot) return null;
-  return finishWorkspaceMaterializationRetirement(snapshot.originalPath, action);
 }

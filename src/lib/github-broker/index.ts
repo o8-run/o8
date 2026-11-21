@@ -17,8 +17,6 @@ export { fetchGitHubCommits, fetchGitHubWorkflowRuns, fetchGitHubWorkflowRunDeta
 export {
   fetchGitHubLabels,
   createGitHubIssue,
-  commentOnGitHubIssue,
-  addLabelsToGitHubIssue,
   findGitHubPullRequestByHead,
   createGitHubPullRequest,
   reviewGitHubPullRequest,

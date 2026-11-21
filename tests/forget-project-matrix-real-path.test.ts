@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { seedForgottenCorrection } from './fixtures/forgotten-correction';
 import type { PacketContext } from '@/lib/orchestrator/types';
 
 const inventoryState = vi.hoisted(() => ({ agents: [] as import('@/lib/fleet/types').AgentSummary[] }));
@@ -29,7 +30,7 @@ const projects = [
 ];
 const cases = projects.flatMap(project => [0, 1].map(sibling => ({ ...project, sibling })));
 let db: typeof import('@/lib/db');
-let corrections: typeof import('@/app/api/cortex/operator-corrections/route');
+let readOperatorCorrections: typeof import('@/lib/cortex/operator-corrections').readOperatorCorrections;
 let outcomes: typeof import('@/app/api/cortex/recent-outcomes/route');
 let relay: typeof import('@/lib/orchestrator/context-relay');
 let projectsModule: typeof import('@/lib/repos/projects');
@@ -52,7 +53,7 @@ function request(endpoint: string, projectId: string, repoPath: string, method =
 }
 async function inventory(projectId: string, repoPath: string) {
   return {
-    corrections: (await (await corrections.GET(request('operator-corrections', projectId, repoPath))).json()).corrections,
+    corrections: readOperatorCorrections({ projectId, repoPaths: [repoPath], limit: 100 }),
     outcomes: (await (await outcomes.GET(request('recent-outcomes', projectId, repoPath))).json()).outcomes,
   } as { corrections: Array<{ id: string; projectId: string }>; outcomes: Array<{ id: string; projectId: string; summary: string }> };
 }
@@ -67,7 +68,7 @@ beforeAll(async () => {
   }));
   db = await import('@/lib/db');
   projectsModule = await import('@/lib/repos/projects');
-  corrections = await import('@/app/api/cortex/operator-corrections/route');
+  ({ readOperatorCorrections } = await import('@/lib/cortex/operator-corrections'));
   outcomes = await import('@/app/api/cortex/recent-outcomes/route');
   relay = await import('@/lib/orchestrator/context-relay');
   ({ buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt'));
@@ -148,24 +149,18 @@ describe.each(cases.map((value, index) => ({ ...value, index })))('$projectId, f
     expect.soft(pairs[index].contexts[0].sourceOutcomeId).not.toBe(pairs[index].contexts[1].sourceOutcomeId);
   });
 
-  it('forget: cross-project IDs are 404 and leave recall unchanged; own IDs are 200', async () => {
+  it('outcome deletion is project-scoped and stored correction exclusions load', async () => {
     const pair = pairs[index], selected = pair.contexts[sibling];
     if (projectId !== 'matrix-a') {
       const { readMemoryRevision } = await import('@/lib/cortex/memory-revision');
       const revision = readMemoryRevision();
-      for (const id of pair.corrections[sibling]) {
-        expect.soft((await corrections.DELETE(request('operator-corrections', 'matrix-a', sharedRepo, 'DELETE', { id, projectId: 'matrix-a' }))).status).toBe(404);
-      }
       expect.soft((await outcomes.DELETE(request('recent-outcomes', 'matrix-a', sharedRepo, 'DELETE', {
         id: selected.sourceOutcomeId, projectId: 'matrix-a', repoPath: sharedRepo,
       }))).status).toBe(404);
       expect.soft(readMemoryRevision()).toBe(revision);
-      expect.soft((await corrections.DELETE(request('operator-corrections', 'matrix-a', sharedRepo, 'DELETE', {
-        id: pair.corrections[sibling][0], projectId,
-      }))).status).toBe(404);
     }
     for (const id of pair.corrections[sibling]) {
-      expect.soft((await corrections.DELETE(request('operator-corrections', projectId, repoPath, 'DELETE', { id, projectId }))).status).toBe(200);
+      await seedForgottenCorrection(db.getSqlite(), id);
     }
     expect.soft((await outcomes.DELETE(request('recent-outcomes', projectId, repoPath, 'DELETE', {
       id: selected.sourceOutcomeId, repoPath, projectId,
@@ -219,15 +214,4 @@ describe.each(cases.map((value, index) => ({ ...value, index })))('$projectId, f
     expect.soft(warm).toContain(`Previous work from dependency 'Inspect parser': matrixcanary completion ${pair.packets[1 - sibling].id}`);
     await projectsModule.setActiveProject('matrix-a');
   }, 45_000);
-});
-
-it('requires explicit correction project identity and refuses conflicting project selectors', async () => {
-  const pair = pairs[0];
-  const missingProject = new NextRequest('http://localhost/api/cortex/operator-corrections', {
-    method: 'DELETE', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ id: pair.corrections[1][0] }),
-  });
-  expect((await corrections.DELETE(missingProject)).status).toBe(400);
-  expect((await corrections.DELETE(request('operator-corrections', 'matrix-a', sharedRepo, 'DELETE', {
-    id: pair.corrections[1][0], projectId: 'matrix-b',
-  }))).status).toBe(404);
 });

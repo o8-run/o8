@@ -11,7 +11,7 @@ const f = vi.hoisted(() => {
   const fs = process.getBuiltinModule('node:fs'); const p = process.getBuiltinModule('node:path');
   const root = fs.realpathSync(fs.mkdtempSync(p.join(process.getBuiltinModule('node:os').tmpdir(), 'o8-source-writers-')));
   process.env.O8_DATA_DIR = p.join(root, 'data'); process.env.CORTEX_IDE_DATA_DIR = process.env.O8_DATA_DIR;
-  return { root, launched: vi.fn(), claude: vi.fn(), spawned: vi.fn(), failGitProbe: false, gitCalls: 0 };
+  return { root, launched: vi.fn(), spawned: vi.fn(), failGitProbe: false, gitCalls: 0 };
 });
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn() }));
 vi.mock('@/lib/cortex/knowledge/reconcile', () => ({ reconcileKnowledgeSources: async () => {} }));
@@ -20,10 +20,6 @@ vi.mock('@/lib/runtime/actions', async original => ({ ...await original<typeof i
     f.launched(input); writeFileSync(path.join(input.cwd, 'note.md'), 'runtime wrote');
     throw new Error('fixture runtime stopped after its write');
   },
-}));
-vi.mock('@/lib/claude-code/interactive-session', () => ({
-  ensureSession: (_key: string, cwd: string) => { f.claude(cwd); writeFileSync(path.join(cwd, 'note.md'), 'Claude wrote'); return { sessionId: 'fixture', cwd }; },
-  sendMessage: async () => {},
 }));
 vi.mock('@/lib/providers/child-process', async original => ({ ...await original<typeof import('@/lib/providers/child-process')>(),
   execFileSync: (...args: Parameters<typeof execFileSync>) => {
@@ -46,10 +42,7 @@ const asset = await import('@/app/api/repo-spec/asset/route');
 const editor = await import('@/app/api/panel/file-io/route');
 const commit = await import('@/app/api/review/commit/route');
 const branches = await import('@/app/api/panel/branches/route');
-const checkout = await import('@/app/api/panel/branches/checkout/route');
-const dev = await import('@/app/api/panel/dev-server/route');
 const runtime = await import('@/app/api/runtime/launch/route');
-const claude = await import('@/app/api/claude-code/send/route');
 const token = getOrCreateWsToken();
 const require = createRequire(import.meta.url);
 const sourceRoot = process.cwd();
@@ -71,12 +64,12 @@ async function protect(root: string) {
 beforeEach(async () => {
   await updateOperatorDefaults({ knowledgeSources: [] });
   for (const entry of await listRepos()) await removeRepo(entry.id);
-  f.launched.mockClear(); f.claude.mockClear(); f.spawned.mockClear();
+  f.launched.mockClear(); f.spawned.mockClear();
   f.failGitProbe = false;
 });
 afterAll(() => { closeDb(); rmSync(f.root, { recursive: true, force: true }); });
 
-it.each(['spec', 'annotation', 'asset', 'editor', 'commit', 'create branch', 'delete branch', 'checkout', 'dev server', 'Claude'] as const)(
+it.each(['spec', 'annotation', 'asset', 'editor', 'commit', 'create branch', 'delete branch'] as const)(
   'refuses the direct %s writer while leaving source files and Git identity untouched', async writer => {
     const vault = repo(); await protect(vault); const before = git(vault, 'rev-parse', 'HEAD');
     const specUrl = `/api/repo-spec?repoPath=${encodeURIComponent(vault)}`;
@@ -87,10 +80,7 @@ it.each(['spec', 'annotation', 'asset', 'editor', 'commit', 'create branch', 'de
     else if (writer === 'editor') response = await editor.PUT(req('/api/panel/file-io', { path: path.join(vault, 'note.md'), content: 'must not edit' }, 'PUT'));
     else if (writer === 'commit') { writeFileSync(path.join(vault, 'new.md'), 'uncommitted'); response = await commit.POST(req('/api/review/commit', { workspace: vault, message: 'must not commit' })); }
     else if (writer === 'create branch') response = await branches.POST(req('/api/panel/branches', { path: vault, branch: 'new-branch' }));
-    else if (writer === 'delete branch') response = await branches.DELETE(req('/api/panel/branches', { path: vault, branch: 'other', force: true }, 'DELETE'));
-    else if (writer === 'checkout') response = await checkout.POST(req('/api/panel/branches/checkout', { repoPath: vault, branch: 'other' }));
-    else if (writer === 'dev server') response = await dev.POST(req('/api/panel/dev-server', { repoPath: vault, command: 'fixture-not-executed' }));
-    else response = await claude.POST(req('/api/claude-code/send', { cwd: vault, tabId: `fixture-${sequence}`, message: 'fixture' }));
+    else response = await branches.DELETE(req('/api/panel/branches', { path: vault, branch: 'other', force: true }, 'DELETE'));
     const body = await response.text();
     expect(readFileSync(path.join(vault, 'note.md'), 'utf8')).toBe('retained');
     expect(readFileSync(path.join(vault, 'o8.md'), 'utf8')).toBe('# Retained\n');
@@ -100,7 +90,7 @@ it.each(['spec', 'annotation', 'asset', 'editor', 'commit', 'create branch', 'de
     expect(git(vault, 'branch', '--list', 'other')).toContain('other');
     expect(git(vault, 'branch', '--list', 'new-branch')).toBe('');
     expect(response.status, body).toBe(403); expect(body).toContain('read-only');
-    expect(f.spawned).not.toHaveBeenCalled(); expect(f.claude).not.toHaveBeenCalled();
+    expect(f.spawned).not.toHaveBeenCalled();
   },
 );
 
@@ -170,54 +160,6 @@ it('guards default-cwd discard through a fresh server process running inside the
   expect(result.status, result.body).toBe(403);
 });
 
-it.each(['gitfile', 'relative core.worktree', 'GIT_DIR', 'GIT_WORK_TREE', 'both environment roots'] as const)(
-  'refuses checkout redirected into protected notes by %s without changing any bytes', async mode => {
-    const writable = repo();
-    git(writable, 'checkout', 'other'); writeFileSync(path.join(writable, 'note.md'), 'replacement from other branch');
-    git(writable, 'add', '.'); git(writable, 'commit', '-m', 'other branch'); git(writable, 'checkout', 'main');
-    const vault = path.join(f.root, `worktree-notes-${++sequence}`); mkdirSync(vault);
-    writeFileSync(path.join(vault, 'note.md'), 'retained'); writeFileSync(path.join(vault, 'o8.md'), '# Retained\n');
-    await protect(vault);
-    const alias = path.join(f.root, `git-alias-${sequence}`); mkdirSync(alias);
-    const admin = path.join(writable, '.git');
-    const oldGitDir = process.env.GIT_DIR, oldWorkTree = process.env.GIT_WORK_TREE;
-    let cwd = alias;
-    if (mode !== 'GIT_WORK_TREE') git(writable, 'config', 'core.worktree', mode === 'relative core.worktree' ? path.relative(admin, vault) : vault);
-    if (mode === 'gitfile' || mode === 'relative core.worktree') writeFileSync(path.join(alias, '.git'), `gitdir: ${admin}\n`);
-    if (mode === 'GIT_DIR' || mode === 'both environment roots') process.env.GIT_DIR = admin;
-    if (mode === 'GIT_WORK_TREE' || mode === 'both environment roots') { process.env.GIT_WORK_TREE = vault; cwd = mode === 'GIT_WORK_TREE' ? writable : alias; }
-    const retained = ['note.md', 'o8.md'].map(file => readFileSync(path.join(vault, file)));
-    const head = readFileSync(path.join(admin, 'HEAD')), index = readFileSync(path.join(admin, 'index'));
-    try {
-      const response = await checkout.POST(req('/api/panel/branches/checkout', { repoPath: cwd, branch: 'other', force: true }));
-      expect.soft(readFileSync(path.join(vault, 'note.md'))).toEqual(retained[0]);
-      expect.soft(readFileSync(path.join(vault, 'o8.md'))).toEqual(retained[1]);
-      expect.soft(readFileSync(path.join(admin, 'HEAD'))).toEqual(head);
-      expect.soft(readFileSync(path.join(admin, 'index'))).toEqual(index);
-      expect(response.status, await response.text()).toBe(403);
-    } finally {
-      if (oldGitDir === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = oldGitDir;
-      if (oldWorkTree === undefined) delete process.env.GIT_WORK_TREE; else process.env.GIT_WORK_TREE = oldWorkTree;
-    }
-  },
-);
-
-it('allows an external gitfile checkout whose effective worktree is separate from the source', async () => {
-  const writable = repo();
-  git(writable, 'checkout', 'other'); writeFileSync(path.join(writable, 'note.md'), 'permitted replacement');
-  git(writable, 'add', '.'); git(writable, 'commit', '-m', 'other branch'); git(writable, 'checkout', 'main');
-  const worktree = path.join(f.root, `allowed-worktree-${++sequence}`); mkdirSync(worktree);
-  writeFileSync(path.join(worktree, 'note.md'), 'retained'); writeFileSync(path.join(worktree, 'o8.md'), '# Retained\n');
-  const vault = repo(); await protect(vault);
-  git(writable, 'config', 'core.worktree', worktree);
-  const alias = path.join(f.root, `allowed-alias-${sequence}`); mkdirSync(alias);
-  writeFileSync(path.join(alias, '.git'), `gitdir: ${path.join(writable, '.git')}\n`);
-  const response = await checkout.POST(req('/api/panel/branches/checkout', { repoPath: alias, branch: 'other', force: true }));
-  expect(response.status, await response.text()).toBe(200);
-  expect(readFileSync(path.join(worktree, 'note.md'), 'utf8')).toBe('permitted replacement');
-  expect(readFileSync(path.join(vault, 'note.md'), 'utf8')).toBe('retained');
-});
-
 it('refuses a commit whose environment redirects Git objects into protected notes', async () => {
   const writable = repo(), vault = repo();
   const objects = path.join(vault, 'objects'); mkdirSync(objects); await protect(vault);
@@ -274,37 +216,6 @@ it.each(['refs', 'refs/heads', 'logs', 'logs/refs/heads', 'packed-refs', 'index'
     expect(response.status, await response.text()).toBe(403);
   },
 );
-
-it.each(['GIT_TRACE', 'GIT_TRACE_SETUP', 'GIT_TRACE_PERFORMANCE', 'GIT_TRACE2', 'GIT_TRACE2_EVENT', 'GIT_TRACE2_PERF', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_PAGER'])(
-  'refuses inherited %s before the guard itself can run Git or modify notes', async name => {
-    const writable = repo(); const vault = path.join(f.root, `trace-notes-${++sequence}`); mkdirSync(vault);
-    const note = path.join(vault, 'note.md'); writeFileSync(note, '# Retained trace canary\n'); await protect(vault);
-    // The old guard ultimately refuses this worktree, but its earlier probe
-    // must not append trace output on the way to that refusal.
-    git(writable, 'config', 'core.worktree', vault);
-    const retained = readFileSync(note); const previous = process.env[name];
-    process.env[name] = note; f.gitCalls = 0;
-    try {
-      const response = await checkout.POST(req('/api/panel/branches/checkout', { repoPath: writable, branch: 'other', force: true }));
-      expect.soft(readFileSync(note)).toEqual(retained);
-      expect.soft(f.gitCalls, 'a guard probe inherited caller-controlled Git behavior').toBe(0);
-      expect(response.status, await response.text()).toBe(403);
-    } finally {
-      if (previous === undefined) delete process.env[name]; else process.env[name] = previous;
-    }
-  },
-);
-
-it('keeps guard probes read-only when local Git config enables trace2 output', async () => {
-  const writable = repo(); const vault = path.join(f.root, `config-trace-${++sequence}`); mkdirSync(vault);
-  const note = path.join(vault, 'note.md'); writeFileSync(note, '# Retained configuration trace canary\n'); await protect(vault);
-  git(writable, 'config', 'core.worktree', vault);
-  git(writable, 'config', 'trace2.eventTarget', note);
-  const retained = readFileSync(note);
-  const response = await checkout.POST(req('/api/panel/branches/checkout', { repoPath: writable, branch: 'other', force: true }));
-  expect.soft(readFileSync(note)).toEqual(retained);
-  expect(response.status, await response.text()).toBe(403);
-});
 
 it.each(['refs/heads', 'logs/refs/heads'])('refuses source admission when a registered repo redirects %s into it', async storage => {
   const writable = repo(); const vault = path.join(f.root, `admission-notes-${++sequence}`); mkdirSync(vault);

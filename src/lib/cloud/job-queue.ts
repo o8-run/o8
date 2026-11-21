@@ -18,7 +18,6 @@ import type {
   CloudJobControlType,
   CloudJobDrainStatus,
   CloudJobEvent,
-  CloudJobMetrics,
   QueueCloudJobControlResult,
 } from './job-store';
 import { SqliteCloudJobStore } from './sqlite-job-store';
@@ -214,10 +213,6 @@ export function acknowledgeJobControl(input: {
 
 export function listJobControls(teamId: string, jobId: string): CloudJobControl[] {
   return store.listControls(teamId, jobId);
-}
-
-export function getJobMetrics(teamId: string, jobId: string): CloudJobMetrics | undefined {
-  return store.metrics(teamId, jobId);
 }
 
 export function beginJobDrain(teamId: string): CloudJobDrainStatus {

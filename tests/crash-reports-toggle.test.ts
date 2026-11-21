@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
  * Real-path test (reachability rule): drive the ACTUAL operator-defaults route
  * with a constructed Request and assert the observable effect the three Sentry
  * layers depend on — resolveCrashReportsEnabledSync() (the exact function the
- * node beforeSend + the /api/telemetry/config resolver read, and the same
+ * node beforeSend read, and the same
  * ~/.o8/operator-defaults.json file the Rust before_send re-reads) reflects the
  * persisted toggle. Testing updateOperatorDefaults() in isolation would prove
  * the writer works but not that a real POST reaches it (the evaporation class).

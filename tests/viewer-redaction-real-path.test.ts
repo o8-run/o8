@@ -19,19 +19,14 @@ const routes = [
   ['/api/v2/files?preview=1', () => import('@/app/api/v2/files/route')],
   ['/api/panel/file-io', () => import('@/app/api/panel/file-io/route')],
   ['/api/panel/file-diff', () => import('@/app/api/panel/file-diff/route')],
-  ['/api/panel/worktree-diff', () => import('@/app/api/panel/worktree-diff/route')],
   ['/api/worktrees/diff', () => import('@/app/api/worktrees/diff/route')],
   ['/api/worktrees/diff?selected=1', () => import('@/app/api/worktrees/diff/route')],
   ['/api/lanes/[id]/diff', () => import('@/app/api/lanes/[id]/diff/route')],
-  ['/api/panel/commit-diff', () => import('@/app/api/panel/commit-diff/route')],
   ['/api/panel/commits/[hash]', () => import('@/app/api/panel/commits/[hash]/route')],
   ['/api/panel/commits/[hash]/file', () => import('@/app/api/panel/commits/[hash]/file/route')],
   ['/api/panel/commits', () => import('@/app/api/panel/commits/route')],
   ['/api/panel/git-log', () => import('@/app/api/panel/git-log/route')],
   ['/api/panel/git/log', () => import('@/app/api/panel/git/log/route')],
-  ['/api/review/file', () => import('@/app/api/review/file/route')],
-  ['/api/review/diff', () => import('@/app/api/review/diff/route')],
-  ['/api/panel/file-preview', () => import('@/app/api/panel/file-preview/route')],
   ['/api/mobile/sync', () => import('@/app/api/mobile/sync/route')],
   ['/api/orchestrator/review-state', () => import('@/app/api/orchestrator/review-state/route')],
 ] as const;
@@ -93,10 +88,9 @@ describe('each credential shape through every persisted viewer route and native 
     const baseBranch = `viewer-base-${index}`;
     git('branch', baseBranch);
     const file = `control-${index}.txt`;
-    const svg = `control-${index}.svg`;
     const content = `π 🔒 safe heading\n${item.text}\n`;
-    writeFileSync(join(root, file), content); writeFileSync(join(root, svg), `<svg><!-- ${item.text} --></svg>`);
-    git('add', '--', file, svg); git('commit', '-q', '-m', item.text);
+    writeFileSync(join(root, file), content);
+    git('add', '--', file); git('commit', '-q', '-m', item.text);
     const sha = git('rev-parse', 'HEAD');
     writeFileSync(join(root, file), `${content}${item.text}\nvisible edit\n`);
     const { createLane } = await import('@/lib/lane/registry');
@@ -106,7 +100,7 @@ describe('each credential shape through every persisted viewer route and native 
     invalidateReviewSnapshotCache();
     for (const [route, load] of routes) {
       const url = new URL(route.replace('[id]', laneId).replace('[hash]', sha), origin);
-      const params = { workspace: root, repoPath: root, worktreePath: root, baseBranch, sha, packetId, limit: '1', path: route === '/api/panel/file-io' ? join(root, file) : route === '/api/panel/file-preview' ? svg : file };
+      const params = { workspace: root, repoPath: root, worktreePath: root, baseBranch, sha, packetId, limit: '1', path: route === '/api/panel/file-io' ? join(root, file) : file };
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
       if (url.searchParams.has('selected')) url.searchParams.set('file', file);
       const init = { headers: { host: '127.0.0.1', authorization }, ...(route === '/api/mobile/sync' ? { method: 'POST', body: JSON.stringify({ review: { includeFile: file } }) } : {}) };
@@ -120,7 +114,7 @@ describe('each credential shape through every persisted viewer route and native 
       expect(remote.status, route).toBe(200); assertMasked(await remote.text(), `${route}: native`);
     }
     expect(readFileSync(join(root, file), 'utf8')).toContain(item.text);
-    git('add', '--', file, svg); git('commit', '-q', '-m', 'fixture baseline');
+    git('add', '--', file); git('commit', '-q', '-m', 'fixture baseline');
   });
 
   it('redacts stored approval diff previews through direct and native reads', async () => {

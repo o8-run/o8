@@ -297,11 +297,6 @@ export function getWorkspaceCommitDiffFiles(root: string, sha: string) {
     .filter((file): file is PanelCommitDiffFile => file !== null);
 }
 
-export function getLocalCommitDiffFiles(sha: string, workspace?: string | null) {
-  const root = resolvePanelWorkspaceRoot(workspace);
-  return getWorkspaceCommitDiffFiles(root, sha);
-}
-
 export function getLocalCommitDetail(sha: string, workspace?: string | null) {
   const root = resolvePanelWorkspaceRoot(workspace);
   const meta = runGit(root, ['log', '-1', '--format=%H%n%s%n%an%n%ae%n%aI%n%b', sha]).trim();

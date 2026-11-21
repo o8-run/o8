@@ -43,7 +43,6 @@ const DEFERRED_BOUNDARIES: ReadonlyMap<string, string> = new Map([
   ['src/lib/mcp/tool-spine/build.ts', 'payer policy part b'],
   ['src/lib/mcp/tool-spine/emit-claude.ts', 'payer policy part b'],
   ['src/lib/mcp/tool-spine/emit-codex.ts', 'payer policy part b'],
-  ['src/lib/mcp/test-connection.ts', 'payer policy part b'],
   ['src/lib/mcp/operator-node22-reexec.ts', 'payer policy part b'],
   ['src/lib/codebase-memory/mcp-client.ts', 'payer policy part b'],
   ['src/lib/providers/deferred-mcp-arguments.ts', 'payer policy part b'],

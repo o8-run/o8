@@ -1,7 +1,6 @@
 import 'server-only';
 
 import { readFileSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -40,23 +39,6 @@ function isMissingFile(error: unknown) {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
-export async function getRemoteRuntimeFlag(): Promise<RemoteRuntimeFlagState> {
-  const envFlag = getEnvRemoteRuntimeFlag();
-  if (envFlag) return envFlag;
-
-  try {
-    const raw = await readFile(getFeatureFlagsPath(), 'utf8');
-    const fileFlag = readRemoteRuntimeFlag(raw);
-    if (fileFlag) return fileFlag;
-  } catch (error) {
-    if (!isMissingFile(error)) {
-      console.error('[worker-flags] Failed to read feature flags:', error);
-    }
-  }
-
-  return { enabled: false, source: 'off' };
-}
-
 export function getRemoteRuntimeFlagSync(): RemoteRuntimeFlagState {
   const envFlag = getEnvRemoteRuntimeFlag();
   if (envFlag) return envFlag;
@@ -72,25 +54,4 @@ export function getRemoteRuntimeFlagSync(): RemoteRuntimeFlagState {
   }
 
   return { enabled: false, source: 'off' };
-}
-
-export async function setRemoteRuntimeFlag(enabled: boolean): Promise<void> {
-  const filePath = getFeatureFlagsPath();
-  let nextFlags: Record<string, unknown> = {};
-
-  try {
-    const raw = await readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      nextFlags = parsed;
-    }
-  } catch (error) {
-    if (!isMissingFile(error)) {
-      console.error('[worker-flags] Failed to read existing feature flags before write:', error);
-    }
-  }
-
-  nextFlags.remoteRuntime = enabled;
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(nextFlags, null, 2)}\n`, 'utf8');
 }

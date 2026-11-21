@@ -14,11 +14,9 @@ state.dir = mkdtempSync(join(tmpdir(), 'o8-key-chat-routes-'));
 const { mutateProviderKey } = await import('@/lib/providers/key-store');
 const keys = await import('@/app/api/v2/keys/route');
 const billing = await import('@/lib/providers/runtime-billing');
-const codexSend = await import('@/app/api/codex/send/route');
 const proxy = await import('@/app/api/v2/proxy/cli/route');
 const request = (path: string, body: unknown, method = 'POST') => new NextRequest(`http://localhost/api/${path}`, { method, headers: { host: 'localhost' }, body: JSON.stringify(body) });
 const targets = [
-  ['workspace-codex', 'codex', 'openai', 'OPENAI_API_KEY'],
   ['proxy-codex', 'codex', 'openai', 'OPENAI_API_KEY'],
   ['proxy-gemini', 'gemini', 'gemini', 'GEMINI_API_KEY'],
   ['proxy-opencode', 'opencode', 'openai', 'OPENAI_API_KEY'],
@@ -41,31 +39,29 @@ beforeEach(() => {
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.dir, { recursive: true, force: true }); });
 async function save(provider: string) { if (provider === 'gemini') { mutateProviderKey('GEMINI_API_KEY', { key: 'fixture-saved-chat-key' }); return; } expect((await keys.POST(request('v2/keys', { provider, key: 'fixture-saved-chat-key' }))).status).toBe(200); }
-async function chat(target: string, runtime: string) {
-  const response = target === 'workspace-codex'
-    ? await codexSend.POST(request('codex/send', { message: 'fixture' }))
-    : await proxy.POST(request('v2/proxy/cli', { runtime, model: 'fixture', repoPath: state.dir, messages: [{ role: 'user', content: 'fixture' }] }));
+async function chat(runtime: string) {
+  const response = await proxy.POST(request('v2/proxy/cli', { runtime, model: 'fixture', repoPath: state.dir, messages: [{ role: 'user', content: 'fixture' }] }));
   expect(response.status).toBe(200); await response.text(); expect(state.envs.length).toBeGreaterThan(0);
 }
 it('preserves deferred save-to-ambient behavior while the real ordinary chat stays subscription billed', async () => {
   await save('openai');
   expect((await keys.GET(new NextRequest('http://localhost/api/v2/keys', { headers: { host: 'localhost' } }))).status).toBe(200);
   expect(process.env.OPENAI_API_KEY).toBe('fixture-saved-chat-key'); expect(process.env.CODEX_API_KEY).toBe('');
-  await chat('workspace-codex', 'codex');
+  await chat('codex');
   expect(state.envs.at(-1)?.OPENAI_API_KEY || null).toBeNull();
 });
-it.each(targets.flatMap(target => (['subscription', 'api'] as const).map(mode => [...target, mode] as const)))('%s (%s, %s, %s) applies %s billing at the real chat spawn', async (target, runtime, provider, canonical, mode) => {
+it.each(targets.flatMap(target => (['subscription', 'api'] as const).map(mode => [...target, mode] as const)))('%s (%s, %s, %s) applies %s billing at the real chat spawn', async (_target, runtime, provider, canonical, mode) => {
   if (runtime === 'codex' && mode === 'api') expect(() => billing.saveRuntimeBillingMode(runtime, mode)).toThrow(); else expect(() => billing.saveRuntimeBillingMode(runtime, mode)).not.toThrow();
-  await save(provider); await chat(target, runtime);
+  await save(provider); await chat(runtime);
   expect(state.envs.at(-1)?.[canonical] || null).toBe(runtime !== 'codex' && mode === 'api' ? 'fixture-saved-chat-key' : null);
 });
-it.each(targets.flatMap(target => ['disable', 'remove'].map(action => [...target, action] as const)))('%s (%s, %s, %s) strips keys after API %s', async (target, runtime, provider, _canonical, action) => {
+it.each(targets.flatMap(target => ['disable', 'remove'].map(action => [...target, action] as const)))('%s (%s, %s, %s) strips keys after API %s', async (_target, runtime, provider, _canonical, action) => {
   if (runtime === 'codex') expect(() => billing.saveRuntimeBillingMode(runtime, 'api')).toThrow(); else expect(() => billing.saveRuntimeBillingMode(runtime, 'api')).not.toThrow();
   await save(provider);
   for (const name of names) vi.stubEnv(name, 'fixture-stale-alias');
   if (provider === 'gemini') mutateProviderKey('GEMINI_API_KEY', action === 'disable' ? { enabled: false } : { key: null });
   else expect((await (action === 'disable' ? keys.PATCH(request('v2/keys', { provider, enabled: false }, 'PATCH')) : keys.DELETE(request('v2/keys', { provider }, 'DELETE')))).status).toBe(200);
-  await chat(target, runtime);
+  await chat(runtime);
   const aliases = provider === 'openai' ? ['OPENAI_API_KEY', 'CODEX_API_KEY'] : ['GEMINI_API_KEY', 'GOOGLE_AI_API_KEY'];
   for (const env of state.envs) for (const name of aliases) expect(env[name] || null, name).toBeNull();
 });

@@ -157,7 +157,7 @@ describe('plugin principal through the real API and persisted state', () => {
   });
 
   it('refuses approval, merge, unrestricted MCP, and every other route even when public', async () => {
-    for (const path of ['/api/panel/approvals', '/api/worktrees/merge', '/api/mcp', '/api/mobile/enroll', '/api/plugins/audit', '/api/plugins/mcp/extra']) {
+    for (const path of ['/api/panel/approvals', '/api/mcp', '/api/mobile/enroll', '/api/plugins/audit', '/api/plugins/mcp/extra']) {
       expect(panelGateMiddleware(request('approve', {}, token(), path)).status).toBe(403);
     }
     for (const name of ['approve_and_merge', 'o8_exec', 'approve']) {

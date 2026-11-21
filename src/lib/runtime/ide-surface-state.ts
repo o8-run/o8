@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -33,25 +33,6 @@ export function readIdeSurfaceState(): IdeSurfaceState | null {
   } catch {
     return null;
   }
-}
-
-export function writeIdeSurfaceState(input: { terminalRepoPaths?: string[]; activeRepoPath?: string | null }) {
-  const terminalRepoPaths = Array.from(new Set(
-    (input.terminalRepoPaths ?? [])
-      .map((repoPath) => normalizeRepoPath(repoPath))
-      .filter((repoPath): repoPath is string => Boolean(repoPath)),
-  ));
-  const next: IdeSurfaceState = {
-    updatedAt: new Date().toISOString(),
-    terminalRepoPaths,
-    activeRepoPath: normalizeRepoPath(input.activeRepoPath),
-  };
-
-  if (!existsSync(STATE_DIR)) {
-    mkdirSync(STATE_DIR, { recursive: true });
-  }
-  writeFileSync(SURFACE_STATE_FILE, JSON.stringify(next, null, 2));
-  return next;
 }
 
 export function listIdeSurfaceRepoPaths() {
