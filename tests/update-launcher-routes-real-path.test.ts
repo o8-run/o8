@@ -47,7 +47,7 @@ it('reads held launcher state through both production GET routes without applyin
   const state = await import('@/app/api/panel/app/update-state/route');
   for (const route of [apply, state]) {
     const response = await bounded(route.GET());
-    expect(await response.json()).toMatchObject({ ok: true, state: { version: '2.0.0', updatePending: true, heldUpdate: { phase: 'ready' } } });
+    expect(await response.json()).toMatchObject({ ok: true, owner: 'launcher', state: { version: '2.0.0', updatePending: true, heldUpdate: { phase: 'ready' } } });
   }
   expect(ops).toEqual(['update-status', 'update-status']);
 });

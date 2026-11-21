@@ -72,7 +72,8 @@ export function launcherUnavailable() {
 
 export async function launcherSnapshot() {
   const status = await launcherRequest('update-status');
-  return { ok: status.ok, state: launcherState(status), currentVersion: status.current,
+  // `owner` tells the old shell's scheduler to stand down instead of posting.
+  return { ok: status.ok, owner: 'launcher' as const, state: launcherState(status), currentVersion: status.current,
     checkRequestedAt: null, applyRequestedAt: null, checkedAt: null, checkAgeMs: null };
 }
 

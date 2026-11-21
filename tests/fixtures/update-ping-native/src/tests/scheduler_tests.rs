@@ -359,3 +359,83 @@ fn idle_scheduler_reads_state_every_few_seconds_and_posts_held_state_only_on_cha
     assert!((2..=4).contains(&gets), "idle state reads in 11 s: {gets}");
     assert!(held_posts.load(Ordering::SeqCst) <= 1, "an unchanged held state must not be posted again");
 }
+
+/// Counts the scheduler's reads and posts against a launcher-owned server.
+fn launcher_owned_traffic(marks_owner: bool) -> (usize, usize) {
+    let primary = server("failure");
+    let fallback = server("failure");
+    let settings = tempfile::tempdir().unwrap();
+    let app = app(&primary.url, &fallback.url, &settings.path().join("settings.json"));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let gets = Arc::new(AtomicUsize::new(0));
+    let posts = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (done, counted_gets, counted_posts) = (stop.clone(), gets.clone(), posts.clone());
+    thread::spawn(move || {
+        while !done.load(Ordering::Acquire) {
+            let Ok((mut socket, _)) = listener.accept() else {
+                thread::sleep(Duration::from_millis(5));
+                continue;
+            };
+            socket.set_nonblocking(false).unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 4096];
+            while let Ok(count) = socket.read(&mut buffer) {
+                if count == 0 { break; }
+                request.extend_from_slice(&buffer[..count]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(split) = text.find("\r\n\r\n") {
+                    let length = text[..split].lines()
+                        .find_map(|line| line.to_lowercase().strip_prefix("content-length: ").map(str::to_owned))
+                        .and_then(|value| value.parse::<usize>().ok()).unwrap_or(0);
+                    if request.len() >= split + 4 + length { break; }
+                }
+            }
+            let (status, body) = if String::from_utf8_lossy(&request).starts_with("GET ") {
+                counted_gets.fetch_add(1, Ordering::SeqCst);
+                ("200 OK", if marks_owner {
+                    r#"{"ok":true,"owner":"launcher","state":{"check":{"checkedAt":null}},"checkRequestedAt":null}"#
+                } else {
+                    r#"{"ok":true,"state":{"check":{"checkedAt":null}},"checkRequestedAt":null}"#
+                })
+            } else {
+                counted_posts.fetch_add(1, Ordering::SeqCst);
+                ("409 Conflict", r#"{"ok":false,"allowed":false,"error":{"code":"launcher_updater_owned"}}"#)
+            };
+            let _ = write!(socket, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        }
+    });
+    let previous = std::env::var_os("O8_API_PORT");
+    std::env::set_var("O8_API_PORT", port.to_string());
+    let _running = Running(
+        tauri::async_runtime::spawn(crate::launch_updater::scheduler::run_with_effects(
+            app.handle().clone(),
+            |app, _, _, _| FixtureEffects { app, installs: Arc::new(AtomicUsize::new(0)) },
+            Duration::from_secs(3600),
+        )),
+        previous,
+        stop,
+    );
+    thread::sleep(Duration::from_secs(11));
+    (gets.load(Ordering::SeqCst), posts.load(Ordering::SeqCst))
+}
+
+#[test]
+fn launcher_owned_updates_put_the_scheduler_on_standby_without_posting() {
+    let _serial = SCHEDULER_ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let (gets, posts) = launcher_owned_traffic(true);
+    // A previous test's aborted scheduler may still make one read here.
+    assert!(gets <= 2, "reads after a launcher-owned read in 11 s: {gets}");
+    assert_eq!(posts, 0, "a launcher-owned read stands the shell down before any post");
+}
+
+#[test]
+fn an_older_server_refusal_also_stops_the_shell_from_posting_again() {
+    let _serial = SCHEDULER_ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let (gets, posts) = launcher_owned_traffic(false);
+    assert!(gets <= 2, "reads after the first launcher refusal in 11 s: {gets}");
+    assert!(posts <= 1, "posts after the first launcher refusal in 11 s: {posts}");
+}
