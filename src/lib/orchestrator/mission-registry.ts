@@ -239,11 +239,6 @@ export function listDurablePacketsWithId(packetId: string): OrchestratorPacket[]
   return matches;
 }
 
-export function hasRegistryPendingHeadlessWork(currentMissionId?: string | null) {
-  return listActiveMissionRegistryEntries(currentMissionId)
-    .some((entry) => missionHasPendingHeadlessWork(entry.mission));
-}
-
 function preserveReleasedPackets(state: OrchestratorMissionState): OrchestratorMissionState {
   const current = readMissionRegistryEntry(state.missionId!, { includeArchived: true });
   if (!current) return state;

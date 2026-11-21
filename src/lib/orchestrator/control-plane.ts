@@ -308,6 +308,16 @@ export function readOrchestratorControlPlaneState(options: { strict?: boolean } 
   return mission;
 }
 
+/** Changes whenever the current-mission file is written; empty when there is none. */
+export function controlPlaneStamp(): string {
+  try {
+    const stat = statSync(ORCHESTRATOR_PATH);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return '';
+  }
+}
+
 export function writeOrchestratorControlPlaneState(state: OrchestratorMissionState) {
   ensureControlPlaneDir();
   const next: OrchestratorControlPlaneFile = {

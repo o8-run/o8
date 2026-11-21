@@ -1,6 +1,7 @@
 import { archiveCompletedLanes, listLanes } from '@/lib/lane/registry';
 import { pruneRepoWorktrees } from '@/lib/lane/worktree-cleanup';
 import {
+  controlPlaneStamp,
   readOrchestratorControlPlaneState,
   reconcileOrchestratorControlPlaneState,
   withLockedState,
@@ -10,7 +11,9 @@ import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
 import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { applyHeadlessTickDeadline } from '@/lib/orchestrator/headless-tick-deadline';
-import { hasRegistryPendingHeadlessWork, listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import { listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
+import { CURRENT_MISSION_KEY, isMissionSettled, laneEpoch, missionVersion, recordMissionPass, refreshSettledMissions } from '@/lib/orchestrator/settled-missions';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 
 const DEFAULT_INTERVAL_MS = 10_000;
@@ -92,12 +95,18 @@ function buildIdleTickResult(mission: OrchestratorMissionState): HeadlessSprintT
 }
 
 function maybeShortCircuitIdleTick(): HeadlessSprintTickResult | null {
+  // A mission whose queued packets all wait on a fixed blocker is not work.
+  refreshSettledMissions();
+  const epoch = laneEpoch();
   const mission = readOrchestratorControlPlaneState();
-  if (hasPendingHeadlessWork(mission)) {
+  if (hasPendingHeadlessWork(mission) && !isMissionSettled(CURRENT_MISSION_KEY, controlPlaneStamp(), epoch)) {
     silentIdleTickCount = 0;
     return null;
   }
-  if (hasRegistryPendingHeadlessWork(mission.missionId)) {
+  const registryWork = listActiveMissionRegistryEntries(mission.missionId).some((entry) => (
+    missionHasPendingHeadlessWork(entry.mission) && !isMissionSettled(entry.id, entry.updatedAt, epoch)
+  ));
+  if (registryWork) {
     silentIdleTickCount = 0;
     return null;
   }
@@ -159,8 +168,12 @@ async function runRegistryMissionTicks(
 ) {
   let launched = 0;
   let maintenanceNeeded = false;
+  refreshSettledMissions();
+  const epoch = laneEpoch();
   for (const entry of listActiveMissionRegistryEntries(currentMissionId)) {
-    const { result: activity } = await withMissionRegistryState(entry.id, async (fresh) => {
+    // Skip a mission whose last pass found nothing to do until it or a lane changes.
+    if (isMissionSettled(entry.id, entry.updatedAt, epoch)) continue;
+    const { result: activity, state } = await withMissionRegistryState(entry.id, async (fresh) => {
       const reconciled = reconcileOrchestratorControlPlaneState(fresh);
       const fanned = fanOutComparisonPackets(reconciled);
       // Most registry missions are idle. Check for work first: the budget reads
@@ -179,6 +192,8 @@ async function runRegistryMissionTicks(
         result: { launched: countLaunchedPackets(fanned, dispatched), maintenanceNeeded: hasWorktreeMaintenanceDemand(dispatched) },
       };
     });
+    const version = missionVersion(entry.id);
+    recordMissionPass(entry.id, { state, launched: activity.launched, changed: version !== entry.updatedAt, version, epoch });
     launched += activity.launched;
     maintenanceNeeded ||= activity.maintenanceNeeded;
   }
@@ -186,9 +201,11 @@ async function runRegistryMissionTicks(
 }
 
 async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
+  const epoch = laneEpoch();
   // #460 — Acquire the control-plane lock so concurrent API operations
   // (reset_packet, etc.) don't race our read-modify-write cycle.
-  const { result } = await withLockedState(async (current) => {
+  const { result: { changed, ...result } } = await withLockedState(async (current) => {
+    const before = JSON.stringify(normalizeOrchestratorMissionStateForPersistence(current));
     const reconciled = reconcileOrchestratorControlPlaneState(current);
     // #1293 — best-of-N fan-out: a seed packet (comparisonModels set, no
     // comparisonGroupId) is consumed by fanOutComparisonPackets — replaced by
@@ -229,7 +246,12 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
       currentWave: dag.currentWave,
       totalWaves: dag.totalWaves,
       mission,
-    } satisfies HeadlessSprintTickResult;
+      changed: JSON.stringify(mission) !== before,
+    };
+  });
+  // Stamp after this pass's own write, so only a later write unsettles it.
+  recordMissionPass(CURRENT_MISSION_KEY, {
+    state: result.mission, launched: result.launched, changed, version: controlPlaneStamp(), epoch,
   });
   const registryActivity = await runRegistryMissionTicks(result.mission.missionId);
   const tickResult = {
