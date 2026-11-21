@@ -1,3 +1,5 @@
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({ execFile: vi.fn(), listening: '' }));
@@ -65,5 +67,33 @@ describe('GET /api/panel/ports', () => {
     expect(bodies[1]).toEqual(bodies[0]);
     expect(bodies[2]).toEqual(bodies[0]);
     expect(fixture.execFile.mock.calls.filter(([, args]) => args.includes('-sTCP:LISTEN'))).toHaveLength(1);
+  });
+
+  it('classifies a redirect from its headers without using a pooled connection', async () => {
+    const requests: Array<{ method?: string; path?: string; connection?: string }> = [];
+    const server = createServer((request, response) => {
+      requests.push({ method: request.method, path: request.url, connection: request.headers.connection });
+      response.writeHead(302, { Location: '/redirect-target' });
+      response.flushHeaders();
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected a fixture TCP port');
+      fixture.listening = listening([[901, 'node', address.port]]);
+      const pooledFetch = vi.spyOn(globalThis, 'fetch');
+      const { GET } = await import('./route');
+
+      const result = await (await GET()).json();
+
+      expect(result.ports).toEqual([expect.objectContaining({ port: address.port, kind: 'page' })]);
+      expect(requests).toEqual([{ method: 'GET', path: '/', connection: 'close' }]);
+      expect(pooledFetch).not.toHaveBeenCalled();
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
