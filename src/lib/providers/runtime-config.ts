@@ -2,7 +2,6 @@ import { providerCredentialMaterials } from './key-store';
 import { matchesProviderCredential } from './credential-materials';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 const PROVIDER_NAMES = new Set(['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_AI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_API_KEY', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'GOOGLE_TTS_API_KEY']);
 const PROVIDERS: Record<string, string> = { openai: 'OPENAI_API_KEY', codex: 'OPENAI_API_KEY', 'openai-codex': 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', 'claude-code': 'ANTHROPIC_API_KEY', openrouter: 'OPENROUTER_API_KEY', google: 'GEMINI_API_KEY', gemini: 'GEMINI_API_KEY', deepseek: 'DEEPSEEK_API_KEY', groq: 'GROQ_API_KEY' };
@@ -56,6 +55,11 @@ function parseWithoutSecrets<T>(parse: () => T): T {
   catch { throw new Error('Runtime credential configuration is invalid. Fix its syntax and retry.'); }
 }
 
+function yamlCodec(): typeof import('yaml') {
+  // This synchronous path only needs the codec for an actual YAML file.
+  return require('yaml');
+}
+
 /** Parse before writing a destination, so even interrupted preparation has no plaintext window. */
 export function sanitizeRuntimeConfigText(file: string, raw: string, runtimeId: string): string {
   if (file.endsWith('.json')) return `${JSON.stringify(filterRuntimeConfig(parseWithoutSecrets(() => JSON.parse(raw)), runtimeId) ?? null, null, 2)}\n`;
@@ -64,7 +68,10 @@ export function sanitizeRuntimeConfigText(file: string, raw: string, runtimeId: 
     const filtered = filterRuntimeConfig(original, runtimeId) as Record<string, unknown>;
     return JSON.stringify(original) === JSON.stringify(filtered) && !matchesProviderCredential(raw, providerCredentialMaterials()) ? raw : stringifyToml(filtered);
   }
-  if (file.endsWith('.yaml') || file.endsWith('.yml')) return stringifyYaml(filterRuntimeConfig(parseWithoutSecrets(() => parseYaml(raw, { logLevel: 'error' })), runtimeId));
+  if (file.endsWith('.yaml') || file.endsWith('.yml')) {
+    const yaml = yamlCodec();
+    return yaml.stringify(filterRuntimeConfig(parseWithoutSecrets(() => yaml.parse(raw, { logLevel: 'error' })), runtimeId));
+  }
   const materials = providerCredentialMaterials();
   return raw.split('\n').filter(line => {
     const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);
@@ -96,7 +103,7 @@ export function assertRuntimeConfigText(file: string, raw: string, runtimeId: st
   const materials = providerCredentialMaterials();
   const original = file.endsWith('.json') ? parseWithoutSecrets(() => JSON.parse(raw))
     : file.endsWith('.toml') ? parseWithoutSecrets(() => parseToml(raw))
-      : /\.ya?ml$/.test(file) ? parseWithoutSecrets(() => parseYaml(raw, { logLevel: 'error' }))
+      : /\.ya?ml$/.test(file) ? parseWithoutSecrets(() => yamlCodec().parse(raw, { logLevel: 'error' }))
         : Object.fromEntries(raw.split('\n').flatMap(line => {
           const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
           return match ? [[match[1], match[2]]] : [];

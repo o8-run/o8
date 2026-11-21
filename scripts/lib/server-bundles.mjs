@@ -34,6 +34,8 @@ const SHARED_RUNTIMES = {
   typescript: { files: ['package.json', 'LICENSE.txt', 'ThirdPartyNoticeText.txt', 'lib/typescript.js'] },
   // The browser engine imports it only when an agent drives a browser.
   'playwright-core': { whole: true, files: ['LICENSE', 'NOTICE', 'ThirdPartyNotices.txt'] },
+  // Runtime configuration loads the synchronous codec only for YAML files.
+  yaml: { whole: true, files: ['LICENSE'] },
 };
 
 function stageSharedRuntimes(root, outDir, metafile) {
