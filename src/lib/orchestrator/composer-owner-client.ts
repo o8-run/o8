@@ -62,6 +62,11 @@ async function internalRequest<M extends ComposerOwnerMethod>(method: M, params:
   return reply.result as ComposerOwnerResults[M];
 }
 
+/** True while o8d is attached as the producer: it then sends a notice for every queue change. */
+export function composerOwnerSignalsAvailable(): boolean {
+  return producer !== undefined;
+}
+
 /** Choose once per call. A sent request never falls back or automatically replays. */
 const nextTransport = composerOwnerHttpTransport();
 export const composerOwnerRequest: ComposerOwnerTransport = (method, params) => {
