@@ -20,7 +20,7 @@ import { autoSettleEligible, inboxSubject, mutateInboxAutoSettle, readInboxState
 import { assertInboxCanSettle, inboxPackets, runtimeInboxIdentity } from './subjects';
 import type { InboxSubject } from './settlement-state';
 import { recurring } from '@/lib/background-work/ledger';
-import { controlPlaneStamp } from '@/lib/orchestrator/control-plane';
+import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -165,19 +165,29 @@ export async function runInboxAutoSettleSweep(options: { force?: boolean; agents
 }
 
 let lastSweepLeftWork = true;
-let settleStatement: { get(): unknown } | null = null;
+let inputsStatement: { get(): unknown } | null = null;
 
 /**
- * Everything a sweep reads, cheaply: any SQLite write on this connection or
- * another (lanes, missions, linked PRs, inbox state, operator defaults), the
- * orchestrator state file, and the chat history folder.
+ * Everything a sweep reads, cheaply. Each table it reads contributes its row
+ * count and newest write; the orchestrator state file contributes only the
+ * packet fields the verdicts use, because it is rewritten every minute whether
+ * or not they changed. The chat history folder and the two operator defaults
+ * complete it.
  */
 function sweepInputs(): string {
-  settleStatement ??= getSqlite().prepare('SELECT total_changes() AS changes, data_version AS version FROM pragma_data_version');
-  const { changes, version } = settleStatement.get() as { changes: number; version: number };
+  inputsStatement ??= getSqlite().prepare(`SELECT
+    (SELECT count(*) || ':' || ifnull(max(updated_at), '') FROM lanes) AS lanes,
+    (SELECT count(*) || ':' || ifnull(max(updated_at), '') FROM missions) AS missions,
+    (SELECT count(*) || ':' || ifnull(max(id), '') FROM conversation_pr_context) AS links,
+    (SELECT count(*) || ':' || ifnull(max(updated_at), '') FROM github_pull_requests) AS pulls,
+    (SELECT count(*) || ':' || ifnull(max(updated_at), '') FROM app_state WHERE key LIKE 'inbox:%') AS inbox`);
+  const tables = Object.values(inputsStatement.get() as Record<string, string>).join('|');
+  const packets = readOrchestratorControlPlaneState().packets.map(packet => [packet.id, packet.status, packet.releaseState, packet.releaseStatePayload ?? null,
+    packet.orchestratorThreadId ?? packet.launchContext?.parentThreadId ?? null]);
   let chats = '';
   try { chats = String(statSync(join(getDataDir(), 'chat-history')).mtimeMs); } catch { /* no chats yet */ }
-  return `${changes}:${version}:${controlPlaneStamp()}:${chats}`;
+  const { autoSettleEnabled, autoSettleIdleDays } = getOperatorDefaultsSync().values;
+  return JSON.stringify([tables, packets, chats, autoSettleEnabled, autoSettleIdleDays]);
 }
 
 /**
