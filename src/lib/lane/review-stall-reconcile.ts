@@ -21,6 +21,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { getSqlite } from '@/lib/db';
+import { fileStamp as refFileStamp, gitDirectories } from '@/lib/git/ref-stamp';
 import { recordLaneEvent } from './events';
 import { listLanes } from './registry';
 import { assessDurableApprovedReview } from './durable-review-approval';
@@ -177,8 +178,24 @@ function worktreeHeadStamp(worktree: string): string {
 }
 
 /**
+ * A lane's branch and base as the stall pass sees them: their loose refs and
+ * reflogs, origin's copies and packed-refs in the shared ref directory. A branch
+ * moved from another worktree, or a fetch, changes one of these.
+ */
+function laneRefsStamp(repoPath: string, branch: string | null, baseBranch: string | null): string {
+  const directories = gitDirectories(repoPath);
+  if (!directories) return '-';
+  const { commonDir } = directories;
+  const refs = [branch, baseBranch].filter((name): name is string => Boolean(name))
+    .flatMap((name) => [`heads/${name}`, `remotes/origin/${name}`]);
+  return [refFileStamp(join(commonDir, 'packed-refs')),
+    ...refs.flatMap((ref) => [refFileStamp(join(commonDir, 'refs', ref)), refFileStamp(join(commonDir, 'logs', 'refs', ref))])].join(',');
+}
+
+/**
  * Everything a stall pass reads, as one string: lanes and lane events, the
- * review queue, approvals, and the HEAD of each reviewing lane's worktree.
+ * review queue, approvals, and the HEAD, branch and base refs of each
+ * reviewing lane.
  */
 export function reviewStallInputs(): string {
   const db = getSqlite();
@@ -189,8 +206,9 @@ export function reviewStallInputs(): string {
       (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at), '') FROM review_queue) AS queue
   `).get() as Record<string, string | number>;
   const reviewing = db.prepare(`
-    SELECT id, worktree_path, repo_path, packet_id, session_key FROM lanes WHERE status = 'reviewing' ORDER BY id
-  `).all() as Array<{ id: string; worktree_path: string | null; repo_path: string; packet_id: string | null; session_key: string | null }>;
+    SELECT id, worktree_path, repo_path, packet_id, session_key, branch, base_branch FROM lanes WHERE status = 'reviewing' ORDER BY id
+  `).all() as Array<{ id: string; worktree_path: string | null; repo_path: string; packet_id: string | null; session_key: string | null;
+    branch: string | null; base_branch: string | null }>;
   // Only the approvals a pass reads (by lane, packet or session), through their
   // indexes: scanning the whole table reads every stored diff.
   const approvals = reviewing.map((lane) => {
@@ -202,6 +220,7 @@ export function reviewStallInputs(): string {
   });
   const heads = reviewing.map((lane, index) => (
     `${lane.id}=${worktreeHeadStamp(lane.worktree_path || lane.repo_path)}/${approvals[index]}`
+      + `/${laneRefsStamp(lane.repo_path, lane.branch, lane.base_branch)}`
   ));
   return [row.lanes, row.events, row.queue, ...heads].join('|');
 }
