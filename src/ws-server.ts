@@ -5542,9 +5542,15 @@ function startPollingLoops() {
   // ActivityKit remote updates must keep flowing after the phone suspends and
   // the websocket disappears. This low-frequency loop reuses the mobile inbox
   // fingerprint/signature path and only sends APNs when the Live Activity
-  // payload changed.
+  // payload changed. With no Live Activity registered it has nothing to send,
+  // and each tick missed the 8 s inbox cache and rebuilt the whole inbox
+  // (often over a second of GitHub work), so it is skipped.
   setInterval(() => {
-    void publishMobileInboxRealtimeSnapshot(false);
+    void import('@/lib/mobile/live-activity-push')
+      .then(({ hasMobileLiveActivityTokens }) => {
+        if (hasMobileLiveActivityTokens()) void publishMobileInboxRealtimeSnapshot(false);
+      })
+      .catch(() => { void publishMobileInboxRealtimeSnapshot(false); });
   }, 30_000);
 
   // Safety-net history poll — reduced frequency since chat.done triggers immediate push
