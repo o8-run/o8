@@ -22,7 +22,12 @@ interface CommandReceipt {
 }
 
 const COMMAND_OUTPUT_LIMIT = 64 * 1024;
-const COMMAND_TIMEOUT_MS = 2_000;
+// On Windows the identity probe shells out to powershell.exe with two
+// Get-CimInstance queries; a cold CIM session on a busy host regularly
+// exceeds 2 s (the same failure shape as #3564), which turns every probe
+// "unknown" and holds all worktree metadata mutation. macOS/Linux helpers
+// stay far inside 2 s.
+const COMMAND_TIMEOUT_MS = process.platform === 'win32' ? 15_000 : 2_000;
 
 /**
  * The time limit only stops a command that is still running, and the receipt
@@ -208,7 +213,7 @@ function runCommandSync(command: string, args: string[]): CommandReceipt {
     encoding: 'utf8',
     env: childEnvironment({ env: { LANG: 'C', LC_ALL: 'C' } }),
     maxBuffer: 64 * 1024,
-    timeout: 2_000,
+    timeout: COMMAND_TIMEOUT_MS,
     windowsHide: true,
   });
   return {

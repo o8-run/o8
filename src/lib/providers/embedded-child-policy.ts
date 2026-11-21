@@ -41,7 +41,7 @@ function withO8ChildPolicy(create, options = {}) {
   ].find(candidate => policyFs.existsSync(candidate));
   // Match the parent store boundary's bounded acquisition wait. The empty lock
   // database needs no journal-mode change, which can itself fail under contention.
-  const lock = new Database(policyPath.join(policy.directory, '.provider-keys.lock'), { timeout: 1000, ...(nativeBinding ? { nativeBinding } : {}) });
+  const lock = new Database(policyPath.join(policy.directory, '.provider-keys.lock'), { timeout: process.platform === 'win32' ? 15_000 : 1000, ...(nativeBinding ? { nativeBinding } : {}) });
   try {
     lock.exec('BEGIN EXCLUSIVE');
     if (hashFile(policy.policyFile) !== policy.policyHash) throw new Error('Child credential policy changed. Retry the launch.');
