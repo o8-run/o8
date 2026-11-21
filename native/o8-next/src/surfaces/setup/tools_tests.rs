@@ -107,12 +107,6 @@ fn onboarding_tools_step_matches_the_desktop_choices(cx: &mut TestAppContext) {
         cx.debug_bounds("setup-copy-opencode").is_none(),
         "an installed tool that needs sign-in has no install command"
     );
-    click(cx, "setup-copy-gemini");
-    assert_eq!(
-        cx.read_from_clipboard().and_then(|item| item.text()),
-        Some("npm i -g @google/gemini-cli".into())
-    );
-    assert!(cx.debug_bounds("setup-instructions-gemini").is_none());
     click(cx, "setup-instructions-antigravity");
     assert_eq!(
         cx.opened_url(),

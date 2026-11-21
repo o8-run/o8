@@ -446,12 +446,6 @@
       ]
     },
     {
-      "path": "src/lib/gemini/owned-key-launch.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
       "path": "src/lib/inbox/card-copy.test.ts",
       "reasons": [
         "worktree-api"
@@ -659,12 +653,6 @@
       "reasons": [
         "child-process",
         "git-cli"
-      ]
-    },
-    {
-      "path": "src/lib/muse/host.test.ts",
-      "reasons": [
-        "executable-fixture"
       ]
     },
     {
@@ -2964,12 +2952,6 @@
       ]
     },
     {
-      "path": "tests/deepseek-harness-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/delegate-dispatch-merge-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3585,19 +3567,6 @@
         "child-process",
         "network-listener",
         "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/grok-acp-live-smoke.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli"
-      ]
-    },
-    {
-      "path": "tests/grok-acp-real-path.test.ts",
-      "reasons": [
         "real-path"
       ]
     },
@@ -4864,39 +4833,6 @@
       "path": "tests/mock-module-transport-real-path.test.ts",
       "reasons": [
         "network-listener",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/model-effort-evidence-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
-        "real-path",
-        "worktree-api"
-      ]
-    },
-    {
-      "path": "tests/muse-host-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "executable-fixture",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/muse-orchestrator-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/muse-worker-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "executable-fixture",
-        "git-cli",
         "real-path"
       ]
     },
@@ -8162,13 +8098,6 @@
     {
       "path": "tests/runtime-launch-idempotency-real-path.test.ts",
       "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/runtime-refusal-consistency-real-path.test.ts",
-      "reasons": [
-        "network-listener",
         "real-path"
       ]
     },
