@@ -472,7 +472,7 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
         ("/api/orchestrator/state", vec![], read_packets),
         (
             "/api/panel/supervisor-inbox",
-            vec![("scope", "all".into())],
+            vec![("scope", "all".into()), ("summaryOnly", "1".into())],
             |data, body, _| read_inbox(data, body),
         ),
     ];

@@ -53,4 +53,15 @@ describe('maintainer inbox persisted route', () => {
     expect(body.maintainer).toBeNull(); expect(body.maintainerError).toContain('unavailable'); expect(Array.isArray(body.items)).toBe(true);
     expect((await read('')).maintainer).toBeUndefined();
   });
+  it('returns only the summary the activity dock reads, matching the full list', async () => {
+    const db = getSqlite(); const at = new Date().toISOString();
+    for (const [id, status] of [['a', 'human_required'], ['b', 'human_required'], ['c', 'pending'], ['d', 'dismissed']]) {
+      db.prepare(`INSERT INTO supervisor_inbox (id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status)
+        VALUES (?, 'default', ?, ?, NULL, 'session_lost', '{}', ?, ?, 1, ?)`).run(id, `incident-${id}`, `/workspace/repo-${id}`, at, at, status);
+    }
+    const summary = await read('?scope=all&summaryOnly=1');
+    expect(Object.keys(summary)).toEqual(['summary']);
+    expect(summary.summary).toEqual((await read('?scope=all')).summary);
+    expect(summary.summary).toMatchObject({ humanRequired: 2, pending: 1, dismissed: 0, total: 3 });
+  });
 });

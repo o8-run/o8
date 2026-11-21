@@ -19,7 +19,8 @@ import {
   reconcileOutsideHumanWaitingInbox,
 } from './outsider-inbox-builder';
 
-export { summarizeInboxItems, type SupervisorInboxSummary } from './inbox-summary';
+import { summarizeInboxItems, type SupervisorInboxSummary } from './inbox-summary';
+export { summarizeInboxItems, type SupervisorInboxSummary };
 
 export type SupervisorInboxKind =
   | 'verification_failed'
@@ -685,6 +686,18 @@ interface InboxReadOptions {
 }
 export function listInboxItems(options: InboxReadOptions = {}): SupervisorInboxItem[] {
   return readInboxItems(options, true);
+}
+/** Counts by status after the same reconciliation, without projecting every row. */
+export function summarizeInbox(options: InboxReadOptions = {}): SupervisorInboxSummary {
+  ensureSupervisorInboxTable();
+  buildOutsideHumanWaitingInbox();
+  collapseActiveInboxIncidents();
+  const dismissed = options.includeDismissed ? '' : `AND status != 'dismissed'`;
+  const rows = (options.includeAllProjects
+    ? getSqlite().prepare(`SELECT status FROM supervisor_inbox WHERE 1 = 1 ${dismissed}`).all()
+    : getSqlite().prepare(`SELECT status FROM supervisor_inbox WHERE project_id = ? ${dismissed}`)
+      .all(options.projectId ?? getActiveProjectScopeForRepoSync().projectId)) as Array<Pick<SupervisorInboxItem, 'status'>>;
+  return summarizeInboxItems(rows);
 }
 /** Recorded projection without incident reconciliation or dismissal. */
 export function listRecordedInboxItems(options: InboxReadOptions = {}): SupervisorInboxItem[] {

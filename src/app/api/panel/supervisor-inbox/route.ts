@@ -1,7 +1,7 @@
 import { pendingNetworkQuestionCards } from '@/lib/bots/question-store';
 import { NextResponse } from 'next/server';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
-import { bulkDismissInboxItems, dismissInboxItem, escalateInboxItem, listInboxItems, summarizeInboxItems } from '@/lib/supervisor/inbox';
+import { bulkDismissInboxItems, dismissInboxItem, escalateInboxItem, listInboxItems, summarizeInbox, summarizeInboxItems } from '@/lib/supervisor/inbox';
 import { readMaintainerFeed } from '@/lib/inbox/maintainer-feed';
 import type { MaintainerFeed } from '@/lib/inbox/maintainer-types';
 
@@ -20,6 +20,11 @@ export async function GET(request: Request) {
   const includeDismissed = searchParams.get('includeDismissed') === '1';
   const includeAllProjects = searchParams.get('scope') === 'all';
   const projectId = searchParams.get('projectId');
+  // The activity dock shows one count; it does not need every projected item.
+  if (searchParams.get('summaryOnly') === '1') {
+    return NextResponse.json({ summary: summarizeInbox({ includeDismissed, includeAllProjects, projectId }) },
+      { headers: serverTimingHeaders(startedAt) });
+  }
   const items = listInboxItems({ includeDismissed, includeAllProjects, projectId });
   let maintainer: MaintainerFeed | null = null;
   let maintainerError: string | null = null;
