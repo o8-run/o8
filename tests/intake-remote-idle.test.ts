@@ -47,6 +47,18 @@ describe('idle intake remote resolution', () => {
     expect(git).not.toHaveBeenCalled();
   });
 
+  it('caches a registered repository with no origin until an origin is added', () => {
+    const repo = join(directory, `remote-${++sequence}`);
+    execFileSync('git', ['init', '--quiet', repo]);
+    writeFileSync(join(directory, 'repos.json'), JSON.stringify({ repos: [{ localPath: repo }] }));
+    expect(resolveRepoPath('example/elsewhere')).toBeNull();
+    const git = vi.mocked(execFileSync).mockClear();
+    for (let index = 0; index < 20; index += 1) expect(resolveRepoPath('example/elsewhere')).toBeNull();
+    expect(git).not.toHaveBeenCalled();
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/example/elsewhere.git'], { cwd: repo });
+    expect(resolveRepoPath('example/elsewhere')).toBe(repo);
+  });
+
   it('detects a changed remote immediately and does not reuse a removed registry entry', () => {
     const repo = fixture();
     expect(resolveRepoPath('example/registered')).toBe(repo);

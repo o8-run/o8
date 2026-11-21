@@ -18,8 +18,10 @@ function readSlug(repoPath: string): string | null | undefined {
   try {
     const remote = git(repoPath, ['remote', 'get-url', 'origin']).trim();
     return remote.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/)?.[1]?.toLowerCase() ?? null;
-  } catch {
-    return undefined;
+  } catch (error) {
+    // Exit 2 is Git's "no such remote": a definite answer the configuration
+    // stamp covers, so it is cached like any slug. Other failures are not.
+    return (error as { status?: unknown }).status === 2 ? null : undefined;
   }
 }
 
