@@ -543,3 +543,41 @@ describe('o8 mission create refuses what it would drop', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('o8 mission archive', () => {
+  it('closes every open packet with the disposition and reports the ones the server refuses', async () => {
+    process.env.O8_API_PORT = '47120';
+    const status = { ok: true, result: { missionId: 'mission-stale', packets: [
+      { id: 'pkt-done', status: 'archived' },
+      { id: 'pkt-never-launched', status: 'queued' },
+      { id: 'pkt-live', status: 'running' },
+    ] } };
+    const closes: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (new URL(String(url)).pathname === '/api/orchestrator/status') return new Response(JSON.stringify(status), { status: 200 });
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      closes.push(body);
+      return body.packetId === 'pkt-live'
+        ? new Response(JSON.stringify({ ok: false, error: { code: 'invalid_packet_state', message: 'Stop the live worker first.' } }), { status: 409 })
+        : new Response(JSON.stringify({ ok: true, result: { closed: true } }), { status: 200 });
+    }));
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true; });
+
+    await expect(runMission(mode, 'archive', ['--mission', 'mission-stale', '--reason', 'superseded', '--note', 'Old plan.']))
+      .resolves.toBe(EXIT.CONFLICT);
+
+    expect(closes.map((body) => [body.packetId, body.disposition, body.note])).toEqual([
+      ['pkt-never-launched', 'superseded', 'Old plan.'],
+      ['pkt-live', 'superseded', 'Old plan.'],
+    ]);
+    expect(JSON.parse(written.join(''))).toMatchObject({
+      schema: 'o8/cli/mission.archive/v1', alreadyClosed: 1, closed: 1,
+      refused: [{ id: 'pkt-live', closed: false, code: 'invalid_packet_state' }],
+    });
+  });
+
+  it('requires a mission and a disposition', async () => {
+    await expect(runMission(mode, 'archive', ['--mission', 'mission-stale'])).rejects.toMatchObject({ code: 'invalid_args' });
+  });
+});

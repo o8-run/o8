@@ -425,4 +425,62 @@ describe('discard packet after an owned session already retired', () => {
       lane: { laneId: fixture.lane.id, sessionKey: fixture.surfaceId },
     });
   }, 20_000);
+
+  it('archives a packet that never launched with the operator disposition', async () => {
+    const packetId = 'pkt-never-launched';
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-never-launched',
+      repoPath: root,
+      packets: [{
+        id: packetId, referenceLabel: '#9001', title: 'never launched', summary: '',
+        workspaceTargetPath: root, branchTarget: 'main', runtime: 'codex',
+        dependencyLabels: [], dependencyPacketIds: [],
+        queueState: 'queued', releaseState: 'pending', status: 'queued', blockedReason: null, lane: null,
+      } as OrchestratorPacket],
+      updatedAt: new Date().toISOString(),
+    });
+
+    const response = await closeRoute.POST(operatorRequest('/api/orchestrator/discard-packet', {
+      packetId, disposition: 'superseded', note: 'Replaced by a newer plan.', clientMutationId: `close-${packetId}`,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true, result: { closed: true, disposition: 'superseded', laneId: null, worktreeRemoved: false },
+    });
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
+      status: 'archived', queueState: 'held', operatorStopped: true, lastEventLabel: 'closed_unmerged',
+      completionSummary: expect.stringContaining('Replaced by a newer plan.'),
+    });
+  }, 20_000);
+
+  it('closes a held packet whose session was archived long ago and whose lane record is gone', async () => {
+    const fixture = await createFixture('long-gone-session', 'exit-clean');
+    let archived = await store.archiveSession(fixture.surfaceId);
+    for (let attempt = 0; !archived.archived && attempt < 100; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      archived = await store.archiveSession(fixture.surfaceId);
+    }
+    expect(archived.archived, archived.note).toBe(true);
+    // The worktree was removed and the lane row is gone; only the packet's own binding remains.
+    git(fixture.repoPath, ['worktree', 'remove', '--force', fixture.worktreePath]);
+    const { getSqlite } = await import('@/lib/db');
+    getSqlite().prepare('DELETE FROM lane_events WHERE lane_id = ?').run(fixture.lane.id);
+    getSqlite().prepare('DELETE FROM lanes WHERE id = ?').run(fixture.lane.id);
+    const state = readOrchestratorControlPlaneState();
+    Object.assign(state.packets[0]!, {
+      status: 'blocked', queueState: 'held', blockedReason: 'session_archive_unconfirmed', lastEventLabel: 'agent_completed',
+    });
+    writeOrchestratorControlPlaneState(state);
+
+    const response = await closePacket(fixture.packetId, true);
+    const payload = await response.json();
+
+    expect(response.status, JSON.stringify(payload)).toBe(200);
+    expect(payload).toMatchObject({ ok: true, result: { closed: true } });
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ status: 'archived', queueState: 'held' });
+    // The archived session stays where it was.
+    expect(existsSync(archived.archivePath!)).toBe(true);
+  }, 30_000);
 });

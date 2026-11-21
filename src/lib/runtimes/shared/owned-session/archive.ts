@@ -11,6 +11,8 @@ import type { OwnedSessionRecord, OwnedSessionState } from './types';
 
 export interface ArchiveOwnedSessionResult {
   archived: boolean;
+  /** True when no session directory exists, active or archived. */
+  missing?: boolean;
   archivePath?: string;
   note: string;
 }
@@ -190,7 +192,7 @@ async function archiveOwnedSessionDirLocked(
     if (destination) {
       return { archived: true, archivePath, note: 'Session already archived.' };
     }
-    return { archived: false, note: 'Session directory was not found.' };
+    return { archived: false, missing: true, note: 'Session directory was not found.' };
   }
 
   if (destination) {

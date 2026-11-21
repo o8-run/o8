@@ -18,6 +18,7 @@
  *   o8 mission dispatch [--mission <id>]
  *   o8 mission status   [--mission <id>] [--cost]
  *   o8 mission stop     --mission <id>
+ *   o8 mission archive  --mission <id> --reason <disposition> [--note <text>] [--acknowledge-missing-worktree]
  *   o8 mission wait     [--mission <id>] [--packet <id>] [--timeout <ms|5m|90s>] [--poll ms]
  *   o8 mission tail     [--mission <id>] [--timeout <ms|5m|90s>] [--poll ms]
  */
@@ -757,8 +758,80 @@ async function runMissionTail(mode: OutputMode, rest: string[]): Promise<number>
   return 0;
 }
 
+const ARCHIVE_DISPOSITIONS = ['adopted_elsewhere', 'superseded', 'spec_changed', 'wontfix'];
+
+interface PacketCloseResponse {
+  ok: boolean;
+  result?: { closed?: boolean; note?: string };
+  error?: { code?: string; message?: string } | string;
+}
+
+/**
+ * Close every open packet in a mission with one operator disposition, through
+ * the same close path as `o8 packet close`. A packet the server refuses (a live
+ * worker, work that could not be preserved) is reported and left as it is; the
+ * mission archives once every packet is closed.
+ */
+async function runMissionArchive(mode: OutputMode, rest: string[]): Promise<number> {
+  const missionId = flag(rest, 'mission')?.trim();
+  const reason = flag(rest, 'reason')?.trim() ?? '';
+  if (!missionId || !ARCHIVE_DISPOSITIONS.includes(reason)) {
+    throw new CliError(
+      'invalid_args',
+      'o8 mission archive requires --mission <id> and --reason adopted_elsewhere|superseded|spec_changed|wontfix.',
+      EXIT.INVALID_ARGS,
+      'Example: o8 mission archive --mission mission-abc123 --reason superseded --note "Replaced by the new plan."',
+    );
+  }
+  const note = flag(rest, 'note')?.trim() || undefined;
+  const status = await fetchStatus(missionId, false);
+  const open = (status.packets ?? []).filter((packet) => packet.status !== 'archived' && packet.status !== 'released');
+  const cfg = resolveConfig();
+  const packets: Array<{ id: string; closed: boolean; code?: string; message?: string }> = [];
+  for (const packet of open) {
+    const res = await fetchCorrelatedPacketMutation<PacketCloseResponse>(cfg, '/api/orchestrator/discard-packet', {
+      packetId: packet.id,
+      disposition: reason,
+      note,
+      acknowledgeMissingWorktree: hasFlag(rest, 'acknowledge-missing-worktree'),
+      clientMutationId: randomUUID(),
+    }, { timeoutMs: SLOW_MUTATION_TIMEOUT_MS, allowConflict: true });
+    const error = res.data?.error;
+    packets.push(res.data?.ok && res.data.result?.closed
+      ? { id: packet.id, closed: true }
+      : {
+        id: packet.id,
+        closed: false,
+        code: typeof error === 'object' ? error?.code : undefined,
+        message: typeof error === 'string' ? error : error?.message ?? 'Packet close was rejected.',
+      });
+  }
+  const refused = packets.filter((packet) => !packet.closed);
+  const payload = {
+    schema: 'o8/cli/mission.archive/v1',
+    missionId,
+    disposition: reason,
+    alreadyClosed: (status.packets?.length ?? 0) - open.length,
+    closed: packets.length - refused.length,
+    refused,
+  };
+  if (mode.human) {
+    printHumanHeading('mission archive');
+    printHumanKv([
+      ['mission', missionId],
+      ['closed', `${payload.closed} of ${open.length} open packets`],
+      ...refused.map((packet) => [`  · ${packet.id}`, `${packet.code ?? 'refused'} — ${packet.message ?? ''}`] as [string, string]),
+    ]);
+  } else {
+    printJson(payload);
+  }
+  return refused.length > 0 ? EXIT.CONFLICT : 0;
+}
+
 export async function runMission(mode: OutputMode, secondary: string | undefined, rest: string[]): Promise<number> {
   switch (secondary) {
+    case 'archive':
+      return runMissionArchive(mode, rest);
     case 'create':
       return runMissionCreate(mode, rest);
     case 'dispatch':
@@ -776,7 +849,7 @@ export async function runMission(mode: OutputMode, secondary: string | undefined
         'unknown_mission_subcommand',
         `Unknown mission subcommand: ${secondary ?? '(none)'}`,
         EXIT.INVALID_ARGS,
-        'Subcommands: create | dispatch | status | stop | wait | tail. Run `o8 --help`.',
+        'Subcommands: create | dispatch | status | stop | archive | wait | tail. Run `o8 --help`.',
       );
   }
 }

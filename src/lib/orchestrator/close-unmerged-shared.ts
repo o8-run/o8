@@ -56,7 +56,8 @@ export type CloseUnmergedResult =
       alreadyClosed: false;
       discarded: true;
       disposition: CloseUnmergedDisposition;
-      laneId: string;
+      /** Null for a packet that never launched. */
+      laneId: string | null;
       packetId: string;
       worktreeRemoved: boolean;
       worktreeCleanup: 'missing' | 'removed' | 'preserved';

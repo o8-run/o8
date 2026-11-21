@@ -40,6 +40,8 @@ export interface InterruptTarget {
 
 export interface LaneSessionArchiveOutcome extends InterruptTarget {
   archived: boolean;
+  /** No session directory exists, active or archived. */
+  missing?: boolean;
   note: string;
 }
 
@@ -314,10 +316,11 @@ export async function archiveLaneSessions(lanes: Lane[]): Promise<LaneSessionArc
         return null;
       });
       const archived = result?.archived === true;
+      const missing = !archived && (result as { missing?: boolean } | null)?.missing === true;
       const note = archived
         ? 'Owned session directory archived.'
-        : 'Owned session directory archive was not confirmed.';
-      outcomes.push({ ...target, archived, note });
+        : missing ? 'Owned session directory was not found.' : 'Owned session directory archive was not confirmed.';
+      outcomes.push({ ...target, archived, ...(missing ? { missing } : {}), note });
       if (!archived) {
         console.warn(`[reap-sessions] session-dir archive was not confirmed for lane ${target.laneId} (${target.runtime}).`);
       }

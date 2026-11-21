@@ -315,6 +315,8 @@ export interface OwnedLaunchResponse {
 
 export interface OwnedArchiveResponse {
   archived: boolean;
+  /** True when no session directory exists, active or archived. */
+  missing?: boolean;
   note: string;
   archivePath?: string;
 }
