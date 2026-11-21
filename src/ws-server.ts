@@ -293,6 +293,7 @@ import {
 } from './lib/realtime/negotiation';
 import { MOBILE_CLOSE } from './lib/ws-server/device-e2ee-policy';
 import { conflictScanRequestHeaders, isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
+import { createReviewRepoWatch } from './lib/ws-server/review-repo-watch';
 import { withWsHealthHandler } from './lib/ws-server/handler-activity';
 import { WsWatchdog } from './lib/ws-server/health-watchdog';
 import { coalesceSafetyNetSync, SafetyNetPoll } from './lib/ws-server/safety-net-poll';
@@ -7901,7 +7902,9 @@ async function broadcastDiffStats() {
 // changed. Now: fs-watchers mark specific workspaces dirty; clean targets are
 // stat-gated on their .git HEAD+index mtimes (commits/stage churn) and
 // skipped; a 60s full sweep catches what neither signal covers (unstaged-only
-// edits in unwatched repos, worktrees whose .git is a pointer file). The
+// edits in unwatched repos, worktrees whose .git is a pointer file). On macOS
+// registered repos get their own watcher too, so the sweep skips every target
+// a watcher covers and stops starting git each minute for idle repos. The
 // REPO_ROOT target always scans — its own unstaged edits are the Workspace
 // panel's live diff and carry no watcher signal.
 const reviewDirtyWorkspaces = new Set<string>();
@@ -7991,7 +7994,8 @@ async function broadcastReviewFileChanges() {
     try {
       const isRoot = resolve(target.workspacePath) === REPO_ROOT;
       const statKey = await reviewTargetStatKey(target.workspacePath);
-      if (!fullSweep && !isRoot && !reviewDirtyWorkspaces.has(target.workspacePath)) {
+      const swept = fullSweep && !reviewRepoWatch.watches(target.workspacePath);
+      if (!swept && !isRoot && !reviewDirtyWorkspaces.has(target.workspacePath)) {
         if (reviewTargetScanMeta.get(target.workspacePath) === statKey) return;
       }
       reviewDirtyWorkspaces.delete(target.workspacePath);
@@ -8148,6 +8152,13 @@ function ensureWorktreeWatchers(extraRepoPaths: string[] = []) {
   }
 }
 
+// Registered repositories' own working trees: an edit marks the repository
+// dirty, so the minute's full scan skips watched targets (macOS only).
+const reviewRepoWatch = createReviewRepoWatch({
+  markDirty: (repoPath) => reviewDirtyWorkspaces.add(repoPath),
+  worktreeBases: () => watchedWorktreeBases,
+});
+
 function startReviewWatchers(): void {
   // Watch .git directory for changes (commits, merges, rebases)
   if (existsSync(GIT_DIR)) {
@@ -8197,7 +8208,7 @@ function startReviewWatchers(): void {
   // registered-repo bases (#1484) once the repo list is readable.
   recurring('worktree-watcher-attach', () => {
     void listRepoPaths()
-      .then((paths) => ensureWorktreeWatchers(paths))
+      .then((paths) => { ensureWorktreeWatchers(paths); reviewRepoWatch.ensure(paths); })
       .catch(() => ensureWorktreeWatchers());
   }, 30_000).unref?.();
 
