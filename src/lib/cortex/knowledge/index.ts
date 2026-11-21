@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
+import { ensureKnowledgeChunksSchema } from '@/lib/db/v83-runtime-tables-migration';
 import { distillDocChunkBatch } from '@/lib/cortex/indexer/doc-distill';
 import { chunkMarkdown } from '@/lib/cortex/indexer/markdown-chunks';
 import { advanceMemoryRevision } from '@/lib/cortex/memory-revision';
@@ -21,9 +22,7 @@ export function ensureKnowledgeSourceWatcher() { if (process.env.O8_DISABLE_DOC_
 export function stopKnowledgeSourceWatcher() { watcherStop?.(); watcherStop = undefined; }
 function tables() {
   const db = getSqlite();
-  db.exec(`CREATE TABLE IF NOT EXISTS knowledge_chunks (
-    source_id TEXT PRIMARY KEY, source TEXT NOT NULL, relative_path TEXT NOT NULL,
-    title TEXT NOT NULL, wiki_links TEXT NOT NULL, text_hash TEXT NOT NULL)`);
+  ensureKnowledgeChunksSchema(db);
   return db;
 }
 function changedMemory() { advanceMemoryRevision(getSqlite()); invalidateAnswerCache(); }

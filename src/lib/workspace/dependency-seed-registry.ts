@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
+import { ensureDependencySeedSchema } from '@/lib/db/v83-runtime-tables-migration';
 import type { MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import {
   normalizedNamespacePath,
@@ -139,97 +140,7 @@ function normalizeStoredLeaseNamespaces(db: ReturnType<typeof getSqlite>): void 
 function sqlite() {
   const db = getSqlite();
   if (initializedDatabasePath !== db.name) {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS dependency_seed_images (
-        recipe_key TEXT PRIMARY KEY,
-        generation TEXT NOT NULL,
-        state TEXT NOT NULL CHECK (state IN ('building', 'built', 'ready', 'retiring')),
-        source_receipt_id TEXT,
-        source_tree_digest TEXT,
-        publisher_pid INTEGER,
-        publisher_identity_json TEXT,
-        image_path TEXT NOT NULL,
-        manifest_path TEXT NOT NULL,
-        staging_directory TEXT NOT NULL,
-        staging_path TEXT NOT NULL,
-        staging_device INTEGER NOT NULL,
-        staging_inode INTEGER NOT NULL,
-        image_device INTEGER,
-        image_inode INTEGER,
-        image_digest TEXT,
-        manifest_device INTEGER,
-        manifest_inode INTEGER,
-        manifest_digest TEXT,
-        image_retired_path TEXT,
-        image_retirement_phase INTEGER NOT NULL DEFAULT 0,
-        manifest_retired_path TEXT,
-        manifest_retirement_phase INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS dependency_seed_leases (
-        lease_id TEXT PRIMARY KEY,
-        recipe_key TEXT NOT NULL,
-        generation TEXT NOT NULL,
-        workspace_path TEXT NOT NULL UNIQUE,
-        shadow_path TEXT NOT NULL UNIQUE,
-        mount_path TEXT NOT NULL UNIQUE,
-        attached_image_path TEXT,
-        device_entry TEXT,
-        system_entities_json TEXT,
-        helper_pid INTEGER,
-        helper_identity_json TEXT,
-        base_device INTEGER,
-        base_inode INTEGER,
-        shadow_device INTEGER,
-        shadow_inode INTEGER,
-        mount_device INTEGER,
-        mount_inode INTEGER,
-        state TEXT NOT NULL CHECK (state IN ('mounting', 'mounted', 'detaching', 'blocked')),
-        owner_pid INTEGER NOT NULL,
-        owner_identity_json TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        FOREIGN KEY (recipe_key) REFERENCES dependency_seed_images(recipe_key) ON DELETE RESTRICT
-      );
-      CREATE INDEX IF NOT EXISTS dependency_seed_leases_image_idx
-        ON dependency_seed_leases(recipe_key, generation, state);
-    `);
-    const imageColumns = db.prepare('PRAGMA table_info(dependency_seed_images)').all() as Array<{
-      name: string;
-    }>;
-    const columns = new Set(imageColumns.map((column) => column.name));
-    const additions: Array<[string, string]> = [
-      ['source_receipt_id', 'TEXT'],
-      ['source_tree_digest', 'TEXT'],
-      ['publisher_pid', 'INTEGER'],
-      ['publisher_identity_json', 'TEXT'],
-      ['image_retired_path', 'TEXT'],
-      ['image_retirement_phase', 'INTEGER NOT NULL DEFAULT 0'],
-      ['manifest_retired_path', 'TEXT'],
-      ['manifest_retirement_phase', 'INTEGER NOT NULL DEFAULT 0'],
-    ];
-    for (const [column, definition] of additions) {
-      if (!columns.has(column)) {
-        db.exec(`ALTER TABLE dependency_seed_images ADD COLUMN ${column} ${definition}`);
-      }
-    }
-    const leaseColumns = new Set((db.prepare(
-      'PRAGMA table_info(dependency_seed_leases)',
-    ).all() as Array<{ name: string }>).map((column) => column.name));
-    const leaseAdditions: Array<[string, string]> = [
-      ['system_entities_json', 'TEXT'],
-      ['helper_pid', 'INTEGER'],
-      ['helper_identity_json', 'TEXT'],
-      ['base_device', 'INTEGER'],
-      ['base_inode', 'INTEGER'],
-      ['attached_image_path', 'TEXT'],
-    ];
-    for (const [column, definition] of leaseAdditions) {
-      if (!leaseColumns.has(column)) {
-        db.exec(`ALTER TABLE dependency_seed_leases ADD COLUMN ${column} ${definition}`);
-      }
-    }
+    ensureDependencySeedSchema(db);
     normalizeStoredLeaseNamespaces(db);
     initializedDatabasePath = db.name;
   }

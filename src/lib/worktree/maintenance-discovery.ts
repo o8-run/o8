@@ -4,6 +4,7 @@ import { realpathSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
+import { ensureWorktreeMaintenanceDiscoverySchema } from '@/lib/db/v83-runtime-tables-migration';
 import type { WorktreeMetaEntry } from './types';
 import { canonicalRepoRoot, resolveWorktreeRootLayout } from './root-layout';
 
@@ -24,66 +25,12 @@ export interface MaintenanceCandidate {
 
 interface Cursor { after: string; upper: string }
 const initialized = new WeakSet<Database.Database>();
-// Trim the platform separator first, then the final component's character set.
-// This expression is identical in the ownership index and exact basename query.
-const separator = path.sep.replaceAll("'", "''");
-const lanePath = `rtrim(worktree_path, '${separator}')`;
-export const WORKTREE_LANE_BASENAME_SQL = `substr(${lanePath}, length(rtrim(${lanePath}, replace(${lanePath}, '${separator}', ''))) + 1)`;
+export { WORKTREE_LANE_BASENAME_SQL } from '@/lib/db/v83-runtime-tables-migration';
 
 /** Discovery is advisory. Metadata, holds and the exact retirement journal remain authority. */
 export function ensureMaintenanceDiscoverySchema(sqlite: Database.Database = getSqlite()): void {
   if (initialized.has(sqlite)) return;
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS worktree_maintenance_roots (
-      metadata_root TEXT PRIMARY KEY,
-      repository_path TEXT NOT NULL,
-      revision TEXT,
-      held_reason TEXT,
-      checked_at INTEGER
-    );
-    CREATE TABLE IF NOT EXISTS worktree_maintenance_entries (
-      discovery_key TEXT PRIMARY KEY,
-      metadata_root TEXT NOT NULL,
-      repository_path TEXT NOT NULL,
-      worktree_id TEXT NOT NULL,
-      worktree_path TEXT NOT NULL,
-      lane_id TEXT,
-      packet_id TEXT,
-      revision TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_maintenance_entries_root
-      ON worktree_maintenance_entries(metadata_root);
-    CREATE INDEX IF NOT EXISTS idx_maintenance_entries_lane
-      ON worktree_maintenance_entries(lane_id);
-    CREATE INDEX IF NOT EXISTS idx_maintenance_entries_packet
-      ON worktree_maintenance_entries(repository_path, packet_id);
-    CREATE TABLE IF NOT EXISTS worktree_maintenance_state (
-      key TEXT PRIMARY KEY, value_json TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS worktree_maintenance_pending (lane_id TEXT PRIMARY KEY);
-    CREATE TABLE IF NOT EXISTS worktree_metadata_state (
-      metadata_root TEXT PRIMARY KEY, payload_json TEXT NOT NULL,
-      mirror_identity_json TEXT, updated_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_maintenance_held_roots
-      ON worktree_maintenance_roots(metadata_root) WHERE held_reason IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_maintenance_held_repo_roots
-      ON worktree_maintenance_roots(repository_path, metadata_root) WHERE held_reason IS NOT NULL;
-  `);
-  const tableExists = (name: string) => sqlite.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-  ).get(name);
-  if (tableExists('lanes')) sqlite.exec(`
-    CREATE INDEX IF NOT EXISTS idx_maintenance_active_lanes ON lanes(created_at, id)
-      WHERE status NOT IN ('completed', 'archived');
-    CREATE INDEX IF NOT EXISTS idx_maintenance_terminal_lanes ON lanes(created_at, id)
-      WHERE status IN ('completed', 'archived');
-    CREATE INDEX IF NOT EXISTS idx_maintenance_lane_path ON lanes(worktree_path);
-    CREATE INDEX IF NOT EXISTS idx_maintenance_lane_basename
-      ON lanes(${WORKTREE_LANE_BASENAME_SQL}) WHERE worktree_path IS NOT NULL;
-  `);
-  if (tableExists('workspace_exact_claims')) sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_maintenance_claims
-    ON workspace_exact_claims(kind, repository_path, worktree_id)`);
+  ensureWorktreeMaintenanceDiscoverySchema(sqlite);
   initialized.add(sqlite);
 }
 
