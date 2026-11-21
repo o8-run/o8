@@ -122,28 +122,6 @@
     "owned": true
   },
   {
-    "path": "/api/mobile/inbox",
-    "methods": [
-      "GET"
-    ],
-    "fallback": true,
-    "reason": "Only a warm empty canonical inbox cache is admitted; fresh, expired, invalidated, live and nonempty projections remain TypeScript-owned.",
-    "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-mobile-inbox-real-path.test.ts",
-    "owned": true
-  },
-  {
-    "path": "/api/review/workspace",
-    "methods": [
-      "GET"
-    ],
-    "fallback": true,
-    "reason": "Only an unselected workspace with no configured default root is native; selected Git/cache/GitHub work remains TypeScript-owned.",
-    "state": "rust-with-fallback",
-    "test": "tests/o8d-rust-review-workspace-real-path.test.ts",
-    "owned": true
-  },
-  {
     "path": "/api/panel/ws-info",
     "methods": [
       "GET"
