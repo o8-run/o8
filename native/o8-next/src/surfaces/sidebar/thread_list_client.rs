@@ -10,6 +10,20 @@ struct Sessions {
     threads: Vec<Session>,
 }
 /// A runtime inventory entry as a sidebar row, when it's a worker.
+/// The workers in an inventory reply, or `None` for the server's empty warming
+/// placeholder, which it serves while it has no snapshot cached.
+fn workers_from(inventory: &Value) -> Result<Option<Vec<Session>>, String> {
+    let agents = inventory["agents"].as_array();
+    if inventory["meta"]["gatewayFreshness"] == "warming" && agents.is_none_or(|a| a.is_empty()) {
+        return Ok(None);
+    }
+    agents
+        .into_iter()
+        .flatten()
+        .filter_map(worker_session)
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
 fn worker_session(agent: &Value) -> Option<Result<Session, String>> {
     let key = agent["sessionKey"]
         .as_str()
@@ -35,10 +49,10 @@ fn worker_session(agent: &Value) -> Option<Result<Session, String>> {
 
 impl Client {
     pub(crate) fn sidebar_threads(&self) -> Result<Vec<Session>, String> {
-        self.sidebar_threads_with_state()
+        self.sidebar_threads_with_state(true)
             .map(|(sessions, _)| sessions)
     }
-    fn sidebar_threads_with_state(&self) -> Result<(Vec<Session>, Value), String> {
+    fn sidebar_threads_with_state(&self, fresh: bool) -> Result<(Vec<Session>, Value), String> {
         let mut sessions = Vec::new();
         let mut seen = HashSet::new();
         let mut offset = 0;
@@ -125,7 +139,15 @@ impl Client {
                 session.outcome = subject.outcome.clone();
             }
         }
-        let inventory: Value = self.get("/api/runtime/inventory", &[("fresh", "1")])?;
+        let mut inventory: Value = self.get(
+            "/api/runtime/inventory",
+            if fresh { &[("fresh", "1")] } else { &[] },
+        )?;
+        // Right after a change or at startup a warming server has nothing
+        // cached; a listing never drops its workers for that.
+        if !fresh && matches!(workers_from(&inventory), Ok(None)) {
+            inventory = self.get("/api/runtime/inventory", &[("fresh", "1")])?;
+        }
         for agent in inventory["agents"].as_array().into_iter().flatten() {
             let Some(key) = agent["sessionKey"].as_str().filter(|key| key.contains(':')) else {
                 continue;
@@ -214,14 +236,11 @@ impl Client {
             .filter_map(|record| record["tabId"].as_str().map(str::to_owned))
             .collect())
     }
-    pub(crate) fn sidebar_workers(&self) -> Result<Vec<Session>, String> {
-        let inventory: Value = self.get("/api/runtime/inventory", &[("fresh", "1")])?;
-        inventory["agents"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(worker_session)
-            .collect()
+    /// Workers from the server's cached inventory; `None` while a warming
+    /// server has nothing cached, so the list keeps the workers it shows.
+    pub(crate) fn sidebar_workers(&self) -> Result<Option<Vec<Session>>, String> {
+        let inventory: Value = self.get("/api/runtime/inventory", &[])?;
+        workers_from(&inventory)
     }
     /// The end of a worker's transcript, for its hover card.
     pub(crate) fn worker_tail(&self, key: &str) -> Result<Value, String> {
@@ -238,7 +257,14 @@ impl Client {
     pub(crate) fn sidebar_sessions_with_branches(
         &self,
     ) -> Result<(Vec<Session>, HashMap<String, String>), String> {
-        let (mut sessions, state) = self.sidebar_threads_with_state()?;
+        self.sidebar_listing(true)
+    }
+    /// The listing, with a fresh runtime inventory or the server's cached one.
+    pub(crate) fn sidebar_listing(
+        &self,
+        fresh: bool,
+    ) -> Result<(Vec<Session>, HashMap<String, String>), String> {
+        let (mut sessions, state) = self.sidebar_threads_with_state(fresh)?;
         let archived: Value = self.get(
             "/api/v2/chat-history/list",
             &[("include", "orchestrator"), ("archived", "only")],
@@ -373,5 +399,19 @@ mod task_title_tests {
         label_from_task(&mut worker);
         assert_eq!(worker.title, "o8 • agent/review-pr-5870-4b4801");
         assert_eq!(worker.repo_slug, None);
+    }
+}
+
+#[cfg(test)]
+mod inventory_tests {
+    use super::workers_from;
+    use serde_json::json;
+
+    #[test]
+    fn a_warming_placeholder_keeps_the_shown_workers() {
+        let warming = json!({"meta": {"gatewayFreshness": "warming"}, "agents": []});
+        assert_eq!(workers_from(&warming).unwrap().map(|w| w.len()), None);
+        let empty = json!({"meta": {"gatewayFreshness": "fresh"}, "agents": []});
+        assert_eq!(workers_from(&empty).unwrap().map(|w| w.len()), Some(0));
     }
 }

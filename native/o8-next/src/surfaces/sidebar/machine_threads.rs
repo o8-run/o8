@@ -98,7 +98,7 @@ fn answer(machine: Machine) -> ((String, Option<String>), Option<Vec<Session>>) 
     let offline = format!("{} · offline", machine.label);
     match machine.reach {
         Reach::Online(remote) => {
-            let workers = remote.sidebar_workers().unwrap_or_default();
+            let workers = remote.sidebar_workers().ok().flatten().unwrap_or_default();
             let list = remote
                 .sidebar_sessions_with_branches()
                 .ok()

@@ -299,7 +299,9 @@ impl ShellExtension for Connection {
             runtime.idle_ticks += 1;
             if !connected || runtime.idle_ticks >= CONNECTED_LOAD_TICKS {
                 runtime.idle_ticks = 0;
+                s.timed_load = connected;
                 s.load(cx);
+                s.timed_load = false;
             }
         }
     }

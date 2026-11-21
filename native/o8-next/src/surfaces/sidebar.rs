@@ -171,13 +171,20 @@ pub(super) const REGISTRATION: Registration = Registration {
             if !shell.connected {
                 shell.notice = "Connecting to local o8 server…".into();
             }
+            let timed = shell.timed_load;
             shell
                 .surfaces
                 .sidebar
                 .view
                 .as_ref()
                 .unwrap()
-                .update(cx, |sidebar, cx| sidebar.load(cx));
+                .update(cx, |sidebar, cx| {
+                    if timed {
+                        sidebar.load_cached(cx)
+                    } else {
+                        sidebar.load(cx)
+                    }
+                });
             cx.notify();
         }
         true
