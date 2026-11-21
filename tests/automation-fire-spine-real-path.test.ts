@@ -9,10 +9,22 @@ const state = vi.hoisted(() => ({
   launches: 0,
   active: 0,
   maxActive: 0,
+  runnerLoads: 0,
+  watchActionLoads: 0,
   activeByRepo: new Map<string, number>(),
   maxByRepo: new Map<string, number>(),
   laneRepos: new Map<string, string>(),
 }));
+
+vi.mock('@/lib/automations/runner', async original => {
+  state.runnerLoads++;
+  return original();
+});
+
+vi.mock('@/lib/automations/watch-actions', async original => {
+  state.watchActionLoads++;
+  return original();
+});
 
 vi.mock('@/lib/repos/registry', () => ({
   findRepoByLocalPath: vi.fn(async (repoPath: string) => ({
@@ -132,6 +144,26 @@ afterAll(() => {
 });
 
 describe('durable automation fire spine', () => {
+  it('loads the launch executor only when the actual scheduler claims due work', async () => {
+    const now = new Date('2026-08-26T12:00:00.000Z').getTime();
+    expect(await runAutomationSchedulerTick({ nowMs: now })).toEqual({ materialized: [], completed: [] });
+    expect(state.runnerLoads).toBe(0);
+    expect(state.watchActionLoads).toBe(0);
+
+    const automation = await createAutomation({
+      name: 'Due fixture',
+      repoPath: '/tmp/automation-lazy-executor',
+      triggerKind: 'cron',
+    });
+    getSqlite().prepare('UPDATE automations SET next_run_at = ? WHERE id = ?').run(now, automation.id);
+
+    const result = await runAutomationSchedulerTick({ nowMs: now });
+    expect(result.completed).toMatchObject([{ automationId: automation.id, status: 'succeeded', claimCount: 1 }]);
+    expect(state.launches).toBe(1);
+    expect(state.runnerLoads).toBe(1);
+    expect(state.watchActionLoads).toBe(0);
+  });
+
   it('dedupes two schedulers while running independent repos concurrently and serializing each repo', async () => {
     const now = new Date('2026-08-26T12:00:00.000Z').getTime();
     const definitions = [
