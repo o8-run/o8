@@ -421,6 +421,11 @@ export function getMobileLiveActivityToken(pushToken: string): StoredMobileLiveA
     : null;
 }
 
+/** True when at least one phone registered a Live Activity to keep updated. */
+export function hasMobileLiveActivityTokens(): boolean {
+  return liveActivityDb().prepare('SELECT 1 FROM mobile_live_activity_tokens LIMIT 1').get() !== undefined;
+}
+
 export function listMobileLiveActivityTokens(): StoredMobileLiveActivityToken[] {
   const sqlite = liveActivityDb();
   const rows = sqlite.prepare(`
