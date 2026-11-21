@@ -307,3 +307,16 @@ it('refuses an installer config file that gains an external hardlink', async () 
     expect(readFileSync(path.join(workspace, 'outside.rc'), 'utf8')).toBe('');
   } finally { rmSync(workspace, { recursive: true, force: true }); }
 });
+
+it('rejects, without an EPIPE crash, when the leaf exits before reading its content', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'o8-pinned-early-exit-'));
+  const identity = await captureWorktreeMaterializationIdentity(workspace);
+  // Replace the workspace: the leaf refuses it at once, before reading stdin.
+  renameSync(workspace, `${workspace}-moved`);
+  mkdirSync(workspace);
+  // Far more than a pipe holds, so the write is still pending when the leaf exits.
+  const content = 'x'.repeat(32 * 1024 * 1024);
+
+  await expect(writePinnedWorkspaceFile(workspace, identity, 'big.txt', content)).rejects.toThrow();
+  expect(existsSync(path.join(workspace, 'big.txt'))).toBe(false);
+}, 20_000);
