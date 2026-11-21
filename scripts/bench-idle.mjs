@@ -128,7 +128,8 @@ async function main() {
   // Codex reads and writes its own home; give it a copy too.
   const codexHome = join(homedir(), '.codex');
   const benchCodex = join(bench, 'codex');
-  if (existsSync(codexHome)) cloneTree(codexHome, benchCodex);
+  // Sockets inside it cannot be copied; cp reports them and copies the rest.
+  if (existsSync(codexHome)) try { cloneTree(codexHome, benchCodex); } catch { /* partial copy is enough */ }
 
   const [apiPort, wsPort, nextPort] = [await freePort(), await freePort(), await freePort()];
   const env = {
