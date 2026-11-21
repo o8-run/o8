@@ -2,7 +2,7 @@ import { invalidateLaunchPolicy } from './launch-policy';
 import { credentialPolicyChanged } from './policy-events';
 import { warnLegacyRuntimeConfigs } from './legacy-runtime-config';
 /** Persisted provider credentials, shared by ordinary Node launch paths. */
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -19,15 +19,40 @@ function textFile(path: string): string {
   try { return readFileSync(path, 'utf8'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''; throw error; }
 }
+// Every locked child spawn reads the store several times. Keep the parsed file
+// and its decrypted values until the file changes: any write (ours, another
+// process's or Rust's) replaces it by rename, which changes its stat.
+let cached: { path: string; stamp: string; snapshot: { raw: string; values: ReadonlyMap<string, string> } } | null = null;
+const decoded = new Map<string, string>();
+
+function fileStamp(path: string): string {
+  try {
+    const stat = statSync(path, { bigint: true });
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+    throw error;
+  }
+}
 function snapshot() {
-  const raw = textFile(join(getDataDir(), '.env.local'));
-  return { raw, values: parseKeyEnv(raw) };
+  const path = join(getDataDir(), '.env.local');
+  const stamp = fileStamp(path);
+  if (cached?.path === path && cached.stamp === stamp) return cached.snapshot;
+  const raw = textFile(path);
+  const result = { raw, values: parseKeyEnv(raw) as ReadonlyMap<string, string> };
+  // Only keep a read the stat still describes; a write during the read is read again next time.
+  decoded.clear();
+  cached = fileStamp(path) === stamp ? { path, stamp, snapshot: result } : null;
+  return result;
 }
 function decode(raw: string): string {
   if (!raw.startsWith('enc:')) return raw.trim();
+  const known = decoded.get(raw);
+  if (known !== undefined) return known;
   const match = /^enc:([a-fA-F0-9]{24}):((?:[a-fA-F0-9]{2}){16,})$/.exec(raw);
   const plain = match ? decryptValueSync(match[2], match[1]) : null;
   if (plain === null) throw new Error('Credential store unavailable');
+  decoded.set(raw, plain.trim());
   return plain.trim();
 }
 export function assertProviderStoreAvailable(): void {
