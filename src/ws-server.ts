@@ -8550,8 +8550,13 @@ async function bootstrapWsServer() {
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
   startAttachedBrowserRefreshLoop();
-  scheduleRealtimeRuntimeRefresh({ reason: 'startup', fresh: false });
-  scheduleRealtimeMobileInboxRefresh(500);
+  // Realtime subscriptions build their own first checkpoint. Start an
+  // unsolicited inbox snapshot only for phones with a registered Live Activity.
+  void import('@/lib/mobile/live-activity-push')
+    .then(({ hasMobileLiveActivityTokens }) => {
+      if (!shuttingDown && hasMobileLiveActivityTokens()) scheduleRealtimeMobileInboxRefresh(500);
+    })
+    .catch(() => { if (!shuttingDown) scheduleRealtimeMobileInboxRefresh(500); });
 
   // Recovery has completed before these services use its state.
   {
