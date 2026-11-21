@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
     const result = await runHeadlessSprintTick();
     return NextResponse.json({
       ok: true,
+      pending: result.pending,
       launched: result.launched,
       active: result.active,
       currentWave: result.currentWave,

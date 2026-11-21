@@ -39,6 +39,7 @@ import { appendDirectiveTrailer } from '@/lib/cortex/directive-merges';
 import { listRepos } from '@/lib/repos/registry';
 import { readPollBranchTip } from '@/lib/git/poll-branch-tip';
 import { recurring } from '@/lib/background-work/ledger';
+import { hasOutstandingReview } from '@/lib/lane/outstanding-review';
 
 const execFileAsync = promisify(execFile);
 
@@ -345,10 +346,11 @@ export function ensureExternalMergeBootHook(): void {
   });
 
   if (tickHandle) return;
+  // A merge made outside o8 lands while a review is open; watch while one is.
   tickHandle = recurring('external-merge-watcher', () => {
     void ingestExternalMerges().catch((err: unknown) => {
       logWarn('tick sweep threw:', err);
     });
-  }, TICK_INTERVAL_MS);
+  }, TICK_INTERVAL_MS, { busy: hasOutstandingReview });
   if (typeof tickHandle.unref === 'function') tickHandle.unref();
 }

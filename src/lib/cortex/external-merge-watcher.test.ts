@@ -14,6 +14,7 @@ vi.mock('server-only', () => ({}));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => fixture.dataDir }));
 vi.mock('@/lib/repos/registry', () => ({ listRepos: async () => fixture.repos }));
 vi.mock('@/lib/cortex/directive-merges', () => ({ appendDirectiveTrailer: fixture.append }));
+vi.mock('@/lib/lane/outstanding-review', () => ({ hasOutstandingReview: () => false }));
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   const tracked = (...args: Parameters<typeof actual.execFile>) => actual.execFile(...args);

@@ -88,6 +88,8 @@ import { getInstanceIdentity } from '@/lib/panel/instance-identity';
 import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
 import { recurring, startLedgerReporter } from '@/lib/background-work/ledger';
+import { noteActivity, noteRequest, startIdleGate } from '@/lib/background-work/idle-gate';
+import { hasOutstandingReview } from '@/lib/lane/outstanding-review';
 import { getOrCreateWsToken, wsTokenSource } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -290,7 +292,7 @@ import {
   optionalRealtimeAudienceMatches,
 } from './lib/realtime/negotiation';
 import { MOBILE_CLOSE } from './lib/ws-server/device-e2ee-policy';
-import { isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
+import { conflictScanRequestHeaders, isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
 import { withWsHealthHandler } from './lib/ws-server/handler-activity';
 import { WsWatchdog } from './lib/ws-server/health-watchdog';
 import { coalesceSafetyNetSync, SafetyNetPoll } from './lib/ws-server/safety-net-poll';
@@ -3473,13 +3475,18 @@ function scheduleRealtimeSessionHistoryRefresh(
   sessionHistoryTimers.set(sessionKey, timer);
 }
 
+let headlessWorkPending = true;
+
 function startHeadlessTickBridge(intervalMs: number) {
   const tick = () => {
     if (headlessTickBridgeInFlight) return;
     if (!canAttemptRealtimeBridge(headlessTickBridgeBackoff)) return;
     headlessTickBridgeInFlight = true;
     void triggerHeadlessSprintTick()
-      .then(() => {
+      .then((result) => {
+        // A launch is work progress: wake any loop paused at rest.
+        if ((result as { launched?: number } | undefined)?.launched) noteActivity();
+        headlessWorkPending = (result as { pending?: boolean } | undefined)?.pending !== false;
         recordBridgeChannelSuccess('headless-tick');
         const success = recordRealtimeBridgeSuccess(headlessTickBridgeBackoff);
         if (success.transition === 'up') {
@@ -3507,9 +3514,11 @@ function startHeadlessTickBridge(intervalMs: number) {
       });
   };
 
+  // A packet that can launch, or one waiting on a backoff or cooldown, keeps
+  // the tick running at rest until it launches or settles.
   const timer = recurring('headless-tick', () => {
     tick();
-  }, intervalMs);
+  }, intervalMs, { busy: () => headlessWorkPending });
 
   if (timer.unref) timer.unref();
 
@@ -5627,10 +5636,7 @@ function startPollingLoops() {
       const res = await fetchWithRetry(buildNextUrl('/api/worktrees/conflicts', new URLSearchParams({
         repo: process.cwd(),
       }), 'GET'), {
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Authorization': `Bearer ${WS_TOKEN}`,
-        },
+        headers: conflictScanRequestHeaders(WS_TOKEN),
         signal: AbortSignal.timeout(3000),
       });
 
@@ -6547,6 +6553,7 @@ function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
 // ── Server startup ──
 
 const httpServer = createServer(async (req, res) => {
+  noteRequest(req.headers, req.method);
   if (handleTokenProjectionRequest(req, res, isAuthorizedInternalRequest)) return;
   // Rust classifies and stamps only the first request on a connection. End each
   // relayed response so the next request is classified and stamped on a fresh socket.
@@ -7661,6 +7668,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('message', (raw) => {
+    noteActivity();
     void withWsHealthHandler('ws-message', () => handleClientMessage(client, typeof raw === 'string' ? raw : raw.toString()));
   });
 
@@ -7703,7 +7711,7 @@ recurring('ws-keepalive', () => {
     client.alive = false;
     client.ws.ping();
   }
-}, PING_INTERVAL_MS);
+}, PING_INTERVAL_MS, { class: 'always', reason: 'connected clients are dropped as dead without pings; it does nothing with no clients' });
 
 // #5 — revoke-disconnect sweep. Revocation drops a device from the HTTP gate
 // immediately (the token-hash file) and refuses its next WS reconnect; this
@@ -7720,7 +7728,7 @@ recurring('device-revoke-sweep', () => {
       }
     } catch { /* DB hiccup — try again next sweep */ }
   }
-}, 20_000);
+}, 20_000, { class: 'always', reason: 'closes the open socket of a revoked phone within 20 s; it does nothing with no clients' });
 
 // ── Git watcher — push diff stats + file changes on changes ──
 
@@ -8503,29 +8511,36 @@ async function bootstrapWsServer() {
   // out-of-band (orchestrator bash-merge) so the UI heals within 30s even if
   // no API caller triggers the inline reconcile. Cheap: a few existsSync
   // checks on a small set of non-terminal lanes.
-  recurring('orphan-and-ancestry-sweep', async () => {
+  recurring('orphan-worktree-reconcile', async () => {
     try {
-      const [
-        { reconcileOrphanedWorktrees },
-        { sweepPacketsMergedByAncestry },
-      ] = await Promise.all([
-        import('@/lib/lane/reconcile'),
-        import('@/lib/orchestrator/merged-by-ancestry'),
-      ]);
+      const { reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
       const healed = await reconcileOrphanedWorktrees();
-      const merged = await sweepPacketsMergedByAncestry();
       if (healed > 0) {
         console.log(`[reconcile] Periodic sweep healed ${healed} orphaned lane(s)`);
       }
+    } catch (error) {
+      console.warn(
+        `[reconcile] Periodic orphan sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }, 30_000).unref();
+
+  // A branch in review can be merged on the remote at any time: this sweep
+  // fetches the base and releases merged packets, so it keeps running at rest
+  // while any lane is in review.
+  recurring('merged-by-ancestry-sweep', async () => {
+    try {
+      const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
+      const merged = await sweepPacketsMergedByAncestry();
       if (merged.merged > 0) {
         console.log(`[merged-by-ancestry] Periodic sweep released ${merged.merged} externally merged packet(s)`);
       }
     } catch (error) {
       console.warn(
-        `[reconcile] Periodic orphan/merged-by-ancestry sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+        `[merged-by-ancestry] Periodic sweep failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-  }, 30_000).unref();
+  }, 30_000, { busy: hasOutstandingReview }).unref();
 
   recurring('rules-promotion', async () => {
     try {
@@ -8547,6 +8562,13 @@ async function bootstrapWsServer() {
   if (shuttingDown) return;
   startReviewWatchers();
   startLedgerReporter(getDataDir());
+  // Idle-safe loops pause while no session runs, nothing launched lately and
+  // no client is active; any of those wakes them at once.
+  void import('@/lib/lane/registry').then(({ listActiveLanes }) => startIdleGate({
+    liveSessions: () => orchestratorInflightAborts.size > 0 || listActiveLanes().some(
+      (lane) => lane.status === 'launching' || lane.status === 'running' || lane.status === 'merging',
+    ),
+  })).catch(() => { /* without the signal the gate never rests */ });
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
   startAttachedBrowserRefreshLoop();

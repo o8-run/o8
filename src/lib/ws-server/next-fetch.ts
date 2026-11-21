@@ -102,6 +102,8 @@ export async function fetchNextJson<T>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${wsToken()}`,
+    // The server's own background reads never wake the idle gate.
+    'x-o8-background': '1',
   };
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';

@@ -14,6 +14,7 @@ import { ChildProcess } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { admitRun, type LoopClass } from './idle-gate';
 
 export interface LedgerEntry {
   name: string;
@@ -26,6 +27,8 @@ export interface LedgerEntry {
   childCommands: Record<string, number>;
   changedRuns: number;
   unchangedRuns: number;
+  /** Timer ticks skipped because the server was at rest. */
+  pausedTicks: number;
 }
 
 interface Run {
@@ -49,7 +52,7 @@ function entryFor(name: string): LedgerEntry {
   if (!entry) {
     entry = {
       name, runs: 0, mainMs: 0, maxRunMainMs: 0, wallMs: 0,
-      children: 0, childWallMs: 0, childCommands: {}, changedRuns: 0, unchangedRuns: 0,
+      children: 0, childWallMs: 0, childCommands: {}, changedRuns: 0, unchangedRuns: 0, pausedTicks: 0,
     };
     entries.set(name, entry);
   }
@@ -130,10 +133,50 @@ export function trackRun<T>(name: string, run: () => T): T {
   return result;
 }
 
-/** `setInterval` for a named background loop. Same arguments after the name, same timer back. */
-export function recurring(name: string, run: () => unknown, intervalMs: number): NodeJS.Timeout {
+export interface LoopOptions {
+  /** `always` keeps running while the server is at rest; it needs a written reason. */
+  class?: LoopClass;
+  reason?: string;
+  /**
+   * Idle-safe loops only: while this returns true (queued work, something
+   * outstanding elsewhere) the loop keeps running at rest. Must be cheap.
+   */
+  busy?: () => boolean;
+}
+
+const classes = new Map<string, LoopClass>();
+
+/**
+ * Run one gated pass of a named loop: at rest an idle-safe loop is recorded as
+ * paused and runs once when the server wakes. Returns false when it paused.
+ */
+export function gatedRun(name: string, run: () => unknown, options: LoopOptions = {}): boolean {
   registered.add(name);
-  return setInterval(() => { trackRun(name, run); }, intervalMs);
+  classes.set(name, options.class ?? 'idle-safe');
+  if (options.class === 'always') {
+    trackRun(name, run);
+    return true;
+  }
+  if (!admitRun(name, () => { trackRun(name, run); }, options.busy)) {
+    if (ledgerEnabled()) entryFor(name).pausedTicks += 1;
+    return false;
+  }
+  trackRun(name, run);
+  return true;
+}
+
+/**
+ * `setInterval` for a named background loop. Same arguments after the name,
+ * same timer back. Idle-safe unless `options.class` is `always`.
+ */
+export function recurring(name: string, run: () => unknown, intervalMs: number, options: LoopOptions = {}): NodeJS.Timeout {
+  registered.add(name);
+  classes.set(name, options.class ?? 'idle-safe');
+  return setInterval(() => { gatedRun(name, run, options); }, intervalMs);
+}
+
+export function loopClass(name: string): LoopClass | undefined {
+  return classes.get(name);
 }
 
 /** Loops ranked by main-thread time, then child processes. */

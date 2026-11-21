@@ -330,7 +330,10 @@ export function startPacketExplainerQueueDrain(): () => void {
     void drainPacketExplainerQueue().catch((error) => {
       console.error('[explainer-queue] Drain error:', error);
     });
-  }, DRAIN_INTERVAL_MS);
+  }, DRAIN_INTERVAL_MS, {
+    // Queued explanations keep the drain going while the server is at rest.
+    busy: () => Boolean(getSqlite().prepare("SELECT 1 FROM explainer_queue WHERE status IN ('pending', 'in_progress') LIMIT 1").get()),
+  });
   void drainPacketExplainerQueue().catch(() => {});
   return () => {
     if (drainTimer) clearInterval(drainTimer);

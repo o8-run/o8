@@ -21,6 +21,8 @@ const MIN_INTERVAL_MS = 1_000;
 const PRUNE_INTERVAL_MS = 10 * 60_000;
 const IDLE_HEARTBEAT_TICKS = 6;
 interface HeadlessSprintTickResult {
+  /** False when the tick found nothing that could launch or move; the idle gate may pause the loop. */
+  pending: boolean;
   launched: number;
   active: number;
   currentWave: number;
@@ -86,6 +88,7 @@ function hasPendingHeadlessWork(state: OrchestratorMissionState) {
 function buildIdleTickResult(mission: OrchestratorMissionState): HeadlessSprintTickResult {
   const dag = buildDagMetadata(mission.packets);
   return {
+    pending: false,
     launched: 0,
     active: countActivePackets(mission),
     currentWave: dag.currentWave,
@@ -241,6 +244,7 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
     console.log(`[headless] Tick: ${launched} launched, ${active} active, wave ${dag.currentWave}/${dag.totalWaves}`);
 
     return {
+      pending: true,
       launched,
       active,
       currentWave: dag.currentWave,

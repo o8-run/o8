@@ -53,9 +53,13 @@ describe('headless tick over idle registry missions', () => {
   it('does not build a launch budget for a mission with nothing to launch', async () => {
     // One queued mission keeps the tick from short-circuiting, as on a real
     // machine; the 12 held missions beside it have nothing to launch.
-    insertMission('queued', 999, true);
+    // With only held missions the tick has nothing to do, so the idle gate may pause it.
     for (let index = 0; index < 12; index += 1) insertMission(`held-${index}`, 1_000 + index);
-    await runHeadlessSprintTick();
+    await expect(runHeadlessSprintTick()).resolves.toMatchObject({ pending: false });
+    expect(budget.calls).toBe(0);
+    // A queued mission is work the tick must keep checking at rest.
+    insertMission('queued', 999, true);
+    await expect(runHeadlessSprintTick()).resolves.toMatchObject({ pending: true });
     // At most the control-plane mission and the queued mission build a budget.
     expect(budget.calls).toBeGreaterThanOrEqual(1);
     expect(budget.calls).toBeLessThanOrEqual(2);

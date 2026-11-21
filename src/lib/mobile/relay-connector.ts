@@ -249,7 +249,7 @@ export class RelayConnector {
         ws.terminate();
       }, this.pongTimeoutMs);
       this.pongTimer.unref?.();
-    }, this.keepAliveIntervalMs);
+    }, this.keepAliveIntervalMs, { class: 'always', reason: 'the phone connection drops without its keepalive' });
     this.keepAliveTimer.unref?.();
   }
 
@@ -272,7 +272,9 @@ export class RelayConnector {
     this.sendControl({ t: 'relay-capabilities', heartbeat: 'app-v1' });
     const beat = () => this.sendControl({ t: 'relay-heartbeat', v: 1 });
     beat();
-    this.heartbeatTimer = recurring('relay-heartbeat', beat, RELAY_HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer = recurring('relay-heartbeat', beat, RELAY_HEARTBEAT_INTERVAL_MS, {
+      class: 'always', reason: 'the relay drops the phone connection without heartbeats',
+    });
     this.heartbeatTimer.unref?.();
   }
 

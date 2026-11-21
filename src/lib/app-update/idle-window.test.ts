@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { evaluateUpdateIdleWindow } from './idle-window';
+import { describe, expect, it, vi } from 'vitest';
+
+import { evaluateUpdateIdleWindow, readTerminalInventory } from './idle-window';
 
 const terminalSession = {
   name: 'cortex-dash-test',
@@ -97,5 +101,23 @@ describe('evaluateUpdateIdleWindow', () => {
       terminalInventoryAvailable: true,
     });
     expect(result.idle).toBe(true);
+  });
+});
+
+describe('readTerminalInventory', () => {
+  it('marks its request to the local server as background, so it never keeps the idle gate awake', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'o8-idle-window-'));
+    vi.stubEnv('O8_DATA_DIR', dataDir);
+    vi.stubEnv('CORTEX_IDE_DATA_DIR', dataDir);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ sessions: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await expect(readTerminalInventory()).resolves.toEqual({ available: true, sessions: [] });
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+      expect(new Headers(init?.headers).get('x-o8-background')).toBe('1');
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 });
