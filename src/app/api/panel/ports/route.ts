@@ -2,7 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
-import { execSync } from '@/lib/providers/child-process';
+import { execFileReadOnly } from '@/lib/providers/child-process';
+import { promisify } from 'util';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { resolvePortInfo } from '@/lib/panel/api-port';
@@ -30,6 +31,24 @@ interface PortGroup {
 // ── Response cache (ports don't change fast enough to scan every request) ──
 let portsCache: { data: unknown; ts: number } | null = null;
 const PORTS_CACHE_TTL_MS = 10_000; // 10s cache — ports don't change every second
+// One scan at a time: requests that miss the cache together share it.
+let scanning: Promise<unknown> | null = null;
+// A listening process keeps its cwd and command line, so each pid is resolved once.
+const processByPid = new Map<number, { process: string; cwd: string; command: string }>();
+
+const execFileAsync = promisify(execFileReadOnly);
+
+/** Runs a read-only tool without blocking the event loop; a non-zero exit still yields its output. */
+async function readTool(file: string, args: string[], timeout: number): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(file, args, { windowsHide: true, encoding: 'utf-8', timeout });
+    return String(stdout).trim();
+  } catch (err) {
+    const stdout = (err as { stdout?: unknown }).stdout;
+    if (typeof stdout === 'string' && stdout.trim()) return stdout.trim();
+    throw err;
+  }
+}
 
 // Well-known system ports to ignore
 const IGNORE_PORTS = new Set([22, 53, 80, 443, 631, 5000, 5353, 7000]);
@@ -138,12 +157,13 @@ export async function GET() {
   if (portsCache && (Date.now() - portsCache.ts) < PORTS_CACHE_TTL_MS) {
     return NextResponse.json(portsCache.data, { headers: serverTimingHeaders(startedAt) });
   }
+  scanning ??= scanPorts().finally(() => { scanning = null; });
+  return NextResponse.json(await scanning, { headers: serverTimingHeaders(startedAt) });
+}
 
+async function scanPorts(): Promise<unknown> {
   try {
-    const raw = execSync(
-      'lsof -i -P -n -sTCP:LISTEN -F pcn 2>/dev/null',
-      { windowsHide: true, encoding: 'utf-8', timeout: 5000 },
-    ).trim();
+    const raw = await readTool('lsof', ['-i', '-P', '-n', '-sTCP:LISTEN', '-F', 'pcn'], 5000);
 
     // Parse lsof output (field mode: p=pid, c=command, n=name).
     interface RawEntry { port: number; pid: number; process: string; cwd: string; command: string; repo: string | null }
@@ -174,13 +194,17 @@ export async function GET() {
     const o8OwnPorts = resolveO8OwnPorts();
     let candidates = entries.filter(e => !o8OwnPorts.has(e.port));
 
-    // Batch-resolve CWD + full command line for every unique PID in two calls.
+    // Resolve CWD + full command line in two batched calls, only for pids not seen before.
     const uniquePids = [...new Set(candidates.map(e => e.pid))];
-    if (uniquePids.length > 0) {
-      const pidList = uniquePids.join(',');
+    for (const pid of processByPid.keys()) if (!uniquePids.includes(pid)) processByPid.delete(pid);
+    // A reused pid shows up under a different process name and is looked up again.
+    const processOf = new Map(candidates.map(e => [e.pid, e.process]));
+    const newPids = uniquePids.filter(pid => processByPid.get(pid)?.process !== processOf.get(pid));
+    if (newPids.length > 0) {
+      const pidList = newPids.join(',');
       const cwdByPid = new Map<number, string>();
       try {
-        const cwdRaw = execSync(`lsof -p ${pidList} -a -d cwd -Fn 2>/dev/null`, { windowsHide: true, encoding: 'utf-8', timeout: 3000 }).trim();
+        const cwdRaw = await readTool('lsof', ['-p', pidList, '-a', '-d', 'cwd', '-Fn'], 3000);
         let pid = 0;
         for (const line of cwdRaw.split('\n')) {
           if (line.startsWith('p')) pid = parseInt(line.slice(1), 10);
@@ -190,7 +214,7 @@ export async function GET() {
 
       const cmdByPid = new Map<number, string>();
       try {
-        const psRaw = execSync(`ps -o pid=,command= -p ${pidList} 2>/dev/null`, { windowsHide: true, encoding: 'utf-8', timeout: 3000 }).trim();
+        const psRaw = await readTool('ps', ['-o', 'pid=,command=', '-p', pidList], 3000);
         for (const line of psRaw.split('\n')) {
           const m = line.trim().match(/^(\d+)\s+(.*)$/);
           if (m) cmdByPid.set(parseInt(m[1], 10), m[2]);
@@ -201,6 +225,16 @@ export async function GET() {
         entry.cwd = cwdByPid.get(entry.pid) ?? '';
         entry.command = cmdByPid.get(entry.pid) ?? '';
       }
+      // Remember only complete answers so a failed lookup is retried on the next scan.
+      for (const pid of newPids) {
+        const cwd = cwdByPid.get(pid);
+        const command = cmdByPid.get(pid);
+        if (cwd !== undefined && command !== undefined) processByPid.set(pid, { process: processOf.get(pid) ?? '', cwd, command });
+      }
+    }
+    for (const entry of candidates) {
+      const known = processByPid.get(entry.pid);
+      if (known?.process === entry.process) { entry.cwd = known.cwd; entry.command = known.command; }
     }
 
     // Drop o8's own MCP bridges / WS server / bundled server (by command
@@ -280,15 +314,15 @@ export async function GET() {
       total: ports.length,
     };
     portsCache = { data: result, ts: Date.now() };
-    return NextResponse.json(result, { headers: serverTimingHeaders(startedAt) });
+    return result;
   } catch (err) {
-    return NextResponse.json({
+    return {
       ports: [],
       groups: [],
       pageCount: 0,
       serviceCount: 0,
       total: 0,
       error: err instanceof Error ? err.message : 'Failed to scan ports',
-    }, { headers: serverTimingHeaders(startedAt) });
+    };
   }
 }
