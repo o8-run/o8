@@ -8,7 +8,7 @@ import {
   readLaunchAgentStarts,
   type LaunchAgentCounterFile,
 } from '@/lib/mcp/launch-agent-crash-counter';
-import { enqueueInboxItem, listInboxItems, resolveInboxItem, type SupervisorInboxItem } from '@/lib/supervisor/inbox';
+import { enqueueInboxItem, listRecordedInboxItems, resolveInboxItem, type SupervisorInboxItem } from '@/lib/supervisor/inbox';
 
 const ALERT_AFTER_FAILURES = 3;
 const lastSurfacedStarts = new Map<string, number>();
@@ -81,7 +81,7 @@ async function reconcileRecovery(counters: LaunchAgentCounterFile[], incidents: 
     if (nowMs - previous.sinceMs < LAUNCH_AGENT_HEALTHY_UPTIME_MS) continue;
     const resolvedAt = new Date(nowMs).toISOString();
     // Operator decisions made while the probe was pending take precedence.
-    for (const item of listInboxItems({ includeAllProjects: true })) {
+    for (const item of listRecordedInboxItems({ includeAllProjects: true })) {
       if (item.kind !== 'launch_agent_crash_loop' || item.payload.label !== label || !activeStatuses.has(item.status)) continue;
       resolveInboxItem(item.id, null, {
         note: `Auto-resolved: ${label} stayed running for five minutes with no new recorded starts. Checked at ${resolvedAt}.`,
@@ -133,7 +133,7 @@ function surfaceCounter(label: string, startsMs: number[], nowMs: number, incide
 
 async function checkLaunchAgentCrashLoops(nowMs: number): Promise<LaunchAgentCrashLoopAlert[]> {
   const counters = readLaunchAgentCounters(getDataDir(), nowMs);
-  const incidents: Incident[] = listInboxItems({ includeAllProjects: true }).filter((item) => item.kind === 'launch_agent_crash_loop');
+  const incidents: Incident[] = listRecordedInboxItems({ includeAllProjects: true }).filter((item) => item.kind === 'launch_agent_crash_loop');
   const labels = new Set(counters.map((counter) => counter.label));
   for (const label of lastSurfacedStarts.keys()) {
     if (!labels.has(label)) lastSurfacedStarts.delete(label);
@@ -157,6 +157,6 @@ export function surfaceLaunchAgentCrashLoop(nowMs = Date.now()): number {
     OPERATOR_MCP_LAUNCH_AGENT_LABEL,
     readLaunchAgentStarts(dataDir, nowMs),
     nowMs,
-    listInboxItems({ includeAllProjects: true }).filter((item) => item.kind === 'launch_agent_crash_loop'),
+    listRecordedInboxItems({ includeAllProjects: true }).filter((item) => item.kind === 'launch_agent_crash_loop'),
   )?.failureCount ?? 0;
 }
