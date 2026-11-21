@@ -443,6 +443,14 @@ impl Engine {
             self.end(Update::Empty);
             return;
         }
+        // Checked here too, so a spoken cancel never shows the polish phase.
+        if spoken_cancel(&apple) {
+            if let Some(audio) = &audio {
+                remove_wav(audio);
+            }
+            self.end(Update::Dropped);
+            return;
+        }
         self.set_phase(if apple.is_empty() {
             Phase::Transcribing
         } else {
