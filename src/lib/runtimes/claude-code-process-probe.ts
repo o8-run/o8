@@ -71,10 +71,19 @@ export async function probeLiveClaudeProcesses(options: {
   const runExecFile = options.execFile ?? execFileAsync as ClaudeProcessProbeExec;
   const readSessionState = options.readSessionState ?? readClaudeProcessSessionState;
   try {
-    const { stdout } = await runExecFile(
-      'bash', ['-c', 'ps -eo pid=,command= | grep -E "claude (--|-)" | grep -v grep | grep -v ".app/"'],
-      { windowsHide: true, timeout: 3000 },
-    );
+    // bash/ps/lsof are Unix-only. On Windows, list claude.exe worker
+    // processes (those launched with flags, i.e. "--" in the command line)
+    // through PowerShell + CIM, excluding the store-packaged desktop app
+    // the way the Unix grep excludes .app bundles; the pid-per-line output
+    // stays format-compatible with the parser below.
+    const { stdout } = process.platform === 'win32'
+      ? await runExecFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+          "Get-CimInstance Win32_Process -Filter \"Name = 'claude.exe'\" | Where-Object { $_.CommandLine -match '--' -and $_.ExecutablePath -notmatch 'WindowsApps' } | ForEach-Object { \"{0} {1}\" -f $_.ProcessId, $_.CommandLine }"],
+        { windowsHide: true, timeout: 10_000 })
+      : await runExecFile(
+        'bash', ['-c', 'ps -eo pid=,command= | grep -E "claude (--|-)" | grep -v grep | grep -v ".app/"'],
+        { windowsHide: true, timeout: 3000 },
+      );
     const pids: number[] = [];
     for (const line of stdout.trim().split('\n').filter(Boolean)) {
       const match = line.trim().match(/^(\d+)/);
@@ -85,6 +94,9 @@ export async function probeLiveClaudeProcesses(options: {
     const processes: LiveClaudeProcess[] = pids.map((pid) => ({ pid }));
     let cwdProbed = true;
     try {
+      // lsof has no Windows equivalent; the probe stays inconclusive on cwd,
+      // exactly like a missing lsof on Linux.
+      if (process.platform === 'win32') throw new Error('lsof is unavailable on Windows');
       const { stdout: cwdOut } = await runExecFile(
         'lsof', ['-a', '-p', pids.join(','), '-d', 'cwd,0', '-Fpfn'],
         { windowsHide: true, timeout: 4000 },
