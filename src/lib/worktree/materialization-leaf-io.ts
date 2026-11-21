@@ -591,8 +591,8 @@ export async function readPinnedWorkspaceFileReceipt(
     content?: unknown; device?: unknown; inode?: unknown; canonicalPath?: unknown;
   };
   if (typeof parsed.content !== 'string'
-    || !Number.isSafeInteger(parsed.device)
-    || !Number.isSafeInteger(parsed.inode)
+    || !validStatInteger(parsed.device)
+    || !validStatInteger(parsed.inode)
     || typeof parsed.canonicalPath !== 'string'
     || !path.isAbsolute(parsed.canonicalPath)) {
     throw new Error('Pinned workspace read returned an invalid file receipt.');
@@ -622,7 +622,7 @@ export async function inspectPinnedWorkspaceEntry(
   };
   if ((parsed.kind !== 'file' && parsed.kind !== 'directory'
       && parsed.kind !== 'symlink' && parsed.kind !== 'other')
-    || !Number.isSafeInteger(parsed.device) || !Number.isSafeInteger(parsed.inode)) {
+    || !validStatInteger(parsed.device) || !validStatInteger(parsed.inode)) {
     throw new Error('Pinned workspace inspection returned an invalid identity.');
   }
   return parsed as { kind: 'file' | 'directory' | 'symlink' | 'other'; device: number; inode: number };
@@ -663,8 +663,8 @@ export async function writePinnedWorkspaceFile(
   const parsed = JSON.parse(receipt.stdout) as {
     device?: unknown; inode?: unknown; canonicalPath?: unknown;
   };
-  if (!Number.isSafeInteger(parsed.device)
-    || !Number.isSafeInteger(parsed.inode)
+  if (!validStatInteger(parsed.device)
+    || !validStatInteger(parsed.inode)
     || typeof parsed.canonicalPath !== 'string'
     || !path.isAbsolute(parsed.canonicalPath)) {
     throw new Error('Pinned workspace direct write returned an invalid target receipt.');
@@ -707,6 +707,15 @@ export async function createPinnedWorkspaceBinding(
   return receipt.code === 46 ? 'unsupported' : receipt.code === 45 ? 'exists' : 'created';
 }
 
+// NTFS file IDs are 64-bit and routinely exceed Number.MAX_SAFE_INTEGER
+// (2^53-1). Node reports them as deterministic doubles (same file -> same
+// double), so on Windows an integral-but-unsafe stat value is still a stable
+// identity; macOS/Linux inodes stay far below the safe range and keep the
+// strict check.
+function validStatInteger(value: unknown): boolean {
+  return Number.isSafeInteger(value)
+    || (process.platform === 'win32' && Number.isInteger(value));
+}
 async function pinnedDirectoryOperation(
   operation: 'ensure-directory' | 'create-install-runtime',
   workspacePath: string,
@@ -718,8 +727,8 @@ async function pinnedDirectoryOperation(
     workspacePath, identity, operation, relativePath, undefined, undefined, afterPinnedStep,
   );
   const parsed = JSON.parse(receipt.stdout) as Partial<WorktreeMaterializationIdentity>;
-  if (!Number.isSafeInteger(parsed.device)
-    || !Number.isSafeInteger(parsed.inode)
+  if (!validStatInteger(parsed.device)
+    || !validStatInteger(parsed.inode)
     || typeof parsed.canonicalPath !== 'string'
     || !path.isAbsolute(parsed.canonicalPath)) {
     throw new Error('Pinned workspace directory returned an invalid identity.');
@@ -754,6 +763,6 @@ export async function clonePinnedWorkspaceDirectory(
   const result = await runPinnedLeaf(workspacePath, identity, 'clone-tree', relativePath, JSON.stringify({ source }));
   if (result.code !== 0) return { disposition: result.code === 46 ? 'unsupported' : 'exists' };
   const receipt = JSON.parse(result.stdout) as { device: number; inode: number; sourceChanged: boolean };
-  if (!Number.isSafeInteger(receipt.device) || !Number.isSafeInteger(receipt.inode)) throw new PinnedWorkspacePublishError('Invalid native clone identity.');
+  if (!validStatInteger(receipt.device) || !validStatInteger(receipt.inode)) throw new PinnedWorkspacePublishError('Invalid native clone identity.');
   return { disposition: 'created', ...receipt };
 }
