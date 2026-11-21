@@ -866,6 +866,13 @@
       ]
     },
     {
+      "path": "src/lib/review/live-changes.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/runtime/actions-owned-surface.test.ts",
       "reasons": [
         "process-signal"
