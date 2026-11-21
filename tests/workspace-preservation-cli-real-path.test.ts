@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -649,31 +649,6 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
     try { runInherited(); await began; } finally { release(); await held; }
     await expect(inheritedAttempt).rejects.toThrow('Another workspace lifecycle mutation ran first');
     expect(existsSync(publication)).toBe(false);
-    finished = true;
-  }, 30_000);
-
-  it('refuses newer ignored content when replaying discard from its old retiring archive', async () => {
-    finished = false;
-    const repo = await addRepo(repoPath);
-    const source = await ownedWorkspace(repo, 'preservation-discard-replay', 'main');
-    mkdirSync(path.join(source.workspacePath, '.o8'));
-    const proof = path.join(source.workspacePath, '.o8', 'proof.bin');
-    writeFileSync(proof, Buffer.from([0, 255, 81]), { mode: 0o400 });
-    const { prepareWorkspaceMaterializationRetirement } = await import('@/lib/workspace/workspace-materialization-retirement');
-    await prepareWorkspaceMaterializationRetirement(repo.localPath, source.workspacePath, 'discard');
-    expect(getWorkspaceSnapshot(repo.id, 'preservation-discard-replay')?.state).toBe('retiring');
-    chmodSync(proof, 0o600);
-    const newer = Buffer.from([9, 255, 0, 82]);
-    writeFileSync(proof, newer);
-    writeFileSync(path.join(source.workspacePath, '.o8', 'newer-note.md'), 'Newer unique recovery bytes.');
-    closeDb();
-    const { discardExactManagedWorktree } = await import('@/lib/workspace/exact-discard');
-    const { probeOwnedSessionProcessQuiescence } = await import('@/lib/workspace/process-probes');
-    await expect(discardExactManagedWorktree({ lane: source.lane, worktreeId: source.worktreeId,
-      isolationKind: 'git-worktree', processProbe: probeOwnedSessionProcessQuiescence })).rejects.toThrow();
-    expect(readFileSync(proof)).toEqual(newer);
-    expect(readFileSync(path.join(source.workspacePath, '.o8', 'newer-note.md'), 'utf8')).toBe('Newer unique recovery bytes.');
-    expect(git(source.workspacePath, 'rev-parse', 'HEAD')).toBe(git(repo.localPath, 'rev-parse', 'main'));
     finished = true;
   }, 30_000);
 

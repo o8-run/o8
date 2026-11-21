@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { seedForgottenCorrection } from './fixtures/forgotten-correction';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 vi.mock('@/lib/realtime/publisher', async importOriginal => ({
@@ -27,7 +28,6 @@ let approvalRoute: typeof import('@/app/api/panel/approvals/route');
 let prompt: typeof import('@/lib/orchestrator/packet-prompt');
 let retrieve: typeof import('@/lib/cortex/qa/retrieve');
 let recall: typeof import('@/lib/cortex/qa/recall');
-let route: { GET(request: NextRequest): Promise<Response>; DELETE(request: NextRequest): Promise<Response> };
 
 beforeAll(async () => {
   vi.stubEnv('O8_DATA_DIR', root); vi.stubEnv('CORTEX_IDE_DATA_DIR', root);
@@ -42,16 +42,6 @@ beforeAll(async () => {
 }, 120_000); // Allow cold transformation of the production route/prompt graph; test deadlines stay unchanged.
 afterAll(() => { db?.closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
-async function loadRoute() {
-  const name = '@/app/api/cortex/operator-corrections/route';
-  route = await import(name);
-}
-function request(method = 'GET', body?: object, token = operator, query = '') {
-  return new NextRequest(`http://localhost/api/cortex/operator-corrections${query}`, {
-    method, headers: { host: 'localhost', authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    ...(body ? { body: JSON.stringify({ projectId: 'default', ...body }) } : {}),
-  });
-}
 function packet(id: string) {
   return { id, workspaceTargetPath: repo, referenceLabel: id, title: 'Parser correction', summary: '',
     status: 'draft', queueState: 'queued', runtime: 'codex', dependencyPacketIds: [], dependencyLabels: [],
@@ -124,7 +114,7 @@ describe('selective correction recall through operator routes and persisted cons
     expect(await prompt.buildPacketPrompt(packet(packetId), [])).not.toContain(summary);
   });
 
-  it('inspects and forgets a route-recorded rejection, invalidating recall while retaining its audit and neighbors after reopen', async () => {
+  it('honors a stored rejection exclusion in recall, prompts and the audit after reopen', async () => {
     const removed = await rejection('remove-feedback'); const kept = await rejection('keep-feedback');
     expect(await brainReasons()).toContain(removed.reason);
     const relay = await import('@/lib/orchestrator/context-relay');
@@ -133,14 +123,11 @@ describe('selective correction recall through operator routes and persisted cons
     const dependent = { ...packet('correction-dependent'), dependencyPacketIds: ['remove-feedback'] };
     expect(await prompt.buildPacketPrompt(dependent, [packet('remove-feedback'), dependent])).toContain(removed.reason);
     expect(await prompt.buildPacketPrompt(packet('remove-feedback'), [])).toContain(removed.reason);
-    await loadRoute();
-    const listed = await (await route.GET(request())).json();
-    expect(listed.corrections.map((c: { id: string }) => c.id)).toContain(removed.id);
     const rows = [{ citation: { kind: 'correction', rowId: removed.rowId, table: 'approvals' }, fields: { body: removed.reason } }] as import('@/lib/cortex/qa/types').TypedRow[];
     recall.seedRecallCacheForTests({ question: 'cached feedback', repoPath: repo, rows, vector: [1, 0] });
     recall.setRecallDependenciesForTests({ hasEmbedding: () => true, assertSpend: async () => {}, classify: async () => ({ class: 'A', bm25Variants: ['feedback'] }), retrieve: async () => [], embed: async () => [1, 0] });
     expect((await recall.recallRows('cached feedback', repo)).rows).toHaveLength(1);
-    expect((await route.DELETE(request('DELETE', { id: removed.id }))).status).toBe(200);
+    await seedForgottenCorrection(db.getSqlite(), removed.id);
     expect((await recall.recallRows('cached feedback', repo)).rows).toEqual([]);
     expect(approvals.getApproval(removed.rowId)?.resolution?.note).toBe(removed.reason);
     db.closeDb(); db.getSqlite();
@@ -148,65 +135,19 @@ describe('selective correction recall through operator routes and persisted cons
     expect(await prompt.buildPacketPrompt(dependent, [packet('remove-feedback'), dependent])).not.toContain(removed.reason);
     expect(await brainReasons()).toContain(kept.reason);
     expect(await prompt.buildPacketPrompt(packet('remove-feedback'), [])).not.toContain(removed.reason);
-    expect((await (await route.GET(request())).json()).corrections.map((c: { id: string }) => c.id)).toEqual([kept.id]);
-    expect((await route.DELETE(request('DELETE', { id: removed.id }))).status).toBe(404);
   });
 
-  it('forgets one persisted steer without erasing its terminal audit or a neighboring steer', async () => {
-    await loadRoute();
+  it('honors a stored steer exclusion without erasing its terminal audit or a neighboring steer', async () => {
     const lane = lanes.createLane({ repoPath: repo, branch: 'fixture', runtime: 'codex', packetId: 'steer-packet' });
     const events = await import('@/lib/lane/events');
     const removed = events.recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', { packetId: 'steer-packet', source: 'operator', message: 'remove steer canary' });
     const kept = events.recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', { packetId: 'steer-packet', source: 'operator', message: 'keep steer canary' });
     expect(await prompt.buildPacketPrompt(packet('steer-packet'), [])).toContain('remove steer canary');
-    expect((await route.DELETE(request('DELETE', { id: `steer:${removed.id}` }))).status).toBe(200);
+    await seedForgottenCorrection(db.getSqlite(), `steer:${removed.id}`);
     expect(await prompt.buildPacketPrompt(packet('steer-packet'), [])).not.toContain('remove steer canary');
     expect(await prompt.buildPacketPrompt(packet('steer-packet'), [])).toContain('keep steer canary');
     expect(lanes.getLaneEvents(lane.id, 10).map(e => e.id)).toEqual(expect.arrayContaining([removed.id, kept.id]));
     expect(await brainReasons()).not.toContain('remove steer canary');
-  });
-
-  it('paginates and searches the whole retained ledger, beyond the contextual retrieval scan and across repository scopes', async () => {
-    await loadRoute();
-    const lane = lanes.createLane({ repoPath: repo, branch: 'fixture', runtime: 'codex', packetId: 'history' });
-    const events = await import('@/lib/lane/events');
-    const oldest = events.recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', { packetId: 'history', source: 'operator', message: 'old retained needle' });
-    for (let index = 0; index < 205; index++) events.recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', { source: 'operator', message: `newer correction ${index}` });
-    const query = '?limit=50&repoPath=' + encodeURIComponent(repo);
-    const first = await (await route.GET(request('GET', undefined, operator, query))).json();
-    const second = await (await route.GET(request('GET', undefined, operator, query + '&offset=50'))).json();
-    expect(first.corrections).toHaveLength(50); expect(first.hasMore).toBe(true);
-    expect(second.corrections).toHaveLength(50);
-    expect(new Set([...first.corrections, ...second.corrections].map(c => c.id)).size).toBe(100);
-    const search = await (await route.GET(request('GET', undefined, operator, query + '&query=old%20retained'))).json();
-    expect(search.corrections.map((c: { id: string }) => c.id)).toEqual([`steer:${oldest.id}`]);
-    const foreign = await (await route.GET(request('GET', undefined, operator, '?repoPath=' + encodeURIComponent(join(root, 'other'))))).json();
-    expect(foreign.corrections).toEqual([]);
-  });
-
-  it('refuses anonymous, worker and device reads/deletes at the handler and retains data on invalid selection', async () => {
-    await loadRoute();
-    const worker = (await import('@/lib/auth/worker-token')).getOrCreateLocalWorkerToken();
-    for (const token of ['invalid', worker, device]) for (const method of ['GET', 'DELETE'] as const) {
-      expect((await route[method](request(method, method === 'DELETE' ? { id: 'steer:missing' } : undefined, token))).status).toBe(403);
-    }
-    for (const id of ['../approval', 'unqualified', 'approval:']) expect((await route.DELETE(request('DELETE', { id }))).status).toBe(400);
-    expect((await route.DELETE(request('DELETE', { id: 'approval:missing' }))).status).toBe(404);
-  });
-
-  it('rolls back the recall exclusion and revision if persistence fails', async () => {
-    await loadRoute();
-    const primed = await rejection('prime-forget-ledger');
-    expect((await route.DELETE(request('DELETE', { id: primed.id }))).status).toBe(200);
-    const selected = await rejection('rollback-feedback');
-    const { readMemoryRevision } = await import('@/lib/cortex/memory-revision');
-    const revision = readMemoryRevision();
-    db.getSqlite().exec("CREATE TRIGGER refuse_correction_forget BEFORE INSERT ON forgotten_operator_corrections BEGIN SELECT RAISE(ABORT, 'fixture refusal'); END");
-    try {
-      expect((await route.DELETE(request('DELETE', { id: selected.id }))).status).toBe(500);
-      expect(await brainReasons()).toContain(selected.reason);
-      expect(readMemoryRevision()).toBe(revision);
-    } finally { db.getSqlite().exec('DROP TRIGGER refuse_correction_forget'); }
   });
 
   it('exposes older and expired outcomes in a bounded inventory and deletes with the listed project identity', async () => {

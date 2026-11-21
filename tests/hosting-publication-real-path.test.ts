@@ -9,7 +9,6 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { githubProvider } from '@/lib/git-providers/github';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { POST as publish } from '@/app/api/panel/prs/[number]/route';
-import { POST as legacy } from '@/app/api/panel/pr/review/route';
 
 const host = vi.hoisted(() => ({ installation: 9000, head: 'a'.repeat(40), merged: false, queue: false, queued: false,
   closed: false, failRead: false, failStateRead: false, holdFinalRead: null as (() => Promise<void>) | null, holdMutation: null as (() => Promise<void>) | null, holdStateRead: null as (() => Promise<void>) | null, lost: false, lostBeforeApply: false, raceHead: false, internalError: false, auto: false, failCheck: false, missingCheck: false, mutations: [] as Array<Record<string, unknown>>, reads: 0 }));
@@ -18,14 +17,14 @@ vi.mock('@/lib/github-broker/managed', () => ({ readManagedGithubToken: () => ({
 const approved = 'a'.repeat(40);
 const mergedSha = 'c'.repeat(40);
 let number = 7000;
-const requestFor = (old = false, extra: Record<string, unknown> = {}, token = getOrCreateWsToken()) => {
+const requestFor = (extra: Record<string, unknown> = {}, token = getOrCreateWsToken()) => {
   const body = { repo: 'example/publication', number, action: 'merge', mergeMethod: 'squash', commitSha: approved, ...extra };
-  return new NextRequest(`http://localhost${old ? '/api/panel/pr/review' : `/api/panel/prs/${number}`}`, { method: 'POST', headers: { host: 'localhost', authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+  return new NextRequest(`http://localhost/api/panel/prs/${number}`, { method: 'POST', headers: { host: 'localhost', authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
 };
-const post = (old = false, extra: Record<string, unknown> = {}) => {
+const post = (extra: Record<string, unknown> = {}) => {
   const body = { repo: 'example/publication', number, action: 'merge', mergeMethod: 'squash', commitSha: approved, ...extra };
   const request = new Request(`http://localhost/api/panel/prs/${number}`, { method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` }, body: JSON.stringify(body) });
-  return old ? legacy(request) : publish(request, { params: Promise.resolve({ number: String(number) }) });
+  return publish(request, { params: Promise.resolve({ number: String(number) }) });
 };
 beforeEach(() => {
   number++; host.installation++; Object.assign(host, { head: approved, merged: false, queue: false, queued: false, lost: false, lostBeforeApply: false, raceHead: false, internalError: false, auto: false, failCheck: false, missingCheck: false, closed: false, failRead: false, failStateRead: false, holdFinalRead: null, holdMutation: null, holdStateRead: null, mutations: [], reads: 0 });
@@ -67,14 +66,14 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 it('installs publication tables at database boot before a publication', () => {
   expect(getSqlite().prepare("SELECT name FROM sqlite_master WHERE name LIKE 'github_publication_%' ORDER BY name").all()).toEqual([{ name: 'github_publication_events' }, { name: 'github_publication_intents' }]);
 });
-it('legacy refuses without an approved SHA before any mutation', async () => {
-  const response = await post(true, { commitSha: undefined });
+it('refuses without an approved SHA before any mutation', async () => {
+  const response = await post({ commitSha: undefined });
   expect(response.status).toBe(400);
-  expect(await response.json()).toMatchObject({ code: 'approved_head_required', message: 'The approved head SHA is required. Send it as commitSha.' });
+  expect(await response.json()).toMatchObject({ error: 'A reviewed commit and merge method are required' });
   expect(host.mutations).toHaveLength(0);
 });
-it.each([false, true])('approved head publishes through route, legacy=%s', async old => {
-  expect((await post(old)).status).toBe(200);
+it('publishes an approved head through the numbered PR route', async () => {
+  expect((await post()).status).toBe(200);
   expect(host.mutations).toHaveLength(1);
   expect(host.mutations[0].sha).toBe(approved);
 });
@@ -100,7 +99,7 @@ it('reconciles a lost merge response before retry, without double publication', 
 });
 it('enqueues with a host head pin and reports queued separately', async () => {
   host.queue = true;
-  const response = await post(false, { action: 'enable-auto-merge' });
+  const response = await post({ action: 'enable-auto-merge' });
   expect(response.status).toBe(200);
   expect(host.mutations[0].variables).toMatchObject({ input: { expectedHeadOid: approved } });
   expect(await response.json()).toMatchObject({ publication: { status: 'queued', mergedSha: null } });
@@ -130,22 +129,22 @@ it('the GitHub provider returns the same durable queue outcome', async () => {
   expect(host.mutations[0].variables).toMatchObject({ input: { expectedHeadOid: approved } });
 });
 it('concurrent route confirmations publish only once', async () => {
-  const responses = await Promise.all([post(), post(true)]);
+  const responses = await Promise.all([post(), post()]);
   expect(responses.map(r => r.status).every(s => s === 200 || s === 202)).toBe(true);
   expect(host.mutations).toHaveLength(1);
 });
 it('records auto-merge enabled separately and pins its host mutation', async () => {
-  const response = await post(false, { action: 'enable-auto-merge' });
+  const response = await post({ action: 'enable-auto-merge' });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ publication: { status: 'auto_merge_enabled', approvedSha: approved, mergedSha: null } });
   expect(host.mutations[0].variables).toMatchObject({ input: { expectedHeadOid: approved } });
 });
-it('middleware still refuses a worker before either hosting route', async () => {
+it('middleware still refuses a worker before the hosting route', async () => {
   const { panelGateMiddleware } = await import('@/middleware');
   const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
   const workerToken = mintPacketWorkerToken(`worker-${number}`);
   try {
-    for (const path of [`/api/panel/prs/${number}`, '/api/panel/pr/review']) {
+    for (const path of [`/api/panel/prs/${number}`]) {
       const request = new NextRequest(`http://localhost${path}`, { method: 'POST', headers: { authorization: `Bearer ${workerToken}`, host: 'localhost' }, body: '{}' });
       expect(panelGateMiddleware(request).status).toBe(403);
     }
@@ -177,8 +176,8 @@ it('retains a persisted packet hold through the numbered PR route', async () => 
 });
 it('reconciles a lost queue acknowledgement without enqueuing twice', async () => {
   host.queue = true; host.lost = true;
-  expect((await post(false, { action: 'enable-auto-merge' })).status).toBe(202);
-  const response = await post(false, { action: 'enable-auto-merge' });
+  expect((await post({ action: 'enable-auto-merge' })).status).toBe(202);
+  const response = await post({ action: 'enable-auto-merge' });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ publication: { status: 'queued', approvedSha: approved, mergedSha: null } });
   expect(host.mutations).toHaveLength(1);
@@ -186,7 +185,7 @@ it('reconciles a lost queue acknowledgement without enqueuing twice', async () =
 
 it.each([false, true])('refuses a definite GraphQL head mismatch, queue=%s', async queue => {
   host.queue = queue; host.raceHead = true;
-  const response = await post(false, { action: 'enable-auto-merge' });
+  const response = await post({ action: 'enable-auto-merge' });
   expect(response.status).toBe(409);
   expect(host.merged).toBe(false);
   expect(host.mutations).toHaveLength(1);
@@ -195,8 +194,8 @@ it.each([false, true])('refuses a definite GraphQL head mismatch, queue=%s', asy
 
 it('keeps an indeterminate GraphQL execution error unknown without retrying the mutation', async () => {
   host.internalError = true;
-  expect((await post(false, { action: 'enable-auto-merge' })).status).toBe(202);
-  expect((await post(false, { action: 'enable-auto-merge' })).status).toBe(202);
+  expect((await post({ action: 'enable-auto-merge' })).status).toBe(202);
+  expect((await post({ action: 'enable-auto-merge' })).status).toBe(202);
   expect(host.mutations).toHaveLength(1);
 });
 
@@ -210,11 +209,11 @@ it('settles an unknown publication after the head moves and permits a fresh deci
   host.lostBeforeApply = true;
   expect((await post()).status).toBe(202);
   host.head = 'd'.repeat(40);
-  expect((await post(false, { commitSha: host.head })).status).toBe(409);
+  expect((await post({ commitSha: host.head })).status).toBe(409);
   expect(receipt()).toMatchObject({ status: 'refused', reason: expect.stringContaining('head changed') });
   expect(host.mutations).toHaveLength(1);
   host.lostBeforeApply = false;
-  expect((await post(false, { commitSha: host.head })).status).toBe(200);
+  expect((await post({ commitSha: host.head })).status).toBe(200);
   expect(host.mutations).toHaveLength(2);
 });
 it('settles a request that did not reach the host only after the bounded window', async () => {
@@ -231,9 +230,9 @@ it('settles a request that did not reach the host only after the bounded window'
 });
 it.each([false, true])('settles confirmed removal of deferred publication, queue=%s', async queue => {
   host.queue = queue;
-  expect((await post(false, { action: 'enable-auto-merge' })).status).toBe(200);
+  expect((await post({ action: 'enable-auto-merge' })).status).toBe(200);
   host.auto = false; host.queued = false;
-  expect((await post(false, { action: 'enable-auto-merge' })).status).toBe(409);
+  expect((await post({ action: 'enable-auto-merge' })).status).toBe(409);
   expect(receipt().status).toBe(queue ? 'refused' : 'disabled');
   expect(host.mutations).toHaveLength(1);
 });
@@ -247,43 +246,38 @@ it('settles a closed unmerged pull request without another mutation', async () =
 });
 it.each(['unknown', 'queued', 'auto_merge_enabled'] as const)('failed reconciliation reads preserve %s evidence', async status => {
   host.queue = status === 'queued'; host.lostBeforeApply = status === 'unknown';
-  await post(false, { action: status === 'unknown' ? 'merge' : 'enable-auto-merge' });
+  await post({ action: status === 'unknown' ? 'merge' : 'enable-auto-merge' });
   const before = receipt();
   host.failRead = status === 'unknown'; host.failStateRead = status !== 'unknown';
-  await post(false, { action: status === 'unknown' ? 'merge' : 'enable-auto-merge' });
+  await post({ action: status === 'unknown' ? 'merge' : 'enable-auto-merge' });
   expect(receipt()).toEqual(before);
   expect(host.mutations).toHaveLength(1);
 });
 it.each([false, true])('admits missing required checks as pending for auto-merge/queue, queue=%s', async queue => {
   host.queue = queue; host.missingCheck = true;
-  const response = await post(false, { action: queue ? 'merge' : 'enable-auto-merge' });
+  const response = await post({ action: queue ? 'merge' : 'enable-auto-merge' });
   expect(response.status).toBe(200);
   expect(host.mutations).toHaveLength(1);
   expect(await response.json()).toMatchObject({ publication: { status: queue ? 'queued' : 'auto_merge_enabled' } });
 });
-it.each([false, true])('real operator client records operator on both hosting routes, legacy=%s', async old => {
+it('records the real operator principal on the numbered PR route', async () => {
   const { panelGateMiddleware } = await import('@/middleware');
-  const request = requestFor(old, { principal: 'anonymous' });
+  const request = requestFor({ principal: 'anonymous' });
   expect(panelGateMiddleware(request).headers.get('x-middleware-next')).toBe('1');
-  const response = old ? await legacy(request) : await publish(request, { params: Promise.resolve({ number: String(number) }) });
+  const response = await publish(request, { params: Promise.resolve({ number: String(number) }) });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ publication: { authorizingPrincipal: 'operator' } });
 });
-it.each([false, true])('preserves device bearer hosting access and evidence, legacy=%s', async old => {
+it('refuses a device bearer at the numbered PR route', async () => {
   const { panelGateMiddleware } = await import('@/middleware');
   const token = 'hosting-device-fixture-0123456789';
   writeFileSync(join(getDataDir(), 'mobile-device-tokens'), createHash('sha256').update(token).digest('hex') + '\n');
-  const request = requestFor(old, { principal: 'operator' }, token);
-  const gate = panelGateMiddleware(request);
-  if (!old) { expect(gate.status).toBe(403); expect(host.mutations).toHaveLength(0); return; }
-  expect(gate.headers.get('x-middleware-next')).toBe('1');
-  const response = await legacy(request);
-  expect(response.status).toBe(200);
-  expect(await response.json()).toMatchObject({ publication: { authorizingPrincipal: 'device', approvedSha: approved } });
-  expect(host.mutations[0].sha).toBe(approved);
+  const request = requestFor({ principal: 'operator' }, token);
+  expect(panelGateMiddleware(request).status).toBe(403);
+  expect(host.mutations).toHaveLength(0);
 });
-it.each([false, true])('normalizes caller SHA before gating and publication, legacy=%s', async old => {
-  const response = await post(old, { commitSha: approved.toUpperCase() });
+it('normalizes caller SHA before gating and publication', async () => {
+  const response = await post({ commitSha: approved.toUpperCase() });
   expect(response.status).toBe(200);
   expect(host.mutations[0].sha).toBe(approved);
   expect(receipt().approvedSha).toBe(approved);
@@ -294,7 +288,7 @@ it('records the queue method rather than a caller-selected method', async () => 
   expect(receipt().method).toBe('queue');
 });
 it('does not report an explicit merge as accepted when auto-merge is in effect', async () => {
-  expect((await post(false, { action: 'enable-auto-merge' })).status).toBe(200);
+  expect((await post({ action: 'enable-auto-merge' })).status).toBe(200);
   const response = await post();
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({ publication: { status: 'auto_merge_enabled', action: 'enable-auto-merge' }, error: expect.stringContaining('explicit merge was not sent') });
@@ -313,7 +307,7 @@ it('checks the winning claim SHA when concurrent callers approved different head
   await ready;
   try {
     host.head = 'd'.repeat(40);
-    expect((await post(false, { commitSha: host.head })).status).toBe(200);
+    expect((await post({ commitSha: host.head })).status).toBe(200);
   } finally { release(); }
   const response = await first;
   expect(response.status).toBe(409);
@@ -329,8 +323,8 @@ it('a late response cannot return a newer head publication as its own success', 
   await ready;
   try {
     host.head = 'd'.repeat(40);
-    expect((await post(false, { commitSha: host.head })).status).toBe(409);
-    expect((await post(false, { commitSha: host.head })).status).toBe(200);
+    expect((await post({ commitSha: host.head })).status).toBe(409);
+    expect((await post({ commitSha: host.head })).status).toBe(200);
   } finally { release(); }
   expect((await first).status).toBe(409);
   expect(host.mutations).toHaveLength(2);
@@ -342,12 +336,12 @@ it('late reconciliation cannot return a newer head publication as success', asyn
   const ready = new Promise<void>(resolve => { entered = resolve; });
   const resumed = new Promise<void>(resolve => { release = resolve; });
   host.holdStateRead = async () => { entered(); await resumed; };
-  const first = post(false, { action: 'enable-auto-merge' });
+  const first = post({ action: 'enable-auto-merge' });
   await ready;
   try {
     host.head = 'd'.repeat(40); host.auto = false;
-    expect((await post(false, { commitSha: host.head })).status).toBe(409);
-    expect((await post(false, { commitSha: host.head })).status).toBe(200);
+    expect((await post({ commitSha: host.head })).status).toBe(409);
+    expect((await post({ commitSha: host.head })).status).toBe(200);
   } finally { release(); }
   expect((await first).status).toBe(409);
   expect(host.mutations).toHaveLength(2);

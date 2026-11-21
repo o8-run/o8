@@ -30,7 +30,6 @@ const heartbeatRoute = await import('@/app/api/lanes/[id]/heartbeat/route');
 const presenceRoute = await import('@/app/api/agents/presence/route');
 const inboxRoute = await import('@/app/api/agents/inbox/route');
 const messageRoute = await import('@/app/api/agents/message/route');
-const conversationRoute = await import('@/app/api/agents/conversation/route');
 const { createAgentMessagePostHandler } = await import('@/lib/agents/message-route-handler');
 const broadcastEventsRoute = await import('@/app/api/broadcast/events/route');
 const { panelGateMiddleware } = await import('@/middleware');
@@ -929,24 +928,11 @@ describe('agent message bus real path', () => {
     expect(overBudget.status).toBe(409);
     expect(count()).toBe(8);
 
-    const workerExtend = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
-      token: workerToken, method: 'POST', body: { id: conversationId, repo, action: 'extend' },
-    }));
-    expect(workerExtend.status).toBe(403);
-    const extended = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
-      token: OPERATOR_TOKEN, method: 'POST', body: { id: conversationId, repo, action: 'extend' },
-    }));
-    expect(extended.status).toBe(200);
-    await expect(extended.json()).resolves.toMatchObject({ conversation: { turnLimit: 12, remainingTurns: 4, status: 'open' } });
-    const ninth = await send({ fromAgentId: 'conversation-a', to: 'Birch', text: 'Operator reopened this.', replyToId: latest.id });
-    expect(ninth.status).toBe(201);
-    expect(ninth.body.message?.conversation).toMatchObject({ turnIndex: 9, turnLimit: 12 });
-
     const exchanges = await messageRoute.GET(request(`http://localhost:3001/api/agents/message?repo=${encodeURIComponent(repo)}&limit=10`, { token: OPERATOR_TOKEN }));
     await expect(exchanges.json()).resolves.toMatchObject({ messages: expect.arrayContaining([expect.objectContaining({ id: firstId, conversation: expect.objectContaining({ id: conversationId }) })]) });
   });
 
-  it('accepts an early final reply and an operator stop without a delivery side effect on rejected replies', async () => {
+  it('accepts an early final reply without a delivery side effect on rejected replies', async () => {
     const repo = `/tmp/o8-agent-final-${Date.now()}`;
     for (const [agentId, name] of [['final-a', 'Harbor'], ['final-b', 'Maple']]) {
       expect((await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
@@ -966,20 +952,7 @@ describe('agent message bus real path', () => {
     const rejected = await send({ fromAgentId: 'final-a', to: 'Maple', text: 'More?', replyToId: final.body.message!.id });
     expect(rejected.status).toBe(409);
     expect(rejected.body.error?.code).toBe('agent_conversation_closed');
-    const stopped = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
-      token: OPERATOR_TOKEN, method: 'POST', body: { id: first.body.message!.conversation.id, repo, action: 'close' },
-    }));
-    expect(stopped.status).toBe(200);
-    const extended = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
-      token: OPERATOR_TOKEN, method: 'POST', body: { id: first.body.message!.conversation.id, repo, action: 'extend' },
-    }));
-    await expect(extended.json()).resolves.toMatchObject({ conversation: { turnLimit: 6, remainingTurns: 4, status: 'open' } });
-    const operatorStopped = await conversationRoute.POST(request('http://localhost:3001/api/agents/conversation', {
-      token: OPERATOR_TOKEN, method: 'POST', body: { id: first.body.message!.conversation.id, repo, action: 'close', summary: 'Stop after review.' },
-    }));
-    expect(operatorStopped.status).toBe(200);
-    const history = await conversationRoute.GET(request(`http://localhost:3001/api/agents/conversation?repo=${encodeURIComponent(repo)}`, { token: OPERATOR_TOKEN }));
-    await expect(history.json()).resolves.toMatchObject({ conversations: [expect.objectContaining({ status: 'closed', closedReason: 'operator_stop', summary: 'Stop after review.' })] });
+
   });
 
   it('lets an agent answer an operator handoff in the same conversation', async () => {

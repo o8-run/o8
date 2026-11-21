@@ -68,7 +68,6 @@ const sessionRules = await import('@/app/api/orchestrator/session-rules/route');
 const merge = await import('@/app/api/orchestrator/merge/route');
 const mergePreview = await import('@/app/api/orchestrator/merge-preview/route');
 const workspace = await import('@/app/api/orchestrator/workspace/route');
-const devServer = await import('@/app/api/panel/dev-server/route');
 const fileIo = await import('@/app/api/panel/file-io/route');
 const repoSpecAsset = await import('@/app/api/repo-spec/asset/route');
 const lanes = await import('@/app/api/lanes/route');
@@ -474,7 +473,18 @@ describe('principal-authz — recurring problem dossiers are worker-readable onl
   const url = 'http://localhost:3001/api/panel/problem-dossiers?includeSuppressed=true';
 
   it('WORKER GET passes the capability gate and reaches the production route', async () => {
-    const request = req(url, { principal: 'worker', method: 'GET' });
+    const { createLane } = await import('@/lib/lane/registry');
+    const packetId = 'pkt-problem-dossier-reader';
+    createLane({
+      label: 'Problem dossier reader',
+      packetId,
+      projectId: 'problem-dossier-fixture',
+      repoPath: dataDir,
+      branch: 'fixture/problem-dossier-reader',
+      baseBranch: 'main',
+      runtime: 'codex',
+    });
+    const request = req(url, { principal: 'worker', method: 'GET', workerToken: mintPacketWorkerToken(packetId) });
     expect(panelGateMiddleware(request).status).toBe(200);
 
     const response = await problemDossiers.GET(request);
@@ -813,20 +823,6 @@ describe('principal-authz — session rules writes are operator-only (#1329 HIGH
   });
 });
 
-describe('principal-authz — shell/RCE primitive is operator-only (HIGH-3 dev-server)', () => {
-  const url = 'http://localhost:3001/api/panel/dev-server';
-
-  it('WORKER → 403 before any shell spawn', async () => {
-    const res = await devServer.POST(req(url, { principal: 'worker', body: { repoPath: '/tmp', command: 'echo hi' } }));
-    expect(res.status).toBe(403);
-  });
-
-  it('OPERATOR → NOT 403 (passes the principal gate; missing fields → 400)', async () => {
-    const res = await devServer.POST(req(url, { principal: 'operator', body: {} }));
-    expect(res.status).toBe(400); // reached real handler: repoPath/command required
-  });
-});
-
 describe('principal-authz — worker file access is confined to registered repos (HIGH-6)', () => {
   const url = 'http://localhost:3001/api/panel/file-io';
 
@@ -914,7 +910,6 @@ describe('principal-authz — fail-closed: unknown/absent principal is denied on
     'http://192.168.1.50:3001/api/orchestrator/rerun-with-feedback',
     'http://192.168.1.50:3001/api/orchestrator/session-rules',
     'http://192.168.1.50:3001/api/orchestrator/merge',
-    'http://192.168.1.50:3001/api/panel/dev-server',
     'http://192.168.1.50:3001/api/panel/file-io',
   ];
 

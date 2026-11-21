@@ -41,7 +41,6 @@ vi.mock('@/lib/providers/child-process', async original => {
 
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { addRepo, updateRepo, listRepos, listReposFresh, removeRepo } = await import('@/lib/repos/registry');
-const { POST: send } = await import('@/app/api/codex/send/route');
 const { POST: reposPost } = await import('@/app/api/panel/repos/route');
 const { POST: save, GET: read } = await import('@/app/api/v2/files/route');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
@@ -78,18 +77,6 @@ beforeEach(async () => {
 });
 afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(f.root, { recursive: true, force: true }); });
 
-it.each([false, true])('refuses a protected literal trailing-space send before any child writes (resume: %s)', async resume => {
-  const sibling = repo();
-  const original = repo(); const vault = `${sibling} `; renameSync(original, vault);
-  await source(vault);
-  const response = await send(request('/api/codex/send', { cwd: vault, message: 'fixture', ...(resume ? { threadId: 'fixture-thread' } : {}) }));
-  const body = await response.text();
-  expect(readFileSync(path.join(sibling, 'note.md'), 'utf8')).toBe('# Preserved notes\n');
-  expect(readFileSync(path.join(vault, 'note.md'), 'utf8')).toBe('# Preserved notes\n');
-  expect(response.status, body).toBe(400);
-  expect(body).toContain('read-only');
-});
-
 it('refuses a case-only clone into an offline source before Git writes the destination', async () => {
   const origin = repo(); const developer = path.join(f.root, 'Developer'); mkdirSync(developer, { recursive: true });
   const vault = path.join(developer, `Notes-${++seq}`); mkdirSync(vault);
@@ -109,16 +96,12 @@ it('refuses a case-only clone into an offline source before Git writes the desti
   }
 });
 
-it.each((['send', 'registry add', 'registry update', 'workspace save'] as const).flatMap(entry =>
+it.each((['registry add', 'registry update', 'workspace save'] as const).flatMap(entry =>
   ([['space', ' '], ['carriage return', '\r']] as const).map(([label, suffix]) => [entry, label, suffix] as const),
 ))('keeps an unprotected literal path through %s (%s)', async (entry, _label, suffix) => {
   const sibling = repo(); const original = repo(); const literal = `${sibling}${suffix}`; renameSync(original, literal);
   const registered = await addRepo(sibling);
-  if (entry === 'send') {
-    const response = await send(request('/api/codex/send', { cwd: literal, message: 'fixture' }));
-    expect(response.status, await response.text()).toBe(200);
-    expect(readFileSync(path.join(literal, 'note.md'), 'utf8')).toBe('CLI wrote here');
-  } else if (entry === 'registry add') {
+  if (entry === 'registry add') {
     const response = await reposPost(request('/api/panel/repos', { action: 'add', localPath: literal }));
     expect(response.status, await response.clone().text()).toBe(201);
     expect((await response.json()).repo.localPath).toBe(literal);
@@ -135,7 +118,7 @@ it.each((['send', 'registry add', 'registry update', 'workspace save'] as const)
 });
 
 const spellings = ['tilde', 'padded tilde', 'relative', 'symlink', 'symlink parent traversal', 'trailing separators', 'case alias'] as const;
-const entries = ['send', 'registry add', 'registry update', 'clone', 'workspace save'] as const;
+const entries = ['registry add', 'registry update', 'clone', 'workspace save'] as const;
 it.each(spellings.flatMap(spelling => entries.map(entry => [spelling, entry] as const)))(
   'excludes a source spelled with %s through %s', async (spelling, entry) => {
     const original = repo();
@@ -165,8 +148,7 @@ it.each(spellings.flatMap(spelling => entries.map(entry => [spelling, entry] as 
       }
     }
     let response: Response;
-    if (entry === 'send') response = await send(request('/api/codex/send', { cwd: input, message: 'fixture' }));
-    else if (entry === 'registry add') response = await reposPost(request('/api/panel/repos', { action: 'add', localPath: input }));
+    if (entry === 'registry add') response = await reposPost(request('/api/panel/repos', { action: 'add', localPath: input }));
     else if (entry === 'registry update') response = await reposPost(request('/api/panel/repos', { action: 'update', id: registered.id, localPath: input }));
     else if (entry === 'clone') {
       // Clone has no caller-supplied destination. Its fixed ~/Developer root
@@ -192,18 +174,6 @@ it.each(spellings.flatMap(spelling => entries.map(entry => [spelling, entry] as 
     if (entry === 'registry update') expect((await listReposFresh()).find(row => row.id === registered.id)?.localPath).toBe(original);
   },
 );
-
-it.each(['root', 'descendant', 'alias', 'resume'] as const)('refuses a direct %s send before an offline CLI can modify the source', async mode => {
-  const folder = repo(); await source(folder);
-  let cwd = folder;
-  if (mode === 'descendant') { cwd = path.join(folder, 'child'); mkdirSync(cwd); writeFileSync(path.join(cwd, 'note.md'), '# Preserved notes\n'); }
-  if (mode === 'alias') { cwd = path.join(f.root, `alias-${++seq}`); symlinkSync(folder, cwd, 'dir'); }
-  const response = await send(request('/api/codex/send', { cwd, message: 'fixture', ...(mode === 'resume' ? { threadId: 'fixture-thread' } : {}) }));
-  const body = await response.text();
-  expect(readFileSync(path.join(cwd, 'note.md'), 'utf8')).toBe('# Preserved notes\n');
-  expect(response.status, body).toBe(400);
-  expect(body).toContain('read-only');
-});
 
 it.each(['route', 'registry'] as const)('refuses registry repoint through the %s entry point', async entry => {
   const original = repo(); const vault = repo();
@@ -274,12 +244,9 @@ it('preserves literal whitespace in configured roots when guarding a default-wor
   }
 });
 
-it('retains normal writable repository sends, updates and file saves', async () => {
+it('retains normal writable repository updates and file saves', async () => {
   const first = repo(); const second = repo(); const vault = repo(); await source(vault);
   const registered = await addRepo(first);
-  const response = await send(request('/api/codex/send', { cwd: first, message: 'fixture' }));
-  expect(response.status).toBe(200); await response.text();
-  expect(readFileSync(path.join(first, 'note.md'), 'utf8')).toBe('CLI wrote here');
   await updateRepo(registered.id, { localPath: second });
   expect((await save(request('/api/v2/files', { workspace: second, path: 'note.md', content: 'permitted' }))).status).toBe(200);
   expect(readFileSync(path.join(second, 'note.md'), 'utf8')).toBe('permitted');

@@ -20,13 +20,11 @@ const runtimeRoute = await import('@/app/api/runtime/launch/route');
 const pollRoute = await import('@/app/api/cloud/worker-poll/route');
 const streamRoute = await import('@/app/api/cloud/worker-stream/route');
 const controlRoute = await import('@/app/api/cloud/worker-control/route');
-const statusRoute = await import('@/app/api/cloud/job-status/route');
-const workerPanelRoute = await import('@/app/api/panel/cloud-workers/route');
 const taskRoute = await import('@/app/api/tasks/[taskId]/route');
 const drainRoute = await import('@/app/api/panel/cloud-jobs/drain/route');
 const { createCloudWorkerKey, revokeCloudWorkerKey } = await import('@/lib/cloud/worker-auth');
-const { recordCloudWorkerPresence } = await import('@/lib/cloud/worker-presence');
-const { getJob, getLatestSessionJob, getJobDrainStatus, listJobControls, listJobs } = await import('@/lib/cloud/job-queue');
+const { listConnectedCloudWorkers, recordCloudWorkerPresence } = await import('@/lib/cloud/worker-presence');
+const { getJob, readJobEvents, getLatestSessionJob, getJobDrainStatus, listJobControls, listJobs } = await import('@/lib/cloud/job-queue');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { cloudRuntime } = await import('@/lib/runtimes/cloud-adapter');
@@ -238,13 +236,6 @@ function acknowledgeControl(job: {
   }));
 }
 
-function jobStatus(jobId: string) {
-  return statusRoute.GET(new NextRequest(
-    `http://localhost/api/cloud/job-status?jobId=${encodeURIComponent(jobId)}&sinceId=0`,
-    { headers: { authorization: `Bearer ${workerKey.plaintext}` } },
-  ));
-}
-
 async function startWorkerHttpBridge() {
   const server = createServer(async (incoming, outgoing) => {
     try {
@@ -302,12 +293,10 @@ describe('durable cloud execution through the runtime launch path', () => {
       { headers: { authorization: `Bearer ${presenceKey.plaintext}` } },
     ));
     expect(poll.status).toBe(204);
-    const connected = await workerPanelRoute.GET();
-    expect((await connected.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+    expect(listConnectedCloudWorkers())
       .toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'presence-fixture' })]));
     closeDb();
-    const afterRestart = await workerPanelRoute.GET();
-    expect((await afterRestart.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+    expect(listConnectedCloudWorkers())
       .toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'presence-fixture' })]));
 
     const crowdedKey = createCloudWorkerKey({ teamId: 'team_default', label: 'bounded presence fixture' });
@@ -321,8 +310,7 @@ describe('durable cloud execution through the runtime launch path', () => {
       SELECT COUNT(*) AS count FROM cloud_worker_presence WHERE key_id = ?
     `).get(crowdedKey.record.id) as { count: number };
     expect(count.count).toBeLessThanOrEqual(32);
-    const fairPanel = await workerPanelRoute.GET();
-    expect((await fairPanel.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+    expect(listConnectedCloudWorkers())
       .toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'presence-fixture' })]));
 
     const invalid = await pollRoute.GET(new NextRequest(
@@ -332,8 +320,7 @@ describe('durable cloud execution through the runtime launch path', () => {
     expect(invalid.status).toBe(401);
     revokeCloudWorkerKey(presenceKey.record.id);
     revokeCloudWorkerKey(crowdedKey.record.id);
-    const revoked = await workerPanelRoute.GET();
-    expect((await revoked.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+    expect(listConnectedCloudWorkers())
       .not.toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'presence-fixture' })]));
   });
 
@@ -624,16 +611,14 @@ describe('durable cloud execution through the runtime launch path', () => {
       teamId: 'team_default', keyId: workerKey.record.id,
       workerId: 'worker-recovery', nowMs: Date.now() - 61_000,
     });
-    const beforeAcceptedEvent = await workerPanelRoute.GET();
-    expect((await beforeAcceptedEvent.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+    expect(listConnectedCloudWorkers())
       .not.toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'worker-recovery' })]));
     const rejectedPresence = await workerStream({
       jobId, workerId: 'forged-presence', leaseToken: firstClaim?.leaseToken,
       type: 'heartbeat', payload: { status: 'running' },
     });
     expect(rejectedPresence.status).toBe(409);
-    const afterRejectedEvent = await workerPanelRoute.GET();
-    expect((await afterRejectedEvent.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+    expect(listConnectedCloudWorkers())
       .not.toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'forged-presence' })]));
 
     const output = await workerStream({
@@ -644,8 +629,7 @@ describe('durable cloud execution through the runtime launch path', () => {
       payload: { text: 'durable worker output' },
     });
     expect(output.status).toBe(200);
-    const afterAcceptedEvent = await workerPanelRoute.GET();
-    expect((await afterAcceptedEvent.json() as { connectedWorkers: Array<{ workerId: string }> }).connectedWorkers)
+    expect(listConnectedCloudWorkers())
       .toEqual(expect.arrayContaining([expect.objectContaining({ workerId: 'worker-recovery' })]));
     const diff = await workerStream({
       jobId,
@@ -704,20 +688,6 @@ describe('durable cloud execution through the runtime launch path', () => {
       additions: 4,
       deletions: 1,
     }]);
-    const status = await jobStatus(jobId);
-    expect(status.status).toBe(200);
-    const statusBody = await status.json();
-    expect(JSON.stringify(statusBody)).not.toContain(repoPath);
-    expect(statusBody).toMatchObject({
-      job: { id: jobId, status: 'completed' },
-      metrics: {
-        claimCount: 2,
-        leaseRecoveryCount: 1,
-        executionAttempts: 0,
-        queueWaitMs: expect.any(Number),
-        terminalLatencyMs: expect.any(Number),
-      },
-    });
   }, 60_000);
 
   it('parks real failures and resolves steer, abort, and restart-drain races deterministically', async () => {
@@ -969,15 +939,7 @@ describe('durable cloud execution through the runtime launch path', () => {
           '--git-dir', bareRemotePath, 'rev-parse', `refs/heads/o8/worker-process-${index}`,
         ], { encoding: 'utf8' }).trim();
         closeDb();
-        const status = await jobStatus(jobId);
-        expect(status.status).toBe(200);
-        const receipt = await status.json() as {
-          job: { launch: Record<string, unknown> };
-          events: Array<{ type: string; payload: { commitSha?: string; checkout?: { cacheHit: boolean; durationMs: number } } }>;
-        };
-        expect(JSON.stringify(receipt.job.launch)).not.toContain(repoPath);
-        expect(JSON.stringify(receipt.job.launch)).not.toContain(realpathSync.native(repoPath));
-        expect(receipt.events).toEqual(expect.arrayContaining([
+        expect(readJobEvents('team_default', jobId, 0)).toEqual(expect.arrayContaining([
           expect.objectContaining({ type: 'completed', payload: expect.objectContaining({ commitSha: pushedSha }) }),
           expect.objectContaining({ type: 'chunk', payload: expect.objectContaining({
             checkout: expect.objectContaining({ cacheHit: index === 2, durationMs: expect.any(Number) }),
@@ -1016,10 +978,7 @@ describe('durable cloud execution through the runtime launch path', () => {
         executionAttempts: 3,
         lastError: expect.stringContaining('git push failed'),
       });
-      const rejectedEvents = (await jobStatus(rejectedId).then((status) => status.json())) as {
-        events: Array<{ type: string }>;
-      };
-      expect(rejectedEvents.events.some((event) => event.type === 'completed')).toBe(false);
+      expect(readJobEvents('team_default', rejectedId, 0).some(event => event.type === 'completed')).toBe(false);
       expect(() => execFileSync('git', [
         '--git-dir', bareRemotePath, 'rev-parse', '--verify', 'refs/heads/o8/worker-process-reject',
       ], { stdio: 'pipe' })).toThrow();

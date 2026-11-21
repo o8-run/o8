@@ -3,11 +3,6 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { expect, it } from 'vitest';
 
 import * as route0 from '@/app/api/panel/branches/route';
-import * as route1 from '@/app/api/panel/branches/checkout/route';
-import * as route2 from '@/app/api/panel/dev-server/route';
-import * as route3 from '@/app/api/panel/ide-surface/route';
-import * as route4 from '@/app/api/panel/terminal-exec/route';
-import * as route5 from '@/app/api/panel/assign-issue/route';
 import * as route6 from '@/app/api/panel/issues/create/route';
 import * as route7 from '@/app/api/panel/issues/enhance/route';
 import * as route8 from '@/app/api/panel/terminal-state/route';
@@ -16,12 +11,6 @@ import * as route9 from '@/app/api/panel/workspaces/route';
 const routes = [
   ['POST /api/panel/branches', route0.POST],
   ['DELETE /api/panel/branches', route0.DELETE],
-  ['POST /api/panel/branches/checkout', route1.POST],
-  ['POST /api/panel/dev-server', route2.POST],
-  ['DELETE /api/panel/dev-server', route2.DELETE],
-  ['POST /api/panel/ide-surface', route3.POST],
-  ['POST /api/panel/terminal-exec', route4.POST],
-  ['POST /api/panel/assign-issue', route5.POST],
   ['POST /api/panel/issues/create', route6.POST],
   ['POST /api/panel/issues/enhance', route7.POST],
   ['POST /api/panel/terminal-state', route8.POST],

@@ -19,30 +19,21 @@ it('refuses a packet worker at the gate once the operator revokes it', async () 
   const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
   const { getSqlite } = await import('@/lib/db');
   const { panelGateMiddleware } = await import('@/middleware');
-  const { POST } = await import('@/app/api/panel/workers/route');
+  const { createToken, revokeToken } = await import('@/lib/worker/tokens');
   const token = mintPacketWorkerToken('fixture-revoked-at-gate');
   const gate = (path: string) => panelGateMiddleware(new NextRequest(`http://127.0.0.1:3000${path}`, {
     headers: { host: '127.0.0.1:3000', authorization: `Bearer ${token}`, 'x-o8-client-addr': '127.0.0.1' } }));
   for (const path of WORKER_READS) expect(gate(path).headers.get('x-middleware-next'), path).toBe('1');
 
-  // The operator's revoke action in the Workers panel.
   const { id } = getSqlite().prepare('SELECT id FROM worker_tokens WHERE token_hash = ?').get(sha256(token)) as { id: string };
-  const revoked = await POST(new Request('http://127.0.0.1:3000/api/panel/workers', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'revoke_token', id }) }));
-  expect(revoked.status).toBe(200);
+  expect(revokeToken(id)).toBe(true);
   for (const path of WORKER_READS) {
     const response = gate(path);
     expect(response.status, path).toBe(401);
     expect((await response.json()).detail, path).toMatch(GATE_REFUSAL);
   }
 
-  // A credential the Workers panel creates with the packet scope but no packet stays out of the
-  // file, after the next rewrite too, so the gate never treats it as a packet worker.
-  const created = await POST(new Request('http://127.0.0.1:3000/api/panel/workers', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'create_token', label: 'fixture packetless', scope: 'local-packet' }) }));
-  expect(created.status).toBe(201);
-  const { plaintextToken } = await created.json() as { plaintextToken: string };
+  const { plaintextToken } = createToken({ label: 'fixture packetless', scope: 'local-packet' });
   mintPacketWorkerToken('fixture-after-packetless');
   for (const path of WORKER_READS) {
     const response = panelGateMiddleware(new NextRequest(`http://127.0.0.1:3000${path}`, {

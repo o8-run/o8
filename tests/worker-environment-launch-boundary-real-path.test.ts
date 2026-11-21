@@ -17,7 +17,6 @@ const peer = join(root, 'peer.cjs');
 const receipt = join(root, 'receipt.json');
 const { managedCommandLaunch } = await import('@/lib/terminal/managed-command-launch');
 const { sanitizePtyEnv } = await import('@/lib/ws-server/pty-support');
-const { testMcpConnection } = await import('@/lib/mcp/test-connection');
 const { callCodebaseMemoryTool } = await import('@/lib/codebase-memory/mcp-client');
 const processBoundary = await import('@/lib/providers/child-process');
 const { childEnvironment } = await import('@/lib/providers/spawn-environment');
@@ -64,24 +63,10 @@ describe('shared process environment boundary', () => {
     await completed(fixtureSpawn(launch.file, launch.args, { env: launch.env, stdio: 'ignore' }));
     expect(observed()).toEqual({ leaked: false, service: true, task: true });
   });
-  it('Check connection does not promote ambient values into explicit server overrides', async () => {
-    const result = await testMcpConnection({ transport: 'stdio', command: process.execPath, args: [peer], env: { FIXTURE_SERVICE_TOKEN: 'explicit-service' } }, 3000);
-    expect(result.ok).toBe(true);
-    expect(observed().service).toBe(true);
-    expect(observed().leaked, 'parent canaries must not reach Check connection').toBe(false);
-  });
   it('codebase-memory MCP uses the same ambient boundary', async () => {
     const result = await callCodebaseMemoryTool({ binPath: peer, cwd: root, toolName: 'fixture', timeoutMs: 3000 });
     expect(result.ok).toBe(true);
     expect(observed().leaked, 'parent canaries must not reach memory MCP').toBe(false);
-  });
-  it('MCP connection checks keep service auth without authorizing provider slots', async () => {
-    const input = { transport: 'stdio' as const, command: process.execPath, args: [peer, '--provider-capture'],
-      env: { FIXTURE_SERVICE_TOKEN: 'explicit-service', OPENAI_API_KEY: 'fixture-explicit-provider' } };
-    expect((await testMcpConnection(input, 3000)).ok).toBe(true);
-    expect(observed().service).toBe(true);
-    expect(observed().provider, 'a provider slot needs runtime billing authority').toBe(false);
-    expect(observed().leaked).toBe(false);
   });
   it.each(['spawn', 'spawnSync', 'execFile', 'execFileSync', 'exec', 'execSync', 'fork'] as const)('%s defaults to an allowlist without runtime identity', async operation => {
     const args = [peer, '--capture'];

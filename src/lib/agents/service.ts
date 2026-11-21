@@ -39,12 +39,10 @@ import {
   listAgentPresenceAcrossRepos,
   listRecentAgentMessages,
   listRecentAgentMessagesAcrossRepos,
-  listAgentConversations,
   normalizeAgentBusRepoPath,
   persistAgentMessage,
   releaseAgentInboxWake,
   updateAgentMessageDelivery,
-  updateAgentConversation,
   upsertAgentPresence,
 } from './store';
 
@@ -324,43 +322,6 @@ export async function postAgentMessage(
     );
   }
   return projectNetworkMessage(message, sqlite);
-}
-
-export function readAgentConversations(
-  input: { repo: string | null; limit: number },
-  principal: RequestPrincipalContext,
-  sqlite: Database.Database = getSqlite(),
-) {
-  if (principal.role !== 'operator') {
-    throw new AgentBusError('Conversation history requires an operator credential.', 'agent_conversations_forbidden', 403);
-  }
-  const repo = requiredString(input.repo, 'repo', 2_000);
-  return { repo: normalizeAgentBusRepoPath(repo), conversations: listAgentConversations(repo, input.limit, sqlite) };
-}
-
-export function changeAgentConversation(
-  input: unknown,
-  principal: RequestPrincipalContext,
-  sqlite: Database.Database = getSqlite(),
-) {
-  if (principal.role !== 'operator') {
-    throw new AgentBusError('Only the operator can stop or extend a conversation.', 'agent_conversation_operator_required', 403);
-  }
-  const body = objectInput(input, 'invalid_agent_conversation');
-  const id = requiredString(body.id, 'id', 200);
-  const repo = requiredString(body.repo, 'repo', 2_000);
-  if (body.action !== 'close' && body.action !== 'extend') {
-    throw new AgentBusError('action must be close or extend.', 'invalid_agent_conversation_action', 400);
-  }
-  const summary = optionalString(body.summary, 'summary', AGENT_MESSAGE_TEXT_MAX_LENGTH);
-  try {
-    return updateAgentConversation({ id, repo, action: body.action, summary }, sqlite);
-  } catch (error) {
-    if (error instanceof AgentConversationError) {
-      throw new AgentBusError(error.message, error.code, error.status);
-    }
-    throw error;
-  }
 }
 
 export function joinAgentPresence(

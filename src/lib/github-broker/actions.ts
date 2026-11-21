@@ -125,28 +125,6 @@ export async function createGitHubIssue(
   };
 }
 
-export async function commentOnGitHubIssue(repoFullName: string, issueNumber: number, body: string) {
-  const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues/${issueNumber}/comments`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body }),
-  });
-  return parseGitHubJson<{ html_url?: string | null }>(response);
-}
-
-export async function addLabelsToGitHubIssue(repoFullName: string, issueNumber: number, labels: string[]) {
-  const normalized = labels.map((label) => label.trim()).filter(Boolean);
-  if (normalized.length === 0) return [];
-
-  const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues/${issueNumber}/labels`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ labels: normalized }),
-  });
-
-  return parseGitHubJson<Array<{ name?: string | null }>>(response);
-}
-
 export async function findGitHubPullRequestByHead(repoFullName: string, branch: string) {
   const owner = repoFullName.split('/')[0] ?? '';
   const { response } = await githubInstallationFetch(

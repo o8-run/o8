@@ -6984,58 +6984,6 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  if (req.url === '/terminal-exec' && req.method === 'POST') {
-    if (!isAuthorizedInternalRequest(req)) {
-      res.writeHead(401);
-      res.end('unauthorized');
-      return;
-    }
-
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on('end', () => {
-      let payload: { sessionName?: string; command?: string } | null = null;
-      try {
-        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { sessionName?: string; command?: string };
-      } catch {
-        res.writeHead(400);
-        res.end('invalid json');
-        return;
-      }
-
-      const sessionName = payload?.sessionName?.trim();
-      const command = payload?.command;
-      if (!sessionName || !command) {
-        res.writeHead(400);
-        res.end('sessionName and command required');
-        return;
-      }
-
-      const attachment = terminalAttachments.get(sessionName);
-      if (!attachment) {
-        res.writeHead(404);
-        res.end('session not found');
-        return;
-      }
-      if (attachment.controlClientId) {
-        res.writeHead(409, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'terminal_busy' }));
-        return;
-      }
-
-      try {
-        // PTY raw-mode TUIs (like Claude Code) interpret \r as Enter, not \n
-        attachment.ptyProcess.write(`${command}\r`);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch (error) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to write to terminal' }));
-      }
-    });
-    return;
-  }
-
   if (req.url?.startsWith('/terminal-scrollback') && req.method === 'GET') {
     if (!isAuthorizedInternalRequest(req)) {
       res.writeHead(401);

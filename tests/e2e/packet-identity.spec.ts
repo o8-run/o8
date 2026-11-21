@@ -42,22 +42,6 @@ async function stubDesktopPacketApis(page: Page) {
     await fulfillMissionState(route, missionState);
   });
 
-  const sseBody = [
-    'data: {"type":"delta","text":"Packet received."}',
-    'data: {"type":"done","text":"Packet received."}',
-    '',
-  ].join('\n');
-
-  for (const path of ['**/api/codex/send', '**/api/claude-code/send']) {
-    await page.route(path, async (route) => {
-      await route.fulfill({
-        status: 200,
-        headers: { 'content-type': 'text/event-stream' },
-        body: sseBody,
-      });
-    });
-  }
-
   for (const path of ['**/api/codex/transcript**', '**/api/claude-code/transcript**']) {
     await page.route(path, async (route) => {
       await route.fulfill({

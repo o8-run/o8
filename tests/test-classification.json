@@ -52,12 +52,6 @@
       ]
     },
     {
-      "path": "src/app/api/codex/send/route.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
       "path": "src/app/api/customize/actions/github-source.test.ts",
       "reasons": [
         "child-process",
@@ -220,23 +214,6 @@
       "path": "src/app/api/v2/proxy/cli/route.test.ts",
       "reasons": [
         "child-process"
-      ]
-    },
-    {
-      "path": "src/app/api/worktrees/merge/route-real-path.test.ts",
-      "reasons": [
-        "apfs-tool",
-        "child-process",
-        "executable-fixture",
-        "git-cli",
-        "real-path",
-        "worktree-api"
-      ]
-    },
-    {
-      "path": "src/app/api/worktrees/merge/route.test.ts",
-      "reasons": [
-        "worktree-api"
       ]
     },
     {
@@ -7266,12 +7243,6 @@
       ]
     },
     {
-      "path": "tests/provider-key-deferred-mcp-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/provider-key-file-billing-disabled-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -9057,13 +9028,6 @@
       ]
     },
     {
-      "path": "tests/viewer-session-redaction-real-path.test.ts",
-      "reasons": [
-        "network-listener",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/visualization-browser-real-path.test.ts",
       "reasons": [
         "browser",
@@ -9203,7 +9167,6 @@
       "path": "tests/worker-environment-npx-registry-real-path.test.ts",
       "reasons": [
         "child-process",
-        "network-listener",
         "real-path"
       ]
     },
@@ -9402,7 +9365,6 @@
       "path": "tests/workspace-preservation-cli-real-path.test.ts",
       "reasons": [
         "child-process",
-        "executable-fixture",
         "git-cli",
         "network-listener",
         "real-path",

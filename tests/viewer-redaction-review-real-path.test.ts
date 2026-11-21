@@ -32,12 +32,9 @@ const rotated = 'fixture-review-rotated-' + 'y'.repeat(32);
 const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 const directReads = [
   ['/api/v2/files', () => import('@/app/api/v2/files/route')],
-  ['/api/review/file', () => import('@/app/api/review/file/route')],
   ['/api/panel/file-content', () => import('@/app/api/panel/file-content/route')],
   ['/api/panel/file-diff', () => import('@/app/api/panel/file-diff/route')],
-  ['/api/panel/commit-diff', () => import('@/app/api/panel/commit-diff/route')],
   ['/api/panel/commits/[hash]', () => import('@/app/api/panel/commits/[hash]/route')],
-  ['/api/panel/worktree-diff', () => import('@/app/api/panel/worktree-diff/route')],
   ['/api/worktrees/diff', () => import('@/app/api/worktrees/diff/route')],
 ] as const;
 
@@ -133,21 +130,15 @@ describe('security review regressions through persisted viewer routes', () => {
 
   it('refuses recoverable credentials in valid binary previews, including byte ranges', async () => {
     const png = makePng(operator); writeFileSync(join(root, 'metadata.png'), png);
-    const { GET: preview } = await import('@/app/api/panel/file-preview/route');
     const { GET: asset } = await import('@/app/api/panel/file-asset/route');
-    for (const [route, handler] of [['/api/panel/file-preview', preview], ['/api/panel/file-asset', asset]] as const) {
-      const req = request(route, { path: 'metadata.png' });
-      await inspect(await handler(req), operator, route); await inspect(await fetch(req), operator, route);
-    }
+    const full = request('/api/panel/file-asset', { path: 'metadata.png' });
+    await inspect(await asset(full), operator); await inspect(await fetch(full), operator);
     const start = png.indexOf(operator);
     const req = request('/api/panel/file-asset', { path: 'metadata.png' }, { headers: { range: `bytes=${start}-${start + operator.length - 1}` } });
     await inspect(await asset(req), operator); await inspect(await fetch(req), operator);
   });
 
-  it('redacts readme and refuses credential-bearing raw SVG bytes and value-only ranges', async () => {
-    writeFileSync(join(root, 'README.md'), `# Public\nPASSWORD=${operator}\n`);
-    const { GET: readme } = await import('@/app/api/panel/readme/route');
-    const req = request('/api/panel/readme'); await inspect(await readme(req), operator); await inspect(await fetch(req), operator);
+  it('refuses credential-bearing raw SVG bytes and value-only ranges', async () => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg"><!-- PASSWORD=${operator} --></svg>`;
     writeFileSync(join(root, 'control.svg'), svg);
     const { GET: asset } = await import('@/app/api/panel/file-asset/route');
@@ -162,7 +153,6 @@ describe('security review regressions through persisted viewer routes', () => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg"><image href="${scheme}image/png;base64,${makePng(operator).toString('base64')}"/></svg>`;
     writeFileSync(join(root, 'embedded.svg'), svg);
     for (const [route, handler] of [
-      ['/api/panel/file-preview', (await import('@/app/api/panel/file-preview/route')).GET],
       ['/api/panel/file-asset', (await import('@/app/api/panel/file-asset/route')).GET],
       ['/api/v2/files', (await import('@/app/api/v2/files/route')).GET],
     ] as const) {
@@ -190,7 +180,6 @@ describe('security review regressions through persisted viewer routes', () => {
     const cases = [
       ['/api/panel/serve-image', { path: join(imageRoot, 'alias.png') }, (await import('@/app/api/panel/serve-image/route')).GET],
       ['/api/mobile/media', { path: join(imageRoot, 'alias.png') }, (await import('@/app/api/mobile/media/route')).GET],
-      ['/api/panel/report-artifact', { id: 'art-viewer-report' }, (await import('@/app/api/panel/report-artifact/route')).GET],
       ['/api/panel/threads/artifact', { id: 'art-viewer-report' }, (await import('@/app/api/panel/threads/artifact/route')).GET],
       ['/api/panel/threads/artifact', { id: 'art-viewer-image' }, (await import('@/app/api/panel/threads/artifact/route')).GET],
       ['/api/repo-spec', { repoPath: root }, (await import('@/app/api/repo-spec/route')).GET],
@@ -211,12 +200,10 @@ describe('security review regressions through persisted viewer routes', () => {
     ensureArtifactBucket(null); const id = 'art-viewer-corpus'; const relPath = artifactRelPath(null, id, 'txt');
     writeFileSync(artifactAbsPath(relPath), item.text); recordArtifact({ id, kind: 'report', source: 'manual', relPath, mimeType: 'text/plain' });
     const cases = [
-      ['/api/panel/readme', {}, (await import('@/app/api/panel/readme/route')).GET],
       ['/api/repo-spec', { repoPath: root }, (await import('@/app/api/repo-spec/route')).GET],
       ['/api/panel/file-asset', { path: 'alias.svg' }, (await import('@/app/api/panel/file-asset/route')).GET],
       ['/api/panel/serve-image', { path: join(imageRoot, 'alias.svg') }, (await import('@/app/api/panel/serve-image/route')).GET],
       ['/api/mobile/media', { path: join(imageRoot, 'alias.svg') }, (await import('@/app/api/mobile/media/route')).GET],
-      ['/api/panel/report-artifact', { id }, (await import('@/app/api/panel/report-artifact/route')).GET],
       ['/api/panel/threads/artifact', { id }, (await import('@/app/api/panel/threads/artifact/route')).GET],
     ] as const;
     for (const [route, params, handler] of cases) {

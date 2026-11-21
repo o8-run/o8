@@ -6,7 +6,7 @@
  * child and issue several related calls without paying process startup for
  * every symbol and fallback lookup.
  *
- * Wire format mirrors src/lib/mcp/test-connection.ts. Both build on the
+ * Wire format uses the
  * MCP 2024-11-05 protocol with newline-delimited JSON-RPC frames.
  */
 

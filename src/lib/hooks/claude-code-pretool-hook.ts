@@ -210,7 +210,7 @@ async function main() {
 
   // Distinguish o8-spawned autonomous agents from the operator's own paired
   // Claude Code session. o8 sets O8_MANAGED_SESSION=1 on every spawn
-  // (orchestrator, claude-code adapter, auto-compact, claude-code/send
+  // (orchestrator, claude-code adapter, auto-compact
   // route); an operator running `claude` directly in their terminal does
   // not have this env var.
   //

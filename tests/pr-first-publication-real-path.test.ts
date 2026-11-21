@@ -1,10 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it, vi } from 'vitest';
-import { NextRequest } from 'next/server';
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}), requestRealtimeRefresh: vi.fn() }));
 const root = mkdtempSync(join(tmpdir(), 'o8-pr-first-publication-'));
 Object.assign(process.env, { O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root, CORTEX_IDE_DB_PATH: join(root, 'test.db'), WS_TOKEN: 'policy-operator-fixture-token', O8_SKIP_PRELAUNCH_TYPECHECK: '1' });
@@ -12,7 +11,6 @@ writeFileSync(join(root, 'mobile-device-tokens'), `${createHash('sha256').update
 const { createProject } = await import('@/lib/projects/store');
 const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
-const { handlePost } = await import('@/app/api/worktrees/merge/handler');
 const { dispatchSecondPassMerge } = await import('@/lib/lane/second-pass-merge-dispatch');
 const { closeDb } = await import('@/lib/db');
 afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
@@ -27,14 +25,6 @@ async function fixture() {
   const lane = createLane({ repoPath: repo, projectId: project.id, branch: worktree.branch, worktreePath: worktree.path, baseBranch: 'main', runtime: 'codex', packetId });
   return { repo, worktree, lane, base: git(repo, 'rev-parse', 'main') };
 }
-it.each(['policy-operator-fixture-token', 'policy-device-fixture-token'])('worktree merge route refuses PR-first publication for %s', async token => {
-  const f = await fixture();
-  const merge = vi.fn(async () => ({ action: 'merge' as const, ok: true, note: 'unexpected integration' }));
-  const response = await handlePost(new NextRequest('http://localhost/api/worktrees/merge', { method: 'POST', headers: { host: 'localhost', authorization: `Bearer ${token}` }, body: JSON.stringify({ repo: f.repo, worktreeId: f.worktree.id, action: 'merge' }) }), { mergeToTarget: merge });
-  expect(response.status).toBe(409);
-  expect(await response.json()).toMatchObject({ reason: 'pr_only', ok: false });
-  expect(merge).not.toHaveBeenCalled(); expect(git(f.repo, 'rev-parse', 'main')).toBe(f.base); expect(existsSync(f.worktree.path)).toBe(true);
-});
 it.each([null, 'https://github.com/example/project.git', 'https://gitlab.com/example/project.git', 'https://code.example.test/example/project.git'])('delivery guidance is true for origin %s and automatic agreement settles without merge retries', async origin => {
   const f = await fixture();
   if (origin) git(f.repo, 'remote', 'add', 'origin', origin);

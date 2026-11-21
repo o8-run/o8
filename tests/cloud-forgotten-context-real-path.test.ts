@@ -5,7 +5,6 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 const root = mkdtempSync(join(tmpdir(), 'o8-cloud-forget-'));
 let db: typeof import('@/lib/db');
 let poll: typeof import('@/app/api/cloud/worker-poll/route');
-let status: typeof import('@/app/api/cloud/job-status/route');
 let jobs: typeof import('@/lib/cloud/job-queue');
 let revision: typeof import('@/lib/cortex/memory-revision');
 let headers: { Authorization: string };
@@ -14,7 +13,6 @@ beforeAll(async () => {
   vi.stubEnv('CORTEX_IDE_DB_PATH', join(root, 'memory.db'));
   db = await import('@/lib/db');
   poll = await import('@/app/api/cloud/worker-poll/route');
-  status = await import('@/app/api/cloud/job-status/route');
   jobs = await import('@/lib/cloud/job-queue');
   revision = await import('@/lib/cortex/memory-revision');
   const { createCloudWorkerKey } = await import('@/lib/cloud/worker-auth');
@@ -29,9 +27,6 @@ it('holds and cancels a queued packet prompt forgotten before worker pickup, whi
   expect(held.status).toBe(409);
   expect(await held.text()).not.toContain('forgotten queued prompt');
   expect(jobs.getJob('team_default', 'old-job')?.status).toBe('cancelled');
-  const details = await status.GET(new Request('http://localhost/api/cloud/job-status?jobId=old-job', { headers }));
-  expect(details.status).toBe(409);
-  expect(await details.text()).not.toContain('forgotten queued prompt');
   jobs.enqueueCloudJob('team_default', 'fresh-job', { cwd: root, prompt: 'current queued prompt', packetId: 'fresh-packet', remoteSource: source, promptMemoryRevision: revision.readMemoryRevision() });
   const fresh = await poll.GET(new Request('http://localhost/api/cloud/worker-poll?waitMs=0&workerId=fixture', { headers }));
   expect(fresh.status).toBe(200);

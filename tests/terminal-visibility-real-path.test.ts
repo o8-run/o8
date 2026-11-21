@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dashSessionNameForOwnerKey, dashTmuxArgs } from '@/lib/ws-server/dash-terminal-persistence';
@@ -600,20 +601,20 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
       O8_API_TOKEN: token,
     };
     delete cliEnv.O8_WORKER_TOKEN;
-    const cli = (...args: string[]) => execFileSync(
+    const cli = (...args: string[]) => promisify(execFile)(
       process.execPath,
       [cliBundle, 'terminal', ...args],
       { cwd: process.cwd(), env: cliEnv, encoding: 'utf8', timeout: 15_000 },
-    );
-    const listed = JSON.parse(cli('list')) as { sessions: Array<{ id: string }> };
+    ).then(({ stdout }) => stdout);
+    const listed = JSON.parse(await cli('list')) as { sessions: Array<{ id: string }> };
     expect(listed.sessions.some((session) => session.id === cliSessionName)).toBe(true);
-    const snapshot = JSON.parse(cli('show', cliSessionName, '--lines', '80')) as {
+    const snapshot = JSON.parse(await cli('show', cliSessionName, '--lines', '80')) as {
       session: { id: string; cols: number; rows: number }; text: string;
     };
     expect(snapshot.session.id).toBe(cliSessionName);
     expect(snapshot.session.cols).toBeGreaterThan(0);
     expect(snapshot.text).toContain('O8_CLI_BEFORE_RESTART');
-    const oneLine = JSON.parse(cli('show', cliSessionName, '--lines', '1')) as { text: string };
+    const oneLine = JSON.parse(await cli('show', cliSessionName, '--lines', '1')) as { text: string };
     expect(oneLine.text.trimEnd().split('\n')).toHaveLength(1);
 
     const observed = spawn(process.execPath, [
@@ -707,7 +708,6 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
       blockedUi.socket.close();
       for (const [path, body] of [
         ['/terminal-voice-input', { sessionName: controlSessionName, text: 'O8_VOICE_MUST_NOT_WRITE' }],
-        ['/terminal-exec', { sessionName: controlSessionName, command: 'O8_EXEC_MUST_NOT_WRITE' }],
       ] as const) {
         const response = await fetch(`http://127.0.0.1:${wsPort}${path}`, {
           method: 'POST',

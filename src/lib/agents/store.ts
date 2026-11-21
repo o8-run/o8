@@ -15,8 +15,6 @@ export type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 export { normalizeAgentBusRepoPath } from './repo-paths';
 export const AGENT_MESSAGE_TEXT_MAX_LENGTH = 4_000;
 export const AGENT_CONVERSATION_DEFAULT_LIMIT = 8;
-export const AGENT_CONVERSATION_EXTENSION = 4;
-export const AGENT_CONVERSATION_MAX_LIMIT = 24;
 export const AGENT_PRESENCE_TTL_MS = 6 * 60_000;
 // Re-wake after a bounded delay so a lost queued turn cannot silence a target indefinitely.
 export const AGENT_NATIVE_WAKE_TTL_MS = 15 * 60_000;
@@ -302,17 +300,6 @@ export function getAgentConversation(
   ensureAgentBusSchema(sqlite);
   const row = sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(id) as ConversationRow | undefined;
   return row ? mapConversation(row) : null;
-}
-
-export function listAgentConversations(
-  repo: string,
-  limit: number,
-  sqlite: Database.Database = getSqlite(),
-): AgentConversation[] {
-  ensureAgentBusSchema(sqlite);
-  return (sqlite.prepare(`
-    SELECT * FROM agent_conversations WHERE repo_path = ? ORDER BY updated_at DESC LIMIT ?
-  `).all(normalizeAgentBusRepoPath(repo), limit) as ConversationRow[]).map(mapConversation);
 }
 
 export function mapMessage(row: MessageRow, sqlite: Database.Database): AgentMessage {
@@ -762,39 +749,4 @@ export function listRecentAgentMessagesAcrossRepos(
     ORDER BY sequence DESC LIMIT ?
   `).all(limit) as MessageRow[];
   return rows.map((row) => mapMessage(row, sqlite));
-}
-
-export function updateAgentConversation(
-  input: { id: string; repo: string; action: 'close' | 'extend'; summary?: string | null },
-  sqlite: Database.Database = getSqlite(),
-): AgentConversation {
-  ensureAgentBusSchema(sqlite);
-  const repo = normalizeAgentBusRepoPath(input.repo);
-  return sqlite.transaction(() => {
-    const row = sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(input.id) as ConversationRow | undefined;
-    if (!row || row.repo_path !== repo) {
-      throw new AgentConversationError('Conversation was not found in this repository.', 'agent_conversation_not_found', 404);
-    }
-    const now = new Date().toISOString();
-    if (input.action === 'close') {
-      if (row.closed_at) return mapConversation(row);
-      sqlite.prepare(`
-        UPDATE agent_conversations SET closed_at = ?, closed_reason = 'operator_stop', summary = ?, updated_at = ? WHERE id = ?
-      `).run(now, input.summary ?? null, now, input.id);
-    } else {
-      if (!row.closed_at) {
-        throw new AgentConversationError('Only a closed conversation can be extended.', 'agent_conversation_open', 409);
-      }
-      const nextLimit = Math.min(AGENT_CONVERSATION_MAX_LIMIT, row.turn_count + AGENT_CONVERSATION_EXTENSION);
-      if (nextLimit <= row.turn_count) {
-        throw new AgentConversationError('This conversation has reached the maximum turn limit.', 'agent_conversation_max_limit', 409);
-      }
-      sqlite.prepare(`
-        UPDATE agent_conversations
-        SET turn_limit = ?, closed_at = NULL, closed_reason = NULL, summary = NULL, updated_at = ?
-        WHERE id = ?
-      `).run(nextLimit, now, input.id);
-    }
-    return mapConversation(sqlite.prepare('SELECT * FROM agent_conversations WHERE id = ?').get(input.id) as ConversationRow);
-  }).immediate();
 }
