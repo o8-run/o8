@@ -71,6 +71,16 @@ export function recoverSharedWorkerReturns(): void {
     WHERE status = 'running'`).run(Date.now());
 }
 
+/**
+ * True when the worker's newest result reached its parent chat. With `runId`,
+ * only a delivered result of that exact run counts.
+ */
+export function sharedWorkerResultDelivered(surfaceId: string, runId?: string | null): boolean {
+  const row = getSqlite().prepare(`SELECT run_id, status FROM shared_worker_returns WHERE surface_id = ?
+    ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(surfaceId) as { run_id: string; status: string } | undefined;
+  return row?.status === 'delivered' && (!runId || row.run_id === runId);
+}
+
 export function listSharedWorkerReturns(threadId: string): SharedWorkerReturn[] {
   return getSqlite().prepare(`SELECT r.* FROM shared_worker_returns r
     JOIN shared_worker_parents p ON p.surface_id = r.surface_id WHERE p.thread_id = ?

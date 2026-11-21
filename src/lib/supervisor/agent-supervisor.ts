@@ -1,6 +1,7 @@
 import { resolveStatus, readOwnedRecoveryState, readOwnedCompletionState } from './recovery-status';
 import { trackRun } from '@/lib/background-work/ledger';
 import { sharedWorkerLaunchContext } from '@/lib/orchestrator/shared-worker-recovery';
+import { sharedWorkerResultDelivered } from '@/lib/orchestrator/shared-worker-returns';
 import { access, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -201,7 +202,9 @@ export function rehydrateWatchedAgents(): number {
     for (const row of rows) {
       if (watchedAgents.has(row.surface_id)) continue;
       const launchContext = sharedWorkerLaunchContext(row.repo_path, row.surface_id);
-      if (row.completion_reported && !launchContext) continue;
+      // A shared worker stays watched until its result reaches the parent chat;
+      // once that is recorded it is finished and is not watched again.
+      if (row.completion_reported && (!launchContext || sharedWorkerResultDelivered(row.surface_id))) continue;
       const pollOrdinal = registrationOrdinal++;
       const lastEventAt = row.last_event_at || row.last_activity_at || row.registered_at;
       watchedAgents.set(row.surface_id, {
@@ -464,8 +467,9 @@ async function supervisorTick(): Promise<void> {
   if (!callbacks || watchedAgents.size === 0) return;
 
   const now = Date.now();
+  // A reported completion is not live: nothing about it can change, so it is not polled.
   const dueAgents = [...watchedAgents.values()]
-    .filter((watched) => watched.nextPollAt <= now)
+    .filter((watched) => !watched.completionReported && watched.nextPollAt <= now)
     .sort((left, right) => (
       left.nextPollAt - right.nextPollAt
       || left.pollOrdinal - right.pollOrdinal
@@ -521,6 +525,19 @@ async function pollWatchedAgent(
   const currentStatus = recovery.owned
     ? recovery.interrupted ? 'interrupted' : !recovery.runId || recovery.packetHoldReason ? 'unavailable' : resolveStatus(runtimeAgent, watched, now)
     : resolveStatus(runtimeAgent, watched, now);
+
+  // A shared worker whose session is not running and whose result already
+  // reached its parent chat is done. Its result is delivered by the shared
+  // worker returns, exactly once per run; keep polling until that is recorded.
+  if (watched.launchContext?.checkoutMode === 'shared' && currentStatus !== 'running' && currentStatus !== 'waiting'
+    && !watched.tentativeFinishedSince && sharedWorkerResultDelivered(watched.surfaceId, recovery.owned ? recovery.runId : null)) {
+    watched.completionReported = true;
+    watched.lastStatus = currentStatus;
+    recordWatchedAgentEvent(watched, now);
+    if (!persistWatchedAgent(watched)) return;
+    console.log(`[supervisor] "${watched.name}" ${currentStatus}; its result reached the parent chat — no longer polled`);
+    return;
+  }
 
   if (currentStatus === 'finished' && !watched.completionReported) {
     const confirmed = await confirmFinishedAgent(watched, transcriptStatus, now);

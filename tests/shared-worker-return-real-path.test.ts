@@ -137,3 +137,41 @@ it('delivers real launched workers to the exact persisted parent, survives resta
   await vi.waitFor(() => expect(listSharedWorkerReturns(parent).find(row => row.surface_id === third)?.status).toBe('held'));
   expect(sendTurn).toHaveBeenCalledTimes(1);
 }, 60_000);
+
+it('stops polling a shared worker once its result reached the parent, keeps polling one still running, and never delivers twice', async () => {
+  const supervisor = await import('@/lib/supervisor/agent-supervisor');
+  const running = 'codex-owned:shared-still-running';
+  const fetchFleetStatus = vi.fn(async () => [{ sessionKey: running, status: 'running' }]);
+  supervisor.startSupervisorLoop({ fetchFleetStatus, fetchTranscript: async () => [], steerAgent: vi.fn(async () => {}),
+    interruptAgent: vi.fn(async () => {}), relaunchAgent: vi.fn(), broadcastAgentUpdate: vi.fn(),
+    queueOrchestratorEscalation: vi.fn() } as unknown as Parameters<typeof supervisor.startSupervisorLoop>[0]);
+  supervisor.stopSupervisorLoop();
+  const shared = { source: 'agent', caller: 'orchestrator', presentation: 'split', repoContext: 'transient',
+    checkoutMode: 'shared', parentThreadId: parent } as const;
+  const [first, second] = surfaces;
+  expect(listSharedWorkerReturns(parent).filter(row => [first, second].includes(row.surface_id)).map(row => row.status)).toEqual(['delivered', 'delivered']);
+  for (const surface of [first, second, running]) supervisor.registerWatchedAgent(surface, repo, surface, 'synthetic', shared);
+  const watched = (surface: string) => supervisor.getWatchedAgents().find(row => row.surfaceId === surface)!;
+  const due = () => { for (const surface of [first, second, running]) if (watched(surface)) watched(surface).nextPollAt = 0; };
+  try {
+    await supervisor.runSupervisorTickForTesting();
+    expect(watched(first).completionReported).toBe(true);
+    expect(watched(second).completionReported).toBe(true);
+    expect(watched(running).completionReported).toBe(false);
+    expect(fetchFleetStatus).toHaveBeenCalledTimes(1);
+
+    // Due again: the running worker is polled; the delivered ones are not.
+    due(); await supervisor.runSupervisorTickForTesting();
+    expect(fetchFleetStatus).toHaveBeenCalledTimes(2);
+    expect(watched(running).lastPolledAt).not.toBeNull();
+    supervisor.unregisterWatchedAgent(running);
+    due(); await supervisor.runSupervisorTickForTesting();
+    expect(fetchFleetStatus).toHaveBeenCalledTimes(2);
+
+    // The parent got each result once, and another return pass does not repeat it.
+    busy = false; heartbeat(); await new Promise(resolve => setTimeout(resolve, 80));
+    expect(sendTurn).toHaveBeenCalledTimes(1);
+  } finally {
+    for (const surface of [first, second, running]) supervisor.unregisterWatchedAgent(surface);
+  }
+}, 30_000);
