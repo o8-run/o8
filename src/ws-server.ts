@@ -95,7 +95,7 @@ import { resolveAppVersion } from '@/lib/telemetry/crash-store';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
-import { pluginTerminalSessionReferences } from '@/lib/action-plugins/host';
+import { pluginTerminalSessionReferences } from '@/lib/action-plugins/receipts';
 import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
 import { getBrowserProvider } from './lib/browser/inventory';

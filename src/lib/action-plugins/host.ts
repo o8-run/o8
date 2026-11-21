@@ -4,7 +4,7 @@ import { spawn } from '@/lib/providers/child-process';
 import { EMBEDDED_CHILD_POLICY_SCRIPT } from '@/lib/providers/embedded-child-policy';
 import { constants, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { createBroadcastRedactionContext, redactBroadcastText } from '@/lib/broadcast/redaction';
@@ -13,9 +13,16 @@ import { ActionPluginError } from './errors';
 import { acquiredSource, githubSourceSchema, type GithubActionSource } from './source-storage';
 import { verifyGithubFiles } from './github-files';
 import { actionStateSchema, clearActionState, describeActionState, provisionActionState, type ActionState } from './state-storage';
-import { inspectPluginTerminal, pluginTerminalEnvironment, requirePluginTerminalRuntime, startPluginTerminal, stopPluginTerminal } from './terminal-runtime';
+import { pluginTerminalEnvironment, requirePluginTerminalRuntime, startPluginTerminal, stopPluginTerminal } from './terminal-runtime';
+
+import {
+  actionPluginRoot as root, lifecycle, openActionReceiptDb as db, readTerminalReceipts, refreshTerminalReceipt,
+  saveTerminalReceipt, type PluginTerminalReceipt,
+} from './receipts';
 
 export { ActionPluginError } from './errors';
+export { pluginTerminalReceipts, pluginTerminalSessionReferences } from './receipts';
+export type { PluginTerminalReceipt } from './receipts';
 
 const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64);
 const fileName = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).max(128).refine((name) => name !== '.' && name !== '..' && name !== 'installed.json' && name !== 'o8-actions.json');
@@ -76,17 +83,6 @@ export type ActionManifest = z.infer<typeof actionManifestSchema>;
 type Saved = { manifest: ActionManifest; revision: string; enabled: boolean; linkedAt: string; sourceDirectory: string; workspaceRoot: string | null; source?: GithubActionSource };
 function sha(data: Buffer | string) { return createHash('sha256').update(data).digest('hex'); }
 function revisionFor(manifest: ActionManifest, workspaceRoot: string | null, sourceDirectory: string, source?: GithubActionSource) { return sha(JSON.stringify({ manifest, workspaceRoot, sourceDirectory, ...(source ? { source } : {}) })); }
-function root(create: boolean) {
-  let at = getDataDir();
-  if (create && !existsSync(at)) mkdirSync(at, { recursive: true, mode: 0o700 });
-  if (!lstatSync(at).isDirectory() || lstatSync(at).isSymbolicLink()) throw new ActionPluginError('unsafe_path', 'Invalid data directory.');
-  for (const part of ['customizations', 'actions']) {
-    at = path.join(at, part);
-    if (create && !existsSync(at)) mkdirSync(at, { mode: 0o700 });
-    if (!lstatSync(at).isDirectory() || lstatSync(at).isSymbolicLink()) throw new ActionPluginError('unsafe_path', 'Invalid action storage directory.');
-  }
-  return at;
-}
 function sourceDir(input: string) {
   if (!path.isAbsolute(input)) throw new ActionPluginError('unsafe_path', 'Choose an absolute local folder.');
   let at = path.parse(input).root;
@@ -147,32 +143,6 @@ function readSaved(id: string): Saved {
     || saved.revision !== revisionFor(manifest, saved.workspaceRoot, saved.sourceDirectory, source) || typeof saved.enabled !== 'boolean') throw new ActionPluginError('damaged', 'Action installation is damaged.');
   return { ...saved, manifest };
 }
-function db() {
-  const file = path.join(root(true), 'receipts.sqlite');
-  let fd: number;
-  try { fd = openSync(file, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, 0o600); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw new ActionPluginError('unsafe_path', 'Invalid receipt storage file.');
-    throw error;
-  }
-  closeSync(fd);
-  const stat = lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new ActionPluginError('unsafe_path', 'Invalid receipt storage file.');
-  const database = new Database(file);
-  database.exec('CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, action_id TEXT NOT NULL, actor TEXT NOT NULL, revision TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, exit_code INTEGER, stdout TEXT, stderr TEXT, error TEXT, source_metadata TEXT)');
-  database.exec('CREATE TABLE IF NOT EXISTS terminal_receipts (id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, receipt_json TEXT NOT NULL)');
-  database.transaction(() => {
-    const columns = database.prepare('PRAGMA table_info(receipts)').all() as Array<{ name: string }>;
-    if (!columns.some((column) => column.name === 'source_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN source_metadata TEXT');
-    if (!columns.some((column) => column.name === 'state_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN state_metadata TEXT');
-  }).immediate();
-  return database;
-}
-function lifecycle<T>(action: (database: Database.Database) => T): T {
-  const database = db();
-  try { return database.transaction(() => action(database)).immediate(); }
-  finally { database.close(); }
-}
 function refuseRunning(database: Database.Database, id: string) {
   for (const terminal of readTerminalReceipts(database, id)) {
     if (['launching', 'running'].includes(refreshTerminalReceipt(database, terminal).status)) throw new ActionPluginError('busy', 'Stop this plugin’s active or pending terminal before changing its installation or saved data.', 409);
@@ -184,44 +154,6 @@ function refuseRunning(database: Database.Database, id: string) {
   if (active) throw new ActionPluginError('busy', 'An action from this plugin is running.', 409);
 }
 
-export type PluginTerminalReceipt = {
-  id: string; pluginId: string; terminalId: string; revision: string; sessionName: string;
-  label: string; workspaceRoot: string | null; source: GithubActionSource | null; state: ActionState | null;
-  actor: 'local-operator'; startedAt: string; finishedAt: string | null;
-  status: 'launching' | 'running' | 'exited' | 'ended' | 'stopped' | 'failed';
-  exitCode: number | null; error: string | null;
-};
-function readTerminalReceipts(database: Database.Database, pluginId?: string): PluginTerminalReceipt[] {
-  const rows = (pluginId
-    ? database.prepare('SELECT receipt_json FROM terminal_receipts WHERE plugin_id = ? ORDER BY rowid DESC').all(pluginId)
-    : database.prepare('SELECT receipt_json FROM terminal_receipts ORDER BY rowid DESC').all()) as Array<{ receipt_json: string }>;
-  return rows.map((row) => JSON.parse(row.receipt_json) as PluginTerminalReceipt);
-}
-function saveTerminalReceipt(database: Database.Database, receipt: PluginTerminalReceipt) {
-  database.prepare('INSERT INTO terminal_receipts (id, plugin_id, receipt_json) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET receipt_json = excluded.receipt_json')
-    .run(receipt.id, receipt.pluginId, JSON.stringify(receipt));
-  return receipt;
-}
-function refreshTerminalReceipt(database: Database.Database, receipt: PluginTerminalReceipt) {
-  if (!['launching', 'running', 'exited'].includes(receipt.status)) return receipt;
-  try {
-    const current = inspectPluginTerminal(receipt.sessionName);
-    // Missing does not mean a pending launch has finished: the host may have
-    // stopped before spawn, or another process may be between claim and spawn.
-    // Only explicit Stop cancels this claim. Replays never execute it again.
-    if (receipt.status === 'launching' && current.status === 'ended') return receipt;
-    return saveTerminalReceipt(database, { ...receipt, ...current, error: null, finishedAt: current.status === 'running' ? null : receipt.finishedAt ?? new Date().toISOString() });
-  } catch {
-    return saveTerminalReceipt(database, { ...receipt, error: 'Terminal status is unavailable. The session remains reserved; retry inspection or stop it before launching again.' });
-  }
-}
-export function pluginTerminalReceipts(pluginId?: string) {
-  return lifecycle((database) => readTerminalReceipts(database, pluginId).map((receipt) => refreshTerminalReceipt(database, receipt)));
-}
-export function pluginTerminalSessionReferences() {
-  if (!existsSync(path.join(getDataDir(), 'customizations', 'actions', 'receipts.sqlite'))) return [];
-  return pluginTerminalReceipts().filter((receipt) => ['launching', 'running', 'exited'].includes(receipt.status)).map((receipt) => receipt.sessionName);
-}
 export async function launchPluginTerminal(input: { id: string; terminalId: string; revision: string; requestId: string; repo?: string }) {
   const requestId = z.string().uuid().parse(input.requestId).toLowerCase();
   const dir = path.dirname(savedPath(input.id));
