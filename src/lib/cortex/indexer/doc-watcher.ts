@@ -25,7 +25,7 @@ import { chunkMarkdown } from './markdown-chunks';
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync, watch } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, watch, type Dirent } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
 import { distillDocChunkBatch } from '@/lib/cortex/indexer/doc-distill';
@@ -303,32 +303,34 @@ function collectWatchedFiles(repos: RegisteredRepo[]): Array<{ repo: RegisteredR
     const stack: string[] = [repo.localPath];
     while (stack.length > 0) {
       const dir = stack.pop()!;
-      let entries: string[];
+      let entries: Dirent[];
       try {
-        entries = readdirSync(dir);
+        entries = readdirSync(dir, { withFileTypes: true });
       } catch {
         continue;
       }
-      for (const name of entries) {
+      for (const entry of entries) {
+        const name = entry.name;
+        const isLink = entry.isSymbolicLink();
+        if (!entry.isDirectory() && !isLink && !/\.md$/i.test(name)) continue;
         const abs = join(dir, name);
-        let stat;
         try {
-          stat = statSync(abs);
+          const target = isLink ? statSync(abs) : entry;
+          if (target.isDirectory()) {
+            if (!SKIP_DIRECTORIES.has(name) && !pathHasWorktreeSegment(abs)) stack.push(abs);
+            continue;
+          }
+          if (!target.isFile() || !/\.md$/i.test(name)) continue;
+          const relPath = relative(repo.localPath, abs);
+          if (!isWhitelisted(relPath)) continue;
+          const stat = 'size' in target ? target : statSync(abs);
+          if (stat.isFile() && stat.size <= MAX_FILE_BYTES && stat.size >= MIN_FILE_LEN) {
+            files.push({ repo, absPath: abs, relPath });
+          }
         } catch {
+          // A file or symlink target can disappear during the walk.
           continue;
         }
-        if (stat.isDirectory()) {
-          if (SKIP_DIRECTORIES.has(name)) continue;
-          if (pathHasWorktreeSegment(abs)) continue;
-          stack.push(abs);
-          continue;
-        }
-        if (!stat.isFile()) continue;
-        if (!/\.md$/i.test(name)) continue;
-        const relPath = relative(repo.localPath, abs);
-        if (!isWhitelisted(relPath)) continue;
-        if (stat.size > MAX_FILE_BYTES || stat.size < MIN_FILE_LEN) continue;
-        files.push({ repo, absPath: abs, relPath });
       }
     }
   }
@@ -398,12 +400,6 @@ function startRepoDocWatcher(): () => void {
 
   seedChunkHashes(files);
   console.log(`[doc-watcher] seeded hashes for ${chunkHashes.size} chunk(s) across ${files.length} file(s)`);
-
-  // Build absPath → repo+relPath lookup for the watch callback.
-  const fileIndex = new Map<string, { repo: RegisteredRepo; relPath: string }>();
-  for (const { repo, absPath, relPath } of files) {
-    fileIndex.set(absPath, { repo, relPath });
-  }
 
   // One fs.watch handle per file (not per-directory) — avoids recursive watch
   // issues on macOS and limits scope to exactly the whitelisted files.
