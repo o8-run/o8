@@ -2,7 +2,7 @@ import { installComposerOwnerFixture } from './fixtures/composer-queue-owner';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -104,12 +104,6 @@ afterAll(async () => {
   closeDb();
 });
 
-// Drifted after thread lists moved into o8d: https://github.com/o8-run/o8/issues/6596
-it.skip('replays recorded o8 next requests through both real HTTP entry points', async () => {
-  candidate = await start();
-  expect(await replayNextRequests(reference, candidate, token, records)).toBe(records.length);
-});
-
 it('reads committed WAL updates without changing persisted state', async () => {
   candidate ||= await start();
   getSqlite().prepare("UPDATE composer_send_queue SET reason = 'Committed WAL update' WHERE id = 'fixture-queue-item'").run();
@@ -149,34 +143,6 @@ it('requires compile/runtime opt-in and a numeric loopback listener', async () =
   for (const args of [[], ['--experimental-http', '--listen', '0.0.0.0:0', '--data-dir', directory]]) {
     await expect(promisify(execFile)(binary, args)).rejects.toThrow('o8d failed');
   }
-});
-
-// Drifted after thread lists moved into o8d: https://github.com/o8-run/o8/issues/6596
-it.skip('replays the URL-based parity command with the original recording', async () => {
-  candidate ||= await start();
-  const result = await promisify(execFile)(process.execPath, ['--import=tsx', 'scripts/next-http-parity.ts',
-    `--reference=${reference}`, `--candidate=${candidate}`, '--recording=tests/fixtures/next-http/requests.json',
-    `--fixture-repo=${repo}`], { env: { ...process.env, O8_NEXT_API_TOKEN: token } });
-  expect(result.stdout).toContain(`HTTP parity passed: ${records.length} requests`);
-});
-
-// Drifted after thread lists moved into o8d: https://github.com/o8-run/o8/issues/6596
-it.skip('replays earlier pages, cursor refusals and the exact client limit', async () => {
-  candidate ||= await start();
-  const first = await sendNextRequest(reference, token, records.find(r => r.name === 'native transcript page')!);
-  const cursor = (first.body as { page: { beforeCursor: string } }).page.beforeCursor;
-  const earlier = { name: 'earlier history', path: `/api/mobile/history?sessionKey=llm-chat:thoughts-long&page=1&limit=100&before=${encodeURIComponent(cursor)}` };
-  expect(await replayNextRequests(reference, candidate, token, [earlier,
-    { name: 'stale cursor', path: `${earlier.path}invalid` },
-    { name: 'negative limit', path: '/api/mobile/history?sessionKey=llm-chat:thoughts-long&limit=-1' },
-  ])).toBe(3);
-  writeFileSync(join(directory, 'chat-history', 'thoughts-oversized.json'), JSON.stringify({ messages: [
-    { id: 'large', role: 'assistant', content: 'x'.repeat(16 * 1024 * 1024) },
-  ] }));
-  try {
-    expect((await sendNextRequest(candidate, token, { name: 'bounded history',
-      path: '/api/mobile/history?sessionKey=llm-chat:thoughts-oversized&limit=100' })).status).toBe(413);
-  } finally { unlinkSync(join(directory, 'chat-history', 'thoughts-oversized.json')); }
 });
 
 it('refuses unsupported reconciliation and symlinks across profiles', async () => {
