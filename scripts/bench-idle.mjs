@@ -15,6 +15,12 @@
 // Usage: npm run bench:idle -- [--data ~/.o8] [--settle 120] [--seconds 60]
 //          [--window /path/to/o8-next] [--window-settle 90] [--keep] [--allow-unsandboxed]
 //
+// Each case leads with the ledger totals: main-thread ms per minute across
+// every registered loop, and child processes spawned per minute. Machine load
+// barely moves them, unlike CPU %, which is printed second. With --window the
+// bench measures three cases: no clients, a background window, and a window in
+// front (the same offscreen window started with O8_NEXT_FOREGROUND=1).
+//
 // The window is the app shell, offscreen, on the copy of the saved shell state
 // (next-shell.json). An offscreen window is never in front, so it marks its
 // reads `x-o8-foreground: 0`. Its startup reads and subscriptions still count
@@ -108,14 +114,17 @@ async function measure(label, pid, dataDir) {
   await sleep(16_000);
   const after = readLedger(dataDir);
   const cpu = ((cpu1 - cpu0) / measureSeconds) * 100;
-  console.log(`\n== ${label}: ${cpu.toFixed(1)}% of a core, ${rssMb(pid)} MB RSS (${measureSeconds} s)`);
   const rows = ledgerDelta(before, after, measureSeconds + 16);
+  const mainMsPerMin = rows.reduce((sum, row) => sum + row.mainMsPerMin, 0);
+  const spawnsPerMin = rows.reduce((sum, row) => sum + row.spawnsPerMin, 0);
+  console.log(`\n== ${label}: ${mainMsPerMin.toFixed(0)} ms/min ledger main, ${spawnsPerMin.toFixed(1)} spawns/min`);
+  console.log(`   ${cpu.toFixed(1)}% of a core, ${rssMb(pid)} MB RSS (${measureSeconds} s)`);
   for (const row of rows.slice(0, 25)) {
     const commands = Object.entries(row.commands).map(([name, count]) => `${name}×${count}`).join(' ');
     console.log(`${row.mainMsPerMin.toFixed(0).padStart(7)} ms/min main  ${row.spawnsPerMin.toFixed(1).padStart(6)} spawns/min  ${String(row.runs).padStart(4)} runs  ${row.name}${commands ? `  [${commands}]` : ''}`);
   }
   if (rows.length === 0) console.log('  no registered loop ran');
-  return { cpu, rows };
+  return { mainMsPerMin, spawnsPerMin, cpu, rows };
 }
 
 async function main() {
@@ -175,10 +184,14 @@ async function main() {
     cwd: serverCwd, env: { ...env, TSX_TSCONFIG_PATH: join(root, 'tsconfig.json') }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   const log = join(bench, 'server.log');
-  server.stdout.on('data', (chunk) => writeFileSync(log, chunk, { flag: 'a' }));
-  server.stderr.on('data', (chunk) => writeFileSync(log, chunk, { flag: 'a' }));
+  // Output can arrive after stop() removes the bench folder; drop it then.
+  let stopped = false;
+  const append = (chunk) => { if (!stopped) writeFileSync(log, chunk, { flag: 'a' }); };
+  server.stdout.on('data', append);
+  server.stderr.on('data', append);
   let window = null;
   const stop = () => {
+    stopped = true;
     window?.kill();
     server.kill();
     if (!flag('keep')) rmSync(bench, { recursive: true, force: true });
@@ -190,18 +203,31 @@ async function main() {
     if (server.exitCode !== null) throw new Error(`server exited; log at ${log}`);
     const quiet = await measure('no clients', server.pid, dataDir);
     let windowed = null;
+    let front = null;
     if (windowBinary) {
-      window = spawn(windowBinary, ['--enable-next', '--app-shell', '--shell-state', join(dataDir, 'next-shell.json'),
+      const openWindow = (foreground) => spawn(windowBinary, ['--enable-next', '--app-shell', '--shell-state', join(dataDir, 'next-shell.json'),
         '--server', `http://127.0.0.1:${apiPort}`, '--offscreen'], {
-        env: { ...process.env, O8_DATA_DIR: dataDir, O8_NEXT_API_TOKEN: readFileSync(join(dataDir, 'ws-token'), 'utf8').trim() },
+        env: {
+          ...process.env, O8_DATA_DIR: dataDir, O8_NEXT_API_TOKEN: readFileSync(join(dataDir, 'ws-token'), 'utf8').trim(),
+          O8_NEXT_FOREGROUND: foreground ? '1' : '0',
+        },
         stdio: 'ignore',
       });
+      window = openWindow(false);
       await sleep(windowSettleSeconds * 1000);
-      windowed = await measure('one offscreen window', server.pid, dataDir);
+      windowed = await measure('background window', server.pid, dataDir);
+      window.kill();
+      window = openWindow(true);
+      await sleep(windowSettleSeconds * 1000);
+      front = await measure('window in front', server.pid, dataDir);
     }
     const scan = scanBackgroundLoops();
     console.log(`\nRegistered loops: ${scan.registered.length}; unregistered setInterval sites: ${scan.unregistered.length}`);
-    if (flag('json')) console.log(JSON.stringify({ quiet, windowed, scan }, null, 2));
+    console.log('\nTotals (ledger main ms/min, spawns/min):');
+    for (const [label, result] of [['no clients', quiet], ['background window', windowed], ['window in front', front]]) {
+      if (result) console.log(`  ${label.padEnd(18)} ${result.mainMsPerMin.toFixed(0).padStart(6)} ms/min  ${result.spawnsPerMin.toFixed(1).padStart(6)} spawns/min  (${result.cpu.toFixed(1)}% CPU)`);
+    }
+    if (flag('json')) console.log(JSON.stringify({ quiet, windowed, front, scan }, null, 2));
     if (flag('keep')) console.log(`[bench:idle] kept ${bench}`);
   } finally {
     stop();
