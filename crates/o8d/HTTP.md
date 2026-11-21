@@ -299,17 +299,10 @@ mission and packet fields are defined in [orchestrator types](../../src/lib/orch
 
 ## Verification and replay
 
-`tests/o8d-next-http-real-path.test.ts` uses production middleware, handlers
-and stores. Only external runtime observation and the Clerk wrapper are fixture
-replacements. It replays `tests/fixtures/next-http/requests.json` against both
-listeners, comparing complete status/body pairs. No timing fields are removed.
-Recordings contain no credentials. For URL-based replay, supply the credential
-through `O8_NEXT_API_TOKEN` and run:
-
-```sh
-node --import=tsx scripts/next-http-parity.ts --reference=ORIGIN \
-  --candidate=ORIGIN --recording=FILE --fixture-repo=PATH
-```
+`tests/o8d-next-http-real-path.test.ts` runs the read-only listener against
+production stores: committed WAL reads, profile isolation, credential rotation,
+listener opt-in and cross-profile refusals. The full replay against the Next
+handlers was removed once thread lists moved into o8d (#6596).
 
 The Rust `saved_history_surface_with_only_o8d` test uses the production client
 and `Surface::select`, reads a saved list, loads the 100-message page/context/
