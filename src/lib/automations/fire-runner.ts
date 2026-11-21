@@ -4,8 +4,7 @@ import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
 import { computeNextRunAt } from './cron';
 import { ensureAutomationPrecheck } from './precheck';
-import { runAutomation } from './runner';
-import { runWatchAutomationAction } from './watch-actions';
+import type { RunAutomationResult } from './runner';
 import { getAutomationFire, settleAutomationFire, type AutomationFire } from './fire-store';
 
 export async function runClaimedAutomationFire(
@@ -45,11 +44,15 @@ export async function runClaimedAutomationFire(
     return settledPrecheck;
   }
 
-  let result: Awaited<ReturnType<typeof runAutomation>>;
+  let result: RunAutomationResult;
   try {
-    result = fire.source === 'watch'
-      ? await runWatchAutomationAction(row, fire)
-      : await runAutomation(row);
+    if (fire.source === 'watch') {
+      const { runWatchAutomationAction } = await import('./watch-actions');
+      result = await runWatchAutomationAction(row, fire);
+    } else {
+      const { runAutomation } = await import('./runner');
+      result = await runAutomation(row);
+    }
   } catch (error) {
     result = {
       ok: false,
