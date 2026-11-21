@@ -20,17 +20,26 @@ import { autoSettleEligible, inboxSubject, mutateInboxAutoSettle, readInboxState
 import { assertInboxCanSettle, inboxPackets, runtimeInboxIdentity } from './subjects';
 import type { InboxSubject } from './settlement-state';
 import { recurring } from '@/lib/background-work/ledger';
+import { controlPlaneStamp } from '@/lib/orchestrator/control-plane';
+import { getDataDir } from '@/lib/data-dir-migration';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
 
 export { emptySettlement, hasQueuedTurnStart, QUEUED_TURN_START_GRACE_MS, transitionSettlement } from './settlement-state';
 export type { InboxSettlement, InboxSubject } from './settlement-state';
 
 const SWEEP_MS = 60_000;
+const DAY_MS = 86_400_000;
 let timer: ReturnType<typeof setInterval> | null = null;
+/** What the last timed sweep read, while it left nothing to retry; null forces the next sweep. */
+let lastInputs: string | null = null;
+/** The earliest moment a subject the last sweep saw can age into an idle settle. */
+let nextIdleAt = Infinity;
 
 interface Candidate { subject: InboxSubject; verdict: AutoSettleVerdict; legacyPinned: boolean }
 
 function eligibleVerdict(subject: InboxSubject, merged: AutoSettleVerdict | null, lastActivityAt: string | undefined,
-  days: number, now: number, legacyPinned = false): AutoSettleVerdict | null {
+  days: number, now: number, legacyPinned = false, idle?: { nextAt: number }): AutoSettleVerdict | null {
   const state = readInboxState(subject);
   if (merged && autoSettleEligible(state, merged.evidenceAt, legacyPinned)) return merged;
   // New work can make an old merge stale. It can still age into an idle settle.
@@ -39,7 +48,9 @@ function eligibleVerdict(subject: InboxSubject, merged: AutoSettleVerdict | null
   // activity while retaining its timestamp as the mutation's freshness fence.
   const latest = Math.max(...[lastActivityAt, state.runAt, state.observedRunAt]
     .map(at => at ? Date.parse(at) : NaN).filter(Number.isFinite));
-  return idleVerdict(Number.isFinite(latest) ? new Date(latest).toISOString() : null, days, now);
+  const verdict = idleVerdict(Number.isFinite(latest) ? new Date(latest).toISOString() : null, days, now);
+  if (!verdict && idle && Number.isFinite(latest)) idle.nextAt = Math.min(idle.nextAt, latest + days * DAY_MS);
+  return verdict;
 }
 
 function linkedPrs(): Map<string, AutoSettlePr[]> {
@@ -97,7 +108,7 @@ function assertCompletionEvidenceCurrent(subject: InboxSubject, captured: AutoSe
   }
 }
 
-export function collectAutoSettleCandidates(idleDays = 0, now = Date.now()): Candidate[] {
+export function collectAutoSettleCandidates(idleDays = 0, now = Date.now(), idle?: { nextAt: number }): Candidate[] {
   const { packets, lanes, prs, owned, byId, laneRows, newest } = readCompletionEvidence();
   const out: Candidate[] = [];
   const activity = idleDays > 0
@@ -109,14 +120,14 @@ export function collectAutoSettleCandidates(idleDays = 0, now = Date.now()): Can
     const subject = inboxSubject('conversation', threadId, record.repoPath, record.projectId);
     const legacyPinned = legacyInboxPin(record) !== null;
     const verdict = eligibleVerdict(subject, conversationVerdict(prs.get(threadId) ?? [], owned.get(threadId) ?? [], laneRows),
-      activity.get(threadId), idleDays, now, legacyPinned);
+      activity.get(threadId), idleDays, now, legacyPinned, idle);
     if (verdict) out.push({ subject, verdict, legacyPinned });
   }
   for (const [sessionKey, lane] of newest) {
     const identity = runtimeInboxIdentity({ sessionKey, workspace: lane.repoPath }, packets, lanes);
     if (identity.parentInboxSubject) continue;
     const verdict = eligibleVerdict(identity.inboxSubject, laneVerdict(lane, lane.packetId ? byId.get(lane.packetId) : undefined),
-      lane.updatedAt, idleDays, now);
+      lane.updatedAt, idleDays, now, false, idle);
     if (verdict) out.push({ subject: identity.inboxSubject, verdict, legacyPinned: false });
   }
   return out;
@@ -125,8 +136,11 @@ export function collectAutoSettleCandidates(idleDays = 0, now = Date.now()): Can
 export async function runInboxAutoSettleSweep(options: { force?: boolean; agents?: AgentSummary[]; idleDays?: number; now?: number } = {}): Promise<string[]> {
   const defaults = getOperatorDefaultsSync().values;
   if (!options.force && !defaults.autoSettleEnabled) return [];
-  const candidates = collectAutoSettleCandidates(options.idleDays ?? defaults.autoSettleIdleDays ?? 0, options.now)
+  const idle = { nextAt: Infinity };
+  const candidates = collectAutoSettleCandidates(options.idleDays ?? defaults.autoSettleIdleDays ?? 0, options.now, idle)
     .filter(c => autoSettleEligible(readInboxState(c.subject), c.verdict.evidenceAt, c.legacyPinned));
+  nextIdleAt = idle.nextAt;
+  lastSweepLeftWork = candidates.length > 0;
   if (!candidates.length) return [];
   let agents = options.agents;
   if (!agents) {
@@ -146,12 +160,51 @@ export async function runInboxAutoSettleSweep(options: { force?: boolean; agents
       }
     } catch { /* Evidence changed, needs input, running or queued: try again next sweep. */ }
   }
+  lastSweepLeftWork = settled.length < candidates.length;
   return settled;
+}
+
+let lastSweepLeftWork = true;
+let settleStatement: { get(): unknown } | null = null;
+
+/**
+ * Everything a sweep reads, cheaply: any SQLite write on this connection or
+ * another (lanes, missions, linked PRs, inbox state, operator defaults), the
+ * orchestrator state file, and the chat history folder.
+ */
+function sweepInputs(): string {
+  settleStatement ??= getSqlite().prepare('SELECT total_changes() AS changes, data_version AS version FROM pragma_data_version');
+  const { changes, version } = settleStatement.get() as { changes: number; version: number };
+  let chats = '';
+  try { chats = String(statSync(join(getDataDir(), 'chat-history')).mtimeMs); } catch { /* no chats yet */ }
+  return `${changes}:${version}:${controlPlaneStamp()}:${chats}`;
+}
+
+/**
+ * The timed sweep. It runs only when something it reads changed, the last
+ * sweep left a candidate to retry, or a subject has aged into an idle settle;
+ * otherwise a pass would read every packet, lane and chat to find nothing.
+ */
+export async function runInboxAutoSettleSweepIfDue(now = Date.now()): Promise<string[] | null> {
+  const inputs = sweepInputs();
+  if (inputs === lastInputs && !lastSweepLeftWork && now < nextIdleAt) return null;
+  lastInputs = null;
+  const settled = await runInboxAutoSettleSweep({ now });
+  // Settling writes; read the inputs after the pass so its own writes do not force another.
+  if (!lastSweepLeftWork) lastInputs = sweepInputs();
+  return settled;
+}
+
+/** For tests: forget what the last timed sweep read. */
+export function resetInboxAutoSettleSweepState(): void {
+  lastInputs = null;
+  lastSweepLeftWork = true;
+  nextIdleAt = Infinity;
 }
 
 export function startInboxAutoSettle(): void {
   if (timer) return;
-  timer = recurring('inbox-auto-settle', () => { void runInboxAutoSettleSweep().catch(err => console.warn('[inbox] auto-settle sweep failed:', err)); }, SWEEP_MS);
+  timer = recurring('inbox-auto-settle', () => { void runInboxAutoSettleSweepIfDue().catch(err => console.warn('[inbox] auto-settle sweep failed:', err)); }, SWEEP_MS);
   timer.unref?.();
 }
 export function stopInboxAutoSettle(): void {

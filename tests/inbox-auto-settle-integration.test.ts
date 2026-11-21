@@ -15,7 +15,7 @@ import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 import { attachPullRequestContext } from '@/lib/orchestrator/pull-request-context';
 import { upsertGitHubPullRequest, type GitHubPullRequestSnapshot } from '@/lib/github-broker/store';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { runInboxAutoSettleSweep } from '@/lib/inbox/settlement';
+import { resetInboxAutoSettleSweepState, runInboxAutoSettleSweep, runInboxAutoSettleSweepIfDue } from '@/lib/inbox/settlement';
 import { inboxSubject, readInboxState, recordInboxConversationEvent } from '@/lib/inbox/store';
 import { enqueueComposerSend } from '@/lib/orchestrator/composer-queue';
 
@@ -255,6 +255,34 @@ describe('server auto-settle sweep', () => {
     upsertGitHubPullRequest(pull(2, new Date().toISOString()));
     expect(await runInboxAutoSettleSweep({ force: true, idleDays: 0 })).toContain(tabId);
     expect(await row(tabId)).toMatchObject({ settledOverride: 'settled', autoSettledReason: 'pr-merged' });
+  }, 60_000);
+
+  it('runs the timed sweep only when its inputs change or an idle settle comes due', async () => {
+    const day = 86_400_000;
+    const tabId = await seed('timed-pr');
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+    upsertGitHubPullRequest(pull(7, null));
+    attachPullRequestContext(tabId, { host: 'github.com', repositoryId: 1, pullRequestId: 7, number: 7 });
+    fixture.agents = [];
+    resetInboxAutoSettleSweepState();
+    // Drain whatever earlier cases left; then nothing changed, so it skips.
+    let result = await runInboxAutoSettleSweepIfDue();
+    for (let pass = 0; pass < 3 && result !== null; pass++) result = await runInboxAutoSettleSweepIfDue();
+    expect(result).toBeNull();
+    expect(await runInboxAutoSettleSweepIfDue()).toBeNull();
+
+    // A mirrored merge is a SQLite write: the next timed sweep runs and settles.
+    upsertGitHubPullRequest(pull(7, new Date().toISOString()));
+    expect(await runInboxAutoSettleSweepIfDue()).toContain(tabId);
+    expect(await runInboxAutoSettleSweepIfDue()).toBeNull();
+
+    // A thread that will age into an idle settle: skipped until its day comes.
+    const idle = await seed('timed-idle', false, Date.now());
+    const kid = child(idle, 'timed-idle', false);
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'auto-settle-timed', repoPath: process.cwd(), packets: [kid.packet] });
+    expect(await runInboxAutoSettleSweepIfDue()).not.toContain(idle);
+    expect(await runInboxAutoSettleSweepIfDue(Date.now() + day)).toBeNull();
+    expect(await runInboxAutoSettleSweepIfDue(Date.now() + 4 * day)).toContain(idle);
   }, 60_000);
 
   it('falls back to idle settlement when newer work follows a canonical merged packet', async () => {
