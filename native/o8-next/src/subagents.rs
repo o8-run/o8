@@ -36,7 +36,7 @@ pub(crate) struct Inspector {
     pending: bool,
     loaded: bool,
     error: Option<String>,
-    next: Option<Instant>,
+    refreshed: Option<Instant>,
     clock_second: u64,
     detail_pending: bool,
     /// What a subagent's own chat last read as, and when; it has no session.
@@ -78,7 +78,7 @@ impl Inspector {
             pending: false,
             loaded: false,
             error: None,
-            next: None,
+            refreshed: None,
             clock_second: 0,
             detail_pending: false,
             native_read: None,
@@ -219,7 +219,12 @@ impl Inspector {
             self.ensure_detail(cx);
             cx.notify();
         }
-        if !self.pending && (refresh || self.next.is_none_or(|at| Instant::now() >= at)) {
+        if !self.pending
+            && (refresh
+                || self.refreshed.is_none_or(|at| {
+                    at.elapsed() >= crate::foreground::cadence(Duration::from_secs(3))
+                }))
+        {
             self.refresh(cx);
         }
         if self.open && self.detail.as_mut().is_some_and(|detail| detail.poll()) {
@@ -244,7 +249,7 @@ impl Inspector {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.pending = false;
-                this.next = Some(Instant::now() + Duration::from_secs(3));
+                this.refreshed = Some(Instant::now());
                 let old = this
                     .selected
                     .as_ref()
