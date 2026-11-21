@@ -11,7 +11,6 @@ export const viewerHttpRoutes = [
   { path: '/api/panel/git-log', load: () => import('@/app/api/panel/git-log/route') },
   { path: '/api/panel/git/log', load: () => import('@/app/api/panel/git/log/route') },
   { path: '/api/review/file', load: () => import('@/app/api/review/file/route') },
-  { path: '/api/mobile/review-file', load: () => import('@/app/api/mobile/review-file/route') },
   { path: '/api/review/diff', load: () => import('@/app/api/review/diff/route') },
   { path: '/api/panel/file-preview', load: () => import('@/app/api/panel/file-preview/route') },
   { path: '/api/panel/readme', load: () => import('@/app/api/panel/readme/route') },

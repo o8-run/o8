@@ -30,7 +30,6 @@ const routes = [
   ['/api/panel/git-log', () => import('@/app/api/panel/git-log/route')],
   ['/api/panel/git/log', () => import('@/app/api/panel/git/log/route')],
   ['/api/review/file', () => import('@/app/api/review/file/route')],
-  ['/api/mobile/review-file', () => import('@/app/api/mobile/review-file/route')],
   ['/api/review/diff', () => import('@/app/api/review/diff/route')],
   ['/api/panel/file-preview', () => import('@/app/api/panel/file-preview/route')],
   ['/api/mobile/sync', () => import('@/app/api/mobile/sync/route')],

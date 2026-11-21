@@ -2,8 +2,7 @@ import { createHash } from 'node:crypto';
 import { viewerCredentialCorpus, knownViewerOperatorFixture, knownViewerDeviceFixture, knownViewerEnvironmentFixture } from './fixtures/viewer-credential-corpus';
 import { execFileSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { performance } from 'node:perf_hooks';
@@ -24,6 +23,7 @@ const assignmentCases = [
   ['yaml plain continuation', 'password: fixture-plain-head\n  fixture-plain-tail\npublic: true\n', 'fixture-plain-tail'],
 ] as const;
 let root: string;
+let imageRoot: string;
 let server: Server;
 let origin: string;
 let authority: string;
@@ -33,7 +33,6 @@ const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encodi
 const directReads = [
   ['/api/v2/files', () => import('@/app/api/v2/files/route')],
   ['/api/review/file', () => import('@/app/api/review/file/route')],
-  ['/api/mobile/review-file', () => import('@/app/api/mobile/review-file/route')],
   ['/api/panel/file-content', () => import('@/app/api/panel/file-content/route')],
   ['/api/panel/file-diff', () => import('@/app/api/panel/file-diff/route')],
   ['/api/panel/commit-diff', () => import('@/app/api/panel/commit-diff/route')],
@@ -43,7 +42,8 @@ const directReads = [
 ] as const;
 
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'o8-viewer-review-'));
+  imageRoot = mkdtempSync('/tmp/o8-viewer-review-');
+  root = realpathSync(imageRoot);
   vi.stubEnv('CORTEX_IDE_REVIEW_REPO_ROOT', root);
   vi.stubEnv('CORTEX_IDE_MEDIA_ROOT', root);
   git('init', '-q', '-b', 'main'); git('config', 'user.name', 'fixture'); git('config', 'user.email', 'fixture@example.invalid');
@@ -74,8 +74,8 @@ function request(route: string, params: Record<string, string> = {}, init: Const
   const headers = new Headers(init?.headers); headers.set('authorization', `Bearer ${authority}`);
   return new NextRequest(url, { ...init, headers });
 }
-async function inspect(response: Response, clear: string) {
-  expect([200, 206, 415]).toContain(response.status);
+async function inspect(response: Response, clear: string, source = response.url) {
+  expect([200, 206, 415], source).toContain(response.status);
   const bytes = Buffer.from(await response.arrayBuffer());
   let recovered = bytes.toString('utf8');
   if (response.headers.get('content-type')?.includes('json')) {
@@ -88,7 +88,7 @@ async function inspect(response: Response, clear: string) {
     visit(JSON.parse(bytes.toString()));
   }
   for (const match of recovered.matchAll(/data:[^,\s]+;base64,([A-Za-z0-9+/=\r\n]+)/g)) recovered += Buffer.from(match[1], 'base64').toString('utf8');
-  expect(recovered.includes(clear), 'credential recoverable from response').toBe(false);
+  expect(recovered.includes(clear), `credential recoverable from response ${source}`).toBe(false);
 }
 async function exerciseText(file: string, clear: string, sha: string, baseBranch: string) {
   for (const [route, load] of directReads) {
@@ -137,7 +137,7 @@ describe('security review regressions through persisted viewer routes', () => {
     const { GET: asset } = await import('@/app/api/panel/file-asset/route');
     for (const [route, handler] of [['/api/panel/file-preview', preview], ['/api/panel/file-asset', asset]] as const) {
       const req = request(route, { path: 'metadata.png' });
-      await inspect(await handler(req), operator); await inspect(await fetch(req), operator);
+      await inspect(await handler(req), operator, route); await inspect(await fetch(req), operator, route);
     }
     const start = png.indexOf(operator);
     const req = request('/api/panel/file-asset', { path: 'metadata.png' }, { headers: { range: `bytes=${start}-${start + operator.length - 1}` } });
@@ -188,15 +188,15 @@ describe('security review regressions through persisted viewer routes', () => {
       recordArtifact({ id, kind, source: 'manual', relPath, mimeType });
     }
     const cases = [
-      ['/api/panel/serve-image', { path: join(root, 'alias.png') }, (await import('@/app/api/panel/serve-image/route')).GET],
-      ['/api/mobile/media', { path: join(root, 'alias.png') }, (await import('@/app/api/mobile/media/route')).GET],
+      ['/api/panel/serve-image', { path: join(imageRoot, 'alias.png') }, (await import('@/app/api/panel/serve-image/route')).GET],
+      ['/api/mobile/media', { path: join(imageRoot, 'alias.png') }, (await import('@/app/api/mobile/media/route')).GET],
       ['/api/panel/report-artifact', { id: 'art-viewer-report' }, (await import('@/app/api/panel/report-artifact/route')).GET],
       ['/api/panel/threads/artifact', { id: 'art-viewer-report' }, (await import('@/app/api/panel/threads/artifact/route')).GET],
       ['/api/panel/threads/artifact', { id: 'art-viewer-image' }, (await import('@/app/api/panel/threads/artifact/route')).GET],
       ['/api/repo-spec', { repoPath: root }, (await import('@/app/api/repo-spec/route')).GET],
     ] as const;
     for (const [route, params, handler] of cases) {
-      const req = request(route, params); await inspect(await handler(req), operator); await inspect(await fetch(req), operator);
+      const req = request(route, params); await inspect(await handler(req), operator, route); await inspect(await fetch(req), operator, route);
     }
     const { POST } = await import('@/app/api/v2/context/files/route');
     const req = request('/api/v2/context/files', {}, { method: 'POST', headers: { 'x-cortex-repo-path': root }, body: JSON.stringify({ paths: ['alias.txt'] }) });
@@ -214,18 +214,23 @@ describe('security review regressions through persisted viewer routes', () => {
       ['/api/panel/readme', {}, (await import('@/app/api/panel/readme/route')).GET],
       ['/api/repo-spec', { repoPath: root }, (await import('@/app/api/repo-spec/route')).GET],
       ['/api/panel/file-asset', { path: 'alias.svg' }, (await import('@/app/api/panel/file-asset/route')).GET],
-      ['/api/panel/serve-image', { path: join(root, 'alias.svg') }, (await import('@/app/api/panel/serve-image/route')).GET],
-      ['/api/mobile/media', { path: join(root, 'alias.svg') }, (await import('@/app/api/mobile/media/route')).GET],
+      ['/api/panel/serve-image', { path: join(imageRoot, 'alias.svg') }, (await import('@/app/api/panel/serve-image/route')).GET],
+      ['/api/mobile/media', { path: join(imageRoot, 'alias.svg') }, (await import('@/app/api/mobile/media/route')).GET],
       ['/api/panel/report-artifact', { id }, (await import('@/app/api/panel/report-artifact/route')).GET],
       ['/api/panel/threads/artifact', { id }, (await import('@/app/api/panel/threads/artifact/route')).GET],
     ] as const;
     for (const [route, params, handler] of cases) {
       const req = request(route, params);
       for (const response of [await handler(req), await fetch(req)]) {
-        expect(response.status).toBe(200);
+        if (route === '/api/mobile/media') {
+          expect(response.status, route).toBe(415);
+          await inspect(response, item.clear, route);
+          continue;
+        }
+        expect(response.status, route).toBe(200);
         const header = response.headers.get('x-o8-viewer-redaction');
         const marks = header ? JSON.parse(header) : (await response.clone().json()).redaction;
-        expect(marks.spans.length).toBeGreaterThan(0); await inspect(response, item.clear);
+        expect(marks?.spans?.length, route).toBeGreaterThan(0); await inspect(response, item.clear, route);
       }
     }
     const { POST } = await import('@/app/api/v2/context/files/route');

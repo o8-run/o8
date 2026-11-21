@@ -7537,62 +7537,6 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  // ── Mobile dev-host URL push ──
-  // Invoked by /api/mobile/push-url after a desktop user long-presses a port
-  // chip and clicks "Send to mobile". Fans out a one-shot `mobile-dev-host`
-  // event to every WS client; the mobile-split-shell listener then dispatches
-  // the matching `o8:mobile-url-push` window CustomEvent for DevHostFrame.
-  if (req.url === '/internal/mobile-url-push' && req.method === 'POST') {
-    if (!isAuthorizedInternalRequest(req)) {
-      res.writeHead(401);
-      res.end('unauthorized');
-      return;
-    }
-
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on('end', () => {
-      try {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
-          url?: string;
-          sourceRepoId?: string | null;
-          sentAt?: string;
-        };
-        const url = typeof body.url === 'string' ? body.url.trim() : '';
-        if (!url) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'url required' }));
-          return;
-        }
-        const sentAt = typeof body.sentAt === 'string' && body.sentAt.trim()
-          ? body.sentAt
-          : currentIsoTime();
-        const sourceRepoId = typeof body.sourceRepoId === 'string' && body.sourceRepoId.trim()
-          ? body.sourceRepoId.trim()
-          : null;
-
-        // Count active clients before broadcasting so the desktop toast can
-        // tell the user "no phone connected" without depending on PWA pings.
-        const recipients = clients.size;
-        broadcast({
-          channel: 'mobile-dev-host',
-          event: 'url-push',
-          data: { url, sentAt, sourceRepoId },
-        });
-
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, recipients, sentAt }));
-      } catch (err) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          ok: false,
-          error: err instanceof Error ? err.message : 'invalid json',
-        }));
-      }
-    });
-    return;
-  }
-
   // Health check endpoint
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });

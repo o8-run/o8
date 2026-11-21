@@ -131,7 +131,6 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET']), path: /^\/api\/mobile\/(?:pull-requests|usage)\/?$/ },
   // Cost and tokens per day by agent: totals only, no session or account detail.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/usage\/history\/?$/ },
-  { methods: new Set(['GET']), path: /^\/api\/mobile\/conversation-pr-context\/?$/ },
   // Browse one thread's checkout: a folder listing and a size-capped text preview.
   // Read-only; ignored and secret-named files are never returned.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/files\/(?:list|content)\/?$/ },
@@ -141,7 +140,6 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['POST']), path: /^\/api\/mobile\/automations\/[^/]+\/(?:enabled|run)\/?$/ },
   // Which coding agents are installed and signed in: booleans and a default model,
   // never an account, organisation or path.
-  { methods: new Set(['GET']), path: /^\/api\/mobile\/agents\/?$/ },
   // Commit and push one thread's work. The checkout comes from the session, never
   // from a path in the request; push refuses the default branch and never forces.
   { methods: new Set(['GET']), path: /^\/api\/mobile\/source-control\/status\/?$/ },
@@ -150,9 +148,9 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET']), path: /^\/api\/mobile\/orchestrator\/models\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
   // Phone-facing routes only. Keep internal desktop/ws-server routes out of
-  // this list: devices*, push-url, and ws-token all require the
+  // this list: device administration requires the
   // operator credential. New mobile routes fail closed until named here.
-  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat\/send|diff-comments?|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|review-file|search|sync|terminal-input|terminal-sessions)\/?$/ },
+  { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|diff-comments?|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|search|sync|terminal-input|terminal-sessions)\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/panel\/approvals\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|github-status|repos|operator-defaults|projects|search)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/panel\/(?:operator-defaults|pr\/review)\/?$/ },

@@ -4789,12 +4789,6 @@
       ]
     },
     {
-      "path": "tests/mobile-chat-send-effort-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/mobile-e2ee-required-real-path.test.ts",
       "reasons": [
         "child-process",
