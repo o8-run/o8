@@ -34,3 +34,10 @@ it('reads a folder outside any repository as empty without starting git', async 
   }
   expect(spawned.count).toBe(0);
 });
+
+it('reads a deleted folder as empty without starting git', async () => {
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), 'o8-live-review-gone-')));
+  rmSync(folder, { recursive: true, force: true });
+  expect(await getLiveReviewChangeSet(folder)).toMatchObject({ changedFiles: [], files: 0 });
+  expect(spawned.count).toBe(0);
+});

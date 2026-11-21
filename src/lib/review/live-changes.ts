@@ -1,6 +1,6 @@
 import { execFile } from '@/lib/providers/child-process';
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
@@ -181,7 +181,8 @@ export async function getLiveReviewChangeSet(
   // Outside any repository every git read fails and nothing can be cached, so
   // a poll would spawn four failing git processes per pass. The packaged
   // server's own folder is such a folder. The answer is the same empty set.
-  if (!await mayHaveGitRepositoryContext(cacheKey)) {
+  // A registered repository that was deleted is not a repository either.
+  if (!existsSync(cacheKey) || !await mayHaveGitRepositoryContext(cacheKey)) {
     liveReviewChangeCache.delete(cacheKey);
     return { repoPath, workspacePath, sessionKey, changedFiles: [], additions: 0, deletions: 0, files: 0 };
   }
