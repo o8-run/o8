@@ -50,3 +50,21 @@ it('still rejects an invalid snapshot after a permissive read cached it', () => 
   expect(readMissionRegistryEntry('invalid')).not.toBeNull();
   expect(() => listMissionRegistryEntries({ strict: true })).toThrow('Stored packet snapshot is unavailable.');
 });
+
+it('reads archived history without retaining its normalized snapshot', () => {
+  insert('archive-transition');
+  expect(readMissionRegistryEntry('archive-transition')?.mission.packets[0]?.title).toBe('original');
+  getSqlite().prepare('UPDATE missions SET archived_at = 2 WHERE id = ?').run('archive-transition');
+  expect(readMissionRegistryEntry('archive-transition')).toBeNull();
+
+  const first = readMissionRegistryEntry('archive-transition', { includeArchived: true });
+  expect(first?.archivedAt).toBe(2);
+  first!.mission.packets[0]!.title = 'changed by caller';
+  expect(readMissionRegistryEntry('archive-transition', { includeArchived: true })?.mission.packets[0]?.title)
+    .toBe('original');
+  expect(normalizeOrchestratorMissionState).toHaveBeenCalledTimes(3);
+
+  getSqlite().prepare('UPDATE missions SET archived_at = NULL WHERE id = ?').run('archive-transition');
+  expect(readMissionRegistryEntry('archive-transition')?.mission.packets[0]?.title).toBe('original');
+  expect(normalizeOrchestratorMissionState).toHaveBeenCalledTimes(4);
+});
