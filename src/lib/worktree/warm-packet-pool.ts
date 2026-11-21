@@ -43,7 +43,10 @@ function startRefresh(): void {
   if (refresh || stopped) return;
   refresh = recurring('warm-packet-pool', () => {
     if (requests.size) queueRefill(0);
-  }, 30_000);
+  }, 30_000, {
+    // A refill that is queued or building keeps going while the server is at rest.
+    busy: () => pending.length > 0 || building !== null || timer !== null,
+  });
   refresh.unref();
 }
 

@@ -91,17 +91,18 @@ function readLedger(dataDir) {
 function ledgerDelta(before, after, seconds) {
   const prior = new Map((before?.loops ?? []).map((loop) => [loop.name, loop]));
   return (after?.loops ?? []).map((loop) => {
-    const was = prior.get(loop.name) ?? { runs: 0, mainMs: 0, children: 0, childWallMs: 0 };
+    const was = prior.get(loop.name) ?? { runs: 0, mainMs: 0, children: 0, childWallMs: 0, pausedTicks: 0 };
     return {
       name: loop.name,
       runs: loop.runs - was.runs,
+      paused: (loop.pausedTicks ?? 0) - (was.pausedTicks ?? 0),
       mainMsPerMin: ((loop.mainMs - was.mainMs) / seconds) * 60,
       spawnsPerMin: ((loop.children - was.children) / seconds) * 60,
       childWallMsPerMin: ((loop.childWallMs - was.childWallMs) / seconds) * 60,
       changedRuns: loop.changedRuns,
       commands: loop.childCommands,
     };
-  }).filter((loop) => loop.runs > 0 || loop.mainMsPerMin > 0)
+  }).filter((loop) => loop.runs > 0 || loop.mainMsPerMin > 0 || loop.paused > 0)
     .sort((a, b) => (b.mainMsPerMin + b.childWallMsPerMin / 10) - (a.mainMsPerMin + a.childWallMsPerMin / 10));
 }
 
@@ -121,7 +122,7 @@ async function measure(label, pid, dataDir) {
   console.log(`   ${cpu.toFixed(1)}% of a core, ${rssMb(pid)} MB RSS (${measureSeconds} s)`);
   for (const row of rows.slice(0, 25)) {
     const commands = Object.entries(row.commands).map(([name, count]) => `${name}×${count}`).join(' ');
-    console.log(`${row.mainMsPerMin.toFixed(0).padStart(7)} ms/min main  ${row.spawnsPerMin.toFixed(1).padStart(6)} spawns/min  ${String(row.runs).padStart(4)} runs  ${row.name}${commands ? `  [${commands}]` : ''}`);
+    console.log(`${row.mainMsPerMin.toFixed(0).padStart(7)} ms/min main  ${row.spawnsPerMin.toFixed(1).padStart(6)} spawns/min  ${String(row.runs).padStart(4)} runs ${String(row.paused).padStart(4)} paused  ${row.name}${commands ? `  [${commands}]` : ''}`);
   }
   if (rows.length === 0) console.log('  no registered loop ran');
   return { mainMsPerMin, spawnsPerMin, cpu, rows };

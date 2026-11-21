@@ -25,7 +25,8 @@ async function internalRequest<M extends ComposerOwnerMethod>(method: M, params:
   if (!INTERNAL_METHODS.has(method)) throw new ComposerOwnerUnavailable('The composer executor requires its attached owner.');
   const body = JSON.stringify({ v: 1, method, params });
   if (Buffer.byteLength(body) > COMPOSER_RPC_FRAME_LIMIT) throw new ComposerOwnerReplyError('limit', 'The composer owner request exceeds its frame limit.');
-  const headers = { Authorization: `Bearer ${getOrCreateWsToken()}`, 'Content-Type': 'application/json' };
+  // The server calling itself is not client activity for the idle gate.
+  const headers = { Authorization: `Bearer ${getOrCreateWsToken()}`, 'Content-Type': 'application/json', 'x-o8-background': '1' };
   let response: Response;
   try {
     response = await fetch(`${base}/internal/composer-queue`, {
