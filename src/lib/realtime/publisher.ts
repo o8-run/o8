@@ -26,6 +26,7 @@ async function postInternalRealtimeRequest(payload: RealtimeInternalRequest) {
       headers: {
         'Authorization': `Bearer ${getOrCreateWsToken()}`,
         'Content-Type': 'application/json',
+        'x-o8-background': '1',
       },
       body: JSON.stringify(payload),
       signal: deadline,

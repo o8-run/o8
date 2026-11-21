@@ -21,11 +21,12 @@ it('charges a loop for work after an await and for the processes it spawns', asy
     return true;
   });
   // Work outside any loop is never charged to one.
-  busy(40);
+  busy(200);
   const entry = ledgerSnapshot().find((item) => item.name === 'fixture-loop')!;
   expect(entry.runs).toBe(1);
   expect(entry.mainMs).toBeGreaterThanOrEqual(45);
-  expect(entry.mainMs).toBeLessThan(85);
+  // Well under the 200 ms spent outside the loop, with room for a loaded machine.
+  expect(entry.mainMs).toBeLessThan(150);
   expect(entry.children).toBe(1);
   expect(entry.childCommands.git).toBe(1);
   expect(entry.changedRuns).toBe(1);

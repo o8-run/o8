@@ -121,7 +121,8 @@ export function waitForJob(
   const promise = new Promise<CloudJob | null>((resolve) => {
     finish = resolve;
     waiters.add(check);
-    interval = recurring('cloud-job-queue-poll', check, DURABLE_POLL_INTERVAL_MS);
+    // A remote worker is waiting on this poll: it runs until the wait settles, at rest or not.
+    interval = recurring('cloud-job-queue-poll', check, DURABLE_POLL_INTERVAL_MS, { busy: () => !settled });
     timeout = setTimeout(() => settle(null), Math.max(0, timeoutMs));
     check();
   });
