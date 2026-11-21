@@ -89,7 +89,9 @@ const store = createOwnedSessionStore({
   humanLabel: 'Owned close fixture',
   squadShortName: 'CloseFixture',
   sessionIdPrefix: 'codex-owned-close-fixture-',
-  launchArgs: ({ prompt }) => ['-e', prompt === 'wait-for-stop'
+  // A launch may append run notes to the prompt (the verified o8 command note
+  // since #4800), so the fixture keys on how the prompt starts.
+  launchArgs: ({ prompt }) => ['-e', prompt.startsWith('wait-for-stop')
     ? 'process.stdout.write("ready\\n"); setInterval(() => {}, 1000);'
     : 'process.stdout.write("done\\n");'],
   resumeArgs: () => null,
