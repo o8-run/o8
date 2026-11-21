@@ -1,3 +1,7 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { atRest, noteActivity, noteRequest, pausedLoopNames, resetIdleGate, startIdleGate } from './idle-gate';
@@ -117,16 +121,39 @@ it('runs every loop once after the last session ends before resting, even a slow
   expect(pausedLoopNames()).toEqual(['fixture-fast', 'fixture-reaper']);
 });
 
-it("does not wake on the conflict scan's request to its own server", async () => {
+it("wakes on neither of the server's own requests to itself, and still wakes on an unmarked one", async () => {
   const { conflictScanRequestHeaders } = await import('@/lib/ws-server/conflict-gate');
-  const run = vi.fn();
-  timers.push(recurring('fixture-scan-paused', run, 1_000));
-  vi.advanceTimersByTime(120_000);
-  expect(atRest()).toBe(true);
-  const pausedAt = run.mock.calls.length;
-  const headers = conflictScanRequestHeaders('token');
-  expect(headers['x-o8-background']).toBe('1');
-  noteRequest(headers, 'GET');
-  expect(atRest()).toBe(true);
-  expect(run.mock.calls.length).toBe(pausedAt);
+  const { readTerminalInventory } = await import('@/lib/app-update/idle-window');
+  const dataDir = mkdtempSync(join(tmpdir(), 'o8-idle-gate-'));
+  vi.stubEnv('O8_DATA_DIR', dataDir);
+  vi.stubEnv('CORTEX_IDE_DATA_DIR', dataDir);
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ sessions: [] }));
+  vi.stubGlobal('fetch', fetchMock);
+  // What the server's HTTP handler receives: Node lowercases header names.
+  const received = (headers: HeadersInit | undefined) => Object.fromEntries(new Headers(headers).entries());
+  try {
+    await readTerminalInventory();
+    const voiceSessions = received((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.headers);
+    const conflicts = received(conflictScanRequestHeaders('token'));
+
+    const run = vi.fn();
+    timers.push(recurring('fixture-self-requests', run, 1_000));
+    vi.advanceTimersByTime(120_000);
+    expect(atRest()).toBe(true);
+    const pausedAt = run.mock.calls.length;
+
+    noteRequest(voiceSessions, 'GET'); // GET /terminal-voice-sessions
+    noteRequest(conflicts, 'GET'); // GET /api/worktrees/conflicts
+    vi.advanceTimersByTime(10_000);
+    expect(atRest()).toBe(true);
+    expect(run.mock.calls.length).toBe(pausedAt);
+
+    // The same request without the header is client activity.
+    const { 'x-o8-background': _marker, ...unmarked } = conflicts;
+    noteRequest(unmarked, 'GET');
+    expect(atRest()).toBe(false);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
 });
