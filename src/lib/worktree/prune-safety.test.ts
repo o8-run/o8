@@ -150,6 +150,26 @@ describe('WorktreeManager.prune() safety guards (#1585)', () => {
     expect(await exists(path.join(base, 'packet-orphan-lane-free')), 'stale no-lane worktree reaped').toBe(false);
   }, 60_000);
 
+  it('leaves a git worktree it has no metadata for out of the age sweep', async () => {
+    const { WorktreeManager } = await import('./manager');
+    // Another tool's worktree (a T3 checkout, a hand-made one) lives outside the managed base.
+    const external = `${repoRoot}-external`;
+    await git(['worktree', 'add', external, '-b', 'external/branch'], repoRoot);
+    const when = new Date(Date.now() - STALE_AGE_MS);
+    const gitAdminPaths = await Promise.all(['HEAD', 'index'].map(async (name) => {
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', name], { cwd: external });
+      return path.resolve(external, stdout.trim());
+    }));
+    await Promise.all([external, path.join(external, 'seed.txt'), ...gitAdminPaths].map((p) => utimes(p, when, when)));
+    try {
+      const pruned = await new WorktreeManager(repoRoot).prune();
+      expect(pruned).not.toContain(path.basename(external));
+      expect(await exists(external), 'unmanaged worktree is untouched').toBe(true);
+    } finally {
+      await rm(external, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('(b) keeps an orphan dir whose mtime probe reads unknown/zero, with a warn', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { WorktreeManager } = await import('./manager');
