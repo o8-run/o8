@@ -522,6 +522,11 @@ describe('merged-by-ancestry reconciliation', () => {
         writeFileSync(log, '');
         return count;
       },
+      takeAll(): number {
+        const count = readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
+        writeFileSync(log, '');
+        return count;
+      },
       restore() {
         process.env.PATH = priorPath;
       },
@@ -553,6 +558,34 @@ describe('merged-by-ancestry reconciliation', () => {
       expect(getLane(lane.id)?.status).toBe('reviewing');
     } finally {
       gitCalls.restore();
+    }
+  }, 30_000);
+
+  it('runs no git for an unmerged lane until its refs or records change', async () => {
+    const { clone } = makeRepo('o8-ancestry-unchanged');
+    writeFileSync(join(clone, 'lane.txt'), 'lane\n');
+    commitAll(clone, 'lane work');
+    const lane = seedLaneOnly(clone);
+    const previous = process.env.O8_ANCESTRY_FETCH_INTERVAL_MS;
+    process.env.O8_ANCESTRY_FETCH_INTERVAL_MS = '300000';
+    const gitCalls = logGitCalls();
+    try {
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 0 });
+      expect(gitCalls.takeAll()).toBeGreaterThan(0);
+      // Nothing changed: the sweep must not start a single git process.
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 0 });
+      expect(gitCalls.takeAll()).toBe(0);
+      // A new commit on the lane branch moves its ref, so detection runs again.
+      writeFileSync(join(clone, 'more.txt'), 'more\n');
+      commitAll(clone, 'more lane work');
+      gitCalls.takeAll();
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 0 });
+      expect(gitCalls.takeAll()).toBeGreaterThan(0);
+      expect(getLane(lane.id)?.status).toBe('reviewing');
+    } finally {
+      gitCalls.restore();
+      if (previous === undefined) delete process.env.O8_ANCESTRY_FETCH_INTERVAL_MS;
+      else process.env.O8_ANCESTRY_FETCH_INTERVAL_MS = previous;
     }
   }, 30_000);
 
