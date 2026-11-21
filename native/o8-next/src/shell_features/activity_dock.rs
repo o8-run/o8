@@ -4,7 +4,7 @@ use crate::motion::Transition;
 use crate::subagents::model::{Agent, Group};
 use gpui::SharedString;
 use serde_json::Value;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 // The Activity Dock: a toolbar of activity tabs floating at the top right of
 // the chat column. A tab grows the toolbar into a card for that tab; its links
 // open the right panel or a surface. The header's Activity toggle shows it.
@@ -155,6 +155,8 @@ struct Dock {
     scope: Option<String>,
     data: Data,
     loaded: Option<Instant>,
+    /// When the open dock last read pull requests, the slow `gh` path.
+    pulls: Option<Instant>,
     /// When each running step was first seen, for steps without saved times.
     seen: std::collections::HashMap<String, f64>,
     spin: Instant,
@@ -171,6 +173,7 @@ impl Default for Dock {
             scope: None,
             data: Data::default(),
             loaded: None,
+            pulls: None,
             seen: Default::default(),
             spin: Instant::now(),
         }
@@ -443,6 +446,16 @@ fn read_inbox(data: &mut Data, body: &Value) {
     data.inbox = body["summary"]["humanRequired"].as_u64().unwrap_or(0);
 }
 
+/// How often the open dock reads pull requests, the slow `gh` path.
+const PULLS_EVERY: Duration = Duration::from_secs(60);
+
+/// Pull requests come from GitHub: read them only while the dock is open, at
+/// most once a minute. Between reads, the local read keeps the known pull
+/// request, since its body lists none.
+fn pulls_due(open: bool, last: Option<Instant>) -> bool {
+    open && last.is_none_or(|at| at.elapsed() >= PULLS_EVERY)
+}
+
 fn load(s: &mut Shell, cx: &mut Context<Shell>) {
     let Some(workspace) = s.state.selected.clone() else {
         return;
@@ -450,36 +463,46 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
     let dock = s.features.get::<Dock>();
     if dock.scope.as_deref() != Some(workspace.as_str()) {
         dock.data = Data::default();
+        dock.pulls = None;
     }
     dock.scope = Some(workspace.clone());
     dock.loaded = Some(Instant::now());
+    let pulls = pulls_due(dock.shown.is_open(), dock.pulls);
+    if pulls {
+        dock.pulls = Some(Instant::now());
+    }
     let client = s.panel_client(&workspace);
     let path = crate::shell::session::workspace_path(&workspace).to_owned();
     type Apply = fn(&mut Data, &Value, &str);
-    let side: [(&'static str, Vec<(&'static str, String)>, Apply); 5] = [
+    // The last field marks the read with pull requests.
+    let mut side: Vec<(&'static str, Vec<(&'static str, String)>, Apply, bool)> = vec![
         (
             "/api/review/workspace",
             vec![("workspace", path.clone()), ("changesOnly", "1".into())],
             |data, body, _| read_snapshot(data, body),
+            false,
         ),
-        // Again with pull requests, the slow `gh` path.
-        (
-            "/api/review/workspace",
-            vec![("workspace", workspace.clone())],
-            |data, body, _| read_snapshot(data, body),
-        ),
-        ("/api/panel/ports", vec![], read_ports),
-        ("/api/orchestrator/state", vec![], read_packets),
+        ("/api/panel/ports", vec![], read_ports, false),
+        ("/api/orchestrator/state", vec![], read_packets, false),
         (
             "/api/panel/supervisor-inbox",
             vec![("scope", "all".into()), ("summaryOnly", "1".into())],
             |data, body, _| read_inbox(data, body),
+            false,
         ),
     ];
+    if pulls {
+        side.push((
+            "/api/review/workspace",
+            vec![("workspace", workspace.clone())],
+            |data, body, _| read_snapshot(data, body),
+            true,
+        ));
+    }
     // Home is no repository: skip its review reads rather than run git
     // status over the whole home folder.
     let home = crate::shell::session::is_home(&workspace);
-    for (route, query, apply) in side {
+    for (route, query, apply, with_pulls) in side {
         if home && route == "/api/review/workspace" {
             continue;
         }
@@ -502,7 +525,7 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
                     crate::shell::session::workspace_path(&scope),
                 );
                 // A pull request found on this branch loads its row for the card.
-                if route == "/api/review/workspace" && dock.data.pull_request.is_some() {
+                if with_pulls && dock.data.pull_request.is_some() {
                     load_pull_details(this, scope.clone(), cx);
                 }
                 cx.notify();
@@ -1791,6 +1814,33 @@ const SPEC: &str = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5 M14 3l5 5v3 M8 9h6 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_open_dock_reads_pull_requests_at_most_once_a_minute() {
+        let now = Instant::now();
+        let earlier = now.checked_sub(PULLS_EVERY + Duration::from_secs(1));
+        assert!(pulls_due(true, None));
+        assert!(!pulls_due(true, Some(now)));
+        assert!(earlier.is_none_or(|at| pulls_due(true, Some(at))));
+        assert!(!pulls_due(false, None));
+        assert!(!pulls_due(false, earlier));
+    }
+
+    #[test]
+    fn the_local_read_keeps_the_known_pull_request() {
+        let mut data = Data::default();
+        read_snapshot(
+            &mut data,
+            &serde_json::json!({"branch": "fix", "pullRequests": [
+                {"number": 7, "headRefName": "fix", "title": "Fix", "state": "OPEN"}
+            ]}),
+        );
+        read_snapshot(
+            &mut data,
+            &serde_json::json!({"branch": "fix", "pullRequests": []}),
+        );
+        assert_eq!(data.pull_request.map(|pr| pr.number), Some(7));
+    }
 
     #[test]
     fn ports_keep_only_this_workspaces_pages() {
