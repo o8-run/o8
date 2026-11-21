@@ -1301,7 +1301,7 @@ export class WorktreeManager {
    * serial `await`s in a `for` loop, so the wall time was the SUM of every
    * worktree's git probes rather than the slowest one.
    */
-  async list(opts: { withDiskUsage?: boolean } = {}): Promise<WorktreeInfo[]> {
+  async list(opts: { withDiskUsage?: boolean; managedOnly?: boolean } = {}): Promise<WorktreeInfo[]> {
     const [gitWorktrees, meta] = await Promise.all([
       this.gitWorktreeList(),
       readWorktreeMetaSnapshot(this.repoRoot),
@@ -1363,7 +1363,7 @@ export class WorktreeManager {
     // "Worktree not found on disk" even when the worktree is fully on disk
     // and registered with git.
     const knownPaths = new Set(results.map((r) => r.path));
-    const orphanResults = await Promise.all(
+    const orphanResults = opts.managedOnly ? [] : await Promise.all(
       gitWorktrees.map(async (gitWt): Promise<WorktreeInfo | null> => {
         if (knownPaths.has(gitWt.path)) return null;
         if (await this.samePath(gitWt.path, this.repoRoot)) return null;
@@ -2271,7 +2271,16 @@ export class WorktreeManager {
 
     pruned.push(...await this.recoverInterruptedCreations(authoritativeMeta));
     authoritativeMeta = await this.loadAllMeta();
-    const worktrees = await this.list();
+    // Only worktrees with metadata can be retired. A git worktree without it
+    // (another tool's checkout, a hand-made one) was refused or matched no
+    // managed path, yet each pass still ran git status, an activity scan,
+    // `git worktree prune` and a metadata transaction for it and counted it as
+    // pruned. On a repository with dozens of such checkouts that pushed the
+    // headless tick past its 30 s deadline every ten minutes.
+    const [worktrees, gitWorktrees] = await Promise.all([
+      this.list({ managedOnly: true }),
+      this.gitWorktreeList(),
+    ]);
     const now = Date.now();
 
     // A crash after exact source→retired rename leaves the public child absent
@@ -2291,8 +2300,9 @@ export class WorktreeManager {
       if (removed) pruned.push(entry.id);
     }
 
+    // Every checkout git knows stays out of the orphan directory sweep below.
     const handledPaths = new Set(
-      await Promise.all(worktrees.map((worktree) => this.canonicalPath(worktree.path))),
+      await Promise.all([...worktrees, ...gitWorktrees].map((worktree) => this.canonicalPath(worktree.path))),
     );
     for (const wt of worktrees) {
       if (now - wt.lastActivityAt > maxAgeMs
