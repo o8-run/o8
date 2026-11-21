@@ -4,6 +4,7 @@ import { lstatSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
+import { mayHaveGitRepositoryContext } from '@/lib/git/repository-context';
 
 const execFileAsync = promisify(execFile);
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
@@ -177,6 +178,13 @@ export async function getLiveReviewChangeSet(
   sessionKey?: string,
 ): Promise<LiveReviewChangeSet> {
   const cacheKey = resolve(workspacePath);
+  // Outside any repository every git read fails and nothing can be cached, so
+  // a poll would spawn four failing git processes per pass. The packaged
+  // server's own folder is such a folder. The answer is the same empty set.
+  if (!await mayHaveGitRepositoryContext(cacheKey)) {
+    liveReviewChangeCache.delete(cacheKey);
+    return { repoPath, workspacePath, sessionKey, changedFiles: [], additions: 0, deletions: 0, files: 0 };
+  }
   const token = await reviewChangeToken(cacheKey);
   const cached = liveReviewChangeCache.get(cacheKey);
   if (token !== null && cached?.token === token) {

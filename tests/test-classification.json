@@ -873,6 +873,12 @@
       ]
     },
     {
+      "path": "src/lib/review/live-changes-no-repo.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/review/live-changes.test.ts",
       "reasons": [
         "child-process",
