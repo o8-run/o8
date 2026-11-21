@@ -30,9 +30,9 @@ export function scanBackgroundLoops() {
     if (/^['"]use client['"]/m.test(text)) continue;
     const rel = relative(root, file);
     if (clientFiles.has(rel)) continue;
-    for (const match of text.matchAll(/(?:recurring|trackRun)\('([^']+)'/g)) registered.add(match[1]);
+    for (const match of text.matchAll(/(?:recurring|trackRun|gatedRun)\('([^']+)'/g)) registered.add(match[1]);
     text.split('\n').forEach((line, index) => {
-      if (/\bsetInterval\(/.test(line) && !rel.endsWith('background-work/ledger.ts')) {
+      if (/\bsetInterval\(/.test(line) && !rel.startsWith('src/lib/background-work/')) {
         unregistered.push({ file: rel, line: index + 1, text: line.trim().slice(0, 120) });
       }
     });

@@ -569,7 +569,7 @@ export class MachineRelayConnector {
         this.terminateUnresponsiveSocket(socket);
       }, this.pongTimeoutMs);
       this.pongTimer.unref?.();
-    }, this.keepAliveIntervalMs);
+    }, this.keepAliveIntervalMs, { class: 'always', reason: 'links to the other computers of the owner drop without it' });
     this.keepAliveTimer.unref?.();
   }
 

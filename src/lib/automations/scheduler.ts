@@ -101,5 +101,7 @@ export function bootAutomationsScheduler(): void {
     + `heartbeat ${HEARTBEAT_PATH}`,
   );
   setTimeout(() => { void runAutomationSchedulerTick(); }, 2_000).unref();
-  recurring('automations-scheduler', () => { void runAutomationSchedulerTick(); }, TICK_MS).unref();
+  recurring('automations-scheduler', () => { void runAutomationSchedulerTick(); }, TICK_MS, {
+    class: 'always', reason: 'scheduled automations must fire on time',
+  }).unref();
 }

@@ -93,6 +93,11 @@ export function triggerAutoReview(lane: Lane): void {
 /**
  * Start the review queue drain loop. Call once per server process.
  */
+/** Queued or running reviews keep the drain going while the server is at rest. */
+function hasQueuedReviews(): boolean {
+  return Boolean(getSqlite().prepare("SELECT 1 FROM review_queue WHERE status IN ('pending', 'in_progress') LIMIT 1").get());
+}
+
 export function startReviewQueueDrain(): () => void {
   if (manualReviewRequested()) return () => {};
   if (drainTimer) return () => { /* already running */ };
@@ -108,7 +113,7 @@ export function startReviewQueueDrain(): () => void {
     void drainReviewQueue().catch((err) => {
       console.error('[auto-review] Drain error:', err);
     });
-  }, DRAIN_INTERVAL_MS);
+  }, DRAIN_INTERVAL_MS, { busy: hasQueuedReviews });
   stopExplainerDrain = startPacketExplainerQueueDrain();
 
   console.log(`[auto-review] Started review queue drain (${DRAIN_INTERVAL_MS}ms interval)`);
