@@ -77,6 +77,7 @@ import { waitForTerminalResyncBarrier, type TerminalResyncCapture } from '@/lib/
 import { formatTmuxResyncSnapshot, parseTmuxSnapshotCursor } from '@/lib/ws-server/terminal-resync-snapshot';
 import { TerminalWorkloadStats } from '@/lib/ws-server/terminal-workload-stats';
 import { O8dBridge } from '@/lib/ws-server/o8d-bridge';
+import { HistoryPollCadence } from '@/lib/ws-server/history-poll-cadence';
 import { o8dStartsByDefault } from '@/lib/ws-server/o8d-binary';
 
 migrateDataDirOnce();
@@ -2455,6 +2456,7 @@ let mobileSnapshotRerequest: { fresh: boolean } | null = null;
 const sessionHistoryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let realtimeSessionHistoryPollTimer: ReturnType<typeof setInterval> | null = null;
 let realtimeSessionHistoryPollInFlight = false;
+const historyPollCadence = new HistoryPollCadence();
 const sessionHistoryReadsInFlight = new Map<string, {
   requestKey: string;
   promise: Promise<SessionTranscriptRead>;
@@ -2890,6 +2892,7 @@ async function buildResyncEvents(stream: RealtimeStreamKey) {
     const entries = transcript.entries;
     const latestId = entries.at(-1)?.id;
     if (latestId) lastRealtimeHistoryId.set(sessionKey, latestId);
+    historyPollCadence.activity(sessionKey);
     return [
       buildRealtimeEnvelope(
         stream,
@@ -2993,6 +2996,7 @@ async function buildBootstrapEvents(stream: RealtimeStreamKey) {
     const entries = transcript.entries;
     const latestId = entries.at(-1)?.id;
     if (latestId) lastRealtimeHistoryId.set(sessionKey, latestId);
+    historyPollCadence.activity(sessionKey);
     lastRealtimeFingerprint.history.set(sessionKey, fingerprintHistory(sessionKey, entries));
     return [
       buildRealtimeEnvelope(
@@ -3373,12 +3377,17 @@ async function readAndPublishSessionHistory(sessionKey: string, fresh: boolean) 
     if (success.transition === 'up') {
       console.log(`[ws-server] realtime session history recovered: ${sessionKey}`);
     }
-    if (!replace && entries.length === 0) return;
+    if (!replace && entries.length === 0) {
+      historyPollCadence.record(sessionKey, false);
+      return;
+    }
     if (replace) {
       const fingerprint = fingerprintHistory(sessionKey, entries);
-      if (!fresh && lastRealtimeFingerprint.history.get(sessionKey) === fingerprint) return;
+      const changed = lastRealtimeFingerprint.history.get(sessionKey) !== fingerprint;
+      historyPollCadence.record(sessionKey, changed);
+      if (!fresh && !changed) return;
       lastRealtimeFingerprint.history.set(sessionKey, fingerprint);
-    }
+    } else historyPollCadence.record(sessionKey, true);
     const latestId = entries.at(-1)?.id;
     if (latestId) lastRealtimeHistoryId.set(sessionKey, latestId);
 
@@ -3396,6 +3405,7 @@ async function readAndPublishSessionHistory(sessionKey: string, fresh: boolean) 
       ),
     ]);
   } catch (error) {
+    historyPollCadence.activity(sessionKey);
     if (fresh) freshSessionHistoryRequested.add(sessionKey);
     const failure = recordRealtimeBridgeFailure(backoff, Date.now(), {
       threshold: 1,
@@ -3451,6 +3461,7 @@ function scheduleRealtimeSessionHistoryRefresh(
   delayMs?: number,
   options: { urgent?: boolean } = {},
 ) {
+  historyPollCadence.activity(sessionKey);
   if (fresh) freshSessionHistoryRequested.add(sessionKey);
   const resolvedDelay = delayMs ?? (options.urgent || freshSessionHistoryRequested.has(sessionKey) ? URGENT_HISTORY_REFRESH_MS : 350);
   const existing = sessionHistoryTimers.get(sessionKey);
@@ -5385,6 +5396,7 @@ function onChatDelta(delta: ChatDelta) {
   const sessionFilter = (c: ClientState) => c.sessionKey === delta.sessionKey;
 
   if (delta.state === 'delta') {
+    historyPollCadence.activity(delta.sessionKey);
     broadcast({ channel: 'chat', event: 'delta', data: { text, runId: delta.runId, seq: delta.seq } }, sessionFilter);
   } else if (delta.state === 'done') {
     broadcast({ channel: 'chat', event: 'done', data: { text, runId: delta.runId, seq: delta.seq } }, sessionFilter);
@@ -5457,6 +5469,7 @@ function subscribedRealtimeSessionKeys(): string[] {
     ...sessionHistoryReadsInFlight.keys(),
     ...sessionHistoryPublications.keys(),
   ]);
+  historyPollCadence.retain(retainedSessionKeys);
   for (const sessionKey of freshSessionHistoryRequested) {
     if (!retainedSessionKeys.has(sessionKey)) freshSessionHistoryRequested.delete(sessionKey);
   }
@@ -5478,18 +5491,8 @@ async function refreshSubscribedRealtimeSessionHistories() {
   if (sessionKeys.length === 0) return;
 
   realtimeSessionHistoryPollInFlight = true;
-  let nextIndex = 0;
-  const refreshNext = async () => {
-    while (nextIndex < sessionKeys.length) {
-      const sessionKey = sessionKeys[nextIndex];
-      nextIndex += 1;
-      await publishSessionHistoryRealtimeSnapshot(sessionKey);
-    }
-  };
-
   try {
-    const workerCount = Math.min(REALTIME_SESSION_HISTORY_CONCURRENCY, sessionKeys.length);
-    await Promise.allSettled(Array.from({ length: workerCount }, () => refreshNext()));
+    await historyPollCadence.refresh(sessionKeys, publishSessionHistoryRealtimeSnapshot, REALTIME_SESSION_HISTORY_CONCURRENCY);
   } finally {
     realtimeSessionHistoryPollInFlight = false;
   }
@@ -5554,9 +5557,6 @@ function startPollingLoops() {
     void Promise.allSettled(activeClients.map((c) => syncClientHistory(c, fetchSafetyNetSync)));
   }, SAFETY_NET_HISTORY_MS);
 
-  // Some runtime adapters persist transcript output without emitting ChatDelta.
-  // Refresh only the unique session streams visible to realtime subscribers,
-  // with one shared bounded poll instead of a timer per mounted pane.
   realtimeSessionHistoryPollTimer = setInterval(() => {
     void refreshSubscribedRealtimeSessionHistories();
   }, REALTIME_SESSION_HISTORY_POLL_MS);

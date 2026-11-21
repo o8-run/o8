@@ -1,4 +1,4 @@
-import { execFile, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -38,6 +38,8 @@ interface HistoryResponseGate {
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-realtime-history-wire-'));
 const token = 'realtime-history-wire-token';
+const clockFile = join(dataDir, 'clock-offset');
+let bundleDir = '';
 const historyReads = new Map<string, number>();
 const historyVersions = new Map([
   ['worker-a', 1],
@@ -84,6 +86,9 @@ async function waitFor(
 
 async function waitForHealth(): Promise<void> {
   await waitFor(async () => {
+    if (wsProcess.exitCode !== null || wsProcess.signalCode !== null) {
+      throw new Error(`WS fixture exited: ${serverOutput.slice(-2_000)}`);
+    }
     try {
       return (await fetch(`http://127.0.0.1:${wsPort}/health`)).ok;
     } catch {
@@ -235,10 +240,28 @@ beforeAll(async () => {
   apiServer.listen(apiPort, '127.0.0.1');
   await once(apiServer, 'listening');
 
+  mkdirSync(join(process.cwd(), 'tmp'), { recursive: true });
+  bundleDir = mkdtempSync(join(process.cwd(), 'tmp/history-wire-'));
+  // Compile the WS entry, retaining real installed dependency and HTTP behavior.
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import { build, stop } from 'esbuild';
+    import { createRequire } from 'node:module';
+    const root = process.cwd(), resolve = createRequire(import.meta.url).resolve;
+    await build({ entryPoints: ['src/ws-server.ts'], outfile: process.argv[1], bundle: true,
+      packages: 'external', platform: 'node', format: 'esm', target: 'node22',
+      alias: { 'server-only': root + '/scripts/server-only-stub.js' },
+      plugins: [{ name: 'node-next-paths', setup(b) {
+        b.onResolve({ filter: new RegExp('^next/') }, args => ({ path: resolve(args.path), external: true }));
+      } }], banner: { js: "import{createRequire as __req}from'node:module';const require=__req(import.meta.url);" } });
+    stop();
+  `, join(bundleDir, 'ws.mjs')], { timeout: 20_000 });
+  const clock = join(dataDir, 'clock.cjs');
+  writeFileSync(clockFile, '0');
+  writeFileSync(clock, `const fs = require('node:fs'), now = Date.now;
+    Date.now = () => now() + Number(fs.readFileSync(${JSON.stringify(clockFile)}, 'utf8'));`);
   wsProcess = execFile(process.execPath, [
-    '--import=./scripts/register-server-only-stub.mjs',
-    '--import=tsx',
-    'src/ws-server.ts',
+    `--require=${clock}`,
+    join(bundleDir, 'ws.mjs'),
   ], {
     cwd: process.cwd(),
     env: {
@@ -262,6 +285,7 @@ afterAll(async () => {
   }
   if (apiServer?.listening) await new Promise<void>((resolve) => apiServer.close(() => resolve()));
   rmSync(dataDir, { recursive: true, force: true });
+  if (bundleDir) rmSync(bundleDir, { recursive: true, force: true });
 });
 
 describe('realtime session history server path', () => {
@@ -445,4 +469,34 @@ describe('realtime session history server path', () => {
       newcomer.socket.close();
     }
   }, 15_000);
+  it('backs off quiet history, resumes on data, and wakes on explicit refresh', async () => {
+    const sessionKey = 'worker-idle';
+    const client = await connectClient();
+    subscribe(client.socket, [sessionKey]);
+    await waitFor(() => readCount(sessionKey) >= 3, 'initial fast reads');
+    const beforeIdle = readCount(sessionKey);
+    writeFileSync(clockFile, '65000');
+    await waitFor(() => readCount(sessionKey) > beforeIdle, 'first quiet safety read');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const quietReads = readCount(sessionKey);
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+    expect(readCount(sessionKey)).toBe(quietReads);
+    historyVersions.set(sessionKey, 2);
+    writeFileSync(clockFile, '75000');
+    await waitFor(() => historySnapshots(client.frames).some((s) => s.entries[0]?.id === `${sessionKey}-2`), 'fallback discovers transcript change');
+    const changedReads = readCount(sessionKey);
+    await waitFor(() => readCount(sessionKey) >= changedReads + 2, 'changed history resumes fast reads');
+    writeFileSync(clockFile, '140000');
+    const beforeQuiet = readCount(sessionKey);
+    await waitFor(() => readCount(sessionKey) > beforeQuiet, 'second quiet checkpoint');
+    historyVersions.set(sessionKey, 3);
+    const response = await fetch(`http://127.0.0.1:${wsPort}/internal/realtime`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'refresh', targets: ['sessionHistory'], sessionKeys: [sessionKey], fresh: true }),
+    });
+    expect(response.status).toBe(202);
+    await waitFor(() => historySnapshots(client.frames).some((s) => s.entries[0]?.id === `${sessionKey}-3`), 'explicit refresh wakes quiet history', 900);
+    client.socket.close();
+    writeFileSync(clockFile, '0');
+  }, 20_000);
 });
