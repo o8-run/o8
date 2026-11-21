@@ -4066,7 +4066,7 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
   if (isTerminalChatConnectivityPrompt(msg.displayMessage ?? message)
     && (!Array.isArray(msg.attachments) || msg.attachments.length === 0)) {
     send(client, { channel: 'orchestrator', event: 'error', data: {
-      repoPath, threadId, error: 'Use o8 chat --check to check connectivity without creating a conversation.',
+      repoPath, threadId, error: 'Use o8 doctor to check connectivity without creating a conversation.',
       ...orchestratorCommandAckCorrelation(correlationId),
     } });
     return;

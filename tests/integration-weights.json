@@ -290,8 +290,6 @@
   "tests/claude-code-worker-skill-isolation-real-path.test.ts": 9,
   "tests/claude-linux-cwd-real-path.test.ts": 1,
   "tests/cli-agent-help-real-path.test.ts": 3,
-  "tests/cli-chat-effort-real-path.test.ts": 2,
-  "tests/cli-chat-terminal-real-path.test.ts": 6,
   "tests/cli-connect-real-path.test.ts": 3,
   "tests/cli-control-plane-contract.test.ts": 2,
   "tests/cli-huddle-report-real-path.test.ts": 5,

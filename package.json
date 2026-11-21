@@ -140,7 +140,6 @@
     "entities": "8.0.0",
     "framer-motion": "^12.36.0",
     "iconoir-react": "^7.11.0",
-    "ink": "6.8.0",
     "jose": "^6.2.2",
     "lucide-react": "^0.577.0",
     "mdast-util-from-markdown": "2.0.3",

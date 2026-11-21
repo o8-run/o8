@@ -1,12 +1,10 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// Today's `o8 packet info` human output, pinned by running the real command with
-// only its network and config stubbed. The Tern lab's text fallback is checked
-// against the same files, so neither side can drift alone.
-const fixtureUrl = new URL('../../experiments/tern/packet.fixture.json', import.meta.url);
+// Run the real packet info command with its network and config stubbed.
+const fixtureUrl = new URL('./fixtures/packet.fixture.json', import.meta.url);
 const goldenUrl = (variant: 'plain' | 'tty') =>
-  new URL(`../../experiments/tern/golden/packet-info.${variant}.txt`, import.meta.url);
+  new URL(`./fixtures/packet-info.${variant}.txt`, import.meta.url);
 const { packet } = JSON.parse(readFileSync(fixtureUrl, 'utf8'));
 
 vi.mock('../config.js', () => ({ resolveConfig: () => ({ apiBase: 'http://127.0.0.1:1' }) }));
