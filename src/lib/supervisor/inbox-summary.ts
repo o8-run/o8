@@ -12,7 +12,7 @@ export interface SupervisorInboxSummary {
   total: number;
 }
 
-export function summarizeInboxItems(items: SupervisorInboxItem[]): SupervisorInboxSummary {
+export function summarizeInboxItems(items: ReadonlyArray<Pick<SupervisorInboxItem, 'status'>>): SupervisorInboxSummary {
   return items.reduce<SupervisorInboxSummary>((summary, item) => {
     summary.total += 1;
     switch (item.status) {
