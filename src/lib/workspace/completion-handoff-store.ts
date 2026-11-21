@@ -45,7 +45,7 @@ function privateDirectory() {
   const directory = path.join(data, 'completion-handoffs');
   mkdirSync(directory, { mode: 0o700, recursive: true });
   const stat = lstatSync(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.mode & 0o077
+  if (!stat.isDirectory() || stat.isSymbolicLink() || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
     || (process.getuid && stat.uid !== process.getuid()) || realpathSync(directory) !== directory) {
     throw new Error('Completion handoff directory has unsafe ownership.');
   }

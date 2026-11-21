@@ -44,7 +44,7 @@ async function privateDirectory(directory: string): Promise<WorktreeMaterializat
     if (error.code !== 'EEXIST') throw error;
   });
   const stat = await lstat(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0
+  if (!stat.isDirectory() || stat.isSymbolicLink() || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
     || (process.getuid && stat.uid !== process.getuid()) || await realpath(directory) !== directory) {
     throw new Error('The private Git preservation directory has unsafe ownership.');
   }
@@ -77,7 +77,7 @@ async function readBundleFile(candidate: string): Promise<{ content: Buffer; sta
   try {
     const before = await file.stat();
     if (!before.isFile() || before.nlink !== 1 || before.size < 1 || before.size > MAX_BUNDLE_BYTES
-      || (before.mode & 0o077) !== 0 || (process.getuid && before.uid !== process.getuid())) {
+      || (process.platform !== 'win32' && (before.mode & 0o077) !== 0) || (process.getuid && before.uid !== process.getuid())) {
       throw new Error('The Git bundle exceeds its bound or has unsafe file ownership.');
     }
     const content = Buffer.alloc(before.size);
@@ -159,7 +159,7 @@ const PREPARE_DIRECTORY = String.raw`
 const fs = require('node:fs');
 const leaf = fs.mkdtempSync('.prepare-');
 const stat = fs.lstatSync(leaf);
-if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077)
+if (!stat.isDirectory() || stat.isSymbolicLink() || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
   || (process.getuid && stat.uid !== process.getuid())) throw new Error('Verifier ownership is unsafe.');
 process.stdout.write(JSON.stringify({ leaf, device: stat.dev, inode: stat.ino }));
 `;
@@ -202,14 +202,14 @@ const fs = require('node:fs');
 const { createHash, randomBytes } = require('node:crypto');
 const input = JSON.parse(process.argv[1]);
 const directory = fs.lstatSync('.');
-if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077)
+if (!directory.isDirectory() || directory.isSymbolicLink() || (process.platform !== 'win32' && (directory.mode & 0o077) !== 0)
   || (process.getuid && directory.uid !== process.getuid())
   || directory.dev !== input.bankIdentity.device || directory.ino !== input.bankIdentity.inode
   || fs.realpathSync('.') !== input.bankIdentity.canonicalPath) {
   throw new Error('Captured publication bank ownership changed.');
 }
 function sameOwner(stat, expected) {
-  return stat.isFile() && !stat.isSymbolicLink() && !(stat.mode & 0o077)
+  return stat.isFile() && !stat.isSymbolicLink() && (process.platform === 'win32' || !(stat.mode & 0o077))
     && (!process.getuid || stat.uid === process.getuid())
     && stat.dev === expected.device && stat.ino === expected.inode;
 }
@@ -264,7 +264,7 @@ const BANK_OPERATION = String.raw`
 const fs = require('node:fs');
 const input = JSON.parse(process.argv[1]);
 const directory = fs.lstatSync('.');
-if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077)
+if (!directory.isDirectory() || directory.isSymbolicLink() || (process.platform !== 'win32' && (directory.mode & 0o077) !== 0)
   || (process.getuid && directory.uid !== process.getuid())
   || directory.dev !== input.identity.device || directory.ino !== input.identity.inode) {
   throw new Error('Private verifier ownership changed.');
@@ -291,7 +291,7 @@ const fs = require('node:fs');
 const input = JSON.parse(process.argv[1]);
 if (!/^\.prepare-[a-zA-Z0-9]+$/.test(input.leaf)) throw new Error('Verifier name is invalid.');
 const stat = fs.lstatSync(input.leaf);
-if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077)
+if (!stat.isDirectory() || stat.isSymbolicLink() || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
   || (process.getuid && stat.uid !== process.getuid())
   || stat.dev !== input.identity.device || stat.ino !== input.identity.inode) {
   throw new Error('Unknown verifier entry retained.');

@@ -63,7 +63,7 @@ async function measureBank(directory: string, completedReservation = false): Pro
   let entries = 0;
   const scan = async (current: string, root: boolean) => {
     const before = await lstat(current);
-    if (!before.isDirectory() || before.isSymbolicLink() || (before.mode & 0o077)
+    if (!before.isDirectory() || before.isSymbolicLink() || (process.platform !== 'win32' && (before.mode & 0o077) !== 0)
       || (process.getuid && before.uid !== process.getuid()) || await realpath(current) !== current) {
       throw new Error('Preservation bank accounting has unsafe directory ownership.');
     }
@@ -80,7 +80,7 @@ async function measureBank(directory: string, completedReservation = false): Pro
       if (stat.isDirectory() && root && entry.name === 'git-bundles') await scan(candidate, false);
       else {
         if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1
-          || (stat.mode & 0o077) || (process.getuid && stat.uid !== process.getuid())) {
+          || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) || (process.getuid && stat.uid !== process.getuid())) {
           throw new Error('Preservation bank accounting is incomplete; unknown evidence remains retained.');
         }
         // Charge sparse logical length as well as physical allocation, rounded

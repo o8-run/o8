@@ -78,7 +78,7 @@ async function ensurePrivateRoot(root: string): Promise<void> {
   ]);
   if (!entry.isDirectory() || entry.isSymbolicLink()
     || canonical !== path.join(canonicalParent, path.basename(root))
-    || (entry.mode & 0o077) !== 0) {
+    || (process.platform !== 'win32' && (entry.mode & 0o077) !== 0)) {
     throw new DependencyImageRefusalError('Dependency image registry is not an exact private directory.');
   }
 }

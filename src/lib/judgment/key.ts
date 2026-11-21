@@ -22,7 +22,7 @@ export function readJudgmentApiKey(): string | null {
   const keyPath = judgmentKeyPath();
   try {
     const mode = statSync(keyPath).mode;
-    if ((mode & 0o077) !== 0) {
+    if ((process.platform !== 'win32' && (mode & 0o077) !== 0)) {
       console.warn(`[judgment] ignoring ${JUDGMENT_KEY_FILENAME}: file is readable by other users; run chmod 600 on it`);
       return null;
     }
