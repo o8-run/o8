@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { and, asc, desc, eq, gt, inArray, isNotNull, ne, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, ne, notInArray, sql } from 'drizzle-orm';
 import { expireStaleApprovals, listApprovalsForContext } from '@/lib/approvals/store';
 import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
 import { recordDispatchRule } from '@/lib/dispatch/rules-store';
@@ -238,25 +238,25 @@ async function captureReviewBoundaryScreenshot(
   }
 }
 
+// These fields are plain text and integers. Aliasing to the schema keys lets SQLite
+// return named rows without allocating positional arrays and mapping them in Drizzle.
+let laneListColumns: ReturnType<typeof sql.join> | undefined;
+
 function getFilteredLaneList(
   whereClause?: ReturnType<typeof and>,
 ): Lane[] {
-  const rows = whereClause
-    ? getLaneDb()
-      .select()
-      .from(lanes)
-      .where(whereClause)
-      .orderBy(asc(lanes.createdAt))
-      .all()
-    : getLaneDb()
-      .select()
-      .from(lanes)
-      .orderBy(asc(lanes.createdAt))
-      .all();
-
-  return rows
-    .map((row) => mapLaneRow(row)!)
-    .filter((lane): lane is Lane => lane !== null);
+  laneListColumns ??= sql.join(
+    Object.entries(getTableColumns(lanes)).map(([key, column]) => sql`${column} as ${sql.identifier(key)}`),
+    sql`, `,
+  );
+  const condition = whereClause ? sql`where ${whereClause}` : sql.empty();
+  const rows = getLaneDb().all<LaneRow>(sql`
+    select ${laneListColumns}
+    from ${lanes}
+    ${condition}
+    order by ${asc(lanes.createdAt)}
+  `);
+  return rows.map(row => mapLaneRow(row)!);
 }
 
 export function createLane(opts: {

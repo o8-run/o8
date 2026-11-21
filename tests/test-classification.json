@@ -3965,6 +3965,12 @@
       ]
     },
     {
+      "path": "tests/lane-list-native-rows-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-reaper-liveness.test.ts",
       "reasons": [
         "child-process",
