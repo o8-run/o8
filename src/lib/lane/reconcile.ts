@@ -1,6 +1,8 @@
 import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from '@/lib/providers/child-process';
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileStamp, gitDirectories } from '@/lib/git/ref-stamp';
 import { promisify } from 'node:util';
 
 import { createApproval } from '@/lib/approvals/store';
@@ -217,6 +219,24 @@ function workspaceLifecycleOwnsMissingPath(lane: Lane): boolean {
   }
 }
 
+// A lane whose branch is present, or gone but not provably merged, gets the
+// same answer until its record, its newest event or one of the refs the answer
+// read changes. Remember what those looked like and skip the git probes for it
+// until then, so an unchanged lane costs no git process per sweep.
+const unchangedBranchAnswers = new Map<string, string>();
+
+function branchAnswerFingerprint(lane: Lane): string | null {
+  const directories = gitDirectories(lane.repoPath);
+  if (!directories) return null;
+  const { commonDir } = directories;
+  const refs = [`heads/${lane.branch}`, `remotes/origin/${lane.branch}`, `heads/${lane.baseBranch}`];
+  return JSON.stringify([
+    lane.status, lane.updatedAt, lane.branch, lane.baseBranch, lane.outcome ?? null,
+    getLaneEvents(lane.id, 1)[0]?.id ?? null, fileStamp(join(commonDir, 'packed-refs')),
+    ...refs.flatMap((ref) => [fileStamp(join(commonDir, 'refs', ref)), fileStamp(join(commonDir, 'logs', 'refs', ref))]),
+  ]);
+}
+
 export function reconcileOrphanedWorktrees(): Promise<number> {
   if (reconcileInFlight) return reconcileInFlight;
   reconcileInFlight = runReconcileOrphanedWorktrees().finally(() => {
@@ -231,6 +251,8 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
       RECONCILABLE_WORKTREE_STATUSES.has(lane.status)
       && !workspaceLifecycleOwnsMissingPath(lane),
   );
+  const liveIds = new Set(reconcilableLanes.map((lane) => lane.id));
+  for (const id of unchangedBranchAnswers.keys()) if (!liveIds.has(id)) unchangedBranchAnswers.delete(id);
   if (reconcilableLanes.length === 0) return 0;
 
   // Worktree-gone candidates (original #541 logic)
@@ -250,13 +272,18 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
   for (const lane of reconcilableLanes) {
     if (lane.worktreePath && !existsSync(lane.worktreePath)) continue; // already caught by worktreeGone
     if (!lane.branch) continue;
+    const fingerprint = branchAnswerFingerprint(lane);
+    if (fingerprint !== null && unchangedBranchAnswers.get(lane.id) === fingerprint) continue;
+    unchangedBranchAnswers.delete(lane.id);
     if (!branchSetsByRepo.has(lane.repoPath)) {
       branchSetsByRepo.set(lane.repoPath, await getLocalBranchSetForRepo(lane.repoPath));
     }
     const branches = branchSetsByRepo.get(lane.repoPath);
     if (!branches) continue; // probe failed — skip rather than false-positive
-    if (branches.has(lane.branch)) continue;
-    if (!(await laneMergeConfirmed(lane))) continue;
+    if (branches.has(lane.branch) || !(await laneMergeConfirmed(lane))) {
+      if (fingerprint !== null) unchangedBranchAnswers.set(lane.id, fingerprint);
+      continue;
+    }
     branchGone.push(lane);
   }
 
