@@ -49,38 +49,21 @@ import { getRemoteRuntimeFlagSync } from '../worker/feature-flags';
 import { registerRuntime } from './registry';
 import { codexRuntime } from './codex';
 import { claudeCodeRuntime } from './claude-code';
-import { geminiRuntime } from './gemini';
-import { magnitudeRuntime } from './magnitude';
 import { cloudRuntime } from './cloud-adapter';
 import { opencodeRuntime } from './opencode';
-import { cursorRuntime } from './cursor';
-import { grokRuntime } from './grok';
 import { piRuntime } from './pi';
 import { piBuiltinRuntime } from './pi-builtin';
-import { primeAgentRuntime } from './prime-agent';
-import { deepSeekHarnessRuntime } from './deepseek-harness';
 import { hermesRuntime } from './hermes';
-import { museRuntime } from './muse';
 import { declarativeWorkerRuntimes, invalidateDeclarativeWorkerFleets } from './declarative-workers';
 import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
 import { invalidateOwnedClaudeCodeFleetCache } from '@/lib/claude-code/owned';
-import { invalidateOwnedGeminiFleetCache } from '@/lib/gemini/owned';
 import { invalidateOwnedOpencodeFleetCache } from '@/lib/opencode/owned';
-import { invalidateOwnedCursorFleetCache } from '@/lib/cursor/owned';
-import { invalidateOwnedGrokFleetCache } from '@/lib/grok/owned';
 import { invalidateOwnedPiFleetCache } from '@/lib/pi/owned';
-import { invalidateOwnedPrimeAgentFleetCache } from '@/lib/prime-agent/owned';
-import { invalidateOwnedDeepSeekHarnessFleetCache } from '@/lib/deepseek-harness/owned';
 import { invalidateOwnedHermesFleetCache } from '@/lib/hermes/owned';
 import './opencode-cost-parser';
-import './cursor-cost-parser';
-import './grok-cost-parser';
 import './pi-cost-parser';
 import './pi-builtin-cost-parser';
-import './prime-agent-cost-parser';
-import './deepseek-harness-cost-parser';
 import './hermes-cost-parser';
-import './muse-cost-parser';
 
 /**
  * Flush the fleet cache across all owned-session stores. Callers (e.g. the
@@ -90,51 +73,25 @@ import './muse-cost-parser';
 export function invalidateAllOwnedFleets(): void {
   invalidateOwnedCodexFleetCache();
   invalidateOwnedClaudeCodeFleetCache();
-  invalidateOwnedGeminiFleetCache();
   invalidateOwnedOpencodeFleetCache();
-  invalidateOwnedCursorFleetCache();
-  invalidateOwnedGrokFleetCache();
   invalidateOwnedPiFleetCache();
-  invalidateOwnedPrimeAgentFleetCache();
-  invalidateOwnedDeepSeekHarnessFleetCache();
   invalidateOwnedHermesFleetCache();
   invalidateDeclarativeWorkerFleets();
 }
 
 registerRuntime(codexRuntime);
 registerRuntime(claudeCodeRuntime);
-// Wave 2c: Gemini CLI as a first-class coding runtime, peer to Codex/Claude
-// Code. Surfaces 'gemini-owned:' sessions, uses `gemini -p … --yolo
-// --output-format stream-json` under the hood. See src/lib/gemini/owned.ts.
-registerRuntime(geminiRuntime);
-// Magnitude is operator-launched in a visible terminal while its upstream
-// headless mode is unavailable. Registering the canonical read-only adapter
-// keeps discovery honest without advertising packet dispatch controls.
-registerRuntime(magnitudeRuntime);
 // Wave 2c: OpenCode 2 CLI — multi-provider coding runtime via `opencode2 run
 // --format json --model provider/model`. Sessions 'opencode-owned:' with
 // 'ses_' prefixed threads. See src/lib/opencode/owned.ts.
 registerRuntime(opencodeRuntime);
-registerRuntime(cursorRuntime);
-registerRuntime(grokRuntime);
 // Runtime expansion P3: Pi (earendil-works/pi) — `pi --mode rpc` bidirectional
 // JSONL with native steer. Sessions 'pi-owned:'. See src/lib/pi/owned.ts.
 registerRuntime(piRuntime);
 // The Pi SDK bundled with o8 as a packet worker on the managed model route.
 // Sessions 'pi-builtin-owned:'. See src/lib/pi-builtin/owned.ts.
 registerRuntime(piBuiltinRuntime);
-// prime-agent — built on the same pi-mono foundation as Pi. v1 launches
-// `prime-agent --mode json` (one process per turn, resumed via `-r
-// <sessionId>`); its `--mode rpc` steer verb is the native-steer upgrade
-// path once needed. Sessions 'prime-agent-owned:'. See
-// src/lib/prime-agent/owned.ts.
-registerRuntime(primeAgentRuntime);
-// DeepSeek Harness owns one official ACP stdio process per o8 session.
-// Provider/model routing remains a Harness concern rather than a new o8
-// provider branch; o8 owns only the normalized worker lifecycle around it.
-registerRuntime(deepSeekHarnessRuntime);
 registerRuntime(hermesRuntime);
-registerRuntime(museRuntime);
 for (const runtime of declarativeWorkerRuntimes) registerRuntime(runtime);
 // #514 — Cloud runtime adapter (self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires

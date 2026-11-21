@@ -270,10 +270,6 @@ pub(super) fn run(
                 ..feedback(format!("Opened {backend} draft."))
             })
         }
-        "/gemini" => Err(
-            "Gemini has no native single-runtime destination yet. The command draft is retained."
-                .into(),
-        ),
         "/chat" => Err(
             "This native surface has no Chat-tab destination yet. The command draft is retained."
                 .into(),

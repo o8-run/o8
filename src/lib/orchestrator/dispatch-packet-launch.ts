@@ -219,9 +219,9 @@ export async function launchPacketWithStorageAdmission(input: {
   // (recovery, a re-routed lane) would drop or coerce it, fail clearly BEFORE any
   // worktree/lane/provider work. Deliberate no-op pins (runtime without a
   // reasoning surface) keep their legacy behavior.
-  if (isHonoredEffortPin(packet.workerRouting) || workerRouting.selectedRuntime === 'muse' && workerRouting.requestedEffort) {
+  if (isHonoredEffortPin(packet.workerRouting)) {
     const pin = await resolveRuntimeEffortPin({
-      requestedEffort: workerRouting.selectedRuntime === 'muse' ? workerRouting.requestedEffort : packet.workerRouting?.requestedEffort,
+      requestedEffort: packet.workerRouting?.requestedEffort,
       runtime: workerRouting.selectedRuntime,
       explicitModel: input.workerRouting.requestedModel,
       model: workerRouting.selectedModel,

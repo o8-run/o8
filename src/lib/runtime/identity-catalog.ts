@@ -187,8 +187,7 @@ export function getRuntimeLaunchIdentitySync(runtime: string, packetId?: string,
   if (context.identity) return context.identity;
   if (context.configHome) return { id: identityId(runtime, context.configHome), label: 'Explicit runtime account', configHomeRef: context.configHome };
   const sessionRoot = context.sessionRoot ?? (runtime === 'codex'
-    ? process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(getDataDir(), 'owned-codex')
-    : runtime === 'muse' ? process.env.O8_OWNED_MUSE_ROOT || path.join(getDataDir(), 'owned-muse') : undefined);
+    ? process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(getDataDir(), 'owned-codex') : undefined);
   if (packetId && sessionRoot) {
     const saved = readPacketSessionIdentitySync(sessionRoot, context.surfacePrefix ?? `${runtime}-owned:`, packetId);
     if (saved) return saved;

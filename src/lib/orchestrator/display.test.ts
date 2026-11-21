@@ -3,13 +3,13 @@ import { runtimeDisplayLabel, agentDisplayLabel, orchestratorBackendDisplayLabel
 
 // Regression guard for the recurring "raw session id leaks into a label" bug.
 // The canonical helpers MUST never emit a raw id or an owned-key prefix
-// (`codex-owned:`/`codex-owned-`, `gemini-owned:`, ...). The historical leak was
+// (`codex-owned:`/`codex-owned-`, `opencode-owned:`, ...). The historical leak was
 // `sessionKey.split(':').pop()?.slice(0, 12)` → the literal "codex-owned-".
 describe('runtimeDisplayLabel', () => {
   it('maps each runtime to its human label', () => {
     expect(runtimeDisplayLabel('codex')).toBe('Codex');
     expect(runtimeDisplayLabel('claude-code')).toBe('Claude Code');
-    expect(runtimeDisplayLabel('gemini')).toBe('Gemini CLI');
+    expect(runtimeDisplayLabel('antigravity')).toBe('Antigravity');
     expect(runtimeDisplayLabel('opencode')).toBe('OpenCode 2');
   });
 
@@ -70,19 +70,19 @@ describe('agentDisplayLabel', () => {
 
   it('falls back to the runtime human label derived from an owned sessionKey — NEVER the raw prefix', () => {
     expect(agentDisplayLabel({ sessionKey: 'codex-owned:codex-owned-1782-abc' })).toBe('Codex');
-    expect(agentDisplayLabel({ sessionKey: 'gemini-owned:gemini-owned-9-z' })).toBe('Gemini CLI');
+    expect(agentDisplayLabel({ sessionKey: 'antigravity-owned:antigravity-owned-9-z' })).toBe('Antigravity');
     expect(agentDisplayLabel({ sessionKey: 'opencode-owned:opencode-owned-3-y' })).toBe('OpenCode 2');
     expect(agentDisplayLabel({ sessionKey: 'claude-code:claude-code-x' })).toBe('Claude Code');
   });
 
   it('honours an explicit runtime over the sessionKey', () => {
-    expect(agentDisplayLabel({ sessionKey: 'codex-owned:foo', runtime: 'gemini' })).toBe('Gemini CLI');
+    expect(agentDisplayLabel({ sessionKey: 'codex-owned:foo', runtime: 'antigravity' })).toBe('Antigravity');
   });
 
   it('never returns an owned-key prefix for any owned key (the leak invariant)', () => {
     for (const key of [
       'codex-owned:codex-owned-1-a',
-      'gemini-owned:gemini-owned-2-b',
+      'antigravity-owned:antigravity-owned-2-b',
       'opencode-owned:opencode-owned-3-c',
       'claude-code:claude-code-4-d',
     ]) {

@@ -8,7 +8,6 @@ import { ORCHESTRATOR_RUNTIME_IDS, getRuntimeCapability, type OrchestratorRuntim
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { codexLaunchArgs, codexResumeArgs } from '@/lib/codex/owned';
 import { buildClaudeStreamJsonArgs } from '@/lib/claude-code/interactive-session';
-import { museWorkerArgs } from '@/lib/muse/owned';
 import { workerLaunchPayload } from '@/lib/cloud/worker-payload';
 
 const h = vi.hoisted(() => ({ launch: vi.fn<typeof import('@/lib/runtime/actions').launchRuntimeSurface>() }));
@@ -39,9 +38,8 @@ const BASIC: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh'];
 const ALL: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'max', 'xhigh', 'ultra'];
 const HIGH_END = new Set(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-5.6-terra']);
 const DEFAULT_ONLY: OrchestratorRuntime[] = [
-  'gemini', 'antigravity', 'magnitude', 'opencode', 'copilot-cli', 'crush', 'openhands',
-  'goose', 'qwen', 'qoder', 'kimi', 'aider', '3code', 'pi', 'pi-builtin', 'cursor',
-  'grok', 'prime-agent', 'hermes', 'deepseek-harness',
+  'antigravity', 'opencode', 'copilot-cli', 'crush', 'openhands',
+  'goose', 'qwen', 'qoder', 'kimi', 'aider', '3code', 'pi', 'pi-builtin', 'hermes',
 ];
 type Row = { runtime: OrchestratorRuntime; model?: string; supported: readonly ThinkingEffort[] };
 const rows: Row[] = [
@@ -54,11 +52,8 @@ const rows: Row[] = [
   })),
   ...DEFAULT_ONLY.flatMap(runtime => [...new Set([
     undefined, getRuntimeCapability(runtime).defaultModel, `${runtime}-configured-fixture`,
-    ...SUPPORTED_MODEL_IDS.filter(model => runtime === 'gemini' && model.startsWith('gemini-')),
     ...(runtime === 'opencode' ? ['provider/model', 'provider/model/high'] : []),
   ])].map(model => ({ runtime, model, supported: [] }))),
-  // Without live account/model evidence only the runtime default is selectable.
-  ...[undefined, 'muse-catalog-fixture'].map(model => ({ runtime: 'muse' as const, model, supported: [] })),
 ];
 const vectors = rows.flatMap(row => [undefined, 'adaptive', ...ALL, 'disabled'].map(effort => ({ ...row, effort })));
 
@@ -110,10 +105,6 @@ describe('runtime and selectable-model effort matrix through the actual launch P
         expect(argv.includes('--effort')).toBe(Boolean(concrete));
         if (concrete) expect(argv[argv.indexOf('--effort') + 1]).toBe(concrete);
       }
-    } else if (runtime === 'muse') {
-      const argv = museWorkerArgs({ prompt: 'fixture', model, effort });
-      expect(argv.includes('--reasoning-effort')).toBe(Boolean(concrete));
-      if (concrete) expect(argv[argv.indexOf('--reasoning-effort') + 1]).toBe(concrete);
     }
   });
 });

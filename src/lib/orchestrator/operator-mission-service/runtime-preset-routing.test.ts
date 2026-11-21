@@ -10,12 +10,12 @@ describe('resolveRuntimePresetModel', () => {
   });
 
   it('keeps the operator model for a runtime without a preset entry', () => {
-    expect(resolveRuntimePresetModel('ui-edit-low-latency', 'gemini', 'operator/model', undefined))
+    expect(resolveRuntimePresetModel('ui-edit-low-latency', 'antigravity', 'operator/model', undefined))
       .toBe('operator/model');
   });
 
   it('returns the fallback untouched when no preset is armed', () => {
-    expect(resolveRuntimePresetModel(undefined, 'gemini', 'operator/model', undefined))
+    expect(resolveRuntimePresetModel(undefined, 'antigravity', 'operator/model', undefined))
       .toBe('operator/model');
   });
 

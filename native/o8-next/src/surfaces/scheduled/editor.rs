@@ -11,9 +11,8 @@ use serde_json::{Value, json};
 const DEFAULT_CRON: &str = "0 9 * * *";
 const DEFAULT_EVENTS: &str = "review_requested, completed, failed";
 type Choice = (&'static str, &'static str, &'static str);
-const RUNTIMES: [Choice; 3] = [
+const RUNTIMES: [Choice; 2] = [
     ("codex", "Codex", ""),
-    ("gemini", "Gemini CLI", ""),
     ("opencode", "OpenCode 2", ""),
 ];
 const TRIGGERS: [Choice; 3] = [

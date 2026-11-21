@@ -18,7 +18,6 @@ import {
 import { opencodeAuthenticatedProviders } from '@/lib/runtimes/shared/opencode-readiness';
 import { hasLiveClaudeOAuth } from '@/lib/claude-code/oauth-credential';
 import { getDataDir } from '@/lib/data-dir-migration';
-import { resolveMuseBinary } from '@/lib/muse/host';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -274,32 +273,6 @@ async function detectClaudeCode(deadlineAt?: number): Promise<DetectedTool> {
   };
 }
 
-function detectGemini(deadlineAt?: number): DetectedTool {
-  const path = locateBin('gemini', deadlineAt);
-  const detected = !!path;
-  let version: string | undefined;
-
-  if (detected) {
-    version = safeExec(path, ['--version'], 2000, deadlineAt);
-  }
-
-  const authPresent = keyPresent(
-    ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_AI_API_KEY'],
-    loadConfiguredKeyNames(),
-  );
-  return {
-    id: 'gemini',
-    name: 'Gemini CLI',
-    detected,
-    ready: detected ? authPresent : undefined,
-    authHint: detected && !authPresent
-      ? 'Gemini CLI requires enterprise sign-in or a paid API key. For free or AI Pro/Ultra, use Antigravity CLI (agy).'
-      : undefined,
-    version,
-    path,
-    details: { authPresent },
-  };
-}
 
 async function detectAntigravity(deadlineAt?: number): Promise<DetectedTool> {
   const readiness = await detectRuntimeAuthStatus('antigravity', deadlineAt);
@@ -359,83 +332,8 @@ function detect3code(deadlineAt?: number): DetectedTool {
   };
 }
 
-function detectMagnitude(deadlineAt?: number): DetectedTool {
-  if (process.platform === 'win32') {
-    return {
-      id: 'magnitude',
-      name: 'Magnitude CLI',
-      detected: false,
-      details: { supported: false, dispatchable: false },
-    };
-  }
-  const path = locateBin('magnitude', deadlineAt);
-  const detected = Boolean(path);
-  const version = detected ? safeExec(path, ['--version'], 2000, deadlineAt) : undefined;
-  const configPath = join(homedir(), '.magnitude', 'config.json');
-  const configured = existsSync(configPath);
 
-  return {
-    id: 'magnitude',
-    name: 'Magnitude CLI',
-    detected,
-    ready: detected ? true : undefined,
-    version,
-    path,
-    details: {
-      configured,
-      configPath,
-      supported: true,
-      dispatchable: false,
-      launchMode: 'visible-terminal',
-    },
-  };
-}
 
-function detectCursor(deadlineAt?: number): DetectedTool {
-  const path = locateBin('cursor-agent', deadlineAt);
-  const detected = !!path;
-  let version: string | undefined;
-
-  if (detected) {
-    version = safeExec(path, ['--version'], 2000, deadlineAt);
-  }
-
-  const authPresent = keyPresent(['CURSOR_API_KEY'], loadConfiguredKeyNames())
-    || existsSync(join(homedir(), '.cursor'));
-  return {
-    id: 'cursor',
-    name: 'Cursor CLI',
-    detected,
-    ready: detected ? authPresent : undefined,
-    authHint: detected && !authPresent ? 'set CURSOR_API_KEY or sign in to Cursor' : undefined,
-    version,
-    path,
-    details: { authPresent },
-  };
-}
-
-function detectGrok(deadlineAt?: number): DetectedTool {
-  const path = locateBin('grok', deadlineAt);
-  const detected = !!path;
-  let version: string | undefined;
-
-  if (detected) {
-    version = safeExec(path, ['--version'], 2000, deadlineAt);
-  }
-
-  const authPresent = keyPresent(['GROK_CODE_XAI_API_KEY'], loadConfiguredKeyNames())
-    || existsSync(join(homedir(), '.grok'));
-  return {
-    id: 'grok',
-    name: 'Grok Build',
-    detected,
-    ready: detected ? authPresent : undefined,
-    authHint: detected && !authPresent ? 'set GROK_CODE_XAI_API_KEY or sign in to Grok' : undefined,
-    version,
-    path,
-    details: { authPresent },
-  };
-}
 
 function detectPi(deadlineAt?: number): DetectedTool {
   const path = locateBin('pi', deadlineAt);
@@ -567,7 +465,7 @@ function buildDetectionResult(
   codexVoiceCapability?: CodexVoiceCapability,
 ): DetectionResult {
   const hasAgentSurface = false;
-  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', '3code', 'magnitude', 'cursor', 'grok', 'pi', 'muse'].includes(t.id) && t.detected);
+  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', '3code', 'pi'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
   const hasEmbeddings = tools.some(t => t.id === 'ollama' && t.detected);
   const hasAnything = hasAgentSurface || hasCliAgent || hasApiKey;
@@ -617,20 +515,10 @@ export async function GET() {
     });
   }
   if (!isPastDeadline(deadlineAt)) tools.push(await detectClaudeCode(deadlineAt));
-  if (!isPastDeadline(deadlineAt)) tools.push(detectGemini(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(await detectAntigravity(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(await detectOpenCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detect3code(deadlineAt));
-  if (!isPastDeadline(deadlineAt)) tools.push(detectMagnitude(deadlineAt));
-  if (!isPastDeadline(deadlineAt)) tools.push(detectCursor(deadlineAt));
-  if (!isPastDeadline(deadlineAt)) tools.push(detectGrok(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectPi(deadlineAt));
-  if (!isPastDeadline(deadlineAt)) {
-    const binary = await resolveMuseBinary().catch(() => null);
-    tools.push({ id: 'muse', name: 'Muse Code', detected: Boolean(binary), path: binary ?? undefined,
-      version: binary ? safeExec(binary, ['--version'], 2_000, deadlineAt) : undefined,
-      authHint: 'Account and model access are checked by Muse when work starts.' });
-  }
   if (!isPastDeadline(deadlineAt)) tools.push(await detectOllama(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectApiKeys());
 

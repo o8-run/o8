@@ -24,10 +24,6 @@ const REQUIRED_ADAPTER_METHODS = [
 ] as const;
 
 describe('dispatchable runtime registry integrity', () => {
-  it('keeps Muse charge evidence unknown through the runtime registry', async () => {
-    expect(getRuntime('muse')?.capabilities.costTelemetry).toBe(false);
-    expect(await parseCost('muse', [], { fallbackModel: 'native-model' })).toMatchObject({ costSource: 'unknown', model: 'native-model' });
-  });
   it('reports unknown Hermes cost evidence through the registered runtime', async () => {
     expect(getRuntime('hermes')?.capabilities.costTelemetry).toBe(false);
     expect(await parseCost('hermes', [], { fallbackModel: 'fixture/model' })).toMatchObject({

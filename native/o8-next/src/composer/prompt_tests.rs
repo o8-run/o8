@@ -84,7 +84,7 @@ fn native_composer_controls_runtime_prefix_opens_a_confirmed_unsent_draft(cx: &m
 fn native_composer_controls_unregistered_destinations_preserve_the_draft(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
-    for raw in ["/chat Retain this message", "/gemini Retain this task"] {
+    for raw in ["/chat Retain this message"] {
         focus(&surface, cx);
         cx.simulate_keystrokes("ctrl-a");
         cx.simulate_input(raw);

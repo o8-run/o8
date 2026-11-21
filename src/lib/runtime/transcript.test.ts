@@ -9,13 +9,8 @@ describe('runtimeIdFromSessionKey', () => {
     ['codex-discovered:thread-2', 'codex'],
     ['claude-code:thread-3', 'claude-code'],
     ['claude-code-owned:surface-2', 'claude-code'],
-    ['gemini-owned:surface-3', 'gemini'],
     ['opencode-owned:surface-4', 'opencode'],
-    ['cursor-owned:surface-5', 'cursor'],
-    ['grok-owned:surface-6', 'grok'],
     ['pi-owned:surface-7', 'pi'],
-    ['prime-agent-owned:surface-8', 'prime-agent'],
-    ['deepseek-harness-owned:surface-9', 'deepseek-harness'],
     ['hermes-owned:surface-10', 'hermes'],
   ])('resolves %s to %s', (sessionKey, runtimeId) => {
     expect(runtimeIdFromSessionKey(sessionKey)).toBe(runtimeId);

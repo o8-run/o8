@@ -158,9 +158,6 @@ function providerForRuntime(runtime: string, costSource?: PersistSessionCostInpu
   if (runtime === 'codex') {
     return 'openai';
   }
-  if (runtime === 'gemini') {
-    return 'google';
-  }
   if (runtime === 'opencode') {
     return 'opencode';
   }

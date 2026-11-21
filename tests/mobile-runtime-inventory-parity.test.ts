@@ -45,7 +45,7 @@ vi.mock('@/lib/mobile/review-units', () => ({
 
 const { getMobileInboxSnapshot, invalidateInboxCache } = await import('@/lib/mobile/inbox');
 
-function runtimeAgent(runtime: 'gemini' | 'aider'): AgentSummary {
+function runtimeAgent(runtime: 'antigravity' | 'aider'): AgentSummary {
   const sessionKey = `${runtime}-owned:mobile-parity`;
   return {
     id: sessionKey,
@@ -104,25 +104,25 @@ describe('mobile full runtime inventory projection', () => {
         gatewayFreshness: 'fresh',
         observablePending: false,
         mirrorMode: 'current-session-first',
-        primarySessionKey: 'gemini-owned:mobile-parity',
+        primarySessionKey: 'antigravity-owned:mobile-parity',
       },
       squads: [],
-      agents: [runtimeAgent('gemini'), runtimeAgent('aider')],
+      agents: [runtimeAgent('antigravity'), runtimeAgent('aider')],
       events: [],
       artifacts: [],
     };
   });
 
-  it('surfaces Gemini and Aider sessions with canonical runtime presentation', async () => {
+  it('surfaces Antigravity and Aider sessions with canonical runtime presentation', async () => {
     const snapshot = await getMobileInboxSnapshot({ fresh: true });
 
-    expect(snapshot.sessions.map((session) => session.runtime)).toEqual(['gemini', 'aider']);
+    expect(snapshot.sessions.map((session) => session.runtime)).toEqual(['antigravity', 'aider']);
     expect(snapshot.fleetSessions.map((session) => ({
       runtime: session.runtime,
       label: session.runtimeLabel,
       accent: session.runtimeAccent,
     }))).toEqual([
-      { runtime: 'gemini', label: 'Gemini CLI', accent: '#4285f4' },
+      { runtime: 'antigravity', label: 'Antigravity', accent: '#0f9d58' },
       { runtime: 'aider', label: 'Aider', accent: '#dc2626' },
     ]);
     expect(getWorkspaceReviewSnapshotMock).toHaveBeenCalledWith({ fresh: false });

@@ -56,7 +56,7 @@ import {
   OwnedWorkspaceUnavailableError,
   type OwnedWorkspaceSpawnGuard,
 } from './workspace-spawn-guard';
-import { createOwnedExecutionPolicy, resolveOwnedLaunchPolicy, refuseOwnedSingleAttemptResume } from './execution-policy';
+import { resolveOwnedLaunchPolicy, refuseOwnedSingleAttemptResume } from './execution-policy';
 import type {
   OwnedFleetAdditions,
   OwnedLaunchRequest,
@@ -157,10 +157,7 @@ export function createOwnedSessionStore(
   });
 
   async function launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse> {
-    const executionPolicy = runtimeId === 'muse' ? createOwnedExecutionPolicy(request, runtimeId)
-      : resolveOwnedLaunchPolicy(request, adapter, { deferDiscovery: true });
-    if (runtimeId === 'muse') await assertRuntimeModelEffortPin(runtimeId, request.model ?? adapter.defaultModel, request.effort,
-      { cwd: request.cwd, packetId: request.packetId, runtimeConfig: request.runtimeConfig, configHome: request.runtimeIdentity?.configHomeRef });
+    const executionPolicy = resolveOwnedLaunchPolicy(request, adapter, { deferDiscovery: true });
     const prompt = request.prompt.trim();
     if (!prompt) {
       throw new Error('prompt is required');
@@ -195,7 +192,7 @@ export function createOwnedSessionStore(
       if (adapter.isolatedConfigHomeEnv && adapter.defaultConfigHome && request.packetId) {
         const defaultConfigHome = adapter.defaultConfigHome();
         const preferred = getRuntimeLaunchIdentitySync(runtimeId, request.packetId, { identity: request.runtimeIdentity,
-          configHome: runtimeId === 'muse' ? request.runtimeConfig?.museConfigRoot : undefined, sessionRoot: root, surfacePrefix });
+          sessionRoot: root, surfacePrefix });
         selectedIdentity = await getOrPinPacketRuntimeIdentity({
           runtime: runtimeId,
           packetId: request.packetId,
@@ -207,15 +204,14 @@ export function createOwnedSessionStore(
           },
         });
       } else if (adapter.isolatedConfigHomeEnv && !providerFromConfig(request.runtimeConfig)) {
-        selectedIdentity = getRuntimeLaunchIdentitySync(runtimeId, undefined, { identity: request.runtimeIdentity,
-          configHome: runtimeId === 'muse' ? request.runtimeConfig?.museConfigRoot : undefined });
+        selectedIdentity = getRuntimeLaunchIdentitySync(runtimeId, undefined, { identity: request.runtimeIdentity });
       }
 
       return selectedIdentity;
     });
-    if (runtimeId !== 'muse') executionPolicy ??= resolveOwnedLaunchPolicy(request, adapter, { identity: selectedIdentity ?? undefined });
+    executionPolicy ??= resolveOwnedLaunchPolicy(request, adapter, { identity: selectedIdentity ?? undefined });
     const runtimeConfig = adapter.captureRuntimeConfig ? adapter.captureRuntimeConfig(request.runtimeConfig) : request.runtimeConfig;
-    if (runtimeId === 'muse' || runtimeId === 'codex') await assertRuntimeModelEffortPin(runtimeId, request.model, request.effort,
+    if (runtimeId === 'codex') await assertRuntimeModelEffortPin(runtimeId, request.model, request.effort,
       { cwd: repoPath, configHome: selectedIdentity?.configHomeRef, packetId: request.packetId, runtimeConfig });
     const createdAt = nowIso();
     const session = {
@@ -307,7 +303,7 @@ export function createOwnedSessionStore(
     let session = await io.findSession(surfaceId);
     await assertOwnedActionFence(surfaceId, session);
     if (session) await assertRuntimeModelEffortPin(runtimeId, session.model, session.effort, { cwd: session.repoPath,
-      configHome: session.identity?.configHomeRef ?? (runtimeId === 'muse' ? session.runtimeConfig?.museConfigRoot : adapter.defaultConfigHome?.()), runtimeConfig: session.runtimeConfig });
+      configHome: session.identity?.configHomeRef ?? adapter.defaultConfigHome?.(), runtimeConfig: session.runtimeConfig });
     assertOwnedActionAdmission(session);
     refuseOwnedSingleAttemptResume(session);
     const automaticRunId = requestedAutomaticRecoveryRun(surfaceId);
@@ -323,7 +319,7 @@ export function createOwnedSessionStore(
     if (!session) {
       const archived = await io.findArchivedSession(surfaceId);
       if (archived) await assertRuntimeModelEffortPin(runtimeId, archived.model, archived.effort, { cwd: archived.repoPath,
-        configHome: archived.identity?.configHomeRef ?? (runtimeId === 'muse' ? archived.runtimeConfig?.museConfigRoot : adapter.defaultConfigHome?.()), runtimeConfig: archived.runtimeConfig });
+        configHome: archived.identity?.configHomeRef ?? adapter.defaultConfigHome?.(), runtimeConfig: archived.runtimeConfig });
       refuseOwnedSingleAttemptResume(archived);
       if (archived && !archived.retiredAt) {
         const restore = await restoreArchivedOwnedSessionDir(root, surfaceId, surfacePrefix);

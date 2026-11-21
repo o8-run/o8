@@ -15,7 +15,6 @@ const account = join(root, '.codex');
 const modelFile = join(account, 'models.json');
 mkdirSync(account);
 const codexSessions = join(root, 'codex-sessions');
-const geminiSessions = join(root, 'gemini-sessions');
 mkdirSync(repo);
 vi.stubEnv('HOME', root);
 vi.stubEnv('O8_DATA_DIR', join(root, 'data'));
@@ -25,7 +24,6 @@ vi.stubEnv('O8_OPENCODE_BIN', binary);
 vi.stubEnv('O8_CODEX_BIN', binary);
 vi.stubEnv('O8_GEMINI_BIN', binary);
 vi.stubEnv('CORTEX_IDE_OWNED_CODEX_ROOT', codexSessions);
-vi.stubEnv('O8_OWNED_GEMINI_ROOT', geminiSessions);
 vi.stubEnv('CODEX_HOME', account);
 vi.stubEnv('O8_WORKER_SANDBOX', 'off');
 vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', '0');
@@ -100,19 +98,17 @@ it.each([undefined, 'adaptive'] as const)('keeps a model-encoded worker variant 
   expect(args).not.toContain('--effort');
 });
 
-async function drain(result: { sessionKey?: string }, kind: 'codex' | 'gemini') {
+async function drain(result: { sessionKey?: string }) {
   if (!result.sessionKey) return;
-  const owned = kind === 'codex' ? await import('@/lib/codex/owned') : await import('@/lib/gemini/owned');
-  const read = kind === 'codex' ? (owned as typeof import('@/lib/codex/owned')).getOwnedCodexRuntimeTail
-    : (owned as typeof import('@/lib/gemini/owned')).getOwnedGeminiRuntimeTail;
-  await vi.waitFor(async () => expect((await read(result.sessionKey!)).surface.lifecycle?.lastOutcome).toBe('finished'));
+  const { getOwnedCodexRuntimeTail } = await import('@/lib/codex/owned');
+  await vi.waitFor(async () => expect((await getOwnedCodexRuntimeTail(result.sessionKey!)).surface.lifecycle?.lastOutcome).toBe('finished'));
 }
 it('refuses high outside a discovered low/ultra set before worker persistence or launch', async () => {
   await workerModelCatalog('codex', repo);
   const { codexRuntime } = await import('@/lib/runtimes/codex');
   const before = launches();
   const launching = codexRuntime.launch({ cwd: repo, prompt: 'Fixture task', model: 'fixture-new-reasoning-model', effort: 'high' });
-  await launching.then(result => drain(result, 'codex')).catch(() => {});
+  await launching.then(result => drain(result)).catch(() => {});
   await expect(launching).rejects.toMatchObject({ name: 'EffortPinRejectionError', code: 'effort_unsupported_model' });
   expect(launches()).toEqual(before);
   expect(existsSync(codexSessions) ? readdirSync(codexSessions) : []).toEqual([]);
@@ -122,7 +118,7 @@ it('rechecks changed discovered choices on cold worker resume before another pro
   const { codexOwnedAdapter } = await import('@/lib/codex/owned');
   const { createOwnedSessionStore } = await import('@/lib/runtimes/shared/owned-session');
   const launched = await codexRuntime.launch({ cwd: repo, prompt: 'Fixture task', model: 'gpt-6.1-sol', effort: 'low' });
-  await drain(launched, 'codex');
+  await drain(launched);
   const file = readdirSync(codexSessions).map(dir => join(codexSessions, dir, 'session.json'))
     .find(file => JSON.parse(readFileSync(file, 'utf8')).surfaceId === launched.sessionKey)!;
   await vi.waitFor(() => expect(JSON.parse(readFileSync(file, 'utf8')).activeRun).toBeUndefined());
@@ -134,19 +130,10 @@ it('rechecks changed discovered choices on cold worker resume before another pro
   const saved = readFileSync(file, 'utf8'), before = launches();
   writeFileSync(modelFile, JSON.stringify([{ model: 'gpt-6.1-sol', supportedReasoningEfforts: [{ reasoningEffort: 'ultra' }] }]));
   const resuming = createOwnedSessionStore(codexOwnedAdapter).resume(launched.sessionKey!, 'Continue');
-  await resuming.then(() => drain(launched, 'codex')).catch(() => {});
+  await resuming.then(() => drain(launched)).catch(() => {});
   await expect(resuming).rejects.toMatchObject({ name: 'EffortPinRejectionError', code: 'effort_unsupported_model' });
   expect(launches()).toEqual(before);
   expect(readFileSync(file, 'utf8')).toBe(saved);
-});
-it('refuses a direct worker effort that has no argument mapping instead of dropping it', async () => {
-  const { geminiRuntime } = await import('@/lib/runtimes/gemini');
-  const before = launches();
-  const launching = geminiRuntime.launch({ cwd: repo, prompt: 'Fixture task', model: 'fixture-model', effort: 'high' });
-  await launching.then(result => drain(result, 'gemini')).catch(() => {});
-  await expect(launching).rejects.toMatchObject({ name: 'EffortPinRejectionError', code: 'effort_unsupported_runtime' });
-  expect(launches()).toEqual(before);
-  expect(existsSync(geminiSessions) ? readdirSync(geminiSessions) : []).toEqual([]);
 });
 it('validates a packet launch against its pinned account rather than the currently selected account', async () => {
   const { registerRuntimeIdentity, selectRuntimeIdentity, getOrPinPacketRuntimeIdentity } = await import('@/lib/runtime/identity-catalog');
@@ -164,6 +151,6 @@ it('validates a packet launch against its pinned account rather than the current
   }).launch({ cwd: repo, prompt: 'Fixture task',
     model: 'gpt-6.1-sol', effort: 'low', packetId: 'fixture-effort-packet' });
   expect(result.ok, result.note).toBe(true);
-  await drain({ sessionKey: result.surfaceId }, 'codex');
+  await drain({ sessionKey: result.surfaceId });
   expect(launches().at(-1)).toContain('model_reasoning_effort=low');
 });

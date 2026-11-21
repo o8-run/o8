@@ -56,9 +56,9 @@ it('refuses Codex API mode through billing policy while ignoring a stale persist
   expect(billing.runtimeBillingMode('codex')).toBe('subscription');
 });
 it('still delivers saved API credentials to a non-Codex runtime opted in through saved billing policy', async () => {
-  expect(() => billing.saveRuntimeBillingMode('gemini', 'api')).not.toThrow();
+  expect(() => billing.saveRuntimeBillingMode('opencode', 'api')).not.toThrow();
   const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(process.env.OPENAI_API_KEY||"missing")'], {
-    env: childEnvironment({ runtimeId: 'gemini' }), encoding: 'utf8',
+    env: childEnvironment({ runtimeId: 'opencode' }), encoding: 'utf8',
   });
   expect(result).toBe('fixture-codex-saved');
 });

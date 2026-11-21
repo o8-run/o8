@@ -48,7 +48,7 @@ export interface ResolvedCli {
 }
 
 export interface CliResolverSpec {
-  /** Logical name for the runtime, e.g. 'codex', 'claude-code', 'gemini', 'cursor'. */
+  /** Logical name for the runtime, e.g. 'codex', 'claude-code', 'opencode'. */
   runtimeId: string;
   /** The binary name to search for: 'codex', 'claude', etc. */
   binaryName: string;
@@ -222,7 +222,7 @@ async function probeVersion(
       windowsHide: true,
       timeout: spec.versionTimeoutMs ?? 5_000,
       maxBuffer: 64 * 1024,
-      env: childEnvironment({ runtimeId: spec.runtimeId, env: { PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1', ...(spec.runtimeId === 'muse' ? { MUSE_NO_AUTO_UPDATE: '1' } : {}) } }),
+      env: childEnvironment({ runtimeId: spec.runtimeId, env: { PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1' } }),
     });
     const combined = `${stdout}\n${stderr}`;
     const match = combined.match(pattern);

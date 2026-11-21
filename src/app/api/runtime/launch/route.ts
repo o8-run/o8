@@ -1,4 +1,3 @@
-import { getRuntimeLaunchIdentitySync } from '@/lib/runtime/identity-catalog';
 import { NextRequest, NextResponse } from 'next/server';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
@@ -98,8 +97,7 @@ export async function POST(request: NextRequest) {
   }
 
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);
-  const launchIdentity = runtimeName === 'codex' ? resolveCodexLaunchIdentity(launchRequest.packetId)
-    : runtimeName === 'muse' ? getRuntimeLaunchIdentitySync('muse', launchRequest.packetId) ?? undefined : undefined;
+  const launchIdentity = runtimeName === 'codex' ? resolveCodexLaunchIdentity(launchRequest.packetId) : undefined;
   // A concrete pin must survive the adapter's mapping. Validate before the
   // receipt binding so a rejected selection can be corrected with the same ID.
   if (launchRequest.effort && launchRequest.effort !== 'adaptive') {

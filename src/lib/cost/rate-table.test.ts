@@ -5,8 +5,6 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { estimateCostUsd } from '@/lib/cortex/qa/llm/brain-spend';
 import { parseCodexSessionCost } from '@/lib/runtimes/codex-cost-parser';
 import { parseSessionCost } from '@/lib/runtimes/cost-parser';
-import { parseCursorSessionCost } from '@/lib/runtimes/cursor-cost-parser';
-import { parseGeminiSessionCost } from '@/lib/runtimes/gemini-cost-parser';
 import { parseOpencodeSessionCost } from '@/lib/runtimes/opencode-cost-parser';
 import { modelRateTable, resolveRate } from './rate-table';
 import { anthropicPricingForModel } from '@/lib/llm/pricing';
@@ -213,30 +211,6 @@ describe('dated model rate table reproducibility', () => {
       80_000 * codexRate.inputUsdPerMillion
       + 20_000 * codexRate.cacheReadUsdPerMillion!
       + 10_000 * codexRate.outputUsdPerMillion
-    ) / TOKENS_PER_MILLION));
-
-    const geminiRate = resolveRate('gemini', 'gemini-2.5-flash')!;
-    const gemini = await parseGeminiSessionCost(fixture('gemini.jsonl', {
-      type: 'result',
-      model: 'gemini-2.5-flash',
-      stats: { inputTokens: 100_000, outputTokens: 10_000, cachedInputTokens: 20_000 },
-    }));
-    expect(gemini.totalCostUsd).toBe(rounded((
-      80_000 * geminiRate.inputUsdPerMillion
-      + 20_000 * geminiRate.cacheReadUsdPerMillion!
-      + 10_000 * geminiRate.outputUsdPerMillion
-    ) / TOKENS_PER_MILLION));
-
-    const cursorRate = resolveRate('cursor', 'cursor-fast')!;
-    const cursor = await parseCursorSessionCost([fixture('cursor.jsonl', {
-      type: 'result',
-      model: 'cursor-fast',
-      usage: { inputTokens: 100_000, outputTokens: 10_000, cacheWriteTokens: 5_000 },
-    })]);
-    expect(cursor.totalCostUsd).toBe(rounded((
-      100_000 * cursorRate.inputUsdPerMillion
-      + 10_000 * cursorRate.outputUsdPerMillion
-      + 5_000 * cursorRate.cacheWriteUsdPerMillion!
     ) / TOKENS_PER_MILLION));
 
     const opencodeRate = resolveRate('opencode', 'opencode/gpt-5-nano')!;

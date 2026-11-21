@@ -33,10 +33,6 @@ export async function sweepOrphanedOwnedSessions(): Promise<number> {
       sweeps.push(sweepOrphanedClaudeCodeSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS, chatOwnedSurfaceIds));
     } catch { /* runtime module unavailable — skip */ }
     try {
-      const { sweepOrphanedGeminiSessions } = await import('@/lib/gemini/owned');
-      sweeps.push(sweepOrphanedGeminiSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS, chatOwnedSurfaceIds));
-    } catch { /* skip */ }
-    try {
       const { sweepOrphanedOpencodeSessions } = await import('@/lib/opencode/owned');
       sweeps.push(sweepOrphanedOpencodeSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS));
     } catch { /* skip */ }

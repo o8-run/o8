@@ -13,7 +13,7 @@ import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture'
  *      pin; it is rejected before mission/packet routing is mutated.
  *
  * Only the process/provider boundary (worktree prep, storage telemetry, runtime
- * auth preflight, Gemini/Claude launch) and the supervisor-watch fetch are
+ * auth preflight, Claude launch) and the supervisor-watch fetch are
  * mocked, matching the proven worker-model-routing-real-path harness.
  */
 
@@ -41,7 +41,6 @@ process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 const preflight = vi.hoisted(() => ({ calls: 0 }));
 const providerLaunches = vi.hoisted(() => ({
   claude: [] as Array<{ model?: string; claudeCodeModel?: string; claudeCodeCarrier?: string; effort?: string }>,
-  gemini: [] as Array<{ model?: string }>,
 }));
 
 // Capacity telemetry is outside effort routing. Keep its completion event real,
@@ -107,22 +106,6 @@ vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => ({
     preflight.calls += 1;
   }),
 }));
-
-vi.mock('@/lib/gemini/owned', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/gemini/owned')>();
-  return {
-    ...actual,
-    launchOwnedGeminiSession: vi.fn(async (request: { model?: string }) => {
-      providerLaunches.gemini.push({ model: request.model });
-      return {
-        ok: true,
-        runtime: 'gemini' as const,
-        surfaceId: 'gemini-owned:mission-effort-pin-test',
-        note: 'fake Gemini launch',
-      };
-    }),
-  };
-});
 
 vi.mock('@/lib/claude-code/owned', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/claude-code/owned')>();
@@ -529,10 +512,10 @@ describe('mission effort pin — public route', () => {
     const repoPath = makeRepo();
     const error = await rejectEffortPin({
       repoPath,
-      runtime: 'gemini',
-      requestedRuntime: 'gemini',
+      runtime: 'antigravity',
+      requestedRuntime: 'antigravity',
       requestedEffort: 'high',
-      issues: [{ number: 900_108, title: 'gemini effort', body: 'body', url: '' }],
+      issues: [{ number: 900_108, title: 'antigravity effort', body: 'body', url: '' }],
     });
     expect(error.code).toBe('effort_unsupported_runtime');
     expect(error.message).toContain('cannot honor');
@@ -617,10 +600,10 @@ describe('mission effort pin — public route', () => {
       requestedEffort: 'high',
       issues: [{
         number: 900_116,
-        title: 'per-issue gemini',
+        title: 'per-issue antigravity',
         body: 'body',
         url: '',
-        runtime: 'gemini',
+        runtime: 'antigravity',
       }],
     });
     expect(error.code).toBe('effort_unsupported_runtime');
@@ -818,7 +801,7 @@ describe('mission effort pin — explicit dispatch runtime override', () => {
     const dispatchRoute = await import('@/app/api/orchestrator/dispatch/route');
     const response = await dispatchRoute.POST(routeRequest('/api/orchestrator/dispatch', {
       missionId: created.result.missionId,
-      runtime: 'gemini',
+      runtime: 'antigravity',
       wait: true,
     }));
     expect(response.status).toBe(400);

@@ -2,9 +2,7 @@ import { listActiveLanes } from '@/lib/lane/registry';
 import { resolveParallelCapSync } from '@/lib/operator/defaults';
 import type { OrchestratorRuntime } from './types';
 
-export const RUNTIME_PARALLEL_CAP: Partial<Record<OrchestratorRuntime, number>> = {
-  gemini: 3,
-};
+export const RUNTIME_PARALLEL_CAP: Partial<Record<OrchestratorRuntime, number>> = {};
 export interface DispatchLaunchBudget {
   maxLaunches: number;
   perRuntime?: Partial<Record<OrchestratorRuntime, number>>;

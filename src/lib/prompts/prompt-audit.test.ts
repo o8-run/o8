@@ -90,7 +90,7 @@ describe('prompt audit: required rules survive real renderers', () => {
     expect(prompt).not.toMatch(shouting);
   });
 
-  it.each(['claude', 'codex', 'pi', 'muse'] as const)('renders scoped orchestrator authority (%s)', (backend) => {
+  it.each(['claude', 'codex', 'pi'] as const)('renders scoped orchestrator authority (%s)', (backend) => {
     const prompt = measure(`orchestrator-${backend}`, buildOrchestratorSystemPrompt('/repo', {
       backend, firstRunClarify: false,
     }));

@@ -60,10 +60,7 @@ describe('worker launch context', () => {
   it.each([
     ['3code-owned:surface-0', '3code'],
     ['opencode-owned:surface-1', 'opencode'],
-    ['gemini-discovered:surface-2', 'gemini'],
     ['claude-code:surface-3', 'claude-code'],
-    ['prime-agent-owned:surface-4', 'prime-agent'],
-    ['deepseek-harness-owned:surface-5', 'deepseek-harness'],
     ['hermes-owned:surface-6', 'hermes'],
     ['unknown:surface-4', 'codex'],
   ] as const)('derives %s as %s for supervisor launches', (sessionKey, runtime) => {

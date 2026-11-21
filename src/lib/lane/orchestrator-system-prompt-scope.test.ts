@@ -53,7 +53,7 @@ function toolsFor(surface: OrchestratorPromptSurface): Set<string> {
 }
 
 const PROFILES: ToolProfile[] = ['full', 'propose', 'solo', 'fable', 'fable-solo'];
-const BACKENDS: OrchestratorPromptBackend[] = ['claude', 'codex', 'pi', 'muse'];
+const BACKENDS: OrchestratorPromptBackend[] = ['claude', 'codex', 'pi'];
 
 function renderedPrompts(backend: OrchestratorPromptBackend): string[] {
   return [false, true].map(firstRunClarify => buildOrchestratorSystemPrompt('/tmp/example-repo', {

@@ -39,23 +39,11 @@ export async function archiveOwnedRuntimeSession(
   if (sessionKey.startsWith('claude-code-owned:')) {
     return import('@/lib/claude-code/owned').then(({ archiveOwnedClaudeCodeSession }) => archiveOwnedClaudeCodeSession(sessionKey));
   }
-  if (sessionKey.startsWith('gemini-owned:')) {
-    return import('@/lib/gemini/owned').then(({ archiveOwnedGeminiSession }) => archiveOwnedGeminiSession(sessionKey));
-  }
   if (sessionKey.startsWith('opencode-owned:')) {
     return import('@/lib/opencode/owned').then(({ archiveOwnedOpencodeSession }) => archiveOwnedOpencodeSession(sessionKey));
   }
-  if (sessionKey.startsWith('cursor-owned:')) {
-    return import('@/lib/cursor/owned').then(({ archiveOwnedCursorSession }) => archiveOwnedCursorSession(sessionKey));
-  }
-  if (sessionKey.startsWith('grok-owned:')) {
-    return import('@/lib/grok/owned').then(({ archiveOwnedGrokSession }) => archiveOwnedGrokSession(sessionKey));
-  }
   if (sessionKey.startsWith('pi-owned:')) {
     return import('@/lib/pi/owned').then(({ archiveOwnedPiSession }) => archiveOwnedPiSession(sessionKey));
-  }
-  if (sessionKey.startsWith('prime-agent-owned:')) {
-    return import('@/lib/prime-agent/owned').then(({ archiveOwnedPrimeAgentSession }) => archiveOwnedPrimeAgentSession(sessionKey));
   }
   return null;
 }

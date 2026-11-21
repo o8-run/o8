@@ -5,7 +5,6 @@ import path from 'node:path';
 import { getCodexRolloutPath } from '@/lib/codex/sessions';
 import { getOwnedCodexSessionIdentityId, getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
 import { getOwnedClaudeCodeTelemetrySources } from '@/lib/claude-code/owned';
-import { getOwnedGeminiTelemetrySources } from '@/lib/gemini/owned';
 import { readLaneTerminalReason, type LaneTerminalReason } from '@/lib/lane/terminal-reason';
 import { findLatestLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { getSqlite } from '@/lib/db';
@@ -23,7 +22,7 @@ import { normalizePiBuiltinEvents } from '@/lib/orchestrator/transcript-normaliz
 
 const MAX_TAIL_BYTES = 256_000;
 
-type TranscriptRuntime = 'codex' | 'opencode' | 'claude-code' | 'gemini' | 'pi-builtin' | null;
+type TranscriptRuntime = 'codex' | 'opencode' | 'claude-code' | 'pi-builtin' | null;
 
 interface ResolvedJsonl {
   raw: string;
@@ -226,27 +225,6 @@ async function resolveRawJsonlForSession(sessionKey: string, fullHistory = false
     } catch {
       return { raw: '', runtime: 'claude-code' };
     }
-  }
-
-  if (sessionKey.startsWith('gemini-owned:')) {
-    try {
-      await getOwnedGeminiTelemetrySources(sessionKey);
-    } catch {
-      // Same unsupported response either way.
-    }
-    return {
-      raw: '',
-      runtime: 'gemini',
-      unsupportedReason: 'gemini-transcript-not-supported-yet',
-    };
-  }
-
-  if (sessionKey.startsWith('gemini:') || sessionKey.startsWith('gemini-discovered:')) {
-    return {
-      raw: '',
-      runtime: 'gemini',
-      unsupportedReason: 'gemini-transcript-not-supported-yet',
-    };
   }
 
   return { raw: '', runtime: null };

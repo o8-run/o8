@@ -153,7 +153,6 @@ function backendRuntime(backend: string): OrchestratorRuntime | null {
   if (backend === 'codex') return 'codex';
   if (backend === 'claude') return 'claude-code';
   if (backend === 'opencode') return 'opencode';
-  if (backend === 'muse') return 'muse';
   return null;
 }
 

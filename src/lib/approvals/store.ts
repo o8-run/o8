@@ -746,7 +746,6 @@ export function listOrchestratorReviews(packetId: string) {
 
 function inferApprovalRuntime(sessionKey: string) {
   if (sessionKey.startsWith('claude-code:')) return 'claude-code' as const;
-  if (sessionKey.startsWith('gemini:')) return 'gemini' as const;
   if (sessionKey.startsWith('opencode:')) return 'opencode' as const;
   return 'codex' as const;
 }

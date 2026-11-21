@@ -147,7 +147,6 @@ function inferRuntime(model: string | undefined | null): MobileOrchestratorThrea
   const lower = model.toLowerCase();
   if (isOrchestratorRuntime(lower)) return lower;
   if (lower.includes('claude')) return 'claude-code';
-  if (lower.includes('gemini')) return 'gemini';
   if (lower.includes('opencode')) return 'opencode';
   if (lower.includes('codex') || lower.startsWith('gpt')) return 'codex';
   const matchedRuntime = ORCHESTRATOR_RUNTIME_IDS.find((runtime) => lower.includes(runtime));

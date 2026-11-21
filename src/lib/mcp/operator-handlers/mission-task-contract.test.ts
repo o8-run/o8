@@ -106,7 +106,7 @@ describe('create_mission task contract default', () => {
   });
 
   it('leaves other runtimes disabled by default', async () => {
-    expect(await createPacket({ runtime: 'gemini' })).toMatchObject({
+    expect(await createPacket({ runtime: 'antigravity' })).toMatchObject({
       taskContractRequired: false,
       taskContractSource: 'default',
     });

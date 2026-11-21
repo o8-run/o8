@@ -151,26 +151,6 @@ export const ORCHESTRATOR_RUNTIMES = {
     tier: 'frontier',
     description: 'Claude Code CLI worker via interactive stream-json. Uses the existing Claude account by default or an explicitly selected API gateway model; never --print.',
   },
-  gemini: {
-    label: 'Gemini CLI',
-    shortLabel: 'Gemini',
-    dispatchable: true,
-    requiresModel: false,
-    // 2026-04-28: reverted from gemini-3.1-pro to gemini-3-pro-preview after
-    // the 3.1-pro fan-out test (mission-958a824e-b0a) showed 5/5 hallucinated
-    // completions at thinkingEffort=max. See memory
-    // gemini_fanout_reliability_apr28.md. The GEMINI_FALLBACK_CASCADE rolls
-    // back further if 3-pro-preview hits quota.
-    defaultModel: 'gemini-3-pro-preview',
-    accentColor: '#4285f4', // Google blue
-    binaryName: 'gemini',
-    workerProvider: 'gemini',
-    authHouse: 'gemini',
-    modelIdPattern: /^(gemini|google\/)/i,
-    reasoningEffort: false,
-    tier: 'standard',
-    description: 'Legacy Gemini CLI worker for enterprise or paid API access via headless stream-json, with owned-session resume and review support. Free and AI Pro/Ultra use Antigravity CLI.',
-  },
   antigravity: {
     label: 'Antigravity',
     shortLabel: 'AGY',
@@ -193,19 +173,6 @@ export const ORCHESTRATOR_RUNTIMES = {
       authPaths: [],
       authFix: 'Run agy and sign in with Google. Keep Use AI Credits off for quota-only use.',
     },
-  },
-  magnitude: {
-    label: 'Magnitude',
-    shortLabel: 'Mag',
-    dispatchable: false,
-    requiresModel: false,
-    accentColor: '#0f9f8f',
-    binaryName: 'magnitude',
-    workerProvider: 'magnitude',
-    authHouse: null,
-    reasoningEffort: false,
-    tier: 'local',
-    description: 'Local-model agent CLI available as a visible repository terminal. Packet dispatch waits for a stable headless or RPC contract.',
   },
   opencode: {
     label: 'OpenCode 2',
@@ -506,56 +473,6 @@ export const ORCHESTRATOR_RUNTIMES = {
     tier: 'standard',
     description: 'Pi SDK bundled with o8 on the managed model route (your plan or the free daily allowance), or on an OpenRouter model you pick. Writes and commands stay in the packet worktree.',
   },
-  cursor: {
-    label: 'Cursor',
-    shortLabel: 'Cursor',
-    dispatchable: true,
-    requiresModel: false,
-    defaultModel: 'cursor-agent',
-    accentColor: '#111827',
-    binaryName: 'cursor-agent',
-    workerProvider: 'cursor',
-    authHouse: 'cursor',
-    reasoningEffort: false,
-    tier: 'frontier',
-    description: 'Cursor CLI headless worker via `cursor-agent -p --output-format stream-json`.',
-  },
-  grok: {
-    label: 'Grok Build',
-    shortLabel: 'Grok',
-    dispatchable: true,
-    requiresModel: false,
-    accentColor: '#16a34a',
-    binaryName: 'grok',
-    workerProvider: 'grok',
-    authHouse: 'grok',
-    modelIdPattern: /^(grok|x-ai\/|xai\/)/i,
-    reasoningEffort: false,
-    tier: 'frontier',
-    description: 'Grok Build coding CLI with provider-selected current defaults, structured headless output, and durable resume.',
-  },
-  'prime-agent': {
-    label: 'Prime Agent',
-    shortLabel: 'Prime',
-    dispatchable: true,
-    requiresModel: false,
-    accentColor: '#0ea5e9',
-    binaryName: 'prime-agent',
-    workerProvider: 'prime-agent',
-    authHouse: 'prime-agent',
-    reasoningEffort: false,
-    // Standard, not frontier: runs on the operator's own provider keys via
-    // prime-agent's own config, so it qualifies for the "Workers use the
-    // Brain" auto mode like Gemini/opencode.
-    tier: 'standard',
-    description: "Open-source RLM coding harness CLI (json-mode JSONL output); runs on the operator's own provider keys.",
-  },
-  muse: {
-    label: 'Muse Code', shortLabel: 'Muse', dispatchable: true, requiresModel: false,
-    accentColor: '#0866ff', binaryName: 'muse', workerProvider: 'muse', authHouse: 'muse',
-    reasoningEffort: true, tier: 'frontier',
-    description: 'Native Muse Code worker with durable sessions. Uses the installed CLI account and its available models; sandbox remains enabled.',
-  },
   hermes: {
     label: 'Hermes',
     shortLabel: 'Hermes',
@@ -568,20 +485,6 @@ export const ORCHESTRATOR_RUNTIMES = {
     reasoningEffort: false,
     tier: 'standard',
     description: 'Hermes Agent worker through its ACP stdio server, using the provider and model configured by Hermes.',
-  },
-  'deepseek-harness': {
-    label: 'DeepSeek Harness',
-    shortLabel: 'DSH',
-    dispatchable: true,
-    requiresModel: false,
-    defaultModel: 'deepseek-v4-pro',
-    accentColor: '#4d6bfe',
-    binaryName: 'dsh-acp-demo',
-    workerProvider: 'deepseek-harness',
-    authHouse: 'deepseek-harness',
-    reasoningEffort: false,
-    tier: 'standard',
-    description: 'DeepSeek Harness developer preview through its official ACP stdio server, with provider selection kept separate from the harness.',
   },
 } satisfies Record<string, OrchestratorRuntimeCapability>;
 

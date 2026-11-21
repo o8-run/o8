@@ -14,7 +14,6 @@ import { SUPPORTED_MODEL_IDS } from '@/lib/models';
 import { getThreecodeModelCatalogue } from '@/lib/runtimes/threecode-model-catalogue';
 import { resolveAcpLaunch } from '@/lib/lane/orchestrator-backends/acp';
 import { probeAcpModels } from './acp-model-probe';
-import { museWorkerModelContext, probeMuseModels } from '@/lib/muse/models';
 import { getRuntimeCapability, type OrchestratorRuntime } from './runtime-capabilities';
 import { resolveEffortPin } from './effort-pin';
 import { THINKING_EFFORTS, type ThinkingEffort } from './thinking-effort';
@@ -104,12 +103,6 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     const catalog = await probeAcpModels('opencode', launch, repoPath);
     ids = catalog.models.map(model => model.value);
     defaultModel ??= catalog.currentModel;
-    source = catalog.source;
-  } else if (runtime === 'muse') {
-    const catalog = await probeMuseModels(repoPath, true, await museWorkerModelContext());
-    ids = catalog.models.map(model => model.id);
-    modelEfforts = new Map(catalog.models.map(model => [model.id, model.efforts]));
-    defaultModel ??= catalog.models.find(model => model.isDefault)?.id ?? null;
     source = catalog.source;
   } else {
     ids = defaultModel ? [defaultModel] : [];

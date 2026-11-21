@@ -145,10 +145,10 @@ describe('read-only packets reach the runtime as an enforced mode', () => {
     expect(resolveLaunchWorkMode({ runtime: 'codex' })).toEqual({ ok: true, workMode: undefined });
   });
 
-  it('refuses a real Gemini runtime before launch, worktree creation, or lane mutation', async () => {
-    const { geminiRuntime } = await import('@/lib/runtimes/gemini');
+  it('refuses a real OpenCode runtime before launch, worktree creation, or lane mutation', async () => {
+    const { opencodeRuntime } = await import('@/lib/runtimes/opencode');
     const { listLanes } = await import('@/lib/lane/registry');
-    const launchSpy = vi.spyOn(geminiRuntime, 'launch');
+    const launchSpy = vi.spyOn(opencodeRuntime, 'launch');
     const worktreesBefore = execFileSync('git', ['worktree', 'list', '--porcelain'], {
       cwd: repoPath,
       encoding: 'utf8',
@@ -156,7 +156,7 @@ describe('read-only packets reach the runtime as an enforced mode', () => {
     const laneIdsBefore = listLanes().map((lane) => lane.id);
     try {
       const result = await launchRuntimeSurface({
-        runtime: 'gemini',
+        runtime: 'opencode',
         prompt: 'inspect without changing anything',
         repoPath,
         workMode: 'read-only',
@@ -166,7 +166,7 @@ describe('read-only packets reach the runtime as an enforced mode', () => {
       expect(result).toMatchObject({
         ok: false,
         retryable: false,
-        runtime: 'gemini',
+        runtime: 'opencode',
         worktree: null,
       });
       expect(result.note).toContain('cannot enforce read-only worker execution');
@@ -181,7 +181,7 @@ describe('read-only packets reach the runtime as an enforced mode', () => {
     }
   });
 
-  it('returns 400 without persistence when the create-mission route requests read-only Gemini', async () => {
+  it('returns 400 without persistence when the create-mission route requests read-only OpenCode', async () => {
     const packetsBefore = readOrchestratorControlPlaneState().packets.map((packet) => packet.id);
     const response = await createMissionRoute.POST(new NextRequest(
       'http://localhost:3001/api/orchestrator/create-mission',
@@ -189,9 +189,9 @@ describe('read-only packets reach the runtime as an enforced mode', () => {
         method: 'POST',
         headers: { host: 'localhost:3001' },
         body: JSON.stringify({
-          clientMutationId: 'read-only-gemini-refusal',
+          clientMutationId: 'read-only-opencode-refusal',
           repoPath,
-          requestedRuntime: 'gemini',
+          requestedRuntime: 'opencode',
           issues: [{
             number: 90_097_004,
             title: 'unsupported read only runtime',

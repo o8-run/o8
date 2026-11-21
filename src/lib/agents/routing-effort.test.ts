@@ -3,7 +3,7 @@
  *  1. PARITY — no requested effort ⇒ selectedEffort/requestedEffort are null and
  *     nothing else changes (the blast radius is zero unless effort is set).
  *  2. PER-RUNTIME — effort is honored only for runtimes with a reasoning-effort
- *     surface (codex/claude-code); gemini/opencode → clean no-op (null).
+ *     surface (codex/claude-code); antigravity/opencode → clean no-op (null).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -48,9 +48,9 @@ describe('resolveWorkerRouting — effort per-runtime', () => {
     expect(resolveWorkerRouting({ requestedEffort: 'low' }).selectedEffort).toBe('low');
   });
 
-  it('gemini remains selected and treats effort as a clean no-op', () => {
-    const r = resolveWorkerRouting({ requestedRuntime: 'gemini', requestedEffort: 'high' });
-    expect(r.selectedRuntime).toBe('gemini');
+  it('antigravity remains selected and treats effort as a clean no-op', () => {
+    const r = resolveWorkerRouting({ requestedRuntime: 'antigravity', requestedEffort: 'high' });
+    expect(r.selectedRuntime).toBe('antigravity');
     expect(r.selectedEffort).toBeNull();
     expect(r.requestedEffort).toBe('high');
   });

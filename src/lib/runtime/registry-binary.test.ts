@@ -13,11 +13,6 @@ describe('runtime process command detection', () => {
     expect(runtimeForCommand('node /usr/local/bin/3code fix the bug')).toBe('3code');
   });
 
-  it('recognizes a Magnitude terminal process', () => {
-    expect(runtimeForCommand('/usr/local/bin/magnitude')).toBe('magnitude');
-    expect(runtimeForCommand('node /usr/local/bin/magnitude')).toBe('magnitude');
-  });
-
   it('recognizes catalog-driven Copilot CLI and Crush processes', () => {
     expect(runtimeForCommand('/usr/local/bin/copilot -p task')).toBe('copilot-cli');
     expect(runtimeForCommand('/usr/local/bin/crush run task')).toBe('crush');

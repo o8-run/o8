@@ -91,7 +91,7 @@ pub(super) fn runtime_for_lead(backend: &str, inventory: &[Runtime]) -> Option<S
     }
     match backend {
         "claude" | "fable" => Some("claude-code".into()),
-        "codex" | "opencode" | "muse" | "pi" => Some(backend.into()),
+        "codex" | "opencode" | "pi" => Some(backend.into()),
         _ => None,
     }
 }
@@ -1345,7 +1345,7 @@ fn install_table_parses_with_the_desktop_commands() {
     // The table falls back to empty at runtime; a broken copy must fail here.
     let table: HashMap<String, Install> =
         serde_json::from_str(include_str!("runtime-install.json")).expect("runtime-install.json");
-    assert!(table.len() >= 10);
+    assert!(table.len() >= 7);
     let codex = install("codex").expect("codex install info");
     assert_eq!(codex.command.as_deref(), Some("npm i -g @openai/codex"));
     assert!(

@@ -149,11 +149,7 @@ function modelMatchesRuntime(model: string, runtime: OrchestratorRuntime): boole
   const house = modelHouse(model);
   if (!house) return true;
   const runtimeHouse = getRuntimeCapability(runtime).authHouse;
-  return runtimeHouse !== 'codex'
-    && runtimeHouse !== 'claude'
-    && runtimeHouse !== 'gemini'
-    && runtimeHouse !== 'cursor'
-    && runtimeHouse !== 'grok'
+  return runtimeHouse !== 'codex' && runtimeHouse !== 'claude'
     ? true
     : house === runtimeHouse;
 }

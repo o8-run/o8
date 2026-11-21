@@ -1,5 +1,4 @@
 import { withLaunchProviderInstance } from './provider-instance-launch';
-import { getRuntimeLaunchIdentitySync } from './identity-catalog';
 import { assertLaunchEffortPin } from '@/lib/runtime/launch-effort';
 import type { RuntimeLaunchRequest } from './launch-request';
 export type { RuntimeLaunchRequest } from './launch-request';
@@ -152,8 +151,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, resolved
     throw new Error('repoPath or cwd is required');
   }
 
-  const launchIdentity = runtimeId === 'codex' ? resolvedIdentity ?? resolveCodexLaunchIdentity(payload.packetId)
-    : runtimeId === 'muse' ? resolvedIdentity ?? getRuntimeLaunchIdentitySync('muse', payload.packetId) ?? undefined : undefined;
+  const launchIdentity = runtimeId === 'codex' ? resolvedIdentity ?? resolveCodexLaunchIdentity(payload.packetId) : undefined;
   await assertLaunchEffortPin(payload, repoPath, launchIdentity);
 
   const runtime = getRuntime(runtimeId);
@@ -190,7 +188,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, resolved
   }
   const { prompt: launchPrompt, projectContext } = await buildLaunchPromptWithProjectBrief(payload, prompt, repoPath);
   const remoteManagedWorktree = runtimeId === 'cloud';
-  const supportsWorktrees = remoteManagedWorktree || ['codex', 'claude-code', 'gemini', 'opencode', 'pi', 'pi-builtin', 'hermes', 'deepseek-harness', 'muse'].includes(runtimeId)
+  const supportsWorktrees = remoteManagedWorktree || ['codex', 'claude-code', 'opencode', 'pi', 'pi-builtin', 'hermes'].includes(runtimeId)
     || listDeclarativeRuntimes().includes(runtimeId as OrchestratorRuntime);
   const packetNeedsWorktree = packetRequiresWorktree(payload);
 

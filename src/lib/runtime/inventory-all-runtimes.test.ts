@@ -86,7 +86,7 @@ afterAll(() => {
 function runtime(id: RuntimeId): AgentRuntime {
   const cwd = join(testRoot, id);
   mkdirSync(cwd, { recursive: true });
-  const lastActivityAt = id === 'gemini'
+  const lastActivityAt = id === 'antigravity'
     ? '2026-07-24T12:00:02.000Z'
     : id === 'aider'
       ? '2026-07-24T12:00:01.000Z'
@@ -144,14 +144,14 @@ describe('canonical runtime inventory discovery', () => {
   });
 
   it('matches main policy by never discovering non-dispatchable registered adapters', async () => {
-    const geminiRuntime = runtime('gemini');
+    const antigravityRuntime = runtime('antigravity');
     const aiderRuntime = runtime('aider');
     const cloudRuntime = runtime('cloud');
     const remoteCustomerRuntime = runtime('remote-customer');
     const cloudDiscovery = vi.spyOn(cloudRuntime, 'discoverSessions');
     const remoteCustomerDiscovery = vi.spyOn(remoteCustomerRuntime, 'discoverSessions');
     registryFixture.runtimes = [
-      geminiRuntime,
+      antigravityRuntime,
       aiderRuntime,
       cloudRuntime,
       remoteCustomerRuntime,
@@ -162,9 +162,9 @@ describe('canonical runtime inventory discovery', () => {
 
     expect(cloudDiscovery).not.toHaveBeenCalled();
     expect(remoteCustomerDiscovery).not.toHaveBeenCalled();
-    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
+    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['antigravity', 'aider']);
     expect(snapshot.agents.map((agent) => agent.identityId)).toEqual([
-      'gemini-identity',
+      'antigravity-identity',
       'aider-identity',
     ]);
     expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
@@ -288,17 +288,17 @@ describe('canonical runtime inventory discovery', () => {
   });
 
   it('serves a cold dashboard snapshot immediately and lets an explicit fresh read expedite discovery', async () => {
-    const geminiRuntime = runtime('gemini');
-    const originalDiscovery = geminiRuntime.discoverSessions;
+    const antigravityRuntime = runtime('antigravity');
+    const originalDiscovery = antigravityRuntime.discoverSessions;
     let releaseDiscovery!: () => void;
     const discoveryGate = new Promise<void>((resolve) => {
       releaseDiscovery = resolve;
     });
-    const discovery = vi.spyOn(geminiRuntime, 'discoverSessions').mockImplementation(async (options) => {
+    const discovery = vi.spyOn(antigravityRuntime, 'discoverSessions').mockImplementation(async (options) => {
       await discoveryGate;
       return originalDiscovery(options);
     });
-    registryFixture.runtimes = [geminiRuntime];
+    registryFixture.runtimes = [antigravityRuntime];
 
     const warming = await getRuntimeInventorySnapshot();
 
@@ -321,13 +321,13 @@ describe('canonical runtime inventory discovery', () => {
 
     const fresh = await freshPending;
     expect(fresh.meta.mode).toBe('live');
-    expect(fresh.agents.map((agent) => agent.runtime)).toEqual(['gemini']);
+    expect(fresh.agents.map((agent) => agent.runtime)).toEqual(['antigravity']);
   });
 
   it('bounds cold runtime discovery so installed CLIs cannot stampede the app', async () => {
     let activeDiscoveries = 0;
     let peakDiscoveries = 0;
-    const runtimes = [runtime('gemini'), runtime('aider'), runtime('opencode'), runtime('cursor')];
+    const runtimes = [runtime('antigravity'), runtime('aider'), runtime('opencode'), runtime('hermes')];
     for (const candidate of runtimes) {
       const originalDiscovery = candidate.discoverSessions;
       candidate.discoverSessions = async (options) => {
@@ -353,12 +353,12 @@ describe('canonical runtime inventory discovery', () => {
       const sessions = await discoverSessions();
       return sessions.map((session) => ({ ...session, lastActivityAt: new Date('not-a-time') }));
     };
-    registryFixture.runtimes = [runtime('gemini'), malformedRuntime];
+    registryFixture.runtimes = [runtime('antigravity'), malformedRuntime];
     invalidateRuntimeInventoryCache();
 
     const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
 
-    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
+    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['antigravity', 'aider']);
     expect(snapshot.agents.find((agent) => agent.runtime === 'aider')?.statusEvidence)
       .toMatchObject({
         runtime: 'aider',
@@ -376,7 +376,7 @@ describe('canonical runtime inventory discovery', () => {
       const sessions = await discoverSessions();
       return sessions.map((session) => ({ ...session, sessionKey: '' }));
     };
-    registryFixture.runtimes = [runtime('gemini'), malformedRuntime];
+    registryFixture.runtimes = [runtime('antigravity'), malformedRuntime];
     invalidateRuntimeInventoryCache();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -384,7 +384,7 @@ describe('canonical runtime inventory discovery', () => {
       const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
 
       expect(snapshot.agents).toHaveLength(2);
-      expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
+      expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['antigravity', 'aider']);
       expect(snapshot.agents[1].statusEvidence).toMatchObject({
         sessionId: 'aider',
         runtime: 'aider',

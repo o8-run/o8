@@ -541,11 +541,7 @@ function ownedRuntimeCommandLabel(surfaceId: string): string | null {
   if (registered) return registered.commandLabel;
   if (surfaceId.startsWith('codex-owned:')) return 'codex';
   if (surfaceId.startsWith('claude-code-owned:')) return 'claude';
-  if (surfaceId.startsWith('gemini-owned:')) return 'gemini';
   if (surfaceId.startsWith('opencode-owned:')) return 'opencode2';
-  if (surfaceId.startsWith('cursor-owned:')) return 'cursor-agent';
-  if (surfaceId.startsWith('grok-owned:')) return 'grok';
-  if (surfaceId.startsWith('prime-agent-owned:')) return 'prime-agent';
   if (surfaceId.startsWith('pi-owned:')) return 'pi';
   return null;
 }

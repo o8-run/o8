@@ -106,12 +106,9 @@ describe('GET /api/setup/detect', () => {
     expect(response.status).toBe(200);
     expect(data.tools).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: '3code', name: '3code CLI', detected: false }),
-      expect.objectContaining({ id: 'magnitude', name: 'Magnitude CLI', detected: false }),
-      expect.objectContaining({ id: 'cursor', name: 'Cursor CLI', detected: false }),
-      expect.objectContaining({ id: 'grok', name: 'Grok Build', detected: false }),
       expect.objectContaining({ id: 'pi', name: 'Pi', detected: false }),
     ]));
-    for (const id of ['3code', 'magnitude', 'cursor', 'grok', 'pi']) {
+    for (const id of ['3code', 'pi']) {
       const tool = data.tools.find((entry) => entry.id === id);
       expect(tool?.ready).toBeUndefined();
       expect(tool?.authHint).toBeUndefined();

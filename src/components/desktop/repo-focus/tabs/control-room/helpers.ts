@@ -74,8 +74,6 @@ export function runtimeLabel(value: string | null | undefined): string {
   switch (value) {
     case 'claude-code':
       return 'Claude';
-    case 'gemini':
-      return 'Gemini';
     case 'opencode':
       return 'opencode';
     case 'codex':

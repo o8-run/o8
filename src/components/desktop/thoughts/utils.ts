@@ -132,7 +132,7 @@ export function isRunnableCliSession(agent: FleetAgent) {
   const runtime = agent.runtime;
   const sessionKey = agent.sessionKey?.trim();
   if (!sessionKey) return false;
-  if (runtime !== 'codex' && runtime !== 'claude-code' && runtime !== 'gemini' && runtime !== 'opencode') return false;
+  if (runtime !== 'codex' && runtime !== 'claude-code' && runtime !== 'opencode') return false;
   if (sessionKey.includes(':ide-tab-')) return false;
   return true;
 }

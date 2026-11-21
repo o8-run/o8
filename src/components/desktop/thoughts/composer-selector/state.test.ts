@@ -176,7 +176,7 @@ describe('composer selector state', () => {
     expect(providerMarkForLead('codex', 'ollama:qwen:32b')).toBe('ollama');
     expect(providerMarkForLead('opencode', 'google/gemini-3-pro')).toBe('gemini');
     expect(providerMarkForRuntime('claude-code')).toBe('anthropic');
-    expect(providerMarkForRuntime('deepseek-harness')).toBe('deepseek');
+    expect(providerMarkForRuntime('antigravity')).toBe('antigravity');
     expect(providerMarkForRuntime('hermes')).toBe('terminal');
   });
 
@@ -259,7 +259,7 @@ describe('composer selector state', () => {
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'high',
       adaptiveEnabled: true,
       inSessionSettings: { mode: 'fusion', workerRuntime: 'opencode' },
-      threadSettings: { mode: 'moa', workerRuntime: 'gemini', workerStartMode: 'huddle' },
+      threadSettings: { mode: 'moa', workerRuntime: 'antigravity', workerStartMode: 'huddle' },
       operatorDefaultSettings: {
         mode: 'multitask',
         workerRuntime: 'codex',

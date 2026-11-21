@@ -67,7 +67,7 @@ export function runtimeForLead(backend: OrchestratorBackendSetting | null, inven
   const builtIn = builtInAgentFromInventory(inventory);
   if (builtIn?.builtIn?.backend === backend) return builtIn.id;
   if (backend === 'claude' || backend === 'fable') return 'claude-code';
-  if (backend === 'codex' || backend === 'opencode' || backend === 'muse' || backend === 'pi') return backend;
+  if (backend === 'codex' || backend === 'opencode' || backend === 'pi') return backend;
   return null;
 }
 

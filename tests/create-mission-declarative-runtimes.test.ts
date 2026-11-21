@@ -123,10 +123,7 @@ describe('create_mission runtime reachability', () => {
 
   it.each([
     ['claude-code', 91_598_001],
-    ['gemini', 91_598_002],
     ['opencode', 91_598_003],
-    ['cursor', 91_598_004],
-    ['grok', 91_598_005],
     ['pi', 91_598_006],
     ['openhands', 91_598_011],
     ['goose', 91_598_012],

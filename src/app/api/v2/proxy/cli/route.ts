@@ -18,12 +18,12 @@ import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 /**
  * POST /api/v2/proxy/cli
  *
- * Routes chat messages through an installed CLI runtime (Claude Code, Codex, Gemini CLI)
+ * Routes chat messages through an installed CLI runtime (Claude Code, Codex, OpenCode)
  * instead of a provider API. Spawns the CLI as a subprocess, pipes the prompt,
  * and streams the output back as SSE events matching our existing stream format.
  */
 
-type CliRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode';
+type CliRuntime = 'claude-code' | 'codex' | 'opencode';
 
 interface CliRequestBody {
   runtime: CliRuntime;
@@ -58,12 +58,6 @@ function describeSilentExit(input: {
 const CODEX_MODEL_MAP: Record<string, string> = {
   ...Object.fromEntries(CODEX_MODEL_IDS.map((id) => [id, id])),
   'o4-mini': 'o4-mini',
-};
-
-const GEMINI_MODEL_MAP: Record<string, string> = {
-  'gemini-3.1-pro': 'gemini-3.1-pro-preview',
-  'gemini-2.5-pro': 'gemini-2.5-pro',
-  'gemini-2.5-flash': 'gemini-2.5-flash',
 };
 
 function extractModelKey(cliModelId: string): string {
@@ -166,18 +160,6 @@ export async function POST(request: Request) {
           envOverride: 'O8_CODEX_BIN',
         };
         args = ['exec', '--json', '-c', `model="${cliModel}"`, '--', prompt];
-        break;
-      }
-      case 'gemini': {
-        const cliModel = GEMINI_MODEL_MAP[modelKey] ?? 'gemini-2.5-flash';
-        cmd = 'gemini';
-        cliSpec = {
-          runtimeId: 'gemini',
-          binaryName: cmd,
-          humanLabel: 'Gemini CLI',
-          envOverride: 'O8_GEMINI_BIN',
-        };
-        args = ['--prompt', prompt, '--output-format', 'stream-json', '--model', cliModel];
         break;
       }
       case 'opencode': {
@@ -405,8 +387,6 @@ function normalizeCliEvent(runtime: CliRuntime, raw: any): SseEvent[] {
       return normalizeClaude(raw);
     case 'codex':
       return normalizeCodex(raw);
-    case 'gemini':
-      return normalizeGemini(raw);
     case 'opencode':
       return normalizeOpenCode(raw);
     default:
@@ -467,24 +447,6 @@ function normalizeCodex(raw: any): SseEvent[] {
       type: 'usage',
       inputTokens: raw.usage.input_tokens ?? 0,
       outputTokens: raw.usage.output_tokens ?? 0,
-    });
-  }
-
-  return events;
-}
-
-function normalizeGemini(raw: any): SseEvent[] {
-  const events: SseEvent[] = [];
-
-  if (raw.type === 'message' && raw.role === 'assistant' && raw.content) {
-    events.push({ type: 'content', text: raw.content });
-  }
-
-  if (raw.type === 'result' && raw.stats) {
-    events.push({
-      type: 'usage',
-      inputTokens: raw.stats.input_tokens ?? raw.stats.input ?? 0,
-      outputTokens: raw.stats.output_tokens ?? 0,
     });
   }
 

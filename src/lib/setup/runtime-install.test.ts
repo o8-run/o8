@@ -23,12 +23,11 @@ describe('runtime install metadata', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('routes free Google accounts to Antigravity instead of the Gemini npm package', () => {
+  it('routes Google accounts to Antigravity', () => {
     expect(getRuntimeInstallInfo('antigravity')).toMatchObject({
       label: 'Antigravity CLI',
       link: 'https://antigravity.google/docs/getting-started?tab=cli',
     });
-    expect(getRuntimeInstallInfo('gemini')?.hint).toContain('enterprise and paid API access');
   });
 
   it('routes missing 3code users to the official setup page', () => {
@@ -40,12 +39,4 @@ describe('runtime install metadata', () => {
     });
   });
 
-  it('provides the official Magnitude npm install command', () => {
-    expect(getRuntimeInstallInfo('magnitude')).toEqual({
-      id: 'magnitude',
-      label: 'Magnitude CLI',
-      command: 'npm i -g @magnitudedev/cli',
-      hint: 'On macOS or Linux, install Magnitude, then launch it in a visible repository terminal to choose a local model or custom endpoint.',
-    });
-  });
 });

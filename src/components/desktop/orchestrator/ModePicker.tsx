@@ -247,7 +247,7 @@ export function loadOrchestrationMode(workspaceKey: string): { mode: Orchestrati
     if (!raw) return { mode: 'fleet', runtime: 'codex' };
     const parsed = JSON.parse(raw) as { mode?: string; runtime?: string };
     const mode: OrchestrationMode = parsed.mode === 'single' || parsed.mode === 'fusion' || parsed.mode === 'chat' ? parsed.mode : 'fleet';
-    const runtime: OrchestratorRuntime = parsed.runtime === 'gemini' || parsed.runtime === 'opencode' || parsed.runtime === 'claude-code' || parsed.runtime === 'codex'
+    const runtime: OrchestratorRuntime = parsed.runtime === 'opencode' || parsed.runtime === 'claude-code' || parsed.runtime === 'codex'
       ? parsed.runtime
       : 'codex';
     return { mode, runtime };

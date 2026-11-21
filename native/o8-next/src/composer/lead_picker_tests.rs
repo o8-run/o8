@@ -245,7 +245,7 @@ fn native_composer_model_picker_keeps_its_size_and_rail_while_the_inventory_land
         bounds(cx, "lead-house-o8"),
     ];
     assert!(cx.debug_bounds("lead-house-opencode").is_none());
-    // Five more houses are installed.
+    // Four more houses are installed.
     let installed = |id: &str| json!({"id": id, "available": true, "installed": true});
     set(
         &surface,
@@ -255,7 +255,6 @@ fn native_composer_model_picker_keeps_its_size_and_rail_while_the_inventory_land
             installed("codex"),
             installed("opencode"),
             installed("pi"),
-            installed("muse"),
             installed("hermes"),
             installed("acp"),
         ]),

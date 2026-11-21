@@ -45,8 +45,6 @@ export const ORCHESTRATOR_BACKEND_BILLING: Record<OrchestratorBackendId, Orchest
   // Bundled Pi draws per token on the o8 model allowance (the paid weekly or
   // free daily allowance), so the decisions-only window policies apply.
   pi: 'metered',
-  // Native account and API capacity vary by the CLI configuration; use the conservative policy.
-  muse: 'metered',
 };
 
 export function orchestratorBackendBillingClass(id: OrchestratorBackendId): OrchestratorBillingClass {

@@ -60,7 +60,6 @@ const RUNTIME_BINARIES = [
   { bin: 'codex', label: 'Codex' },
   { bin: 'claude', label: 'Claude Code' },
   { bin: 'agy', label: 'Antigravity CLI' },
-  { bin: 'gemini', label: 'Gemini CLI' },
 ];
 
 let cachedBaseContext: { expiresAt: number; data: BaseFtuxContext } | null = null;

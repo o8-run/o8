@@ -123,14 +123,6 @@ pub(crate) const COMMANDS: &[Command] = &[
         group: "route",
     },
     Command {
-        command: "/gemini",
-        title: "Gemini",
-        description: "Open a one-agent Gemini tab for this repo.",
-        argument: true,
-        aliases: &[],
-        group: "route",
-    },
-    Command {
         command: "/opencode",
         title: "OpenCode 2",
         description: "Open a one-agent OpenCode 2 tab for this repo.",

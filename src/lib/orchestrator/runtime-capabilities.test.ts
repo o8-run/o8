@@ -68,6 +68,6 @@ describe('runtime capability catalog', () => {
       runtime: 'claude-code',
       model: MODEL_IDS.claudeHaikuQaDefault,
     });
-    expect(resolveRuntimePreset('ui-edit-low-latency', 'gemini')).toBeNull();
+    expect(resolveRuntimePreset('ui-edit-low-latency', 'antigravity')).toBeNull();
   });
 });

@@ -19,8 +19,7 @@ export type DispatchDefaultOrchestratorBackend =
   | 'opencode'
   // Bundled Pi dispatches through the same operator server; the worker default
   // is still resolved independently.
-  | 'pi'
-  | 'muse';
+  | 'pi';
 
 export interface ResolveDefaultDispatchRuntimeInput {
   explicitRuntime?: OrchestratorRuntime | null;

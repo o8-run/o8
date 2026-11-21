@@ -87,7 +87,7 @@ it.skipIf(process.platform !== 'linux')('serves ordinary lists through the publi
 it.skipIf(process.platform !== 'linux')('rejects missing, malformed, oversized and incomplete capability grants through the front door',async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(),'o8d-queue-grant-'))); let mode = 'valid'; let stderr = ''; let stdout = '';
   await seedSessionFixture(directory); const repo = seedRows(directory); const path = pathFor(repo,'thoughts-queue',{ backend: 'pi' });
-  const context = () => ({ target: { repoPath: repo,threadId: 'thoughts-queue' },request: { repoPath: repo,threadId: 'thoughts-queue',backend: 'pi' },capabilities: ORCHESTRATOR_BACKEND_IDS.map(id => ({ id: String(id),liveSteer: mode !== 'rotate' && (id === 'pi' || id === 'muse') })) });
+  const context = () => ({ target: { repoPath: repo,threadId: 'thoughts-queue' },request: { repoPath: repo,threadId: 'thoughts-queue',backend: 'pi' },capabilities: ORCHESTRATOR_BACKEND_IDS.map(id => ({ id: String(id),liveSteer: mode !== 'rotate' && id === 'pi' })) });
   const upstream = createServer((req,res) => {
     if (req.headers['x-o8d-session-read'] === 'authorize') {
       expect(req.headers['x-o8d-composer-queue']).toBe('capabilities/1'); if (mode === 'missing') { res.writeHead(204).end(); return; }

@@ -344,9 +344,9 @@ describe('spawn-prompt effort pin — public route rejections', () => {
     const repoPath = makeRepo();
     const error = await rejectSpawnPin({
       repoPath,
-      requestedRuntime: 'gemini',
+      requestedRuntime: 'antigravity',
       requestedEffort: 'high',
-      task: 'gemini effort',
+      task: 'antigravity effort',
     });
     expect(error.code).toBe('effort_unsupported_runtime');
     expect(error.message).toContain('cannot honor');

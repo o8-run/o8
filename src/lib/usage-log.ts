@@ -11,7 +11,7 @@ const USAGE_LOG_DIR = getDataDir();
 const USAGE_LOG_PATH = path.join(USAGE_LOG_DIR, 'usage.jsonl');
 const inFlightUsageDispatches = new Set<string>();
 
-export type DispatchUsageRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'grok';
+export type DispatchUsageRuntime = 'claude-code' | 'codex' | 'opencode';
 
 export interface UsageSnapshot {
   inputTokens: number;

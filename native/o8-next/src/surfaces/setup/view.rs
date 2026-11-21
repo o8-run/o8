@@ -105,7 +105,7 @@ impl Snapshot {
             || backend == "o8"
             || (!backend.is_empty()
                 && self.setup["setupRecommendation"]["preserved"] == true
-                && !["codex", "claude", "fable", "opencode", "muse"].contains(&backend)))
+                && !["codex", "claude", "fable", "opencode"].contains(&backend)))
             && !workers.is_empty()
             && workers.iter().all(|w| self.available(w))
     }

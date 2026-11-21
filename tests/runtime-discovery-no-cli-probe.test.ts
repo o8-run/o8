@@ -14,18 +14,11 @@ const root = mkdtempSync(path.join(os.tmpdir(), 'o8-discovery-no-probe-'));
 vi.stubEnv('PI_CODING_AGENT_DIR', path.join(root, 'absent-user-pi'));
 vi.stubEnv('PI_CODING_AGENT_SESSION_DIR', '');
 process.env.O8_OWNED_PI_ROOT = path.join(root, 'pi');
-process.env.O8_OWNED_PRIME_AGENT_ROOT = path.join(root, 'prime-agent');
-process.env.O8_OWNED_CURSOR_ROOT = path.join(root, 'cursor');
-process.env.O8_OWNED_GROK_ROOT = path.join(root, 'grok');
 const { resolveCli } = await import('@/lib/runtimes/shared/cli-resolver');
 const { discoverRuntimeSessions } = await import('@/lib/runtime/inventory-discovery');
 const { piRuntime } = await import('@/lib/runtimes/pi');
-const { primeAgentRuntime } = await import('@/lib/runtimes/prime-agent');
-const { cursorRuntime } = await import('@/lib/runtimes/cursor');
-const { grokRuntime } = await import('@/lib/runtimes/grok');
-const { magnitudeRuntime } = await import('@/lib/runtimes/magnitude');
 const { antigravityRuntime } = await import('@/lib/runtimes/antigravity');
-const runtimes = [piRuntime, primeAgentRuntime, cursorRuntime, grokRuntime, magnitudeRuntime, antigravityRuntime];
+const runtimes = [piRuntime, antigravityRuntime];
 
 afterAll(() => {
   vi.unstubAllEnvs();

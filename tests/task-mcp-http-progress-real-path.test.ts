@@ -479,7 +479,7 @@ it('does not relabel a legacy reviewer runtime during a plain claim', async () =
   expect(control.readOrchestratorControlPlaneState().packets[0].launchContext).toBeFalsy();
 });
 
-it.each(['claude', 'codex', 'claude-code', 'gemini', 'opencode'])('preserves named runtime %s from task creation to started child', async (requestedRuntime) => {
+it.each(['claude', 'codex', 'claude-code', 'antigravity', 'opencode'])('preserves named runtime %s from task creation to started child', async (requestedRuntime) => {
   const tasks = await import('@/app/api/tasks/route');
   const dispatch = await import('@/lib/tasks/http/dispatch');
   const expected = requestedRuntime === 'claude' ? 'claude-code' : requestedRuntime;

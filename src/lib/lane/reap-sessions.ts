@@ -292,21 +292,9 @@ export async function archiveLaneSessions(lanes: Lane[]): Promise<LaneSessionArc
         } else if (target.sessionKey.startsWith('claude-code-owned:')) {
           const { archiveOwnedClaudeCodeSession } = await import('@/lib/claude-code/owned');
           return archiveOwnedClaudeCodeSession(target.sessionKey);
-        } else if (target.sessionKey.startsWith('gemini-owned:')) {
-          const { archiveOwnedGeminiSession } = await import('@/lib/gemini/owned');
-          return archiveOwnedGeminiSession(target.sessionKey);
         } else if (target.sessionKey.startsWith('opencode-owned:')) {
           const { archiveOwnedOpencodeSession } = await import('@/lib/opencode/owned');
           return archiveOwnedOpencodeSession(target.sessionKey);
-        } else if (target.sessionKey.startsWith('cursor-owned:')) {
-          const { archiveOwnedCursorSession } = await import('@/lib/cursor/owned');
-          return archiveOwnedCursorSession(target.sessionKey);
-        } else if (target.sessionKey.startsWith('grok-owned:')) {
-          const { archiveOwnedGrokSession } = await import('@/lib/grok/owned');
-          return archiveOwnedGrokSession(target.sessionKey);
-        } else if (target.sessionKey.startsWith('prime-agent-owned:')) {
-          const { archiveOwnedPrimeAgentSession } = await import('@/lib/prime-agent/owned');
-          return archiveOwnedPrimeAgentSession(target.sessionKey);
         } else if (target.sessionKey.startsWith('pi-owned:')) {
           const { archiveOwnedPiSession } = await import('@/lib/pi/owned');
           return archiveOwnedPiSession(target.sessionKey);

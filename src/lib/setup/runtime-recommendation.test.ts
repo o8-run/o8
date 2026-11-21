@@ -6,7 +6,7 @@ import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection
 const inventory = [
   { id: 'codex', label: 'Codex', available: true, unavailableReason: null, detail: '', fix: '' },
   { id: 'claude-code', label: 'Claude Code', available: true, unavailableReason: null, detail: '', fix: '' },
-  { id: 'gemini', label: 'Gemini', available: false, unavailableReason: 'needs_auth', detail: '', fix: 'Sign in' },
+  { id: 'antigravity', label: 'Antigravity', available: false, unavailableReason: 'needs_auth', detail: '', fix: 'Sign in' },
   { id: 'opencode', label: 'OpenCode', available: false, unavailableReason: 'not_installed', detail: '', fix: 'Install' },
 ] as const;
 const activity = { codex: 3, claude: 8, complete: true };
@@ -113,14 +113,14 @@ describe('detected runtime recommendation', () => {
   });
 
   it('shows installed tools needing login, hides missing tools, and preserves a selected missing tool', () => {
-    expect(visibleRuntimeInventory(inventory).map((item) => item.id)).toEqual(['codex', 'claude-code', 'gemini']);
+    expect(visibleRuntimeInventory(inventory).map((item) => item.id)).toEqual(['codex', 'claude-code', 'antigravity']);
     expect(visibleRuntimeInventory(inventory, ['opencode']).map((item) => item.id)).toContain('opencode');
   });
 });
 
 describe('enabledRuntimeInventory', () => {
   it('hides runtimes turned off in Settings › Providers', () => {
-    expect(enabledRuntimeInventory(inventory, ['claude-code']).map(item => item.id)).toEqual(['codex', 'gemini', 'opencode']);
+    expect(enabledRuntimeInventory(inventory, ['claude-code']).map(item => item.id)).toEqual(['codex', 'antigravity', 'opencode']);
     expect(enabledRuntimeInventory(inventory).length).toBe(4);
   });
 });

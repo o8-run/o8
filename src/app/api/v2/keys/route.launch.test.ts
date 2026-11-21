@@ -20,7 +20,6 @@ vi.mock('@/lib/runtimes/shared/cli-resolver', async original => ({ ...await orig
 vi.mock('@/lib/runtimes/shared/cli-locate', async original => ({ ...await original<typeof import('@/lib/runtimes/shared/cli-locate')>(), resolveClaudeBinary: () => process.execPath }));
 vi.mock('@/lib/runtimes/shared/owned-session/workspace-spawn-guard', async original => ({ ...await original<typeof import('@/lib/runtimes/shared/owned-session/workspace-spawn-guard')>(), assertOwnedWorkspaceSpawnAvailable: vi.fn(async () => ({ status: 'available' })) }));
 vi.mock('@/lib/hermes/runtime-resolution', () => ({ resolveHermesBinary: () => process.execPath }));
-vi.mock('@/lib/deepseek-harness/runtime-resolution', () => ({ resolveDeepSeekHarnessLaunch: async () => ({ command: process.execPath, args: [] }) }));
 vi.mock('@/lib/claude-code/codex-subscription-proxy', () => ({ ClaudeCodeWorkerAuthenticationError: class extends Error {}, prepareClaudeCodeWorkerConfig: async () => { await state.prepareGate(); return { configDir: join(state.dir, 'claude-config'), credentialEnv: {} }; } }));
 vi.mock('@/lib/mcp/worker-injection', async original => ({ ...await original<typeof import('@/lib/mcp/worker-injection')>(), resolveWorkerMcpInjection: async () => ({ servers: state.mcp ? [{ id: 'fixture', name: 'fixture', command: process.execPath, args: [], env: { OPENAI_API_KEY: state.mcpKey, LLM_API_KEY: state.mcpKey, MCP_SERVICE_TOKEN: 'fixture-non-provider' } }] : [], skipped: [] }) }));
 vi.mock('@/lib/pi/managed-usage', () => ({ createPiManagedUsageTransport: () => ({ stream: async function* () {} }) }));
@@ -41,7 +40,7 @@ vi.mock('node:child_process', async original => ({ ...await original<typeof impo
       try {
         const frame = JSON.parse(line);
         if (frame.id && frame.method) queueMicrotask(() => child.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: frame.id,
-          result: frame.method === 'initialize' ? { protocolVersion: 1, agentInfo: { name: state.runtime === 'deepseek-harness' ? 'deepseek-harness-acp' : state.runtime, version: 'fixture' }, sessionId: 'fixture', sessionFile: join(state.dir, 'session.jsonl'), tools: [] }
+          result: frame.method === 'initialize' ? { protocolVersion: 1, agentInfo: { name: state.runtime, version: 'fixture' }, sessionId: 'fixture', sessionFile: join(state.dir, 'session.jsonl'), tools: [] }
             : frame.method === 'session/new' ? { sessionId: 'fixture' } : frame.method === 'prompt' ? { assistantText: '', modelCalls: 0, toolCalls: 0 } : { stopReason: 'end_turn' } })}\n`));
       } catch { /* Generic CLIs may use non-JSON stdin. */ }
     }
@@ -67,28 +66,22 @@ async function changeProvider(provider: string, change: { key?: string | null; e
   }
 }
 const aliases = ['GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_AI_API_KEY', 'GOOGLE_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
-const generic = ['codex', 'claude-code', 'gemini', 'cursor', 'prime-agent', 'muse', 'opencode'];
-const acp = ['hermes', 'grok', 'deepseek-harness'];
+const generic = ['codex', 'claude-code', 'opencode'];
+const acp = ['hermes'];
 const declarative = listDeclarativeRuntimes();
 const modules: Record<string, { launch: (request: never) => Promise<unknown> }> = {};
 beforeAll(async () => {
   const loaders = [
     ['codex', 'Codex', () => import('@/lib/codex/owned')],
     ['claude-code', 'ClaudeCode', () => import('@/lib/claude-code/owned')],
-    ['gemini', 'Gemini', () => import('@/lib/gemini/owned')],
-    ['cursor', 'Cursor', () => import('@/lib/cursor/owned')],
-    ['prime-agent', 'PrimeAgent', () => import('@/lib/prime-agent/owned')],
-    ['muse', 'Muse', () => import('@/lib/muse/owned')],
     ['opencode', 'Opencode', () => import('@/lib/opencode/owned')],
     ['hermes', 'Hermes', () => import('@/lib/hermes/owned')],
-    ['grok', 'Grok', () => import('@/lib/grok/owned')],
-    ['deepseek-harness', 'DeepSeekHarness', () => import('@/lib/deepseek-harness/owned')],
     ['pi', 'Pi', () => import('@/lib/pi/owned')],
     ['pi-builtin', 'PiBuiltin', () => import('@/lib/pi-builtin/owned')],
   ] as const;
   for (const [runtime, suffix, load] of loaders) {
-    const runtimeModule = await load() as unknown as Record<string, ((request: never) => Promise<unknown>) | { launch: (request: never) => Promise<unknown> }>;
-    modules[runtime] = { launch: runtime === 'muse' ? (runtimeModule.museOwnedStore as { launch: (request: never) => Promise<unknown> }).launch : runtimeModule[`launchOwned${suffix}Session`] as (request: never) => Promise<unknown> };
+    const runtimeModule = await load() as unknown as Record<string, (request: never) => Promise<unknown>>;
+    modules[runtime] = { launch: runtimeModule[`launchOwned${suffix}Session`] as (request: never) => Promise<unknown> };
   }
   await import('@/lib/runtimes/declarative-workers');
   const { getDeclarativeOwnedRuntime } = await import('@/lib/runtimes/shared/owned-session');
@@ -123,12 +116,12 @@ it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(
     await changeProvider(provider, { key: `fixture-saved-${provider}` });
     if (action !== 'enabled') await changeProvider(provider, action === 'disable' ? { enabled: false } : { key: null });
   }
-  const result = await modules[runtime].launch({ cwd: repo, prompt: 'fixture', runtimeConfig: { museConfigRoot: join(state.dir, 'muse-config'), museDataRoot: join(state.dir, 'muse-data') } } as never);
+  const result = await modules[runtime].launch({ cwd: repo, prompt: 'fixture' } as never);
   expect(result).toMatchObject({ ok: true });
   expect(state.envs.length).toBeGreaterThan(0);
   for (const env of state.envs) {
     for (const [index, key] of keys.entries()) {
-      const enabled = !['codex', 'hermes'].includes(runtime) && action === 'enabled' && mode !== 'sdk' && !(runtime === 'muse' && key === 'OPENROUTER_API_KEY');
+      const enabled = !['codex', 'hermes'].includes(runtime) && action === 'enabled' && mode !== 'sdk';
       expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(enabled ? `fixture-saved-${providers[index]}` : null);
     }
     for (const key of aliases) {
@@ -145,14 +138,14 @@ it('Windows owned launch uses direct spawn when the POSIX bridge is enabled', as
   vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', '0');
   Object.defineProperty(process, 'platform', { value: 'win32' });
   try {
-    expect(await modules['prime-agent'].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
+    expect(await modules.opencode.launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
     expect(state.envs.length).toBeGreaterThan(0); expect(state.bridges).toBe(0);
   } finally { Object.defineProperty(process, 'platform', platform); }
 });
 it('ACP launch retains an explicit unmanaged provider override instead of an ambient key', async () => {
   const { AcpClient } = await import('@/lib/acp/client');
   vi.stubEnv('HERMES_HOME', '');
-  const client = new AcpClient({ runtimeId: 'grok', command: process.execPath, args: [], env: { XAI_API_KEY: 'fixture-explicit-xai' } });
+  const client = new AcpClient({ runtimeId: 'hermes', command: process.execPath, args: [], env: { XAI_API_KEY: 'fixture-explicit-xai' } });
   expect(state.envs.at(-1)?.XAI_API_KEY).toBe('fixture-explicit-xai');
   client.kill();
 });

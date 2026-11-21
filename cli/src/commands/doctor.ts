@@ -186,7 +186,7 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
         tools: DetectRuntime[];
         codexVoiceCapability?: CodexVoiceDoctorCapability;
       }>(cfg, '/api/setup/detect');
-      const ids = ['codex', 'claude-code', 'gemini', 'opencode', '3code', 'cursor', 'grok', 'pi'];
+      const ids = ['codex', 'claude-code', 'antigravity', 'opencode', '3code', 'pi'];
       runtimes = (res.data?.tools ?? []).filter((t) => ids.includes(t.id));
       codexVoiceCapability = res.data?.codexVoiceCapability ?? null;
     } catch {

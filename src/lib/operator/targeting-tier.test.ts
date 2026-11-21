@@ -26,7 +26,7 @@ describe('targeting tier defaults', () => {
 describe('isTargetingTier', () => {
   it('accepts a well-formed tier', () => {
     expect(isTargetingTier({ runtime: 'opencode', model: 'google/gemini-2.5-flash', effort: 'low' })).toBe(true);
-    expect(isTargetingTier({ runtime: 'gemini', model: 'flash', effort: 'low' })).toBe(true);
+    expect(isTargetingTier({ runtime: 'antigravity', model: 'flash', effort: 'low' })).toBe(true);
     expect(isTargetingTier({ runtime: 'codex', model: '', effort: 'max' })).toBe(true);
   });
   it('rejects bad runtime / missing model / bad effort / non-object', () => {
@@ -51,9 +51,9 @@ describe('coerceStoredTier', () => {
 
 describe('mergeTier — env > file > fallback, per subfield', () => {
   it('env subfield wins; unset env subfields fall to file then fallback', () => {
-    const file: TargetingTier = { runtime: 'gemini', model: 'flash', effort: 'medium' };
+    const file: TargetingTier = { runtime: 'antigravity', model: 'flash', effort: 'medium' };
     const merged = mergeTier({ effort: 'max' }, file, FALLBACK);
-    expect(merged).toEqual({ runtime: 'gemini', model: 'flash', effort: 'max' }); // effort from env, rest from file
+    expect(merged).toEqual({ runtime: 'antigravity', model: 'flash', effort: 'max' }); // effort from env, rest from file
   });
   it('no env, no file → fallback', () => {
     expect(mergeTier(null, undefined, FALLBACK)).toEqual(FALLBACK);

@@ -34,11 +34,7 @@ function stubState(packet: OrchestratorPacket): OrchestratorMissionState {
 describe('runtimeFromSessionKey', () => {
   it('recognizes OpenCode owned and provider session keys without widening unknown prefixes', () => {
     expect(runtimeFromSessionKey('claude-code-owned:session-xyz')).toBe('claude-code');
-    expect(runtimeFromSessionKey('gemini-owned:session-xyz')).toBe('gemini');
-    expect(runtimeFromSessionKey('cursor-owned:session-xyz')).toBe('cursor');
-    expect(runtimeFromSessionKey('grok-owned:session-xyz')).toBe('grok');
     expect(runtimeFromSessionKey('pi-owned:session-xyz')).toBe('pi');
-    expect(runtimeFromSessionKey('prime-agent-owned:session-xyz')).toBe('prime-agent');
     expect(runtimeFromSessionKey('qwen-owned:session-xyz')).toBe('qwen');
     expect(runtimeFromSessionKey('opencode-owned:session-xyz')).toBe('opencode');
     expect(runtimeFromSessionKey('opencode:session-xyz')).toBe('opencode');

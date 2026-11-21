@@ -23,7 +23,7 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_API_KEY', 'fixture-boundary-key'); vi.stubEnv('LOGIN_COPY', 'fixture-boundary-key');
   writeFileSync(join(state.dir, '.env.local'), '');
   mutateProviderKey('OPENAI_API_KEY', { key: 'fixture-boundary-key' });
-  saveRuntimeBillingMode('gemini', 'subscription');
+  saveRuntimeBillingMode('opencode', 'subscription');
 });
 afterAll(() => { vi.unstubAllEnvs(); rmSync(state.dir, { recursive: true, force: true }); });
 it.each(['spawnSync', 'execFileSync', 'execSync', 'spawn', 'execFile', 'promisified', 'fork'])('%s rejects implicit ambient provider credentials', async operation => {
@@ -39,9 +39,9 @@ it.each(['spawnSync', 'execFileSync', 'execSync', 'spawn', 'execFile', 'promisif
   expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual([null, null]);
 });
 it('rejects a prepared API environment after billing changes before the actual spawn', () => {
-  saveRuntimeBillingMode('gemini', 'api');
-  const env = childEnvironment({ runtimeId: 'gemini' });
-  saveRuntimeBillingMode('gemini', 'subscription');
+  saveRuntimeBillingMode('opencode', 'api');
+  const env = childEnvironment({ runtimeId: 'opencode' });
+  saveRuntimeBillingMode('opencode', 'subscription');
   expect(() => cp.spawnSync(process.execPath, [script], { env })).toThrow(/changed during child preparation/);
 });
 it('rejects historical credential values retained in prepared arguments after a restart', async () => {
@@ -51,15 +51,15 @@ it('rejects historical credential values retained in prepared arguments after a 
   expect(() => fresh.spawnSync(process.execPath, [script, '--header=Bearer fixture-boundary-key'])).toThrow(/arguments contain/);
 });
 it('preserves API mode without copying an unlisted ambient alias at the actual process boundary', () => {
-  saveRuntimeBillingMode('gemini', 'api');
-  cp.execFileSync(process.execPath, [script], { env: childEnvironment({ runtimeId: 'gemini' }) });
+  saveRuntimeBillingMode('opencode', 'api');
+  cp.execFileSync(process.execPath, [script], { env: childEnvironment({ runtimeId: 'opencode' }) });
   expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(['fixture-boundary-key', null]);
 });
 it.each(['api', 'subscription'] as const)('preserves work admission and credential policy in %s', async mode => {
-  saveRuntimeBillingMode('gemini', mode);
+  saveRuntimeBillingMode('opencode', mode);
   const { spawnWithWorkAdmission } = await import('@/lib/app-update/work-launch-admission');
   const { childEnvironment: admittedEnvironment } = await import('@/lib/providers/spawn-environment');
-  const child = spawnWithWorkAdmission(process.execPath, [script], mode === 'api' ? { env: admittedEnvironment({ runtimeId: 'gemini' }) } : {});
+  const child = spawnWithWorkAdmission(process.execPath, [script], mode === 'api' ? { env: admittedEnvironment({ runtimeId: 'opencode' }) } : {});
   const leases = join(state.dir, 'work-launches');
   const records = readdirSync(leases);
   expect(records).toHaveLength(1);
@@ -101,8 +101,8 @@ it.each(['subscription', 'remove'])('strips embedded provider copies from auxili
 });
 
 it('preserves policy and options with an explicitly omitted child argument array', async () => {
-  saveRuntimeBillingMode('gemini', 'api');
-  const env = childEnvironment({ runtimeId: 'gemini' });
+  saveRuntimeBillingMode('opencode', 'api');
+  const env = childEnvironment({ runtimeId: 'opencode' });
   const sync = cp.spawnSync(process.execPath, undefined, { env, input: 'process.stdout.write(process.env.OPENAI_API_KEY)', encoding: 'utf8' });
   expect(sync.stdout).toBe('fixture-boundary-key');
   const stdout = await new Promise<string>((resolve, reject) => {
@@ -113,9 +113,9 @@ it('preserves policy and options with an explicitly omitted child argument array
 });
 
 it.each(['subscription', 'api'] as const)('preserves unrelated service credentials at the real %s child boundary', mode => {
-  saveRuntimeBillingMode('gemini', mode);
+  saveRuntimeBillingMode('opencode', mode);
   const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify([process.env.BRAVE_API_KEY,process.env.GITHUB_TOKEN,process.env.SEARCH_API_KEY,process.env.MCP_API_KEY]))'], {
-    encoding: 'utf8', env: childEnvironment({ runtimeId: 'gemini', env: { BRAVE_API_KEY: 'fixture-brave', GITHUB_TOKEN: 'fixture-github', SEARCH_API_KEY: 'fixture-search', MCP_API_KEY: 'fixture-mcp' } }),
+    encoding: 'utf8', env: childEnvironment({ runtimeId: 'opencode', env: { BRAVE_API_KEY: 'fixture-brave', GITHUB_TOKEN: 'fixture-github', SEARCH_API_KEY: 'fixture-search', MCP_API_KEY: 'fixture-mcp' } }),
   });
   expect(JSON.parse(result)).toEqual(['fixture-brave', 'fixture-github', 'fixture-search', 'fixture-mcp']);
 });
@@ -123,14 +123,14 @@ it.each(['subscription', 'api'] as const)('preserves unrelated service credentia
 it.each(['argv', 'shell'])('rejects an unsaved ambient provider credential copied into prepared %s', form => {
   writeFileSync(join(state.dir, '.env.local'), '');
   vi.stubEnv('OPENAI_API_KEY', 'fixture-unsaved-provider');
-  const env = childEnvironment({ runtimeId: 'gemini' });
+  const env = childEnvironment({ runtimeId: 'opencode' });
   expect(() => form === 'argv'
     ? cp.execFileSync(process.execPath, ['-e', 'process.exit(0)', '--', '--header=Bearer fixture-unsaved-provider'], { env })
     : cp.execSync('echo "Bearer fixture-unsaved-provider"', { env })).toThrow(/arguments contain/);
 });
 
 it('rejects an unsaved explicit provider credential retained in prepared argv', () => {
-  const env = childEnvironment({ runtimeId: 'gemini', inherit: false, env: { OPENAI_API_KEY: 'fixture-explicit-provider' } });
+  const env = childEnvironment({ runtimeId: 'opencode', inherit: false, env: { OPENAI_API_KEY: 'fixture-explicit-provider' } });
   expect(() => cp.execFileSync(process.execPath, ['-e', 'process.exit(0)', '--', 'Bearer fixture-explicit-provider'], { env })).toThrow(/arguments contain/);
 });
 it('preserves explicit local subscription transport at the actual child boundary', async () => {

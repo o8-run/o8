@@ -260,7 +260,7 @@ describe.sequential('worker MCP injection real path', () => {
 
     const unsupportedPrompt = await buildPacketPrompt({
       ...packet('pkt-worker-mcp-unsupported', 'test/worker-mcp-unsupported'),
-      runtime: 'gemini',
+      runtime: 'antigravity',
     }, [], 'main', firstLane.worktreePath);
     expect(unsupportedPrompt).not.toContain('MCP servers attached to this packet:');
 

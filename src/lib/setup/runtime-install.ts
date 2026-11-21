@@ -34,12 +34,6 @@ export const RUNTIME_INSTALL_INFO: Record<string, RuntimeInstallInfo> = {
     command: 'npm i -g @anthropic-ai/claude-code',
     hint: "Install Anthropic's Claude Code CLI to dispatch packets.",
   },
-  gemini: {
-    id: 'gemini',
-    label: 'Gemini CLI',
-    command: 'npm i -g @google/gemini-cli',
-    hint: 'Gemini CLI remains available for enterprise and paid API access. For free or AI Pro/Ultra use Antigravity CLI.',
-  },
   antigravity: {
     id: 'antigravity',
     label: 'Antigravity CLI',
@@ -57,22 +51,6 @@ export const RUNTIME_INSTALL_INFO: Record<string, RuntimeInstallInfo> = {
     label: '3code CLI',
     link: 'https://3code.capocasa.dev/',
     hint: 'Install 3code, then run it once to configure a model provider.',
-  },
-  magnitude: {
-    id: 'magnitude',
-    label: 'Magnitude CLI',
-    command: 'npm i -g @magnitudedev/cli',
-    hint: 'On macOS or Linux, install Magnitude, then launch it in a visible repository terminal to choose a local model or custom endpoint.',
-  },
-  cursor: {
-    id: 'cursor',
-    label: 'Cursor CLI',
-    hint: 'Install Cursor CLI to dispatch packets through Cursor.',
-  },
-  grok: {
-    id: 'grok',
-    label: 'Grok Build',
-    hint: 'Install Grok Build and set GROK_CODE_XAI_API_KEY to dispatch packets.',
   },
   pi: {
     id: 'pi',

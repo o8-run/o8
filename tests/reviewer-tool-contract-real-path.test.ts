@@ -93,7 +93,7 @@ afterAll(() => {
 // Every tool-capable registered backend can be selected via reviewer=follow.
 // The conversational o8 backend has no tools and is not a tool reviewer.
 const backends: OrchestratorBackendId[] = [
-  'claude', 'codex', 'pi', 'openclaw', 'hermes', 'acp', 'opencode', 'collide', 'fable', 'muse',
+  'claude', 'codex', 'pi', 'openclaw', 'hermes', 'acp', 'opencode', 'collide', 'fable',
 ];
 
 describe('reviewer tool contract through the durable review queue (#4145)', () => {

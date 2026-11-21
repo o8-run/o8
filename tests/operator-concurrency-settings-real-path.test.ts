@@ -130,13 +130,13 @@ describe('operator concurrency settings real path', () => {
     expect(readFileSync(settingsPath, 'utf8')).toBe(before);
   });
 
-  it('subtracts persisted running and launching lanes while preserving runtime resource gates', async () => {
+  it('subtracts persisted running and launching lanes', async () => {
     await updateOperatorDefaults({ parallelCap: 64 });
     for (const [index, status] of (['running', 'launching', 'idle'] as const).entries()) {
-      const lane = createLane({ repoPath: dataDir, branch: `worker-${index}`, runtime: 'gemini', baseCommit: 'a'.repeat(40) });
+      const lane = createLane({ repoPath: dataDir, branch: `worker-${index}`, runtime: 'antigravity', baseCommit: 'a'.repeat(40) });
       updateLane(lane.id, { status });
     }
-    expect(buildRemainingLaunchBudget()).toMatchObject({ maxLaunches: 62, perRuntime: { gemini: 1 } });
+    expect(buildRemainingLaunchBudget()).toMatchObject({ maxLaunches: 62 });
     await updateOperatorDefaults({ parallelCap: 1 });
     expect(buildRemainingLaunchBudget().maxLaunches).toBe(0);
   });

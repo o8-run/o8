@@ -47,21 +47,6 @@ writeFileSync(join(codexHome, 'models_cache.json'), JSON.stringify({ models: [{
 }] }));
 const codexIdentity = { id: 'codex-local-default', label: 'Current local sign-in', configHomeRef: codexHome };
 
-const modelFile = join(dataDir, 'models.json');
-const museBinary = join(dataDir, 'muse.cjs');
-vi.stubEnv('O8_MUSE_BIN', museBinary);
-vi.stubEnv('XDG_CONFIG_HOME', join(dataDir, 'config'));
-vi.stubEnv('XDG_DATA_HOME', join(dataDir, 'native-data'));
-writeFileSync(museBinary, `#!${process.execPath}
-if(process.argv.includes('--version')){console.log('1.4.7');process.exit(0);}
-require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
- const m=JSON.parse(line);if(!m.id)return;
- let result={};
- if(m.method==='initialize')result={schema:{version:1,fingerprint:'fixture'},grantedCapabilities:['sessionMcp'],museHome:${JSON.stringify(join(dataDir, 'native-data', 'muse'))}};
- if(m.method==='model/list')result={providerId:'meta',profileId:null,source:'fixture',models:JSON.parse(require('node:fs').readFileSync(${JSON.stringify(modelFile)},'utf8'))};
- console.log(JSON.stringify({jsonrpc:'2.0',id:m.id,result}));
-}).on('close',()=>process.exit(0));
-`, { mode: 0o700 });
 
 const route = await import('@/app/api/runtime/launch/route');
 const idempotency = await import('@/lib/orchestrator/idempotency-store');
@@ -101,7 +86,6 @@ describe('runtime launch persisted idempotency through the real route', () => {
     h.launch.mockReset();
     h.launch.mockImplementation(async (request) => successfulResult(request));
     h.publish.mockClear();
-    writeFileSync(modelFile, JSON.stringify([{ providerId: 'meta', modelId: 'muse-wonder', variants: ['high'] }]));
     idempotency.__resetIdempotencyStoreForTests();
   });
 
@@ -154,9 +138,8 @@ describe('runtime launch persisted idempotency through the real route', () => {
   });
 
   it.each([
-    { runtime: 'gemini', model: 'gemini-3-pro-preview', effort: 'high', code: 'effort_unsupported_runtime' },
+    { runtime: 'antigravity', model: 'gemini-3.8-flash-low', effort: 'high', code: 'effort_unsupported_runtime' },
     { runtime: 'opencode', model: 'opencode/deepseek-v4-flash-free', effort: 'low', code: 'effort_unsupported_runtime' },
-    { runtime: 'cursor', model: 'cursor-agent', effort: 'medium', code: 'effort_unsupported_runtime' },
     { runtime: 'codex', model: 'gpt-6-luna', effort: 'ultra', code: 'effort_coerced' },
     { runtime: 'codex', model: 'gpt-5.5', effort: 'max', code: 'effort_coerced' },
     { runtime: 'cloud', model: 'gpt-6-luna', effort: 'ultra', code: 'effort_coerced' },
@@ -189,12 +172,11 @@ describe('runtime launch persisted idempotency through the real route', () => {
   });
 
   it.each([
-    { runtime: 'gemini', effort: undefined },
-    { runtime: 'gemini', effort: 'adaptive' },
+    { runtime: 'antigravity', effort: undefined },
+    { runtime: 'antigravity', effort: 'adaptive' },
     { runtime: 'opencode', effort: 'adaptive' },
     { runtime: 'codex', model: 'gpt-6-luna', effort: 'max' },
     { runtime: 'claude-code', model: 'claude-opus-4-7', effort: 'max' },
-    { runtime: 'muse', model: 'muse-wonder', effort: 'high' },
   ])('preserves supported selection $runtime/$effort', async (selection) => {
     const response = await route.POST(post({
       ...selection, prompt: 'Inspect the fixture.', cwd: dataDir,
@@ -203,15 +185,6 @@ describe('runtime launch persisted idempotency through the real route', () => {
     expect(response.status).toBe(200);
     const identity = selection.runtime === 'codex' ? [codexIdentity] : [];
     expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(selection), ...identity);
-  });
-
-  it('refuses a previously supported choice after its discovered model evidence changes', async () => {
-    writeFileSync(modelFile, JSON.stringify([{ providerId: 'meta', modelId: 'muse-wonder', variants: ['low'] }]));
-    const response = await route.POST(post({ runtime: 'muse', model: 'muse-wonder', effort: 'high',
-      prompt: 'Inspect the fixture.', cwd: dataDir, clientMutationId: 'refused-discovered-effort' }));
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ code: 'effort_unsupported_model' });
-    expect(h.launch).not.toHaveBeenCalled();
   });
 
   it.each([

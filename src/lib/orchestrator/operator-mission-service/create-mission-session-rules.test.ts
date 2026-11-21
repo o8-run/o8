@@ -126,7 +126,7 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
     await expect(createMission({
       issues: [{ number: 90004, title: 'inline: unsupported search', body: 'do the thing', url: '' }],
       repoPath,
-      runtime: 'gemini',
+      runtime: 'antigravity',
       constraints: '',
       qualitySearch: { taskContract },
     })).rejects.toThrow('not supported by the selected worker runtime');

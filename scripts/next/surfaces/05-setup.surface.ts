@@ -9,7 +9,6 @@ const FIXTURE_TOOLS: SetupRuntime[] = [
   { id: 'codex', label: 'Codex', available: true, installed: true, unavailableReason: null, detail: 'Ready', fix: '' },
   { id: 'claude-code', label: 'Claude Code', available: true, installed: true, unavailableReason: null, detail: 'Signed in on this computer.', fix: '' },
   { id: 'opencode', label: 'OpenCode', available: false, installed: true, unavailableReason: 'needs_auth', detail: 'OpenCode is installed but has no provider connected.', fix: 'Connect a provider in OpenCode, then refresh.' },
-  { id: 'gemini', label: 'Gemini CLI', available: false, installed: false, unavailableReason: 'not_installed', detail: 'Gemini CLI was not found on this computer.', fix: '' },
   { id: 'antigravity', label: 'Antigravity CLI', available: false, installed: false, unavailableReason: 'not_installed', detail: 'Antigravity CLI was not found on this computer.', fix: '' },
 ];
 /** `--onboarding-no-tools`: the same tools, none installed. */

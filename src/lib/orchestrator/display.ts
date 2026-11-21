@@ -27,9 +27,6 @@ export function resolveDisplayRuntime(
     const ownedRuntime = (Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[])
       .find((runtime) => sessionKey.startsWith(`${runtime}-owned:`));
     if (ownedRuntime) return ownedRuntime;
-    if (sessionKey.startsWith('gemini-owned:') || sessionKey.startsWith('gemini:')) {
-      return 'gemini';
-    }
     if (sessionKey.startsWith('claude-code:') || sessionKey.startsWith('claude-code-')) {
       return 'claude-code';
     }
@@ -65,7 +62,6 @@ export interface OrchestratorDisplayTone {
 const RUNTIME_SHORT_LABELS: Partial<Record<OrchestratorRuntime, string>> = {
   codex: 'CX',
   'claude-code': 'CC',
-  gemini: 'GM',
   opencode: 'OC2',
 };
 

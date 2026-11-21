@@ -29,11 +29,11 @@ describe('disabledRuntimes (Settings › Providers switch)', () => {
 
   it('persists through the native settings POST and reads back from settings.toml', async () => {
     const { revision } = await getOperatorDefaultsTomlState();
-    const response = await post({ disabledRuntimes: ['cursor', 'cursor', 'grok'], settingsTomlRevision: revision });
+    const response = await post({ disabledRuntimes: ['antigravity', 'antigravity', 'hermes'], settingsTomlRevision: revision });
     expect(response.status).toBe(200);
     expect(readFileSync(tomlPath, 'utf8')).toMatch(/\[providers\][\s\S]*disabled_runtimes/);
     const read = await (await GET(new Request(native))).json();
-    expect(read.values.disabledRuntimes).toEqual(['cursor', 'grok']);
+    expect(read.values.disabledRuntimes).toEqual(['antigravity', 'hermes']);
     expect(read.sources.disabledRuntimes).toBe('file');
 
     const next = await getOperatorDefaultsTomlState();

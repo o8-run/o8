@@ -7,7 +7,7 @@ describe('runtimeFromSessionKeyId (#1749)', () => {
     // their session keys said exactly what was running.
     expect(runtimeFromSessionKeyId('claude-code-owned:abc123')).toBe('claude-code');
     expect(runtimeFromSessionKeyId('codex-owned:def456')).toBe('codex');
-    expect(runtimeFromSessionKeyId('gemini-owned:ghi789')).toBe('gemini');
+    expect(runtimeFromSessionKeyId('opencode-owned:ghi789')).toBe('opencode');
   });
 
   it('reads a discovered session key too', () => {

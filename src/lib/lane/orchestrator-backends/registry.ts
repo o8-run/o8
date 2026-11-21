@@ -22,7 +22,6 @@ import { collideBackend } from './moa';
 import { fableBackend } from './fable';
 import { o8Backend } from './o8';
 import { piBackend } from './pi';
-import { museBackend } from './muse';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
 import { applyOrchestrationMode } from './orchestration-mode';
@@ -48,7 +47,7 @@ export function withOrchestrationMode(
         return Promise.reject(error);
       }
       const resolved = applyOrchestrationMode(message, options);
-      const prompt = ['openclaw', 'hermes', 'acp', 'opencode', 'muse'].includes(backend.id)
+      const prompt = ['openclaw', 'hermes', 'acp', 'opencode'].includes(backend.id)
         ? withVisualizationInstructions(resolved.message, repoPath, options?.threadId) : resolved.message;
       // Settings › Providers instances: the thread's bound instance (binary, home, env) for this turn.
       return runWithThreadProviderInstance(backend.id, options?.threadId,
@@ -68,7 +67,6 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
   fable: withOrchestrationMode(fableBackend),
   o8: withOrchestrationMode(o8Backend),
   pi: withOrchestrationMode(piBackend),
-  muse: withOrchestrationMode(museBackend),
 };
 
 /** The default backend — also the fallback for any unregistered id. */

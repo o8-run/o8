@@ -33,7 +33,7 @@ describe('task-specific worker selection', () => {
     } finally { mocks.defaults.values.codexWorkerEffort = 'adaptive'; }
   });
   it('refuses a runtime outside the configured pool', async () => {
-    await expect(resolveDelegationSelection({ runtime: 'gemini' }, '/repo')).rejects.toMatchObject({ code: 'worker_not_enabled' });
+    await expect(resolveDelegationSelection({ runtime: 'antigravity' }, '/repo')).rejects.toMatchObject({ code: 'worker_not_enabled' });
   });
   it('refuses a model mismatch instead of substituting the default', async () => {
     await expect(resolveDelegationSelection({ runtime: 'codex', model: 'claude-sonnet-5' }, '/repo')).rejects.toMatchObject({ code: 'worker_model_unavailable' });

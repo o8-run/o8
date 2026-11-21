@@ -30,10 +30,8 @@ import {
   providerIdForModel,
   readOpencodeConfig,
 } from './opencode-readiness';
-import { deepSeekHarnessInstallGuidance, resolveDeepSeekHarnessLaunch } from '@/lib/deepseek-harness/runtime-resolution';
 import { hermesReadiness } from './hermes-readiness';
 import { piBuiltinReadiness } from './pi-builtin-readiness';
-import { museAvailability } from '@/lib/muse/availability';
 import { detectPiUserSetup, type PiUserSetup } from '@/lib/pi/user-setup';
 import { validateRuntimeModelSelection } from './model-compatibility';
 import { suggestMachineAuthProfile } from './auth-profile-suggestion';
@@ -295,33 +293,6 @@ function claudeSnapshotForCarrier(
   return { ...snapshot, statuses: { ...snapshot.statuses, claude } };
 }
 
-async function detectGemini(): Promise<RuntimeAuthStatus> {
-  const binaryPath = scanAndLink('gemini') ?? process.env.O8_GEMINI_BIN?.trim() ?? undefined;
-  if (!binaryPath) {
-    return nowStatus('gemini', 'gemini', {
-      installed: false,
-      authenticated: false,
-      detail: 'Gemini CLI is not installed.',
-      fix: 'Install Gemini CLI for enterprise or paid API access. For free or AI Pro/Ultra, install Antigravity CLI (agy).',
-    });
-  }
-
-  const home = os.homedir();
-  const authenticated = Boolean(
-    resolveProviderKey('GEMINI_API_KEY'),
-  ) || await fileExists(path.join(home, '.gemini', 'oauth_creds.json'));
-  return nowStatus('gemini', 'gemini', {
-    installed: true,
-    authenticated,
-    connection: localCredentialEvidence([resolveProviderKey('GEMINI_API_KEY') ? 'Google' : ''].filter(Boolean), authenticated, 'Google'),
-    detail: authenticated
-      ? 'Gemini CLI is installed and has local sign-in or API-key evidence.'
-      : 'Gemini CLI is installed but no local sign-in or API-key evidence was found.',
-    fix: 'Use enterprise sign-in or set a paid GEMINI_API_KEY. For free or AI Pro/Ultra, use Antigravity CLI (agy).',
-    binaryPath,
-  });
-}
-
 async function detectOpencode(): Promise<RuntimeAuthStatus> {
   const binaryPath = scanAndLink('opencode2') ?? undefined;
   if (!binaryPath) {
@@ -414,54 +385,6 @@ function refreshOpencodeStatus(): Promise<RuntimeAuthStatus> {
   return promise;
 }
 
-async function detectCursor(): Promise<RuntimeAuthStatus> {
-  const binaryPath = scanAndLink('cursor-agent') ?? undefined;
-  if (!binaryPath) {
-    return nowStatus('cursor', 'cursor', {
-      installed: false,
-      authenticated: false,
-      detail: 'Cursor CLI is not installed.',
-      fix: 'Install Cursor CLI, then run `cursor-agent login` or set CURSOR_API_KEY.',
-    });
-  }
-  const authenticated = Boolean(process.env.CURSOR_API_KEY)
-    || await fileExists(path.join(os.homedir(), '.cursor'));
-  return nowStatus('cursor', 'cursor', {
-    installed: true,
-    authenticated,
-    connection: localCredentialEvidence([process.env.CURSOR_API_KEY ? 'Cursor' : ''].filter(Boolean), authenticated, 'Cursor', 'runtime_config'),
-    detail: authenticated
-      ? 'Cursor CLI is installed and has local sign-in or CURSOR_API_KEY evidence.'
-      : 'Cursor CLI is installed but no local sign-in evidence was found.',
-    fix: 'Run `cursor-agent login` or set CURSOR_API_KEY.',
-    binaryPath,
-  });
-}
-
-async function detectGrok(): Promise<RuntimeAuthStatus> {
-  const binaryPath = scanAndLink('grok') ?? undefined;
-  if (!binaryPath) {
-    return nowStatus('grok', 'grok', {
-      installed: false,
-      authenticated: false,
-      detail: 'Grok Build CLI is not installed.',
-      fix: 'Install Grok Build, then sign in or set GROK_CODE_XAI_API_KEY.',
-    });
-  }
-  const authenticated = Boolean(process.env.GROK_CODE_XAI_API_KEY)
-    || await fileExists(path.join(os.homedir(), '.grok'));
-  return nowStatus('grok', 'grok', {
-    installed: true,
-    authenticated,
-    connection: localCredentialEvidence([process.env.GROK_CODE_XAI_API_KEY ? 'xAI' : ''].filter(Boolean), authenticated, 'xAI', 'runtime_config'),
-    detail: authenticated
-      ? 'Grok Build CLI is installed and has local sign-in or GROK_CODE_XAI_API_KEY evidence.'
-      : 'Grok Build CLI is installed but no local sign-in evidence was found.',
-    fix: 'Sign in with Grok Build or set GROK_CODE_XAI_API_KEY.',
-    binaryPath,
-  });
-}
-
 async function detectPi(): Promise<RuntimeAuthStatus> {
   const piSetup = await detectPiUserSetup();
   const binaryPath = piSetup.binaryPath;
@@ -483,60 +406,6 @@ async function detectPi(): Promise<RuntimeAuthStatus> {
     fix: !binaryPath ? 'Install Pi, then configure a provider with `pi`.' : 'Run `pi` and configure a provider before dispatching.',
     binaryPath,
     piSetup,
-  });
-}
-
-async function detectPrimeAgent(): Promise<RuntimeAuthStatus> {
-  const binaryPath = scanAndLink('prime-agent') ?? process.env.O8_PRIME_AGENT_BIN?.trim() ?? undefined;
-  if (!binaryPath) {
-    return nowStatus('prime-agent', 'prime-agent', {
-      installed: false,
-      authenticated: false,
-      detail: 'Prime Agent CLI is not installed.',
-      fix: 'Install prime-agent, then configure a provider before dispatching.',
-    });
-  }
-
-  const authenticated = Boolean(
-    resolveProviderKey('ANTHROPIC_API_KEY')
-    || resolveProviderKey('OPENAI_API_KEY')
-    || resolveProviderKey('GEMINI_API_KEY'),
-  ) || await fileExists(path.join(os.homedir(), '.prime'));
-  return nowStatus('prime-agent', 'prime-agent', {
-    installed: true,
-    authenticated,
-    connection: localCredentialEvidence([resolveProviderKey('ANTHROPIC_API_KEY') ? 'Anthropic' : '', resolveProviderKey('OPENAI_API_KEY') ? 'OpenAI' : '', resolveProviderKey('GEMINI_API_KEY') ? 'Google' : ''].filter(Boolean), authenticated, undefined, 'runtime_config'),
-    detail: authenticated
-      ? 'Prime Agent CLI is installed and has provider credentials.'
-      : 'Prime Agent CLI is installed but no provider credentials were found.',
-    fix: 'Configure a provider in prime-agent before dispatching.',
-    binaryPath,
-  });
-}
-
-async function detectDeepSeekHarness(): Promise<RuntimeAuthStatus> {
-  const launch = await resolveDeepSeekHarnessLaunch().catch(() => null);
-  if (!launch) {
-    return nowStatus('deepseek-harness', 'deepseek-harness', {
-      installed: false,
-      authenticated: false,
-      detail: deepSeekHarnessInstallGuidance(),
-      fix: deepSeekHarnessInstallGuidance(),
-    });
-  }
-  const provider = launch.provider;
-  const authenticated = provider === 'deepseek-official'
-    ? Boolean(resolveProviderKey('DEEPSEEK_API_KEY')?.trim())
-    : Boolean(resolveProviderKey('OPENROUTER_API_KEY')?.trim());
-  const credential = provider === 'deepseek-official' ? 'DEEPSEEK_API_KEY' : 'OPENROUTER_API_KEY';
-  return nowStatus('deepseek-harness', 'deepseek-harness', {
-    installed: true,
-    authenticated,
-    detail: authenticated
-      ? `DeepSeek Harness ACP is available from ${launch.source}${launch.version ? ` (${launch.version})` : ''} through ${provider}.`
-      : `DeepSeek Harness ACP is available from ${launch.source}, but ${credential} is not set.`,
-    fix: authenticated ? 'No action needed.' : `Set ${credential} before dispatching DeepSeek Harness.`,
-    binaryPath: launch.command,
   });
 }
 
@@ -577,16 +446,10 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime, deadlineAt
   switch (runtime) {
     case 'codex': return detectCodex();
     case 'claude-code': return detectClaude();
-    case 'gemini': return detectGemini();
     case 'antigravity': return probeAntigravityLogin(deadlineAt).then(status => nowStatus('antigravity', 'antigravity', status));
     case 'opencode': return detectOpencode();
-    case 'cursor': return detectCursor();
-    case 'grok': return detectGrok();
     case 'pi': return detectPi();
-    case 'prime-agent': return detectPrimeAgent();
     case 'hermes': return hermesReadiness().then(status => nowStatus('hermes', 'hermes', status));
-    case 'muse': return museAvailability().then(status => nowStatus('muse', 'muse', status));
-    case 'deepseek-harness': return detectDeepSeekHarness();
     case 'pi-builtin': return piBuiltinReadiness().then(status => nowStatus('pi-builtin', 'pi-builtin', status));
     default: return detectDeclarativeRuntime(runtime);
   }

@@ -71,13 +71,12 @@ function repoHasDispatchHistory(repoPath: string): boolean {
 }
 
 /** The CLI running the orchestrator turn. Fable runs through the Claude Code session. */
-export type OrchestratorPromptBackend = 'claude' | 'codex' | 'pi' | 'muse';
+export type OrchestratorPromptBackend = 'claude' | 'codex' | 'pi';
 
 const BACKEND_LABEL: Record<OrchestratorPromptBackend, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
   pi: 'Pi',
-  muse: 'Muse Code',
 };
 
 /** The tool surface a turn actually has, which decides the prompt sections it gets. */

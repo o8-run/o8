@@ -64,7 +64,7 @@ export function packetStatusColor(packet: OrchestratorPacket): string {
 }
 
 export function runtimeFromValue(value?: string | null): OrchestratorRuntime {
-  if (value === 'claude-code' || value === 'gemini' || value === 'opencode') return value;
+  if (value === 'claude-code' || value === 'opencode') return value;
   return 'codex';
 }
 

@@ -96,7 +96,6 @@ describe('saved remote terminal continuity', () => {
 describe('owned runtime session persistence', () => {
   it.each([
     ['pi', 'pi-owned:abc'],
-    ['prime-agent', 'prime-agent-owned:abc'],
     ['qwen', 'qwen-owned:abc'],
   ] as const)('preserves %s session identity', (runtime, sessionKey) => {
     expect(formatPersistedRuntimeSessionKey(runtime, sessionKey)).toBe(sessionKey);

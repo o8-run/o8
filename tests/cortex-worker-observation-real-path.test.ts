@@ -83,7 +83,7 @@ it('observes only persisted parent workers through the actual MCP entry, with st
     response.setHeader('content-type', 'application/json');
     if (request.url?.startsWith('/api/runtime/inventory')) response.end(JSON.stringify({ agents: [
       { name: 'Related', runtime: 'opencode', sessionKey: surface, runtimeSurface: { id: surface, ownership: 'owned', capabilities: { readTail: true, sendInput: true } } },
-      { name: 'External', runtime: 'muse', sessionKey: 'muse-discovered:external', runtimeSurface: { id: 'muse-discovered:external', ownership: 'discovered', capabilities: { readTail: true, sendInput: false } } },
+      { name: 'External', runtime: 'opencode', sessionKey: 'opencode-discovered:external', runtimeSurface: { id: 'opencode-discovered:external', ownership: 'discovered', capabilities: { readTail: true, sendInput: false } } },
     ] }));
     else if (request.url?.startsWith('/api/runtime/transcript')) {
       transcriptQuery = request.url;
@@ -140,7 +140,7 @@ it('observes only persisted parent workers through the actual MCP entry, with st
     const fleet = payload(await call('cortex_fleet_status'));
     expect(fleet.agents).toEqual(expect.arrayContaining([
       expect.objectContaining({ runtime: 'opencode', surfaceId: surface, related: true, ownership: 'owned' }),
-      expect.objectContaining({ runtime: 'muse', surfaceId: 'muse-discovered:external', related: false, ownership: 'discovered', capabilities: { readTail: true, sendInput: false } }),
+      expect.objectContaining({ runtime: 'opencode', surfaceId: 'opencode-discovered:external', related: false, ownership: 'discovered', capabilities: { readTail: true, sendInput: false } }),
     ]));
     const transcript = payload(await call('cortex_read_transcript', { sessionKey: surface, sinceId: 'entry-1', maxTextChars: 1000 }));
     expect(transcriptQuery).toContain('sinceId=entry-1');

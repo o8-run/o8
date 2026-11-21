@@ -61,7 +61,7 @@ const OPENCODE: Glyph = Glyph::Fill("M16.8 4.8H7.2v14.4h9.6V4.8ZM21.6 24H2.4V0h1
 /// COMPOSER_MODEL_GROUPS houses: key, label, the runtime that must be
 /// installed, mark, and whether the models come from a live catalog. o8 is the
 /// built-in agent (bundled Pi on the managed model) and is always shown.
-const LEAD_HOUSES: [(&str, &str, &str, Glyph, bool); 8] = [
+const LEAD_HOUSES: [(&str, &str, &str, Glyph, bool); 7] = [
     (
         "claude",
         "Claude Code",
@@ -73,7 +73,6 @@ const LEAD_HOUSES: [(&str, &str, &str, Glyph, bool); 8] = [
     ("opencode", "OpenCode", "opencode", OPENCODE, true),
     ("o8", "o8", "", O8, false),
     ("pi", "Pi", "pi", PI, false),
-    ("muse", "Muse Code", "muse", TERMINAL, true),
     // Hermes leads through `hermes acp` on its governed profile (#1304; worker
     // runtime by kvnloo in #3391). Shown to anyone who has it installed.
     ("hermes", "Hermes", "hermes", TERMINAL, true),
@@ -87,7 +86,6 @@ fn house_of(backend: &str) -> &'static str {
         "pi" => "pi",
         "acp" => "acp",
         "hermes" => "hermes",
-        "muse" => "muse",
         _ => "codex",
     }
 }
@@ -98,7 +96,7 @@ fn mark(backend: &str) -> Option<Glyph> {
         "o8" => Some(O8),
         "pi" => Some(PI),
         "opencode" => Some(OPENCODE),
-        "muse" | "hermes" | "acp" => Some(TERMINAL),
+        "hermes" | "acp" => Some(TERMINAL),
         _ => None,
     }
 }

@@ -13,7 +13,7 @@ vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 72).toString('base64url'));
 vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
 const children = new Set<number>();
 afterAll(() => { for (const pid of children) try { process.kill(pid, 'SIGTERM'); } catch { /* Already retired. */ } vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
-it.each(['muse', 'opencode'] as const)('%s established processes recycle after saved billing changes and real API revocation', async (runtimeId) => {
+it.each(['opencode'] as const)('%s established processes recycle after saved billing changes and real API revocation', async (runtimeId) => {
   const backend = makeAcpBackend({ id: runtimeId, label: 'Billing fixture', resolveLaunch: () => ({ command: process.execPath, args: ['-e', peer] }) });
   const mode = async (mode: 'subscription' | 'api') => billing.saveRuntimeBillingMode(runtimeId, mode);
   const save = async () => expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-acp-key' }))).status).toBe(200);

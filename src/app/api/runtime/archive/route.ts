@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ownedCodexSessionState } from '@/lib/codex/owned';
 import { ownedClaudeCodeSessionState } from '@/lib/claude-code/owned';
-import { ownedCursorSessionState } from '@/lib/cursor/owned';
-import { ownedGeminiSessionState } from '@/lib/gemini/owned';
-import { ownedGrokSessionState } from '@/lib/grok/owned';
 import { ownedOpencodeSessionState } from '@/lib/opencode/owned';
 import { ownedPiSessionState } from '@/lib/pi/owned';
-import { ownedPrimeAgentSessionState } from '@/lib/prime-agent/owned';
 import { archiveLane, findLaneBySession, getLane } from '@/lib/lane/registry';
 import { isLaneTerminal } from '@/lib/lane/terminal-states';
 import {
@@ -62,12 +58,8 @@ async function readOwnedSessionState(sessionKey: string): Promise<OwnedSessionSt
   try {
     if (sessionKey.startsWith('codex-owned:')) return await ownedCodexSessionState(sessionKey);
     if (sessionKey.startsWith('claude-code-owned:')) return await ownedClaudeCodeSessionState(sessionKey);
-    if (sessionKey.startsWith('gemini-owned:')) return await ownedGeminiSessionState(sessionKey);
     if (sessionKey.startsWith('opencode-owned:')) return await ownedOpencodeSessionState(sessionKey);
-    if (sessionKey.startsWith('cursor-owned:')) return await ownedCursorSessionState(sessionKey);
-    if (sessionKey.startsWith('grok-owned:')) return await ownedGrokSessionState(sessionKey);
     if (sessionKey.startsWith('pi-owned:')) return await ownedPiSessionState(sessionKey);
-    if (sessionKey.startsWith('prime-agent-owned:')) return await ownedPrimeAgentSessionState(sessionKey);
     await import('@/lib/runtimes');
     const { getOwnedSessionLifecycle } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
     const registered = getOwnedSessionLifecycle(sessionKey);

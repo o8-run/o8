@@ -35,7 +35,7 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
  * `pi` is the bundled Pi SDK session on the managed model route (pi.ts), with
  * the same built-in o8 servers as the Claude orchestrator.
  */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode' | 'pi' | 'muse';
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode' | 'pi';
 
 export const ORCHESTRATOR_BACKEND_IDS = backendIds as readonly OrchestratorBackendId[];
 

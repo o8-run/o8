@@ -4,17 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const stateMocks = vi.hoisted(() => ({
   codex: vi.fn(),
   claude: vi.fn(),
-  cursor: vi.fn(),
-  gemini: vi.fn(),
-  grok: vi.fn(),
   opencode: vi.fn(),
   pi: vi.fn(),
-  prime: vi.fn(),
   archiveClaude: vi.fn(),
-  archiveCursor: vi.fn(),
-  archiveGrok: vi.fn(),
   archivePi: vi.fn(),
-  archivePrime: vi.fn(),
   archiveOwned: vi.fn(),
   getLane: vi.fn(),
   archiveLane: vi.fn(),
@@ -29,18 +22,6 @@ vi.mock('@/lib/claude-code/owned', () => ({
   archiveOwnedClaudeCodeSession: stateMocks.archiveClaude,
   ownedClaudeCodeSessionState: stateMocks.claude,
 }));
-vi.mock('@/lib/cursor/owned', () => ({
-  archiveOwnedCursorSession: stateMocks.archiveCursor,
-  ownedCursorSessionState: stateMocks.cursor,
-}));
-vi.mock('@/lib/gemini/owned', () => ({
-  archiveOwnedGeminiSession: vi.fn(),
-  ownedGeminiSessionState: stateMocks.gemini,
-}));
-vi.mock('@/lib/grok/owned', () => ({
-  archiveOwnedGrokSession: stateMocks.archiveGrok,
-  ownedGrokSessionState: stateMocks.grok,
-}));
 vi.mock('@/lib/opencode/owned', () => ({
   archiveOwnedOpencodeSession: vi.fn(),
   ownedOpencodeSessionState: stateMocks.opencode,
@@ -48,10 +29,6 @@ vi.mock('@/lib/opencode/owned', () => ({
 vi.mock('@/lib/pi/owned', () => ({
   archiveOwnedPiSession: stateMocks.archivePi,
   ownedPiSessionState: stateMocks.pi,
-}));
-vi.mock('@/lib/prime-agent/owned', () => ({
-  archiveOwnedPrimeAgentSession: stateMocks.archivePrime,
-  ownedPrimeAgentSessionState: stateMocks.prime,
 }));
 vi.mock('@/lib/lane/registry', () => ({
   getLane: stateMocks.getLane,
@@ -88,12 +65,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   stateMocks.codex.mockResolvedValue('active');
   stateMocks.claude.mockResolvedValue('missing');
-  stateMocks.cursor.mockResolvedValue('missing');
-  stateMocks.gemini.mockResolvedValue('archived');
-  stateMocks.grok.mockResolvedValue('active');
   stateMocks.opencode.mockResolvedValue('missing');
   stateMocks.pi.mockResolvedValue('active');
-  stateMocks.prime.mockResolvedValue('archived');
   stateMocks.getLane.mockReturnValue(null);
   stateMocks.findLaneBySession.mockReturnValue(null);
   stateMocks.archiveLane.mockReturnValue(null);
@@ -104,15 +77,13 @@ beforeEach(() => {
 describe('GET /api/runtime/archive', () => {
   it('routes full owned keys by prefix, dedupes them, and fails open per key', async () => {
     const codexKey = 'codex-owned:codex-owned-1';
-    const cursorKey = 'cursor-owned:cursor-owned-1';
-    stateMocks.cursor.mockRejectedValue(new Error('uncertain filesystem'));
+    const opencodeKey = 'opencode-owned:opencode-owned-1';
+    stateMocks.opencode.mockRejectedValue(new Error('uncertain filesystem'));
 
     const response = await GET(request([
       ` ${codexKey} `,
-      'gemini-owned:gemini-owned-1',
-      'opencode-owned:opencode-owned-1',
-      cursorKey,
-      'grok-owned:grok-owned-1',
+      'pi-owned:pi-owned-1',
+      opencodeKey,
       'unknown-owned:unknown-1',
       codexKey,
     ]));
@@ -120,15 +91,13 @@ describe('GET /api/runtime/archive', () => {
     expect(await response.json()).toEqual({
       states: {
         [codexKey]: 'active',
-        'gemini-owned:gemini-owned-1': 'archived',
-        'opencode-owned:opencode-owned-1': 'missing',
-        [cursorKey]: 'active',
-        'grok-owned:grok-owned-1': 'active',
+        'pi-owned:pi-owned-1': 'active',
+        [opencodeKey]: 'active',
         'unknown-owned:unknown-1': 'active',
       },
     });
     expect(stateMocks.codex).toHaveBeenCalledOnce();
-    expect(stateMocks.cursor).toHaveBeenCalledOnce();
+    expect(stateMocks.opencode).toHaveBeenCalledOnce();
   });
 
   it('caps the state lookup at 100 unique keys', async () => {

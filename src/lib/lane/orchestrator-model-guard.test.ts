@@ -11,8 +11,6 @@ describe('modelBelongsToRuntime', () => {
     expect(modelBelongsToRuntime(MODEL_IDS.raw.openAiGpt56Sol, 'codex')).toBe(true);
     expect(modelBelongsToRuntime(MODEL_IDS.raw.anthropicClaudeOpus5, 'claude-code')).toBe(true);
     expect(modelBelongsToRuntime('anthropic/claude-opus-5', 'claude-code')).toBe(true);
-    expect(modelBelongsToRuntime(MODEL_IDS.raw.gemini25Flash, 'gemini')).toBe(true);
-    expect(modelBelongsToRuntime(MODEL_IDS.raw.xaiGrok45, 'grok')).toBe(true);
   });
 
   it('refuses every cross-house pairing, not just the two that were reported', () => {
@@ -22,14 +20,12 @@ describe('modelBelongsToRuntime', () => {
     expect(modelBelongsToRuntime(MODEL_IDS.raw.openAiGpt56Sol, 'claude-code')).toBe(false);
     expect(modelBelongsToRuntime(MODEL_IDS.raw.gemini25Flash, 'codex')).toBe(false);
     expect(modelBelongsToRuntime(MODEL_IDS.raw.xaiGrok45, 'claude-code')).toBe(false);
-    expect(modelBelongsToRuntime(MODEL_IDS.raw.anthropicClaudeOpus5, 'gemini')).toBe(false);
-    expect(modelBelongsToRuntime(MODEL_IDS.raw.openAiGpt56Terra, 'grok')).toBe(false);
   });
 
   it('does not guess for a runtime that fronts several providers', () => {
-    // cursor and opencode legitimately run models from more than one house. A
+    // opencode legitimately runs models from more than one house. A
     // wrong constraint would block a valid selection.
-    for (const runtimeId of ['cursor', 'opencode'] as OrchestratorRuntime[]) {
+    for (const runtimeId of ['opencode'] as OrchestratorRuntime[]) {
       expect(getRuntimeCapability(runtimeId).modelIdPattern).toBeUndefined();
       expect(modelBelongsToRuntime(MODEL_IDS.raw.anthropicClaudeOpus5, runtimeId)).toBe(true);
       expect(modelBelongsToRuntime(MODEL_IDS.raw.openAiGpt56Sol, runtimeId)).toBe(true);

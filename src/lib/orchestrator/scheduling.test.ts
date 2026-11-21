@@ -88,7 +88,6 @@ const { hasReviewableCompletionDiff } = await import('@/lib/supervisor/completio
 const {
   MAX_PARALLEL_DISPATCHES,
   MAX_LAUNCH_ATTEMPTS,
-  RUNTIME_PARALLEL_CAP,
   buildRemainingLaunchBudget,
   getBootRecoveryLaunchBlocker,
   getDispatchBlocker,
@@ -329,9 +328,8 @@ describe('dispatch scheduling caps and waves', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
   });
 
-  it('exports the configured global and runtime dispatch caps', () => {
+  it('exports the configured global dispatch cap', () => {
     expect(MAX_PARALLEL_DISPATCHES).toBeGreaterThanOrEqual(1);
-    expect(RUNTIME_PARALLEL_CAP.gemini).toBe(3);
   });
 
   it('persists the dependency materialization path on the packet lane binding', async () => {
@@ -357,18 +355,17 @@ describe('dispatch scheduling caps and waves', () => {
       branch: `inline/active-codex-${Date.now()}`,
       runtime: 'codex',
     });
-    const gemini = createLane({
+    const antigravity = createLane({
       repoPath: '/tmp/o8-scheduling-active-repo',
-      branch: `inline/active-gemini-${Date.now()}`,
-      runtime: 'gemini',
+      branch: `inline/active-antigravity-${Date.now()}`,
+      runtime: 'antigravity',
     });
     setLaneStatus(codex.id, 'running', 'system', 'active');
-    setLaneStatus(gemini.id, 'launching', 'system', 'active');
+    setLaneStatus(antigravity.id, 'launching', 'system', 'active');
 
     const after = buildRemainingLaunchBudget();
 
     expect(after.maxLaunches).toBe(Math.max(0, before.maxLaunches - 2));
-    expect(after.perRuntime?.gemini).toBe(Math.max(0, (before.perRuntime?.gemini ?? 0) - 1));
   });
 
   it('honors MAX_PARALLEL_DISPATCHES via the launch budget passed to the real tick', async () => {
@@ -779,23 +776,23 @@ describe('dispatch scheduling caps and waves', () => {
     expect(launchMock.calls.map((call) => call.packetId)).toEqual(['master-default']);
   }, 20_000);
 
-  it('honors an explicit per-runtime launch budget for Gemini', async () => {
+  it('honors an explicit per-runtime launch budget', async () => {
     const repoPath = makeRepo();
     const cap = 3;
-    const packets = [1, 2, 3, 4].map((index) => packetFixture(repoPath, `gemini-${index}`, {
-      runtime: 'gemini',
-      workerRouting: { requestedRuntime: 'gemini' } as OrchestratorPacket['workerRouting'],
+    const packets = [1, 2, 3, 4].map((index) => packetFixture(repoPath, `antigravity-${index}`, {
+      runtime: 'antigravity',
+      workerRouting: { requestedRuntime: 'antigravity' } as OrchestratorPacket['workerRouting'],
     }));
 
     const next = await runDispatchTick(missionFixture(repoPath, packets), {
-      launchBudget: { maxLaunches: 10, perRuntime: { gemini: cap } },
+      launchBudget: { maxLaunches: 10, perRuntime: { antigravity: cap } },
       storageAdmission: permissiveAdmission(),
     });
 
     expect(launchMock.calls.map((call) => call.packetId)).toHaveLength(cap);
-    expect(launchMock.calls.every((call) => call.runtime === 'gemini')).toBe(true);
+    expect(launchMock.calls.every((call) => call.runtime === 'antigravity')).toBe(true);
     expect(next.packets.filter((packet) => packet.status === 'launching')).toHaveLength(cap);
-    expect(next.packets.find((packet) => packet.id === 'gemini-4')?.status).toBe('queued');
+    expect(next.packets.find((packet) => packet.id === 'antigravity-4')?.status).toBe('queued');
   }, 20_000);
 
   it('dispatches only the released dependency wave before later packets', async () => {

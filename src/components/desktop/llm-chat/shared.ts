@@ -121,7 +121,7 @@ export interface ModelOption {
   /** 'cli' = routed through installed CLI runtime, 'api' = direct API via BYOK key */
   backend: 'cli' | 'api';
   /** Which CLI runtime powers this model (only when backend === 'cli') */
-  cliRuntime?: 'claude-code' | 'codex' | 'gemini' | 'opencode';
+  cliRuntime?: 'claude-code' | 'codex' | 'opencode';
   /** Whether this model supports thinking/reasoning output */
   supportsThinking?: boolean;
   /** Default effort level for CLI models (Claude: low/medium/high/max) */
@@ -198,11 +198,6 @@ export const CLI_RUNTIME_MODELS: Record<string, ModelOption[]> = {
     { id: 'cli:codex:gpt-5.6-luna', label: 'GPT-5.6 Luna', provider: 'openai', color: '#10a37f', description: 'Fast + cheap (Haiku-class)', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
     { id: 'cli:codex:gpt-5.5', label: 'GPT-5.5', provider: 'openai', color: '#10a37f', description: 'Prior flagship', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
     { id: 'cli:codex:o4-mini', label: 'o4-mini', provider: 'openai', color: '#10a37f', description: 'Fast reasoning', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
-  ],
-  gemini: [
-    { id: 'cli:gemini:gemini-3.1-pro', label: 'Gemini 3.1 Pro', provider: 'google', color: '#4285f4', description: 'Latest flagship', backend: 'cli', cliRuntime: 'gemini', supportsThinking: true },
-    { id: 'cli:gemini:gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', color: '#4285f4', description: 'Stable, GA', backend: 'cli', cliRuntime: 'gemini', supportsThinking: true },
-    { id: 'cli:gemini:gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', color: '#4285f4', description: 'Fast + cheap', backend: 'cli', cliRuntime: 'gemini', supportsThinking: true },
   ],
   opencode: [
     // Fallback: single row used when auth.json is missing or unparseable.
