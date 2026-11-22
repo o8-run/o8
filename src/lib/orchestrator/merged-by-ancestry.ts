@@ -6,6 +6,7 @@ import { fileStamp, gitDirectories } from '@/lib/git/ref-stamp';
 import { promisify } from 'node:util';
 
 import { appendEvent, archiveLane, getLane, getLaneEvents, listLanes, updateLane } from '@/lib/lane/registry';
+import { listLanesByStatuses } from '@/lib/lane/rows';
 import { assessOwnedTranscriptActivity } from '@/lib/lane/reaper-liveness';
 import { laneCreationBaseCommit } from '@/lib/lane/creation-base';
 import type { Lane } from '@/lib/lane/types';
@@ -510,23 +511,22 @@ async function detectMergedByAncestry(candidate: Candidate, refreshedBases: Set<
 }
 
 function buildCandidates(): Candidate[] {
-  const lanes = listLanes();
-  const laneById = new Map(lanes.map((lane) => [lane.id, lane]));
-  const laneByPacket = new Map(lanes.filter((lane) => lane.packetId).map((lane) => [lane.packetId!, lane]));
-
   const packets = readOrchestratorControlPlaneState().packets;
   const remotePackets = packets.filter((packet) => packet.runtime === 'cloud' || packet.lane?.runtime === 'cloud');
   const remotePacketIds = new Set(remotePackets.map((packet) => packet.id));
   const remoteLaneIds = new Set(remotePackets.map((packet) => packet.lane?.laneId).filter(Boolean));
-  const packetCandidates = packets
-    .filter((packet) => {
-      const terminal = packetTerminalState(packet);
-      return packet.runtime !== 'cloud'
-        && packet.lane?.runtime !== 'cloud'
-        && terminal !== 'released'
-        && terminal !== 'archived'
-        && PACKET_SWEEPABLE_STATUSES.has(packet.status);
-    })
+  const eligiblePackets = packets.filter((packet) => {
+    const terminal = packetTerminalState(packet);
+    return packet.runtime !== 'cloud'
+      && packet.lane?.runtime !== 'cloud'
+      && terminal !== 'released'
+      && terminal !== 'archived'
+      && PACKET_SWEEPABLE_STATUSES.has(packet.status);
+  });
+  const packetLanes = listLanes(new Set(eligiblePackets.map(packet => packet.id)));
+  const laneById = new Map(packetLanes.map(lane => [lane.id, lane]));
+  const laneByPacket = new Map(packetLanes.map(lane => [lane.packetId!, lane]));
+  const packetCandidates = eligiblePackets
     .map((packet) => {
       const laneId = packet.lane?.laneId?.trim() || null;
       const lane = (laneId ? laneById.get(laneId) ?? getLane(laneId) : null)
@@ -559,13 +559,12 @@ function buildCandidates(): Candidate[] {
   // state. Prefer the worktree clone as the git cwd — dispatched branches
   // usually exist only there — falling back to the lane's canonical repo.
   const coveredLaneIds = new Set(packetCandidates.map((c) => c.laneId).filter(Boolean));
-  const laneOnlyCandidates: Candidate[] = lanes
+  const laneOnlyCandidates: Candidate[] = listLanesByStatuses(LANE_ONLY_SWEEPABLE_STATUSES)
     .filter((lane) => (
       lane.runtime !== 'cloud'
       && !remotePacketIds.has(lane.packetId ?? '')
       && !remoteLaneIds.has(lane.id)
       && !coveredLaneIds.has(lane.id)
-      && LANE_ONLY_SWEEPABLE_STATUSES.has(lane.status)
       && Boolean(lane.branch)
       && (lane.branch !== lane.baseBranch || Boolean(lane.packetId))
     ))

@@ -7,3 +7,10 @@ import { getSqlite } from '@/lib/db';
 export function hasOutstandingReview(): boolean {
   return Boolean(getSqlite().prepare("SELECT 1 FROM lanes WHERE status = 'reviewing' LIMIT 1").get());
 }
+
+/** Settled and reviewing lanes do not keep idle-safe work awake. */
+export function hasLaneBlockingIdle(): boolean {
+  return Boolean(getSqlite().prepare(
+    "SELECT 1 FROM lanes WHERE status IN ('launching', 'running', 'merging') LIMIT 1",
+  ).get());
+}
