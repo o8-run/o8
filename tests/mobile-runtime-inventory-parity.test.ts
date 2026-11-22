@@ -34,7 +34,7 @@ vi.mock('@/lib/render/bootstrap', () => ({
 }));
 
 vi.mock('@/lib/mobile/history', () => ({
-  getMobileSessionTranscript: async () => [],
+  getMobileInboxTranscriptPreview: async () => '',
 }));
 
 vi.mock('@/lib/mobile/review-units', () => ({

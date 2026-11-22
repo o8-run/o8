@@ -16,7 +16,7 @@ import type { MobileControlAction, MobileFleetAction, MobileFleetRuntime, Mobile
 import { applyInboxUrgency } from '@/lib/mobile/inbox-urgency';
 import { applyInboxRefereeChips } from '@/lib/mobile/inbox-referee-chips';
 import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
-import { getMobileSessionTranscript } from '@/lib/mobile/history';
+import { getMobileInboxTranscriptPreview } from '@/lib/mobile/history';
 import { buildMobileReviewUnits, shouldExposeWorkspaceReviewSnapshot, summarizeMobileReviewUnits } from '@/lib/mobile/review-units';
 import {
   isDispatchableRuntime,
@@ -232,12 +232,6 @@ export function toMobileFleetSession(agent: AgentSummary, approval?: ApprovalRec
   };
 }
 
-function summarizeTranscript(text: string) {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (!normalized) return '';
-  return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized;
-}
-
 function relativeMobileAge(isoLike: string | null | undefined) {
   if (!isoLike) return 'just now';
   const parsed = new Date(isoLike).getTime();
@@ -372,7 +366,7 @@ async function buildMobileInboxSnapshot(options: {
 
   const workspaceChats = listIdeLlmChatSessions();
   for (const chat of workspaceChats) {
-    const currentTask = chat.lastMessage ? summarizeTranscript(chat.lastMessage) : 'Start a conversation.';
+    const currentTask = chat.lastMessagePreview ?? 'Start a conversation.';
     const parsedLastActivity = new Date(chat.modifiedAt ?? chat.savedAt ?? Date.now()).getTime();
     const session: AgentSummary = {
       id: chat.sessionKey,
@@ -461,19 +455,15 @@ async function buildMobileInboxSnapshot(options: {
     ?? orderedSessions.find((session) => session.status === 'running')
     ?? orderedSessions[0];
 
-  const [reviewSnapshot, primaryTranscript] = await Promise.all([
+  const [reviewSnapshot, primarySnippet] = await Promise.all([
     includeWorkspaceReview
       // Fleet events can request a fresh inbox many times per second. Session
       // truth should follow that signal, but remote PR/issue review already has
       // its own 20-second cache and must not be burst-refetched with the fleet.
       ? getWorkspaceReviewSnapshot({ fresh: false }).catch(() => null)
       : Promise.resolve(null),
-    primarySession ? getMobileSessionTranscript(primarySession.sessionKey, 3, fresh).catch(() => []) : Promise.resolve([]),
+    primarySession ? getMobileInboxTranscriptPreview(primarySession.sessionKey, fresh).catch(() => '') : Promise.resolve(''),
   ]);
-
-  const primarySnippet = primaryTranscript.length
-    ? summarizeTranscript(primaryTranscript[primaryTranscript.length - 1]?.text ?? '')
-    : '';
 
   const staleDrafts = includeWorkspaceReview ? await readRegisteredIdleDrafts().catch(() => ({ drafts: [], sources: [], error: 'Idle drafts could not be loaded.' })) : { drafts: [], sources: [] };
   const items: MobileInboxItem[] = staleDrafts.drafts.map(pr => ({

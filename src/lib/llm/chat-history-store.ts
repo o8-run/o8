@@ -90,6 +90,15 @@ export function getCanonicalChatHistoryPath(tabId: string): string {
   return join(HISTORY_DIR, `${safe}.json`);
 }
 
+export function getChatHistoryFileVersion(filePath: string): string | null {
+  try {
+    const stat = statSync(filePath, { bigint: true, throwIfNoEntry: false });
+    return stat ? `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export type CanonicalChatHistoryRecord = SearchableChatHistoryRecord & {
   [key: string]: unknown;
 };
