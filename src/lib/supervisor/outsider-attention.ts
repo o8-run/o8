@@ -43,6 +43,43 @@ function validTimestamp(value: string | null): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+/** The outside commenter a thread is waiting on, before any time threshold. */
+function outsiderWait(thread: OutsiderAttentionThread): { waitingLogin: string; waitingSinceMs: number } | null {
+  const waitingLogin = thread.lastHumanCommentAuthorLogin?.trim() ?? '';
+  const waitingSinceMs = validTimestamp(thread.lastHumanCommentAt);
+  if (!waitingLogin || waitingSinceMs === null || isGitHubBotLogin(waitingLogin)) return null;
+  if (isGitHubInsiderAssociation(thread.lastHumanCommentAuthorAssociation)) return null;
+
+  // Closed threads remain in the mirror briefly for history, but they cannot
+  // start a new human-waiting incident after the source thread has closed.
+  if (thread.state.toLowerCase() !== 'open') return null;
+
+  const lastInsiderCommentMs = validTimestamp(thread.lastInsiderCommentAt);
+  if (lastInsiderCommentMs !== null && lastInsiderCommentMs > waitingSinceMs) return null;
+  return { waitingLogin, waitingSinceMs };
+}
+
+/**
+ * The next moment `findWaitingOutsiders` gives a different answer with the
+ * same threads: a thread crosses the threshold, or a waiting thread's whole
+ * hours tick over. Infinity when no thread can change on its own.
+ */
+export function nextOutsiderWaitChangeAt(threads: OutsiderAttentionThread[], now: Date, thresholdMs: number): number {
+  const nowMs = now.getTime();
+  const boundedThresholdMs = Math.max(0, thresholdMs);
+  let next = Infinity;
+  for (const thread of threads) {
+    const wait = outsiderWait(thread);
+    if (!wait) continue;
+    const waitingMs = nowMs - wait.waitingSinceMs;
+    const at = waitingMs < boundedThresholdMs
+      ? wait.waitingSinceMs + boundedThresholdMs
+      : wait.waitingSinceMs + (Math.floor(waitingMs / (60 * 60_000)) + 1) * 60 * 60_000;
+    next = Math.min(next, at);
+  }
+  return next;
+}
+
 export function findWaitingOutsiders(
   threads: OutsiderAttentionThread[],
   now: Date,
@@ -53,17 +90,9 @@ export function findWaitingOutsiders(
   const boundedThresholdMs = Math.max(0, thresholdMs);
 
   return threads.flatMap((thread) => {
-    const waitingLogin = thread.lastHumanCommentAuthorLogin?.trim() ?? '';
-    const waitingSinceMs = validTimestamp(thread.lastHumanCommentAt);
-    if (!waitingLogin || waitingSinceMs === null || isGitHubBotLogin(waitingLogin)) return [];
-    if (isGitHubInsiderAssociation(thread.lastHumanCommentAuthorAssociation)) return [];
-
-    // Closed threads remain in the mirror briefly for history, but they cannot
-    // start a new human-waiting incident after the source thread has closed.
-    if (thread.state.toLowerCase() !== 'open') return [];
-
-    const lastInsiderCommentMs = validTimestamp(thread.lastInsiderCommentAt);
-    if (lastInsiderCommentMs !== null && lastInsiderCommentMs > waitingSinceMs) return [];
+    const wait = outsiderWait(thread);
+    if (!wait) return [];
+    const { waitingLogin, waitingSinceMs } = wait;
 
     const waitingMs = nowMs - waitingSinceMs;
     if (waitingMs < boundedThresholdMs) return [];

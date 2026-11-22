@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorLaneBinding, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-liveness-probes-data-'));
@@ -267,5 +267,42 @@ describe('subject-gone TTL fallthrough', () => {
     void result;
     const after = listInboxItems({ includeAllProjects: true }).find((row) => row.id === item.id);
     expect(after?.status).toBe('human_required');
+  });
+});
+
+describe('the timed sweep', () => {
+  it('probes again only when an open incident, its packet or lane changes, or an expiry falls due', async () => {
+    const start = Date.parse('2026-09-01T12:00:00.000Z');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(start);
+    try {
+      getSqlite().prepare('DELETE FROM supervisor_inbox').run();
+      const repoPath = mkdtempSync(join(tmpdir(), 'o8-liveness-timed-'));
+      tempDirs.push(repoPath);
+      const lane = seedPacket(repoPath, 'pkt-timed');
+      setLaneStatus(lane.id, 'running', 'system', 'still_running');
+      const retry = enqueueInboxItem({ repoPath, packetId: 'pkt-timed', kind: 'bounded_retry_exhausted',
+        payload: { laneId: lane.id, error: 'Retry budget exhausted.' } });
+      const gone = enqueueInboxItem({ repoPath, packetId: 'pkt-timed-gone', kind: 'session_lost', payload: {}, status: 'human_required' });
+      ageInboxItem(gone.id, new Date(start - 7 * 24 * 60 * 60_000 + 60 * 60_000).toISOString());
+
+      await expect(runLivenessProbeSweep()).resolves.toMatchObject({ scanned: 2, resolved: 0 });
+      // Nothing the probes read changed: they do not run.
+      await expect(runLivenessProbeSweep()).resolves.toMatchObject({ scanned: 0 });
+
+      // The lane completes: the next sweep probes and clears the card.
+      setLaneStatus(lane.id, 'completed', 'system', 'merged');
+      await expect(runLivenessProbeSweep()).resolves.toMatchObject({ resolved: 1 });
+      expect(inboxItem(retry.id)?.status).not.toBe('human_required');
+      await expect(runLivenessProbeSweep()).resolves.toMatchObject({ scanned: 1, resolved: 0 });
+      await expect(runLivenessProbeSweep()).resolves.toMatchObject({ scanned: 0 });
+
+      // The packet-gone card reaches its 7-day expiry with no other change.
+      vi.setSystemTime(start + 61 * 60_000);
+      await expect(runLivenessProbeSweep()).resolves.toMatchObject({ resolved: 1 });
+      expect(inboxItem(gone.id)?.status).not.toBe('human_required');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

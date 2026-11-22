@@ -1,8 +1,12 @@
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
 import { getSqlite } from '@/lib/db';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { listGitHubAttentionThreads } from '@/lib/github-broker/store';
 import { resolveRepoPath } from '@/lib/intake/resolve-repo';
 import {
   findWaitingOutsiders,
+  nextOutsiderWaitChangeAt,
   type OutsiderAttentionThreadKind,
   type WaitingOutsider,
 } from './outsider-attention';
@@ -119,9 +123,40 @@ function incidentPayload(waiting: WaitingOutsider): OutsideIncidentPayload {
   };
 }
 
+/**
+ * Everything the outside-waiting reconcile reads, apart from the clock: the
+ * GitHub mirror's thread fields, the outside-waiting inbox rows, the repository
+ * registry (it maps mirrored repositories to local ones) and the threshold.
+ */
+export function outsideHumanWaitingInputs(): string {
+  const sqlite = getSqlite();
+  const threads = ['github_issues', 'github_pull_requests'].map((table) => JSON.stringify(sqlite.prepare(`
+    SELECT COUNT(*) AS rows, SUM(state = 'open') AS open,
+           TOTAL(julianday(updated_at)) AS updated, TOTAL(julianday(closed_at)) AS closed,
+           TOTAL(julianday(last_human_comment_at)) AS human, TOTAL(julianday(last_insider_comment_at)) AS insider,
+           TOTAL(length(title)) AS titles, TOTAL(length(url)) AS urls,
+           TOTAL(length(last_human_comment_author_login)) AS logins,
+           TOTAL(length(last_human_comment_author_association)) AS associations
+    FROM ${table}
+  `).get()));
+  const incidents = JSON.stringify(sqlite.prepare(`
+    SELECT COUNT(*) AS rows, TOTAL(julianday(created_at)) AS created, TOTAL(julianday(resolved_at)) AS resolved,
+           TOTAL(length(status)) AS statuses, TOTAL(length(payload)) AS payloads, TOTAL(length(repo_path)) AS repos
+    FROM supervisor_inbox WHERE kind = 'outside_human_waiting'
+  `).get());
+  let registry = 'none';
+  try {
+    const info = statSync(join(getDataDir(), 'repos.json'));
+    registry = `${info.ino}:${info.size}:${info.mtimeMs}`;
+  } catch { /* No registry: nothing resolves. */ }
+  return [...threads, incidents, registry, configuredThresholdMs()].join('|');
+}
+
 export function reconcileOutsideHumanWaitingInbox(input: ReconcileOutsideInboxInput): {
   created: number;
   resolved: number;
+  /** When the same inputs next give a different answer; Infinity when only an input change can. */
+  nextChangeAt: number;
 } {
   const now = input.now ?? new Date();
   const thresholdMs = input.thresholdMs ?? configuredThresholdMs();
@@ -193,5 +228,5 @@ export function reconcileOutsideHumanWaitingInbox(input: ReconcileOutsideInboxIn
     resolved += 1;
   }
 
-  return { created, resolved };
+  return { created, resolved, nextChangeAt: nextOutsiderWaitChangeAt(threads, now, thresholdMs) };
 }
