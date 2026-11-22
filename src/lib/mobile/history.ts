@@ -1,7 +1,8 @@
 import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
-import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
+import { INBOX_LLM_TRANSCRIPT_LIMIT, loadMobileLlmChatHistory, loadMobileLlmInboxTail } from '@/lib/llm/mobile-llm-chat';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import { summarizeTranscript } from '@/lib/llm/transcript-preview';
 import { readSessionHuddleTranscriptEvents, readSessionSteerTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
 import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
 import '@/lib/runtimes';
@@ -165,6 +166,13 @@ function finalizeMobileTranscript(
   limit: number,
 ): MobileTranscriptEntry[] {
   return mergeDurableMobileTranscriptEntries(sessionKey, transcript).slice(-limit);
+}
+
+export async function getMobileInboxTranscriptPreview(sessionKey: string, fresh: boolean): Promise<string> {
+  const transcript = sessionKey.startsWith('llm-chat:')
+    ? mergeDurableMobileTranscriptEntries(sessionKey, loadMobileLlmInboxTail(sessionKey))
+    : await getMobileSessionTranscript(sessionKey, INBOX_LLM_TRANSCRIPT_LIMIT, fresh);
+  return summarizeTranscript(transcript.at(-1)?.text ?? '');
 }
 
 export async function getMobileSessionTranscript(

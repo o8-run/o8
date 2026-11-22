@@ -1,6 +1,6 @@
-import { statSync } from 'node:fs';
 import path from 'node:path';
-import { getCanonicalChatHistoryPath, listPersistedLlmChats, readPersistedLlmChat } from '@/lib/llm/chat-history-store';
+import { getCanonicalChatHistoryPath, getChatHistoryFileVersion, listPersistedLlmChats, readPersistedLlmChat } from '@/lib/llm/chat-history-store';
+import { summarizeTranscript } from '@/lib/llm/transcript-preview';
 import { listCurrentIdeRepoPaths, readIdeTerminalStateFiles } from '@/lib/runtime/ide-terminal-state';
 
 export interface IdeLlmChatDescriptor {
@@ -15,53 +15,45 @@ export interface IdeLlmChatDescriptor {
   modifiedAt?: string;
   isCurrentSession: boolean;
   messageCount: number;
-  lastMessage?: string;
+  lastMessagePreview?: string;
 }
 
-type ChatListing = Pick<IdeLlmChatDescriptor, 'model' | 'repoName' | 'repoPath' | 'savedAt' | 'messageCount' | 'lastMessage'> & {
+type ChatListing = Pick<IdeLlmChatDescriptor, 'model' | 'repoName' | 'repoPath' | 'savedAt' | 'messageCount' | 'lastMessagePreview'> & {
   title?: string;
   modifiedAt: string;
 };
 
 const CHAT_LISTING_LIMIT = 128;
 const CHAT_LISTING_MAX_LENGTH = 8192;
-const chatListings = new Map<string, { version: string; body: string }>();
-
-function chatFileVersion(filePath: string): string | null {
-  try {
-    const stat = statSync(filePath, { bigint: true, throwIfNoEntry: false });
-    return stat ? `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` : null;
-  } catch {
-    return null;
-  }
-}
+const chatListings = new Map<string, { version: string; listing: Readonly<ChatListing> }>();
 
 function readChatListing(tabId: string): ChatListing | null {
   const filePath = getCanonicalChatHistoryPath(tabId);
-  const version = chatFileVersion(filePath);
+  const version = getChatHistoryFileVersion(filePath);
   const cached = chatListings.get(filePath);
-  if (cached && cached.version === version) return JSON.parse(cached.body) as ChatListing;
+  if (cached && cached.version === version) return cached.listing;
   chatListings.delete(filePath);
   if (version === null) return null;
 
   const record = readPersistedLlmChat(tabId);
   if (!record) return null;
   const { model, title, repoName, repoPath, savedAt, messages } = record.history;
+  const lastMessage = messages.findLast(entry => entry.content?.trim())?.content;
   const listing = {
     model, title, repoName, repoPath, savedAt,
     modifiedAt: record.modifiedAt,
     messageCount: messages.length,
-    lastMessage: messages.findLast(entry => entry.content?.trim())?.content?.trim(),
+    lastMessagePreview: lastMessage ? summarizeTranscript(lastMessage) : undefined,
   };
   // Keep bounded copies of listing fields so transcript strings can be collected.
   if (Object.values(listing).some(value => typeof value === 'string' && value.length > CHAT_LISTING_MAX_LENGTH)) {
     return listing;
   }
   const body = JSON.stringify(listing);
-  if (body.length <= CHAT_LISTING_MAX_LENGTH && chatFileVersion(filePath) === version) {
+  if (body.length <= CHAT_LISTING_MAX_LENGTH && getChatHistoryFileVersion(filePath) === version) {
     const oldest = chatListings.keys().next();
     if (chatListings.size === CHAT_LISTING_LIMIT && !oldest.done) chatListings.delete(oldest.value);
-    chatListings.set(filePath, { version, body });
+    chatListings.set(filePath, { version, listing: JSON.parse(body) as ChatListing });
   }
   return listing;
 }
@@ -97,7 +89,7 @@ export function listIdeLlmChatSessions(): IdeLlmChatDescriptor[] {
           modifiedAt: chat?.modifiedAt,
           isCurrentSession: file.activeTabId === tab.id,
           messageCount: chat?.messageCount ?? 0,
-          lastMessage: chat?.lastMessage,
+          lastMessagePreview: chat?.lastMessagePreview,
         };
 
         const existing = descriptors.get(next.sessionKey);
@@ -139,7 +131,7 @@ export function listIdeLlmChatSessions(): IdeLlmChatDescriptor[] {
       modifiedAt: chat.modifiedAt,
       isCurrentSession: false,
       messageCount: chat.messageCount,
-      lastMessage: chat.lastMessage,
+      lastMessagePreview: chat.lastMessagePreview,
     });
   }
 
