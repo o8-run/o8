@@ -28,6 +28,7 @@ let inboxMarker = 'initial';
 let inboxReads = 0;
 let inboxSyncs = 0;
 let globalSnapshotReads = 0;
+let inboxResponseWait: Promise<void> | undefined;
 let historyVersion = 0;
 let historyUnavailable = false;
 let historyText = '';
@@ -134,6 +135,7 @@ beforeAll(async () => {
 
     if (url.pathname === '/api/mobile/inbox' && request.method === 'GET') {
       inboxReads += 1;
+      await inboxResponseWait;
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify(inbox()));
       return;
@@ -256,20 +258,30 @@ describe('versioned realtime protocol through the WebSocket entry point', () => 
     }
   });
 
-  it('builds the inbox for an explicit global subscription capability without a pairing', async () => {
-    const client = await connectClient();
+  it('serves the same checkpoint to concurrent explicit subscribers without a pairing', async () => {
+    const subscribers = await Promise.all([connectClient(), connectClient()]);
+    const readsBefore = inboxReads;
+    let releaseInboxResponse: () => void = () => {};
+    inboxResponseWait = new Promise((resolve) => { releaseInboxResponse = resolve; });
+    const checkpoint = (client: (typeof subscribers)[number]) =>
+      realtimeEvents(client.frames).find((event) => event.event === 'mobile.inbox.snapshot');
     try {
-      client.socket.send(JSON.stringify({
-        type: 'realtime-subscribe',
-        capabilities: ['mobile-inbox-delta-v1'],
-        subscriptions: [{ stream: 'global' }],
-      }));
-      await waitFor(
-        () => realtimeEvents(client.frames).some((event) => event.event === 'mobile.inbox.snapshot'),
-        'requested inbox checkpoint',
-      );
+      for (const { socket } of subscribers) {
+        socket.send(JSON.stringify({
+          type: 'realtime-subscribe',
+          capabilities: ['mobile-inbox-delta-v1'],
+          subscriptions: [{ stream: 'global' }],
+        }));
+      }
+      await waitFor(() => inboxReads >= readsBefore + 2, 'overlapping checkpoint reads');
+      releaseInboxResponse();
+      await waitFor(() => subscribers.every(checkpoint), 'requested inbox checkpoints');
+      const [first, second] = subscribers.map(checkpoint);
+      expect(first?.data?.revision).toBe(second?.data?.revision);
     } finally {
-      client.socket.close();
+      releaseInboxResponse();
+      inboxResponseWait = undefined;
+      for (const { socket } of subscribers) socket.close();
     }
   });
 

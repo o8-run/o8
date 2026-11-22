@@ -2552,19 +2552,21 @@ function hasMobileInboxAudience() {
   return hasMobilePairing();
 }
 
-async function getRegisteredMobileInboxCheckpoint(client: ClientState): Promise<{
+async function getMobileInboxCheckpoint(client: ClientState): Promise<{
   inbox: MobileInboxSnapshot;
   revision: number;
 } | null> {
   if (!wantsMobileInbox(client) && !hasMobilePairing()) return null;
-  if (lastMobileInboxSnapshot) {
-    return { inbox: lastMobileInboxSnapshot, revision: mobileInboxRevision };
+  if (!lastMobileInboxSnapshot) {
+    const inbox = await getMobileInboxSnapshot({ fresh: mobileInboxRevision > 0 });
+    // Another subscriber or the publisher may have installed a checkpoint during the read.
+    if (!lastMobileInboxSnapshot) {
+      lastMobileInboxSnapshot = inbox;
+      mobileInboxRevision += 1;
+      lastRealtimeFingerprint.mobileInbox = fingerprintInboxSnapshot(inbox);
+    }
   }
-  const inbox = await getMobileInboxSnapshot();
-  lastMobileInboxSnapshot = inbox;
-  mobileInboxRevision += 1;
-  lastRealtimeFingerprint.mobileInbox = fingerprintInboxSnapshot(inbox);
-  return { inbox, revision: mobileInboxRevision };
+  return { inbox: lastMobileInboxSnapshot, revision: mobileInboxRevision };
 }
 
 function currentIsoTime() {
@@ -2909,7 +2911,7 @@ async function buildResyncEvents(stream: RealtimeStreamKey, client: ClientState)
         ),
       ];
 
-      const inboxCheckpoint = await getRegisteredMobileInboxCheckpoint(client).catch(() => null);
+      const inboxCheckpoint = await getMobileInboxCheckpoint(client).catch(() => null);
       if (inboxCheckpoint) {
         events.push(buildRealtimeEnvelope(
           'global',
@@ -3005,7 +3007,7 @@ async function buildBootstrapEvents(stream: RealtimeStreamKey, client: ClientSta
         ),
       ];
 
-      const inboxCheckpoint = await getRegisteredMobileInboxCheckpoint(client).catch(() => null);
+      const inboxCheckpoint = await getMobileInboxCheckpoint(client).catch(() => null);
       if (inboxCheckpoint) {
         events.push(buildRealtimeEnvelope(
           'global',
