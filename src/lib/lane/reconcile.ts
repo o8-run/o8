@@ -6,9 +6,10 @@ import { fileStamp, gitDirectories } from '@/lib/git/ref-stamp';
 import { promisify } from 'node:util';
 
 import { createApproval } from '@/lib/approvals/store';
+import { getSqlite } from '@/lib/db';
 import { laneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { getLaneEvents, listLanes, setLaneStatus } from '@/lib/lane/registry';
-import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
+import type { Lane, LaneRuntime } from '@/lib/lane/types';
 import { getRuntime } from '@/lib/runtimes';
 import { crashSurvivableWorkersEnabled } from '@/lib/runtimes/shared/owned-session/crash-survival';
 import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state';
@@ -87,11 +88,20 @@ function createSessionLostApproval(lane: Lane) {
 // per spawn on the 30s reconcile tick, chaining into multi-second wedges over
 // a large .cortex-worktrees clone farm (#1498). existsSync stays — it's a
 // single sub-millisecond stat per lane, not a walk.
-const RECONCILABLE_WORKTREE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStatus>([
-  'reviewing',
-  'merging',
-  'awaiting_input',
-]);
+type ReconciliationLane = Pick<Lane,
+  'id' | 'label' | 'repoPath' | 'worktreePath' | 'branch' | 'baseBranch' | 'packetId' | 'runtime' |
+  'status' | 'outcome' | 'updatedAt'
+>;
+
+function listWorktreesForReconciliation(): ReconciliationLane[] {
+  return getSqlite().prepare(`
+    SELECT id, label, repo_path AS repoPath, worktree_path AS worktreePath, branch,
+      base_branch AS baseBranch, packet_id AS packetId, runtime, status, outcome,
+      updated_at AS updatedAt
+    FROM lanes WHERE status IN ('reviewing', 'merging', 'awaiting_input')
+    ORDER BY created_at
+  `).all() as ReconciliationLane[];
+}
 
 // #558 — Branch existence probe per repo. When the orchestrator bash-merges
 // and deletes the branch but leaves the worktree dir intact (or when the agent
@@ -172,7 +182,7 @@ async function isAncestorCommit(repoPath: string, ancestorSha: string, descendan
   }
 }
 
-function latestRecordedMergeHeadSha(lane: Lane): string | null {
+function latestRecordedMergeHeadSha(lane: ReconciliationLane): string | null {
   return getLaneEvents(lane.id)
     .slice()
     .reverse()
@@ -181,7 +191,7 @@ function latestRecordedMergeHeadSha(lane: Lane): string | null {
     ?.trim() ?? null;
 }
 
-async function laneMergeConfirmed(lane: Lane): Promise<boolean> {
+async function laneMergeConfirmed(lane: ReconciliationLane): Promise<boolean> {
   const laneHeadSha = (await readRefSha(lane.repoPath, lane.branch)) ?? latestRecordedMergeHeadSha(lane);
   if (laneHeadSha) {
     const events = getLaneEvents(lane.id, 10_000);
@@ -204,7 +214,7 @@ async function laneMergeConfirmed(lane: Lane): Promise<boolean> {
 // and double-log; fold a concurrent call into the in-flight one.
 let reconcileInFlight: Promise<number> | null = null;
 
-function workspaceLifecycleOwnsMissingPath(lane: Lane): boolean {
+function workspaceLifecycleOwnsMissingPath(lane: ReconciliationLane): boolean {
   const packetId = lane.packetId?.trim();
   if (!packetId) return false;
   try {
@@ -225,7 +235,7 @@ function workspaceLifecycleOwnsMissingPath(lane: Lane): boolean {
 // until then, so an unchanged lane costs no git process per sweep.
 const unchangedBranchAnswers = new Map<string, string>();
 
-function branchAnswerFingerprint(lane: Lane): string | null {
+function branchAnswerFingerprint(lane: ReconciliationLane): string | null {
   const directories = gitDirectories(lane.repoPath);
   if (!directories) return null;
   const { commonDir } = directories;
@@ -246,11 +256,8 @@ export function reconcileOrphanedWorktrees(): Promise<number> {
 }
 
 async function runReconcileOrphanedWorktrees(): Promise<number> {
-  const reconcilableLanes = listLanes().filter(
-    (lane) =>
-      RECONCILABLE_WORKTREE_STATUSES.has(lane.status)
-      && !workspaceLifecycleOwnsMissingPath(lane),
-  );
+  const reconcilableLanes = listWorktreesForReconciliation()
+    .filter(lane => !workspaceLifecycleOwnsMissingPath(lane));
   const liveIds = new Set(reconcilableLanes.map((lane) => lane.id));
   for (const id of unchangedBranchAnswers.keys()) if (!liveIds.has(id)) unchangedBranchAnswers.delete(id);
   if (reconcilableLanes.length === 0) return 0;
@@ -268,7 +275,7 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
   // tripping a false-completion (branch deleted, work parked on tmp-*, main
   // not yet updated). Probe once per repo to keep the cost bounded.
   const branchSetsByRepo = new Map<string, Set<string> | null>();
-  const branchGone: Lane[] = [];
+  const branchGone: ReconciliationLane[] = [];
   for (const lane of reconcilableLanes) {
     if (lane.worktreePath && !existsSync(lane.worktreePath)) continue; // already caught by worktreeGone
     if (!lane.branch) continue;
@@ -287,7 +294,7 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
     branchGone.push(lane);
   }
 
-  const confirmedWorktreeGone: Lane[] = [];
+  const confirmedWorktreeGone: ReconciliationLane[] = [];
   for (const lane of worktreeGone) {
     if (await laneMergeConfirmed(lane)) {
       confirmedWorktreeGone.push(lane);

@@ -89,7 +89,7 @@ import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
 import { recurring, startLedgerReporter } from '@/lib/background-work/ledger';
 import { noteActivity, noteRequest, startIdleGate } from '@/lib/background-work/idle-gate';
-import { hasOutstandingReview } from '@/lib/lane/outstanding-review';
+import { hasLaneBlockingIdle, hasOutstandingReview } from '@/lib/lane/outstanding-review';
 import { getOrCreateWsToken, wsTokenSource } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -8575,11 +8575,9 @@ async function bootstrapWsServer() {
   startLedgerReporter(getDataDir());
   // Idle-safe loops pause while no session runs, nothing launched lately and
   // no client is active; any of those wakes them at once.
-  void import('@/lib/lane/registry').then(({ listActiveLanes }) => startIdleGate({
-    liveSessions: () => orchestratorInflightAborts.size > 0 || listActiveLanes().some(
-      (lane) => lane.status === 'launching' || lane.status === 'running' || lane.status === 'merging',
-    ),
-  })).catch(() => { /* without the signal the gate never rests */ });
+  startIdleGate({
+    liveSessions: () => orchestratorInflightAborts.size > 0 || hasLaneBlockingIdle(),
+  });
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
   startAttachedBrowserRefreshLoop();
