@@ -279,6 +279,21 @@ async function listThoughtHistoryFileStatsAsync(): Promise<OrchestratorHistoryFi
   return stats;
 }
 
+/**
+ * A one-stat change check for the 1 Hz thread sync. Every chat save writes a
+ * temporary file and renames it over the thread's file, which changes the
+ * folder; saves in this process also bump the write version. An unchanged
+ * value means no thread file was added, replaced or removed.
+ */
+export async function mobileOrchestratorThreadHistoryFolderTokenAsync(): Promise<string> {
+  try {
+    const info = await statAsync(ORCHESTRATOR_HISTORY_DIR);
+    return `${historyWriteVersion}:${info.ino}:${info.mtimeMs}`;
+  } catch {
+    return `${historyWriteVersion}:none`;
+  }
+}
+
 // Async form of mobileOrchestratorThreadHistoryStatToken — identical token
 // value, no sync fs. Used by the 1Hz ws-server poll.
 export async function mobileOrchestratorThreadHistoryStatTokenAsync(): Promise<string> {

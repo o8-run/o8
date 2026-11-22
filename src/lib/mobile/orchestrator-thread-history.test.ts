@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -522,4 +522,25 @@ describe('orchestrator thread history persistence', () => {
     expect(afterSync).not.toBe(before);
     expect(await history.mobileOrchestratorThreadHistoryStatTokenAsync()).toBe(afterSync);
   });
+
+  it('moves the folder token on every thread save, here or in another process, and only then', async () => {
+    const history = await loadHistoryModule();
+    const first = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', title: 'Alpha' });
+    const quiet = await history.mobileOrchestratorThreadHistoryFolderTokenAsync();
+    // Reads and an unchanged folder: the same token.
+    history.listMobileOrchestratorThreads({ backend: null });
+    expect(await history.mobileOrchestratorThreadHistoryFolderTokenAsync()).toBe(quiet);
+
+    // A save in this process.
+    history.createMobileOrchestratorThread({ repoPath: '/tmp/repo', title: 'Bravo' });
+    const saved = await history.mobileOrchestratorThreadHistoryFolderTokenAsync();
+    expect(saved).not.toBe(quiet);
+
+    // Another process's save replaces the file the same way: temporary file, then rename.
+    const filePath = history.safeOrchestratorHistoryPath(first.id);
+    writeFileSync(`${filePath}.999.tmp`, readFileSync(filePath, 'utf-8').replace('"Alpha"', '"Charlie"'));
+    renameSync(`${filePath}.999.tmp`, filePath);
+    expect(await history.mobileOrchestratorThreadHistoryFolderTokenAsync()).not.toBe(saved);
+  });
 });
+

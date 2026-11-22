@@ -108,6 +108,7 @@ import {
   listMobileOrchestratorRevealRequests,
   listMobileOrchestratorThreads,
   markMobileOrchestratorThreadFailed,
+  mobileOrchestratorThreadHistoryFolderTokenAsync,
   mobileOrchestratorThreadHistoryStatTokenAsync,
   truncateMobileOrchestratorThreadFromMessage,
   upsertMobileOrchestratorAssistantMessage,
@@ -2325,12 +2326,25 @@ const CODEX_APP_SYNC_INTERVAL_MS = 4_000;
 let lastOrchestratorThreadFingerprints = new Map<string, string>();
 let lastOrchestratorRevealCursor = new Date(Date.now() - 3000).toISOString();
 let lastOrchestratorThreadHistoryStatToken: string | null = null;
+let lastOrchestratorThreadHistoryFolderToken: string | null = null;
+let lastOrchestratorThreadHistoryStatAt = 0;
+/** A file edited in place leaves the folder unchanged; the per-file check still runs this often. */
+const ORCHESTRATOR_THREAD_FULL_CHECK_MS = 60_000;
 
 async function pushOrchestratorThreadChanges() {
   if (clients.size === 0) return;
   try {
+    // One folder stat answers "did any thread file change" for every save,
+    // instead of a stat per thread file every second.
+    const folderToken = await mobileOrchestratorThreadHistoryFolderTokenAsync();
+    if (folderToken === lastOrchestratorThreadHistoryFolderToken
+      && Date.now() - lastOrchestratorThreadHistoryStatAt < ORCHESTRATOR_THREAD_FULL_CHECK_MS) return;
     const statToken = await mobileOrchestratorThreadHistoryStatTokenAsync();
-    if (lastOrchestratorThreadHistoryStatToken === statToken) return;
+    lastOrchestratorThreadHistoryStatAt = Date.now();
+    if (lastOrchestratorThreadHistoryStatToken === statToken) {
+      lastOrchestratorThreadHistoryFolderToken = folderToken;
+      return;
+    }
 
     const threads = listMobileOrchestratorThreads({ backend: null });
     const nextFingerprints = new Map<string, string>();
@@ -2359,6 +2373,7 @@ async function pushOrchestratorThreadChanges() {
       });
     }
     lastOrchestratorThreadHistoryStatToken = statToken;
+    lastOrchestratorThreadHistoryFolderToken = folderToken;
   } catch (error) {
     console.warn('[ws-server] orchestrator thread sync failed:', error instanceof Error ? error.message : String(error));
   }
