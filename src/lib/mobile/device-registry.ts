@@ -197,6 +197,10 @@ export function isDeviceActive(deviceId: string): boolean {
   return Boolean(row);
 }
 
+export function hasPairedMobileDevice(): boolean {
+  return Boolean(getSqlite().prepare('SELECT 1 FROM mobile_devices WHERE revoked_at IS NULL LIMIT 1').get());
+}
+
 /** List devices (newest first) for the operator's "Paired devices" surface. */
 export function listDevices(): MobileDevice[] {
   const sqlite = getSqlite();

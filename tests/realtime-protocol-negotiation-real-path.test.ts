@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -24,6 +25,9 @@ let apiPort = 0;
 let wsPort = 0;
 let serverOutput = '';
 let inboxMarker = 'initial';
+let inboxReads = 0;
+let inboxSyncs = 0;
+let globalSnapshotReads = 0;
 let historyVersion = 0;
 let historyUnavailable = false;
 let historyText = '';
@@ -102,13 +106,13 @@ function realtimeBatches(frames: WireFrame[]) {
   return frames.filter((frame) => frame.channel === 'realtime' && frame.event === 'batch');
 }
 
-async function requestRefresh(target: 'mobileInbox' | 'sessionHistory') {
+async function requestRefresh(target: 'mobileInbox' | 'sessionHistory', alsoGlobal = false) {
   const response = await fetch(`http://127.0.0.1:${wsPort}/internal/realtime`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       kind: 'refresh',
-      targets: [target],
+      targets: alsoGlobal ? [target, 'global'] : [target],
       ...(target === 'sessionHistory' ? { sessionKeys: ['worker-protocol'] } : {}),
       fresh: true,
       reason: 'protocol real-path test',
@@ -129,6 +133,7 @@ beforeAll(async () => {
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as Record<string, unknown>;
 
     if (url.pathname === '/api/mobile/inbox' && request.method === 'GET') {
+      inboxReads += 1;
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify(inbox()));
       return;
@@ -136,6 +141,7 @@ beforeAll(async () => {
 
     if (url.pathname === '/api/mobile/sync' && request.method === 'POST') {
       if (body.inbox) {
+        inboxSyncs += 1;
         response.writeHead(200, { 'Content-Type': 'application/json' });
         response.end(JSON.stringify({ inbox: inbox(), inboxEtag: inboxMarker }));
         return;
@@ -164,6 +170,7 @@ beforeAll(async () => {
     }
 
     if (url.pathname === '/api/command-center/snapshot') {
+      globalSnapshotReads += 1;
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({
         fleet: { agents: [], meta: { mode: 'live' } },
@@ -223,6 +230,49 @@ afterAll(async () => {
 });
 
 describe('versioned realtime protocol through the WebSocket entry point', () => {
+  it('skips unsolicited inbox reads even when a desktop subscribes to global state', async () => {
+    const desktop = await connectClient();
+    try {
+      desktop.socket.send(JSON.stringify({
+        type: 'realtime-subscribe', subscriptions: [{ stream: 'global' }],
+      }));
+      await waitFor(
+        () => realtimeEvents(desktop.frames).some((event) => event.event === 'runtime.snapshot'),
+        'desktop bootstrap',
+      );
+      expect(realtimeEvents(desktop.frames).some((event) => event.event === 'mobile.inbox.snapshot')).toBe(false);
+      expect(inboxSyncs).toBe(0);
+      expect(inboxReads).toBe(0);
+
+      const readsBeforeRefresh = globalSnapshotReads;
+      await requestRefresh('mobileInbox', true);
+      await waitFor(() => globalSnapshotReads > readsBeforeRefresh, 'co-scheduled global refresh');
+      // The mobile refresh is separately debounced for 250 ms.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(inboxReads).toBe(0);
+      expect(inboxSyncs).toBe(0);
+    } finally {
+      desktop.socket.close();
+    }
+  });
+
+  it('builds the inbox for an explicit global subscription capability without a pairing', async () => {
+    const client = await connectClient();
+    try {
+      client.socket.send(JSON.stringify({
+        type: 'realtime-subscribe',
+        capabilities: ['mobile-inbox-delta-v1'],
+        subscriptions: [{ stream: 'global' }],
+      }));
+      await waitFor(
+        () => realtimeEvents(client.frames).some((event) => event.event === 'mobile.inbox.snapshot'),
+        'requested inbox checkpoint',
+      );
+    } finally {
+      client.socket.close();
+    }
+  });
+
   it('resyncs after an oversized envelope while still delivering it live (#4422)', async () => {
     const first = await connectClient();
     first.socket.send(JSON.stringify({
@@ -272,6 +322,11 @@ describe('versioned realtime protocol through the WebSocket entry point', () => 
   });
 
   it('selects features and emits an optional event only to the capable client', async () => {
+    const db = new Database(join(dataDir, 'cortex-ide.db'));
+    db.prepare('INSERT INTO mobile_devices (id, token_hash, identity_public_key) VALUES (?, ?, ?)').run(
+      'paired-fixture', 'paired-token-hash', 'paired-public-key',
+    );
+    db.close();
     const current = await connectClient();
     const oldest = await connectClient();
     current.socket.send(JSON.stringify({

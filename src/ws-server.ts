@@ -245,7 +245,7 @@ import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions, signalOwnedDashTmuxSession } from './lib/ws-server/dash-terminal-gc';
-import { syncTokenFile, resolveDeviceByToken, isDeviceActive, isDeviceRevoked, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
+import { syncTokenFile, resolveDeviceByToken, hasPairedMobileDevice, isDeviceActive, isDeviceRevoked, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
 import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/relay-connector';
 import {
   startMachineAttachSupervisor,
@@ -2530,16 +2530,39 @@ let lastMobileInboxSnapshot: MobileInboxSnapshot | null = null;
 let mobileInboxDeltasSinceCheckpoint = 0;
 const MOBILE_INBOX_CHECKPOINT_INTERVAL = 20;
 
-async function getRegisteredMobileInboxCheckpoint(): Promise<{
+function wantsMobileInbox(client: ClientState) {
+  return client.ws.readyState === WebSocket.OPEN
+    && client.realtimeCapabilities.has(MOBILE_INBOX_DELTA_CAPABILITY)
+    && client.realtimeSubscriptions.some(({ stream }) => stream === 'global');
+}
+
+function hasMobilePairing() {
+  try {
+    return hasPairedMobileDevice();
+  } catch {
+    // A registry read failure cannot establish that a phone is paired.
+    return false;
+  }
+}
+
+function hasMobileInboxAudience() {
+  for (const client of clients.values()) {
+    if (wantsMobileInbox(client)) return true;
+  }
+  return hasMobilePairing();
+}
+
+async function getRegisteredMobileInboxCheckpoint(client: ClientState): Promise<{
   inbox: MobileInboxSnapshot;
   revision: number;
-}> {
+} | null> {
+  if (!wantsMobileInbox(client) && !hasMobilePairing()) return null;
   if (lastMobileInboxSnapshot) {
     return { inbox: lastMobileInboxSnapshot, revision: mobileInboxRevision };
   }
   const inbox = await getMobileInboxSnapshot();
   lastMobileInboxSnapshot = inbox;
-  mobileInboxRevision = Math.max(1, mobileInboxRevision);
+  mobileInboxRevision += 1;
   lastRealtimeFingerprint.mobileInbox = fingerprintInboxSnapshot(inbox);
   return { inbox, revision: mobileInboxRevision };
 }
@@ -2829,7 +2852,7 @@ function replayRealtimeSubscriptions(client: ClientState, subscriptions: Realtim
     if (subscription.since != null && (
       cursorEpochMismatch || cursorAheadOfStream || cursorFellBehind
     )) {
-      void buildResyncEvents(stream).then((events) => {
+      void buildResyncEvents(stream, client).then((events) => {
         sendRealtimeBatch(client, stream, 'bootstrap', events, {
           requestedSince: since,
           earliestAvailable: earliestAvailable ?? (realtimeSeq + 1),
@@ -2843,10 +2866,13 @@ function replayRealtimeSubscriptions(client: ClientState, subscriptions: Realtim
     if (replay.length > 0) {
       sendRealtimeBatch(client, stream, 'replay', replay);
     }
+    if (stream === 'global' && subscription.since != null && !lastMobileInboxSnapshot && wantsMobileInbox(client)) {
+      scheduleRealtimeMobileInboxRefresh(250, true);
+    }
   }
 }
 
-async function buildResyncEvents(stream: RealtimeStreamKey) {
+async function buildResyncEvents(stream: RealtimeStreamKey, client: ClientState) {
   if (stream === 'global') {
     const capturedSeq = realtimeSeq;
     try {
@@ -2883,7 +2909,7 @@ async function buildResyncEvents(stream: RealtimeStreamKey) {
         ),
       ];
 
-      const inboxCheckpoint = await getRegisteredMobileInboxCheckpoint().catch(() => null);
+      const inboxCheckpoint = await getRegisteredMobileInboxCheckpoint(client).catch(() => null);
       if (inboxCheckpoint) {
         events.push(buildRealtimeEnvelope(
           'global',
@@ -2933,7 +2959,7 @@ async function buildResyncEvents(stream: RealtimeStreamKey) {
   }
 }
 
-async function buildBootstrapEvents(stream: RealtimeStreamKey) {
+async function buildBootstrapEvents(stream: RealtimeStreamKey, client: ClientState) {
   if (stream === 'global') {
     const capturedSeq = realtimeSeq;
     try {
@@ -2979,7 +3005,7 @@ async function buildBootstrapEvents(stream: RealtimeStreamKey) {
         ),
       ];
 
-      const inboxCheckpoint = await getRegisteredMobileInboxCheckpoint().catch(() => null);
+      const inboxCheckpoint = await getRegisteredMobileInboxCheckpoint(client).catch(() => null);
       if (inboxCheckpoint) {
         events.push(buildRealtimeEnvelope(
           'global',
@@ -3231,6 +3257,12 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
 }
 
 async function publishMobileInboxRealtimeSnapshot(fresh = false) {
+  if (!hasMobileInboxAudience()) {
+    // An ignored update can leave a checkpoint stale for the next subscriber.
+    lastMobileInboxSnapshot = null;
+    lastRealtimeFingerprint.mobileInbox = '';
+    return;
+  }
   if (!canAttemptRealtimeBridge(mobileInboxBridgeBackoff)) {
     scheduleRealtimeMobileInboxRefresh(getRealtimeBridgeRetryDelay(mobileInboxBridgeBackoff), fresh);
     return;
@@ -3722,7 +3754,7 @@ async function handleClientMessage(client: ClientState, raw: string) {
       } }));
       for (const subscription of subscriptions) {
         if (subscription.since != null) continue;
-        void buildBootstrapEvents(subscription.stream).then((events) => {
+        void buildBootstrapEvents(subscription.stream, client).then((events) => {
           sendRealtimeBatch(client, subscription.stream, 'bootstrap', events);
         });
       }
@@ -5373,7 +5405,7 @@ async function syncClientInbox(client: ClientState, fetch = fetchSync) {
   // Delta-capable clients receive revisioned inbox events from the realtime
   // log. Suppress the legacy full snapshot safety poll after negotiation; the
   // initial connection/bootstrap checkpoint still seeds canonical state.
-  if (client.realtimeCapabilities.has(MOBILE_INBOX_DELTA_CAPABILITY)) return;
+  if (client.realtimeCapabilities.has(MOBILE_INBOX_DELTA_CAPABILITY) || !hasMobilePairing()) return;
   const revision = mobileInboxRevision || undefined;
   const previousEtag = client.inboxEtag;
   const data = await fetch({ inbox: { etag: previousEtag ?? undefined } });
