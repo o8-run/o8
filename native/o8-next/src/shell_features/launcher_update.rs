@@ -95,6 +95,7 @@ fn request(_: &Path, _: &str) -> Result<Value, String> {
 fn poll(s: &mut Shell, cx: &mut Context<Shell>) {
     let state = s.features.get::<State>();
     if state.reading
+        || crate::foreground::hidden()
         || state
             .checked
             .is_some_and(|at| at.elapsed() < crate::foreground::cadence(Duration::from_secs(2)))
