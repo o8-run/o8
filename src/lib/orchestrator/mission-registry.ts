@@ -225,6 +225,14 @@ export function findMissionRegistryEntryByPacketId(
 }
 
 /** Storage reconciliation needs every owner, including duplicates and archived owners. */
+/** Changes whenever a stored mission is added, written, archived or removed. */
+export function missionsStamp(): string {
+  const row = getSqlite().prepare(
+    'SELECT COUNT(*) AS n, MAX(updated_at) AS latest, TOTAL(updated_at) AS total FROM missions',
+  ).get() as { n: number; latest: number | null; total: number };
+  return `${row.n}:${row.latest ?? 0}:${row.total}`;
+}
+
 export function listDurablePacketsWithId(packetId: string): OrchestratorPacket[] {
   if (!packetId) return [];
   const needle = JSON.stringify(packetId).slice(1, -1);
