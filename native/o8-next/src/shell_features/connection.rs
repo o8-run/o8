@@ -297,7 +297,10 @@ impl ShellExtension for Connection {
             let connected = s.connected;
             let runtime = s.features.get::<Runtime>();
             runtime.idle_ticks += 1;
-            if !connected || runtime.idle_ticks >= CONNECTED_LOAD_TICKS {
+            // Nobody can see the window: a connected one keeps following its
+            // stream and skips the resilience read until it shows again.
+            let resilience = runtime.idle_ticks >= CONNECTED_LOAD_TICKS && !crate::foreground::hidden();
+            if !connected || resilience {
                 runtime.idle_ticks = 0;
                 s.timed_load = connected;
                 s.load(cx);

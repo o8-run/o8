@@ -674,6 +674,7 @@ impl Shell {
         }
     }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
+        crate::foreground::set_visible(!self.offscreen && crate::foreground::on_screen(window));
         features::tick(self, refresh, window, cx);
     }
 }

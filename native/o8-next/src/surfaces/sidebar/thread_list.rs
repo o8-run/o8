@@ -896,7 +896,11 @@ impl ThreadList {
             .collect()
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        // Nobody can see the window: stream frames still apply in place below,
+        // but no timed or change-driven read runs until it shows again.
+        let hidden = crate::foreground::hidden();
         if machine_threads::enabled()
+            && !hidden
             && !self.machines_loading
             && self
                 .machines_read_at
@@ -1087,12 +1091,18 @@ impl ThreadList {
             .dirty
             .is_some_and(|time| time.elapsed() >= Duration::from_millis(300))
             && (self.urgent || self.last_attempt.elapsed() >= DIRTY_RELOAD_GAP);
-        if changed {
+        if hidden {
+            // A change stays marked and reloads on the first tick it is seen.
+        } else if changed {
             self.load(cx);
         } else if self.last_load.elapsed() >= Duration::from_secs(300) {
             self.load_cached(cx);
         }
-        if !self.loading && !self.inventory_loading && Instant::now() >= self.inventory_due {
+        if !hidden
+            && !self.loading
+            && !self.inventory_loading
+            && Instant::now() >= self.inventory_due
+        {
             self.inventory_loading = true;
             let generation = self.generation;
             let client = self.client.clone();

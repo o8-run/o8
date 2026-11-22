@@ -6,7 +6,7 @@
 //! Links are the server's explicit conversation PR context
 //! (GET /api/orchestrator/pull-request-context?threadId=…, table
 //! conversation_pr_context), refreshed at most once a minute for listed
-//! conversations.
+//! conversations, one read each, and not at all while nobody can see the window.
 //!
 //! Dev only: O8_DEV_SIDEBAR_PR_LINKS may name a JSON file of
 //! `{ "<threadId>": [{ "repositoryFullName", "number", "title"?, "state"? }] }`
@@ -109,6 +109,7 @@ fn state_color(state: Option<&str>) -> gpui::Rgba {
 impl ThreadList {
     pub(super) fn pr_links_due(&self) -> bool {
         !self.pr_loading
+            && !crate::foreground::hidden()
             && !self.sessions.is_empty()
             && self.pr_links_at.is_none_or(|at| at.elapsed() >= REFRESH)
     }
