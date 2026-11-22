@@ -8,6 +8,11 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@clerk/nextjs/server', () => ({
   clerkMiddleware: (handler: unknown) => handler,
 }));
+const settingsReads = vi.hoisted(() => ({ count: 0 }));
+vi.mock('@/lib/operator/defaults', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/operator/defaults')>();
+  return { ...actual, getOperatorDefaultsSync: () => { settingsReads.count += 1; return actual.getOperatorDefaultsSync(); } };
+});
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-broadcast-speaker-'));
 const operatorToken = 'broadcast-speaker-operator-token-0123456789';
@@ -69,6 +74,35 @@ async function emptyCommentary() {
 }
 
 describe('Broadcast speaker real path', () => {
+  it('reads its voice settings again only when a settings file changes, and applies a change within a tick', async () => {
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
+      JSON.stringify({ commentary: [], cursor: null, hasMore: false }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    settingsReads.count = 0;
+    const stop = startBroadcastSpeakerLoop();
+    try {
+      // Voice off: a check every second, settings parsed once.
+      await vi.advanceTimersByTimeAsync(10_500);
+      expect(settingsReads.count).toBe(1);
+      const quietPolls = fetchMock.mock.calls.length;
+
+      await updateOperatorDefaults({ broadcastVoice: 'on' });
+      settingsReads.count = 0;
+      await vi.advanceTimersByTimeAsync(3_000);
+      // The edit was seen on the next tick and read once; voice on polls every second.
+      expect(settingsReads.count).toBe(1);
+      expect(fetchMock.mock.calls.length - quietPolls).toBeGreaterThanOrEqual(2);
+    } finally {
+      stop();
+      await updateOperatorDefaults({ broadcastVoice: 'off' });
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('logs one warning for a continuous commentary outage', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
